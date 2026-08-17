@@ -199,6 +199,13 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
 
+  // Resource and edge terms
+  resource_residency_weight = other.resource_residency_weight;
+  resource_residency_target = other.resource_residency_target;
+  edge_tile_penalty_weight  = other.edge_tile_penalty_weight;
+  depth_u_edge_weight       = other.depth_u_edge_weight;
+  deep_k_pipeline_weight    = other.deep_k_pipeline_weight;
+
   // Kernel rejection
   reject = other.reject;
   // VGPR / single-wave occupancy penalty
@@ -276,6 +283,13 @@ heuristics_database_t::heuristics_database_t() {
 heuristics_database_t& heuristics_database_t::get_instance() {
   static heuristics_database_t instance;
   return instance;
+}
+
+void heuristics_database_t::reset_defaults() {
+  entries_.clear();
+  hand_optimized_map_.clear();
+  default_params_ = heuristic_params_t{};
+  initialize_defaults();
 }
 
 /**

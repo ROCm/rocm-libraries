@@ -448,6 +448,29 @@ struct tensile_params_t {
   /// Math clocks per unrolled loop iteration (0 = auto-calculate)
   int math_clocks_unrolled_loop = 0;
 
+  /// Stream-K and scheduling properties used by analytical prediction.
+  int stream_k                = 0;
+  bool stream_k_force_dp_only = false;
+  bool stream_k_fixup_tree    = false;
+  int schedule_iter_alg       = 0;
+  int prefetch_local_read     = 0;
+  int one_lds_buffer          = 0;
+  int transpose_lds           = 0;
+  int stagger_u               = 0;
+  int stagger_u_mapping       = 0;
+  bool source_swap            = false;
+  int local_read_vector_width = 1;
+  std::size_t lds_bytes       = 0;
+
+  /// Generated resource metadata. Zero means unavailable and must not be
+  /// silently interpreted as a measured value.
+  int total_vgprs           = 0;
+  int accumulator_vgprs     = 0;
+  int total_sgprs           = 0;
+  std::size_t scratch_bytes = 0;
+  int threads_per_workgroup = 0;
+  int compiled_cu_occupancy = 0;
+
   /// Swizzled memory layout flags
   bool swizzle_a = false;
   bool swizzle_b = false;
@@ -467,7 +490,17 @@ struct tensile_params_t {
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
            wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
            prefetch_global_read == o.prefetch_global_read &&
-           math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
+           math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && stream_k == o.stream_k &&
+           stream_k_force_dp_only == o.stream_k_force_dp_only &&
+           stream_k_fixup_tree == o.stream_k_fixup_tree && schedule_iter_alg == o.schedule_iter_alg &&
+           prefetch_local_read == o.prefetch_local_read && one_lds_buffer == o.one_lds_buffer &&
+           transpose_lds == o.transpose_lds && stagger_u == o.stagger_u &&
+           stagger_u_mapping == o.stagger_u_mapping && source_swap == o.source_swap &&
+           local_read_vector_width == o.local_read_vector_width && lds_bytes == o.lds_bytes &&
+           total_vgprs == o.total_vgprs && accumulator_vgprs == o.accumulator_vgprs &&
+           total_sgprs == o.total_sgprs && scratch_bytes == o.scratch_bytes &&
+           threads_per_workgroup == o.threads_per_workgroup &&
+           compiled_cu_occupancy == o.compiled_cu_occupancy && swizzle_a == o.swizzle_a &&
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
            global_split_u_coalesced == o.global_split_u_coalesced &&
@@ -490,6 +523,24 @@ struct tensile_params_t {
                               wave_group_n,
                               prefetch_global_read,
                               math_clocks_unrolled_loop,
+                              stream_k,
+                              stream_k_force_dp_only,
+                              stream_k_fixup_tree,
+                              schedule_iter_alg,
+                              prefetch_local_read,
+                              one_lds_buffer,
+                              transpose_lds,
+                              stagger_u,
+                              stagger_u_mapping,
+                              source_swap,
+                              local_read_vector_width,
+                              lds_bytes,
+                              total_vgprs,
+                              accumulator_vgprs,
+                              total_sgprs,
+                              scratch_bytes,
+                              threads_per_workgroup,
+                              compiled_cu_occupancy,
                               swizzle_a,
                               swizzle_b,
                               workgroup_mapping_xcc,

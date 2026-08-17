@@ -670,6 +670,17 @@ class SizeMapping:
                  'DirectToLdsA',
                  'DirectToLdsB',
                  'ExpertSchedulingMode',
+                 'scheduleIterAlg',
+                 'prefetchLocalRead',
+                 'oneLDSBuffer',
+                 'transposeLDS',
+                 'sourceSwap',
+                 'localReadVectorWidth',
+                 'totalVgprs',
+                 'accumulatorVgprs',
+                 'totalSgprs',
+                 'ldsBytes',
+                 'scratchBytes',
                  'clusterDim'
                  ]
 
@@ -765,6 +776,17 @@ class SizeMapping:
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
                    ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   scheduleIterAlg           = int(d.get('_ScheduleIterAlg', d.get('ScheduleIterAlg', 0))),
+                   prefetchLocalRead         = int(d.get('PrefetchLocalRead', 0)),
+                   oneLDSBuffer              = bool(d.get('1LDSBuffer', 0)),
+                   transposeLDS              = int(d.get('TransposeLDS', 0)),
+                   sourceSwap                = bool(d.get('SourceSwap', False)),
+                   localReadVectorWidth      = int(d.get('LocalReadVectorWidth', 0)),
+                   totalVgprs               = int(d.get('TotalVgprs', 0)),
+                   accumulatorVgprs         = int(d.get('AccumulatorVgprs', d.get('NumVgprValuC', 0))),
+                   totalSgprs               = int(d.get('TotalSgprs', 0)),
+                   ldsBytes                 = int(d.get('LdsNumBytes', 0)),
+                   scratchBytes             = int(d.get('ScratchBytes', 0)),
                    clusterDim               = d['ClusterDim']
                    )
     @classmethod

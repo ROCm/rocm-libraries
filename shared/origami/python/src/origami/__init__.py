@@ -30,7 +30,12 @@ try:
         problem_t,
         hardware_t,
         context_t,
+        heuristic_params_t,
         # Hardware functions
+        set_heuristic_defaults,
+        get_heuristic_defaults,
+        clear_heuristic_entries,
+        reset_heuristics,
         get_hardware_for_device,
         get_hardware_for_arch,
         # Data type functions
@@ -67,6 +72,7 @@ try:
         select_grid_size,
         select_reduction,
         select_workgroup_mapping,
+        select_staggerU,
         compute_number_of_output_tiles,
         # Reduction functions
         int_to_reduction_t,
@@ -89,11 +95,6 @@ try:
         att_round_elements_to_128B,
         att_compute_mem_bw_from_occupancy,
         att_compute_l2_hit_rate_global,
-        # Heuristic parameter tuning (offline)
-        heuristic_params_t,
-        set_heuristic_defaults,
-        get_heuristic_defaults,
-        clear_heuristic_entries,
     )
 except ImportError as e:
     raise ImportError(
@@ -125,6 +126,12 @@ __all__ = [
     "problem_t",
     "hardware_t",
     "context_t",
+    "heuristic_params_t",
+    # Heuristic calibration functions
+    "set_heuristic_defaults",
+    "get_heuristic_defaults",
+    "clear_heuristic_entries",
+    "reset_heuristics",
     # Hardware functions
     "get_hardware_for_device",
     "get_hardware_for_arch",
@@ -161,6 +168,7 @@ __all__ = [
     "select_grid_size",
     "select_reduction",
     "select_workgroup_mapping",
+    "select_staggerU",
     "compute_number_of_output_tiles",
     # Reduction functions
     "int_to_reduction_t",
@@ -183,11 +191,6 @@ __all__ = [
     "att_round_elements_to_128B",
     "att_compute_mem_bw_from_occupancy",
     "att_compute_l2_hit_rate_global",
-    # Heuristic parameter tuning (offline)
-    "heuristic_params_t",
-    "set_heuristic_defaults",
-    "get_heuristic_defaults",
-    "clear_heuristic_entries",
 ]
 
 try:

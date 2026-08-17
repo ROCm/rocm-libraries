@@ -227,6 +227,48 @@ TEST_CASE("GEMM: compute_total_latency", "[gemm]") {
   }
 }
 
+TEST_CASE("GEMM: gfx1100 HHS-TN Resource/Edge override", "[gemm][heuristics]") {
+  auto hardware = make_hardware(1100);
+  auto problem  = make_problem(130, 130, 70, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype  = origami::data_type_t::Half;
+  problem.b_dtype  = origami::data_type_t::Half;
+  problem.c_dtype  = origami::data_type_t::Half;
+  problem.d_dtype  = origami::data_type_t::Half;
+  problem.mi_dtype = origami::data_type_t::Half;
+
+  auto config = make_config(128, 128, 64, 16, 16, 16);
+  auto& tensile                    = config.tensile();
+  tensile.stream_k                 = 3;
+  tensile.depth_u                  = 64;
+  tensile.compiled_cu_occupancy    = 1;
+  tensile.prefetch_global_read     = 1;
+  tensile.prefetch_local_read      = 1;
+
+  auto scoped = origami::heuristics_database_t::get_instance().lookup(problem, hardware, config);
+  REQUIRE(scoped.resource_residency_weight == Approx(0.498023658223131));
+  REQUIRE(scoped.resource_residency_target == Approx(2.316770847186393));
+  REQUIRE(scoped.edge_tile_penalty_weight == Approx(5.191999760573993));
+  REQUIRE(scoped.depth_u_edge_weight == Approx(3.923640703044928));
+
+  auto stock_problem = problem;
+  stock_problem.b_transpose = origami::transpose_t::T;
+  auto stock = origami::heuristics_database_t::get_instance().lookup(stock_problem, hardware, config);
+  REQUIRE(stock.resource_residency_weight == 0.0);
+  REQUIRE(stock.edge_tile_penalty_weight == 0.0);
+  REQUIRE(stock.depth_u_edge_weight == 0.0);
+
+  auto& database = origami::heuristics_database_t::get_instance();
+  auto saved = database.get_default_params();
+  database.clear_general_entries();
+  database.set_default_params(origami::heuristic_params_t{});
+  auto stock_latency = origami::gemm::compute_total_latency(problem, hardware, config);
+  database.reset_defaults();
+  auto resource_edge_latency = origami::gemm::compute_total_latency(problem, hardware, config);
+  database.set_default_params(saved);
+
+  REQUIRE(resource_edge_latency > stock_latency);
+}
+
 TEST_CASE("GEMM: check_lds_capacity", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - 256x256x64 tile fits in LDS") {
@@ -1314,6 +1356,13 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
 
   // Check default main loop efficiency
   REQUIRE(defaults.main_loop_efficiency == 1.0);
+
+  // Resource/edge corrections must remain inert unless explicitly overridden.
+  REQUIRE(defaults.resource_residency_weight == 0.0);
+  REQUIRE(defaults.resource_residency_target == 1.0);
+  REQUIRE(defaults.edge_tile_penalty_weight == 0.0);
+  REQUIRE(defaults.depth_u_edge_weight == 0.0);
+  REQUIRE(defaults.deep_k_pipeline_weight == 0.0);
 }
 
 TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
@@ -1321,10 +1370,14 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   origami::heuristic_params_t override;
 
   // Set some non-default values in override
-  override.weight_compute           = 2.0;
-  override.weight_memory            = 3.0;
-  override.main_memory_load_latency = 300.0;
-  override.main_loop_efficiency     = 0.8;
+  override.weight_compute             = 2.0;
+  override.weight_memory              = 3.0;
+  override.main_memory_load_latency   = 300.0;
+  override.main_loop_efficiency       = 0.8;
+  override.resource_residency_weight = 0.5;
+  override.resource_residency_target = 2.25;
+  override.edge_tile_penalty_weight  = 4.0;
+  override.depth_u_edge_weight       = 3.0;
 
   // Merge override into base
   base.merge_with(override);
@@ -1334,6 +1387,10 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   REQUIRE(base.weight_memory == 3.0);
   REQUIRE(base.main_memory_load_latency == 300.0);
   REQUIRE(base.main_loop_efficiency == 0.8);
+  REQUIRE(base.resource_residency_weight == 0.5);
+  REQUIRE(base.resource_residency_target == 2.25);
+  REQUIRE(base.edge_tile_penalty_weight == 4.0);
+  REQUIRE(base.depth_u_edge_weight == 3.0);
 
   // Check that non-overridden values remain default
   REQUIRE(base.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);

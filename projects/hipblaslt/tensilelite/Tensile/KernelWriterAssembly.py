@@ -2040,6 +2040,17 @@ class KernelWriterAssembly(KernelWriter):
     totalSgprs = self.sgprPool.size()
 
     mkb.setGprs(totalVgprs=totalVgprs, totalAgprs=totalAgprs, totalSgprs=totalSgprs)
+    # Persist the generated resource counts on the kernel state. Code generation
+    # may run in worker processes, so TensileCreateLibrary also returns these
+    # values explicitly and copies them back to the parent solution.
+    kernel["TotalVgprs"] = totalVgprs
+    # WMMA accumulators live in architectural VGPRs rather than the separate
+    # AGPR pool. Preserve their logical footprint independently so consumers
+    # can distinguish accumulator pressure from operand/prefetch pressure.
+    kernel["AccumulatorVgprs"] = (
+        totalAgprs if totalAgprs > 0 else max(0, self.states.c.numVgprValu)
+    )
+    kernel["TotalSgprs"] = totalSgprs
 
     if self.vgprPool.size() > self.states.regCaps["MaxVgpr"]:
       self.states.overflowedResources = 1
@@ -2133,8 +2144,14 @@ class KernelWriterAssembly(KernelWriter):
     if max_vgpr_total >= pool_total:
       return
 
+    total_sgprs = self.sgprPool.size()
     mkb.setGprs(totalVgprs=max_vgpr, totalAgprs=pool_agprs,
-                totalSgprs=self.sgprPool.size())
+                totalSgprs=total_sgprs)
+    kernel["TotalVgprs"] = max_vgpr
+    kernel["AccumulatorVgprs"] = (
+        pool_agprs if pool_agprs > 0 else max(0, self.states.c.numVgprValu)
+    )
+    kernel["TotalSgprs"] = total_sgprs
 
     kernel["CUOccupancy"] = self.getOccupancy(
       kernel["NumThreads"], max_vgpr, self.sgprPool.size(),

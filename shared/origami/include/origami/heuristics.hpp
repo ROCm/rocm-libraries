@@ -174,6 +174,13 @@ struct ORIGAMI_EXPORT heuristic_params_t {
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
+  // === Resource and edge terms (default-inert) ===
+  double resource_residency_weight = 0.0;
+  double resource_residency_target = 1.0;
+  double edge_tile_penalty_weight  = 0.0;
+  double depth_u_edge_weight       = 0.0;
+  double deep_k_pipeline_weight    = 0.0;
+
   // === Kernel Rejection ===
   /// When true, the kernel is rejected: its predicted latency is forced to the
   /// maximum so that rank_configs() drops it from selection entirely.
@@ -313,6 +320,11 @@ class ORIGAMI_EXPORT heuristics_database_t {
    * @brief Add or update a heuristic entry.
    */
   void add_entry(const heuristic_key_t& key, const heuristic_params_t& params);
+
+  /// Reset the database to its built-in defaults: clears general entries and the
+  /// base default params, then re-runs initialize_defaults(). NOT thread-safe;
+  /// call only when no concurrent lookups are in flight.
+  void reset_defaults();
 
   /**
    * @brief Add or update a hand-optimized kernel efficiency entry.

@@ -148,6 +148,24 @@ NB_MODULE(origami, m) {
       .def_rw("wave_group_n", &origami::tensile_params_t::wave_group_n)
       .def_rw("prefetch_global_read", &origami::tensile_params_t::prefetch_global_read)
       .def_rw("math_clocks_unrolled_loop", &origami::tensile_params_t::math_clocks_unrolled_loop)
+      .def_rw("stream_k", &origami::tensile_params_t::stream_k)
+      .def_rw("stream_k_force_dp_only", &origami::tensile_params_t::stream_k_force_dp_only)
+      .def_rw("stream_k_fixup_tree", &origami::tensile_params_t::stream_k_fixup_tree)
+      .def_rw("schedule_iter_alg", &origami::tensile_params_t::schedule_iter_alg)
+      .def_rw("prefetch_local_read", &origami::tensile_params_t::prefetch_local_read)
+      .def_rw("one_lds_buffer", &origami::tensile_params_t::one_lds_buffer)
+      .def_rw("transpose_lds", &origami::tensile_params_t::transpose_lds)
+      .def_rw("stagger_u", &origami::tensile_params_t::stagger_u)
+      .def_rw("stagger_u_mapping", &origami::tensile_params_t::stagger_u_mapping)
+      .def_rw("source_swap", &origami::tensile_params_t::source_swap)
+      .def_rw("local_read_vector_width", &origami::tensile_params_t::local_read_vector_width)
+      .def_rw("lds_bytes", &origami::tensile_params_t::lds_bytes)
+      .def_rw("total_vgprs", &origami::tensile_params_t::total_vgprs)
+      .def_rw("accumulator_vgprs", &origami::tensile_params_t::accumulator_vgprs)
+      .def_rw("total_sgprs", &origami::tensile_params_t::total_sgprs)
+      .def_rw("scratch_bytes", &origami::tensile_params_t::scratch_bytes)
+      .def_rw("threads_per_workgroup", &origami::tensile_params_t::threads_per_workgroup)
+      .def_rw("compiled_cu_occupancy", &origami::tensile_params_t::compiled_cu_occupancy)
       .def_rw("swizzle_a", &origami::tensile_params_t::swizzle_a)
       .def_rw("swizzle_b", &origami::tensile_params_t::swizzle_b)
       .def_rw("workgroup_mapping_xcc", &origami::tensile_params_t::workgroup_mapping_xcc)
@@ -204,7 +222,13 @@ NB_MODULE(origami, m) {
       .def_rw("vgpr_per_simd", &origami::heuristic_params_t::vgpr_per_simd)
       .def_rw("vgpr_threads_per_wg", &origami::heuristic_params_t::vgpr_threads_per_wg)
       .def_rw("vgpr_overhead", &origami::heuristic_params_t::vgpr_overhead)
-      .def_rw("vgpr_operand_coeff", &origami::heuristic_params_t::vgpr_operand_coeff);
+      .def_rw("vgpr_operand_coeff", &origami::heuristic_params_t::vgpr_operand_coeff)
+      // Resource/edge terms (default-inert; ported from gfx1100 Resource/Edge work).
+      .def_rw("resource_residency_weight", &origami::heuristic_params_t::resource_residency_weight)
+      .def_rw("resource_residency_target", &origami::heuristic_params_t::resource_residency_target)
+      .def_rw("edge_tile_penalty_weight", &origami::heuristic_params_t::edge_tile_penalty_weight)
+      .def_rw("depth_u_edge_weight", &origami::heuristic_params_t::depth_u_edge_weight)
+      .def_rw("deep_k_pipeline_weight", &origami::heuristic_params_t::deep_k_pipeline_weight);
 
   m.def(
       "set_heuristic_defaults",
@@ -220,6 +244,10 @@ NB_MODULE(origami, m) {
       "clear_heuristic_entries",
       []() { origami::heuristics_database_t::get_instance().clear_general_entries(); },
       "Remove all general (non hand-optimized) heuristic entries for a clean tuning slate.");
+  m.def(
+      "reset_heuristics",
+      []() { origami::heuristics_database_t::get_instance().reset_defaults(); },
+      "Reset the heuristics database to its built-in defaults.");
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -241,6 +269,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("index", &origami::config_t::index)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(

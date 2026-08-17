@@ -40,13 +40,20 @@ def test_library_dir_strips_target_features():
 # result NamedTuples
 # ---------------------------------------------------------------------------
 def test_kernel_codegen_result_fields():
-    r = M.KernelCodeGenResult(0, "src", "hdr", "name", "obj", (9, 0, 10), 64, 1, 2, 3)
+    r = M.KernelCodeGenResult(
+        0, "src", "hdr", "name", "obj", (9, 0, 10), 64, 1, 2, 3,
+        40, 128, 80, 32768, 0,
+    )
     assert r.err == 0 and r.cuoccupancy == 1 and r.pgr == 2 and r.mathclk == 3
+    assert (r.totalVgprs, r.accumulatorVgprs, r.totalSgprs) == (40, 128, 80)
+    assert (r.ldsBytes, r.scratchBytes) == (32768, 0)
 
 
 def test_kernel_min_result_fields():
-    r = M.KernelMinResult(1, 4, 5, 6)
+    r = M.KernelMinResult(1, 4, 5, 6, 40, 128, 80, 32768, 0)
     assert (r.err, r.cuoccupancy, r.pgr, r.mathclk) == (1, 4, 5, 6)
+    assert (r.totalVgprs, r.accumulatorVgprs, r.totalSgprs) == (40, 128, 80)
+    assert (r.ldsBytes, r.scratchBytes) == (32768, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -147,13 +154,67 @@ def test_remove_invalid_solutions_and_kernels(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_pass_post_kernel_info_to_solution(monkeypatch):
     monkeypatch.setattr(M, "getKernelNameMin", lambda k, split: k["name"])
-    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33)]
+    results = [SimpleNamespace(
+        cuoccupancy=11, pgr=22, mathclk=33,
+        totalVgprs=40, accumulatorVgprs=128, totalSgprs=80,
+        ldsBytes=32768, scratchBytes=0,
+    )]
     kernels = [{"name": "k0"}]
     sol = _Sol([{"name": "k0"}], state={})
     M.passPostKernelInfoToSolution(results, kernels, [sol], splitGSU=False)
     assert sol._state["CUOccupancy"] == 11
     assert sol._state["PrefetchGlobalRead"] == 22
     assert sol._state["MathClocksUnrolledLoop"] == 33
+    assert sol._state["TotalVgprs"] == 40
+    assert sol._state["AccumulatorVgprs"] == 128
+    assert sol._state["TotalSgprs"] == 80
+    assert sol._state["LdsNumBytes"] == 32768
+    assert sol._state["ScratchBytes"] == 0
+
+
+def test_pass_post_kernel_info_to_library(monkeypatch):
+    monkeypatch.setattr(M, "getKernelFileBase", lambda split, k: k["name"])
+    state = {
+        "PrefetchGlobalRead": 2,
+        "_ScheduleIterAlg": 3,
+        "PrefetchLocalRead": 1,
+        "1LDSBuffer": 1,
+        "TransposeLDS": 1,
+        "SourceSwap": True,
+        "LocalReadVectorWidth": 16,
+        "NonTemporalA": 0,
+        "NonTemporalB": 4,
+        "NonTemporalD": 0,
+        "WaveSeparateGlobalReadA": 0,
+        "WaveSeparateGlobalReadB": 0,
+        "UnrollLoopSwapGlobalReadOrder": 0,
+        "DirectToVgprA": 0,
+        "DirectToVgprB": 0,
+    }
+    original = _Sol([{"name": "k0"}], state=state)
+    mapping = SimpleNamespace()
+    solution = SimpleNamespace(originalSolution=original, sizeMapping=mapping)
+    master = SimpleNamespace(solutions={0: solution}, lazyLibraries={})
+    result = SimpleNamespace(
+        cuoccupancy=2, pgr=2, mathclk=8,
+        totalVgprs=96, accumulatorVgprs=80, totalSgprs=94,
+        ldsBytes=62720, scratchBytes=0,
+    )
+
+    M.passPostKernelInfoToLibrary([result], [{"name": "k0"}], {"gfx1100": master}, False)
+
+    assert mapping.CUOccupancy == 2
+    assert mapping.totalVgprs == 96
+    assert mapping.accumulatorVgprs == 80
+    assert mapping.totalSgprs == 94
+    assert mapping.ldsBytes == 62720
+    assert mapping.scratchBytes == 0
+    assert mapping.scheduleIterAlg == 3
+    assert mapping.prefetchLocalRead == 1
+    assert mapping.oneLDSBuffer is True
+    assert mapping.transposeLDS == 1
+    assert mapping.sourceSwap is True
+    assert mapping.localReadVectorWidth == 16
 
 
 # ---------------------------------------------------------------------------
