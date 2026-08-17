@@ -2410,7 +2410,18 @@ public:
         notes.reserve(backendNotes.size());
         for(auto note : backendNotes)
         {
-            notes.push_back(fromHipdnnBehaviorNote(note));
+            // A note this frontend does not recognize is dropped rather than
+            // surfaced: a newer backend may define notes past this frontend's
+            // range, and reporting them would require inventing a meaning.
+            if(const auto mapped = fromHipdnnBehaviorNote(note); mapped.has_value())
+            {
+                notes.push_back(*mapped);
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO(
+                    "Skipping behavior note unknown to this frontend: " << static_cast<int>(note));
+            }
         }
 
         return {ErrorCode::OK, ""};
