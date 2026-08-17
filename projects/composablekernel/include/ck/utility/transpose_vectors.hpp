@@ -9,14 +9,11 @@
 
 namespace ck {
 
-template <typename S,
-          index_t NX,
-          index_t NY,
-          typename S2 = void>
+template <typename S, index_t NX, index_t NY, typename S2 = void>
 struct transpose_vectors;
 
-// transpose fp16 2x2
-template<typename T>
+// transpose b16 (bf16/fp16) 2x2
+template <typename T>
 __device__ void transpose_b16_2x2(const T& x0, const T& x1, T& y0, T& y1)
 {
     constexpr int32_t m0 = 0x05040100;
@@ -31,11 +28,11 @@ __device__ void transpose_b16_2x2(const T& x0, const T& x1, T& y0, T& y1)
 }
 
 template <typename T, index_t NX, index_t NY>
-struct transpose_vectors<T,
-                         NX,
-                         NY,
-                         typename enable_if<is_same<T, bhalf_t>::value || is_same<T, half_t>::value,
-                                            void>::type>
+struct transpose_vectors<
+    T,
+    NX,
+    NY,
+    typename enable_if<is_same<T, bhalf_t>::value || is_same<T, half_t>::value, void>::type>
 {
     // we got [NY * NX] amount of S data to be transposed
     static constexpr index_t s_per_x = NY;
@@ -74,15 +71,9 @@ struct transpose_vectors<T,
 };
 
 // transpose b8 4x4
-template<typename T>
-__device__ void transpose_b8_4x4(const T& x0,
-                                   const T& x1,
-                                   const T& x2,
-                                   const T& x3,
-                                   T& y0,
-                                   T& y1,
-                                   T& y2,
-                                   T& y3)
+template <typename T>
+__device__ void
+transpose_b8_4x4(const T& x0, const T& x1, const T& x2, const T& x3, T& y0, T& y1, T& y2, T& y3)
 {
     int32_t t0, t1;
     int32_t z0, z1, z2, z3;
@@ -111,11 +102,11 @@ __device__ void transpose_b8_4x4(const T& x0,
 }
 
 template <typename T, index_t NX, index_t NY>
-struct transpose_vectors<T,
-                         NX,
-                         NY,
-                         typename enable_if<is_same<T, int8_t>::value || is_same<T, f8_t>::value,
-                                            void>::type>
+struct transpose_vectors<
+    T,
+    NX,
+    NY,
+    typename enable_if<is_same<T, int8_t>::value || is_same<T, f8_t>::value, void>::type>
 {
     // we got [NY * NX] amount of S data to be transposed
     static constexpr index_t s_per_x = NY;

@@ -494,7 +494,7 @@ __device__ void amd_global_atomic_add_impl(const typename vector_type<T, N>::typ
         vector_type<float, N> tmp{src_thread_data};
         static_for<0, N, 1>{}([&](auto i) {
             __builtin_amdgcn_global_atomic_fadd_f32(bit_cast<float*>(addr) + i,
-                                                       tmp.template AsType<float>()[i]);
+                                                    tmp.template AsType<float>()[i]);
         });
     }
 }
@@ -767,25 +767,23 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
                       T* p_dst_wave,
                       const index_t dst_thread_element_offset,
                       const bool dst_thread_element_valid,
-                      [[maybe_unused]] const index_t dst_element_space_size)
+                      const index_t dst_element_space_size)
 {
-    using vector_t                = typename vector_type_maker<T, N>::type::type;
-    using scalar_t                = typename scalar_type<vector_t>::type;
-    constexpr index_t vector_size = scalar_type<vector_t>::vector_size;
-
-#ifdef __gfx125__
-    if(dst_thread_element_valid)
-    {
-        amd_global_atomic_add_impl<scalar_t, vector_size>(
-            src_thread_data, p_dst_wave + dst_thread_element_offset);
-    }
-#else
     const int32x4_t dst_wave_buffer_resource =
         make_wave_buffer_resource(p_dst_wave, dst_element_space_size);
 
     index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
 
+    using vector_t                = typename vector_type_maker<T, N>::type::type;
+    using scalar_t                = typename scalar_type<vector_t>::type;
+    constexpr index_t vector_size = scalar_type<vector_t>::vector_size;
+
+#ifdef __gfx125__
+    if constexpr(is_same<T, bhalf_t>::value || is_same<T, half_t>::value ||
+                 is_same<T, float>::value)
+#else
     if constexpr(is_same<T, bhalf_t>::value)
+#endif
     {
         if(dst_thread_element_valid)
         {
@@ -808,7 +806,6 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
         }
 #endif
     }
-#endif
 }
 
 // buffer_atomic_max requires:

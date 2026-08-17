@@ -1591,7 +1591,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
             return ave_time;
         }
 
-        template <typename GridwiseGemm, typename GridwiseGemmCTranspose, typename NonGroupedGridwiseGemm>
+        template <typename GridwiseGemm,
+                  typename GridwiseGemmCTranspose,
+                  typename NonGroupedGridwiseGemm>
         float RunImp(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
             float ave_time = 0;
@@ -1750,7 +1752,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
             {
                 if constexpr(NXdlPerWave64 > 0)
                 {
-                    return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64, NonGroupedGridwiseGemm64>(arg, stream_config);
+                    return RunImp<GridwiseGemm64,
+                                  GridwiseGemmCTranspose64,
+                                  NonGroupedGridwiseGemm64>(arg, stream_config);
                 }
                 else
                 {
@@ -1761,7 +1765,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
             {
                 if constexpr(NXdlPerWave32 > 0)
                 {
-                    return RunImp<GridwiseGemm32, GridwiseGemmCTranspose32, NonGroupedGridwiseGemm32>(arg, stream_config);
+                    return RunImp<GridwiseGemm32,
+                                  GridwiseGemmCTranspose32,
+                                  NonGroupedGridwiseGemm32>(arg, stream_config);
                 }
                 else
                 {
@@ -1805,17 +1811,6 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         {
             return false;
         }
-        // This entire device template instantiates XDL (MFMA) kernels, which are
-        // CDNA-only. The shared is_xdl_wmma_supported() helper above can return
-        // true for FP16/BF16 with 16x16 on RDNA (gfx11/gfx12) because it is
-        // also used by WMMA device templates. Reject all instances of this XDL
-        // template on RDNA to avoid launching MFMA kernels on hardware that
-        // does not implement those intrinsics. The corresponding WMMA path
-        // lives in device_grouped_conv_bwd_data_multiple_d_wmma_cshuffle.hpp.
-        // if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
-        // {
-        //     return false;
-        // }
         if(!is_bf16_atomic_supported() && std::is_same_v<EDataType, ck::bhalf_t> &&
            arg.k_batch_ > 1)
         {

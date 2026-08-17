@@ -48,9 +48,11 @@ struct depend_on_instantiation
   static constexpr bool value = x;
 };
 
-//! Deprecated [Since 3.0]
-#define THRUST_STATIC_ASSERT(B) static_assert(B)
-//! Deprecated [Since 3.0]
+#if THRUST_CPP_DIALECT >= 2017
+#  define THRUST_STATIC_ASSERT(B) static_assert(B)
+#else
+#  define THRUST_STATIC_ASSERT(B) static_assert(B, "static assertion failed")
+#endif
 #define THRUST_STATIC_ASSERT_MSG(B, msg) static_assert(B, msg)
 
 } // namespace detail

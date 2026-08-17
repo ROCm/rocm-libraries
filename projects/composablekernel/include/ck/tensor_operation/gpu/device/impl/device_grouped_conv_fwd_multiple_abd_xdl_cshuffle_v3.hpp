@@ -1454,7 +1454,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        // Memory access error
+        // Memory access runtime error on gfx1250 (inconsistent across runs)
         // TODO: need fix
         if constexpr(LargeTensors)
         {
@@ -1488,12 +1488,12 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         // with Conv Multiple D instances
         if constexpr(isMultiABD)
         {
-            return false;
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
                 std::cout << "The MultiABD is not supported!" << " In " << __FILE__ << ":"
                           << __LINE__ << ", in function: " << __func__ << std::endl;
             }
+            return false;
         }
 
         // check device

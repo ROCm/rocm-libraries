@@ -25,23 +25,25 @@ void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_pipev1_inst
     // 1. Default
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances<2,
-                                                                               NHWGC,
-                                                                               GKYXC,
-                                                                               NHWGK,
-                                                                               ConvBwdWeightDefault,
-                                                                               BlockGemmPipelineScheduler::Intrawave,
-                                                                               BlockGemmPipelineVersion::v1>{});
+        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances<
+            2,
+            NHWGC,
+            GKYXC,
+            NHWGK,
+            ConvBwdWeightDefault,
+            BlockGemmPipelineScheduler::Intrawave,
+            BlockGemmPipelineVersion::v1>{});
     // 2. Filter1x1Stride1Pad0
-    add_device_operation_instances(instances,
-                                   device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances<
-                                       2,
-                                       NHWGC,
-                                       GKYXC,
-                                       NHWGK,
-                                       ConvBwdWeightFilter1x1Stride1Pad0,
-                                       BlockGemmPipelineScheduler::Intrawave,
-                                       BlockGemmPipelineVersion::v1>{});
+    add_device_operation_instances(
+        instances,
+        device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances<
+            2,
+            NHWGC,
+            GKYXC,
+            NHWGK,
+            ConvBwdWeightFilter1x1Stride1Pad0,
+            BlockGemmPipelineScheduler::Intrawave,
+            BlockGemmPipelineVersion::v1>{});
 }
 
 } // namespace instance
