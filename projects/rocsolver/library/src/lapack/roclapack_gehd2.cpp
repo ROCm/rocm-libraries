@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gehd2.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -37,6 +38,7 @@ rocblas_status rocsolver_gehd2_impl(rocblas_handle handle,
                                     U A,
                                     const I lda,
                                     T* tau)
+try
 {
     ROCSOLVER_ENTER_TOP("gehd2", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda);
 
@@ -90,6 +92,10 @@ rocblas_status rocsolver_gehd2_impl(rocblas_handle handle,
     return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, tau, strideP,
                                        batch_count, (T*)scalars, work_workArr, (T*)Abyx_norms,
                                        (T*)diag);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

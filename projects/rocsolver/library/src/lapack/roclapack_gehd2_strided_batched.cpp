@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_gehd2.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -40,6 +41,7 @@ rocblas_status rocsolver_gehd2_strided_batched_impl(rocblas_handle handle,
                                                     T* tau,
                                                     const rocblas_stride strideP,
                                                     const I batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("gehd2_strided_batched", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda,
                         "--strideA", strideA, "--strideP", strideP, "--batch_count", batch_count);
@@ -89,6 +91,10 @@ rocblas_status rocsolver_gehd2_strided_batched_impl(rocblas_handle handle,
     return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, tau, strideP,
                                        batch_count, (T*)scalars, work_workArr, (T*)Abyx_norms,
                                        (T*)diag);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

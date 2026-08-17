@@ -66,14 +66,14 @@ void rocsolver_gehd2_getMemorySize(const I n,
 
     // size of Abyx_norms is maximum of what is needed by larf and larfg
     // size_work_workArr is maximum of re-usable work space and array of pointers to workspace
-    size_t s1, s2, s3, w1, w2, w3;
+    size_t abyx_lf1, abyx_lf2, n_lg, wa_lf1, wa_lf2, w_lg;
     rocsolver_larf_getMemorySize<BATCHED, T>(rocblas_side_right, ihi, dim, batch_count,
-                                             size_scalars, &s1, &w1);
+                                             size_scalars, &abyx_lf1, &wa_lf1);
     rocsolver_larf_getMemorySize<BATCHED, T>(rocblas_side_left, dim, n - ilo, batch_count,
-                                             size_scalars, &s2, &w2);
-    rocsolver_larfg_getMemorySize<T>(dim, batch_count, &w3, &s3);
-    *size_work_workArr = std::max({w1, w2, w3});
-    *size_Abyx_norms = std::max({s1, s2, s3});
+                                             size_scalars, &abyx_lf2, &wa_lf2);
+    rocsolver_larfg_getMemorySize<T>(dim, batch_count, &w_lg, &n_lg);
+    *size_work_workArr = std::max({wa_lf1, wa_lf2, w_lg});
+    *size_Abyx_norms = std::max({abyx_lf1, abyx_lf2, n_lg});
 
     // size of array to store temporary diagonal values
     *size_diag = sizeof(S) * dim * batch_count;

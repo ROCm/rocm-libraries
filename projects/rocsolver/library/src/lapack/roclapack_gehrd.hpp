@@ -51,19 +51,58 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS2* BS2) gehrd_sub_Y_kernel(const I nro
                                                                      const rocblas_stride strideA,
                                                                      T* __restrict__ YA,
                                                                      const rocblas_stride ldy,
-                                                                     const rocblas_stride strideY)
+                                                                     const rocblas_stride strideY,
+                                                                     const I batch_count)
 {
-    const rocblas_int row = blockIdx.x * BS2 + threadIdx.x;
-    const rocblas_int col = blockIdx.y * BS2 + threadIdx.y;
-    const rocblas_int bid = blockIdx.z;
+    I row = blockIdx.x * blockDim.x + threadIdx.x;
+    I col = blockIdx.y * blockDim.y + threadIdx.y;
+    I bid = blockIdx.z;
 
-    if(row >= nrows || col >= nb_cols)
-        return;
+    I const row_inc = blockDim.x * gridDim.x;
+    I const col_inc = blockDim.y * gridDim.y;
+    I const bid_inc = gridDim.z;
 
-    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    const T* Y = load_ptr_batch<T>(YA, bid, 0, strideY);
+    for(; bid < batch_count; bid += bid_inc)
+    {
+        T* __restrict__ A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+        const T* __restrict__ Y = load_ptr_batch<T>(YA, bid, 0, strideY);
 
-    A[idx2D(row, col, lda)] -= Y[idx2D(row, col, ldy)];
+        for(; col < nb_cols; col += col_inc)
+        {
+            for(; row < nrows; row += row_inc)
+            {
+                A[idx2D(row, col, lda)] -= Y[idx2D(row, col, ldy)];
+            }
+        }
+    }
+}
+
+// Host helper to launch gehrd_sub_Y_kernel
+template <typename T, typename I, typename U>
+void gehrd_sub_Y(rocblas_handle handle,
+                 const I nrows,
+                 const I nb_cols,
+                 U A,
+                 const rocblas_stride shiftA,
+                 const I lda,
+                 const rocblas_stride strideA,
+                 T* Y,
+                 const rocblas_stride ldy,
+                 const rocblas_stride strideY,
+                 const I batch_count)
+{
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    const auto& grid_limits = props->maxGridSize;
+
+    I bx = std::min<I>((nrows + BS2 - 1) / BS2, grid_limits[0]);
+    I by = std::min<I>((nb_cols + BS2 - 1) / BS2, grid_limits[1]);
+    I bz = std::min<I>(batch_count, grid_limits[2]);
+    ROCSOLVER_LAUNCH_KERNEL((gehrd_sub_Y_kernel<T, I, U>), dim3(bx, by, bz), dim3(BS2, BS2), 0,
+                            stream, nrows, nb_cols, A, shiftA, lda, strideA, Y, ldy, strideY,
+                            batch_count);
 }
 
 template <bool BATCHED, typename T, typename I>
@@ -243,11 +282,8 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
                             ib - 1, &one, 0, A, shiftA + idx2D(i + 1, i, lda), lda, strideA, Y, 0,
                             ldy, strideY, batch_count, (T**)work_workArr);
 
-        rocblas_int bx = (i + BS2) / BS2;
-        rocblas_int by = (ib - 1 + BS2 - 1) / BS2;
-        ROCSOLVER_LAUNCH_KERNEL((gehrd_sub_Y_kernel<T, I, U>), dim3(bx, by, batch_count),
-                                dim3(BS2, BS2), 0, stream, i + 1, ib - 1, A,
-                                shiftA + idx2D(0, i + 1, lda), lda, strideA, Y, ldy, strideY);
+        gehrd_sub_Y(handle, i + 1, ib - 1, A, shiftA + idx2D(0, i + 1, lda), lda, strideA, Y, ldy,
+                    strideY, batch_count);
 
         // Apply H^H from left to A(i+1:ihi-1, i+ib:n-1)
         rocsolver_larfb_template<BATCHED, STRIDED, T>(

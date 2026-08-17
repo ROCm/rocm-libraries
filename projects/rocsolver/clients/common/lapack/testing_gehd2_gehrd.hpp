@@ -308,7 +308,7 @@ void testing_gehd2_gehrd(Arguments& argus)
     rocblas_int ihi = argus.get<rocblas_int>("ihi", n);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stP = argus.get<rocblas_stride>("strideP", n - 1);
+    rocblas_stride stP = argus.get<rocblas_stride>("strideP", std::max(n - 1, 0));
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
@@ -320,7 +320,7 @@ void testing_gehd2_gehrd(Arguments& argus)
 
     // determine sizes
     size_t size_A = size_t(lda) * n;
-    size_t size_P = size_t(n - 1);
+    size_t size_P = n > 1 ? size_t(n - 1) : 0;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
