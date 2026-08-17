@@ -6,7 +6,7 @@
 Noise reduction in Primbench
 ********************************
 
-GPU microbenchmarks are susceptible to several categories of measurement noise. Uncontrolled noise can mask real performance differences. For example a benchmark with 10% noise cannot distinguish a 4% performance improvement from random variation. Primbench applies a layered set of techniques to reduce each noise source.
+GPU microbenchmarks are susceptible to several categories of measurement noise. Uncontrolled noise can mask real performance differences. For example, a benchmark with 10% noise cannot distinguish a 4% performance improvement from random variation. Primbench applies a layered set of techniques to reduce each noise source.
 
 Batch-based timing
 ==================
@@ -32,7 +32,7 @@ Before timing the first batch, Primbench issues a single unmeasured kernel launc
 Stream blocking for atomic event recording
 ==========================================
 
-GPU event recording is asynchronous. The recorded start time might not correspond to the moment the kernel actually begins executing if other work is still draining from the stream. This introduces timing noise.
+GPU event recording is asynchronous. The recorded start time might not correspond to the moment the kernel begins executing if other work is still being processed in the stream. This introduces timing noise.
 
 Primbench addresses this by enqueuing the start event, the kernel, and the stop event as one atomic sequence. It briefly blocks GPU execution with a lightweight spinlock kernel, enqueues all three operations, and then releases the block:
 
@@ -66,7 +66,9 @@ Temperature sensor selection
 
 On AMD GPUs, temperatures are read through AMD SMI. Primbench probes available sensor types, ``edge`` and ``hotspot``, in priority order at startup and caches the first one that returns a reading. If no supported sensor can be read, Primbench terminates with an error. The selected sensor type is recorded as ``context.general.temperature_type`` in the JSON output.
 
-GPU monitoring requires AMD SMI on HIP. When monitoring is unavailable, such as on Windows, temperature-based warming and cooling must be disabled by compiling with ``-DPRIMBENCH_NO_MONITORING``.
+.. note::
+
+   GPU monitoring requires AMD SMI on HIP. When monitoring is unavailable, such as on Windows, temperature-based warming and cooling must be disabled by compiling with ``-DPRIMBENCH_NO_MONITORING``.
 
 GPU cache clearing
 ==================

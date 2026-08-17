@@ -35,7 +35,7 @@ exclude_patterns = ["README.md"]
 # .readthedocs.yaml). Plain breathe reads that committed output rather
 # than rocm_docs.doxygen, which re-runs Doxygen from the Sphinx source
 # directory and overwrites the XML with symbol-less output.
-breathe_projects = {"Primbench API reference": "../doxygen/xml"}
+breathe_projects = {"Primbench API reference": "doxygen/xml"}
 breathe_default_project = "Primbench API reference"
 
 # -- Sphinx setup ----------------------------------------------------------

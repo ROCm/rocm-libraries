@@ -1,6 +1,6 @@
 .. meta::
-   :description: Using primbench with rocRAND
-   :keywords: ROCm libraries, primbench, ROCm, benchmarking, tools
+   :description: How to use Primbench to write and run HIP GPU microbenchmarks, including type registration, the benchmark interface, executor usage, and compilation.
+   :keywords: ROCm libraries, Primbench, ROCm, benchmarking, tools, HIP
 
 *****************************
 Benchmarking with Primbench
@@ -8,20 +8,20 @@ Benchmarking with Primbench
 
 To use Primbench, import |primbench.hpp|_ into your benchmarking code.
 
-Use ``PRIMBENCH_REGISTER_TYPE`` to register a name for each variable type, or specialization, that will be benchmarked. This name is used to identify the type in the output.
+Use ``PRIMBENCH_REGISTER_TYPE`` to register a name for each variable type, or specialization, that you benchmark. This name is used to identify the type in the output.
 
 For example, in |copy_benchmark.cpp|_ the ``char`` and ``long long`` types are given the names ``"char"`` and ``"long long"``:
 
 .. code:: cpp
 
-  PRIMBENCH_REGISTER_TYPE(char, "char")
-  PRIMBENCH_REGISTER_TYPE(long long, "long long")
+   PRIMBENCH_REGISTER_TYPE(char, "char")
+   PRIMBENCH_REGISTER_TYPE(long long, "long long")
 
 Registering also lets you provide alternate names for your types. For example, you could register ``long long`` as ``"longx2"``:
 
 .. code:: cpp
 
-  PRIMBENCH_REGISTER_TYPE(long long, "longx2")
+   PRIMBENCH_REGISTER_TYPE(long long, "longx2")
 
 Both the ``meta()`` and ``run()`` functions in ``primbench::benchmark_interface`` must be implemented.
 
@@ -33,15 +33,15 @@ For example, from ``copy_benchmark.cpp``:
 
 .. code:: cpp
 
-  template<typename T>
-  struct copy_benchmark : public primbench::benchmark_interface
-  {
-    primbench::json meta() const override
-    {
-      return primbench::json{}.add("algo", "copy").add("type", primbench::name<T>());
-    }
-    [...]
-  }
+   template<typename T>
+   struct copy_benchmark : public primbench::benchmark_interface
+   {
+     primbench::json meta() const override
+     {
+       return primbench::json{}.add("algo", "copy").add("type", primbench::name<T>());
+     }
+     [...]
+   }
 
 Define the algorithm to benchmark. It is passed to ``state.run()`` in the implementation of ``primbench::benchmark_interface::run()``.
 
@@ -49,15 +49,15 @@ For example, the ``copy_kernel`` algorithm is defined in ``copy_benchmark.cpp``:
 
 .. code:: cpp
 
-  template<typename T, unsigned int BlockSize, unsigned int ItemsPerThread>
-  __global__ __launch_bounds__(BlockSize)
-  void copy_kernel(const T* input, T* output)
-  {
-    unsigned int idx = threadIdx.x + blockIdx.x * BlockSize * ItemsPerThread;
-    #pragma unroll
-    for(unsigned int i = 0; i < ItemsPerThread; ++i)
-        output[idx + i * BlockSize] = input[idx + i * BlockSize];
-  }
+   template<typename T, unsigned int BlockSize, unsigned int ItemsPerThread>
+   __global__ __launch_bounds__(BlockSize)
+   void copy_kernel(const T* input, T* output)
+   {
+     unsigned int idx = threadIdx.x + blockIdx.x * BlockSize * ItemsPerThread;
+     #pragma unroll
+     for(unsigned int i = 0; i < ItemsPerThread; ++i)
+         output[idx + i * BlockSize] = input[idx + i * BlockSize];
+   }
 
 The ``run()`` function runs the benchmark. ``run()`` must include a call to ``state.set_items()``. ``state.set_items()`` sets the number of items processed per iteration. The number of items must be greater than 0.
 
@@ -71,19 +71,19 @@ For example, from ``copy_benchmark.cpp``:
 
 .. code:: cpp
 
-  state.set_items(items);
-  state.add_reads<T>(items);
-  state.add_writes<T>(items);
+   state.set_items(items);
+   state.add_reads<T>(items);
+   state.add_writes<T>(items);
 
 The kernel call is wrapped in a lambda and passed to ``state.run()``. ``state.run()`` runs the kernel as many times as required.
 
 .. code:: cpp
 
-  state.run(
-          [&] {
-              copy_kernel<T, BlockSize, ItemsPerThread>
-                  <<<grid, block, 0, stream>>>(d_input, d_output);
-          });
+   state.run(
+           [&] {
+               copy_kernel<T, BlockSize, ItemsPerThread>
+                   <<<grid, block, 0, stream>>>(d_input, d_output);
+           });
 
 Benchmark settings and flags can be passed to the ``executor`` class constructor as optional parameters. The ``executor`` queues and runs the benchmarks.
 
@@ -95,28 +95,29 @@ For example, from ``copy_benchmark.cpp``:
 
 .. code:: cpp
 
-  int main(int argc, char* argv[])
-  {
-    primbench::executor executor(argc, argv);
+   int main(int argc, char* argv[])
+   {
+     primbench::executor executor(argc, argv);
 
-    executor.queue<copy_benchmark<char>>();
-    executor.queue<copy_benchmark<long long>>();
+     executor.queue<copy_benchmark<char>>();
+     executor.queue<copy_benchmark<long long>>();
 
-    executor.run();
-  }
+     executor.run();
+   }
 
 Compile the benchmark using ``hipcc``. For example, on Linux:
 
 .. code:: shell
 
-  hipcc -o copy_benchmark copy_benchmark.cpp -lamd_smi
-  ./copy_benchmark
+   hipcc -o copy_benchmark copy_benchmark.cpp -lamd_smi
+   ./copy_benchmark
 
 On Windows:
 
 .. code:: shell
 
-  hipcc -o copy_benchmark.exe examples/hip/copy_benchmark.cpp -I. -DPRIMBENCH_NO_MONITORING -std=c++17 -g --offload-arch=$(amdgpu-arch) ; ./copy_benchmark.exe
+   hipcc -o copy_benchmark.exe examples/hip/copy_benchmark.cpp -I. -DPRIMBENCH_NO_MONITORING -std=c++17 -g --offload-arch=$(amdgpu-arch)
+   ./copy_benchmark.exe
 
 For the complete list of command-line options, see :doc:`Command-line options </reference/cli-options>`.
 

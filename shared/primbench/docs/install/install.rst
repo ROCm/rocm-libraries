@@ -22,11 +22,7 @@ Prerequisites
 
 .. note::
 
-   AMD SMI isn't available on Windows. As a result, GPU temperature monitoring is not available on Windows. Disable GPU monitoring on Windows by adding the following flag when compiling your code:
-
-   .. code:: shell
-
-      -DPRIMBENCH_NO_MONITORING
+   Because AMD SMI isn't available on Windows, GPU temperature monitoring is unavailable on Windows. Disable GPU monitoring on Windows by compiling with ``PRIMBENCH_NO_MONITORING``.
 
 Compile options
 ===============
@@ -42,7 +38,7 @@ Primbench behavior is controlled by preprocessor macros passed at compile time.
    * - ``-DPRIMBENCH_NO_MONITORING``
      - Disables GPU temperature monitoring. Required on Windows. Use when AMD SMI isn't available.
    * - ``-DPRIMBENCH_NO_TEST``
-     - Disables correctness-test execution. ``state.test()`` lambdas are not called.
+     - Disables correctness-test execution. ``state.test()`` lambdas aren't called.
    * - ``-DPRIMBENCH_GPU_CACHE_SIZE=n``
      - Sets the size in bytes of the buffer used to evict GPU caches before each kernel launch. Defaults to ``256 * MiB``.
    * - ``-DBRANCH_NAME=\"name\"``

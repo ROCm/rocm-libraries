@@ -6,7 +6,7 @@
 Configure benchmark settings
 ******************************
 
-Primbench benchmarks accept configuration through the ``primbench::settings`` struct, command-line arguments, and compile-time macros. For the full list of command-line options, see :doc:`Command-line options </reference/cli-options>`. For details on JSON and CSV output structure, see :doc:`JSON output format </reference/json-output-format>`.
+Primbench benchmarks accept configuration through the ``primbench::settings`` struct, command-line arguments, and compile-time macros. For the full list of command-line options, see :doc:`Command-line options </reference/cli-options>`. For details on JSON and CSV output structure, see :doc:`JSON output format </reference/primbench-json-output>`.
 
 Pass settings programmatically
 ================================
@@ -121,7 +121,7 @@ Adjust indentation with ``--spaces-per-indent``. The default is ``4``. Set to ``
 Perform a dry run
 ==================
 
-Use ``--dry`` to skip benchmark setup and execution while still producing JSON and CSV output files. This is useful for validating that your specializations are queued correctly and that output paths are writable:
+Use ``--dry`` to skip benchmark setup and execution while still producing JSON and CSV output files. Use a dry run to confirm that your specializations are queued correctly and that output paths are writable.
 
 .. code:: shell
 

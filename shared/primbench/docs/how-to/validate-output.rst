@@ -29,8 +29,8 @@ Because the test runs after the warmup kernel launch, the GPU output buffers alr
 
 Use the ``PRIMBENCH_ASSERT`` macro to compare actual values against expected values. It works with:
 
-- Scalar arithmetic types: compare a single value against an expected scalar.
-- Iterable containers: compare element-wise against another container or a brace-enclosed initializer list.
+- Scalar arithmetic types: Compares a single value against an expected scalar.
+- Iterable containers: Compares element-wise against another container or a brace-enclosed initializer list.
 
 On mismatch, ``PRIMBENCH_ASSERT`` prints the file name, line number, and the mismatched values to ``stderr``, then exits the program.
 
@@ -64,7 +64,7 @@ To skip all correctness checks, such as in production benchmark runs where only 
 
    hipcc -o my_benchmark my_benchmark.cpp -I. -DPRIMBENCH_NO_TEST -lamd_smi
 
-When ``PRIMBENCH_NO_TEST`` is defined, ``state.test()`` lambdas are not executed.
+When ``PRIMBENCH_NO_TEST`` is defined, ``state.test()`` lambdas aren't executed.
 
 
 If your kernel modifies its input data in place, subsequent kernel calls during timed iterations operate on already-mutated data, which can produce incorrect results. Use ``state.run_before_every_iteration()`` to register a lambda that restores the input before each kernel call.

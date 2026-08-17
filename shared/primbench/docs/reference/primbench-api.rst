@@ -98,6 +98,8 @@ Size constants
 Macros
 ======
 
+The following macros configure type names, error checking, correctness assertions, and compile-time behavior.
+
 Type registration
 -----------------
 
@@ -117,7 +119,7 @@ Correctness assertions
 
 .. doxygendefine:: PRIMBENCH_ASSERT
 
-Asserts equality between an input value and an expected value. Overloads handle scalar arithmetic types, iterable containers, and brace-enclosed initializer lists. An optional tolerance parameter (defaults to ``0.0``) controls the maximum allowed difference for floating-point comparisons. On mismatch the macro prints file, line, and a diagnostic message to ``stderr`` and exits.
+Asserts equality between an input value and an expected value. Overloads handle scalar arithmetic types, iterable containers, and brace-enclosed initializer lists. An optional tolerance parameter defaults to ``0.0`` and controls the maximum allowed difference for floating-point comparisons. On mismatch the macro prints file, line, and a diagnostic message to ``stderr`` and exits.
 
 Compile-time configuration
 --------------------------
@@ -135,7 +137,7 @@ Sets the size of the buffer used to evict GPU caches before kernel launches. Ove
 Version-control metadata
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-``BRANCH_NAME`` and ``COMMIT_HASH`` are optional compile-time macros. Pass them via ``-DBRANCH_NAME=...`` and ``-DCOMMIT_HASH=...``. Their values are embedded in the ``context.general`` section of the JSON output so that benchmark results can be traced back to a specific source revision.
+``BRANCH_NAME`` and ``COMMIT_HASH`` are optional compile-time macros. Pass them with ``-DBRANCH_NAME=...`` and ``-DCOMMIT_HASH=...``. Their values are embedded in the ``context.general`` section of the JSON output so that benchmark results can be traced back to a specific source revision.
 
 Free functions
 ==============

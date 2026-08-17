@@ -17,9 +17,6 @@ The Primbench public repository is at `ROCm/rocm-libraries <https://github.com/R
 
       * :doc:`Install Primbench <install/install>`
 
-.. grid:: 2
-   :gutter: 3
-
    .. grid-item-card:: Conceptual
 
       * :doc:`Noise reduction in Primbench <conceptual/primbench-noise-reduction>`
@@ -33,9 +30,9 @@ The Primbench public repository is at `ROCm/rocm-libraries <https://github.com/R
    .. grid-item-card:: Reference
 
       * :doc:`Primbench API <reference/primbench-api>`
-      * :doc:`Primbench output <reference/primbench-output>`
-      * :doc:`JSON output format <reference/json-output-format>`
       * :doc:`Command-line options <reference/cli-options>`
+      * :doc:`JSON output format <reference/primbench-json-output>`
+      * :doc:`CSV output <reference/primbench-csv-output>`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

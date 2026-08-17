@@ -16,11 +16,11 @@ subtrees:
     entries:
       - file: reference/primbench-api
         title: Primbench API
-      - file: reference/primbench-output
-        title: Primbench output
-      - file: reference/json-output-format
-        title: JSON output format
       - file: reference/cli-options
+      - file: reference/primbench-json-output
+        title: JSON output format
+      - file: reference/primbench-csv-output
+        title: CSV output
   - caption: About
     entries:
       - file: license
