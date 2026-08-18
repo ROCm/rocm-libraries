@@ -51,7 +51,6 @@ from kernels.common.attention_unified import (
     _gfx942_flash_wide_setting,
     _kv_storage_dtype,
     _num_segments,
-    _resolve_attention_arch,
     _resolve_gfx1250_tiled3d,
     _select_2d_block_m_per_warp,
     _select_2d_num_warps,
@@ -66,13 +65,24 @@ from kernels.common.attention_unified import (
 # Imported as a module (not a bound symbol) so tests that
 # ``mock.patch.object(attention_unified, "_d256_gfx950_fast", ...)`` still steer
 # the builder's fast-route branch below (a bound import would freeze the ref).
+#
+# ``_resolve_attention_arch`` MUST be reached through this module handle for the
+# same reason, and is deliberately absent from the ``from ... import`` list
+# above. It used to be bound, which silently defeated
+# ``mock.patch.object(au, "_resolve_attention_arch", ...)``: the patch rebinds
+# the attribute on the module, but a bound reference captured at import time
+# still points at the original. The builder then resolved the REAL device arch,
+# ``_tiled_2d_impl`` handed back that arch's spec class, and the gfx950-only
+# override fields (e.g. ``use_q_direct_reg``) raised TypeError -- but only when
+# this module was already imported before the patch was applied, so the
+# breakage looked like flaky test ordering.
 from kernels.common import attention_unified as _kau
 
 
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
     if arch == "gfx1250":
         return UnifiedAttention2DTiledSpec(
@@ -327,7 +337,7 @@ def _tiled_spec_from_problem(
 def _tiled_3d_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
     tile_size_override = _gfx942_3d_tile_size_override(problem)
     if arch == "gfx1250":
