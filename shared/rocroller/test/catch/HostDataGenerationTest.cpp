@@ -94,11 +94,11 @@ namespace HostDataGenerationTest
 
                     REQUIRE(generated.reference);
                     auto const reference
-                        = generated.reference.template loadAs<float>({row, column});
+                        = generated.reference->template loadAs<float>({row, column});
                     if constexpr(isBlockScaledType<T>)
                     {
                         REQUIRE(generated.scales);
-                        auto const scale = generated.scales.template loadAs<float>(
+                        auto const scale = generated.scales->template loadAs<float>(
                             {row, column / static_cast<size_t>(blockScaling)});
                         CHECK(value * scale == reference);
                     }
