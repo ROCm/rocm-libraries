@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, \
     vectorUInt32CeilDivideAndRemainder
 
-from Tensile.Common import roundUp, log2, ceilDivide, clusterEnabled
+from tensilelite.Common import roundUp, log2, ceilDivide, clusterEnabled
 
 def scalarUInt24DivideAndRemainderPair(qReg, dReg, divReg, rReg, tmpVgprRes, wavewidth, doRemainder=True, doQuotient=True):
 

@@ -5,7 +5,7 @@ CUOccupancy measurement utilities: occupancy formula and custom-kernel ASM parsi
 
 Production code — must not import hip-python or perform GPU runtime queries.
 HIP-based occupancy measurement lives in the test layer:
-    Tensile/Tests/unit/occupancy_hip_testutil.py
+    tensilelite/Tests/unit/occupancy_hip_testutil.py
 """
 
 from math import ceil

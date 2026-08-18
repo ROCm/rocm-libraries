@@ -17,22 +17,22 @@ import os
 import shutil
 from copy import deepcopy
 
-from Tensile.Common import Path, print1, printExit, printWarning
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Common import Path, print1, printExit, printWarning
+from tensilelite.Common.GlobalParameters import globalParameters
+from tensilelite.SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from .base import OptimizationBackend
 
 
-from Tensile.ductile import config as ductile_config
-from Tensile.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
-from Tensile.ductile.algorithm import GeneticAlgorithm
+from tensilelite.ductile import config as ductile_config
+from tensilelite.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
+from tensilelite.ductile.algorithm import GeneticAlgorithm
 
 
 
 def _generate_single_solution_with_groups(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap, silent=False):
     """Generate a single solution from a permutation, handling group_ parameter expansion."""
-    from Tensile.BenchmarkProblems import _build_and_validate_solution
+    from tensilelite.BenchmarkProblems import _build_and_validate_solution
 
     solution = {
         "ProblemType": deepcopy(problemType.state),

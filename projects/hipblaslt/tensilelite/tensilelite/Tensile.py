@@ -23,7 +23,7 @@
 ################################################################################
 
 if __name__ == "__main__":
-    print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
+    print("This file can no longer be run as a script.  Run 'tensilelite/bin/Tensile' instead.")
     exit(1)
 
 import ast
@@ -38,26 +38,26 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from Tensile import __version__
-from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
+from tensilelite import __version__
+from tensilelite.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, architectureMap, \
+from tensilelite.Common.Architectures import ARCH_COMPILER_TARGET, architectureMap, \
                                          baseArchName, detectGlobalCurrentISA, \
                                          gfxToIsa, isaToGfx
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters, validateRuntimeLanguage
-from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
-from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
-from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
-from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-from Tensile.Utilities.Decorators.Profile import profile
-from Tensile import BenchmarkProblems
-from Tensile import ClientWriter
-from Tensile import LibraryIO
-from Tensile.backends.config import parse_backend_config
-from Tensile import LibraryLogic
+from tensilelite.Common.TimingInstrumentation import timing_context, flush_timing_buffer
+from tensilelite.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
+from tensilelite.Toolchain.Source import SourceToolchain, makeSourceToolchain
+from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from tensilelite.Utilities.Decorators.Profile import profile
+from tensilelite import BenchmarkProblems
+from tensilelite import ClientWriter
+from tensilelite import LibraryIO
+from tensilelite.backends.config import parse_backend_config
+from tensilelite import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'

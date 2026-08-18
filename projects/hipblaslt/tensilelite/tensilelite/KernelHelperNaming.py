@@ -25,12 +25,12 @@
 from copy import deepcopy
 from enum import IntEnum
 
-from Tensile.Common.GlobalParameters import internalParameters
-from Tensile.KernelWriterBetaOnly import KernelWriterBetaOnly
-from Tensile.KernelWriterConversion import KernelWriterConversion
-from Tensile.KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
-from Tensile.KernelWriterActivationFunction import KernelWriterActivationFunction
-from Tensile.KernelWriterReduction import KernelWriterReduction
+from tensilelite.Common.GlobalParameters import internalParameters
+from tensilelite.KernelWriterBetaOnly import KernelWriterBetaOnly
+from tensilelite.KernelWriterConversion import KernelWriterConversion
+from tensilelite.KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
+from tensilelite.KernelWriterActivationFunction import KernelWriterActivationFunction
+from tensilelite.KernelWriterReduction import KernelWriterReduction
 
 
 class KernelHelperEnum(IntEnum):

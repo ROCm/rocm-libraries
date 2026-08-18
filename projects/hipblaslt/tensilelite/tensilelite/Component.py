@@ -65,7 +65,7 @@ Components are found by calling `Component.<subtype>.find(writer)` where `writer
 
 With this fallback mechanism, components can be added one at a time, without disrupting existing code.
 
-Components can be categorized in different files in the `Tensile/Components` directory.  Each file should be listed in the `__all__` member of `Tensile/Components/__init__.py`.
+Components can be categorized in different files in the `tensilelite/Components` directory.  Each file should be listed in the `__all__` member of `tensilelite/Components/__init__.py`.
 """
 
 import abc

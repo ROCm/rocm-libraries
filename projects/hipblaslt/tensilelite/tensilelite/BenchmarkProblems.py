@@ -37,16 +37,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from Tensile import SolutionLibrary, LibraryIO
-from Tensile.KernelWriter import DebugConfig
-from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
-from Tensile.Toolchain.Component import Assembler
-from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
-from Tensile.SolutionStructs.Solution import Solution
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
+from tensilelite import SolutionLibrary, LibraryIO
+from tensilelite.KernelWriter import DebugConfig
+from tensilelite.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
+from tensilelite.Toolchain.Component import Assembler
+from tensilelite.SolutionStructs.Problem import ProblemType, ProblemSizes
+from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
-from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
+from tensilelite.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
 
 from .BenchmarkStructs import BenchmarkProcess
 from .backends import BackendFactory
@@ -58,12 +58,12 @@ from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFil
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
-from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
+from tensilelite.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
-from Tensile.Common.Architectures import isaToGfx, gfxToVariants
-from Tensile.Common.GlobalParameters import globalParameters, startTime
-from Tensile.Common.TimingInstrumentation import timing_context
+from tensilelite.Common.Architectures import isaToGfx, gfxToVariants
+from tensilelite.Common.GlobalParameters import globalParameters, startTime
+from tensilelite.Common.TimingInstrumentation import timing_context
 
 _CACHE_FIELDS = {
     "ConstantParams": "constantParams",
@@ -78,7 +78,7 @@ _CACHE_FIELDS = {
 # --cpu-only results CSV. Fixed (never random / never timestamped) so the file is
 # byte-identical across runs (T8) and the value is large enough that addFromCSV's winner
 # selection has a well-defined winner. See the synthetic-perf caveat in
-# Tensile/Tests/unit/characterization/_codegen/GPU-MOCK.md.
+# tensilelite/Tests/unit/characterization/_codegen/GPU-MOCK.md.
 _CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
 
 

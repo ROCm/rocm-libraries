@@ -114,8 +114,8 @@ import shutil
 import subprocess
 import time
 
-from Tensile.Common import print1, printWarning, ClientExecutionLock
-from Tensile.Common.GlobalParameters import globalParameters
+from tensilelite.Common import print1, printWarning, ClientExecutionLock
+from tensilelite.Common.GlobalParameters import globalParameters
 
 # Wall-clock deadline in seconds from launch; all GPU processes must finish within this window
 GPU_WALL_TIMEOUT_SECS = 60

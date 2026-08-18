@@ -9,10 +9,10 @@ benchmarks all of them. It's the original Tensile strategy for solution generati
 """
 
 from typing import List, Dict, Any, Callable, Tuple
-from Tensile.BenchmarkStructs import constructForkPermutations
+from tensilelite.BenchmarkStructs import constructForkPermutations
 
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.Common import print1
+from tensilelite.Common.TimingInstrumentation import timing_context
+from tensilelite.Common import print1
 
 from .base import OptimizationBackend
 
@@ -77,7 +77,7 @@ class TensileBackend(OptimizationBackend):
         solutionPoolIndex = benchmark_config["solutionPoolIndex"] or {}
 
         # Import locals to avoid circular dependency
-        from Tensile.BenchmarkProblems import (_generateForkedSolutions, _generateCustomKernelSolutions,
+        from tensilelite.BenchmarkProblems import (_generateForkedSolutions, _generateCustomKernelSolutions,
                                                _constructAllPoolSolutions)
     
         configPTStr = str(problemType)

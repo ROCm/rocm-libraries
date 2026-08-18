@@ -118,7 +118,7 @@ def _mxEnumValue(field):
     unwrap to the enum). Both must be accepted."""
     if field is None:
         return None
-    # ``DataType.value`` is the underlying *int* (see Tensile.Common.DataType);
+    # ``DataType.value`` is the underlying *int* (see tensilelite.Common.DataType);
     # ``DataTypeEnum.X.value`` is also an int. So the first getattr unwraps
     # DataType -> int, and the second is a no-op for ints / unwraps a raw
     # DataTypeEnum -> int.

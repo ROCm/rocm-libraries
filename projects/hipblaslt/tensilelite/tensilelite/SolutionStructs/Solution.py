@@ -29,34 +29,34 @@ import sys
 from enum import Enum
 from typing import List, Dict, Literal, Tuple
 
-from Tensile.AsmStoreState import VectorDataTypes
-from Tensile.Activation import ActivationType
-from Tensile.AsmStoreState import VectorDataTypes
-from Tensile.Common import assignParameterWithDefault, IsaInfo, \
+from tensilelite.AsmStoreState import VectorDataTypes
+from tensilelite.Activation import ActivationType
+from tensilelite.AsmStoreState import VectorDataTypes
+from tensilelite.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
                     streamKMulticast, streamK2DMulticast, \
                     swizzleGeometry
-from Tensile.Common.DataType import DataType
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.CustomKernels import supportsUserSgprKernargPreload
-from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.CustomKernels import supportsUserSgprKernargPreload
+from tensilelite.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config
-from Tensile.Common.GlobalParameters import defaultSolution, \
+from tensilelite.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
-from Tensile.Common.ValidParameters import validParameters, \
+from tensilelite.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
                                             _skipTypeCheck, \
                                             normalizeSwInstructionPrefetch, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
-from Tensile.SolutionStructs.Naming import getSolutionNameFull
-from Tensile.SolutionStructs.Problem import ProblemType
-from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
-from Tensile.Toolchain.Component import Assembler
-from Tensile.Components.CustomSchedule import hasCustomSchedule
+from tensilelite.SolutionStructs.Naming import getSolutionNameFull
+from tensilelite.SolutionStructs.Problem import ProblemType
+from tensilelite.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
+from tensilelite.Toolchain.Component import Assembler
+from tensilelite.Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
@@ -214,7 +214,7 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
     return True
   # Lazy import: Components/Subtile pulls the Components package and would
   # deadlock at module-load time if imported from Solution.py's top level.
-  from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
+  from tensilelite.Components.Subtile.Kernel import selectABGeometry, TileInfo
   for tc in ("A", "B"):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
     loadRatioGR = tileInfo.loadRatioGR
@@ -1155,7 +1155,7 @@ class Solution(collections.abc.Mapping):
       # back-imports the Components package and would deadlock at
       # module-load time if pulled from Solution.py's top-level
       # imports.
-      from Tensile.Components.StreamK import streamKVariantClass
+      from tensilelite.Components.StreamK import streamKVariantClass
       if state["StreamK"] != 0 and not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4, 5}")
       if state["DebugStreamK"] != 0:

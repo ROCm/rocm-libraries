@@ -3,7 +3,7 @@
 
 """Shared backend configuration parsing and validation."""
 
-from Tensile.Common import printExit
+from tensilelite.Common import printExit
 
 
 def parse_backend_config(raw_backend):

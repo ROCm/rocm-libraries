@@ -25,7 +25,7 @@
 from argparse import ArgumentParser
 from pathlib import Path
 
-from Tensile.Toolchain.Validators import ToolchainDefaults
+from tensilelite.Toolchain.Validators import ToolchainDefaults
 
 BUNDLED_KNOWN_BUGS = object()
 

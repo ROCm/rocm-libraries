@@ -26,12 +26,12 @@ from pathlib import Path
 from typing import Dict
 from . import LibraryIO
 from . import SolutionSelectionLibrary
-from Tensile.Common import print1, print2, HR, printExit, \
+from tensilelite.Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
-from Tensile.Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
+from tensilelite.Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
+from tensilelite.Common.TimingInstrumentation import timing_context
+from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 
 from copy import deepcopy
 from sys import stdout
@@ -233,7 +233,6 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
        None)
 
 
-
 ################################################################################
 # LogicAnalyzer
 ################################################################################
@@ -399,7 +398,6 @@ class LogicAnalyzer:
       dataFileName = dataFileNameList[fileIdx]
       self.addFromCSV(dataFileName, self.numSolutionsPerGroup[fileIdx], \
           self.solutionGroupMap[fileIdx])
-
 
 
     #print self.data
@@ -639,7 +637,6 @@ class LogicAnalyzer:
 
     print("Winners", winners)
     self.pruneSolutions(winners)
-
 
 
   ##############################################################################
@@ -886,7 +883,6 @@ class LogicAnalyzer:
     return ruleList
 
 
-
   ##############################################################################
   ##############################################################################
   ###
@@ -894,7 +890,6 @@ class LogicAnalyzer:
   ###
   ##############################################################################
   ##############################################################################
-
 
 
   ##############################################################################
@@ -1441,7 +1436,7 @@ def generateLogic(
   print2("# DefaultAnalysisParameters: " % defaultAnalysisParameters)
 
   if config:
-    from Tensile.Common.TypeValidationErrors import (
+    from tensilelite.Common.TypeValidationErrors import (
         ConfigTypeError, formatMismatch,
     )
     for key, value in config.items():

@@ -27,9 +27,9 @@ import re
 from argparse import ArgumentParser
 from typing import Any, Dict, List, Optional
 
-from Tensile.Common import coVersionMap, printExit
-from Tensile.Common.Architectures import architectureMap
-from Tensile.Toolchain.Validators import ToolchainDefaults
+from tensilelite.Common import coVersionMap, printExit
+from tensilelite.Common.Architectures import architectureMap
+from tensilelite.Toolchain.Validators import ToolchainDefaults
 
 
 def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -148,7 +148,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         dest="EnableMarker",
         action="store_true",
         default=False,
-        help="Enable marker in Tensile.",
+        help="Enable marker in tensilelite.",
     )
     argParser.add_argument(
         "--no-generate-solution-table",
