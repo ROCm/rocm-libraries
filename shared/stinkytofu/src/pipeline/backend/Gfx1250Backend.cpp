@@ -231,12 +231,15 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));
 
+    if (runScheduler) {
+        mpm.addPass(createFunctionToModuleAdaptor(createInsertDelayAluPass(/*minWavesPerSimd=*/2)));
+    }
+
     {
         PassManager pm = makeEntryPM(module, debugStreams);
         pm.addPass(createMemTokenConsistencyCheckPass());
 
         if (runScheduler) {
-            pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
             pm.addPass(createLoopRegionRemarkPass());
         }
         pm.addPass(createEstimateAsmCyclesPass());
