@@ -137,6 +137,8 @@ Accuracy tests should be run, unless otherwise specified by the developer, on al
 are supported by the rocFFT library.  Currently, TheRock only tests on a subset of the supported
 architectures.
 
+One should not re-run accuracy tests until the desired result is achieved.
+
 ### ASAN / TSAN / Sanitizer Coverage
 
 ASAN (address sanitizer) coverage is enabled in rocFFT via `BUILD_ADDRESS_SANITIZER`.
@@ -198,6 +200,14 @@ Multi-process performance testing is still in development.
 Performance tests should be run, unless otherwise specified by the developer, on all
 architectures that are supported by the rocFFT library.
 
+Since we perform null-hypothesis testing, we do not use a percentage cutoff.
+
+One should not re-run performance tests until the desired result is achieved.
+
+While every effort has been made to reduce false positives, these will still inevitably occur; the
+performance tests therefore cannot be gating.  We will trust developers to use their judgement to
+deal with these cases.
+
 Performance testing is currently not implemented in TheRock due to infrastructure issues.
 
 
@@ -220,4 +230,6 @@ These gaps are due to infractucture availability issues.
 ### Desired testing standard 
 
 Our objective is to have targetted static analysis, unit test, integration tests, and performance
-tests on all architectures combinations that rocFFT supports.
+tests on all architectures combinations that rocFFT supports.  Tests should be performed pre-submit
+using a targetted testing strategy (eg documentation builds don't need performance testing), with a
+weekly build to confirm.
