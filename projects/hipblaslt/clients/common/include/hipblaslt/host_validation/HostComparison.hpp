@@ -31,6 +31,11 @@ namespace hipblaslt::host_validation
 
         /// Apply an absolute pointwise tolerance supplied by HostComparisonRequest.
         Near,
+
+        /// Apply the scale-aware symmetric tolerance
+        ///   |observed - expected| < tolerance * (|observed| + |expected| + 1).
+        /// The +1 term supplies an absolute floor for cancellation near zero.
+        SymmetricRelative,
     };
 
     struct HostComparisonRequest
@@ -64,6 +69,9 @@ namespace hipblaslt::host_validation
 
         /// Absolute tolerance used only when pointwise is Near.
         double absoluteTolerance = 0.0;
+
+        /// Symmetric relative coefficient used only when pointwise is SymmetricRelative.
+        double symmetricRelativeTolerance = 0.0;
 
         /// Collect NaN/infinity agreement statistics in comparison, independently of finite
         /// pointwise acceptance.
@@ -142,6 +150,14 @@ namespace hipblaslt::host_validation
             break;
         case HostPointwiseComparison::Near:
             options                            = nearComparisonOptions(request.absoluteTolerance);
+            options.computePointwiseStatistics = false;
+            options.computeFrobenius           = false;
+            options.maxReportedMismatches      = 10;
+            break;
+        case HostPointwiseComparison::SymmetricRelative:
+            options.symmetricRelativeTolerance = request.symmetricRelativeTolerance;
+            options.strictTolerance            = true;
+            options.equalNaNs                  = true;
             options.computePointwiseStatistics = false;
             options.computeFrobenius           = false;
             options.maxReportedMismatches      = 10;
