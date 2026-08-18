@@ -27,6 +27,28 @@
 
 namespace ck {
 
+namespace detail {
+// Downgrades the unsupported-activation check from a hard error to a diagnostic so callers that
+// request an unimplemented activation still build. Instantiating the false specialization emits
+// -Wdeprecated-declarations at the call site.
+template <bool Supported>
+struct moe_mx_bpreshuffle_activation_support
+{
+    __host__ __device__ static constexpr void check() {}
+};
+
+template <>
+struct moe_mx_bpreshuffle_activation_support<false>
+{
+    [[deprecated("gridwise_moe_mx_gemm_bpreshuffle: requested activation is not implemented; "
+                 "stage-1 output is left unwritten and results will be wrong")]] __host__ __device__
+    static constexpr void
+    check()
+    {
+    }
+};
+} // namespace detail
+
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
 // kernel function Blockers:
 // 1. Two separted declaration of __shared__ pointer is the key to make sure data access operate on
@@ -1240,11 +1262,11 @@ struct GridwiseMoeGemmMX_BPreshuffle
                                CElementwiseOperation c_element_op)
     {
         static_assert(KPackPerGroup == BlockwiseGemmPipe::KThreadChunk);
-        static_assert(ActivationOperation == Activation::gelu_and_mul ||
-                          ActivationOperation == Activation::silu_and_mul ||
-                          ActivationOperation == Activation::gelu_tanh_and_mul,
-                      "gridwise_moe_mx_gemm_bpreshuffle only supports gelu_and_mul, silu_and_mul "
-                      "and gelu_tanh_and_mul.");
+        // Only stage-1 consumes ActivationOperation, so stage-2 instances stay silent.
+        detail::moe_mx_bpreshuffle_activation_support<
+            !IsInputGemm || ActivationOperation == Activation::gelu_and_mul ||
+            ActivationOperation == Activation::silu_and_mul ||
+            ActivationOperation == Activation::gelu_tanh_and_mul>::check();
         ignore                           = a_element_op;
         ignore                           = b_element_op;
         index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
@@ -1757,11 +1779,11 @@ struct GridwiseMoeGemmMX_BPreshuffle
                                     CElementwiseOperation c_element_op)
     {
         static_assert(KPackPerGroup == BlockwiseGemmPipe::KThreadChunk);
-        static_assert(ActivationOperation == Activation::gelu_and_mul ||
-                          ActivationOperation == Activation::silu_and_mul ||
-                          ActivationOperation == Activation::gelu_tanh_and_mul,
-                      "gridwise_moe_mx_gemm_bpreshuffle only supports gelu_and_mul, silu_and_mul "
-                      "and gelu_tanh_and_mul.");
+        // Only stage-1 consumes ActivationOperation, so stage-2 instances stay silent.
+        detail::moe_mx_bpreshuffle_activation_support<
+            !IsInputGemm || ActivationOperation == Activation::gelu_and_mul ||
+            ActivationOperation == Activation::silu_and_mul ||
+            ActivationOperation == Activation::gelu_tanh_and_mul>::check();
         ignore                           = a_element_op;
         ignore                           = b_element_op;
         index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
