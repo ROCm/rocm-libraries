@@ -120,7 +120,6 @@ def _log_work(tuning_dir: Path, name: str):
         f.write(content)
 
 
-
 def configure(
     hipblaslt_path: str | Path,
     gemm_configs: Union[GemmConfig, Sequence[GemmConfig]],
@@ -308,7 +307,7 @@ def run(
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
-                        hipblaslt_path / "tensilelite/Tensile/bin/Tensile",
+                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
                         self.config,
                         self.build_dir,
                         "--prebuilt-client",

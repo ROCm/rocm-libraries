@@ -17,7 +17,7 @@ _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 if str(_TASKS_DIR) not in sys.path:
     sys.path.insert(0, str(_TASKS_DIR))
 
-from Tensile.RocisaStatus import _rocisa_install_status
+from tensilelite.RocisaStatus import _rocisa_install_status
 
 # gfx1250 v0/v1 ASIC-revision detection lives in the packaged Tensile tree
 # (invoke-free) so CI test artifacts can exercise it directly; these @task
@@ -273,7 +273,7 @@ def build_client(
 ):
     """Build the tensilelite-client C++ executable.
 
-    To run Tensile after building, use: Tensile/bin/Tensile <args>
+    To run Tensile after building, use: tensilelite/bin/Tensile <args>
     When rocisa is not pip-installed, HIPBLASLT_BUNDLE_PYTHON_DEPS is
     enabled automatically so CMake builds it in the client build
     directory. When rocisa is installed editable, the bindings are
