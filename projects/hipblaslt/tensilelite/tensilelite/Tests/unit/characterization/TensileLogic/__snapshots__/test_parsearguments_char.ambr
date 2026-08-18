@@ -10,6 +10,7 @@
     'LogicPath': 'logic/dir',
     'StrictKnownBugs': False,
     'Verbose': 2,
+    'logic_filter': '**/*.yaml',
   })
 # ---
 # name: test_defaults_only_logicpath
@@ -23,6 +24,7 @@
     'LogicPath': 'logic/dir',
     'StrictKnownBugs': False,
     'Verbose': 1,
+    'logic_filter': '**/*.yaml',
   })
 # ---
 # name: test_minimal_check_all
@@ -36,5 +38,6 @@
     'LogicPath': 'logic/dir',
     'StrictKnownBugs': False,
     'Verbose': 1,
+    'logic_filter': '**/*.yaml',
   })
 # ---

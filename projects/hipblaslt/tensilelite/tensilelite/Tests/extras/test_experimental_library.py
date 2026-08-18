@@ -34,6 +34,7 @@ from tensilelite.ExperimentalLibrary import (
     _library_type,
     _placeholder_problem_size_groups,
     _resolve_logic_sources,
+    _tensile_create_library_cmd,
     _unique_staged_name,
     cmd_build_lib,
     cmd_extract,
@@ -456,6 +457,7 @@ def test_gen_logic_matching_arch_passes_guard_and_omits_cpu_only(monkeypatch, tm
         E.cmd_gen_logic(_gen_logic_ns(tmp_path, "gfx950", config=cfg))
 
     cmd = captured["cmd"]
+    assert cmd[:4] == ["python", "-m", "tensilelite", "run"]
     assert "--cpu-only" not in cmd  # regression guard: benchmarking is now default
     assert "--gpu-targets" in cmd
     assert "gfx950" in cmd
@@ -964,3 +966,8 @@ def test_patch_logic_skip_unbuildable_keeps_failed_solution_as_baseline(
         rows = {r[1]: (r[2], r[3]) for r in csv.reader(fh) if r[0] != "logic_file"}
     assert rows["1"] == ("skipped", "reject")
     assert rows["2"] == ("applied", "")
+
+def test_create_library_subprocess_uses_package_command():
+    command = _tensile_create_library_cmd("python", "/logic", "/output", "gfx942")
+
+    assert command[:4] == ["python", "-m", "tensilelite", "create-library"]
