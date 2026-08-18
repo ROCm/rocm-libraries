@@ -96,6 +96,17 @@ the test suite to verify bit-wise reproducibility.  Bit-wise reproducibility req
 running the same version of rocFFT, identical ROCm stacks (compiler/runtime/driver), and the same
 GPU model.
 
+#### Samples
+
+Samples are currently located in a separate repository.  The purpose of the samplese repository is
+to pedogical; as such, it should work with the latest release of rocFFT.  New API features and
+behaviour in the rocFFT library will therefore reside in the rocFFT repository, and will be moved to
+the samples repository after the library changes are made available in a public release.  In order
+to ensure that these samples behave correctly, these should be tested as part of the pre-commit and
+nightly testing.
+
+There is a gap in that these tests are not currently run the TheRock's CI.
+
 #### Accuracy tests
 
 The accuracy tests are all given as accuracy_test.vs_fftw, using FFTW for reference computation.  L2
