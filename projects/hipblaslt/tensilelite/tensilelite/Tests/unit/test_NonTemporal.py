@@ -21,7 +21,7 @@
 # THE SOFTWARE.
 #
 ################################################################################
-"""Unit tests for ``Tensile.Components.NonTemporal``.
+"""Unit tests for ``tensilelite.Components.NonTemporal``.
 
 Covers the legacy (``HasTHModifier=False``) path that emits the classic
 glc/slc/nt bits, and the gfx1250 (``HasTHModifier=True``) path that emits
@@ -35,7 +35,7 @@ pytestmark = pytest.mark.unit
 
 from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 
-from Tensile.Components.NonTemporal import (
+from tensilelite.Components.NonTemporal import (
     _at_least_device_scope,
     _has_temporal_hint,
     decodeNonTemporal,

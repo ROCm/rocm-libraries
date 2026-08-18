@@ -4,11 +4,11 @@
 ################################################################################
 """P6 — gfx942 GSU MultipleBufferSingleKernel (MBSK) arm characterization.
 
-Exercises the MBSK-gated arms of Tensile/Components/GSU.py that are NOT
+Exercises the MBSK-gated arms of tensilelite/Components/GSU.py that are NOT
 reached by the existing test_r3_gsu_on_char.py (which uses MultipleBuffer and
 SingleBuffer algorithms but not MultipleBufferSingleKernel).
 
-Target lines in Tensile/Components/GSU.py:
+Target lines in tensilelite/Components/GSU.py:
   GSUOn.graWorkGroup             line 326-337  (_GlobalAccumulation==MBSK)
   GSUOn.globalWriteBatchProlog   line 725-728  (_GlobalAccumulation==MBSK)
   GSUOn.defineAndResources       line 734-745  (_GlobalAccumulation==MBSK)

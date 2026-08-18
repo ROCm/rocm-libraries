@@ -5,7 +5,7 @@
 """R6 — SubtileGREmit remaining arms: loadRatioGR branches + dead-code paths.
 
 CPU-only characterization. Targets uncovered regions of
-Tensile/Components/Subtile/SubtileGREmit.py:
+tensilelite/Components/Subtile/SubtileGREmit.py:
 
   528-639   Non-legacy helper functions (_grComputeOffset, _grComputeSubtileOffsets,
             _grComputeRowPartition, _grComputeAllOffsets + graInitPointer).
@@ -159,7 +159,7 @@ def _kernel_b16_wg22():
 
 def test_r6_graInitPointer_emits_placeholder():
     """graInitPointer emits a placeholder module (lines 528-533)."""
-    from Tensile.Components.Subtile.SubtileGREmit import graInitPointer
+    from tensilelite.Components.Subtile.SubtileGREmit import graInitPointer
     from rocisa.code import Module
 
     w = _make_writer()
@@ -173,8 +173,8 @@ def test_r6_graInitPointer_emits_placeholder():
 
 def test_r6_grComputeOffset_produces_instructions():
     """_grComputeOffset emits scale + mul + shift + add sequence (lines 539-555)."""
-    from Tensile.Components.Subtile.SubtileGREmit import _grComputeOffset
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.SubtileGREmit import _grComputeOffset
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
     from rocisa.code import Module
 
     kernel = _kernel_b16_wg22()
@@ -195,8 +195,8 @@ def test_r6_grComputeOffset_produces_instructions():
 
 def test_r6_grComputeSubtileOffsets_sgpr_path():
     """_grComputeSubtileOffsets emits s_mul + s-soffsets for localSubtilesRegister (lines 561-579)."""
-    from Tensile.Components.Subtile.SubtileGREmit import _grComputeSubtileOffsets
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.SubtileGREmit import _grComputeSubtileOffsets
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
     from rocisa.code import Module
 
     # WG=(2,2) with AB_B16: localSubtileGrid=[4,2], loadRatioGR=1.0
@@ -225,8 +225,8 @@ def test_r6_grComputeRowPartition_ratio_half():
     WG=(1,1) + AB_B8 (FP8, bpe=1) yields loadRatioGR = 0.5.  The branch emits
     VMovB32(localRow=0) + VMovB32(partitionRow=waveId).
     """
-    from Tensile.Components.Subtile.SubtileGREmit import _grComputeRowPartition
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B8
+    from tensilelite.Components.Subtile.SubtileGREmit import _grComputeRowPartition
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B8
     from rocisa.code import Module
 
     kernel = _kernel_b8_wg11()
@@ -249,8 +249,8 @@ def test_r6_grComputeRowPartition_ratio_two():
     WG=(4,4) + AB_B16 yields loadRatioGR = 2.0.  The branch emits
     VMovB32(localRow=waveId) + VMovB32(partitionRow=0).
     """
-    from Tensile.Components.Subtile.SubtileGREmit import _grComputeRowPartition
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.SubtileGREmit import _grComputeRowPartition
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
     from rocisa.code import Module
 
     kernel = _kernel_b16_wg44()
@@ -274,8 +274,8 @@ def test_r6_grComputeAllOffsets_ratio_half():
     The loop runs for i=1..numGRPerSubtile-1=1, which exercises the half-block
     rotation arm (lines 630-634) for bpe=1 (FP8).  Non-FP8 bpe also tested.
     """
-    from Tensile.Components.Subtile.SubtileGREmit import _grComputeAllOffsets
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B8
+    from tensilelite.Components.Subtile.SubtileGREmit import _grComputeAllOffsets
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B8
     from rocisa.code import Module
 
     kernel = _kernel_b8_wg11()
@@ -296,8 +296,8 @@ def test_r6_grComputeAllOffsets_ratio_half():
 
 def test_r6_grComputeAllOffsets_ratio_one():
     """_grComputeAllOffsets with loadRatioGR==1.0 takes the else-VMovB32 arm (line 636)."""
-    from Tensile.Components.Subtile.SubtileGREmit import _grComputeAllOffsets
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.SubtileGREmit import _grComputeAllOffsets
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
     from rocisa.code import Module
 
     # numGRPerSubtile > 1 requires ratio < 1, so use ratio=1.0 which has
@@ -332,8 +332,8 @@ def test_r6_grComputeSubtileOffsets_legacy_vgpr_fallback():
     Force the VGPR path by setting sgpr_start >= MaxSgpr - 3 = 253.
     Checks that SMulI32 + VAddU32 appear (not just SMulI32 alone).
     """
-    from Tensile.Components.Subtile.SubtileGREmit import _grComputeSubtileOffsets_legacy
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B8
+    from tensilelite.Components.Subtile.SubtileGREmit import _grComputeSubtileOffsets_legacy
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B8
     from rocisa.code import Module
     from rocisa.instruction import VAddU32
 
@@ -407,7 +407,7 @@ def _make_full_writer_with_tileinfos(geom_A, geom_B, kernel):
     wB = _fresh()
     tiB = None
 
-    from Tensile.Components.Subtile.Kernel import TileInfo
+    from tensilelite.Components.Subtile.Kernel import TileInfo
     tiA = TileInfo(geom_A, "A", wA, kernel)
     tiA.allocOffsetRegisters(wA, kernel)
 
@@ -443,8 +443,8 @@ def test_r6_emitSingleBufferLoad_ratio_gt1_early_return():
     loadRatioGR==2.0 (WG=(4,4)+AB_B16): linearId=1, firstInGroup=0 -> early return.
     Covers lines 855-858: the ``if tileInfo.loadRatioGR > 1`` guard.
     """
-    from Tensile.Components.Subtile.SubtileGREmit import emitSingleBufferLoad
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+    from tensilelite.Components.Subtile.SubtileGREmit import emitSingleBufferLoad
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
 
     kernel = _kernel_b16_wg44()
     w = _make_writer()
@@ -470,8 +470,8 @@ def test_r6_emitSingleBufferLoad_ratio_gt1_early_return():
 
 def test_r6_emitSubtileBufferLoad_wrapper():
     """emitSubtileBufferLoad wrapper looks up tileInfo via writer.states (lines 886-887)."""
-    from Tensile.Components.Subtile.SubtileGREmit import emitSubtileBufferLoad
-    from Tensile.Components.Subtile.Kernel import AB_B16
+    from tensilelite.Components.Subtile.SubtileGREmit import emitSubtileBufferLoad
+    from tensilelite.Components.Subtile.Kernel import AB_B16
 
     kernel = _kernel_b16_wg22()
     writer, tiA, tiB = _make_full_writer_with_tileinfos(AB_B16, AB_B16, kernel)
@@ -491,8 +491,8 @@ def test_r6_emitSubtileBufferLoad_wrapper():
 
 def test_r6_globalReadDoSubtile_iterates_grid():
     """globalReadDoSubtile loops over localSubtileGrid and emits per-subtile loads (lines 894-903)."""
-    from Tensile.Components.Subtile.SubtileGREmit import globalReadDoSubtile
-    from Tensile.Components.Subtile.Kernel import AB_B16
+    from tensilelite.Components.Subtile.SubtileGREmit import globalReadDoSubtile
+    from tensilelite.Components.Subtile.Kernel import AB_B16
 
     kernel = _kernel_b16_wg22()
     writer, tiA, tiB = _make_full_writer_with_tileinfos(AB_B16, AB_B16, kernel)
@@ -513,8 +513,8 @@ def test_r6_globalReadDoSubtile_iterates_grid():
 
 def test_r6_globalReadLDSBufferSwap_scale_path():
     """globalReadLDSBufferSwap routes tc='MXSA'/'MXSB' to scale swap (lines 947-948)."""
-    from Tensile.Components.Subtile.SubtileGREmit import globalReadLDSBufferSwap
-    from Tensile.Components.Subtile.Kernel import TileInfo, MXSA_B8, MXSB_B8
+    from tensilelite.Components.Subtile.SubtileGREmit import globalReadLDSBufferSwap
+    from tensilelite.Components.Subtile.Kernel import TileInfo, MXSA_B8, MXSB_B8
 
     kernel_mx = {
         "MacroTileA": 128, "MacroTileB": 128,
