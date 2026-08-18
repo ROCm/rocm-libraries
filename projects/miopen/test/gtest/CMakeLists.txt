@@ -421,11 +421,18 @@ file(WRITE "${INSTALL_TEST_FILE}"
 if (NOT MIOPEN_TEST_CATEGORY)
   set(MIOPEN_TEST_CATEGORY standard)
 endif()
+# ROCM_LIBRARIES_ROOT is ${CMAKE_CURRENT_SOURCE_DIR}/../../ of the MIOpen project,
+# i.e. this resolves only when MIOpen is configured from inside a rocm-libraries
+# checkout. A component build that exports MIOpen into its own directory has no
+# shared/ctest, and an unconditional include() there is a hard configure failure
+# with BUILD_TESTING=ON (the release default). The else() branch below already
+# spelled out the intended behaviour - it was just unreachable, because the guard
+# tested for the YAML file while the include above had already failed.
 set(MIOPEN_TEST_CATEGORIES_CMAKE ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
-include(${MIOPEN_TEST_CATEGORIES_CMAKE})
 message(STATUS "YAML-based test categorization:")
 list(APPEND CMAKE_MESSAGE_INDENT "  ")
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+if(EXISTS "${MIOPEN_TEST_CATEGORIES_CMAKE}" AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+        include(${MIOPEN_TEST_CATEGORIES_CMAKE})
         message(STATUS "YAML-based test categorization")
         message(STATUS "apply_test_category_labels(miopen_gtest ${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR} ${INSTALL_TEST_FILE})")
         apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}")
