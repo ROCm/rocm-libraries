@@ -62,7 +62,7 @@ option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
-option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build the in-tree rocisa Python extension." OFF)
+option(ROCISA_BUILD_PYTHON "Build the in-tree rocisa Python extension without device libraries." OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
@@ -223,14 +223,34 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
     endif()
 endif()
 
-if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
     set(hipblaslt_python_dev Development.Module)
     hipblaslt_find_python("${hipblaslt_python_dev}")
-    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 else()
     hipblaslt_find_python("${hipblaslt_python_dev}")
+endif()
+if(HIPBLASLT_ENABLE_DEVICE)
+    if(WIN32)
+        set(_hipblaslt_python_path_separator "$<SEMICOLON>")
+    else()
+        set(_hipblaslt_python_path_separator ":")
+    endif()
+    set(_hipblaslt_python_paths
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    list(JOIN _hipblaslt_python_paths
+        "${_hipblaslt_python_path_separator}" _hipblaslt_python_path)
+    set(HIPBLASLT_PYTHON_COMMAND
+        "${CMAKE_COMMAND}" -E env
+        "PYTHONPATH=${_hipblaslt_python_path}"
+        "PATH=$ENV{PATH}"
+        ${san_opts}
+        -- "${Python3_EXECUTABLE}")
+    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
+else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
+    set(HIPBLASLT_PYTHON_DEPS "")
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT

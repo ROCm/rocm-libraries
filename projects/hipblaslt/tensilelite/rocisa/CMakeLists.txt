@@ -47,9 +47,11 @@ target_include_directories(rocisa-cpp
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-# Build the Python extension when bundling deps (hipblaslt subdir build)
-# or when building standalone.
-if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
+# Device generation always owns the in-tree extension. ROCISA_BUILD_PYTHON
+# retains a root-project rocisa-only configuration; the standalone project
+# remains independently buildable by Python packaging.
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS OR ROCISA_STANDALONE)
     if(ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
@@ -132,6 +134,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                             ${ROCISAINST_SOURCE}
                             ${ROCISAPASS_SOURCE}
                             ${ROCISAFUNC_SOURCE})
+    if(NOT ROCISA_STANDALONE)
+        set_target_properties(_rocisa PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa")
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
+            "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
+            COPYONLY)
+    endif()
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
