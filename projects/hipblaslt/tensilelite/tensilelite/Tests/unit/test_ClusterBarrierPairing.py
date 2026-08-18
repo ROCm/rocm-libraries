@@ -20,9 +20,9 @@ from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcmp1B32, SCBranchSCC1, SCmpEQU32, SCmpLeU32, SLShiftRightB32, TensorLoadToLds, VReadfirstlaneB32
 
-from Tensile.Components.DecouplePGR import dcpThickGateFromTokenPasses
-from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
-from Tensile.KernelWriter import KernelWriter
+from tensilelite.Components.DecouplePGR import dcpThickGateFromTokenPasses
+from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
+from tensilelite.KernelWriter import KernelWriter
 
 
 def _mockWriter():

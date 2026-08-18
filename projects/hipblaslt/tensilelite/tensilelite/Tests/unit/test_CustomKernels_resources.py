@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-import Tensile.CustomKernels as CustomKernels
+import tensilelite.CustomKernels as CustomKernels
 
 pytestmark = pytest.mark.unit
 
