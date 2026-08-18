@@ -2679,6 +2679,12 @@ class Solution(collections.abc.Mapping):
       # persisting SGPRs, so MX-scaled SK+PAP tiles are allowed here; the
       # SGPR-overflow check still drops any tile that overflows.
 
+    # TDMSplit is disabled: it has unresolved read-token/tensorcnt races under
+    # the decoupled load-vs-compute wave layout. Reject any solution requesting it.
+    if state["TDMSplit"]:
+      reject(state, printRejectionReason, "TDMSplit is currently disabled")
+      return
+
     # Wave-separated TDM splits waves by parity (even=A, odd=B) and requires
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves
     # itself must be a power of two (>= 2).
