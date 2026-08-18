@@ -39,6 +39,9 @@ static uint32_t expectedEngines()
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
     ++expected;
 #endif
+#ifdef HIPDNN_ENGINE_HIP_FLASH2
+    ++expected;
+#endif
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     expected += static_cast<uint32_t>(
         hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets().size());
