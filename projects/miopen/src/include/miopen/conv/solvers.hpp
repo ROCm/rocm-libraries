@@ -4875,14 +4875,13 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 // Tuning state for the vendored hipconv solver.
 //
 // hipconv exposes its per-shape kernels as an ordered, deterministic list
-// (hipconv::get_valid_configs). We persist the list index as the tuning key, and
-// keep the kernel name as a checksum so a drifted list is rejected on restore.
-// The index is the only field that identifies a config today because most
-// families do not implement describe_config().
+// (hipconv::get_valid_configs), already filtered to the layer and ranked, so the list
+// index is the entire key and a stored index survives only as long as the list order
+// does. Keying on hipconv::describe_config() would remove that dependence, and waits on
+// descriptor coverage across every family.
 struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipConv>
 {
-    int index               = -1;
-    std::string kernel_name = "";
+    int index = -1;
 
     PerformanceConfigConvHipConv() = default;
     PerformanceConfigConvHipConv(bool) {}
@@ -4891,7 +4890,6 @@ struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipCon
     static void Visit(Self&& self, F f)
     {
         f(self.index, "index");
-        f(self.kernel_name, "kernel_name");
     }
 
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
@@ -4901,10 +4899,18 @@ struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipCon
     bool operator==(const PerformanceConfigConvHipConv& other) const;
 
 private:
-    // Populate index/kernel_name from a resolved arch handle (as const void* to
-    // keep hipconv types out of this header).
+    // Populate index from a resolved arch handle (as const void* to keep hipconv
+    // types out of this header).
     void InitFromArch(const void* arch, const miopen::conv::ProblemDescription&);
-    static std::string GetCurrentDeviceName();
+
+    // Length of the config list for this enumeration, filled by IsValid() and read by
+    // SetNextValue(), which has no ExecutionContext of its own to resolve the arch.
+    //
+    // ComputedIterator (generic_search.hpp) calls IsValid on this same object before
+    // every SetNextValue, so the length is always in place by the time it is read.
+    //
+    // maybe_unused because the !MIOPEN_USE_HIPCONV stubs read nothing.
+    [[maybe_unused]] mutable int config_count = -1;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<PerformanceConfigConvHipConv>
