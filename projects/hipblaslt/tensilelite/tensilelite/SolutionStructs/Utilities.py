@@ -25,7 +25,7 @@
 import sys
 import math
 
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 from rocisa.enum import DataTypeEnum
 
 # Largest LdsBlockSizePerPad (bytes) the TDM pad_interval field can encode.

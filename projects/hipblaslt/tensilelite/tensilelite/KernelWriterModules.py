@@ -27,7 +27,7 @@ from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SW
   VMovRelsD2B32, VMulF32, VMulF64, VMulLOU32, VMulPKF16
 from rocisa.functions import BranchIfNotZero
 
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
   #TODO: refactor this

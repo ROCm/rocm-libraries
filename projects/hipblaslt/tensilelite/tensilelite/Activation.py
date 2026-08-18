@@ -39,8 +39,8 @@ from rocisa.instruction import Instruction, SMovB32, SNop, SSetMask, VAddF16, VA
     VMinF64, VMinI32, VMovB32, VMulF16, VMulF32, VMulF64, VMulLOU32, VMulPKF16, VRcpF16, \
     VRcpF32, VSubF32, VSubI32
 
-from Tensile.Common.DataType import DataType
-from Tensile.Common.Utilities import printExit, printWarning
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.Utilities import printExit, printWarning
 
 from dataclasses import dataclass
 

@@ -23,8 +23,8 @@
 ################################################################################
 from functools import lru_cache
 
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
-from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from tensilelite.Common.Constants import MAX_FILENAME_LENGTH
+from tensilelite.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 
 from .Problem import ProblemType
 

@@ -5,6 +5,7 @@ from types import MappingProxyType
 import yaml
 
 from Tensile.resources import ductile_defaults_text
+from tensilelite.Resources import ductile_defaults_text
 
 
 def deep_update(base: dict, override: dict) -> dict:

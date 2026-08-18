@@ -27,7 +27,7 @@ import sys
 import time
 from contextlib import contextmanager
 
-from Tensile.Common.GlobalParameters import globalParameters
+from tensilelite.Common.GlobalParameters import globalParameters
 
 _timing_logger = logging.getLogger("tensile.timing")
 if not _timing_logger.handlers:

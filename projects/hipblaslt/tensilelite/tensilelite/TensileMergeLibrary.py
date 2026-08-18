@@ -30,14 +30,14 @@ import argparse
 from copy import deepcopy
 from typing import Any
 
-from Tensile import __version__
-from Tensile import LibraryIO
-from Tensile.SolutionStructs.Naming import getSolutionNameMin
-from Tensile.SolutionStructs.Naming import getKernelNameMin
-from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
-from Tensile.Common import ParallelMap2
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common import assignParameterWithDefault
+from tensilelite import __version__
+from tensilelite import LibraryIO
+from tensilelite.SolutionStructs.Naming import getSolutionNameMin
+from tensilelite.SolutionStructs.Naming import getKernelNameMin
+from tensilelite.SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from tensilelite.Common import ParallelMap2
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common import assignParameterWithDefault
 from .CustomYamlLoader import load_yaml_stream
 
 verbosity = 1

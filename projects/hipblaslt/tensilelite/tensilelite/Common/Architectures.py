@@ -385,7 +385,7 @@ def detectHostGfxArchs() -> List[str]:
     # Lazy import: keep this module free of a load-time dependency on the
     # Toolchain package (which imports Common.Utilities) and avoid any import cycle.
     try:
-        from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+        from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
     except Exception:
         return []
 

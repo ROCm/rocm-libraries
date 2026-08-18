@@ -27,9 +27,9 @@ from copy import deepcopy
 
 from .KernelWriterBase import KernelWriterBase
 
-from Tensile.Common.Architectures import isaToGfx
-from Tensile.Common import INDEX_CHARS, IsaInfo
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.Architectures import isaToGfx
+from tensilelite.Common import INDEX_CHARS, IsaInfo
+from tensilelite.Common.DataType import DataType
 
 class KernelWriterConversion(KernelWriterBase):
 
