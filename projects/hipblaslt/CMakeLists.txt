@@ -237,19 +237,27 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
         OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
     set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    hipblaslt_resolve_build_rocm_version(HIPBLASLT_BUILD_ROCM_VERSION)
     execute_process(
         COMMAND "${Python3_EXECUTABLE}"
             "${_tensilelite_source_root}/release_metadata.py"
-            "${HIPBLASLT_BUILD_ROCM_ROOT}"
+            "${HIPBLASLT_BUILD_ROCM_VERSION}"
         OUTPUT_VARIABLE TENSILELITE_DISTRIBUTION_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE
         COMMAND_ERROR_IS_FATAL ANY
     )
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    set(_tensilelite_version_dependencies
         "${_tensilelite_source_root}/VERSION"
-        "${_tensilelite_source_root}/release_metadata.py"
-        "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version"
-    )
+        "${_tensilelite_source_root}/release_metadata.py")
+    if(HIPBLASLT_ENABLE_THEROCK)
+        list(APPEND _tensilelite_version_dependencies
+            "${THEROCK_SOURCE_DIR}/version.json")
+    else()
+        list(APPEND _tensilelite_version_dependencies
+            "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        ${_tensilelite_version_dependencies})
     configure_file(
         "${_tensilelite_source_root}/client/TensileLiteClientVersion.hpp.in"
         "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated/TensileLiteClientVersion.hpp"
@@ -706,6 +714,7 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_canonical_stage}"
         COMMAND ${CMAKE_COMMAND} -E env
             "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+            "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
             -- "${Python3_EXECUTABLE}" -m pip wheel
             --disable-pip-version-check --no-build-isolation --no-deps
             --wheel-dir "${_tensilelite_canonical_stage}"
@@ -730,7 +739,7 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
             "${_tensilelite_src}/release_metadata.py"
             "${_tensilelite_src}/requirements.txt"
             "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
-            "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version"
+            ${_tensilelite_version_dependencies}
         COMMENT "Building the canonical TensileLite release wheel"
         VERBATIM
         USES_TERMINAL
@@ -748,6 +757,7 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_compatibility_stage}"
         COMMAND ${CMAKE_COMMAND} -E env
             "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+            "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
             -- "${Python3_EXECUTABLE}" -m pip wheel
             --disable-pip-version-check --no-build-isolation --no-deps
             --wheel-dir "${_tensilelite_compatibility_stage}"
@@ -772,7 +782,7 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
             "${_tensilelite_src}/compat/MANIFEST.in"
             "${_tensilelite_src}/compat/README.md"
             "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
-            "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version"
+            ${_tensilelite_version_dependencies}
         COMMENT "Building the Tensile compatibility release wheel"
         VERBATIM
         USES_TERMINAL

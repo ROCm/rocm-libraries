@@ -11,7 +11,19 @@ from setuptools.command.build_py import build_py
 
 
 _metadata = runpy.run_path(str(Path(__file__).resolve().parents[1] / "release_metadata.py"))
-_version = _metadata["distribution_version"](os.environ.get("ROCM_PATH", "/opt/rocm"))
+
+
+def _build_rocm_version() -> str:
+    value = os.environ.get("TENSILELITE_ROCM_VERSION")
+    if not value:
+        raise RuntimeError(
+            "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
+            "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
+        )
+    return value
+
+
+_version = _metadata["distribution_version"](_build_rocm_version())
 
 
 class CleanBuildPy(build_py):

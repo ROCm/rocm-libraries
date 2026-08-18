@@ -42,7 +42,18 @@ def _detect_rocm():
 
     return "/opt/rocm"
 
-
+def _rocm_base_version(rocm_root: pathlib.Path) -> str:
+    version_file = rocm_root / ".info" / "version"
+    try:
+        version = version_file.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise Exit(
+            f"Selected ROCm root has no readable version metadata: {version_file}",
+            code=1,
+        ) from exc
+    if not version:
+        raise Exit(f"Selected ROCm version metadata is empty: {version_file}", code=1)
+    return version
 @task
 def get_gpu_arch(c):
     print(detect_gpu_arch())
@@ -364,7 +375,11 @@ def install(
     if not built_client.is_file() or not os.access(built_client, os.X_OK):
         raise Exit(f"Built tensilelite-client is missing or not executable: {built_client}", code=1)
 
-    env = dict(os.environ, ROCM_PATH=str(rocm))
+    env = dict(
+        os.environ,
+        ROCM_PATH=str(rocm),
+        TENSILELITE_ROCM_VERSION=_rocm_base_version(rocm),
+    )
     c.run(
         shlex.join(
             [
