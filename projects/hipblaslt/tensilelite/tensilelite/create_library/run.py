@@ -1607,7 +1607,9 @@ def _childEnvironment() -> Dict[str, str]:
     return env
 
 
-def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
+def _buildGroupsSeparately(
+    groups: List[List[str]], requestedJobs: int, argv: List[str]
+) -> None:
     """Builds each group in its own process, concurrently.
 
     A run names its target by the ISA it parses out of the gfx name, so a
@@ -1618,12 +1620,15 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
 
     The output directory is shared: each run keeps its scratch to itself
     (buildTmpDir) and their per-architecture outputs are named apart.
+
+    ``argv`` is this run's own arguments, the ones main parsed. Not sys.argv:
+    behind the ``tensilelite`` dispatcher that still starts with the command
+    name, which a child would take for its LogicPath.
     """
     print1(
         f"# Architectures requested need {len(groups)} builds to cover: "
         + ", ".join("[" + ";".join(g) + "]" for g in groups)
     )
-    argv = sys.argv[1:]
     jobs = _jobsPerGroup(requestedJobs, groups)
     env = _childEnvironment()
     # Spawned inside the try so that a failure to start the second one still
@@ -1701,7 +1706,11 @@ def main(argv=None):
     # takes the one path below, unchanged.
     groups = isaCollisionFreeGroups(archs)
     if len(groups) > 1:
-        _buildGroupsSeparately(groups, arguments["CpuThreads"])
+        _buildGroupsSeparately(
+            groups,
+            arguments["CpuThreads"],
+            sys.argv[1:] if argv is None else list(argv),
+        )
         return
 
     archs = expandAllArchitectures(archs)
