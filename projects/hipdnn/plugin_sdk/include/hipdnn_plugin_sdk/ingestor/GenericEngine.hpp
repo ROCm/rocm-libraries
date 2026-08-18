@@ -106,18 +106,11 @@ public:
         std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
         // Advertised out-of-band, like MIOpen's createBenchmarkingKnob: never entering
         // _engine.knobs means findUndeclaredKnob never sees it and readKnobFilter never
-        // filters on it.
-        //
-        // Conditional on the handle, because benchmarking times kernels on
-        // handle.getStream(): an engine whose THandle cannot supply a stream must not
-        // claim a capability it cannot honour. Advertising unconditionally would let the
-        // frontend see supportsExhaustive, prime the engine, and only then discover at
-        // plan-build time that no stream exists.
-        if constexpr(HasGetStream<THandle>::value)
-        {
-            knobOffsets.push_back(KnobFactory::createIntKnob(
-                builder, BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {}));
-        }
+        // filters on it. Unconditional, because every ingestor engine can benchmark --
+        // the class-level static_assert requires THandle to supply the stream timing
+        // runs on.
+        knobOffsets.push_back(KnobFactory::createIntKnob(
+            builder, BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {}));
         for(const auto& knob : _planBuilder.getCustomKnobs(handle, opGraph))
         {
             knobOffsets.push_back(hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knob));

@@ -42,12 +42,21 @@ struct IngestorSettings
 
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
 /// candidate, and this builds a plan for whichever one selection chose.
+/// @tparam THandle Must expose `hipStream_t getStream() const`, the stream benchmarking
+///         times kernels on. Required of ingestor users only -- validateHandleType()
+///         does not ask for it, so a provider that never instantiates these templates
+///         pays nothing.
 /// @tparam TSettings Must carry an `IngestorSettings ingestorSettings` member.
 /// @tparam TContext Must expose `const TSettings& executionSettings() const`, holding
 ///         the settings initializeExecutionSettings() populated.
 template <typename THandle, typename TSettings, typename TContext>
 class GenericPlanBuilder : public IPlanBuilder<THandle, TSettings, TContext>
 {
+    static_assert(HasGetStream<THandle>::value,
+                  "A handle used with the kernel ingestor must have a "
+                  "'hipStream_t getStream() const' method: benchmarking times candidate "
+                  "kernels with HIP events on that stream");
+
 public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
@@ -181,55 +190,35 @@ public:
             return;
         }
 
-        // Benchmarking needs handle.getStream(); gated with `if constexpr` (not a plain
-        // `if`) so a THandle without it -- any handle that never turns the knob on --
-        // never instantiates BenchmarkPlan<THandle> at all, matching HasGetStream being
-        // an opt-in requirement rather than one validateHandleType() imposes on everyone.
-        if constexpr(HasGetStream<THandle>::value)
-        {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' will benchmark "
-                                                        << filtered.size() << " candidate(s) ("
-                                                        << catalog.entries.size()
-                                                        << " before knob filtering), ranked front "
-                                                        << toString(filtered.front().kernelId));
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' will benchmark "
+                                                    << filtered.size() << " candidate(s) ("
+                                                    << catalog.entries.size()
+                                                    << " before knob filtering), ranked front "
+                                                    << toString(filtered.front().kernelId));
 
-            std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
-            candidates.reserve(filtered.size());
-            for(const auto& kernel : filtered)
+        std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
+        candidates.reserve(filtered.size());
+        for(const auto& kernel : filtered)
+        {
+            try
             {
-                try
-                {
-                    candidates.push_back(
-                        {kernel.kernelId,
-                         std::make_unique<GenericPlan<THandle>>(
-                             _stateManager.getDispatchDetails(kernel), context, catalog.bound)});
-                }
-                catch(const std::exception& error)
-                {
-                    HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                           << _engine.name << "' dropped benchmarking candidate '"
-                                           << toString(kernel.kernelId) << "': " << error.what());
-                }
+                candidates.push_back(
+                    {kernel.kernelId,
+                     std::make_unique<GenericPlan<THandle>>(
+                         _stateManager.getDispatchDetails(kernel), context, catalog.bound)});
             }
+            catch(const std::exception& error)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                       << _engine.name << "' dropped benchmarking candidate '"
+                                       << toString(kernel.kernelId) << "': " << error.what());
+            }
+        }
 
-            // An empty vector here (every candidate's GenericPlan threw) throws
-            // INTERNAL_ERROR out of BenchmarkPlan's own constructor, propagating unhandled.
-            executionContext.setPlan(
-                std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates), handle));
-        }
-        else
-        {
-            // Unreachable in practice: GenericEngine::getDetails() only advertises the
-            // benchmarking knob when THandle has getStream(), so a caller cannot set the
-            // knob on such an engine and benchmarkingEnabled cannot become true. Kept as
-            // a named failure rather than an assumption, and actionable if a provider
-            // reaches it by setting the flag through some other route.
-            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                        "engine '" + _engine.name
-                                            + "' cannot benchmark: add "
-                                              "'hipStream_t getStream() const' to this "
-                                              "provider's handle type to enable it");
-        }
+        // An empty vector here (every candidate's GenericPlan threw) throws
+        // INTERNAL_ERROR out of BenchmarkPlan's own constructor, propagating unhandled.
+        executionContext.setPlan(
+            std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates), handle));
     }
 
     /// One knob per KMD field the engine exposes; default is the top-ranked value.

@@ -244,10 +244,39 @@ inline void ensureNoopDispatchRegistered(const std::string& symbol = "test.dispa
     }
 }
 
-class TestDeviceResolver : public IDeviceResolver<int>
+/// The minimal handle the state-manager and plan-builder tests pass around. It carries
+/// a stream because GenericPlanBuilder requires one of any ingestor handle, and an
+/// equality operator so per-handle device resolution can still be asserted.
+///
+/// Implicitly convertible from int, deliberately: these tests identify handles by a
+/// bare literal (`0`, `1`) and the conversion keeps every one of those call sites
+/// reading as it did when this was an int alias.
+struct TestHandle
+{
+    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    TestHandle(int handleId = 0)
+        : id(handleId)
+    {
+    }
+
+    int id = 0;
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    hipStream_t getStream() const
+    {
+        return nullptr;
+    }
+
+    friend bool operator==(const TestHandle& lhs, const TestHandle& rhs)
+    {
+        return lhs.id == rhs.id;
+    }
+};
+
+class TestDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
-    DeviceId deviceId(const int& /*handle*/) const override
+    DeviceId deviceId(const TestHandle& /*handle*/) const override
     {
         return 0;
     }
@@ -290,9 +319,9 @@ inline KernelDescriptor makeTestKernel(const DescriptorId& id,
     return kernel;
 }
 
-inline std::unique_ptr<KernelIngestorStateManager<int>>
+inline std::unique_ptr<KernelIngestorStateManager<TestHandle>>
     makeTestStateManager(size_t cacheCapacity
-                         = KernelIngestorStateManager<int>::DEFAULT_CATALOG_CACHE_CAPACITY)
+                         = KernelIngestorStateManager<TestHandle>::DEFAULT_CATALOG_CACHE_CAPACITY)
 {
     MetadataSchema schema;
     schema.id = SCHEMA_ID;
@@ -302,7 +331,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
 
     std::vector<MatchDescriptor> matchers{
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
-    ensureNoopDispatchRegistered<int>("hipdnn.kernel_ingestor.test.dispatch");
+    ensureNoopDispatchRegistered<TestHandle>("hipdnn.kernel_ingestor.test.dispatch");
     std::vector<DispatchDescriptor> dispatches{
         {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
 
@@ -316,7 +345,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
                     makeTestKernel(testId(0x65), "kernel_256_float", 256, "FLOAT"),
                     makeTestKernel(testId(0x66), "kernel_64_half", 64, "HALF")};
 
-    return std::make_unique<KernelIngestorStateManager<int>>(
+    return std::make_unique<KernelIngestorStateManager<TestHandle>>(
         std::move(schema),
         std::move(matchers),
         std::move(dispatches),
@@ -516,7 +545,7 @@ inline std::vector<MatchDescriptor> makeTestMatchers()
             {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
 }
 
-template <typename THandle = int>
+template <typename THandle = TestHandle>
 inline std::vector<DispatchDescriptor> makeTestDispatches()
 {
     ensureNoopDispatchRegistered<THandle>();
@@ -571,7 +600,6 @@ private:
     std::string _kernelSymbol;
 };
 
-using TestHandle = int;
 using StateManager = KernelIngestorStateManager<TestHandle>;
 
 /// The default engine: a graph match plus one kernel-scoped criterion, and no
@@ -629,10 +657,9 @@ private:
     const IKernelDispatchHandler<THandle>* _previous = nullptr;
 };
 
-/// Models a real provider handle, which always carries a stream: both shipped handles
-/// (hip-kernel-provider's and MIOpen's) expose getStream(), and GenericEngine only
-/// advertises the benchmarking knob for handles that do. A handle deliberately lacking
-/// it is StreamlessStubHandle, below.
+/// Models a real provider handle, which always carries a stream: every shipped handle
+/// exposes getStream(), and GenericPlanBuilder static_asserts it, since benchmarking
+/// times candidate kernels on that stream.
 struct StubHandle
 {
     void storeEngineDetailsDetachedBuffer(const void* /*ptr*/,
@@ -645,20 +672,6 @@ struct StubHandle
     hipStream_t getStream() const
     {
         return nullptr;
-    }
-
-private:
-    std::vector<std::unique_ptr<flatbuffers::DetachedBuffer>> _buffers;
-};
-
-/// A handle without getStream(), for pinning that an engine on such a handle neither
-/// advertises the benchmarking knob nor claims exhaustive support.
-struct StreamlessStubHandle
-{
-    void storeEngineDetailsDetachedBuffer(const void* /*ptr*/,
-                                          std::unique_ptr<flatbuffers::DetachedBuffer> buffer)
-    {
-        _buffers.push_back(std::move(buffer));
     }
 
 private:
