@@ -36,33 +36,6 @@ from rocke.runtime import KernelLauncher, LaunchConfig  # noqa: E402
 _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 
 
-def _build_request(args, sq: int):
-    """Build AttentionRequest from CLI args for dispatch path."""
-    from dispatch.attention import AttentionRequest
-
-    return AttentionRequest(
-        # Required fields
-        batch=1,
-        nhead_q=args.hq,
-        nhead_k=args.hkv,
-        seqlen_q=sq,
-        seqlen_k=sq,  # self-attention
-        hdim_q=args.d,
-        hdim_v=args.d,
-        arch="gfx950",
-        # Optional fields
-        mask_type=args.causal,  # 0 or 1, converted to bool by _dense_spec
-        use_sinks=args.use_sinks,
-        sliding_window=args.sw,
-        dtype=args.dtype,
-        algorithm="attention_dense",  # Required for opt-in to dense candidate
-        # Dense-specific knobs
-        dense_persistent="off" if not args.persistent else "on",
-        dense_num_persistent=args.np,
-        dense_persist_decode="auto",
-    )
-
-
 def _make_launcher(spec: AttentionDenseSpec):
     """kernel-spec generation + compilation + ABI signature -> cached launcher."""
     ok, why = supports_attention_dense(spec)
@@ -234,50 +207,26 @@ def main():
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
     )
     ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
-    ap.add_argument(
-        "--dispatch",
-        action="store_true",
-        help="route through dispatch layer instead of direct spec construction",
-    )
     args = ap.parse_args()
 
-    # Warn about incompatible flags when using dispatch path
-    if args.dispatch:
-        if args.bn != 64:
-            print(f"Warning: --dispatch uses block_n=64 (ignoring --bn {args.bn})")
-        if args.wpe != 2:
-            print(
-                f"Warning: --dispatch uses waves_per_eu=2 (ignoring --wpe {args.wpe})"
-            )
-        if args.interleave:
-            print("Warning: --dispatch does not support --interleave")
-
     for sq in (256, 512, 2048, 8192):
-        if args.dispatch:
-            # Route through dispatch layer
-            from dispatch.attention.gfx950 import dense_spec_for_request
-
-            req = _build_request(args, sq)
-            spec = dense_spec_for_request(req)
-        else:
-            # Direct spec construction (original path)
-            spec = AttentionDenseSpec(
-                batch=1,
-                seqlen_q=sq,
-                seqlen_kv=sq,
-                num_query_heads=args.hq,
-                num_kv_heads=args.hkv,
-                head_size=args.d,
-                causal=bool(args.causal),
-                dtype=args.dtype,
-                block_n=args.bn,
-                waves_per_eu=args.wpe,
-                persistent=args.persistent,
-                num_persistent=args.np,
-                interleave=args.interleave,
-                sliding_window=args.sw,
-                use_sinks=args.use_sinks,
-            )
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=sq,
+            seqlen_kv=sq,
+            num_query_heads=args.hq,
+            num_kv_heads=args.hkv,
+            head_size=args.d,
+            causal=bool(args.causal),
+            dtype=args.dtype,
+            block_n=args.bn,
+            waves_per_eu=args.wpe,
+            persistent=args.persistent,
+            num_persistent=args.np,
+            interleave=args.interleave,
+            sliding_window=args.sw,
+            use_sinks=args.use_sinks,
+        )
         run(spec)
 
 
