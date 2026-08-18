@@ -30,7 +30,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock, call, mock_open
 
-from Tensile.TensileBenchmarkCluster import (
+from tensilelite.TensileBenchmarkCluster import (
     BenchmarkImplSLURM,
     TensileBenchmarkCluster,
 )
@@ -104,7 +104,7 @@ class TestBenchmarkImplSLURM:
         assert any("TensileFork" in str(c) for c in docker_calls)
 
     @patch("os.listdir")
-    @patch("Tensile.TensileBenchmarkCluster.ScriptWriter")
+    @patch("tensilelite.TensileBenchmarkCluster.ScriptWriter")
     def test_generate_benchmark_creates_scripts(self, mock_script_writer, mock_listdir):
         """BenchmarkImplSLURM.generateBenchmark creates cluster scripts."""
         # Mock os.listdir to return empty list (no config files in tasks dir)
@@ -142,7 +142,7 @@ class TestBenchmarkImplSLURM:
     @patch("os.makedirs")
     @patch("os.path.isfile")
     @patch("os.listdir")
-    @patch("Tensile.TensileBenchmarkCluster.ScriptWriter")
+    @patch("tensilelite.TensileBenchmarkCluster.ScriptWriter")
     def test_generate_benchmark_processes_config_files(self, mock_script_writer, mock_listdir,
                                                        mock_isfile, mock_makedirs, mock_rename):
         """BenchmarkImplSLURM.generateBenchmark processes config files in tasks directory."""
@@ -224,8 +224,8 @@ class TestTensileBenchmarkCluster:
     """Test suite for TensileBenchmarkCluster class."""
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_init_creates_config(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.__init__ creates configuration."""
         args = ["logic.yaml", "/deploy/path"]
@@ -235,8 +235,8 @@ class TestTensileBenchmarkCluster:
         assert cluster._config is not None
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_init_with_slurm_backend(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster uses SLURM backend by default."""
         args = ["logic.yaml", "/deploy/path"]
@@ -249,8 +249,8 @@ class TestTensileBenchmarkCluster:
         assert cluster._backendImpl == BenchmarkImplSLURM
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path", "--cluster-backend", "unknown"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_init_raises_on_unknown_backend(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster raises on unknown backend."""
         args = ["logic.yaml", "/deploy/path", "--cluster-backend", "unknown"]
@@ -262,8 +262,8 @@ class TestTensileBenchmarkCluster:
             TensileBenchmarkCluster(args)
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_workflow_steps_returns_tuple(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.workflowSteps returns tuple of workflow flags."""
         args = ["logic.yaml", "/deploy/path"]
@@ -282,8 +282,8 @@ class TestTensileBenchmarkCluster:
         assert steps == (True, False, True)
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_config_returns_config_object(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.config returns configuration object."""
         args = ["logic.yaml", "/deploy/path"]
@@ -297,8 +297,8 @@ class TestTensileBenchmarkCluster:
         assert config == mock_config_instance
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_base_dir_returns_base_directory(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.baseDir returns base directory from config."""
         args = ["logic.yaml", "/deploy/path"]
@@ -314,8 +314,8 @@ class TestTensileBenchmarkCluster:
         mock_config_instance.__getitem__.assert_called_with("BenchmarkBaseDir")
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_tasks_dir_returns_tasks_directory(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.tasksDir returns tasks directory."""
         args = ["logic.yaml", "/deploy/path"]
@@ -331,8 +331,8 @@ class TestTensileBenchmarkCluster:
         mock_config_instance.__getitem__.assert_called_with("BenchmarkTasksDir")
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_image_dir_returns_image_directory(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.imageDir returns image directory."""
         args = ["logic.yaml", "/deploy/path"]
@@ -347,8 +347,8 @@ class TestTensileBenchmarkCluster:
         assert image_dir == "/fake/image/dir"
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_results_dir_returns_results_directory(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.resultsDir returns results directory."""
         args = ["logic.yaml", "/deploy/path"]
@@ -363,8 +363,8 @@ class TestTensileBenchmarkCluster:
         assert results_dir == "/fake/results/dir"
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_final_logic_dir_returns_final_logic_directory(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.finalLogicDir returns final logic directory."""
         args = ["logic.yaml", "/deploy/path"]
@@ -379,8 +379,8 @@ class TestTensileBenchmarkCluster:
         assert final_dir == "/fake/final/dir"
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_logs_dir_returns_logs_directory(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.logsDir returns logs directory."""
         args = ["logic.yaml", "/deploy/path"]
@@ -413,8 +413,8 @@ class TestTensileBenchmarkCluster:
         assert result == path  # Should still return path even on error
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_root_tensile_dir_returns_root_directory(self, mock_project_config, mock_init):
         """TensileBenchmarkCluster.rootTensileDir returns root Tensile directory."""
         args = ["logic.yaml", "/deploy/path"]
@@ -431,12 +431,12 @@ class TestTensileBenchmarkCluster:
 
     @patch("os.path.isdir")
     @patch("os.listdir")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkSplitter")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.generateBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkSplitter")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.generateBenchmark")
     @patch("os.makedirs")
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path", "--deploy-only"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_generate_cluster_benchmark_creates_directories(self, mock_project_config, mock_init,
                                                            mock_makedirs, mock_generate, mock_splitter,
                                                            mock_listdir, mock_isdir):
@@ -469,12 +469,12 @@ class TestTensileBenchmarkCluster:
         # Should generate benchmark
         mock_generate.assert_called_once()
 
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.postInvokeBenchmark")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.invokeBenchmark")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.preInvokeBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.postInvokeBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.invokeBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.preInvokeBenchmark")
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path", "--run-only"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_run_cluster_benchmark_invokes_backend(self, mock_project_config, mock_init,
                                                    mock_pre, mock_invoke, mock_post):
         """TensileBenchmarkCluster run workflow invokes backend methods."""
@@ -496,13 +496,13 @@ class TestTensileBenchmarkCluster:
         mock_invoke.assert_called_once()
         mock_post.assert_called_once()
 
-    @patch("Tensile.TensileBenchmarkCluster.mergePartialLogics")
+    @patch("tensilelite.TensileBenchmarkCluster.mergePartialLogics")
     @patch("os.path.isfile")
     @patch("os.path.isdir")
     @patch("os.listdir")
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path", "--results-only"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_combine_results_merges_partial_logics(self, mock_project_config, mock_init,
                                                    mock_listdir, mock_isdir, mock_isfile, mock_merge):
         """TensileBenchmarkCluster combine workflow merges partial results."""
@@ -535,19 +535,19 @@ class TestTensileBenchmarkCluster:
         # Should merge partial logics
         mock_merge.assert_called_once()
 
-    @patch("Tensile.TensileBenchmarkCluster.mergePartialLogics")
+    @patch("tensilelite.TensileBenchmarkCluster.mergePartialLogics")
     @patch("os.path.isfile")
     @patch("os.path.isdir")
     @patch("os.listdir")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.postInvokeBenchmark")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.invokeBenchmark")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.preInvokeBenchmark")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.generateBenchmark")
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkSplitter")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.postInvokeBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.invokeBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.preInvokeBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.generateBenchmark")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkSplitter")
     @patch("os.makedirs")
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_main_runs_all_workflow_steps(self, mock_project_config, mock_init,
                                          mock_makedirs, mock_splitter, mock_generate,
                                          mock_pre, mock_invoke, mock_post,
