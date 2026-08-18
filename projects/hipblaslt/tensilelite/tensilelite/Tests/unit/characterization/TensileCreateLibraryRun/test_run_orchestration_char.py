@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Characterization tests for tensilelite.TensileCreateLibrary.Run — orchestration layer.
+"""Characterization tests for tensilelite.tensilelite_create_library.run — orchestration layer.
 
 Targets methodology-A missing ranges:
   152-173  : _stinky_asm_verify_wanted, _stinky_out, _verify_stinky_asm_comment_vs_elf_text
@@ -49,7 +49,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Module imports (deferred so rocisa import happens only once per process)
 # ---------------------------------------------------------------------------
-M = importlib.import_module("tensilelite.TensileCreateLibrary.Run")
+M = importlib.import_module("tensilelite.tensilelite_create_library.run")
 SL = importlib.import_module("tensilelite.SolutionLibrary")
 
 _DATA_DIR = Path(__file__).parent / "data"

@@ -6,7 +6,7 @@ import types
 import pytest
 import yaml
 
-from tensilelite import Tensile as TensileModule
+from tensilelite import tensilelite as TensileModule
 
 pytestmark = pytest.mark.unit
 
@@ -76,7 +76,7 @@ def test_yaml_backend_is_normalized_and_preserved(monkeypatch, tmp_path):
         _base_config(backend={"Name": "Ductile", "Config": {"seed": 11, "n_gen": 2}}),
     )
 
-    TensileModule.Tensile([config_path, str(tmp_path / "output")])
+    TensileModule.tensilelite([config_path, str(tmp_path / "output")])
 
     assert captured["config"]["Backend"] == {"Name": "ductile", "Config": {"seed": 11, "n_gen": 2}}
 
@@ -91,4 +91,4 @@ def test_invalid_backend_type_exits(monkeypatch, tmp_path):
     config_path = _write_config(tmp_path, _base_config(backend="ductile"))
 
     with pytest.raises(RuntimeError, match="Invalid backend configuration"):
-        TensileModule.Tensile([config_path, str(tmp_path / "output")])
+        TensileModule.tensilelite([config_path, str(tmp_path / "output")])

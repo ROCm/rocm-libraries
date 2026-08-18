@@ -92,12 +92,12 @@ dependencies = [
 ]
 
 [project.scripts]
-Tensile = "tensilelite.Tensile:main"
-TensileCreateLibrary = "tensilelite.TensileCreateLibrary:run"
+Tensile = "tensilelite.tensilelite:main"
+TensileCreateLibrary = "tensilelite.tensilelite_create_library:run"
 TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
 TensileGetPath = "tensilelite:PrintTensileRoot"
-TensileBenchmarkCluster = "tensilelite.TensileBenchmarkCluster:main"
-TensileRetuneLibrary = "tensilelite.TensileRetuneLibrary:main"
+TensileBenchmarkCluster = "tensilelite.benchmark_cluster:main"
+TensileRetuneLibrary = "tensilelite.retune_library:main"
 
 [dependency-groups]
 dev = [
@@ -153,10 +153,10 @@ only_mutate = [
     "tensilelite/Common/ValidParameters.py",
     "tensilelite/SolutionStructs/Naming.py",
     "tensilelite/SolutionStructs/Utilities.py",
-    "tensilelite/TensileLogic/ValidChipId.py",
-    "tensilelite/TensileLogic/ValidMatrixInstruction.py",
-    "tensilelite/TensileLogic/ValidWorkGroup.py",
-    "tensilelite/TensileLogic/ValidWorkGroupMappingXCC.py",
+    "tensilelite/tensilelite_logic/valid_chip_id.py",
+    "tensilelite/tensilelite_logic/valid_matrix_instruction.py",
+    "tensilelite/tensilelite_logic/valid_work_group.py",
+    "tensilelite/tensilelite_logic/valid_work_group_mapping_xcc.py",
 ]
 do_not_mutate = [
     "tensilelite/Tests/*",
