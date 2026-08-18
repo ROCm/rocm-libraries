@@ -15,6 +15,7 @@
  */
 
 #include "heuristics/uhd/adapters/TreeDataAdapter.hpp"
+#include "heuristics/uhd/Sha256.hpp"
 
 #include "GbdtModelTestBuilder.hpp"
 
@@ -1113,8 +1114,10 @@ TEST_F(TestTreeDataAdapter, ModelHashFieldAccepted)
                       .addTree(makeLeafTree(5.0))
                       .build();
 
-    // Load with a hash string (not yet validated)
-    const std::string modelHash = "sha256:placeholder_hash_not_yet_validated";
+    // Compute actual model hash for validation (RFC 0019 §9.2)
+    const std::string modelHash = hipdnn_backend::heuristics::uhd::sha256(buffer.data(), buffer.size());
+
+    // Load with model hash validation enabled
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH, modelHash);
     ASSERT_NE(adapter, nullptr);
     EXPECT_DOUBLE_EQ(adapter->score({0.0, 0.0}), 5.0);

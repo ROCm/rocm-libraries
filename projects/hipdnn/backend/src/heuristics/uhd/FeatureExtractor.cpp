@@ -161,7 +161,9 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
     // Parse and analyze derived values (RFC 0019 §6.4)
     _parsedDerived.reserve(derived.size());
     const std::string kernelPrefix = "$kernel.";
+    const std::string derivedPrefix = "$derived.";
 
+    // First pass: identify directly kernel-dependent derived values
     for(size_t i = 0; i < derived.size(); ++i)
     {
         const auto& [name, exprStr] = derived[i];
@@ -178,6 +180,49 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
         if(kernelDependent)
         {
             _kernelDependentDerivedIndices.insert(i);
+        }
+    }
+
+    // Second pass: propagate kernel-dependency transitively through $derived.* references
+    // A derived value is kernel-dependent if it references another kernel-dependent derived.
+    bool changed = true;
+    while(changed)
+    {
+        changed = false;
+        for(size_t i = 0; i < _parsedDerived.size(); ++i)
+        {
+            if(_kernelDependentDerivedIndices.count(i) > 0)
+            {
+                continue; // Already marked
+            }
+
+            auto vars = JsonLogicEvaluator::extractVariables(_parsedDerived[i].second);
+            for(const auto& var : vars)
+            {
+                if(var.rfind(derivedPrefix, 0) == 0)
+                {
+                    const std::string refName = var.substr(derivedPrefix.length());
+                    // Find the referenced derived value
+                    for(size_t j = 0; j < _parsedDerived.size(); ++j)
+                    {
+                        if(_parsedDerived[j].first == refName
+                           && _kernelDependentDerivedIndices.count(j) > 0)
+                        {
+                            _kernelDependentDerivedIndices.insert(i);
+                            changed = true;
+                            break;
+                        }
+                    }
+                    if(changed)
+                    {
+                        break;
+                    }
+                }
+            }
+            if(changed)
+            {
+                break;
+            }
         }
     }
 
@@ -199,10 +244,40 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
         // {"shape": ["$kernel", 0]} reads $kernel.shape_0. Testing only for the
         // "$kernel." prefix would file that entry as shared, so it would be evaluated
         // in the shared pass before any kernel metadata is bound.
-        const bool kernelDependent
+        //
+        // Additionally, check if this references any kernel-dependent derived values.
+        // A derived value is kernel-dependent if it transitively depends on $kernel.*.
+        bool kernelDependent
             = std::any_of(vars.begin(), vars.end(), [&kernelPrefix](const std::string& v) {
                   return v == "$kernel" || v.rfind(kernelPrefix, 0) == 0;
               });
+
+        // Check for derived value references (RFC 0019 §6.4)
+        if(!kernelDependent)
+        {
+            for(const auto& var : vars)
+            {
+                if(var.rfind(derivedPrefix, 0) == 0)
+                {
+                    // Extract derived value name
+                    const std::string derivedName = var.substr(derivedPrefix.length());
+                    // Check if this derived value is kernel-dependent
+                    for(size_t i = 0; i < _parsedDerived.size(); ++i)
+                    {
+                        if(_parsedDerived[i].first == derivedName
+                           && _kernelDependentDerivedIndices.count(i) > 0)
+                        {
+                            kernelDependent = true;
+                            break;
+                        }
+                    }
+                    if(kernelDependent)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
 
         const size_t index = _parsedExprs.size() - 1;
         if(kernelDependent)

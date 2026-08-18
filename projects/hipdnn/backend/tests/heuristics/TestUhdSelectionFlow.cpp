@@ -119,6 +119,7 @@ TEST_F(TestUhdSelectionFlow, SelectWithEmptyCandidatesReturnsApplied)
 {
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_empty_test";
     entry.uhdConfig.adapterType = "static_order";
     entry.candidates = {}; // Empty
 
@@ -283,6 +284,7 @@ TEST_F(TestUhdSelectionFlow, SelectionUsesKernelMetadata)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_kernel_metadata_test";
     entry.uhdConfig.adapterType = "static_order";
     // Include tile_m in signature so it affects scoring
     entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$kernel.id\""};
@@ -343,6 +345,7 @@ TEST_F(TestUhdSelectionFlow, AdapterWithoutHashSkipsMismatchGuard)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_hash_skip_test";
     entry.uhdConfig.adapterType = "static_order";
     entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
     entry.uhdConfig.staticOrderFields = {"priority", "id"};
@@ -372,6 +375,7 @@ TEST_F(TestUhdSelectionFlow, UnknownAdapterTypeFallsBackToStaticOrder)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_unknown_adapter_test";
     entry.uhdConfig.adapterType = "unknown_adapter_type";
     entry.uhdConfig.featuresSignature = {"\"$kernel.priority\""};
     entry.uhdConfig.objective = "max";
@@ -1416,6 +1420,7 @@ TEST_F(TestUhdSelectionFlow, StaticOrderRanksLargeIdsCorrectly)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_large_ids_test";
     entry.uhdConfig.adapterType = "static_order";
     entry.uhdConfig.staticOrderFields = {"priority", "id"};
     entry.candidates = {bestPriorityHugeId, worsePrioritySmallId};
@@ -1436,6 +1441,7 @@ TEST_F(TestUhdSelectionFlow, StaticOrderRanksByArbitraryKmdField)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_kmd_field_test";
     entry.uhdConfig.adapterType = "static_order";
     entry.uhdConfig.staticOrderFields = {"tile_m"};
     entry.candidates = {large, small};
@@ -1455,6 +1461,7 @@ TEST_F(TestUhdSelectionFlow, StaticOrderAcceptsNamespacedFieldNames)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_namespaced_test";
     entry.uhdConfig.adapterType = "static_order";
     entry.uhdConfig.staticOrderFields = {"$kernel.priority"};
     entry.candidates = {k1, k2};
@@ -1476,6 +1483,7 @@ TEST_F(TestUhdSelectionFlow, StaticOrderSortsMissingFieldLast)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_missing_field_test";
     entry.uhdConfig.adapterType = "static_order";
     entry.uhdConfig.staticOrderFields = {"tile_m"};
     entry.candidates = {lacks, has};
@@ -1497,6 +1505,7 @@ TEST_F(TestUhdSelectionFlow, StaticOrderReportsNoScore)
 
     EngineEntry entry;
     entry.engineId = 100;
+    entry.uhdConfig.uhdId = "uhd_no_score_test";
     entry.uhdConfig.adapterType = "static_order";
     entry.candidates = {k1};
 

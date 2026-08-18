@@ -11,11 +11,18 @@
 
 #include <cstddef>
 
+// Explicit symbol visibility for dlopen/dlsym
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define SCORER_EXPORT __declspec(dllexport)
+#else
+#define SCORER_EXPORT __attribute__((visibility("default")))
+#endif
+
 extern "C"
 {
 
 /// Simple linear scorer: sum all features.
-double test_linear_scorer(const double* features, size_t num_features)
+SCORER_EXPORT double test_linear_scorer(const double* features, size_t num_features)
 {
     double sum = 0.0;
     for(size_t i = 0; i < num_features; ++i)
@@ -26,13 +33,13 @@ double test_linear_scorer(const double* features, size_t num_features)
 }
 
 /// Constant scorer: always returns 42.0.
-double test_constant_scorer(const double* /*features*/, size_t /*num_features*/)
+SCORER_EXPORT double test_constant_scorer(const double* /*features*/, size_t /*num_features*/)
 {
     return 42.0;
 }
 
 /// Feature product scorer: multiply first two features.
-double test_product_scorer(const double* features, size_t num_features)
+SCORER_EXPORT double test_product_scorer(const double* features, size_t num_features)
 {
     if(num_features < 2)
     {
