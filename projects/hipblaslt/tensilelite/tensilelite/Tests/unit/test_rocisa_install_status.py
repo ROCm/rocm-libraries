@@ -11,7 +11,7 @@ import pytest
 # same way in the source tree and in the installed test artifacts (the Tests
 # conftest puts the tensilelite root on sys.path). Importing it here avoids the
 # `invoke` dependency that loading tasks.py by path used to pull in.
-from Tensile.RocisaStatus import _rocisa_install_status
+from tensilelite.RocisaStatus import _rocisa_install_status
 
 pytestmark = pytest.mark.unit
 
