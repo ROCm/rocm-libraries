@@ -48,6 +48,7 @@ from kernels.gfx942.attention_dense import (
     _k_group_stride,
     _use_exp2_fast,
     _v_row_pad,
+    _v_swizzle_width,
     _tuned_waves_per_eu,
 )
 
@@ -217,8 +218,9 @@ _SPEC_PERTURBATIONS = {
 _TUNING_PERTURBATIONS = {
     "block_m": (128, 512),
     "lds_row_pad": (0, 16),
-    "v_row_pad": (0, 16),
+    "v_row_pad": (0, 64),
     "use_cfvst": (False, True),
+    "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "waves_per_eu": (4, 3),
     "iglp": (True, False),
@@ -582,6 +584,9 @@ _CONTRACT_GRID = [
     (dict(dtype="fp16"), dict(use_cfvst=False)),  # accepted: OFF is always legal
     (dict(head_size=64), dict(use_cfvst=True)),  # REJECTED: policy says off at D64
     (dict(dtype="bf16", head_size=128), dict(use_cfvst=True)),  # REJECTED: spills
+    # --- tuning: use_v_swizzle (independent of the pad; cfvst-gated) ---
+    (dict(dtype="fp16"), dict(use_v_swizzle=False)),  # accepted: OFF is always legal
+    (dict(head_size=64), dict(use_v_swizzle=True)),  # REJECTED: no V^T path at D64
     # --- tuning: use_exp2_fast (no rejected region -- see the comment above) ---
     (dict(), dict(use_exp2_fast=False)),
     (dict(), dict(use_exp2_fast=True)),  # forced ON at bf16 D128, the spilling arm
@@ -898,6 +903,7 @@ def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
     path stays unpadded (no swizzle)."""
     v_ldrow = block_n + _v_row_pad(128, "fp16", block_n)
+    assert v_ldrow == _v_swizzle_width(block_n), (block_n, v_ldrow)
     assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
     assert _v_row_pad(128, "bf16", block_n) == 8
 
@@ -913,8 +919,8 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
     The swizzle key ``(dim & (V_LDROW//4 - 1)) << 2`` lowers to an ``and i32`` / ``shl
     i32 .., 2`` / ``xor i32`` triple, and the ONLY ``and i32 x, C`` mask in this kernel
     is that swizzle mask -- so the set of such constants must be exactly the derived
-    ``V_LDROW//4 - 1`` (two distinct values == store and read drifted). Forcing a pad
-    off the derived width breaks the pow2 gate, so the mask disappears and 'on' is
+    ``V_LDROW//4 - 1`` (two distinct values == store and read drifted). Forcing
+    ``use_v_swizzle=False`` drops the swizzle, so the mask disappears and 'on' is
     provably distinct from 'off'."""
     import re
 
@@ -934,7 +940,7 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
 
     off = _lower(
         build_attention_dense(
-            spec, arch="gfx942", tuning=Gfx942DenseTuning(v_row_pad=8)
+            spec, arch="gfx942", tuning=Gfx942DenseTuning(use_v_swizzle=False)
         )
     )
     assert _swz_masks(off) == [], (block_n, _swz_masks(off))
