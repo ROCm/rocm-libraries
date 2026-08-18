@@ -116,7 +116,6 @@ except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
 
 
-
 ###################
 # Writing functions
 ###################
