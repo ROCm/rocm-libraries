@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — Solution derivation edge branches (CPU-only characterization).
 
-Targets uncovered clusters in Tensile/SolutionStructs/Solution.py:
+Targets uncovered clusters in tensilelite/SolutionStructs/Solution.py:
   2282-2318  HalfPLR block: reject arms gated by HalfPLR > 0
   3491-3532  Sparse metadata GRVW setup (Sparse=1, not DirectToVgprSparseMetadata)
   3697-3727  UseDotInstruction reject arms (non-MI kernel with HPA)

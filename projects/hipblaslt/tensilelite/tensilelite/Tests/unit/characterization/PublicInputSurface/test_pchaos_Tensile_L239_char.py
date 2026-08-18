@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: ``if args.platform:`` in
-``Tensile/tensilelite.py`` at line 239, inside ``argUpdatedGlobalParameters``.
+``tensilelite/Tensile.py`` at line 239, inside ``argUpdatedGlobalParameters``.
 
 Branch 765305e2fbcf1ee08927bffdac198278bded30ee.
 

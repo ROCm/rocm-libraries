@@ -29,7 +29,7 @@ The flag is `--cpu-only` and **requires `--gpu-targets`** (you must name the
 target arch to spoof). It is plumbed through an internal global, not the
 documented `--global-parameters` surface.
 
-- **CLI flag** — `Tensile/tensilelite.py` (`--cpu-only`, `dest="cpuOnly"`). It is
+- **CLI flag** — `tensilelite/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It is
   stashed into internal plumbing: `globalParameters["CpuOnly"]` and the target
   arch into `globalParameters["CpuOnlyArch"]`.
 - **Plumbing keys** — `tensilelite/Common/GlobalParameters.py` defines

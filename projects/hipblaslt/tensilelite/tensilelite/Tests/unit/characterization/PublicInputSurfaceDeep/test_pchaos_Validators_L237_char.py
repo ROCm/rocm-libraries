@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-# Characterization of Tensile/Toolchain/Validators.py:237 [guard-return]
+# Characterization of tensilelite/Toolchain/Validators.py:237 [guard-return]
 #   branch_id: 09380ac263b6fa5b5ce1fae3b659c59c5e2178a5
 #   function: _validateExecutable
 #   predicate: _exeExists(Path(file))   (== os.access(Path(file), os.X_OK))
