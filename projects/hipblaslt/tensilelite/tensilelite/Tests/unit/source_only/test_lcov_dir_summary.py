@@ -15,7 +15,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _SCRIPT = (
-    pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lcov_dir_summary.py"
+    pathlib.Path(__file__).resolve().parents[4] / "scripts" / "lcov_dir_summary.py"
 )
 _spec = importlib.util.spec_from_file_location("lcov_dir_summary", _SCRIPT)
 summary = importlib.util.module_from_spec(_spec)

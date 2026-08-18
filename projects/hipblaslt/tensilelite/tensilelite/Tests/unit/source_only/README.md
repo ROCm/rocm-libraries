@@ -6,8 +6,8 @@ classified these checkout dependencies here:
 
 - release inputs and wheel construction: `test_release_metadata.py`;
 - developer Invoke workflows: `test_install_task.py`;
-- checkout-only developer scripts: `test_analyze_timing.py` and
-  `test_precommit_affected_tests.py`;
+- checkout-only developer scripts: `test_aggregate_timing.py`, `test_analyze_timing.py`,
+  `test_lcov_dir_summary.py` and `test_precommit_affected_tests.py`;
 - source/AST and cross-component inspection: `test_EnableESM2TrackValuVsrc.py`,
   `test_PlaceholderMerge.py`, `test_StinkyTofuESM2_sparse_guard.py`, and
   `test_specs_amdsmi.py`.
