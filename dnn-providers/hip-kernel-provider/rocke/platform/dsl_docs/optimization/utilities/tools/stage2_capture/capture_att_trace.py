@@ -9,9 +9,8 @@ instead of a flag soup plus a hunt through the output directory. It
 - preflights ``rocprofv3`` and the ``rocprof-trace-decoder`` library, failing
   with the PMC fallback pointer rather than an opaque decoder error;
 - discovers the kernel name with a ``--stats`` pass when no regex is given;
-- drops any inline-frame sidecar left in the output directory *before* starting
-  rocprofv3, so a reused directory cannot keep the previous build's source
-  attribution beside a new trace;
+- writes each attempt to a fresh capture-generation directory, so an older
+  dispatch can never be reported as output from the current invocation;
 - runs the ATT capture over the command you pass after ``--``;
 - reports every decoded ``ui_output_*_dispatch_*`` folder with the numbers that
   say whether the trace is usable at all.
@@ -24,6 +23,9 @@ Usage:
     python capture_att_trace.py -- python3 -m rocke.run_manifest k.hsaco m.json
     python capture_att_trace.py --kernel-regex 'ugemm_gfx950' -- python3 bench.py
     python capture_att_trace.py --output-dir ./att_out -- python3 bench.py
+
+Each invocation creates ``capture-<trace-id>`` below the output directory.
+Older generations are retained for comparison.
 
 Note on ``code.json``: columns ``Latency`` and ``Stall`` are hit-weighted
 totals over every execution, not per-execution averages. Divide by ``Hit``
@@ -54,8 +56,8 @@ _spec.loader.exec_module(_tp)
 CAPTURE_COMPLETE = _tp.CAPTURE_COMPLETE
 CAPTURE_TRUNCATED = _tp.CAPTURE_TRUNCATED
 DISPATCH_GLOB = _tp.DISPATCH_GLOB
+capture_generation = _tp.capture_generation
 dispatch_dirs = _tp.dispatch_dirs
-invalidate_provenance = _tp.invalidate_provenance
 kernel_name_of = _tp.kernel_name_of
 new_trace_id = _tp.new_trace_id
 sha256_file = _tp.sha256_file
@@ -72,38 +74,33 @@ BULK_FILES = ("wstates", "realtime")
 DECODER_SONAME = "librocprof-trace-decoder.so"
 
 
-def _snapshot_code_hashes(out: Path) -> dict[str, str]:
-    """Map dispatch folder name to the hash of its ``code.json`` before capture."""
-    snap: dict[str, str] = {}
-    for d in dispatch_dirs(out):
-        code_json = d / "code.json"
-        if code_json.is_file():
-            snap[d.name] = sha256_file(code_json)
-    return snap
+class CaptureError(RuntimeError):
+    """The profiler ran but did not complete the requested capture."""
 
 
 def _stamp_dispatches(
     out: Path,
-    before: dict[str, str],
     *,
+    trace_id: str,
     capture: str,
-) -> None:
-    """Write or refresh ``wavescope-trace.json`` on dispatches touched this run."""
+) -> list[Path]:
+    """Stamp every decoded dispatch in one private capture generation."""
+    stamped: list[Path] = []
     for d in dispatch_dirs(out):
         code_json = d / "code.json"
         if not code_json.is_file():
             continue
         digest = sha256_file(code_json)
-        if d.name in before and before[d.name] == digest:
-            continue
         write_trace_sentinel(
             d,
-            trace_id=new_trace_id(),
+            trace_id=trace_id,
             code_json_hash=digest,
             capture=capture,
             kernel=kernel_name_of(d),
         )
+        stamped.append(d)
         print(f"[identity] stamped {d.name} as {capture}")
+    return stamped
 
 
 def _decoder_dir() -> Path | None:
@@ -226,7 +223,7 @@ def capture(
     print(f"[capture] {' '.join(argv)}\n", flush=True)
     proc = subprocess.run(argv)
     if proc.returncode != 0:
-        raise SystemExit(f"rocprofv3 exited {proc.returncode}")
+        raise CaptureError(f"rocprofv3 exited {proc.returncode}")
 
 
 def summarize(dispatch: Path) -> dict:
@@ -304,6 +301,7 @@ def main() -> int:
         default=None,
         help="where to write the trace (default: ./att_out beside the cwd)",
     )
+    p.add_argument("--capture-id", default=None, help=argparse.SUPPRESS)
     p.add_argument(
         "--target-cu", type=int, default=1, help="CU to trace (ATT is per-CU)"
     )
@@ -341,11 +339,20 @@ def main() -> int:
         print(f"\n[discover] using --kernel-regex '{regex}'")
         print("           pass --kernel-regex explicitly to override\n")
 
-    out = args.output_dir or Path.cwd() / "att_out"
-    out.mkdir(parents=True, exist_ok=True)
-    before = _snapshot_code_hashes(out)
-    invalidate_provenance(out)
-
+    out_root = args.output_dir or Path.cwd() / "att_out"
+    out_root.mkdir(parents=True, exist_ok=True)
+    trace_id = args.capture_id or new_trace_id()
+    try:
+        out = capture_generation(out_root, trace_id)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    try:
+        out.mkdir()
+    except FileExistsError as exc:
+        raise SystemExit(
+            f"capture generation already exists: {out}\n"
+            "  Choose a different --capture-id or remove the abandoned generation."
+        ) from exc
     try:
         capture(
             command,
@@ -357,16 +364,20 @@ def main() -> int:
             iteration_range=args.iteration_range,
             se_mask=args.se_mask,
         )
-    except SystemExit as exc:
-        _stamp_dispatches(out, before, capture=CAPTURE_TRUNCATED)
-        raise exc
+    except CaptureError:
+        _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_TRUNCATED)
+        raise
+    except OSError:
+        _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_TRUNCATED)
+        raise
+    except KeyboardInterrupt:
+        _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_TRUNCATED)
+        raise
 
-    _stamp_dispatches(out, before, capture=CAPTURE_COMPLETE)
-
-    dispatches = sorted(out.glob(DISPATCH_GLOB))
+    dispatches = _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_COMPLETE)
     if not dispatches:
         raise SystemExit(
-            f"no {DISPATCH_GLOB} folder was decoded under {out}.\n"
+            f"no current {DISPATCH_GLOB} folder was decoded under {out}.\n"
             "  The regex most likely matched no dispatch -- re-check the kernel "
             "name, or widen --iteration-range."
         )
@@ -375,10 +386,14 @@ def main() -> int:
     for d in dispatches:
         report(d)
 
+    print(f"Capture generation: {out}")
     print("Open in WaveScope: run 'WaveScope: Open Trace Folder...' and pick")
     print(f"  {dispatches[0]}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except CaptureError as exc:
+        raise SystemExit(str(exc)) from exc

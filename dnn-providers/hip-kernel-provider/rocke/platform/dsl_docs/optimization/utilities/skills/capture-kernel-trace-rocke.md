@@ -32,6 +32,10 @@ python3 tools/stage2_capture/capture_att_trace.py --output-dir ./att_out \
   -- python3 -m rocke.run_manifest out/kernel.hsaco out/manifest.json
 ```
 
+Each invocation writes a fresh `capture-<trace-id>` generation below `att_out`
+and prints the exact decoded dispatch folder to open. Older generations remain
+separate and cannot satisfy a later capture that matched no dispatch.
+
 Pass `--kernel-regex` to skip the discovery pass. The manual steps below remain the reference for
 remote/Docker captures and for anything the wrapper does not cover.
 

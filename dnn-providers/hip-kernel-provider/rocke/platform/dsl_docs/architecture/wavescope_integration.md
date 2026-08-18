@@ -194,10 +194,10 @@ carries, so a rebuild that moved half the addresses is reported too, not just on
 that moved all of them. That property is what lets the
 feature ship without coupling to a decoder release.
 
-Nothing in the file can prove it belongs to the trace it sits beside: the keys are
-bare addresses. So neither side tries to validate what it finds — each removes it,
-and the rule is that whoever is about to invalidate a trace takes its sidecars
-with it, before doing anything that can fail half way.
+Bare addresses alone cannot prove that a sidecar belongs to the trace beside it.
+The content hashes and capture generation do: capture owns the trace ID, completion
+state, and `code.json` hash, while the sidecar producer owns only the optional
+source-attribution file and code-object hash.
 
 For the producer that means every sidecar under the trace goes first, ahead of
 code-object discovery, of locating `llvm-dwarfdump`, and of the per-dispatch
@@ -206,34 +206,31 @@ renamed over the destination, deleted if anything raises. A dispatch is left
 holding a complete sidecar from this run or none, and none degrades to
 innermost-frame attribution rather than to a layout that no longer exists.
 
-For a capture it means the same removal happens in `capture_att_trace.py` before
-`rocprofv3` starts, because rocprofv3 rewrites the directory in place and can
-exit nonzero having already replaced part of it. Putting it there rather than in
-the wrapper is what makes a failed capture, a capture with `--no-source`, and a
-direct `capture_att_trace.py` run behave alike — the two entry points cannot
-disagree about a folder neither of them finished writing. A removal that fails
-ends the run before the trace is touched; a capture is cheap next to an
-optimization pass spent reading another kernel's attribution.
+Capture does not rewrite an existing directory. Every invocation writes to a new
+`capture-<trace-id>` generation below the requested output root. A failed capture,
+a `--no-source` capture, and direct `capture_att_trace.py` use therefore share the
+same boundary, and no dispatch from an older generation can make the current run
+look successful.
 
 ## Artifact identity and failed captures
 
-Invalidation is the first line of defense: before `rocprofv3` runs, every
-`inline_frames.json` and `wavescope-trace.json` under the output directory is
-removed so a partial or failed capture cannot leave provenance from an earlier
-run beside new `code.json` bytes. Content hashes are the second line: they detect
-stale pairings that invalidation missed — a sidecar copied in by hand, a
-regenerated sidecar against an old trace, or a truncated capture that still
-decoded enough to open.
+Generation isolation is the first line of defense: `rocprofv3` starts in an empty
+directory owned by one trace ID. Content hashes are the second line: they detect a
+sidecar copied in by hand or a `code.json` changed after capture. Sidecar
+regeneration removes only sidecar-owned files; it preserves and validates the
+capture sentinel.
 
 ### State machine
 
 ```text
 capture starts
-  -> invalidate sidecar + sentinel (+ temps)
-  -> rocprofv3 writes trace bytes
-  -> on success: stamp wavescope-trace.json capture=complete for changed dispatches
-  -> on rocprofv3 failure: stamp capture=truncated for changed dispatches, then fail
-  -> emit_inline_frames.py writes inline_frames.json v3 and enriches the sentinel
+  -> allocate trace id and empty capture-<trace-id> generation
+  -> rocprofv3 writes trace bytes only inside that generation
+  -> on success: require a current dispatch and stamp it capture=complete
+  -> on no dispatch: fail; the generation contains no finalized dispatch
+  -> on rocprofv3 failure: stamp partial dispatches capture=truncated, then fail
+  -> emit_inline_frames.py requires capture=complete
+  -> remove only the old sidecar, write v3 atomically, preserve capture fields
 viewer opens folder
   -> hash raw code.json UTF-8 bytes (never re-serialized JSON)
   -> v3 sidecar: require matching codeJsonHash, traceId, codeObjectHash, and complete capture

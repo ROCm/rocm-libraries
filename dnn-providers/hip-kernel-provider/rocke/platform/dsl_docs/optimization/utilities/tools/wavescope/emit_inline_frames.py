@@ -26,8 +26,9 @@ Re-running over a folder that already has sidecars is safe and is the expected
 way to use this: every sidecar under the trace directory goes first, before this
 run looks for a code object or for llvm-dwarfdump, either of which can end the
 run -- so a dispatch this run does not rewrite is left with no sidecar rather
-than the previous run's answer. A capture into an existing directory clears them
-too, from ``stage2_capture/capture_att_trace.py``, before rocprofv3 starts.
+than the previous run's answer. The capture sentinel is preserved: capture owns
+whether trace bytes are complete, and this producer refuses a running, truncated,
+or changed trace rather than promoting it to complete.
 
 Sidecar version 3 binds each file to the exact ``code.json`` bytes and code
 object whose DWARF produced the stacks, via ``wavescope-trace.json``.
@@ -35,6 +36,7 @@ object whose DWARF produced the stacks, via ``wavescope-trace.json``.
     python emit_inline_frames.py <att-output-dir>
     python emit_inline_frames.py <att-output-dir> --code-object k.hsaco
     python emit_inline_frames.py <att-output-dir> --invalidate-only
+    python emit_inline_frames.py <legacy-output-dir> --assume-complete
 """
 
 from __future__ import annotations
@@ -65,7 +67,7 @@ TMP_SUFFIX = _tp.SIDECAR_TMP_SUFFIX
 TRACE_SENTINEL = _tp.TRACE_SENTINEL
 dispatch_dirs = _tp.dispatch_dirs
 enrich_trace_sentinel = _tp.enrich_trace_sentinel
-invalidate_provenance = _tp.invalidate_provenance
+invalidate_sidecars = _tp.invalidate_sidecars
 new_trace_id = _tp.new_trace_id
 read_trace_sentinel = _tp.read_trace_sentinel
 sha256_file = _tp.sha256_file
@@ -322,22 +324,43 @@ def row_code_objects(rows: list) -> set[str]:
     }
 
 
-def trace_identity_for(dispatch: Path, code_json: Path) -> tuple[str, str]:
-    """Return ``(trace_id, code_json_hash)`` for a dispatch about to get a sidecar."""
+def trace_identity_for(
+    dispatch: Path,
+    code_json: Path,
+    *,
+    assume_complete: bool,
+) -> tuple[str | None, str, str | None]:
+    """Validate capture provenance before a dispatch receives a sidecar."""
     code_json_hash = sha256_file(code_json)
     sentinel = read_trace_sentinel(dispatch)
-    if sentinel and sentinel.get("codeJsonHash") == code_json_hash:
-        trace_id = sentinel.get("traceId")
-        if isinstance(trace_id, str) and trace_id:
-            return trace_id, code_json_hash
-    trace_id = new_trace_id()
-    write_trace_sentinel(
-        dispatch,
-        trace_id=trace_id,
-        code_json_hash=code_json_hash,
-        capture=CAPTURE_COMPLETE,
-    )
-    return trace_id, code_json_hash
+    if sentinel is None:
+        if not assume_complete:
+            return (
+                None,
+                code_json_hash,
+                (
+                    "has no capture sentinel; pass --assume-complete only for a "
+                    "known-complete legacy trace"
+                ),
+            )
+        trace_id = new_trace_id()
+        write_trace_sentinel(
+            dispatch,
+            trace_id=trace_id,
+            code_json_hash=code_json_hash,
+            capture=CAPTURE_COMPLETE,
+        )
+        return trace_id, code_json_hash, None
+
+    capture = sentinel.get("capture")
+    if capture != CAPTURE_COMPLETE:
+        return None, code_json_hash, f"capture is {capture!r}, not complete"
+    if sentinel.get("codeJsonHash") != code_json_hash:
+        return None, code_json_hash, "code.json no longer matches its capture sentinel"
+    trace_id = sentinel.get("traceId")
+    if not isinstance(trace_id, str) or not trace_id:
+        return None, code_json_hash, "capture sentinel has no valid traceId"
+    return trace_id, code_json_hash, None
 
 
 def main(argv=None) -> int:
@@ -352,7 +375,12 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--invalidate-only",
         action="store_true",
-        help="drop existing sidecars and sentinels, write none",
+        help="drop existing sidecars, preserve capture sentinels, and write none",
+    )
+    ap.add_argument(
+        "--assume-complete",
+        action="store_true",
+        help="allow a known-complete legacy trace with no capture sentinel",
     )
     args = ap.parse_args(argv)
 
@@ -360,15 +388,34 @@ def main(argv=None) -> int:
     if not root.is_dir():
         raise SystemExit(f"not a directory: {root}")
 
-    dropped = invalidate_provenance(root)
+    dropped = invalidate_sidecars(root)
 
     if args.invalidate_only:
-        print(f"  {dropped} provenance file(s) removed under {root}")
+        print(f"  {dropped} sidecar file(s) removed under {root}")
         return 0
 
     dirs = dispatch_dirs(root)
     if not dirs:
         raise SystemExit(f"no decoded dispatch folder under {root}")
+
+    identities: dict[Path, tuple[str, str]] = {}
+    skipped = 0
+    for d in dirs:
+        code_json = d / "code.json"
+        if not code_json.is_file():
+            continue
+        trace_id, code_json_hash, problem = trace_identity_for(
+            d, code_json, assume_complete=args.assume_complete
+        )
+        if problem is not None:
+            print(f"  {d.name}: skipped: {problem}")
+            skipped += 1
+            continue
+        assert trace_id is not None
+        identities[d] = (trace_id, code_json_hash)
+
+    if not identities:
+        raise SystemExit(f"no sidecar written ({skipped} dispatch(es) skipped)")
 
     candidates = [args.code_object] if args.code_object else find_code_objects(root)
     if not candidates:
@@ -381,11 +428,8 @@ def main(argv=None) -> int:
     dwarfdump = find_dwarfdump()
     parsed: dict[Path, list[dict]] = {}
     written = 0
-    skipped = 0
-    for d in dirs:
+    for d, (trace_id, code_json_hash) in identities.items():
         code_json = d / "code.json"
-        if not code_json.is_file():
-            continue
         rows = json.loads(code_json.read_text())["code"]
         present = row_code_objects(rows)
 
@@ -414,7 +458,6 @@ def main(argv=None) -> int:
             skipped += 1
             continue
 
-        trace_id, code_json_hash = trace_identity_for(d, code_json)
         code_object_hash = sha256_file(code_object)
         sidecar = build_sidecar(
             rows,
@@ -432,7 +475,6 @@ def main(argv=None) -> int:
             traceId=trace_id,
             codeJsonHash=code_json_hash,
             codeObjectHash=code_object_hash,
-            capture=CAPTURE_COMPLETE,
         )
         out = d / SIDECAR
         written += 1

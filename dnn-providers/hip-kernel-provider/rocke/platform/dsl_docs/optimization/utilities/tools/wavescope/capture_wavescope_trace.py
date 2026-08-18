@@ -21,10 +21,11 @@ This runs all three in order. Capture itself is delegated to
 discovery, per-dispatch reporting); this adds the environment for step 1 and the
 sidecar for step 3, and says which folder to open.
 
-Dropping a sidecar left by an earlier capture into the same directory belongs to
-that capture step, which does it before rocprofv3 starts. Keeping it there rather
-than here is what makes ``--no-source``, a capture that fails part way through,
-and a direct ``capture_att_trace.py`` run all behave the same way.
+Each invocation gets a fresh ``capture-<trace-id>`` generation below the output
+directory. That boundary makes ``--no-source``, partial failure, and direct
+``capture_att_trace.py`` use safe without deleting or confusing older captures.
+Sidecar generation may enrich a completed generation, but cannot change whether
+capture itself completed.
 
 Usage:
     python3 capture_wavescope_trace.py -- python3 bench.py
@@ -45,6 +46,7 @@ import argparse
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -82,7 +84,7 @@ def split_command(argv: list[str]) -> tuple[list[str], list[str]]:
 
 def run_capture(
     command: list[str], out_dir: Path, forward: list[str], *, with_source: bool
-) -> None:
+) -> Path:
     env = os.environ.copy()
     if with_source:
         # Inherited by rocprofv3 and through it by the profiled process, which is
@@ -94,18 +96,22 @@ def run_capture(
         env.pop(LOC_ENV, None)
         print(f"[source] {LOC_ENV} unset -- Source column will be empty", flush=True)
 
+    capture_id = str(uuid.uuid4())
     argv = [
         sys.executable,
         str(CAPTURE_SCRIPT),
         *forward,
         "--output-dir",
         str(out_dir),
+        "--capture-id",
+        capture_id,
         "--",
         *command,
     ]
     proc = subprocess.run(argv, env=env)
     if proc.returncode != 0:
         raise SystemExit(f"capture failed (exit {proc.returncode})")
+    return out_dir / f"capture-{capture_id}"
 
 
 def run_sidecar(out_dir: Path, code_object: Path | None) -> bool:
@@ -177,15 +183,15 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = (args.output_dir or Path.cwd() / "att_out").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    run_capture(command, out_dir, forward, with_source=not args.no_source)
+    generation = run_capture(command, out_dir, forward, with_source=not args.no_source)
 
     if not args.no_source:
         print(
             "\n[inline] recovering the call stack rocprofv3 flattened away", flush=True
         )
-        run_sidecar(out_dir, args.code_object)
+        run_sidecar(generation, args.code_object)
 
-    dispatches = sorted(out_dir.glob(DISPATCH_GLOB))
+    dispatches = sorted(generation.glob(DISPATCH_GLOB))
     if not dispatches:
         # capture_att_trace.py already explains this case; don't claim success.
         return 1
