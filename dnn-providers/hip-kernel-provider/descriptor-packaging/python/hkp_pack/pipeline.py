@@ -32,11 +32,27 @@ class InlineUKD:
 
 
 @dataclass
+class StandaloneUKD(InlineUKD):
+    """A UKD authored as its own `<name>.ukd.json` and referenced by a KDP.
+
+    Carries the same compiled fields as an inline UKD plus the original filename,
+    since it stays a standalone file in the shipped shard (rather than being
+    folded into the KDP).
+    """
+
+    filename: str = ""
+
+
+@dataclass
 class ArchKDP:
     id: str
     filename: str
     header: dict
     ukds: list = field(default_factory=list)
+    # Ordered kernelDescriptors output spec: each element is either an InlineUKD
+    # (rewritten inline in the shipped KDP) or a str (a standalone-UKD id ref,
+    # kept verbatim). Preserves authored order across the heterogeneous vector.
+    entries: list = field(default_factory=list)
 
 
 @dataclass
@@ -45,6 +61,7 @@ class IntermediateArch:
     directory: Path
     kdps: list = field(default_factory=list)
     variant_co: dict = field(default_factory=dict)
+    standalone_ukds: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -71,20 +88,62 @@ def _kdp_header(doc):
     return {k: v for k, v in doc.items() if k != "kernelDescriptors"}
 
 
+def _ukd_extra(ukd):
+    return {
+        k: v
+        for k, v in ukd.items()
+        if k
+        not in (
+            "id",
+            "name",
+            "kernel_source",
+            "metadata",
+            "priority",
+            "build",
+        )
+    }
+
+
+def _compile_ukd_variant(ukd, where, flat, arch, hipcc, inter_arch_dir, variant_co):
+    """Compile one hip UKD's (source,build) variant, deduped into variant_co.
+
+    Returns (variant_key, source, entry, build) so both inline and standalone
+    callers can build their record.
+    """
+    ks = ukd["kernel_source"]
+    if ks["kind"] != "hip":
+        raise HkpPackError(
+            f"{where} must be authored in hip form (got kind='{ks['kind']}')"
+        )
+    source = ks["source"]
+    entry = ks["entry"]
+    build = ks["build"]
+    vk = variant_key(source, build)
+    if vk not in variant_co:
+        variant_co[vk] = compile_hip_variant(
+            hipcc, flat.root, source, build, arch, inter_arch_dir
+        )
+    return vk, source, entry, build
+
+
 def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
     """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
 
     Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
     hip->hsaco, build lifted to top-level) + one .co per distinct (source,build)
     variant + every generic copied through + any non-matching KDP copied in its
-    authored hip form (so pruning has a KDP to drop). Returns an IntermediateArch
-    carrying the origin data the pack step needs for provenance.
+    authored hip form (so pruning has a KDP to drop). Standalone UKDs a surviving
+    KDP references by Id are compiled here too and tracked per arch, to be
+    emitted as their own files by pack_arch. Returns an IntermediateArch carrying
+    the origin data the pack step needs for provenance.
     """
     inter_arch_dir = Path(inter_arch_dir)
     inter_arch_dir.mkdir(parents=True, exist_ok=True)
 
     variant_co = {}
     arch_kdps = []
+    standalone_ukds = {}
+    ukd_by_id = flat.ukd_by_id()
 
     for kdp in flat.kdps():
         doc = kdp.doc
@@ -94,53 +153,64 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
 
         new_doc = copy.deepcopy(doc)
         ukds = []
-        for ukd in new_doc["kernelDescriptors"]:
-            ks = ukd["kernel_source"]
-            if ks["kind"] != "hip":
-                raise HkpPackError(
-                    f"UKD '{ukd.get('id')}' in {kdp.path.name} must be authored "
-                    f"in hip form (got kind='{ks['kind']}')"
+        entries = []
+        new_kds = []
+        for entry in new_doc["kernelDescriptors"]:
+            if isinstance(entry, str):
+                # A reference to a standalone UKD: compile it once per arch and
+                # keep the string in the KDP; it ships as its own file.
+                entries.append(entry)
+                new_kds.append(entry)
+                if entry in standalone_ukds:
+                    continue
+                sdesc = ukd_by_id[entry]
+                sukd = sdesc.doc
+                where = f"standalone UKD {sdesc.path.name}"
+                vk, source, sentry, build = _compile_ukd_variant(
+                    sukd, where, flat, arch, hipcc, inter_arch_dir, variant_co
                 )
-            source = ks["source"]
-            entry = ks["entry"]
-            build = ks["build"]
-            vk = variant_key(source, build)
-            if vk not in variant_co:
-                variant_co[vk] = compile_hip_variant(
-                    hipcc, flat.root, source, build, arch, inter_arch_dir
+                standalone_ukds[entry] = StandaloneUKD(
+                    id=sukd.get("id"),
+                    name=sukd.get("name"),
+                    metadata=sukd.get("metadata"),
+                    priority=sukd.get("priority"),
+                    source=source,
+                    entry=sentry,
+                    build=build,
+                    symbol=sentry,
+                    variant_key=vk,
+                    extra=_ukd_extra(sukd),
+                    filename=sdesc.path.name,
                 )
+                continue
+
+            ukd = entry
+            where = f"UKD '{ukd.get('id')}' in {kdp.path.name}"
+            vk, source, uentry, build = _compile_ukd_variant(
+                ukd, where, flat, arch, hipcc, inter_arch_dir, variant_co
+            )
             ukd["kernel_source"] = {
                 "kind": "hsaco",
                 "file": f"{vk}.co",
-                "symbol": entry,
+                "symbol": uentry,
             }
             ukd["build"] = build
-            ukds.append(
-                InlineUKD(
-                    id=ukd.get("id"),
-                    name=ukd.get("name"),
-                    metadata=ukd.get("metadata"),
-                    priority=ukd.get("priority"),
-                    source=source,
-                    entry=entry,
-                    build=build,
-                    symbol=entry,
-                    variant_key=vk,
-                    extra={
-                        k: v
-                        for k, v in ukd.items()
-                        if k
-                        not in (
-                            "id",
-                            "name",
-                            "kernel_source",
-                            "metadata",
-                            "priority",
-                            "build",
-                        )
-                    },
-                )
+            new_kds.append(ukd)
+            record = InlineUKD(
+                id=ukd.get("id"),
+                name=ukd.get("name"),
+                metadata=ukd.get("metadata"),
+                priority=ukd.get("priority"),
+                source=source,
+                entry=uentry,
+                build=build,
+                symbol=uentry,
+                variant_key=vk,
+                extra=_ukd_extra(ukd),
             )
+            ukds.append(record)
+            entries.append(record)
+        new_doc["kernelDescriptors"] = new_kds
         (inter_arch_dir / kdp.path.name).write_text(
             json.dumps(new_doc, indent=2) + "\n", encoding="utf-8"
         )
@@ -150,6 +220,7 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
                 filename=kdp.path.name,
                 header=_kdp_header(doc),
                 ukds=ukds,
+                entries=entries,
             )
         )
 
@@ -157,7 +228,11 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
         (inter_arch_dir / generic.path.name).write_bytes(generic.path.read_bytes())
 
     return IntermediateArch(
-        arch=arch, directory=inter_arch_dir, kdps=arch_kdps, variant_co=variant_co
+        arch=arch,
+        directory=inter_arch_dir,
+        kdps=arch_kdps,
+        variant_co=variant_co,
+        standalone_ukds=standalone_ukds,
     )
 
 
@@ -213,36 +288,44 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
     kpack_dir = out_arch_dir / "kpack"
     kpack_dir.mkdir(parents=True, exist_ok=True)
 
+    standalone = list(inter.standalone_ukds.values())
+
+    def _all_ukds():
+        for kdp in inter.kdps:
+            for ukd in kdp.ukds:
+                yield ukd
+        for ukd in standalone:
+            yield ukd
+
     variant_bytes = {}
     variant_sha = {}
     variant_source_build = {}
-    for kdp in inter.kdps:
-        for ukd in kdp.ukds:
-            vk = ukd.variant_key
-            toc_key = vk
-            sig = (ukd.source, json.dumps(ukd.build, sort_keys=True))
-            if vk in variant_source_build and variant_source_build[vk] != sig:
-                raise HkpPackError(
-                    f"toc_key collision: '{vk}' maps to two distinct "
-                    f"(source,build) inputs {variant_source_build[vk]} and {sig}"
-                )
-            variant_source_build[vk] = sig
-            if vk not in variant_bytes:
-                data = inter.variant_co[vk].read_bytes()
-                digest = _sha256(data)
-                if expected_sha256 and toc_key in expected_sha256:
-                    if digest != expected_sha256[toc_key]:
-                        raise HkpPackError(
-                            f"sha256 mismatch for toc_key '{toc_key}': expected "
-                            f"{expected_sha256[toc_key]}, packed blob is {digest}"
-                        )
-                variant_bytes[vk] = data
-                variant_sha[vk] = digest
-            if ukd.symbol.encode("ascii") not in variant_bytes[vk]:
-                raise HkpPackError(
-                    f"UKD '{ukd.id}' declares symbol '{ukd.symbol}' not present "
-                    f"in code object for variant '{vk}'"
-                )
+    for ukd in _all_ukds():
+        vk = ukd.variant_key
+        toc_key = vk
+        sig = (ukd.source, json.dumps(ukd.build, sort_keys=True))
+        if vk in variant_source_build and variant_source_build[vk] != sig:
+            raise HkpPackError(
+                f"toc_key collision: '{vk}' maps to two distinct "
+                f"(source,build) inputs {variant_source_build[vk]} and {sig}"
+            )
+        variant_source_build[vk] = sig
+        if vk not in variant_bytes:
+            data = inter.variant_co[vk].read_bytes()
+            digest = _sha256(data)
+            if expected_sha256 and toc_key in expected_sha256:
+                if digest != expected_sha256[toc_key]:
+                    raise HkpPackError(
+                        f"sha256 mismatch for toc_key '{toc_key}': expected "
+                        f"{expected_sha256[toc_key]}, packed blob is {digest}"
+                    )
+            variant_bytes[vk] = data
+            variant_sha[vk] = digest
+        if ukd.symbol.encode("ascii") not in variant_bytes[vk]:
+            raise HkpPackError(
+                f"UKD '{ukd.id}' declares symbol '{ukd.symbol}' not present "
+                f"in code object for variant '{vk}'"
+            )
 
     archive = kpack_mod.PackedKernelArchive(
         group_name=GROUP_NAME,
@@ -271,11 +354,32 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
         # (id, arch): the same KDP/UKD id ships under multiple arch shards with
         # per-arch content, unique per arch rather than globally.
         out_doc["arch"] = [arch]
-        out_doc["kernelDescriptors"] = [
-            _rewrite_ukd_kpack(u, arch, u.variant_key, variant_sha[u.variant_key])
-            for u in kdp.ukds
-        ]
+        # Preserve the authored heterogeneous vector: inline UKDs are rewritten
+        # to kpack form, standalone-UKD id refs are kept as bare strings (those
+        # UKDs ship as their own files below).
+        out_kds = []
+        for e in kdp.entries:
+            if isinstance(e, str):
+                out_kds.append(e)
+            else:
+                out_kds.append(
+                    _rewrite_ukd_kpack(
+                        e, arch, e.variant_key, variant_sha[e.variant_key]
+                    )
+                )
+        out_doc["kernelDescriptors"] = out_kds
         (out_arch_dir / kdp.filename).write_text(
+            json.dumps(out_doc, indent=2) + "\n", encoding="utf-8"
+        )
+
+    # A standalone UKD stays its own file in the shard, rewritten to kpack form
+    # with this arch's kpack details. It is emitted only for arches whose
+    # surviving KDPs referenced it (compile_intermediate only records those).
+    for ukd in standalone:
+        out_doc = _rewrite_ukd_kpack(
+            ukd, arch, ukd.variant_key, variant_sha[ukd.variant_key]
+        )
+        (out_arch_dir / ukd.filename).write_text(
             json.dumps(out_doc, indent=2) + "\n", encoding="utf-8"
         )
 

@@ -42,6 +42,7 @@
       },
       "metadata": { "dtype": "FLOAT", "block_size": 64 },
       "priority": 0
-    }
+    },
+    "ukd-pointwise-add-f32-b128"
   ]
 }

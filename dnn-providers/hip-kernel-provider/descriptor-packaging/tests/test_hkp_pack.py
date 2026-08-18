@@ -24,7 +24,10 @@ def _read(path):
 
 
 def _inline_ukds(out_dir, kdp_name):
-    return _read(out_dir / kdp_name)["kernelDescriptors"]
+    # Only the inline (object) entries; standalone-UKD id refs are bare strings.
+    return [
+        u for u in _read(out_dir / kdp_name)["kernelDescriptors"] if isinstance(u, dict)
+    ]
 
 
 @pytest.fixture(scope="session")
@@ -146,6 +149,7 @@ def test_prn3_exact_post_prune_set(built):
             "pointwise_half.kdp.json",
             "pointwise_wild.kdp.json",
             "copy.kdp.json",
+            "pointwise_add_b128.ukd.json",
             "pointwise.umd.json",
             "pointwise.ued.json",
             "pointwise.udd.json",
@@ -159,6 +163,7 @@ def test_prn3_exact_post_prune_set(built):
         "gfx950": {
             "pointwise.kdp.json",
             "pointwise_wild.kdp.json",
+            "pointwise_add_b128.ukd.json",
             "pointwise.umd.json",
             "pointwise.ued.json",
             "pointwise.udd.json",
@@ -213,6 +218,8 @@ def test_byte_round_trip(built, kpack_python_dir):
         )
         for kdp in (built["out"] / arch).glob("*.kdp.json"):
             for ukd in _read(kdp)["kernelDescriptors"]:
+                if isinstance(ukd, str):
+                    continue
                 ks = ukd["kernel_source"]
                 blob = archive.get_kernel(ks["toc_key"], arch)
                 assert blob is not None
@@ -226,6 +233,8 @@ def test_symbol_in_round_tripped_blob(built, kpack_python_dir):
     )
     for kdp in (built["out"] / "gfx942").glob("*.kdp.json"):
         for ukd in _read(kdp)["kernelDescriptors"]:
+            if isinstance(ukd, str):
+                continue
             ks = ukd["kernel_source"]
             blob = archive.get_kernel(ks["toc_key"], "gfx942")
             assert ks["symbol"].encode("ascii") in blob
@@ -282,14 +291,23 @@ def test_multi_kernel_stored_once(built, kpack_python_dir):
     # one TOC entry (one gfx942 ordinal), not one per UKD.
     entries = archive.toc[shared]
     assert list(entries) == ["gfx942"]
-    # And overall the archive stores one blob per distinct toc_key, not per UKD:
-    # gfx942 carries five inline UKDs but only four distinct (source,build)
-    # variants, so a per-UKD duplication regression would show up as > 4 entries.
-    all_toc_keys = {
-        u["kernel_source"]["toc_key"]
-        for kdp in (built["out"] / "gfx942").glob("*.kdp.json")
-        for u in _read(kdp)["kernelDescriptors"]
-    }
+    # And overall the archive stores one blob per distinct toc_key, not per UKD.
+    # gfx942 carries five UKDs (four distinct inline variants) plus one
+    # standalone UKD (a fifth distinct variant), so a per-UKD duplication
+    # regression would show up as more TOC entries than distinct toc_keys.
+    all_toc_keys = set()
+    for jp in (built["out"] / "gfx942").glob("*.json"):
+        if jp.name == "kpack" or not (
+            jp.name.endswith(".kdp.json") or jp.name.endswith(".ukd.json")
+        ):
+            continue
+        doc = _read(jp)
+        entries_doc = (
+            doc["kernelDescriptors"] if jp.name.endswith(".kdp.json") else [doc]
+        )
+        for u in entries_doc:
+            if isinstance(u, dict):
+                all_toc_keys.add(u["kernel_source"]["toc_key"])
     assert len(archive.toc) == len(all_toc_keys)
 
 
@@ -487,6 +505,8 @@ def test_determinism_same_variant_twice(
         result = {}
         for kdp in sorted((out).glob("gfx942/*.kdp.json")):
             for ukd in _read(kdp)["kernelDescriptors"]:
+                if isinstance(ukd, str):
+                    continue
                 result[ukd["id"]] = ukd["kernel_source"]["sha256"]
         return result
 
@@ -528,4 +548,152 @@ def test_unknown_type_token_still_errors(
     src = _copy_fixture(tmp_path, main_fixture)
     (src / "stray.bogus.json").write_text('{"id": "x"}\n', encoding="utf-8")
     with pytest.raises(HkpPackError, match="unknown type token 'bogus'"):
+        _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+
+
+# --- E. Standalone UKD -----------------------------------------------------
+_STANDALONE_UKD_FILE = "pointwise_add_b128.ukd.json"
+_STANDALONE_UKD_ID = "ukd-pointwise-add-f32-b128"
+
+
+def test_standalone_ukd_copied_to_both_arch_shards(built):
+    # LOAD-BEARING: the standalone UKD referenced by the multi-arch pointwise KDP
+    # ([gfx942, gfx950]) ships as its own <name>.ukd.json in BOTH shards, same id,
+    # kpack-form, with per-arch details (different library + sha256), and no arch.
+    u942 = _read(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
+    u950 = _read(built["out"] / "gfx950" / _STANDALONE_UKD_FILE)
+    assert u942["id"] == u950["id"] == _STANDALONE_UKD_ID
+    # A standalone UKD file carries no arch (its arch follows the referencing KDP).
+    assert "arch" not in u942 and "arch" not in u950
+    ks942, ks950 = u942["kernel_source"], u950["kernel_source"]
+    assert ks942["kind"] == ks950["kind"] == "kpack"
+    assert ks942["library"] == "kpack/hip_kernel_provider_gfx942.kpack"
+    assert ks950["library"] == "kpack/hip_kernel_provider_gfx950.kpack"
+    assert ks942["sha256"] != ks950["sha256"]
+
+
+def test_standalone_ukd_matches_inline_kpack_shape(built):
+    # A standalone UKD's shipped kernel_source is kpack-form with the same
+    # structure as an inline UKD's (library/toc_key/symbol/sha256 + provenance).
+    ukd = _read(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
+    ks = ukd["kernel_source"]
+    assert set(["kind", "library", "toc_key", "symbol", "sha256"]).issubset(ks)
+    assert "file" not in ks and "build" not in ks
+    assert ks["symbol"] == "PointwiseAdd"
+    prov = ukd["provenance"]
+    assert prov["origin_kind"] == "hip"
+    assert prov["source"] == "PointwiseAdd.cpp"
+    assert prov["entry"] == "PointwiseAdd"
+    assert prov["build"]["defines"]["HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE"] == 128
+    # Authored top-level fields the tool does not model survive the rewrite.
+    assert ukd["version"] == "0.1"
+
+
+def test_standalone_ukd_blob_round_trips(built, kpack_python_dir):
+    # The standalone UKD's kpack blob is really in each shard's archive and its
+    # stamped sha256/symbol match the stored bytes.
+    kpack = _load_kpack(kpack_python_dir)
+    for arch in ("gfx942", "gfx950"):
+        archive = kpack.PackedKernelArchive.read(
+            built["out"] / arch / "kpack" / f"hip_kernel_provider_{arch}.kpack"
+        )
+        ks = _read(built["out"] / arch / _STANDALONE_UKD_FILE)["kernel_source"]
+        blob = archive.get_kernel(ks["toc_key"], arch)
+        assert blob is not None
+        assert hashlib.sha256(blob).hexdigest() == ks["sha256"]
+        assert ks["symbol"].encode("ascii") in blob
+
+
+def test_heterogeneous_kdp_keeps_string_ref(built):
+    # The KDP that references both inline UKD objects and the standalone id string
+    # packs both: its shipped kernelDescriptors keeps the two inline objects (now
+    # kpack-form) AND the bare string ref verbatim, in authored order.
+    kds = _read(built["out"] / "gfx942" / "pointwise.kdp.json")["kernelDescriptors"]
+    objs = [e for e in kds if isinstance(e, dict)]
+    strs = [e for e in kds if isinstance(e, str)]
+    assert len(objs) == 2
+    assert strs == [_STANDALONE_UKD_ID]
+    assert kds[-1] == _STANDALONE_UKD_ID  # authored order preserved (ref last)
+    for o in objs:
+        assert o["kernel_source"]["kind"] == "kpack"
+
+
+def test_standalone_ukd_pruned_from_nonreferencing_shard(built):
+    # gfx90a keeps only the wildcard KDP, which does not reference the standalone
+    # UKD, so the standalone file is absent from that shard.
+    assert not (built["out"] / "gfx90a" / _STANDALONE_UKD_FILE).exists()
+
+
+def test_standalone_ukd_dangling_id(tmp_path, main_fixture, hipcc, kpack_python_dir):
+    # A KDP referencing a UKD id string with no matching .ukd.json hard-errors.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.kdp.json"
+    doc = _read(p)
+    doc["kernelDescriptors"].append("ukd-does-not-exist")
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="unknown UKD Id 'ukd-does-not-exist'"):
+        _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+
+
+def test_standalone_ukd_shared_by_two_kdps_stored_once(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # Two KDPs on the same arch both reference the one standalone UKD -> its blob
+    # is stored once (deduped by variant_key), not once per referencing KDP.
+    src = _copy_fixture(tmp_path, main_fixture)
+    # copy.kdp.json is gfx942-only; add the standalone ref to it too, so both it
+    # and pointwise.kdp.json reference the same standalone id on gfx942.
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+    kpack = _load_kpack(kpack_python_dir)
+    archive = kpack.PackedKernelArchive.read(
+        tmp_path / "out" / "gfx942" / "kpack" / "hip_kernel_provider_gfx942.kpack"
+    )
+    ukd = _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)
+    toc_key = ukd["kernel_source"]["toc_key"]
+    # The shared standalone toc_key owns exactly one arch entry (one blob).
+    assert list(archive.toc[toc_key]) == ["gfx942"]
+
+
+def test_standalone_ukd_referenced_by_wildcard_kdp(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # A standalone UKD referenced by a wildcard KDP (arch []) ships in every shard.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise_wild.kdp.json"
+    doc = _read(p)
+    doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942", "gfx90a"])
+    for arch in ("gfx942", "gfx90a"):
+        assert (tmp_path / "out" / arch / _STANDALONE_UKD_FILE).exists(), arch
+
+
+def test_standalone_ukd_id_collides_with_inline(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # An inline UKD sharing an id with a standalone UKD is a hard error.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.kdp.json"
+    doc = _read(p)
+    # Reuse the standalone id on one of the inline entries.
+    doc["kernelDescriptors"][0]["id"] = _STANDALONE_UKD_ID
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="collides with a standalone UKD"):
+        _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+
+
+def test_standalone_ukd_with_arch_field_rejected(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # A standalone UKD must not carry its own arch (arch comes from the KDP).
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / _STANDALONE_UKD_FILE
+    doc = _read(p)
+    doc["arch"] = ["gfx942"]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="must not carry an 'arch' field"):
         _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
