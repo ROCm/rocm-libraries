@@ -514,11 +514,11 @@ Test targets (each `<component>-check` has per-category variants, and each targe
 |--------|-------------|
 | `miopen-provider-check` | Run all miopen-provider tests |
 | `miopen-provider-<category>-check` | Run miopen-provider tests for a category: `quick`, `standard`, `comprehensive`, `full` |
-| `miopen-provider-external-integration-check` | Run the cross-provider integration tests for miopen-provider |
+| `miopen-provider-external-integration-check` | Run the provider-agnostic integration suite independently against miopen-provider |
 | `hipblaslt-provider-check` | Run all hipblaslt-provider tests |
 | `hipblaslt-provider-<category>-check` | Run hipblaslt-provider tests for a category: `quick`, `standard`, `comprehensive`, `full` |
-| `hipblaslt-provider-external-integration-check` | Run the cross-provider integration tests for hipblaslt-provider |
-| `hipdnn-integration-tests-check` | Run all cross-provider integration tests |
+| `hipblaslt-provider-external-integration-check` | Run the provider-agnostic integration suite independently against hipblaslt-provider |
+| `hipdnn-integration-tests-check` | Run the provider-agnostic integration test executable |
 | `hipdnn-integration-tests-<category>-check` | Run integration tests for a configured category |
 
 hip-kernel-provider does not register `-check` targets; its tests are staged through its install bucket rather than the shared test-target machinery.

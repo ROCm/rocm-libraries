@@ -79,6 +79,7 @@ Use them when a change crosses component boundaries but does not require numeric
 Real-provider integration tests execute graphs through provider plugins and compare results with a reference.
 Use them for operation correctness, provider selection, engine behavior, and device-dependent paths.
 The shared provider integration suite is the normal home for “this graph runs and produces the right result”; provider-local tests cover behavior specific to one provider.
+The `hipdnn_integration_tests` executable is provider-agnostic: each provider runs the shared graph set independently with its own plugin and engine.
 
 hipDNN owns routing, API, serialization, and plugin-contract quality.
 Each provider owns its operation correctness and supported-architecture coverage; a core-only pass is not evidence that provider behavior is correct.

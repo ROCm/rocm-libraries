@@ -58,11 +58,13 @@ Public backend and frontend contracts are not unit contracts merely because a co
 |---|---|---|---|
 | Public backend API | Consumer through exported backend C API, usually with controlled plugins | API lifecycle, descriptor behavior, error mapping, and plugin-management contract | Numerical correctness of a real provider |
 | Frontend-to-backend | Frontend C++ API through backend with controlled provider behavior | Graph lowering, descriptor creation, execution flow, and result transport | Kernel correctness on an ASIC |
-| Provider-local integration | Provider plugin plus real dependencies/device | Adapter-specific applicability, unsupported paths, engine behavior, determinism, and cases not reducible to graph-output comparison | Cross-provider consistency by itself |
-| Shared provider integration | `hipdnn_integration_tests`, a selected plugin/engine, and reference execution | End-to-end graph execution and numerical comparison for the observed engine/device/problem | Complete operation or architecture support |
+| Provider-local integration | Provider plugin plus real dependencies/device | Adapter-specific applicability, unsupported paths, engine behavior, determinism, and cases not reducible to graph-output comparison | Behavior of any other provider |
+| Shared provider integration | Provider-agnostic `hipdnn_integration_tests`, invoked independently with one selected plugin/engine, and reference execution | End-to-end graph execution and numerical comparison for the observed engine/device/problem | Complete operation or architecture support |
 | Dependency-library tests | MIOpen, hipBLASLt, rocKE, or other kernel-library boundary | Library/kernel behavior owned below the provider adapter | hipDNN graph routing unless exercised through hipDNN |
 
 The shared suite is the default home for “execute this graph on this engine and compare its outputs” coverage. Provider-local C++ tests remain appropriate for adapter-specific failure paths, feature switches, determinism, compilation, engine selection, and other behavior that cannot be represented as a graph-output bundle. The [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) owns that authoring decision and all bundle/tier mechanics.
+
+The provider-agnostic executable contains the shared graph set. Each provider invokes it independently with its own plugin and engine; no invocation loads or compares multiple providers.
 
 Reference execution provides an expected numerical result; it does not establish provider applicability. A provider must first declare the graph applicable, select an engine, and execute it. Tests must preserve that sequence so a reference implementation cannot mask selection or translation failures. See the [CPU Graph Executor design](../rfcs/0001_CpuGraphExecutorDesign.md) for the host reference architecture.
 
@@ -71,7 +73,7 @@ Reference execution provides an expected numerical result; it does not establish
 | Artifact or behavior | Validation responsibility |
 |---|---|
 | Public API, graph serialization, routing, plugin lifecycle, and frontend/backend data transport | hipDNN core tests |
-| Shared graph cases, reference comparison, tolerance plumbing, and cross-provider harness | Shared provider integration infrastructure |
+| Shared graph cases, reference comparison, tolerance plumbing, and provider-agnostic harness | Shared provider integration infrastructure |
 | Provider graph translation, applicability, engine binding, provider-specific skips/tolerances, and adapter failures | Provider adapter tests and configuration |
 | Kernel selection and numerical behavior below the adapter | Underlying dependency and kernel-library tests, plus end-to-end provider observations |
 | Architecture-specific applicability | Provider/engine capability contract and runtime checks |
