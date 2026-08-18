@@ -1941,6 +1941,65 @@ class TestAttentionHelpers(unittest.TestCase):
                     f"supported 3D kernel, got: {reason}",
                 )
 
+    @staticmethod
+    def _fp8_decode_problem(fp8_fnuz=False):
+        return UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=2048,
+            dtype="bf16",
+            use_fp8=True,
+            fp8_fnuz=fp8_fnuz,
+        )
+
+    def test_gfx942_fp8_decode_rejects_ocp_requires_fnuz(self):
+        """G3: OCP fp8 K/V on the gfx9_mfma family (gfx942) decodes as
+        e4m3fnuz and silently mis-decodes -> the gate must reject it (loud
+        error, not a NaN kernel) unless the caller opts into fnuz via
+        ``fp8_fnuz=True``.
+        """
+        from kernels import (
+            supports_native_unified_attention,
+            supports_native_unified_attention_3d_tiled,
+        )
+
+        with _patch_resolved_arch("gfx942"):
+            for gate in (
+                supports_native_unified_attention_3d_tiled,
+                supports_native_unified_attention,
+            ):
+                ok, reason = gate(self._fp8_decode_problem())
+                self.assertFalse(ok, msg=f"{gate.__name__} should reject OCP fp8")
+                self.assertIn("fnuz", reason)
+            # Opt-in acknowledges fnuz bytes -> not rejected for the format.
+            ok_fnuz, _ = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertTrue(ok_fnuz)
+
+    def test_gfx950_fp8_decode_accepts_ocp_rejects_fnuz(self):
+        """gfx950 decodes OCP fp8 natively: the guard accepts OCP K/V but must
+        reject fnuz-declared K/V, which would silently mis-decode on an OCP arch.
+        """
+        from kernels import supports_native_unified_attention_3d_tiled
+
+        with _patch_resolved_arch("gfx950"):
+            ok, reason = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem()
+            )
+            self.assertTrue(ok, msg=f"gfx950 decodes OCP fp8: {reason}")
+
+            ok_fnuz, reason_fnuz = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertFalse(ok_fnuz, msg="gfx950 should reject fnuz-declared fp8")
+            self.assertIn("fnuz", reason_fnuz)
+
     def test_tiled_3d_spec_builder_constructs_per_arch(self):
         """Focused guard on the 3D spec builder that broke: a decode problem must
         construct the arch's ``UnifiedAttention3DTiledSpec`` (signature parity)
