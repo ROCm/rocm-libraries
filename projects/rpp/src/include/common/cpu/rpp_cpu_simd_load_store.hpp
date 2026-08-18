@@ -3837,33 +3837,57 @@ inline void rpp_generic_nn_load_i8pln1_avx(Rpp8s* srcPtrChannel, Rpp32s* srcLoc,
     p = _mm256_setr_m128i(px, xmm_px0);
 }
 
-inline void rpp_generic_bilinear_load_mask_avx(__m256& pSrcY, __m256& pSrcX, __m256* pRoiLTRB,
-                                               Rpp32s* invalidLoadMask) {
-    _mm256_storeu_si256(
-        (__m256i*)invalidLoadMask,
-        _mm256_cvtps_epi32(_mm256_or_ps(  // Vectorized ROI boundary check for 8 locations
-            _mm256_or_ps(_mm256_cmp_ps(pSrcX, pRoiLTRB[0], _CMP_LT_OQ),
-                         _mm256_cmp_ps(pSrcY, pRoiLTRB[1], _CMP_LT_OQ)),
-            _mm256_or_ps(_mm256_cmp_ps(_mm256_floor_ps(pSrcX), pRoiLTRB[2], _CMP_GT_OQ),
-                         _mm256_cmp_ps(_mm256_floor_ps(pSrcY), pRoiLTRB[3], _CMP_GT_OQ)))));
+inline void rpp_generic_bilinear_load_masks_avx(__m256& pSrcY, __m256& pSrcX, __m256* pRoiLTRB,
+                                                Rpp32s* invalidTL, Rpp32s* invalidTR,
+                                                Rpp32s* invalidBL, Rpp32s* invalidBR) {
+    __m256 pFloorX = _mm256_floor_ps(pSrcX);
+    __m256 pFloorY = _mm256_floor_ps(pSrcY);
+    __m256 pCeilX = _mm256_add_ps(pFloorX, avx_p1);
+    __m256 pCeilY = _mm256_add_ps(pFloorY, avx_p1);
+
+    // Per-corner ROI boundary checks for 8 locations (Left/Right on X, Top/Bottom on Y); a corner
+    // outside the ROI is marked invalid independently of the other three corners, so a bilinear
+    // window that straddles the ROI edge still blends its in-ROI corners instead of being
+    // rejected outright.
+    __m256 pLeftInvalid = _mm256_or_ps(_mm256_cmp_ps(pFloorX, pRoiLTRB[0], _CMP_LT_OQ),
+                                       _mm256_cmp_ps(pFloorX, pRoiLTRB[2], _CMP_GT_OQ));
+    __m256 pRightInvalid = _mm256_or_ps(_mm256_cmp_ps(pCeilX, pRoiLTRB[0], _CMP_LT_OQ),
+                                        _mm256_cmp_ps(pCeilX, pRoiLTRB[2], _CMP_GT_OQ));
+    __m256 pTopInvalid = _mm256_or_ps(_mm256_cmp_ps(pFloorY, pRoiLTRB[1], _CMP_LT_OQ),
+                                      _mm256_cmp_ps(pFloorY, pRoiLTRB[3], _CMP_GT_OQ));
+    __m256 pBottomInvalid = _mm256_or_ps(_mm256_cmp_ps(pCeilY, pRoiLTRB[1], _CMP_LT_OQ),
+                                         _mm256_cmp_ps(pCeilY, pRoiLTRB[3], _CMP_GT_OQ));
+
+    _mm256_storeu_si256((__m256i*)invalidTL,
+                        _mm256_cvtps_epi32(_mm256_or_ps(pTopInvalid, pLeftInvalid)));
+    _mm256_storeu_si256((__m256i*)invalidTR,
+                        _mm256_cvtps_epi32(_mm256_or_ps(pTopInvalid, pRightInvalid)));
+    _mm256_storeu_si256((__m256i*)invalidBL,
+                        _mm256_cvtps_epi32(_mm256_or_ps(pBottomInvalid, pLeftInvalid)));
+    _mm256_storeu_si256((__m256i*)invalidBR,
+                        _mm256_cvtps_epi32(_mm256_or_ps(pBottomInvalid, pRightInvalid)));
 }
 
 template <typename T>
 inline void rpp_generic_bilinear_load_1c_avx(T* srcPtrChannel, RpptDescPtr srcDescPtr,
                                              RpptBilinearNbhoodLocsVecLen8& srcLocs, __m256& pSrcY,
                                              __m256& pSrcX, __m256* pRoiLTRB, __m256* pSrc) {
-    Rpp32s invalidLoadMask[8];
+    Rpp32s invalidTL[8], invalidTR[8], invalidBL[8], invalidBR[8];
     RpptBilinearNbhoodValsVecLen8 srcVals;
     memset(&srcVals, 0, sizeof(RpptBilinearNbhoodValsVecLen8));
-    rpp_generic_bilinear_load_mask_avx(pSrcY, pSrcX, pRoiLTRB, invalidLoadMask);
+    rpp_generic_bilinear_load_masks_avx(pSrcY, pSrcX, pRoiLTRB, invalidTL, invalidTR, invalidBL,
+                                        invalidBR);
     for (int j = 0; j < 8; j++) {
-        if (invalidLoadMask[j] == 0)  // Loading specific pixels where invalidLoadMask is set to 0
-        {
+        // Each corner loads independently; a corner outside the ROI is left at 0 (black) by the
+        // memset above instead of skipping all four taps for the location.
+        if (!invalidTL[j])
             srcVals.srcValsTL.data[j] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsTL.data[j]];
+        if (!invalidTR[j])
             srcVals.srcValsTR.data[j] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsTR.data[j]];
+        if (!invalidBL[j])
             srcVals.srcValsBL.data[j] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsBL.data[j]];
+        if (!invalidBR[j])
             srcVals.srcValsBR.data[j] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsBR.data[j]];
-        }
     }
     pSrc[0] = _mm256_loadu_ps(&srcVals.srcValsTL.data[0]);  // R channel Top-Left
     pSrc[1] = _mm256_loadu_ps(&srcVals.srcValsTR.data[0]);  // R channel Top-Right
@@ -3875,20 +3899,24 @@ template <typename T>
 inline void rpp_generic_bilinear_load_3c_avx(T* srcPtrChannel, RpptDescPtr srcDescPtr,
                                              RpptBilinearNbhoodLocsVecLen8& srcLocs, __m256& pSrcY,
                                              __m256& pSrcX, __m256* pRoiLTRB, __m256* pSrc) {
-    Rpp32s invalidLoadMask[8];
+    Rpp32s invalidTL[8], invalidTR[8], invalidBL[8], invalidBR[8];
     RpptBilinearNbhoodValsVecLen8 srcVals;
     memset(&srcVals, 0, sizeof(RpptBilinearNbhoodValsVecLen8));
-    rpp_generic_bilinear_load_mask_avx(pSrcY, pSrcX, pRoiLTRB, invalidLoadMask);
+    rpp_generic_bilinear_load_masks_avx(pSrcY, pSrcX, pRoiLTRB, invalidTL, invalidTR, invalidBL,
+                                        invalidBR);
     for (int j = 0; j < 8; j++) {
-        if (invalidLoadMask[j] == 0)  // Loading specific pixels where invalidLoadMask is set to 0
-        {
-            for (int c = 0; c < srcDescPtr->c * 8; c += 8) {
-                Rpp32s pos = c + j;
+        for (int c = 0; c < srcDescPtr->c * 8; c += 8) {
+            Rpp32s pos = c + j;
+            // Each corner loads independently; a corner outside the ROI is left at 0 (black) by
+            // the memset above instead of skipping all four taps for the location.
+            if (!invalidTL[j])
                 srcVals.srcValsTL.data[pos] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsTL.data[pos]];
+            if (!invalidTR[j])
                 srcVals.srcValsTR.data[pos] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsTR.data[pos]];
+            if (!invalidBL[j])
                 srcVals.srcValsBL.data[pos] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsBL.data[pos]];
+            if (!invalidBR[j])
                 srcVals.srcValsBR.data[pos] = (Rpp32f)srcPtrChannel[srcLocs.srcLocsBR.data[pos]];
-            }
         }
     }
     pSrc[0] = _mm256_loadu_ps(&srcVals.srcValsTL.data[0]);    // R channel Top-Left

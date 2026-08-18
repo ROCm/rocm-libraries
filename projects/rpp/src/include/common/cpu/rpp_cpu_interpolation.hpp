@@ -32,50 +32,60 @@ inline void compute_generic_bilinear_srclocs_and_interpolate(T* srcPtrChannel,
                                                              RpptDescPtr srcDescPtr, Rpp32f& srcY,
                                                              Rpp32f& srcX, RpptROI* roiLTRB,
                                                              T* dst) {
-    RpptPoint2D srcLT, srcRB;
+    // Unclamped tap coordinates: used both for the interpolation weights (never clamped, so the
+    // sub-pixel weighting always matches the true source location) and to decide, per corner,
+    // whether that corner lies inside the ROI.
+    Rpp32s top = (Rpp32s)std::floor(srcY);
+    Rpp32s left = (Rpp32s)std::floor(srcX);
+    Rpp32s bottom = top + 1;
+    Rpp32s right = left + 1;
+
+    bool topValid = (top >= roiLTRB->ltrbROI.lt.y) && (top <= roiLTRB->ltrbROI.rb.y);
+    bool bottomValid = (bottom >= roiLTRB->ltrbROI.lt.y) && (bottom <= roiLTRB->ltrbROI.rb.y);
+    bool leftValid = (left >= roiLTRB->ltrbROI.lt.x) && (left <= roiLTRB->ltrbROI.rb.x);
+    bool rightValid = (right >= roiLTRB->ltrbROI.lt.x) && (right <= roiLTRB->ltrbROI.rb.x);
+    // Per-corner validity (Top-Left, Top-Right, Bottom-Left, Bottom-Right); a corner outside the
+    // ROI contributes a black (0) tap instead of rejecting the whole output pixel.
+    bool cornerValid[4] = {topValid && leftValid, topValid && rightValid, bottomValid && leftValid,
+                           bottomValid && rightValid};
+
     Rpp32f weightParams[4], bilinearCoeffs[4];
-    Rpp32s srcLoc[4];
-    srcLT.y = (Rpp32s)srcY;  // Bilinear LT point y value
-    srcLT.y = std::min(srcLT.y, roiLTRB->ltrbROI.rb.y - 1);
-    srcRB.y = std::min(srcLT.y + 1, roiLTRB->ltrbROI.rb.y - 1);  // Bilinear RB point y value
-    srcLT.x = (Rpp32s)srcX;                                      // Bilinear LT point x value
-    srcLT.x = std::min(srcLT.x, roiLTRB->ltrbROI.rb.x - 1);
-    srcRB.x = std::min(srcLT.x + 1, roiLTRB->ltrbROI.rb.x - 1);  // Bilinear RB point x value
-    weightParams[0] = srcY - srcLT.y;                            // weightedHeight
-    weightParams[1] = 1 - weightParams[0];                       // 1 - weightedHeight
-    weightParams[2] = srcX - srcLT.x;                            // weightedWidth
-    weightParams[3] = 1 - weightParams[2];                       // 1 - weightedWidth
+    weightParams[0] = srcY - top;           // weightedHeight
+    weightParams[1] = 1 - weightParams[0];  // 1 - weightedHeight
+    weightParams[2] = srcX - left;          // weightedWidth
+    weightParams[3] = 1 - weightParams[2];  // 1 - weightedWidth
     bilinearCoeffs[0] =
         weightParams[1] * weightParams[3];  // (1 - weightedHeight) * (1 - weightedWidth)
     bilinearCoeffs[1] = weightParams[1] * weightParams[2];  // (1 - weightedHeight) * weightedWidth
     bilinearCoeffs[2] = weightParams[0] * weightParams[3];  // weightedHeight * (1 - weightedWidth)
     bilinearCoeffs[3] = weightParams[0] * weightParams[2];  // weightedHeight * weightedWidth
-    srcLT.y *= srcDescPtr->strides.hStride;                 // LT Row * hStride
-    srcRB.y *= srcDescPtr->strides.hStride;                 // RB Row * hStride
-    srcLT.x *= srcDescPtr->strides.wStride;                 // LT Col * wStride
-    srcRB.x *= srcDescPtr->strides.wStride;                 // LT Col * wStride
-    srcLoc[0] = srcLT.y + srcLT.x;                          // Left-Top pixel memory location
-    srcLoc[1] = srcLT.y + srcRB.x;                          // Right-Top pixel memory location
-    srcLoc[2] = srcRB.y + srcLT.x;                          // Left-Bottom pixel memory location
-    srcLoc[3] = srcRB.y + srcRB.x;                          // Right-Bottom pixel memory location
+
+    // Clamp only for safe addressing; cornerValid (not this clamp) decides real-vs-black.
+    Rpp32s addrTop = std::min(std::max(top, roiLTRB->ltrbROI.lt.y), roiLTRB->ltrbROI.rb.y);
+    Rpp32s addrBottom = std::min(std::max(bottom, roiLTRB->ltrbROI.lt.y), roiLTRB->ltrbROI.rb.y);
+    Rpp32s addrLeft = std::min(std::max(left, roiLTRB->ltrbROI.lt.x), roiLTRB->ltrbROI.rb.x);
+    Rpp32s addrRight = std::min(std::max(right, roiLTRB->ltrbROI.lt.x), roiLTRB->ltrbROI.rb.x);
+    addrTop *= srcDescPtr->strides.hStride;
+    addrBottom *= srcDescPtr->strides.hStride;
+    addrLeft *= srcDescPtr->strides.wStride;
+    addrRight *= srcDescPtr->strides.wStride;
+    Rpp32s srcLoc[4];
+    srcLoc[0] = addrTop + addrLeft;      // Left-Top pixel memory location
+    srcLoc[1] = addrTop + addrRight;     // Right-Top pixel memory location
+    srcLoc[2] = addrBottom + addrLeft;   // Left-Bottom pixel memory location
+    srcLoc[3] = addrBottom + addrRight;  // Right-Bottom pixel memory location
 
     for (int c = 0; c < srcDescPtr->c; c++) {
+        Rpp32f sum = 0;
+        if (cornerValid[0]) sum += (Rpp32f)(*(srcPtrChannel + srcLoc[0])) * bilinearCoeffs[0];
+        if (cornerValid[1]) sum += (Rpp32f)(*(srcPtrChannel + srcLoc[1])) * bilinearCoeffs[1];
+        if (cornerValid[2]) sum += (Rpp32f)(*(srcPtrChannel + srcLoc[2])) * bilinearCoeffs[2];
+        if (cornerValid[3]) sum += (Rpp32f)(*(srcPtrChannel + srcLoc[3])) * bilinearCoeffs[3];
+
         if constexpr (std::is_same<T, Rpp8s>::value || std::is_same<T, Rpp8u>::value)
-            dst[c] = (T)std::nearbyintf(
-                ((*(srcPtrChannel + srcLoc[0]) * bilinearCoeffs[0]) +  // TopRow R01 Pixel * coeff0
-                 (*(srcPtrChannel + srcLoc[1]) * bilinearCoeffs[1]) +  // TopRow R02 Pixel * coeff1
-                 (*(srcPtrChannel + srcLoc[2]) *
-                  bilinearCoeffs[2]) +  // BottomRow R01 Pixel * coeff2
-                 (*(srcPtrChannel + srcLoc[3]) *
-                  bilinearCoeffs[3])));  // BottomRow R02 Pixel * coeff3
+            dst[c] = (T)std::nearbyintf(sum);
         else if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
-            dst[c] = (T)((
-                (*(srcPtrChannel + srcLoc[0]) * bilinearCoeffs[0]) +  // TopRow R01 Pixel * coeff0
-                (*(srcPtrChannel + srcLoc[1]) * bilinearCoeffs[1]) +  // TopRow R02 Pixel * coeff1
-                (*(srcPtrChannel + srcLoc[2]) *
-                 bilinearCoeffs[2]) +  // BottomRow R01 Pixel * coeff2
-                (*(srcPtrChannel + srcLoc[3]) *
-                 bilinearCoeffs[3])));  // BottomRow R02 Pixel * coeff3
+            dst[c] = (T)sum;
 
         srcPtrChannel += srcDescPtr->strides.cStride;
     }
@@ -222,21 +232,16 @@ inline void compute_generic_bilinear_interpolation_pkd3_to_pln3(Rpp32f srcY, Rpp
                                                                 T* dstPtrTempG, T* dstPtrTempB,
                                                                 T* srcPtrChannel,
                                                                 RpptDescPtr srcDescPtr) {
-    Rpp32s srcXFloor = std::floor(srcX);
-    Rpp32s srcYFloor = std::floor(srcY);
-    if ((srcXFloor < roiLTRB->ltrbROI.lt.x) || (srcYFloor < roiLTRB->ltrbROI.lt.y) ||
-        (srcXFloor > roiLTRB->ltrbROI.rb.x) || (srcYFloor > roiLTRB->ltrbROI.rb.y)) {
-        *dstPtrTempR = 0;
-        *dstPtrTempG = 0;
-        *dstPtrTempB = 0;
-    } else {
-        T dst[3];
-        compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX,
-                                                         roiLTRB, dst);
-        *dstPtrTempR = dst[0];
-        *dstPtrTempG = dst[1];
-        *dstPtrTempB = dst[2];
-    }
+    // Per-corner ROI validity (and the black-tap substitution for any corner outside it) is
+    // handled inside compute_generic_bilinear_srclocs_and_interpolate, so this always produces
+    // the right answer whether the bilinear window is fully inside, straddling, or fully outside
+    // the ROI.
+    T dst[3];
+    compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX, roiLTRB,
+                                                     dst);
+    *dstPtrTempR = dst[0];
+    *dstPtrTempG = dst[1];
+    *dstPtrTempB = dst[2];
 }
 
 template <typename T>
@@ -244,15 +249,8 @@ inline void compute_generic_bilinear_interpolation_pln3pkd3_to_pkd3(Rpp32f srcY,
                                                                     RpptROI* roiLTRB, T* dstPtrTemp,
                                                                     T* srcPtrChannel,
                                                                     RpptDescPtr srcDescPtr) {
-    Rpp32s srcXFloor = std::floor(srcX);
-    Rpp32s srcYFloor = std::floor(srcY);
-    if ((srcXFloor < roiLTRB->ltrbROI.lt.x) || (srcYFloor < roiLTRB->ltrbROI.lt.y) ||
-        (srcXFloor > roiLTRB->ltrbROI.rb.x) || (srcYFloor > roiLTRB->ltrbROI.rb.y)) {
-        memset(dstPtrTemp, 0, 3 * sizeof(T));
-    } else {
-        compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX,
-                                                         roiLTRB, dstPtrTemp);
-    }
+    compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX, roiLTRB,
+                                                     dstPtrTemp);
 }
 
 template <typename T>
@@ -261,22 +259,12 @@ inline void compute_generic_bilinear_interpolation_pln_to_pln(Rpp32f srcY, Rpp32
                                                               T* srcPtrChannel,
                                                               RpptDescPtr srcDescPtr,
                                                               RpptDescPtr dstDescPtr) {
-    Rpp32s srcXFloor = std::floor(srcX);
-    Rpp32s srcYFloor = std::floor(srcY);
-    if ((srcXFloor < roiLTRB->ltrbROI.lt.x) || (srcYFloor < roiLTRB->ltrbROI.lt.y) ||
-        (srcXFloor > roiLTRB->ltrbROI.rb.x) || (srcYFloor > roiLTRB->ltrbROI.rb.y)) {
-        for (int c = 0; c < srcDescPtr->c; c++) {
-            *dstPtrTemp = 0;
-            dstPtrTemp += dstDescPtr->strides.cStride;
-        }
-    } else {
-        T dst[3];
-        compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX,
-                                                         roiLTRB, dst);
-        for (int c = 0; c < srcDescPtr->c; c++) {
-            *dstPtrTemp = dst[c];
-            dstPtrTemp += dstDescPtr->strides.cStride;
-        }
+    T dst[3];
+    compute_generic_bilinear_srclocs_and_interpolate(srcPtrChannel, srcDescPtr, srcY, srcX, roiLTRB,
+                                                     dst);
+    for (int c = 0; c < srcDescPtr->c; c++) {
+        *dstPtrTemp = dst[c];
+        dstPtrTemp += dstDescPtr->strides.cStride;
     }
 }
 
