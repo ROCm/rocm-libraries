@@ -815,15 +815,54 @@ def build_implicit_gemm_conv_wgrad(
     ]
 
     threads = spec.block_size
-    # A (dY, NHWK) and B (X, NHWC) are loaded along the K_wg (reduction) axis by
-    # CoalescedTileLoader.  In NHWK the stride between adjacent K_wg positions is K
-    # (= output channels); in NHWC it is C (= input channels).  Neither is 1, so
-    # buffer_load_vN would read consecutive *channel* values at the same spatial
-    # position rather than the intended next spatial position.  Force vec=1 for both
-    # operands regardless of what the auto-picker or the caller requests.
-    # TODO: Enable vec size large than 1
+    # A (dY, NHWK) and B (X, NHWC) have their GEMM reduction axis K_wg = N*Ho*Wo,
+    # which is NOT the stride-1 tensor axis: in NHWK the stride between adjacent
+    # K_wg positions is K, in NHWC it is C.  A naive vectorised load along K_wg
+    # would read consecutive *channel* values at one spatial position instead of
+    # the next spatial position (wrong data) -- hence the historical vec=1.
+    #
+    # The stride-1 axis is instead the GEMM *free* axis: k_out (= M) for dY and
+    # the inner C of N_wg for X.  So vectorise the global load along that free
+    # (row) axis and transpose it into the row-major (M/N, K) LDS tile on store
+    # (CoalescedTileLoader vector_axis="row").  The MFMA consumer reads the same
+    # K-contiguous LDS tile unchanged.
+    #
+    # Enabled for the sync CDNA-MFMA path only (op.family == "mma"): the async
+    # (raw_ptr_buffer_load_lds) path writes lane-contiguous LDS and cannot host a
+    # transpose-on-store; the WMMA path is a separate follow-on.  Correctness
+    # requires the free-axis vector to stay within one stride-1 run -- vec_a | K
+    # (dY's k_out is contiguous over the whole K dim) and vec_b | C (an X vector
+    # must not cross a (y,x) filter boundary) -- and choose_vec additionally
+    # enforces even tile distribution.  When a width > 1 is not admissible the
+    # loader falls back to the scalar vector_axis="col" path, keeping those
+    # configs byte-identical.
+    axis_a = axis_b = "col"
     load_vec_a = 1
     load_vec_b = 1
+    if not spec.async_dma and op.family == "mma":
+
+        def _free_axis_vec(chan: int, dtype: str) -> int:
+            widths = (8, 4, 2, 1) if dtype != "fp32" else (4, 2, 1)
+            return next(v for v in widths if chan % v == 0)
+
+        va = CoalescedTileLoader.choose_vec(
+            tile_rows=block_m,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=_free_axis_vec(p.kpg, spec.data.dtype_a),
+            vector_axis="row",
+        )
+        vb = CoalescedTileLoader.choose_vec(
+            tile_rows=block_n,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=_free_axis_vec(p.cpg, spec.data.dtype_b),
+            vector_axis="row",
+        )
+        if va > 1:
+            load_vec_a, axis_a = va, "row"
+        if vb > 1:
+            load_vec_b, axis_b = vb, "row"
 
     # For pointwise (Y=X=1, stride 1, pad 0) all descriptors collapse to flat
     # 2-D address arithmetic — no unmerge/embed/pad, just multiply+add:
@@ -900,6 +939,7 @@ def build_implicit_gemm_conv_wgrad(
             block_size=threads,
             load_vec=load_vec_a,
             elem_dtype=ir_dtype_a,
+            vector_axis=axis_a,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
@@ -907,6 +947,7 @@ def build_implicit_gemm_conv_wgrad(
             block_size=threads,
             load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
+            vector_axis=axis_b,
         )
 
     schedule = SchedulePolicy.for_pipeline(
