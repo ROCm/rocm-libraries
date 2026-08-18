@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-import importlib.util
+import importlib
 import sys
 import types
 from pathlib import Path
@@ -33,12 +33,7 @@ import pytest
 # Load ValidChipId.py via importlib to bypass tensilelite/tensilelite_logic/__init__.py,
 # which transitively imports joblib / heavy build deps via Run.py.
 def _load_validchipid_mod():
-    p = Path(__file__).resolve().parents[2] / "tensilelite_logic" / "valid_chip_id.py"
-    spec = importlib.util.spec_from_file_location("ValidChipId_under_test", p)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("tensilelite.tensilelite_logic.valid_chip_id")
 
 
 def _install_rocisa_stub(monkeypatch):
