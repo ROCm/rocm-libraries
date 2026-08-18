@@ -22,6 +22,7 @@ targeting gfx1250) and are skipped when the toolchain is unavailable.
 """
 
 import copy
+import importlib
 import inspect
 import os
 import sys
@@ -1139,7 +1140,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    RunModule = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1628,7 +1629,7 @@ def _generateLogicData(monkeypatch, *architectureNames):
     from unittest.mock import MagicMock
 
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    RunModule = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
     libraries = {}
     parsed = []
@@ -1722,7 +1723,7 @@ def test_fallback_logic_is_still_merged_and_popped(
 def test_output_arch_names_is_identity_for_ordinary_archs():
     """An ordinary build maps every architecture to itself, so threading the map
     through the writers cannot move or rename a single non-stepping artifact."""
-    from tensilelite.TensileCreateLibrary.Run import computeOutputArchNames
+    from tensilelite.tensilelite_create_library.run import computeOutputArchNames
 
     assert computeOutputArchNames(["gfx942"]) == {"gfx942": "gfx942"}
     assert computeOutputArchNames(["gfx90a", "gfx942"]) == {
@@ -1737,7 +1738,7 @@ def test_output_arch_names_maps_a_stepping_to_its_own_subtree():
     """gfx1250v0 shares gfx1250's ISA, so its base is gfx1250, but the value is the
     stepping name: that is what redirects its master/mapping/shard writes into
     library/gfx1250v0/ while leaving the ISA-keyed internals on gfx1250."""
-    from tensilelite.TensileCreateLibrary.Run import computeOutputArchNames
+    from tensilelite.tensilelite_create_library.run import computeOutputArchNames
 
     assert computeOutputArchNames([GFX1250V0]) == {GFX1250: GFX1250V0}
     # The plain architecture is still the identity, so a v1 build is unchanged.
@@ -1749,7 +1750,7 @@ def test_output_arch_names_rejects_two_names_sharing_one_isa():
     for one ISA, so the map cannot pick one. Reject it here rather than silently
     resolve it by dict-insertion order, since the inverse the helper cache relies
     on would otherwise be ill-defined."""
-    from tensilelite.TensileCreateLibrary.Run import computeOutputArchNames
+    from tensilelite.tensilelite_create_library.run import computeOutputArchNames
 
     with pytest.raises(ValueError, match="share an ISA"):
         computeOutputArchNames([GFX1250, GFX1250V0])
@@ -1769,7 +1770,7 @@ def _run_createlibrary_to_writes(
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    RunModule = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1928,7 +1929,7 @@ def test_a_v0_build_forwards_the_output_map_into_both_code_object_builders(
     both buildAssemblyCodeObjectFiles and buildSourceCodeObjectFiles."""
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    RunModule = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
     seen = {}
 
