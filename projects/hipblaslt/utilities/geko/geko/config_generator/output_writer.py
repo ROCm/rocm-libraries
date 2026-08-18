@@ -293,7 +293,7 @@ def write_run_script(
 
     run_command = (
         f'PYTHONPATH={hip_s}/tensilelite/ '
-        f'{hip_s}/tensilelite/Tensile/bin/Tensile '
+        f'{hip_s}/tensilelite/tensilelite/bin/Tensile '
         f'$YAML $WORK_DIR {client_path_str} 2>&1 | tee $OUT'
     )
 
