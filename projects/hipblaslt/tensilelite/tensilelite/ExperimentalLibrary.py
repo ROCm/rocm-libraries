@@ -38,7 +38,7 @@ silently half-built):
              ``ProblemSizes`` left over from extracting a ``Prediction``-type
              source. Benchmarks on the target-arch GPU (fails fast if that
              arch is not present on the host).
-  build-lib  Run ``tensilelite.tensilelite_create_library --experimental`` to turn the
+  build-lib  Run ``tensilelite create-library --experimental`` to turn the
              staged logic into a loadable device library.
   patch-logic
              Override ``--set`` params on shipped ``3_LibraryLogic`` solutions
@@ -121,9 +121,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-# The TensileLite package directory that contains this module. Used to locate the
-# bin/Tensile launcher (``python -m tensilelite.tensilelite`` is intentionally disabled
-# upstream).
+# The TensileLite package directory that contains this module. Source-only
+# workflows use it to locate the surrounding hipBLASLt checkout.
 _TENSILE_PKG_DIR = Path(__file__).resolve().parent
 
 _SPDX_HEADER = (
@@ -922,13 +921,11 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
                 "without benchmarking is intentionally not supported by this tool.)"
             )
 
-    bin_tensile = _TENSILE_PKG_DIR / "bin" / "Tensile"
-    if not args.dry_run and not bin_tensile.is_file():
-        raise ExperimentalLibraryError(f"TensileLite launcher not found: {bin_tensile}")
-
     cmd = [
         args.python,
-        str(bin_tensile),
+        "-m",
+        "tensilelite",
+        "run",
         config,
         workdir,
         "--gpu-targets",
@@ -1009,13 +1006,14 @@ def _tensile_create_library_cmd(
     experimental: bool = True,
     jobs: Optional[int] = None,
 ) -> List[str]:
-    """Build the ``python -m tensilelite.tensilelite_create_library ...`` argv shared by
+    """Build the ``python -m tensilelite create-library ...`` argv shared by
     build-lib and patch-logic's buildability probe.
     """
     cmd = [
         python,
         "-m",
-        "tensilelite.tensilelite_create_library",
+        "tensilelite",
+        "create-library",
         logic_dir,
         out_dir,
         "HIP",
