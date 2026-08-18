@@ -26,8 +26,9 @@ namespace HostDataGenerationTest
     {
         template <typename T>
         constexpr bool isBlockScaledType
-            = std::is_same_v<T, FP4> || std::is_same_v<T, FP6> || std::is_same_v<T, BF6>
-              || std::is_same_v<T, FP8> || std::is_same_v<T, BF8>;
+            = std::is_same_v<
+                  T,
+                  FP4> || std::is_same_v<T, FP6> || std::is_same_v<T, BF6> || std::is_same_v<T, FP8> || std::is_same_v<T, BF8>;
 
         std::vector<uint8_t> bytes(roc::host_validation::Tensor const& tensor)
         {
