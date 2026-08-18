@@ -5,13 +5,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <roc/host_validation/tensor.hpp>
 
 namespace roc::host_validation {
-// Selects the source-value recipe for packed MX data. Scale selection is a
-// separate concern in MxGenerationProblem: scales may be derived from the data
-// recipe or supplied by an independent constant-valued recipe.
+// Selects the source-value recipe for packed MX data. Scale selection uses the
+// separate MxScaleGenerationMode policy.
 enum class MxGenerationMode {
     Bounded,
     BoundedAlternatingSign,
@@ -44,10 +42,24 @@ struct MxGenerationRecipe {
     double parameter1 = 1.0;
 };
 
+// Selects how block scales are produced, independently of the data recipe.
+// Derived chooses a scale from each block's generated source values. Every
+// other mode writes one scale-specific constant to all blocks and does not
+// change the generated data values.
+enum class MxScaleGenerationMode {
+    Derived,
+    // Smallest encoded finite scale: numerical zero where the scale format has
+    // one, otherwise its minimum positive value (for example E8M0 raw zero).
+    Minimum,
+    One,
+    Two,
+    Maximum,
+    NaN,
+};
+
 // Describes a rank-two, block-scaled MX tensor in its natural host layout.
-// Data generation and scale selection are conceptually independent: data
-// always controls source values, while scale optionally overrides the scale
-// recipe used for each block.
+// Data generation and scale selection are independent: data controls source
+// values, while scale controls only how each block scale is selected.
 struct MxGenerationProblem {
     // Retained for compatibility with the pre-component MX generator.
     static constexpr uint32_t defaultSeed = 1713573849U;
@@ -69,10 +81,9 @@ struct MxGenerationProblem {
     // Source values to quantize into dataType.
     MxGenerationRecipe data;
 
-    // Optional independent scale recipe. If absent, or equal to data, scales
-    // are derived from the data recipe. A different recipe is currently
-    // restricted to constant-valued modes.
-    std::optional<MxGenerationRecipe> scale;
+    // Scale-selection policy. Derived computes scales from data; constant modes
+    // use the same encoded scale for every block.
+    MxScaleGenerationMode scale = MxScaleGenerationMode::Derived;
 
     // Seed used by stochastic data and scale choices.
     uint32_t seed = defaultSeed;

@@ -75,6 +75,11 @@ bool ulp_positive_init()
 
 namespace hipblaslt_norm_dist
 {
+    // Constants from the XORWOW state initialization and Weyl sequence. These
+    // are algorithm parameters, not host-validation initialization seeds.
+    inline constexpr unsigned int xorwowSeedMultiplier = 69069u;
+    inline constexpr unsigned int xorwowWeylIncrement  = 362437u;
+
     struct XorwowState
     {
         unsigned int x[5];
@@ -87,10 +92,10 @@ namespace hipblaslt_norm_dist
         unsigned int value = seed;
         for(int index = 0; index < 5; ++index)
         {
-            value = value * 69069 + (index + 1);
+            value = value * xorwowSeedMultiplier + (index + 1);
             state->x[index] = value;
         }
-        state->counter = seed ^ 362437;
+        state->counter = seed ^ xorwowWeylIncrement;
     }
 
     __host__ __device__ inline unsigned int
@@ -105,7 +110,7 @@ namespace hipblaslt_norm_dist
         temporary ^= temporary >> 2;
         temporary ^= temporary << 1;
         state->x[0] = temporary ^ first ^ (first << 4);
-        state->counter += 362437;
+        state->counter += xorwowWeylIncrement;
         return state->x[0] + state->counter;
     }
 
@@ -972,7 +977,9 @@ void hipblaslt_init_device(ABC_dims                 abc,
             break;
         case hipblaslt_initialization::norm_dist:
             {
-                constexpr uint32_t kNormDistSeed = 69069u;
+                constexpr uint32_t kNormDistSeed
+                    = static_cast<uint32_t>(
+                        hipblaslt::host_validation::defaultInitializationSeed);
                 fill_batch(A, M, N, lda, stride, batch_count, [kNormDistSeed] __host__ __device__ (size_t idx) -> T {
                                return norm_dist<T>(kNormDistSeed, idx);
                            });
@@ -982,7 +989,9 @@ void hipblaslt_init_device(ABC_dims                 abc,
             if constexpr(std::is_floating_point_v<T> || std::is_same_v<T, hipblasLtHalf>
                          || std::is_same_v<T, hip_bfloat16>)
             {
-                constexpr unsigned int kNormDistOneSpecialSeed = 12345u;
+                constexpr unsigned int kNormDistOneSpecialSeed
+                    = static_cast<unsigned int>(
+                        hipblaslt::host_validation::oneSpecialInitializationSeed);
                 // Match integer_exact B / fp16_accumulator_probe B: stride==0 means packed batches;
                 // fill_batch must see a non-zero stride spanning each slab so special_idx and the
                 // Gaussian fill cover the full strided buffer (see testing_matmul.hpp size_*).

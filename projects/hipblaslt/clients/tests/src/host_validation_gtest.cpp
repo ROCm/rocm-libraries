@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <utility>
 #include <vector>
 
 TEST(HostValidationTensorStorage, PooledPinnedAllocatorBacksTensorAliases)
@@ -37,6 +38,35 @@ TEST(HostValidationTensorStorage, PooledPinnedAllocatorBacksTensorAliases)
     clone.storeFrom({1}, 11.0f);
     EXPECT_EQ(tensor.loadAs<float>({1}), 7.0f);
     EXPECT_EQ(clone.loadAs<float>({1}), 11.0f);
+}
+
+TEST(HostValidationTypeBridge, UsesScalarTypeAsTheExternalTypeConversionHub)
+{
+    using hipblaslt::host_validation::hipDataTypeForScalarType;
+    using hipblaslt::host_validation::scalarType;
+    using roc::host_validation::ScalarType;
+
+    constexpr std::array mappings{
+        std::pair{ScalarType::Float4E2M1,
+                  static_cast<hipDataType>(HIP_R_4F_E2M1_EXT)},
+        std::pair{ScalarType::Float6E2M3,
+                  static_cast<hipDataType>(HIP_R_6F_E2M3_EXT)},
+        std::pair{ScalarType::Float6E3M2,
+                  static_cast<hipDataType>(HIP_R_6F_E3M2_EXT)},
+        std::pair{ScalarType::Float8E4M3, HIP_R_8F_E4M3},
+        std::pair{ScalarType::Float8E5M2, HIP_R_8F_E5M2},
+        std::pair{ScalarType::E8M0, HIP_R_8F_UE8M0},
+        std::pair{ScalarType::E5M3,
+                  static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)},
+    };
+    for(const auto& [scalar, hip] : mappings)
+    {
+        EXPECT_EQ(hipDataTypeForScalarType(scalar), hip);
+        EXPECT_EQ(scalarType(hip), scalar);
+    }
+
+    EXPECT_EQ(hipDataTypeForScalarType(ScalarType::E4M3), HIP_R_8F_E4M3);
+    EXPECT_THROW(hipDataTypeForScalarType(ScalarType::Int12), std::invalid_argument);
 }
 
 TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues)
