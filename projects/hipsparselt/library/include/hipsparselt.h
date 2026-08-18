@@ -91,7 +91,7 @@
 // clang-format off
 
 #if defined(__HIP_PLATFORM_AMD__)
-/*! \ingroup types_module
+/*!
  *  \brief Handle to the hipSPARSELt library context queue.
  *
  *  \details
@@ -102,7 +102,7 @@
  */
 typedef struct hipsparseLtHandle_t {uint8_t data[11024];} hipsparseLtHandle_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Descriptor of the matrix.
  *
  *  \details
@@ -113,7 +113,7 @@ typedef struct hipsparseLtHandle_t {uint8_t data[11024];} hipsparseLtHandle_t;
  */
 typedef struct hipsparseLtMatDescriptor_t {uint8_t data[11024];} hipsparseLtMatDescriptor_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Descriptor of the matrix multiplication operation.
  *
  *  \details
@@ -123,7 +123,7 @@ typedef struct hipsparseLtMatDescriptor_t {uint8_t data[11024];} hipsparseLtMatD
  */
 typedef struct hipsparseLtMatmulDescriptor_t {uint8_t data[11024];} hipsparseLtMatmulDescriptor_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Descriptor of the matrix multiplication algorithm.
  *
  *  \details
@@ -131,7 +131,7 @@ typedef struct hipsparseLtMatmulDescriptor_t {uint8_t data[11024];} hipsparseLtM
  */
 typedef struct hipsparseLtMatmulAlgSelection_t {uint8_t data[11024];} hipsparseLtMatmulAlgSelection_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Descriptor of the matrix multiplication execution plan
  *
  *  \details
@@ -150,7 +150,7 @@ typedef struct {uint8_t data[11024];} hipsparseLtMatmulAlgSelection_t;
 typedef struct {uint8_t data[11024];} hipsparseLtMatmulPlan_t;
 #endif
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the sparsity of the structured matrix.
  *
  *  \details
@@ -164,7 +164,7 @@ typedef enum {
                                         - 2:4 for ``half``, ``bfloat16``, and ``int``. */
 } hipsparseLtSparsity_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the additional attributes of a matrix descriptor.
  *
  *  \details
@@ -176,7 +176,7 @@ typedef enum {
    HIPSPARSELT_MAT_BATCH_STRIDE,    /**< Stride between consecutive matrices in a batch expressed in terms of matrix elements. READ/WRITE. */
 } hipsparseLtMatDescAttribute_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the compute precision modes of the matrix.
  *
  *  \details
@@ -191,7 +191,7 @@ typedef enum {
                                        CUDA backend only. */
 } hipsparseLtComputetype_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the additional attributes of a matrix multiplication descriptor.
  *
  *  \details
@@ -224,7 +224,7 @@ typedef enum {
    HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC = 19,         /**< Pointer to the gate residual matrix.descriptor */
 } hipsparseLtMatmulDescAttribute_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the algorithm for matrix-matrix multiplication.
  *
  *  \details
@@ -234,7 +234,7 @@ typedef enum {
    HIPSPARSELT_MATMUL_ALG_DEFAULT
 } hipsparseLtMatmulAlg_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the matrix multiplication algorithm attributes.
  *
  *  \details
@@ -250,7 +250,7 @@ typedef enum {
    HIPSPARSELT_MATMUL_SPLIT_K_BUFFERS = 5,
 } hipsparseLtMatmulAlgAttribute_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the pruning algorithm to apply to the structured matrix before the compression.
  *
  *  \details
@@ -261,7 +261,7 @@ typedef enum {
    HIPSPARSELT_PRUNE_SPMMA_STRIP = 1, /**< Zero out two elements in a 1x4 strip. Non-zero elements have the maximum L1-norm value in all combinations in the strip.*/
 } hipsparseLtPruneAlg_t;
 
-/*! \ingroup types_module
+/*!
  *  \brief Specify the Split-K mode value.
  *
  *  \details
@@ -278,7 +278,7 @@ typedef enum {
 extern "C" {
 #endif
 
-/*! \ingroup aux_module
+/*!
  *  \brief Initialize hipSPARSELt for the current HIP device.
  *
  *  \details
@@ -289,7 +289,7 @@ extern "C" {
 HIPSPARSELT_EXPORT
 void hipsparseLtInitialize();
 
-/*! \ingroup library_module
+/*!
  *  \brief Retrieve the version number of the hipSPARSELt library.
  *
  *  \details
@@ -306,7 +306,7 @@ void hipsparseLtInitialize();
 HIPSPARSELT_EXPORT
 hipsparseStatus_t hipsparseLtGetVersion(const hipsparseLtHandle_t* handle, int* version);
 
-/*! \ingroup library_module
+/*!
  *  \brief Retrieve the value of the requested property.
  *
  *  \details
@@ -328,7 +328,7 @@ hipsparseStatus_t hipsparseLtGetGitRevision(hipsparseLtHandle_t handle, char* re
 HIPSPARSELT_EXPORT
 hipsparseStatus_t hipsparseLtGetArchName(char** archName);
 
-/*! \ingroup library_module
+/*!
  *  \brief Create a hipSPARSELt handle
  *
  *  \details
@@ -347,7 +347,7 @@ hipsparseStatus_t hipsparseLtGetArchName(char** archName);
 HIPSPARSELT_EXPORT
 hipsparseStatus_t hipsparseLtInit(hipsparseLtHandle_t* handle);
 
-/*! \ingroup library_module
+/*!
  *  \brief Destroy a hipSPARSELt handle.
  *
  *  \details
@@ -364,7 +364,7 @@ HIPSPARSELT_EXPORT
 hipsparseStatus_t hipsparseLtDestroy(const hipsparseLtHandle_t* handle);
 
 /* matrix descriptor */
-/*! \ingroup matrix_desc_module
+/*!
  *  \brief Create a descriptor for a dense matrix
  *  \details
  *  \p hipsparseLtDenseDescriptorInit creates and initializes a matrix descriptor.
@@ -401,7 +401,7 @@ hipsparseStatus_t hipsparseLtDenseDescriptorInit(const hipsparseLtHandle_t*  han
                                                  hipDataType                 valueType,
                                                  hipsparseOrder_t            order);
 
-/*! \ingroup matrix_desc_module
+/*!
  *  \brief Create a descriptor for a structured matrix.
  *  \details
  *  \p hipsparseLtStructuredDescriptorInit creates and initializes a matrix descriptor.
@@ -442,7 +442,7 @@ hipsparseStatus_t hipsparseLtStructuredDescriptorInit(const hipsparseLtHandle_t*
                                                       hipsparseOrder_t            order,
                                                       hipsparseLtSparsity_t       sparsity);
 
-/*! \ingroup matrix_desc_module
+/*!
  *  \brief Destroy a matrix descriptor.
  *
  *  \details
@@ -458,7 +458,7 @@ hipsparseStatus_t hipsparseLtStructuredDescriptorInit(const hipsparseLtHandle_t*
 HIPSPARSELT_EXPORT
 hipsparseStatus_t hipsparseLtMatDescriptorDestroy(const hipsparseLtMatDescriptor_t* matDescr);
 
-/*! \ingroup matrix_desc_module
+/*!
  *  \brief Specify the matrix attribute of a matrix descriptor.
  *
  *  \details
@@ -486,7 +486,7 @@ hipsparseStatus_t hipsparseLtMatDescSetAttribute(const hipsparseLtHandle_t*    h
                                                  const void*                   data,
                                                  size_t                        dataSize);
 
-/*! \ingroup matrix_desc_module
+/*!
  *  \brief Get the matrix type of a matrix descriptor.
  *
  *  \details
@@ -515,7 +515,7 @@ hipsparseStatus_t hipsparseLtMatDescGetAttribute(const hipsparseLtHandle_t*     
                                                  size_t                            dataSize);
 
 /* matmul descriptor */
-/*! \ingroup matmul_desc_module
+/*!
  *  \brief  Initializes the matrix multiplication descriptor.
  *
  *  \details
@@ -555,7 +555,7 @@ hipsparseStatus_t hipsparseLtMatmulDescriptorInit(const hipsparseLtHandle_t*    
                                                   const hipsparseLtMatDescriptor_t* matD,
                                                   hipsparseLtComputetype_t          computeType);
 
-/*! \ingroup matmul_desc_module
+/*!
  *  \brief Specify the matrix attribute of a matrix descriptor.
  *
  *  \details
@@ -585,7 +585,7 @@ hipsparseStatus_t
                                       const void*                      data,
                                       size_t                           dataSize);
 
-/*! \ingroup matmul_desc_module
+/*!
  *  \brief Get the matrix type of a matrix descriptor.
  *
  *  \details
@@ -616,7 +616,7 @@ hipsparseStatus_t
                                       size_t                               dataSize);
 
 /* algorithm selection */
-/*! \ingroup matmul_algo_module
+/*!
  *  \brief Initializes the algorithm selection descriptor.
  *  \details
  *  \p hipsparseLtMatmulAlgSelectionInit creates a algorithm selection descriptor.
@@ -640,7 +640,7 @@ hipsparseStatus_t
                                       const hipsparseLtMatmulDescriptor_t* matmulDescr,
                                       hipsparseLtMatmulAlg_t               alg);
 
-/*! \ingroup matmul_algo_module
+/*!
  *  \brief Destroy the algorithm selection descriptor.
  *  \details
  *  \p hipsparseLtMatmulAlgSelectionDestroy releases the resources used by an instance
@@ -656,7 +656,7 @@ hipsparseStatus_t
 HIPSPARSELT_EXPORT
 hipsparseStatus_t hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection);
 
-/*! \ingroup matmul_algo_module
+/*!
  *  \brief Specify the algorithm attribute of a algorithm selection descriptor.
  *
  *  \details
@@ -685,7 +685,7 @@ hipsparseStatus_t hipsparseLtMatmulAlgSetAttribute(const hipsparseLtHandle_t*   
                                                    const void*                      data,
                                                    size_t                           dataSize);
 
-/*! \ingroup matmul_algo_module
+/*!
  *  \brief Get the specific algorithm attribute from the algorithm selection descriptor.
  *
  *  \details
@@ -717,7 +717,7 @@ hipsparseStatus_t
                                      size_t                                 dataSize);
 
 /* matmul plan */
-/*! \ingroup matmul_module
+/*!
  *  \brief Determines the required workspace size.
  *  \details
  *  \p hipsparseLtMatmulGetWorkspace determines the required workspace size
@@ -738,7 +738,7 @@ hipsparseStatus_t hipsparseLtMatmulGetWorkspace(const hipsparseLtHandle_t*     h
                                                 const hipsparseLtMatmulPlan_t* plan,
                                                 size_t*                        workspaceSize);
 
-/*! \ingroup matmul_module
+/*!
  *  \brief Initializes the matrix multiplication plan descriptor.
  *  \details
  *  \p hipsparseLtMatmulPlanInit creates a matrix multiplication plan descriptor.
@@ -762,7 +762,7 @@ hipsparseStatus_t hipsparseLtMatmulPlanInit(const hipsparseLtHandle_t*          
                                             const hipsparseLtMatmulDescriptor_t*   matmulDescr,
                                             const hipsparseLtMatmulAlgSelection_t* algSelection);
 
-/*! \ingroup matmul_module
+/*!
  *  \brief Destroy a matrix multiplication plan descriptor.
  *  \details
  *  \p hipsparseLtMatmulPlanDestroy releases the resources used by an instance
@@ -779,7 +779,7 @@ HIPSPARSELT_EXPORT
 hipsparseStatus_t hipsparseLtMatmulPlanDestroy(const hipsparseLtMatmulPlan_t* plan);
 
 /* matmul execution */
-/*! \ingroup matmul_module
+/*!
  *  \brief Sparse matrix and dense matrix multiplication.
  *
  *  \details
@@ -837,7 +837,7 @@ hipsparseStatus_t hipsparseLtMatmul(const hipsparseLtHandle_t*     handle,
                                     hipStream_t*                   streams,
                                     int32_t                        numStreams);
 
-/*! \ingroup matmul_module
+/*!
  *  \brief Sparse matrix and dense matrix multiplication
  *
  *  \details
@@ -906,7 +906,7 @@ hipsparseStatus_t hipsparseLtMatmulSearch(const hipsparseLtHandle_t* handle,
 
 /* helper */
 // prune
-/*! \ingroup helper_module
+/*!
  *  \brief Prune a dense matrix.
  *
  *  \details
@@ -940,7 +940,7 @@ hipsparseStatus_t hipsparseLtSpMMAPrune(const hipsparseLtHandle_t*           han
                                         hipsparseLtPruneAlg_t                pruneAlg,
                                         hipStream_t                          stream);
 
-/*! \ingroup helper_module
+/*!
  *  \brief Check the correctness of the pruning structure for a given matrix.
  *
  *  \details
@@ -969,7 +969,7 @@ hipsparseStatus_t hipsparseLtSpMMAPruneCheck(const hipsparseLtHandle_t*         
                                              int*                                 d_valid,
                                              hipStream_t                          stream);
 
-/*! \ingroup helper_module
+/*!
  *  \brief Prune a dense matrix.
  *
  *  \details
@@ -1010,7 +1010,7 @@ hipsparseStatus_t hipsparseLtSpMMAPrune2(const hipsparseLtHandle_t*        handl
                                          hipsparseLtPruneAlg_t             pruneAlg,
                                          hipStream_t                       stream);
 
-/*! \ingroup helper_module
+/*!
  *  \brief Check the correctness of the pruning structure for a given matrix.
  *
  *  \details
@@ -1046,7 +1046,7 @@ hipsparseStatus_t hipsparseLtSpMMAPruneCheck2(const hipsparseLtHandle_t*        
                                               hipStream_t                       stream);
 
 // compression
-/*! \ingroup helper_module
+/*!
  *  \brief Provide the size of the compressed matrix.
  *
  *  \details
@@ -1071,7 +1071,7 @@ hipsparseStatus_t hipsparseLtSpMMACompressedSize(const hipsparseLtHandle_t*     
                                                  size_t*                        compressedSize,
                                                  size_t*                        compressBufferSize);
 
-/*! \ingroup helper_module
+/*!
  *  \brief Compress a dense matrix to structured matrix.
  *
  *  \details
@@ -1104,7 +1104,7 @@ hipsparseStatus_t hipsparseLtSpMMACompress(const hipsparseLtHandle_t*     handle
                                            void*                          d_compressBuffer,
                                            hipStream_t                    stream);
 
-/*! \ingroup helper_module
+/*!
  *  \brief Provide the size of the compressed matrix.
  *
  *  \details
@@ -1130,7 +1130,7 @@ hipsparseStatus_t hipsparseLtSpMMACompressedSize2(const hipsparseLtHandle_t*    
                                                   size_t*                           compressedSize,
                                                   size_t* compressBufferSize);
 
-/*! \ingroup helper_module
+/*!
  *  \brief Compress a dense matrix to structured matrix.
  *
  *  \details

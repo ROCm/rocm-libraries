@@ -145,10 +145,11 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
-            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
-            auto        hasTHModifier    = rocIsa::getInstance().getAsmCaps()["HasTHModifier"];
-            auto        hasNVModifier    = rocIsa::getInstance().getAsmCaps()["HasNVModifier"];
+            const auto& asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasDLCModifier   = capOrDefault(asmCaps, "HasDLCModifier");
+            auto        hasSCOPEModifier = capOrDefault(asmCaps, "HasSCOPEModifier");
+            auto        hasTHModifier    = capOrDefault(asmCaps, "HasTHModifier");
+            auto        hasNVModifier    = capOrDefault(asmCaps, "HasNVModifier");
             std::string kStr;
             if(offset12 != 0)
             {
@@ -242,8 +243,9 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
-            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
+            const auto& asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasDLCModifier   = capOrDefault(asmCaps, "HasDLCModifier");
+            auto        hasSCOPEModifier = capOrDefault(asmCaps, "HasSCOPEModifier");
             std::string kStr;
             if(offset != 0)
             {
@@ -337,12 +339,12 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        asmCaps          = rocIsa::getInstance().getAsmCaps();
-            auto        hasDLCModifier   = asmCaps["HasDLCModifier"];
-            auto        hasSCOPEModifier = asmCaps["HasSCOPEModifier"];
-            auto        hasNTModifier    = asmCaps["HasNTModifier"];
-            auto        hasTHModifier    = asmCaps["HasTHModifier"];
-            auto        hasNVModifier    = asmCaps["HasNVModifier"];
+            const auto& asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasDLCModifier   = capOrDefault(asmCaps, "HasDLCModifier");
+            auto        hasSCOPEModifier = capOrDefault(asmCaps, "HasSCOPEModifier");
+            auto        hasNTModifier    = capOrDefault(asmCaps, "HasNTModifier");
+            auto        hasTHModifier    = capOrDefault(asmCaps, "HasTHModifier");
+            auto        hasNVModifier    = capOrDefault(asmCaps, "HasNVModifier");
             std::string kStr;
             if(offen)
             {
@@ -435,10 +437,11 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
-            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
-            auto        hasTHModifier    = rocIsa::getInstance().getAsmCaps()["HasTHModifier"];
-            auto        hasNVModifier    = rocIsa::getInstance().getAsmCaps()["HasNVModifier"];
+            const auto& asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasDLCModifier   = capOrDefault(asmCaps, "HasDLCModifier");
+            auto        hasSCOPEModifier = capOrDefault(asmCaps, "HasSCOPEModifier");
+            auto        hasTHModifier    = capOrDefault(asmCaps, "HasTHModifier");
+            auto        hasNVModifier    = capOrDefault(asmCaps, "HasNVModifier");
             std::string kStr;
             if(offset != 0)
             {
@@ -531,15 +534,18 @@ namespace rocisa
         int              row_bcast;
         int              bound_ctrl;
         std::vector<int> quad_perm;
+        int              row_xmask;
 
         DPPModifiers(int                      row_shr    = -1,
                      int                      row_bcast  = -1,
                      int                      bound_ctrl = -1,
-                     const std::vector<int>&  quad_perm  = {})
+                     const std::vector<int>&  quad_perm  = {},
+                     int                      row_xmask  = -1)
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
             , quad_perm(quad_perm)
+            , row_xmask(row_xmask)
         {
         }
 
@@ -559,6 +565,8 @@ namespace rocisa
                 kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
             if(!quad_perm.empty())
                 kStr += " quad_perm:" + vectorToString(quad_perm);
+            if(row_xmask != -1)
+                kStr += " row_xmask:" + std::to_string(row_xmask);
             return kStr;
         }
 
@@ -1177,7 +1185,7 @@ namespace rocisa
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
             std::string msbStr = "";
-            if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v")
+            if(capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasVgprMSB") && regType == "v")
             {
                 setMsb();
                 if(msb > 0)

@@ -14,7 +14,9 @@
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
@@ -216,8 +218,8 @@ class Gfx1250HazardPass : public Pass {
    public:
     static char ID;
 
-    Gfx1250HazardPass(std::vector<Function*> functions, bool enableXcntDrainProfile)
-        : functions(std::move(functions)), enableXcntDrainProfile(enableXcntDrainProfile) {}
+    explicit Gfx1250HazardPass(bool enableXcntDrainProfile)
+        : enableXcntDrainProfile(enableXcntDrainProfile) {}
 
     const char* getName() const override {
         return "Gfx1250HazardPass";
@@ -237,12 +239,7 @@ class Gfx1250HazardPass : public Pass {
 
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
-        if (!functions.empty()) {
-            for (Function* f : functions)
-                if (f) runOnFunction(*f, archId, *profile);
-        } else {
-            runOnFunction(func, archId, *profile);
-        }
+        runOnFunction(func, archId, *profile);
         profile->print();
         return preserveCFGAnalyses();
     }
@@ -382,6 +379,7 @@ class Gfx1250HazardPass : public Pass {
         addSources(state, *inst);
     }
 
+   public:
     static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile) {
         profile.beginFunction(func);
 
@@ -402,16 +400,48 @@ class Gfx1250HazardPass : public Pass {
         }
     }
 
-    std::vector<Function*> functions;
+   private:
     bool enableXcntDrainProfile = false;
 };
 
 char Gfx1250HazardPass::ID = 0;
+
+// Runs the per-function hazard fix under one shared profile so an enabled profile
+// aggregates all functions. Only needed for profiling.
+class Gfx1250HazardModulePass : public ModulePass {
+   public:
+    explicit Gfx1250HazardModulePass(bool enableXcntDrainProfile)
+        : enableXcntDrainProfile(enableXcntDrainProfile) {}
+
+    const char* getName() const override {
+        return "Gfx1250HazardModulePass";
+    }
+
+    PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
+                          ModuleAnalysisManager& /*MAM*/) override {
+        if (!passCtx.getAsmCapsConfig().requiresXCntForVolatileVMEM)
+            return PreservedAnalyses::all();
+
+        const auto arch = passCtx.getGemmTileConfig().arch;
+        const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+        auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
+        for (Function* f : M.getFunctions())
+            if (f && !f->empty()) Gfx1250HazardPass::runOnFunction(*f, archId, *profile);
+        profile->print();
+        return PreservedAnalyses::all();
+    }
+
+   private:
+    bool enableXcntDrainProfile;
+};
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createGfx1250HazardPass(std::vector<Function*> functions,
-                                              bool enableXcntDrainProfile) {
-    return std::make_unique<Gfx1250HazardPass>(std::move(functions), enableXcntDrainProfile);
+std::unique_ptr<Pass> createGfx1250HazardPass(bool enableXcntDrainProfile) {
+    return std::make_unique<Gfx1250HazardPass>(enableXcntDrainProfile);
+}
+
+std::unique_ptr<ModulePass> createGfx1250HazardModulePass(bool enableXcntDrainProfile) {
+    return std::make_unique<Gfx1250HazardModulePass>(enableXcntDrainProfile);
 }
 }  // namespace stinkytofu
