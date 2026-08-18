@@ -7,7 +7,7 @@
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
-#include "engines/plans/MiopenReluPlanBuilder.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -49,7 +49,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
-             engine->addPlanBuilder(std::make_unique<MiopenReluPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
 
              return engine;
          }},
@@ -64,7 +64,6 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              // Only include conv plan builders - batchnorm doesn't support deterministic mode
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
-
              return engine;
          }}
 

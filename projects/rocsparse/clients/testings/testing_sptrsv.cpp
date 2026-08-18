@@ -268,8 +268,9 @@ void cpu_csrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
                             csr_row_ptr,
@@ -282,9 +283,8 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_usolve(M,
                             alpha,
                             csr_row_ptr,
@@ -297,6 +297,7 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose
@@ -327,8 +328,9 @@ void cpu_csrsv(rocsparse_operation  trans,
             }
         }
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -341,9 +343,8 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_lsolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -356,6 +357,7 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
