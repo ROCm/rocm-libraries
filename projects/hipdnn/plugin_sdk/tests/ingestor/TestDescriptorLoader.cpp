@@ -445,6 +445,31 @@ TEST(TestDescriptorLoader, KeepsPerArchStandaloneKernelsSharingOneId)
     EXPECT_EQ(packs[1].kernels.back().source.sourceFile, "Kernel_gfx942.cpp");
 }
 
+/// The composition the provider actually runs, and the only place both halves of the
+/// per-arch change meet: the two tests above stop at resolveDescriptorSets, and the
+/// state manager's own suite builds its packs by hand. Two shards of one pack are the
+/// same kernel built twice, so they complete to identical tuples; engine-wide tuple
+/// uniqueness throws on the second, and the catch in loadValidatedDescriptorSets turns
+/// that into a dropped engine rather than a dropped pack -- with every test above green.
+TEST(TestDescriptorLoader, KeepsPerArchShardsSharingAMetadataTupleThroughTheStateManagerProbe)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_probe"));
+    for(const std::string arch : {"gfx90a", "gfx942"})
+    {
+        auto documents = makeSetDocuments('1', "test:sharded_probe");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({arch});
+        pack.at("kernelDescriptors")[0]["kernel_source"]["source_file"] = "Kernel_" + arch + ".cpp";
+        writeDocuments(dir.path() / arch, documents);
+    }
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().packs.size(), 2u);
+}
+
 /// The empty-arch fallback: a UKD declaring no arch is the shared definition every pack
 /// reaches, which is how one kernel file serves packs of several engines.
 TEST(TestDescriptorLoader, ResolvesAnArchIndependentKernelFromAnArchSpecificPack)
