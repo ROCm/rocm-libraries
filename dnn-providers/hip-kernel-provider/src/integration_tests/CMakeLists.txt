@@ -71,6 +71,15 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     )
 endif()
 
+if(ENABLE_HIP_FLASH2_ENGINE)
+    if(NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "ENABLE_HIP_FLASH2_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable Flash2 integration tests.")
+    else()
+        add_subdirectory(hip_flash2_engine)
+    endif()
+endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
