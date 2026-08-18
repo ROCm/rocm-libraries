@@ -14,7 +14,7 @@ Calling the script without any arguments
 ```
 ./perfoptim-suite
 ```
-runs the default configuration which executes all available functions with real double precision and all the size cases.
+runs the default configuration which executes all available functions with real single and double precision and all the size cases.
 
 Options can be passed to the script as arguments to modify its behaviour. The available options are:
 ```
@@ -31,10 +31,10 @@ getrf             -> LU factorization
 getrfBatch        -> LU factorization batch version
 getrfNpvt         -> LU factorization without pivoting
 getrfNpvtBatch    -> LU factorization without pivoting batch version
-getrs             -> linear systemn solver with LU
-getrsBatch        -> linear systemn solver with LU batch version
-getrsNpvt         -> linear systemn solver with no pivoting LU
-getrsNpvtBatch    -> linear systemn solver with no pivoting LU batch version
+getrs             -> linear system solver with LU
+getrsBatch        -> linear system solver with LU batch version
+getrsNpvt         -> linear system solver with no pivoting LU
+getrsNpvtBatch    -> linear system solver with no pivoting LU batch version
 getriBatch        -> matrix inversion with LU batch version
 getriOOPBatch     -> Out-of-place matrix inversion with LU batch version
 trtri             -> triangular matrix inversion

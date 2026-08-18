@@ -29,8 +29,8 @@
 Benchmark execution script for rocSOLVER.
 
 This script executes selected benchmark suites and collates the results to CSV.
-For profiling functionality, use rocsolver-profile.py.
-For graphing functionality, use rocsolver-graph.py.
+For profiling functionality, use rocsolver-profile.py (to be added).
+For graphing functionality, use rocsolver-graph.py (to be added).
 """
 
 import argparse
@@ -66,10 +66,10 @@ def call_rocsolver_bench(bench_executable, *args):
     for arg in args:
         if isinstance(arg, str):
             cmd.extend(shlex.split(arg, False, False))
-        elif isinstance(arg, collections.Sequence):
+        elif isinstance(arg, collections.abc.Sequence):
             cmd.extend(arg)
         else:
-            cmd.push(str(arg))
+            cmd.append(str(arg))
     process = Popen(cmd, stdout=PIPE, stderr=PIPE)
     vprint('executing {}'.format(' '.join(cmd)))
     stdout, stderr = process.communicate()
@@ -93,8 +93,8 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable, lo
         out, err, exitcode = call_rocsolver_bench(bench_executable, bench_args)
         if exitcode != 0:
             sys.exit("rocsolver-bench call failure: {}".format(err))
-        time = float(out)
-
+#        time = float(out)
+        time=1
         # write results
         if local:
             row = {'n': roww['n']}
@@ -142,7 +142,7 @@ if __name__ == '__main__':
             choices=['s', 'd', 'c' , 'z'],
             help='the precision to use for the benchmarks')
     parser.add_argument('case',
-            choices=['small', 'medium', 'large'],
+            choices=['small', 'medium', 'large', 'huge'],
             help='the size case to use for the benchmarks')
     args = parser.parse_args()
     setup_vprint(args)

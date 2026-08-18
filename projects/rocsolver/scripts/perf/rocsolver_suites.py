@@ -127,7 +127,7 @@ def potrs_suite(*, suite, precision, sizenormal, sizebatch):
             for s in size:
                 if s < 4000: ld = s + 1
                 else: ld = s + 64
-                if nv == 'half_n': nrhs = s/2
+                if nv == 'half_n': nrhs = s//2
                 elif nv == 'n': nrhs = s 
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'nrhs': nv, 'n': s}
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
@@ -151,7 +151,7 @@ def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
             for s, bc in size:
                 if s < 4000: ld = s + 1
                 else: ld = s + 64
-                if nv == 'half_n': nrhs = s/2
+                if nv == 'half_n': nrhs = s//2
                 elif nv == 'n': nrhs = s
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'uplo': shape, 'nrhs': nv, 'n': s}
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --uplo {upl} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
@@ -208,7 +208,7 @@ def sytrs_suite(*, suite, precision, sizenormal, sizebatch):
             for s in size:
                 if s < 4000: ld = s + 1
                 else: ld = s + 64
-                if nv == 'half_n': nrhs = s/2
+                if nv == 'half_n': nrhs = s//2
                 elif nv == 'n': nrhs = s
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'nrhs': nv, 'n': s}
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
@@ -278,7 +278,7 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
         for s in size:
             if s < 4000: ld = s + 1
             else: ld = s + 64
-            if nv == 'half_n': nrhs = s/2
+            if nv == 'half_n': nrhs = s//2
             elif nv == 'n': nrhs = s 
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': nv, 'n': s}
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
@@ -296,7 +296,7 @@ def getrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
         for s, bc in size:
             if s < 4000: ld = s + 1
             else: ld = s + 64
-            if nv == 'half_n': nrhs = s/2
+            if nv == 'half_n': nrhs = s//2
             elif nv == 'n': nrhs = s
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
@@ -314,7 +314,7 @@ def getrsNpvt_suite(*, suite, precision, sizenormal, sizebatch):
         for s in size:
             if s < 4000: ld = s + 1
             else: ld = s + 64
-            if nv == 'half_n': nrhs = s/2
+            if nv == 'half_n': nrhs = s//2
             elif nv == 'n': nrhs = s
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': nv, 'n': s}
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
@@ -332,7 +332,7 @@ def getrsNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
         for s, bc in size:
             if s < 4000: ld = s + 1
             else: ld = s + 64
-            if nv == 'half_n': nrhs = s/2
+            if nv == 'half_n': nrhs = s//2
             elif nv == 'n': nrhs = s
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
@@ -433,7 +433,6 @@ def geqrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
 
 
 def cholqr_suite(*, suite, precision, sizenormal, sizebatch):
-#(TODO: this function needs to be added to rocsolver)
     """
     CHOLQR tests are run, for the given precision and number of rows,
     with 160 columns and also for the square case (#rows = #columns).
@@ -457,7 +456,6 @@ def cholqr_suite(*, suite, precision, sizenormal, sizebatch):
 
 
 def cholqrBatch_suite(*, suite, precision, sizenormal, sizebatch):
-#(TODO: this function needs to be added to rocsolver)
     """
     CHOLQRBATCH tests are run, for the given precision and number of rows,
     with 26 columns and also for the square case (#rows = #columns)
@@ -503,7 +501,7 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
             for s in size:
                 if s < 4000: ld = s + 1
                 else: ld = s + 64
-                if nv == 'half_n': nrhs = s/2
+                if nv == 'half_n': nrhs = s//2
                 elif nv == 'n': nrhs = s
                 if s >= 160:
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'trans': ops, 'nrhs': nv, 'n': s}
@@ -533,7 +531,7 @@ def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
             for s, bc in size:
                 if s < 4000: ld = s + 1
                 else: ld = s + 64
-                if nv == 'half_n': nrhs = s/2
+                if nv == 'half_n': nrhs = s//2
                 elif nv == 'n': nrhs = s
                 if s >= 26:
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'trans': ops, 'nrhs': nv, 'n': s}
@@ -594,7 +592,7 @@ def larft_suite(*, suite, precision, sizenormal, sizebatch):
     for nk in ['one', 'half_n', 'n']:
         k = 1
         for s in size:
-            if nk == 'half_n': k = s/2
+            if nk == 'half_n': k = s//2
             elif nk == 'n': k = s
             if s < 4000: ld1 = s + 1
             else: ld1 = s + 64
@@ -955,8 +953,8 @@ SUITES = {
     # Over-determined linear systems (least-squares)
     'geqrf': geqrf_suite,
     'geqrfBatch': geqrfBatch_suite,
-    'cholqr': cholqr_suite,                     #(TODO: needs to be added to rocsolver)
-    'cholqrBatch': cholqrBatch_suite,           #(TODO: needs to be added to rocsolver)
+    'cholqr': cholqr_suite,                     
+    'cholqrBatch': cholqrBatch_suite,           
     'gels': gels_suite,                          
     'gelsBatch': gelsBatch_suite,               
     'xxgqr': xxgqr_suite,

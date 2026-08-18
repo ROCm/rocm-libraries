@@ -16,10 +16,10 @@
 # getrfBatch        -> LU factorization batch version
 # getrfNpvt         -> LU factorization without pivoting
 # getrfNpvtBatch    -> LU factorization without pivoting batch version
-# getrs             -> linear systemn solver with LU
-# getrsBatch        -> linear systemn solver with LU batch version
-# getrsNpvt         -> linear systemn solver with no pivoting LU 
-# getrsNpvtBatch    -> linear systemn solver with no pivoting LU batch version
+# getrs             -> linear system solver with LU
+# getrsBatch        -> linear system solver with LU batch version
+# getrsNpvt         -> linear system solver with no pivoting LU 
+# getrsNpvtBatch    -> linear system solver with no pivoting LU batch version
 # getriBatch        -> matrix inversion with LU batch version
 # getriOOPBatch     -> Out-of-place matrix inversion with LU batch version
 # trtri             -> triangular matrix inversion
