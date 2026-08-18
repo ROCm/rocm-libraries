@@ -167,7 +167,7 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent):
 @pytest.mark.parametrize("block_n", [32])
 def test_dense_fp16_d128_cfvst_swizzle_correct_at_other_tile_widths(block_n):
     """The fp16-D128 cfvst V^T swizzle must stay CORRECT at tile widths other than the
-    shipped block_n=64. The derived v_row_pad keeps V_LDROW a pow2 128 so the XOR
+    shipped block_n=64. The derived v_row_pad keeps V_LDROW a pow2 (>=64) so the XOR
     swizzle engages here too (block_n=32 is the active small-tile double-K direction);
     before the derived pad it silently fell back to no-swizzle. On-silicon guard vs
     fp32 SDPA for the tile-width axis the policy tests only cover structurally."""

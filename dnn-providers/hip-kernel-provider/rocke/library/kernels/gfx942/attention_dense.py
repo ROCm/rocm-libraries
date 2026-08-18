@@ -311,10 +311,10 @@ class Gfx942DenseTuning:
     #   Same status as ``lds_row_pad``: pad REMOVAL is settled-negative, the pad VALUE
     #   is inherited-and-not-re-derived-for-gfx942 and therefore OPEN -- and this is
     #   the very pad whose gfx950 sweep found 8 ~= no pad at all (see above).
-    #   Resolved via :meth:`resolved_v_row_pad` (``None`` -> :func:`_v_row_pad`): 64 on
-    #   the cfvst path (fp16-D128) to widen V_lds to pow2 128 so the swizzle engages,
-    #   else 8. Every read goes through that one resolver, so the budget cannot drift
-    #   from the allocation.
+    #   Resolved via :meth:`resolved_v_row_pad` (``None`` -> :func:`_v_row_pad`): on the
+    #   cfvst path (fp16-D128) derived from block_n so V_lds is the smallest pow2 >= 64
+    #   wide (pad 64->0, 32->32, 128->0) and the XOR swizzle engages; else 8. Every read
+    #   goes through that one resolver, so the budget cannot drift from the allocation.
     v_row_pad: int | None = None
 
     # use_cfvst: force the P1 conflict-free perm_b32 store-path V transpose on/off.
@@ -375,7 +375,7 @@ class Gfx942DenseTuning:
 
     def resolved_v_row_pad(self, spec: AttentionDenseSpec) -> int:
         """Resolved V^T row pad (``None`` -> :func:`_v_row_pad`, derived from ``block_n``
-        so ``V_lds`` is a pow2 >= 128 wide and the bank-conflict swizzle engages at any
+        so ``V_lds`` is a pow2 >= 64 wide and the bank-conflict swizzle engages at any
         tile width on the cfvst path; 8 else). Read by the builder's ``V_lds`` alloc AND
         the ``_lds_bytes`` budget so the two cannot drift."""
         if self.v_row_pad is None:
@@ -567,16 +567,22 @@ def _use_cfvst(head_size: int, dtype: str) -> bool:
 def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
     """V^T row (token-axis) pad, in elements, on the cfvst path (fp16-D128); 8 (no
     swizzle, original layout) everywhere else. Derived from ``block_n`` so the ``V_lds``
-    row width ``block_n + pad`` is the smallest pow2 >= max(128, block_n) -- the XOR
-    bank-conflict swizzle (``col' = key ^ ((dim&31)<<2)``) then stays in-bounds and
-    engages at EVERY tile width (block_n 64->64, 32->96, 128->0), not only block_n=64.
-    A constant pad would silently drop the swizzle -- while still charging the widened
-    LDS -- at any other tile width. Rides the :func:`_use_cfvst` gate. Side effect: the V
-    footprint is a constant ``head_size * width * 2`` (32 KB at D128), block_n-invariant.
+    row width ``block_n + pad`` is the smallest pow2 >= max(64, block_n) -- the XOR
+    bank-conflict swizzle (``col' = key ^ ((dim & (V_LDROW//4 - 1)) << 2)``) then stays
+    in-bounds and engages at EVERY tile width (pad 64->0, 32->32, 128->0), not only
+    block_n=64. Width 64 (not 128) is the minimum that spreads all 32 banks: on a
+    32-bank part only bits 2..5 of the (multiple-of-4) column reach the bank field, so a
+    4-bit key (mask V_LDROW//4 - 1 = 15) saturates it; a 5th bit would land above the
+    field and only double the row for no extra spread. A constant pad would silently
+    drop the swizzle -- while still charging the widened LDS -- at any other tile width.
+    Rides the :func:`_use_cfvst` gate. V footprint ``head_size * (block_n + pad) * 2`` =
+    16 KB at D128/block_n=64 (0 pad), half the width-128 row; total LDS 33.8 KB -- below
+    develop (35.8 KB) and width-128 (50.2 KB), but still ~1 KB over the 32 KB 2-WG/CU
+    ceiling, so that door needs the register floor cut first, not this widening.
     """
     if not _use_cfvst(head_size, dtype):
         return 8
-    width = max(128, 1 << (block_n - 1).bit_length())
+    width = max(64, 1 << (block_n - 1).bit_length())
     return width - block_n
 
 
@@ -1086,10 +1092,13 @@ def _build_attention_dense_single_buffer(
         # resolved struct, so the budget cannot under-count this allocation.
         V_LDROW = BN + tuning.resolved_v_row_pad(spec)
         V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
-        # V^T bank-conflict swizzle (col' = key ^ ((dim&31)<<2)): the resolved pad makes
-        # V_LDROW the smallest pow2 >= max(128, block_n) on the cfvst path, so it engages
-        # at every tile width. Off only on the non-cfvst path (pad 8 -> width not pow2).
-        SWZ_V = (V_LDROW & (V_LDROW - 1)) == 0 and V_LDROW >= 128
+        # V^T bank-conflict swizzle (col' = key ^ ((dim & V_SWZ_MASK) << 2)): the resolved
+        # pad makes V_LDROW the smallest pow2 >= max(64, block_n) on the cfvst path, so it
+        # engages at every tile width. Off only on the non-cfvst path (pad 8 -> not pow2).
+        # MASK is derived from the row so store and read can't drift and the XOR stays
+        # in-bounds; 4 bits (15) saturate the 32-bank field at width 64, 31 at width 128.
+        SWZ_V = (V_LDROW & (V_LDROW - 1)) == 0 and V_LDROW >= 64
+        V_SWZ_MASK = V_LDROW // 4 - 1
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
         # regresses it -- see _use_cfvst); read element-wise in read_v.
@@ -1173,8 +1182,8 @@ def _build_attention_dense_single_buffer(
             )  # (V[t0,d0+1], V[t1,d0+1])
             d1 = b.add(d0, b.const_i32(1))
             if SWZ_V:
-                c0 = b.xor(t0, b.shl(b.land(d0, b.const_i32(31)), b.const_i32(2)))
-                c1 = b.xor(t0, b.shl(b.land(d1, b.const_i32(31)), b.const_i32(2)))
+                c0 = b.xor(t0, b.shl(b.land(d0, b.const_i32(V_SWZ_MASK)), b.const_i32(2)))
+                c1 = b.xor(t0, b.shl(b.land(d1, b.const_i32(V_SWZ_MASK)), b.const_i32(2)))
             else:
                 c0, c1 = t0, t0
             b.smem_store_vN(
@@ -1197,6 +1206,13 @@ def _build_attention_dense_single_buffer(
         so this is ONE ds_read_b64 vs the naive path's 4 element-wise ds_read_u16.
         The values delivered to the MFMA are bit-identical between the two paths (same
         (dim, key) mapping); only the LDS layout and read width differ.
+        The XOR swizzle takes this read from 4-way (the pre-swizzle +8-pad develop
+        layout) to 1-way / conflict-free -- that is the reviewable win, not removal of a
+        pre-existing 32-way jam (the 32-way state only appears if the row is widened to a
+        32-dword multiple, and the swizzle then digs back out of it). The residual bank
+        conflicts live on the STORE (8-way -> 4-way: within a wave t0 is constant and
+        d0 = 2*lane, so (d0 & mask) takes only 8 values), so further conflict work
+        belongs there, not on this read.
         naive (D64 / bf16-D128): element-wise from V_lds[key, dim] (bank-heavy, but
         those configs are VGPR-bound / spill under cfvst, not LDS-read-bound)."""
         if USE_CFVST:
@@ -1205,7 +1221,7 @@ def _build_attention_dense_single_buffer(
             col = key0
             if SWZ_V:
                 col = b.xor(
-                    key0, b.shl(b.land(dim_row, b.const_i32(31)), b.const_i32(2))
+                    key0, b.shl(b.land(dim_row, b.const_i32(V_SWZ_MASK)), b.const_i32(2))
                 )
             return b.smem_load_vN(V_lds, b.const_i32(0), dim_row, col, dtype=dtype, n=4)
         dim_col = b.add(b.const_i32(dt * 32), lane_m)
