@@ -145,7 +145,6 @@ members = ["rocisa"]
 # fixtures. mutmut caches the initial non-Python source copy, so snapshots must
 # be refreshed explicitly for the copied test tree to match the source suite.
 [tool.mutmut]
-
 source_paths = ["tensilelite"]
 only_mutate = [
     "tensilelite/Common/DataType.py",
@@ -174,7 +173,7 @@ pytest_add_cli_args_test_selection = [
     "tensilelite/Tests/unit/characterization/TensileLogic",
     "tensilelite/Tests/unit/characterization/ValidParameters"
 ]
-also_copy = ["pytest.ini", "Tensile/Tests/unit/characterization"]
+also_copy = ["pytest.ini", "tensilelite/Tests/unit/characterization"]
 # mutate_only_covered_lines MUST stay false here: when true, mutmut runs an
 # in-process coverage gather whose _unload_modules_not_in() pops `rocisa` from
 # sys.modules; the later "Running stats" phase re-imports rocisa in the SAME
