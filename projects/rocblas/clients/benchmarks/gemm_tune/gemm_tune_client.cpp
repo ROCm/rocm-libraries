@@ -23,6 +23,9 @@
 
 #include "type_dispatch.hpp"
 
+#include "blas_ex/rocblas_gemm_ex.hpp"
+#include "tensile_host.hpp"
+
 #include <memory>
 #include <sstream>
 #include <string>
@@ -188,9 +191,11 @@ int main(int argc, char* argv[])
             // run benchmark
             int best_solution_index = rocblas_gemm_dispatch<GEMMTunerDispatch>(arg);
 
-            // log result, if solution is found. Tensile solutions are now reported as biased
-            // negative indices so only the default index 0 and invalid index -1 means no solution was found
-            if(best_solution_index != 0 && best_solution_index != -1)
+            // log result, if solution is found and the index is a valid tensile or hipblaslt
+            // index, or the internal rocBLAS GEMV fallback index
+            if(rocblas_tensile_index(best_solution_index)
+               || rocblas_hipblaslt_index(best_solution_index)
+               || best_solution_index == GEMM_EX_GEMV_SOLUTION_IDX)
             {
                 *current_entry = true;
                 *current_os << arg_key << DELIM << best_solution_index << "\n";
