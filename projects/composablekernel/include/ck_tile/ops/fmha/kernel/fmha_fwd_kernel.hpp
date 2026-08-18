@@ -9,6 +9,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
 
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -308,6 +309,41 @@ struct FmhaFwdKernel
         const int32_t* seqstart_v_scale_ptr;
     };
 
+    struct FmhaFwdCommonPerBlockKargs : FmhaFwdCommonQScaleKargs
+    {
+        ck_tile::index_t stride_q_descale = 0;
+        ck_tile::index_t stride_k_descale = 0;
+        ck_tile::index_t stride_v_descale = 0;
+
+        ck_tile::index_t nhead_stride_q_descale = 0;
+        ck_tile::index_t nhead_stride_k_descale = 0;
+        ck_tile::index_t nhead_stride_v_descale = 0;
+
+        // Descale granularity: rows of Q / cols of KV that share one scale. The host
+        // lays out the descale buffer and reference at this size (and the group
+        // seqstart is cumulative in these units), so the kernel must index descales
+        // here rather than at the kernel tile size kN0 (which equals it only for d>=128).
+        ck_tile::index_t block_scale_size_q  = 1;
+        ck_tile::index_t block_scale_size_kv = 1;
+    };
+
+    struct FmhaFwdBatchPerBlockKargs : FmhaFwdCommonPerBlockKargs
+    {
+        ck_tile::index_t batch_stride_q_descale = 0;
+        ck_tile::index_t batch_stride_k_descale = 0;
+        ck_tile::index_t batch_stride_v_descale = 0;
+    };
+
+    struct FmhaFwdGroupPerBlockKargs : FmhaFwdCommonPerBlockKargs
+    {
+        // Cumulative per-batch tile-start indices into the packed Q/K/V descale
+        // tensors. Required because PERBLOCK descale slots are per-tile, not
+        // per-token, so token-based offsets (query_start * stride_descale)
+        // would over-index for any seqlen not a multiple of the tile size.
+        const int32_t* block_scale_seqstart_q_ptr = nullptr;
+        const int32_t* block_scale_seqstart_k_ptr = nullptr;
+    };
+
     struct FmhaFwdCommonLSEKargs
     {
         void* lse_ptr                     = nullptr;
@@ -386,11 +422,15 @@ struct FmhaFwdKernel
           std::conditional_t<
               QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
               FmhaFwdCommonQScaleKargs,
-              std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
-                                 FmhaFwdBatchBlockScaleKargs,
-                                 std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::MX,
-                                                    FmhaFwdBatchMXKargs,
-                                                    FmhaFwdEmptyKargs<3>>>>,
+              std::conditional_t<
+                  QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
+                  FmhaFwdBatchBlockScaleKargs,
+                  std::conditional_t<
+                      QScaleEnum == BlockAttentionQuantScaleEnum::MX,
+                      FmhaFwdBatchMXKargs,
+                      std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK,
+                                         FmhaFwdBatchPerBlockKargs,
+                                         FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdBatchModeDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>
     {
@@ -417,11 +457,15 @@ struct FmhaFwdKernel
           std::conditional_t<
               QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
               FmhaFwdCommonQScaleKargs,
-              std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
-                                 FmhaFwdGroupBlockScaleKargs,
-                                 std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::MX,
-                                                    FmhaFwdGroupMXKargs,
-                                                    FmhaFwdEmptyKargs<3>>>>,
+              std::conditional_t<
+                  QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
+                  FmhaFwdGroupBlockScaleKargs,
+                  std::conditional_t<
+                      QScaleEnum == BlockAttentionQuantScaleEnum::MX,
+                      FmhaFwdGroupMXKargs,
+                      std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK,
+                                         FmhaFwdGroupPerBlockKargs,
+                                         FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdCommonDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
           std::conditional_t<kSkipMinSeqlenQ, FmhaFwdSkipMinSeqlenQKargs, FmhaFwdEmptyKargs<6>>
@@ -582,6 +626,21 @@ struct FmhaFwdKernel
         }
         else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
         {
+            // BLOCKSCALE descale is per (block_scale_size_*) chunk; the kernel
+            // reads ONE descale per tile (kM0 for Q, kN0 for K/V), so the user-
+            // supplied block sizes must be >= and a multiple of the kernel
+            // tile sizes. Sub-tile granularity is not supported here.
+            constexpr index_t kM0 = FmhaPipeline::kM0;
+            constexpr index_t kN0 = FmhaPipeline::kN0;
+            if(block_scale_size_q < kM0 || block_scale_size_q % kM0 != 0)
+                throw std::invalid_argument(
+                    "BLOCKSCALE: block_scale_size_q (" + std::to_string(block_scale_size_q) +
+                    ") must be >= kM0 (" + std::to_string(kM0) + ") and an integer multiple of it");
+            if(block_scale_size_kv < kN0 || block_scale_size_kv % kN0 != 0)
+                throw std::invalid_argument(
+                    "BLOCKSCALE: block_scale_size_kv (" + std::to_string(block_scale_size_kv) +
+                    ") must be >= kN0 (" + std::to_string(kN0) + ") and an integer multiple of it");
+
             kargs.q_descale_ptr = q_descale_ptr;
             kargs.k_descale_ptr = k_descale_ptr;
             kargs.v_descale_ptr = v_descale_ptr;
@@ -614,6 +673,42 @@ struct FmhaFwdKernel
             kargs.batch_stride_q_descale = batch_stride_q_descale;
             kargs.batch_stride_k_descale = batch_stride_k_descale;
             kargs.batch_stride_v_descale = batch_stride_v_descale;
+        }
+        else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK)
+        {
+            // PERBLOCK reads ONE descale per kernel tile (kM0 rows of Q, kN0 cols of
+            // K/V), so the host-chosen descale granularity must be >= and a multiple
+            // of the tile sizes. This lets the host size the descale buffer from
+            // block_scale_size_q/kv alone, without knowing the kernel tiles kM0/kN0.
+            constexpr index_t kM0 = FmhaPipeline::kM0;
+            constexpr index_t kN0 = FmhaPipeline::kN0;
+            if(block_scale_size_q < kM0 || block_scale_size_q % kM0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_q (" + std::to_string(block_scale_size_q) +
+                    ") must be >= kM0 (" + std::to_string(kM0) + ") and an integer multiple of it");
+            if(block_scale_size_kv < kN0 || block_scale_size_kv % kN0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_kv (" + std::to_string(block_scale_size_kv) +
+                    ") must be >= kN0 (" + std::to_string(kN0) + ") and an integer multiple of it");
+
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
+
+            kargs.stride_q_descale = stride_q_descale;
+            kargs.stride_k_descale = stride_k_descale;
+            kargs.stride_v_descale = stride_v_descale;
+
+            kargs.nhead_stride_q_descale = nhead_stride_q_descale;
+            kargs.nhead_stride_k_descale = nhead_stride_k_descale;
+            kargs.nhead_stride_v_descale = nhead_stride_v_descale;
+
+            kargs.batch_stride_q_descale = batch_stride_q_descale;
+            kargs.batch_stride_k_descale = batch_stride_k_descale;
+            kargs.batch_stride_v_descale = batch_stride_v_descale;
+
+            kargs.block_scale_size_q  = block_scale_size_q;
+            kargs.block_scale_size_kv = block_scale_size_kv;
         }
         if constexpr(kHasDropout)
         {
@@ -1036,6 +1131,21 @@ struct FmhaFwdKernel
         }
         else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
         {
+            // See batch-mode BLOCKSCALE branch above for the contract:
+            // block_scale_size_{q,kv} must be >= and multiple of kM0/kN0.
+            constexpr index_t kM0 = FmhaPipeline::kM0;
+            constexpr index_t kN0 = FmhaPipeline::kN0;
+            if(block_scale_size_q < kM0 || block_scale_size_q % kM0 != 0)
+                throw std::invalid_argument("BLOCKSCALE (group): block_scale_size_q (" +
+                                            std::to_string(block_scale_size_q) +
+                                            ") must be >= kM0 (" + std::to_string(kM0) +
+                                            ") and an integer multiple of it");
+            if(block_scale_size_kv < kN0 || block_scale_size_kv % kN0 != 0)
+                throw std::invalid_argument("BLOCKSCALE (group): block_scale_size_kv (" +
+                                            std::to_string(block_scale_size_kv) +
+                                            ") must be >= kN0 (" + std::to_string(kN0) +
+                                            ") and an integer multiple of it");
+
             kargs.q_descale_ptr = q_descale_ptr;
             kargs.k_descale_ptr = k_descale_ptr;
             kargs.v_descale_ptr = v_descale_ptr;
@@ -1067,6 +1177,43 @@ struct FmhaFwdKernel
             kargs.nhead_stride_v_descale = nhead_stride_v_descale;
 
             kargs.seqstart_v_scale_ptr = reinterpret_cast<const int32_t*>(seqstart_v_scale_ptr);
+        }
+        else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK)
+        {
+            // PERBLOCK reads ONE descale per kernel tile (kM0 rows of Q, kN0 cols of
+            // K/V), so the host-chosen descale granularity must be >= and a multiple
+            // of the tile sizes. This lets the host size the descale buffer from
+            // block_scale_size_q/kv alone, without knowing the kernel tiles kM0/kN0.
+            constexpr index_t kM0 = FmhaPipeline::kM0;
+            constexpr index_t kN0 = FmhaPipeline::kN0;
+            if(block_scale_size_q < kM0 || block_scale_size_q % kM0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_q (" + std::to_string(block_scale_size_q) +
+                    ") must be >= kM0 (" + std::to_string(kM0) + ") and an integer multiple of it");
+            if(block_scale_size_kv < kN0 || block_scale_size_kv % kN0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_kv (" + std::to_string(block_scale_size_kv) +
+                    ") must be >= kN0 (" + std::to_string(kN0) + ") and an integer multiple of it");
+
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
+
+            kargs.stride_q_descale = stride_q_descale;
+            kargs.stride_k_descale = stride_k_descale;
+            kargs.stride_v_descale = stride_v_descale;
+
+            kargs.nhead_stride_q_descale = nhead_stride_q_descale;
+            kargs.nhead_stride_k_descale = nhead_stride_k_descale;
+            kargs.nhead_stride_v_descale = nhead_stride_v_descale;
+
+            kargs.block_scale_size_q  = block_scale_size_q;
+            kargs.block_scale_size_kv = block_scale_size_kv;
+
+            kargs.block_scale_seqstart_q_ptr =
+                reinterpret_cast<const int32_t*>(block_scale_seqstart_q_ptr);
+            kargs.block_scale_seqstart_k_ptr =
+                reinterpret_cast<const int32_t*>(block_scale_seqstart_k_ptr);
         }
         if constexpr(kHasDropout)
         {
@@ -1377,8 +1524,8 @@ struct FmhaFwdKernel
             has_padded_seqlen_k = (kargs.seqlen_k_ptr != nullptr);
 
 #if CK_TILE_FMHA_FORCE_HEAD_MAJOR
-            // compiler-workaround gate (ROCm 7.1 + gfx12).
-            // Keep head-major enabled for all unaffected kernels.
+        // compiler-workaround gate (ROCm 7.1 + gfx12).
+        // Keep head-major enabled for all unaffected kernels.
 #if defined(__gfx12__) && (HIP_VERSION_MAJOR == 7) && (HIP_VERSION_MINOR == 1)
         constexpr bool kSkipHeadMajor = kIsGroupMode && kHasMask && !kHasDropout &&
                                         (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS) &&
@@ -1590,6 +1737,16 @@ struct FmhaFwdKernel
                     batch_offset_k_descale = key_start * kargs.stride_k_descale;
                     batch_offset_v_descale = kargs.seqstart_v_scale_ptr[i_batch];
                 }
+                else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK)
+                {
+                    // Descale slots are packed per-tile; use the cumulative
+                    // tile-start array prepared by the host (mirrors BLOCKSCALE).
+                    const long_index_t bquery_start = kargs.block_scale_seqstart_q_ptr[i_batch];
+                    const long_index_t bkey_start   = kargs.block_scale_seqstart_k_ptr[i_batch];
+                    batch_offset_q_descale          = bquery_start;
+                    batch_offset_k_descale          = bkey_start;
+                    batch_offset_v_descale          = bkey_start;
+                }
                 batch_offset_o = query_start * kargs.stride_o;
 
                 // real logical lengths (exclude PAD)
@@ -1658,7 +1815,8 @@ struct FmhaFwdKernel
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_randval;
                 }
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE ||
-                             QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                             QScaleEnum == BlockAttentionQuantScaleEnum::MX ||
+                             QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK)
                 {
                     batch_offset_q_descale =
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_q_descale;
@@ -2295,6 +2453,75 @@ struct FmhaFwdKernel
                                                 q_scale_dram_window,
                                                 k_scale_dram_window,
                                                 v_scale_dram_window);
+                }
+                else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK)
+                {
+                    const float* q_descale_ptr =
+                        reinterpret_cast<const float*>(kargs.q_descale_ptr) +
+                        static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_q_descale +
+                        batch_offset_q_descale;
+                    const float* k_descale_ptr =
+                        reinterpret_cast<const float*>(kargs.k_descale_ptr) +
+                        static_cast<long_index_t>(i_nhead_ / kargs.nhead_ratio_qk) *
+                            kargs.nhead_stride_k_descale +
+                        batch_offset_k_descale;
+                    const float* v_descale_ptr =
+                        reinterpret_cast<const float*>(kargs.v_descale_ptr) +
+                        static_cast<long_index_t>(i_nhead_ / kargs.nhead_ratio_qk) *
+                            kargs.nhead_stride_v_descale +
+                        batch_offset_v_descale;
+
+                    // Per-block: fuse Q descale into scale_s. Index the descale buffer at
+                    // the host's descale granularity (block_scale_size_q/kv, per-block), NOT
+                    // the kernel tile size kN0 — those agree only for d>=128. For d<128
+                    // (e.g. d=64, kN0=64) using the tile size mis-indexes the per-128-block
+                    // descale buffer. This mirrors what BLOCKSCALE already passes above.
+                    size_t q_idx        = i_m0 / kargs.block_scale_size_q;
+                    float q_descale     = q_descale_ptr[q_idx];
+                    float fused_scale_s = kargs.scale_s * q_descale;
+
+                    float scale_p =
+                        ck_tile::type_convert<float>(ck_tile::numeric<PDataType>::max());
+                    float scale_o = 1.0f / scale_p;
+
+                    auto o_acc_element_func = [&]() {
+                        if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
+                            return make_composes(
+                                ck_tile::saturates<ck_tile::fp8_t>{},
+                                ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o});
+                        else
+                            return ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o};
+                    }();
+
+                    return invoke_fmha_pipeline(q_dram_window,
+                                                identity{}, // q_element_func
+                                                k_dram_window,
+                                                identity{}, // k_element_func
+                                                v_dram_window,
+                                                identity{}, // v_element_func
+                                                bias_dram_window,
+                                                identity{}, // bias_element_func
+                                                randval_dram_window,
+                                                lse_dram_window,
+                                                identity{},          // lse_element_func
+                                                scales<float>{1.0f}, // s_acc_element_func
+                                                scales<remove_cvref_t<decltype(scale_p)>>{
+                                                    scale_p},       // p_compute_element_func
+                                                o_acc_element_func, // o_acc_element_func
+                                                mask,
+                                                position_encoding,
+                                                fused_scale_s,
+                                                variant,
+                                                variant_params,
+                                                block_indices,
+                                                smem_ptr,
+                                                dropout,
+                                                k_descale_ptr,
+                                                v_descale_ptr,
+                                                kargs.block_scale_size_kv,
+                                                make_null_tile_window(make_tuple()),
+                                                make_null_tile_window(make_tuple()),
+                                                make_null_tile_window(make_tuple()));
                 }
                 else
                 {

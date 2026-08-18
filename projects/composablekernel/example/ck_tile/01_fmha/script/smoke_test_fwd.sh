@@ -105,7 +105,9 @@ run_fp8bf16_tests() {
     for perm in 0 1 ; do
     for b in 1 2 ; do
     for hdim in 64 128 256 ; do
-    for scale in 1 2; do
+    # qscale: 1=pertensor, 2=blockscale, 5=perblock. perblock covers all hdims here
+    # (incl. d=64 where the descale granularity differs from the kernel tile size).
+    for scale in 1 2 5; do
 
     $EXE -prec=fp8bf16 -init=3 -b=$b -h=1 -d=$hdim -s=128 -iperm=$perm -operm=$perm -vlayout=r -qscale=$scale -kname=$KNAME $COMMON_ARGS
 
