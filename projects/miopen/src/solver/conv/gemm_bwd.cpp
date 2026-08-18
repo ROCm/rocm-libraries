@@ -717,6 +717,9 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
             return false;
         if(!problem.IsDirectionBackwardData())
             return false;
+        // 3D scatters through Col2Im3d, which addresses dx as channel-first.
+        if(problem.Is3d() && !problem.IsLayoutDefault())
+            return false;
         if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
             return false;
 

@@ -40,6 +40,9 @@ auto GetConvTestCases(miopenDataType_t datatype)
         TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype},
         // 3D point-output backward data: Do=Ho=Wo=1, stride==filter (GemmBwdRest fast path)
         TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
+        // Same, but with dx larger than the filter, so Col2Im3d performs a real scatter
+        // instead of degenerating into an element-wise copy.
+        TestCase{{4, 3, 5, 5, 5}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
         // clang-format on
     };
 }
