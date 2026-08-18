@@ -75,18 +75,27 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
 
+    // Benchmarking touches no Python object: config/settings are native types, and
+    // AutotuneConfig::rankingFn (the one field that could call back into Python) is
+    // deliberately unbound, so nothing here needs to reacquire the GIL mid-loop. This
+    // can run for minutes across many candidates, so release it for the duration:
+    // other Python threads proceed, and a pending Ctrl-C is delivered promptly
+    // instead of waiting for the whole benchmarking loop to finish.
     std::vector<AutotuneResult> results;
-    const auto err
-        = workspaceSize
-              ? g.autotune(rawHandle,
-                           cppVariantPack,
-                           workspacePtr,
-                           *workspaceSize,
-                           config,
-                           storageConfig,
-                           &results)
-              : g.autotune(
-                    rawHandle, cppVariantPack, workspacePtr, config, storageConfig, &results);
+    Error err;
+    {
+        nb::gil_scoped_release release;
+        err = workspaceSize
+                  ? g.autotune(rawHandle,
+                               cppVariantPack,
+                               workspacePtr,
+                               *workspaceSize,
+                               config,
+                               storageConfig,
+                               &results)
+                  : g.autotune(
+                        rawHandle, cppVariantPack, workspacePtr, config, storageConfig, &results);
+    }
     if(err.is_bad())
     {
         throw std::runtime_error("Autotune failed: " + err.get_message());
