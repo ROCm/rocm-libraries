@@ -225,6 +225,11 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
     MIOPEN_INTERNALS_EXPORT std::size_t
     GetWorkSpaceSize(ExecutionContext ctx, const conv::ProblemDescription& problem) const;
 
+    MIOPEN_INTERNALS_EXPORT void GetWorkSpaceSizeRange(ExecutionContext ctx,
+                                                       const conv::ProblemDescription& problem,
+                                                       std::size_t* minWorkspaceSize,
+                                                       std::size_t* maxWorkspaceSize) const;
+
     MIOPEN_INTERNALS_EXPORT void FindConvFwdAlgorithm(const Handle& handle,
                                                       const TensorDescriptor& xDesc,
                                                       ConstData_t x,

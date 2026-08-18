@@ -49,8 +49,7 @@ template<typename KeyType,
          typename ValueType,
          unsigned int                  BlockSize,
          unsigned int                  ItemsPerThread,
-         rocprim::block_sort_algorithm block_sort_algorithm,
-         std::enable_if_t<std::is_same<ValueType, rocprim::empty_type>::value, bool> = true>
+         rocprim::block_sort_algorithm block_sort_algorithm>
 __global__ __launch_bounds__(BlockSize)
 void sort_kernel(const KeyType* input, KeyType* output)
 {
@@ -60,41 +59,30 @@ void sort_kernel(const KeyType* input, KeyType* output)
     KeyType keys[ItemsPerThread];
     rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
 
-    rocprim::block_sort<KeyType, BlockSize, ItemsPerThread, ValueType, block_sort_algorithm> bsort;
-    bsort.sort(keys);
-
-    rocprim::block_store_direct_blocked(lid, output + block_offset, keys);
-}
-
-template<typename KeyType,
-         typename ValueType,
-         unsigned int                  BlockSize,
-         unsigned int                  ItemsPerThread,
-         rocprim::block_sort_algorithm block_sort_algorithm,
-         std::enable_if_t<!std::is_same<ValueType, rocprim::empty_type>::value, bool> = true>
-__global__ __launch_bounds__(BlockSize)
-void sort_kernel(const KeyType* input, KeyType* output)
-{
-    const unsigned int lid          = threadIdx.x;
-    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
-
-    KeyType   keys[ItemsPerThread];
-    ValueType values[ItemsPerThread];
-    rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
-
-    ROCPRIM_UNROLL
-    for(unsigned int item = 0; item < ItemsPerThread; ++item)
+    if constexpr(!std::is_same<ValueType, rocprim::empty_type>::value)
     {
-        values[item] = block_offset + lid * ItemsPerThread + item;
+        ValueType values[ItemsPerThread];
+
+        ROCPRIM_UNROLL
+        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+        {
+            values[item] = block_offset + lid * ItemsPerThread + item;
+        }
+        rocprim::block_sort<KeyType, BlockSize, ItemsPerThread, ValueType, block_sort_algorithm>
+            bsort;
+        bsort.sort(keys, values);
+
+        ROCPRIM_UNROLL
+        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+        {
+            keys[item] = keys[item] + static_cast<KeyType>(values[item]);
+        }
     }
-
-    rocprim::block_sort<KeyType, BlockSize, ItemsPerThread, ValueType, block_sort_algorithm> bsort;
-    bsort.sort(keys, values);
-
-    ROCPRIM_UNROLL
-    for(unsigned int item = 0; item < ItemsPerThread; ++item)
+    else
     {
-        keys[item] = keys[item] + static_cast<KeyType>(values[item]);
+        rocprim::block_sort<KeyType, BlockSize, ItemsPerThread, ValueType, block_sort_algorithm>
+            bsort;
+        bsort.sort(keys);
     }
 
     rocprim::block_store_direct_blocked(lid, output + block_offset, keys);

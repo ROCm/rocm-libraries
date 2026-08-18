@@ -23,6 +23,7 @@
 #include "origami/streamk.hpp"
 
 namespace origami {
+namespace gemm {
 
 // Forward declaration for internal Formocast latency computation
 static double compute_formocast_latency(const problem_t& problem,
@@ -35,7 +36,11 @@ static double compute_formocast_latency(const problem_t& problem,
 context_t::context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config) {
   // Extract parameters
   const size_t NUM_XCD = hardware.NUM_XCD;
-  const size_t N_CU    = hardware.N_CU;
+  // Effective usable CU count. Decided once here and consumed across the model
+  // (launch params, occupancy, cache/epilogue/reduction estimates). A non-zero
+  // problem.num_cus caps the count; 0 falls back to the full hardware count.
+  n_cu              = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  const size_t N_CU = n_cu;
 
   const size_t M     = problem.size.m;
   const size_t N     = problem.size.n;
@@ -57,9 +62,9 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   grid_n           = math::safe_ceil_div(N, MT_N);
   num_output_tiles = grid_m * grid_n * batch;
 
-  // Launch parameters
   auto [reduction, wgs, cus, timesteps, split] =
-      compute_launch_parameters(problem, hardware, config, config.grid_selection, 0);
+      compute_launch_parameters(problem, hardware, config, config.grid_selection);
+  tile_schedule      = streamk::select_hybrid_mode(problem, hardware, config, problem.num_cus);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;
@@ -96,15 +101,23 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     const auto a_bits = datatype_to_bits(problem.a_dtype);
     const auto b_bits = datatype_to_bits(problem.b_dtype);
 
-    OLOG_DEBUG("======== Origami Debug Info ========");
-    OLOG_DEBUG("ProblemSize (MxNxBxK): " << int(M) << "x" << int(N) << "x" << int(batch) << "x"
-                                         << int(K));
+    OLOG_DEBUG("======== Origami Debug Info ========");  // This signature indicates the start of
+                                                         // the debug information.
+    OLOG_DEBUG("M: " << int(M));
+    OLOG_DEBUG("N: " << int(N));
+    OLOG_DEBUG("Batch: " << int(batch));
+    OLOG_DEBUG("K: " << int(K));
+    OLOG_DEBUG("InputDataTypeA: " << datatype_to_string(problem.a_dtype));
+    OLOG_DEBUG("InputDataTypeB: " << datatype_to_string(problem.b_dtype));
+    OLOG_DEBUG("OutputDataType: " << datatype_to_string(problem.d_dtype));
+    OLOG_DEBUG("ComputeType: " << datatype_to_string(problem.mi_dtype));
     OLOG_DEBUG("MacroTile: " << int(MT_M) << "x" << int(MT_N) << "x" << int(MT_K));
     OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
     OLOG_DEBUG("ElementSizeA (bits): " << int(a_bits));
     OLOG_DEBUG("ElementSizeB (bits): " << int(b_bits));
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));
     OLOG_DEBUG("CacheHintsB: " << int(config.cache_hints_b));
+    OLOG_DEBUG("StreamK: " << int(config.stream_k));
 
     OLOG_DEBUG("Grid: " << int(grid_m) << "x" << int(grid_n));
     OLOG_DEBUG("NumOutputTiles: " << int(num_output_tiles));
@@ -112,6 +125,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("NumTimesteps: " << int(num_timesteps));
     OLOG_DEBUG("SplittingFactor: " << int(splitting_factor));
     OLOG_DEBUG("ReductionStrategy: " << int(reduction_strategy));
+    OLOG_DEBUG("TileSchedule: " << hybrid_mode_to_string(tile_schedule));
 
     OLOG_DEBUG("ActiveCUs: " << int(active_cus));
     OLOG_DEBUG("ReadMemBWFactor: " << mem_bw_limited);
@@ -221,7 +235,9 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   // Extract parameters
   const size_t batch = problem.batch;
 
-  const size_t N_CU    = hardware.N_CU;
+  // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs. Keeps
+  // the predicted mapping consistent with the capped model (context.n_cu).
+  const size_t N_CU    = resolve_num_cus(problem.num_cus, hardware.N_CU);
   const size_t NUM_XCD = hardware.NUM_XCD;
 
   const size_t MT_M = config.mt.m;
@@ -238,9 +254,9 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   if (batch > 1) {
     auto numMTs_total = numMTs * batch;
     if (numMTs == 1 || numMTs_total <= NUM_XCD || numMTs % NUM_XCD == 0)
-      return {0, 0, 1};
+      return {0, 0, 0, 1};
     else
-      return {0, NUM_XCD, 1};
+      return {0, 0, NUM_XCD, 1};
   }
 
   // Non-temporal
@@ -254,11 +270,11 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
     size_t out_chunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, NUM_XCD), cus_per_xcd) : 0;
 
     if (nta > 3 && ntb < 4)
-      return {out_chunk, out_wgmxcc, use_wgmxcc ? static_cast<int32_t>(grid_n) : 1};
+      return {0, out_chunk, out_wgmxcc, use_wgmxcc ? static_cast<int32_t>(grid_n) : 1};
     else if (nta < 4 && ntb > 3)
-      return {out_chunk, out_wgmxcc, use_wgmxcc ? -static_cast<int32_t>(grid_m) : 1};
+      return {0, out_chunk, out_wgmxcc, use_wgmxcc ? -static_cast<int32_t>(grid_m) : 1};
     else
-      return {0, NUM_XCD, 1};
+      return {0, 0, NUM_XCD, 1};
   }
 
   // WGMXCC
@@ -271,22 +287,22 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
     out_wgmxcc = NUM_XCD;
 
   // WGM shortcuts
-  if (out_wgmxcc == 0 || grid_m == 1 || grid_n == 1) return {0, out_wgmxcc, 1};
+  if (out_wgmxcc == 0 || grid_m == 1 || grid_n == 1) return {0, 0, out_wgmxcc, 1};
 
   // If the grid is large, use the square root of the number of CUs as the WGM.
   // Solution is not very sensitive to the WGM value in this case.
   const size_t grid_threshold = std::sqrt(N_CU);
   if (grid_m > grid_threshold && grid_n > grid_threshold)
-    return {0, out_wgmxcc, static_cast<int32_t>(std::ceil(std::sqrt(N_CU / NUM_XCD)))};
+    return {0, 0, out_wgmxcc, static_cast<int32_t>(std::ceil(std::sqrt(N_CU / NUM_XCD)))};
 
   size_t numWGsPerXCD = std::min(math::safe_ceil_div(numMTs, NUM_XCD), cus_per_xcd);
   // If there is enough work per L2 and the grid_n is small, use the grid_n as the WGM.
   if (numWGsPerXCD >= cus_per_xcd / 2 && grid_n <= 8)
-    return {0, out_wgmxcc, static_cast<int32_t>(grid_n)};
+    return {0, 0, out_wgmxcc, static_cast<int32_t>(grid_n)};
 
   // Build candidate list
   size_t wgm_cap = std::min(grid_n, numWGsPerXCD / 2);
-  if (wgm_cap == 0) return {0, out_wgmxcc, 1};
+  if (wgm_cap == 0) return {0, 0, out_wgmxcc, 1};
 
   // Bitmask of candidates: bit i set means i is a WGM candidate.
   // Drawback: cannot handle values more than 64.
@@ -341,7 +357,7 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
     }
   }
 
-  return {0, out_wgmxcc, static_cast<int32_t>(best_wgm)};
+  return {0, 0, out_wgmxcc, static_cast<int32_t>(best_wgm)};
 }
 
 // Compute the launch parameters for the kernel.
@@ -349,26 +365,30 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
     const problem_t& problem,
     const hardware_t& hardware,
     const config_t& config,
-    grid_selection_t grid_selection,
-    size_t max_cus) {
-  const reduction_t reduction_strategy =
-      streamk::select_reduction(problem, hardware, config, grid_selection);
-  auto config_with_reduction               = config;
-  config_with_reduction.reduction_strategy = reduction_strategy;
-  const size_t num_wgs =
-      streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection, max_cus);
-
+    grid_selection_t grid_selection) {
   const size_t num_mts = streamk::compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  size_t num_wgs                 = num_mts;
+  reduction_t reduction_strategy = reduction_t::none;
+
+  if (config.stream_k > 0) {
+    reduction_strategy = streamk::select_reduction(problem, hardware, config, grid_selection);
+    auto config_with_reduction               = config;
+    config_with_reduction.reduction_strategy = reduction_strategy;
+    num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
+  }
+
   // There are cases in which StreamK combines multiple output MTs and assigns to 1 WG.
   // That means, we artifically observe one full timesteps, but that is not what actually happens
   // under the hood. From a theoretical point of view, these distributions change all of the
   // computations in Origami. With current implementation, it is hard to capture that
   // behaviour analytically. So for now, if the num_wgs is less than the num_mts, we calculate
   // num_timesteps based on the num_mts. Otherwise, we use num_wgs to compute num_timesteps.
-  const size_t num_active_cus   = num_wgs < hardware.N_CU ? num_wgs : hardware.N_CU;
-  const size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, hardware.N_CU)
-                                                    : math::safe_ceil_div(num_mts, hardware.N_CU);
+  // Usable CU count: derived from the problem's CU budget (problem.num_cus).
+  const size_t usable_cus       = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  const size_t num_active_cus   = num_wgs < usable_cus ? num_wgs : usable_cus;
+  const size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, usable_cus)
+                                                    : math::safe_ceil_div(num_mts, usable_cus);
   const size_t splitting_factor = math::safe_ceil_div(num_wgs, num_mts);
 
   return std::make_tuple(
@@ -1062,7 +1082,7 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
                                            const context_t& context) {
   // Extract parameters
   const size_t num_xcd     = hardware.NUM_XCD;
-  const size_t N_CU        = hardware.N_CU;
+  const size_t N_CU        = context.n_cu;
   const double l2_cap      = static_cast<double>(hardware.L2_capacity);
   const size_t k_per_split = context.k_per_split;
   const auto& wgm          = context.wgm;
@@ -1252,8 +1272,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   bool enable_batched_amp = (problem.batch > 1);
   if (enable_batched_amp && concurrent_load < l2_cap) {
     const double amp_ceiling = heuristic.l2_amp_ceiling_batched;
-    const double headroom  = 1.0 - concurrent_load / l2_cap;
-    const double amp_boost = headroom * headroom;
+    const double headroom    = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost   = headroom * headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
     l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
@@ -1265,8 +1285,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   bool enable_split_k_amp = (l2_tiles.k > 1 && l2_tiles.m * l2_tiles.n < 5);
   if (enable_split_k_amp && concurrent_load < l2_cap) {
     const double amp_ceiling = heuristic.l2_amp_ceiling_k_split;
-    const double headroom  = 1.0 - concurrent_load / l2_cap;
-    const double amp_boost = headroom;
+    const double headroom    = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost   = headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
     l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
@@ -1507,7 +1527,7 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
 
-  const size_t N_CU = hardware.N_CU;
+  const size_t N_CU = context.n_cu;
 
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
@@ -1795,8 +1815,8 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   const size_t VW = std::max(static_cast<size_t>(1), static_cast<size_t>(4.0 / d_bytes));
   const size_t total_wgs =
       math::safe_ceil_div(output_elements, heuristic.postgsu_threads_per_wg * VW);
-  const size_t active_wgs = std::min(total_wgs, hardware.N_CU);
-  const size_t timesteps  = math::safe_ceil_div(total_wgs, hardware.N_CU);
+  const size_t active_wgs = std::min(total_wgs, context.n_cu);
+  const size_t timesteps  = math::safe_ceil_div(total_wgs, context.n_cu);
 
   // Bandwidth based on occupancy of the reduction kernel
   // Assuming data resides in MALL.
@@ -1836,9 +1856,23 @@ double compute_parallel_reduction_latency(const problem_t& problem,
 
 double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
-                             const config_t& config,
-                             size_t max_cus) {
+                             const config_t& config) {
   assert(config.is_valid());
+
+  // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
+  // When a matching heuristic marks the config as rejected, report the maximum
+  // latency so rank_configs() drops the kernel from selection entirely.
+  if (get_heuristic_params(problem, hardware, config).reject) {
+    return std::numeric_limits<double>::max();
+  }
+
+  // ANALYTICAL_GEMM_PICK: force a specific MT size for solution selection.
+  {
+    const auto& pick = runtime_options::get().gemm_pick;
+    if (pick.m > 0 && (config.mt.m != pick.m || config.mt.n != pick.n || config.mt.k != pick.k)) {
+      return std::numeric_limits<double>::max();
+    }
+  }
 
   // Use Formocast simulation model if prediction_mode is set to simulation
   if (config.prediction_mode == prediction_modes_t::simulation) {
@@ -1915,7 +1949,8 @@ double compute_total_latency(const problem_t& problem,
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);
-    OLOG_DEBUG("=================================");
+    OLOG_DEBUG("=================================");  // This signature indicates the end of the
+                                                      // debug information.
   }
 
   return total_latency;
@@ -2002,4 +2037,5 @@ static double compute_formocast_latency(const problem_t& problem,
   return perf.microSeconds;
 }
 
+}  // namespace gemm
 }  // namespace origami

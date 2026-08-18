@@ -1,0 +1,103 @@
+################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Designed StreamK + TDMSplit + PrefetchAcrossPersistent config for gfx1250
+# codegen characterization.
+#
+# Goal: pin the multi-wave TDMSplit split-increment recompute that replaced the
+# persistent tdmABGlobalSplitIncs / tdmABLdsSplitIncs SGPRs. On the multi-wave
+# (prod(MIWaveGroup) > 1) path the LDS split boundary and the global split
+# increment are now recomputed transiently at point of use via
+# KernelWriterAssembly._tdmSplitMultiWaveInc (wave-parity-selected stride: even
+# waves load A, odd load B), so no persistent split SGPRs are emitted.
+#
+# This is a clone of the sibling streamk.yaml with TDMSplit + PAP forced on:
+#   StreamK=[3], TDMInst=[3], TDMSplit=[True], PrefetchAcrossPersistent=[1]
+# and the multi-wave MX WMMA MatrixInstruction ([16,16,128,1,1,1,1,2,2],
+# prod(MIWaveGroup) == 4 > 1) retained so the removed Solution.py reject
+# (TDMSplit + PAP on MX-scaled inputs) no longer fires.
+#
+# gfx1250 specifics (see streamk.yaml):
+#   - MX-FP8 data (DataType=F8, MXBlockA=32, MXBlockB=32), TN layout
+#     (TransposeA=True, TransposeB=False) -- the only MX layout PAP allows.
+#   - TDMInst=3 + MXLoadInst=TDM + MXScaleFormat=InMemorySwizzle (gfx1250 MX).
+#   - WavefrontSize=32, StaggerU=[0] (TDM + PAP with StaggerU is rejected).
+#   - StreamK=[3] (mode 3 only; TDM + PAP requires StreamK == 3).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # MX-FP8 (F8 in, float32 out) TN, Batched, StreamK=3 + TDMSplit + PAP
+  ########################################
+  -
+    - # ProblemType: MX-F8 TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      MXBlockA: 32
+      MXBlockB: 32
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        - StaggerU: [0]
+        - PrefetchAcrossPersistent: [1]
+        - TDMSplit: [True]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]

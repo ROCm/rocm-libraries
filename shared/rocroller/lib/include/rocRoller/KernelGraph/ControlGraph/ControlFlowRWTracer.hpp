@@ -93,6 +93,7 @@ namespace rocRoller::KernelGraph
         void operator()(ControlGraph::LoadLinear const& op, int tag);
         void operator()(ControlGraph::LoadSGPR const& op, int tag);
         void operator()(ControlGraph::LoadTileDirect2LDS const& op, int tag);
+        void operator()(ControlGraph::LoadTiledTDMToLDS const& op, int tag);
         void operator()(ControlGraph::LoadTiled const& op, int tag);
         void operator()(ControlGraph::LoadVGPR const& op, int tag);
         void operator()(ControlGraph::Multiply const& op, int tag);
@@ -114,6 +115,7 @@ namespace rocRoller::KernelGraph
         void trackConnections(int control, std::unordered_set<int> const& exclude, ReadWrite rw);
         void trackOffsetAndStride(int control, ReadWrite rw);
         void trackBuffer(int control, ReadWrite rw);
+        void trackTDM(int control, ReadWrite rw);
 
         bool hasGeneratedInputs(int const& tag);
         void generate(std::set<int> candidates);

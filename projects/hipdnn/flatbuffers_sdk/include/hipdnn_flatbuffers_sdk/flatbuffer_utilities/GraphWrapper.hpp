@@ -9,6 +9,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
 
 namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
 {
@@ -52,6 +53,19 @@ public:
                     = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(buffer);
             }
         }
+    }
+
+    // Constructs a GraphWrapper from a buffer of uncertain provenance, such as
+    // the output of Graph::to_binary(), which may be a bare serialized Graph or
+    // an "HDGP" SerializedGraphAndPlan container that embeds the graph. The
+    // graph blob is peeled out via extractGraphBlob() before wrapping. Use the
+    // plain constructor when the buffer is known to be exactly a Graph buffer.
+    // Throws std::invalid_argument if the buffer is an HDGP container that fails
+    // verification or whose graph blob is missing/empty.
+    static GraphWrapper fromSerializedBlob(const void* buffer, size_t size)
+    {
+        const auto view = extractGraphBlob(buffer, size);
+        return GraphWrapper(view.data, view.size);
     }
 
     const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override

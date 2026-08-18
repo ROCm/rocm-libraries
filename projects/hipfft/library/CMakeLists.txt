@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -158,7 +158,9 @@ foreach( lib ${HIPFFT_LIBRARY_TARGETS} )
 endforeach()
 
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
-  target_include_directories( hipfft PUBLIC $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}> )
+  foreach( include_dir ${CUDAToolkit_INCLUDE_DIRS} )
+    target_include_directories( hipfft PUBLIC $<BUILD_INTERFACE:${include_dir}> )
+  endforeach()
 endif()
 
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )

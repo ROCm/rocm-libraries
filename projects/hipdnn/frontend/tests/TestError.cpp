@@ -57,6 +57,53 @@ TEST(TestError, ToStringReturnsCorrectStringForAllErrorCodes)
               "ATTRIBUTE_NOT_SET");
     EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED),
               "GRAPH_NOT_SUPPORTED");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::SHAPE_DEDUCTION_FAILED),
+              "SHAPE_DEDUCTION_FAILED");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::INVALID_TENSOR_NAME),
+              "INVALID_TENSOR_NAME");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::INVALID_VARIANT_PACK),
+              "INVALID_VARIANT_PACK");
+    EXPECT_EQ(hipdnn_frontend::to_string(
+                  hipdnn_frontend::ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED),
+              "GRAPH_EXECUTION_PLAN_CREATION_FAILED");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::GRAPH_EXECUTION_FAILED),
+              "GRAPH_EXECUTION_FAILED");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::HEURISTIC_QUERY_FAILED),
+              "HEURISTIC_QUERY_FAILED");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::UNSUPPORTED_GRAPH_FORMAT),
+              "UNSUPPORTED_GRAPH_FORMAT");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::CUDA_API_FAILED),
+              "CUDA_API_FAILED");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::CUDNN_BACKEND_API_FAILED),
+              "CUDNN_BACKEND_API_FAILED");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::INVALID_CUDA_DEVICE),
+              "INVALID_CUDA_DEVICE");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::HANDLE_ERROR), "HANDLE_ERROR");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::NVRTC_COMPILATION_FAILED),
+              "NVRTC_COMPILATION_FAILED");
+}
+
+TEST(TestError, CudnnCompatCodesConstructAndCompare)
+{
+    for(auto code : {hipdnn_frontend::ErrorCode::SHAPE_DEDUCTION_FAILED,
+                     hipdnn_frontend::ErrorCode::INVALID_TENSOR_NAME,
+                     hipdnn_frontend::ErrorCode::INVALID_VARIANT_PACK,
+                     hipdnn_frontend::ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                     hipdnn_frontend::ErrorCode::GRAPH_EXECUTION_FAILED,
+                     hipdnn_frontend::ErrorCode::HEURISTIC_QUERY_FAILED,
+                     hipdnn_frontend::ErrorCode::UNSUPPORTED_GRAPH_FORMAT,
+                     hipdnn_frontend::ErrorCode::CUDA_API_FAILED,
+                     hipdnn_frontend::ErrorCode::CUDNN_BACKEND_API_FAILED,
+                     hipdnn_frontend::ErrorCode::INVALID_CUDA_DEVICE,
+                     hipdnn_frontend::ErrorCode::HANDLE_ERROR,
+                     hipdnn_frontend::ErrorCode::NVRTC_COMPILATION_FAILED})
+    {
+        const hipdnn_frontend::Error error(code, "msg");
+        EXPECT_EQ(error.get_code(), code);
+        EXPECT_TRUE(error.is_bad());
+        EXPECT_TRUE(error == code);
+        EXPECT_NE(hipdnn_frontend::to_string(code), "UNKNOWN_ERROR");
+    }
 }
 
 TEST(TestError, ToStringReturnsUnknownForInvalidCode)

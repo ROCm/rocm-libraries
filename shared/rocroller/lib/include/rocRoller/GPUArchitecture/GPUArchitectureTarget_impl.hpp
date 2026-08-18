@@ -3,17 +3,7 @@
 
 #pragma once
 
-#include <array>
-#include <cstdio>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -44,6 +34,8 @@ namespace rocRoller
             return "gfx1200";
         case GPUArchitectureGFX::GFX1201:
             return "gfx1201";
+        case GPUArchitectureGFX::GFX1250:
+            return "gfx1250";
         default:
             return "gfxunknown";
         }
@@ -73,6 +65,8 @@ namespace rocRoller
         case GPUArchitectureGFX::GFX1200:
         case GPUArchitectureGFX::GFX1201:
             return "AMD RDNA 4";
+        case GPUArchitectureGFX::GFX1250:
+            return "AMD CDNA 5";
         default:
             return "unknown";
         }
@@ -114,6 +108,17 @@ namespace rocRoller
 
     inline std::string GPUArchitectureTarget::toString() const
     {
+        std::string rv{rocRoller::toString(gfx)};
+        if(asicRevisionId >= 0)
+            rv = concatenate(rv, "rev", asicRevisionId);
+
+        if(features.sramecc || features.xnack)
+            rv = concatenate(rv, ":", features.toString());
+        return rv;
+    }
+
+    inline std::string GPUArchitectureTarget::toAssemblerString() const
+    {
         if(features.sramecc || features.xnack)
             return concatenate(gfx, ":", features.toString());
         else
@@ -125,30 +130,4 @@ namespace rocRoller
         return rocRoller::name(gfx);
     }
 
-    inline GPUArchitectureTarget GPUArchitectureTarget::fromString(std::string const& archStr)
-    {
-        GPUArchitectureTarget rv;
-
-        int         start = 0;
-        size_t      end   = archStr.find(":");
-        std::string arch  = archStr.substr(start, end - start);
-
-        rv.gfx = rocRoller::fromString<GPUArchitectureGFX>(arch);
-
-        while(end != std::string::npos)
-        {
-            start               = end + 1;
-            end                 = archStr.find(":", start);
-            std::string feature = archStr.substr(start, end - start);
-            if(feature == "xnack+")
-            {
-                rv.features.xnack = true;
-            }
-            else if(feature == "sramecc+")
-            {
-                rv.features.sramecc = true;
-            }
-        }
-        return rv;
-    }
 }

@@ -29,6 +29,7 @@
 #include "rocsparse_bsrsm_info.hpp"
 #include "rocsparse_bsrsv_info.hpp"
 #include "rocsparse_csric0_info.hpp"
+#include "rocsparse_csrildlt0_info.hpp"
 #include "rocsparse_csrilu0_info.hpp"
 #include "rocsparse_csrsm_info.hpp"
 #include "rocsparse_csrsv_info.hpp"
@@ -40,19 +41,21 @@ namespace rocsparse
     struct trm_t
     {
     protected:
-        std::shared_ptr<_rocsparse_csrsv_info>   m_csrsv_info;
-        std::shared_ptr<_rocsparse_csrsm_info>   m_csrsm_info;
-        std::shared_ptr<_rocsparse_csrilu0_info> m_csrilu0_info;
-        std::shared_ptr<_rocsparse_csric0_info>  m_csric0_info;
-        std::shared_ptr<_rocsparse_bsrsv_info>   m_bsrsv_info;
-        std::shared_ptr<_rocsparse_bsrsm_info>   m_bsrsm_info;
-        std::shared_ptr<_rocsparse_bsrilu0_info> m_bsrilu0_info;
-        std::shared_ptr<_rocsparse_bsric0_info>  m_bsric0_info;
+        std::shared_ptr<_rocsparse_csrsv_info>     m_csrsv_info;
+        std::shared_ptr<_rocsparse_csrsm_info>     m_csrsm_info;
+        std::shared_ptr<_rocsparse_csrilu0_info>   m_csrilu0_info;
+        std::shared_ptr<_rocsparse_csric0_info>    m_csric0_info;
+        std::shared_ptr<_rocsparse_csrildlt0_info> m_csrildlt0_info;
+        std::shared_ptr<_rocsparse_bsrsv_info>     m_bsrsv_info;
+        std::shared_ptr<_rocsparse_bsrsm_info>     m_bsrsm_info;
+        std::shared_ptr<_rocsparse_bsrilu0_info>   m_bsrilu0_info;
+        std::shared_ptr<_rocsparse_bsric0_info>    m_bsric0_info;
 
         void destroy_csrsv_info();
         void destroy_csrsm_info();
         void destroy_csrilu0_info();
         void destroy_csric0_info();
+        void destroy_csrildlt0_info();
         void destroy_bsrsv_info();
         void destroy_bsrsm_info();
         void destroy_bsrilu0_info();
@@ -61,28 +64,31 @@ namespace rocsparse
         void uncouple(rocsparse::trm_data_t* p);
 
     public:
-        rocsparse_csrsv_info   create_csrsv_info();
-        rocsparse_csrsm_info   create_csrsm_info();
-        rocsparse_csrilu0_info create_csrilu0_info();
-        rocsparse_csric0_info  create_csric0_info();
-        rocsparse_bsrsv_info   create_bsrsv_info();
-        rocsparse_bsrsm_info   create_bsrsm_info();
-        rocsparse_bsrilu0_info create_bsrilu0_info();
-        rocsparse_bsric0_info  create_bsric0_info();
+        rocsparse_csrsv_info     create_csrsv_info();
+        rocsparse_csrsm_info     create_csrsm_info();
+        rocsparse_csrilu0_info   create_csrilu0_info();
+        rocsparse_csric0_info    create_csric0_info();
+        rocsparse_csrildlt0_info create_csrildlt0_info();
+        rocsparse_bsrsv_info     create_bsrsv_info();
+        rocsparse_bsrsm_info     create_bsrsm_info();
+        rocsparse_bsrilu0_info   create_bsrilu0_info();
+        rocsparse_bsric0_info    create_bsric0_info();
 
-        std::shared_ptr<_rocsparse_csrsv_info>   get_shared_csrsv_info();
-        std::shared_ptr<_rocsparse_csrsm_info>   get_shared_csrsm_info();
-        std::shared_ptr<_rocsparse_csrilu0_info> get_shared_csrilu0_info();
-        std::shared_ptr<_rocsparse_csric0_info>  get_shared_csric0_info();
-        std::shared_ptr<_rocsparse_bsrsv_info>   get_shared_bsrsv_info();
-        std::shared_ptr<_rocsparse_bsrsm_info>   get_shared_bsrsm_info();
-        std::shared_ptr<_rocsparse_bsrilu0_info> get_shared_bsrilu0_info();
-        std::shared_ptr<_rocsparse_bsric0_info>  get_shared_bsric0_info();
+        std::shared_ptr<_rocsparse_csrsv_info>     get_shared_csrsv_info();
+        std::shared_ptr<_rocsparse_csrsm_info>     get_shared_csrsm_info();
+        std::shared_ptr<_rocsparse_csrilu0_info>   get_shared_csrilu0_info();
+        std::shared_ptr<_rocsparse_csric0_info>    get_shared_csric0_info();
+        std::shared_ptr<_rocsparse_csrildlt0_info> get_shared_csrildlt0_info();
+        std::shared_ptr<_rocsparse_bsrsv_info>     get_shared_bsrsv_info();
+        std::shared_ptr<_rocsparse_bsrsm_info>     get_shared_bsrsm_info();
+        std::shared_ptr<_rocsparse_bsrilu0_info>   get_shared_bsrilu0_info();
+        std::shared_ptr<_rocsparse_bsric0_info>    get_shared_bsric0_info();
 
         void clear_csrsv_info();
         void clear_csrsm_info();
         void clear_csrilu0_info();
         void clear_csric0_info();
+        void clear_csrildlt0_info();
         void clear_bsrsv_info();
         void clear_bsrsm_info();
         void clear_bsrilu0_info();

@@ -2,6 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   NumWarmups: 1
   MaxEnqueuesPerSync: 1
@@ -11,8 +12,8 @@ GlobalParameters:
   DataInitTypeB: 24
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   MaxWorkspaceSize: 134217728
   KernelTime: True
@@ -29,7 +30,7 @@ GlobalParameters:
       - [32, 32, 16, 1, 1, 1, 5, 4, 1] # MT128x160, 4 waves; MFMA bf16 32x32x16, AGNTAB+SK coverage
     - DepthU: [64]
     - 1LDSBuffer: [-1]
-    - ExpandPointerSwap: [0]
+    - ExpandPointerSwap: [false]
     - StaggerU: [16]
     - TransposeLDS: [0]
     - WorkGroupMapping: [1]
@@ -77,7 +78,7 @@ GlobalParameters:
       - [32, 32, 16, 1, 1, 1, 5, 4, 1] # MT128x160, 4 waves; MFMA bf16 32x32x16, AGNTAB+SK coverage
     - DepthU: [64]
     - 1LDSBuffer: [-1]
-    - ExpandPointerSwap: [0]
+    - ExpandPointerSwap: [false]
     - StaggerU: [16]
     - WorkGroupMapping: [1]
     - WorkGroupMappingXCC: [8]
@@ -120,7 +121,7 @@ GlobalParameters:
       - [32, 32, 16, 1, 1, 1, 5, 4, 1] # MT128x160, 4 waves; MFMA bf16 32x32x16
     - DepthU: [64]
     - 1LDSBuffer: [-1]
-    - ExpandPointerSwap: [0]
+    - ExpandPointerSwap: [false]
     - StaggerU: [16]
     - TransposeLDS: [0]
     - WorkGroupMapping: [1]

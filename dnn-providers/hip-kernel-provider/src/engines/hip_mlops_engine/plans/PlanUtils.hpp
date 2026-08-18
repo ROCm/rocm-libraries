@@ -6,9 +6,27 @@
 #include "hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h"
 #include "hipdnn_plugin_sdk/PluginException.hpp"
 #include <cstddef>
+#include <limits>
+#include <string>
 
 namespace hip_kernel_provider
 {
+
+/**
+ * Safely narrows an int64_t value to int, throwing HipdnnPluginException
+ * if the value is out of range.
+ */
+inline int checkedNarrowToInt(int64_t value, const char* name)
+{
+    if(value < static_cast<int64_t>(std::numeric_limits<int>::min())
+       || value > static_cast<int64_t>(std::numeric_limits<int>::max()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(name) + " value " + std::to_string(value) + " exceeds int range");
+    }
+    return static_cast<int>(value);
+}
 
 /**
 * Given a data SDK type, returns a string of the HIP type that can be used to pass

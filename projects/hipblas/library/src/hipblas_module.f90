@@ -375,6 +375,55 @@ module hipblas
         end function hipblasGetAtomicsMode
     end interface
 
+    ! batch alpha/beta stride
+    interface
+        function hipblasSetBatchAlphaStride(handle, alpha_stride) &
+            bind(c, name='hipblasSetBatchAlphaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchAlphaStride
+            type(c_ptr), value :: handle
+            integer(c_int64_t), value :: alpha_stride
+        end function hipblasSetBatchAlphaStride
+    end interface
+
+    interface
+        function hipblasGetBatchAlphaStride(handle, alpha_stride) &
+            bind(c, name='hipblasGetBatchAlphaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchAlphaStride
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: alpha_stride
+        end function hipblasGetBatchAlphaStride
+    end interface
+
+    interface
+        function hipblasSetBatchBetaStride(handle, beta_stride) &
+            bind(c, name='hipblasSetBatchBetaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchBetaStride
+            type(c_ptr), value :: handle
+            integer(c_int64_t), value :: beta_stride
+        end function hipblasSetBatchBetaStride
+    end interface
+
+    interface
+        function hipblasGetBatchBetaStride(handle, beta_stride) &
+            bind(c, name='hipblasGetBatchBetaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchBetaStride
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: beta_stride
+        end function hipblasGetBatchBetaStride
+    end interface
+
     !--------!
     ! blas 1 !
     !--------!
@@ -22018,6 +22067,119 @@ module hipblas
         end function hipblasZgemmBatched_64
     end interface
 
+    ! gemmGroupedBatched
+    interface
+        function hipblasSgemmGroupedBatched(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                            alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                            Carray, ldc_array, group_count, group_size) &
+            bind(c, name='hipblasSgemmGroupedBatched')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgemmGroupedBatched
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int), value :: group_count
+            type(c_ptr), value :: group_size
+        end function hipblasSgemmGroupedBatched
+    end interface
+
+    interface
+        function hipblasDgemmGroupedBatched(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                            alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                            Carray, ldc_array, group_count, group_size) &
+            bind(c, name='hipblasDgemmGroupedBatched')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgemmGroupedBatched
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int), value :: group_count
+            type(c_ptr), value :: group_size
+        end function hipblasDgemmGroupedBatched
+    end interface
+
+    interface
+        function hipblasSgemmGroupedBatched_64(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                               alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                               Carray, ldc_array, group_count, group_size) &
+            bind(c, name='hipblasSgemmGroupedBatched_64')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgemmGroupedBatched_64
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int64_t), value :: group_count
+            type(c_ptr), value :: group_size
+        end function hipblasSgemmGroupedBatched_64
+    end interface
+
+    interface
+        function hipblasDgemmGroupedBatched_64(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                               alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                               Carray, ldc_array, group_count, group_size) &
+            bind(c, name='hipblasDgemmGroupedBatched_64')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgemmGroupedBatched_64
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int64_t), value :: group_count
+            type(c_ptr), value :: group_size
+        end function hipblasDgemmGroupedBatched_64
+    end interface
+
     ! gemmStridedBatched
     interface
         function hipblasHgemmStridedBatched(handle, transA, transB, m, n, k, alpha, &
@@ -23813,6 +23975,156 @@ module hipblas
             integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
             integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
         end function hipblasGemmBatchedExWithFlags_64
+    end interface
+
+    interface
+        function hipblasGemmGroupedBatchedEx(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                             alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                             ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                             ldd_array, group_count, group_size, compute_type, algo) &
+            bind(c, name='hipblasGemmGroupedBatchedEx')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGemmGroupedBatchedEx
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            integer(kind(HIP_R_16F)), value :: a_type
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            integer(kind(HIP_R_16F)), value :: b_type
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            integer(kind(HIP_R_16F)), value :: c_type
+            type(c_ptr), value :: ldc_array
+            type(c_ptr), value :: Darray
+            integer(kind(HIP_R_16F)), value :: d_type
+            type(c_ptr), value :: ldd_array
+            integer(c_int), value :: group_count
+            type(c_ptr), value :: group_size
+            integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
+            integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
+        end function hipblasGemmGroupedBatchedEx
+    end interface
+
+    interface
+        function hipblasGemmGroupedBatchedExWithFlags(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                                    alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                                    ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                                    ldd_array, group_count, group_size, compute_type, algo, flags) &
+            bind(c, name='hipblasGemmGroupedBatchedExWithFlags')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGemmGroupedBatchedExWithFlags
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            integer(kind(HIP_R_16F)), value :: a_type
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            integer(kind(HIP_R_16F)), value :: b_type
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            integer(kind(HIP_R_16F)), value :: c_type
+            type(c_ptr), value :: ldc_array
+            type(c_ptr), value :: Darray
+            integer(kind(HIP_R_16F)), value :: d_type
+            type(c_ptr), value :: ldd_array
+            integer(c_int), value :: group_count
+            type(c_ptr), value :: group_size
+            integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
+            integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
+            integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
+        end function hipblasGemmGroupedBatchedExWithFlags
+    end interface
+
+    interface
+        function hipblasGemmGroupedBatchedEx_64(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                                alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                                ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                                ldd_array, group_count, group_size, compute_type, algo) &
+            bind(c, name='hipblasGemmGroupedBatchedEx_64')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGemmGroupedBatchedEx_64
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            integer(kind(HIP_R_16F)), value :: a_type
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            integer(kind(HIP_R_16F)), value :: b_type
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            integer(kind(HIP_R_16F)), value :: c_type
+            type(c_ptr), value :: ldc_array
+            type(c_ptr), value :: Darray
+            integer(kind(HIP_R_16F)), value :: d_type
+            type(c_ptr), value :: ldd_array
+            integer(c_int64_t), value :: group_count
+            type(c_ptr), value :: group_size
+            integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
+            integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
+        end function hipblasGemmGroupedBatchedEx_64
+    end interface
+
+    interface
+        function hipblasGemmGroupedBatchedExWithFlags_64(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                                         alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                                         ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                                         ldd_array, group_count, group_size, compute_type, algo, flags) &
+            bind(c, name='hipblasGemmGroupedBatchedExWithFlags_64')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGemmGroupedBatchedExWithFlags_64
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transA_array
+            type(c_ptr), value :: transB_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            integer(kind(HIP_R_16F)), value :: a_type
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            integer(kind(HIP_R_16F)), value :: b_type
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            integer(kind(HIP_R_16F)), value :: c_type
+            type(c_ptr), value :: ldc_array
+            type(c_ptr), value :: Darray
+            integer(kind(HIP_R_16F)), value :: d_type
+            type(c_ptr), value :: ldd_array
+            integer(c_int64_t), value :: group_count
+            type(c_ptr), value :: group_size
+            integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
+            integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
+            integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
+        end function hipblasGemmGroupedBatchedExWithFlags_64
     end interface
 
     interface

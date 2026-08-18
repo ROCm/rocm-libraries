@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_bdsvdx.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -47,6 +48,7 @@ rocblas_status rocsolver_bdsvdx_impl(rocblas_handle handle,
                                      const rocblas_int ldz,
                                      rocblas_int* ifail,
                                      rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("bdsvdx", "--uplo", uplo, "--svect", svect, "--srange", srange, "-n", n,
                         "--vl", vl, "--vu", vu, "--il", il, "--iu", iu, "--ldz", ldz);
@@ -114,6 +116,10 @@ rocblas_status rocsolver_bdsvdx_impl(rocblas_handle handle,
         shiftZ, ldz, strideZ, ifail, strideIfail, info, batch_count, (rocblas_int*)work1_iwork,
         (T*)work2_pivmin, (T*)Esqr, (T*)bounds, (T*)inter, (rocblas_int*)ninter, (rocblas_int*)nsplit,
         (rocblas_int*)iblock, (rocblas_int*)isplit_map, (T*)Dtgk, (T*)Etgk, (T*)Stmp);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

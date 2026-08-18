@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,7 +86,8 @@ static size_t compute_partition_count(T1 length)
     // things down.  particularly noticeable with mix_3D tests
     static const size_t MAX_PARTITIONS = 8;
     size_t              iters          = count_iters(length);
-    size_t hw_threads = std::min(MAX_PARTITIONS, static_cast<size_t>(omp_get_num_procs()));
+    size_t              hw_threads     = std::min(
+        MAX_PARTITIONS, static_cast<size_t>(std::min(omp_get_num_procs(), omp_get_max_threads())));
     if(!hw_threads)
         return 1;
 

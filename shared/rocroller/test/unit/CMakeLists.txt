@@ -98,6 +98,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/MFMAUnitObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTestGFX9.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTestGFX120X.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTestGFX1250.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MemoryInstructionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MixedArithmeticTest.cpp"

@@ -1,0 +1,91 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 DESIGNED config for gfx950 LRA transposed-MFMA paths.
+#
+# Target: Tensile/Components/LraTileAssignment.py
+# Missing ranges: 144-249, 285-409 (plus 473-592, 611-693 as ceiling evidence)
+#
+# STRATEGY
+# --------
+# Lines 144-249 are in LraTileAssignmentTransposedMFMA.__call__:
+#   - Requires: EnableMatrixInstruction=True, HasLDSTrB128B16=True (gfx950 only)
+#   - Dispatched when tP["enableLDSTr"]=True AND DataType=b (BF16) / DataType=h (FP16)
+#   - Branch tP["isM"]=False (N-side matrix) walks lines 148-249
+#   - Branch num1DWaves>1 (lines 233-239) needs MIWaveGroup with [x>1, ...] or [..., y>1]
+#
+# Lines 285-409 are in LraTileAssignmentTransposedMFMAB8.__call__:
+#   - Requires: HasLDSTrB64B8=True (gfx950 only) + DataType=I8 (dispatched as DataType="b"
+#     with I8 type + LDSTrInst) OR DataType=F8/B8
+#   - enableLDSTr=True gate
+#   - Branch tP["isM"]=False walks lines 373-390 (else branch)
+#   - Branch tP["isM"]=True walks lines 359-371
+#
+# Selector in LraTileAssignmentTransposedMFMA:
+#   - DataType=b (BF16) -> HasLDSTrB128B16 class (B16 path, lines 144-249)
+#   - DataType=I8       -> LraTileAssignmentTransposedMFMAB8 (B8 path, lines 285-409)
+#
+# ForkParameters below: 2 MatrixInstruction shapes x 2 SourceSwap = 4 permutations
+# (limited to 8 via emit_kernels_from_config limit=8 in the test).
+# MIWaveGroup [4,4,...] means num1DWaves = MIWaveGroup[1] = 4 > 1 for tile01==1
+# which exercises the wave-offset branch on line 233.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # BBS NN TransposeLDS=1 LDSTrInst=True
+  # DataType=b (BF16) -> LraTileAssignmentTransposedMFMA (lines 144-249)
+  # MIWaveGroup [4,4] -> num1DWaves=4>1 -> wave-offset branch (line 233)
+  # SourceSwap fork -> dividedForBlkId alternation
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # Two MatrixInstruction shapes: 16x16 BM/BN=4x4 (MIWaveGroup [2,2]) and
+        # 16x16 BM=2,BN=8 (MIWaveGroup [4,1]) -> different num1DWaves on each tile side.
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 32, 1, 1, 2, 8, 4, 1]
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - LDSTrInst: [True]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - StaggerUStride: [16]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [-1]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

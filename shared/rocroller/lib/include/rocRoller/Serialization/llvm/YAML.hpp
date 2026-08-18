@@ -315,7 +315,9 @@ namespace llvm
                                      rocRoller::FP6,
                                      rocRoller::BF6,
                                      rocRoller::FP4,
-                                     rocRoller::E8M0>) struct ScalarTraits<T>
+                                     rocRoller::E8M0,
+                                     rocRoller::E5M3,
+                                     rocRoller::E4M3>) struct ScalarTraits<T>
         {
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {

@@ -210,8 +210,8 @@ nullptr, d_type, ldd, stride_d, batch_count, compute_type, algo, solution_index,
 
 // the following tests still output to D
 
-// If K==0, then alpha, A and B can both be nullptr without issue.
-DAPI_CHECK(rocblas_gemm_strided_batched_ex_fn, (handle, transA, transB, M, N, 0, nullptr,
+// If K==0, then A and B can both be nullptr without issue.
+DAPI_CHECK(rocblas_gemm_strided_batched_ex_fn, (handle, transA, transB, M, N, 0, alpha,
 nullptr, a_type, lda, stride_a, nullptr, b_type, ldb, stride_b, beta, dC, c_type, ldc, stride_c,
 dD, d_type, ldd, stride_d, batch_count, compute_type, algo, solution_index, flags));
 

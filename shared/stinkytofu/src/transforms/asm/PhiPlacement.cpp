@@ -47,7 +47,7 @@ struct BlockDefs {
     RegKeyMap<StinkyInstruction*> lastDef;
 };
 
-std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo) {
+std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo, bool includePseudo) {
     const unsigned N = rpo.size();
     std::vector<BlockDefs> info(N);
 
@@ -58,7 +58,7 @@ std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo) {
             if (isPseudoInst(inst)) continue;
 
             for (const auto& dest : inst->getDestRegs()) {
-                if (!dest.isRegister() || isPseudoReg(dest)) continue;
+                if (!dest.isRegister() || (!includePseudo && isPseudoReg(dest))) continue;
                 for (unsigned d = 0; d < dest.reg.num; ++d) {
                     RegKey key = toRegKey(dest, d);
                     info[i].keys.insert(key);
@@ -79,7 +79,7 @@ std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo) {
 // no PHIs — they would be dead on arrival.
 //----------------------------------------------------------------------
 
-RegKeySet gatherUsedRegs(const std::vector<BasicBlock*>& rpo) {
+RegKeySet gatherUsedRegs(const std::vector<BasicBlock*>& rpo, bool includePseudo) {
     RegKeySet used;
     for (BasicBlock* bb : rpo) {
         for (IRBase& ir : *bb) {
@@ -87,7 +87,7 @@ RegKeySet gatherUsedRegs(const std::vector<BasicBlock*>& rpo) {
             auto* inst = cast<StinkyInstruction>(&ir);
             if (isPseudoInst(inst)) continue;
             for (const auto& src : inst->getSrcRegs()) {
-                if (!src.isRegister() || isPseudoReg(src)) continue;
+                if (!src.isRegister() || (!includePseudo && isPseudoReg(src))) continue;
                 for (unsigned s = 0; s < src.reg.num; ++s) used.insert(toRegKey(src, s));
             }
         }
@@ -180,12 +180,13 @@ std::vector<ReachMap> computeReachOut(const std::vector<BasicBlock*>& rpo,
 
 void removeExistingPhis(Function& func) {
     for (BasicBlock& bb : func) {
-        while (!bb.empty()) {
-            IRBase& ir = *bb.begin();
-            if (ir.getType() != IRBase::IRType::StinkyTofu) break;
-            auto* inst = cast<StinkyInstruction>(&ir);
-            if (inst->getUnifiedOpcode() != GFX::PHI) break;
-            ir.erase();
+        for (auto it = bb.begin(); it != bb.end();) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst != nullptr && inst->getUnifiedOpcode() == GFX::PHI) {
+                it = bb.eraseIR(it);
+            } else {
+                ++it;
+            }
         }
     }
 }
@@ -220,7 +221,8 @@ char InsertPhiPass::ID = 0;
 namespace stinkytofu {
 // Time: O(N*E + R*(N + F) + I), N = blocks, E = CFG edges,
 //       R = register keys, F = Sigma|DF[i]|, I = instructions.
-void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool clearExisting) {
+void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool clearExisting,
+                           bool includePseudo) {
     if (func.empty()) return;
 
     if (clearExisting) removeExistingPhis(func);
@@ -231,11 +233,11 @@ void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool cl
 
     // --- 1. Per-block register definitions ---
 
-    auto blockDefs = gatherDefs(rpo);
+    auto blockDefs = gatherDefs(rpo, includePseudo);
 
     // --- 2. Globally-used registers (semi-pruned SSA) ---
 
-    auto usedRegs = gatherUsedRegs(rpo);
+    auto usedRegs = gatherUsedRegs(rpo, includePseudo);
 
     // --- 3. PHI-placement sites (iterated DF, only for used registers) ---
 
@@ -285,10 +287,10 @@ void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool cl
     }
 }
 
-void insertPhiInstructions(Function& func, bool clearExisting) {
+void insertPhiInstructions(Function& func, bool clearExisting, bool includePseudo) {
     if (func.empty()) return;
     DominanceInfo domInfo = computeDominanceInfo(func);
-    insertPhiInstructions(func, domInfo, clearExisting);
+    insertPhiInstructions(func, domInfo, clearExisting, includePseudo);
 }
 
 std::unique_ptr<Pass> createInsertPhiPass() {

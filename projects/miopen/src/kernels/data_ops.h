@@ -170,9 +170,9 @@ void readDataVec2(uint lcl_id,
         lvisX &= (g_x < gbl_width && g_y < gbl_height);
         lvisY &= (g_x < gbl_width && g_y < gbl_height);
 #else
-        uint l_x            = x + lcl_x;
-        uint l_y            = y + lcl_y;
-        uint lcl_off        = lcl_base + mad24(l_y, lcl_stride, l_x);
+        uint l_x     = x + lcl_x;
+        uint l_y     = y + lcl_y;
+        uint lcl_off = lcl_base + mad24(l_y, lcl_stride, l_x);
 #endif
         lcl_data[lcl_off].x = (lvisX) ? gbl_data[gbl_off_v2.x] : (_FLOAT)0;
 #if MLO_N_INPUTS_REMAINDER <= MLO_N_IN_TILES_PERSTACK

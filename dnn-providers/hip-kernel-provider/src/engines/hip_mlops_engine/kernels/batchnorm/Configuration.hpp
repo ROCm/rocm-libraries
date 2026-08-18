@@ -150,14 +150,12 @@ template <typename HipKernelConfig,
           typename Architecture,
           int Variant,
           int NCHW,
-          int MaxN,
           int NElements,
           int N,
           int C,
           int HW,
           int NHW,
           int CHW,
-          int Vectorize,
           int VecSize,
           int StashMethod,
           int LoopUnrollMaxN,
@@ -167,10 +165,8 @@ template <typename HipKernelConfig,
           int UseNodpp>
 struct proto_config
 {
-    static_assert(Vectorize == 0 || Vectorize == 1, "Vectorize must be 0 or 1");
     static_assert(UseNodpp == 0 || UseNodpp == 1, "UseNodpp must be 0 or 1");
     static_assert(NCHW >= 0, "HIP_PLUGIN_BN_NCHW should be always >= 0");
-    static_assert(MaxN >= 0, "HIP_PLUGIN_BN_MAXN should be always >= 0");
     static_assert(C >= 0, "HIP_PLUGIN_BN_C should be always >= 0");
     static_assert(N >= 0, "HIP_PLUGIN_BN_N should be always >= 0");
     static_assert(HW >= 0, "HIP_PLUGIN_BN_HW should be always >= 0");
@@ -196,14 +192,20 @@ struct proto_config
                      : 0); // TODO: not sure if 0 should be the default value of this.
     static constexpr auto launch_dim = LaunchDim{};
     static constexpr unsigned int nchw = static_cast<unsigned int>(NCHW);
-    static constexpr unsigned int max_n = static_cast<unsigned int>(MaxN);
+
+    // `max_n` is a limit on the number of batch elements from the x tensor that can be cached in per-thread memory as part of
+    // variant 3 kernels. If batchsize (n_elements) exceeds this limit then the kernel doesn't cache the global memory accesses.
+    // The constant of 65 is related to the heuristic used in `defaultConfigSpatialSingle` where Batchnorm plans select the kernel
+    // variant to use. In BN Fwd training, the heuristics only selects variant 3 when N <= 32, so the caching optimization is always
+    // used. In BN Bwd training, the heuristics only selects variant 3 when N > 64, so the caching optimization is never used. If
+    // there are future changes to how the heuristic selects variant 3 kernels, then it may be worth revisiting this caching limit.
+    static constexpr unsigned int max_n = 65;
     static constexpr unsigned int n_elements = static_cast<unsigned int>(NElements);
     static constexpr unsigned int n = static_cast<unsigned int>(N);
     static constexpr unsigned int c = static_cast<unsigned int>(C);
     static constexpr unsigned int hw = static_cast<unsigned int>(HW);
     static constexpr unsigned int nhw = static_cast<unsigned int>(NHW);
     static constexpr unsigned int chw = static_cast<unsigned int>(CHW);
-    static constexpr bool vectorize = static_cast<bool>(Vectorize);
     static constexpr int stash_method = StashMethod;
     static constexpr int loop_unroll_max_n = LoopUnrollMaxN;
     static constexpr int loop_unroll_max_hw = LoopUnrollMaxHW;
@@ -218,7 +220,8 @@ struct proto_config
           && !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x
                || target_arch == architecture::gfx120x || target_arch == architecture::gfx115x)
           && !(use_nodpp && (variant != 0));
-    static constexpr unsigned int vec_size = vectorize ? VecSize : 1;
+    static constexpr unsigned int vec_size = VecSize;
+    static constexpr bool vectorize = VecSize > 1;
     static constexpr unsigned int vec_size_x
         = vectorize && HipKernelConfig::layout_nhwc ? vec_size : 1;
     static constexpr unsigned int vec_size_y
@@ -267,14 +270,12 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
                                                                 HIP_PLUGIN_GFX115X>,
     HIP_PLUGIN_BN_VARIANT,
     HIP_PLUGIN_BN_NCHW,
-    HIP_PLUGIN_BN_MAXN,
     HIP_PLUGIN_BN_N_ELEMENTS,
     HIP_PLUGIN_BN_N,
     HIP_PLUGIN_BN_C,
     HIP_PLUGIN_BN_HW,
     HIP_PLUGIN_BN_NHW,
     HIP_PLUGIN_BN_CHW,
-    HIP_PLUGIN_BN_VECTORIZE,
     HIP_PLUGIN_BN_VEC_SIZE,
     HIP_PLUGIN_BN_STASH_METHOD,
     HIP_PLUGIN_BN_LOOP_UNROLL_MAXN,

@@ -29,6 +29,7 @@ namespace rocRoller
         struct Unroll;
         struct User;
         struct VGPR;
+        struct VGPRBlockSet;
         struct VGPRBlockNumber;
         struct VGPRBlockIndex;
         struct WaveTile;
@@ -55,6 +56,7 @@ namespace rocRoller
                                        Unroll,
                                        User,
                                        VGPR,
+                                       VGPRBlockSet,
                                        VGPRBlockNumber,
                                        VGPRBlockIndex,
                                        WaveTile,

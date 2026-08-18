@@ -17,7 +17,10 @@ namespace rocRoller
         class AddConvertOperations
         {
         public:
-            AddConvertOperations() {}
+            AddConvertOperations(ContextPtr context)
+                : m_context(context)
+            {
+            }
 
             void addConverts(KernelGraph& graph);
 
@@ -45,6 +48,8 @@ namespace rocRoller
             std::map<int, DataType> m_storageDataType;
 
             std::vector<ConvertLocation> m_locations;
+
+            ContextPtr m_context;
         };
 
         void AddConvertOperations::stageMultiplyConverts(KernelGraph const& graph)
@@ -68,6 +73,28 @@ namespace rocRoller
                         auto [macBTag, macB] = graph.getDimension<MacroTile>(
                             node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
                         m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS});
+
+                        if(m_context->targetArchitecture().HasCapability(
+                               GPUCapability::PartiallyActiveWaveSize))
+                        {
+                            if(op.scaleA == Operations::ScaleMode::Separate)
+                            {
+                                auto [macScaleATag, macScaleA] = graph.getDimension<MacroTile>(
+                                    node,
+                                    Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
+                                m_multiplyArgs[macScaleATag].push_back(
+                                    {node, NaryArgument::LHS_SCALE});
+                            }
+
+                            if(op.scaleB == Operations::ScaleMode::Separate)
+                            {
+                                auto [macScaleBTag, macScaleB] = graph.getDimension<MacroTile>(
+                                    node,
+                                    Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
+                                m_multiplyArgs[macScaleBTag].push_back(
+                                    {node, NaryArgument::RHS_SCALE});
+                            }
+                        }
                     },
                     [&](CIsAnyOf<LoadTiled, LoadLDSTile> auto op) {
                         auto coord = graph.mapper.get<MacroTile>(node);
@@ -194,7 +221,7 @@ namespace rocRoller
         {
             auto graph = k;
 
-            AddConvertOperations adder;
+            AddConvertOperations adder{m_context};
 
             adder.addConverts(graph);
 

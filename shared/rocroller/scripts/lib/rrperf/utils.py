@@ -21,9 +21,12 @@ def sjoin(xs):
     return " ".join([str(x) for x in xs])
 
 
-def load_suite(suite: str):
+def load_suite(suite_name: str):
     """Load performance suite from rrsuites.py."""
-    return getattr(rrperf.rrsuites, suite)()
+    rrsuite = getattr(rrperf.rrsuites, suite_name, None)
+    if rrsuite is None:
+        rrsuite = getattr(rrperf.rrsuites_gfx1250, suite_name, None)
+    return rrsuite()
 
 
 def first_problem_from_suite(suite: str):

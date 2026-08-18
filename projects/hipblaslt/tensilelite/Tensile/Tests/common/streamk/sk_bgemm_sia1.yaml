@@ -1,0 +1,72 @@
+# Stream-K with ScheduleIterAlg=1 (coarse schedule).
+TestParameters:
+  marks: [ skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  SleepPercent: 50
+
+BenchmarkProblems:
+
+  - # BGEMM TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BGEMM TN - Stream-K SIA1, MT64x64
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - WavefrontSize: [32]
+        - 1LDSBuffer: [0]
+        - DepthU: [32, 64]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [0]
+        - LocalReadVectorWidth: [16]
+        - MatrixInstruction:
+          # MT64x64 spread over enough waves to fit the gfx11 256-VGPR budget.
+          - [16, 16, 16, 1, 1, 1, 2, 4, 2] # MT64x64, 8 waves
+          - [16, 16, 16, 1, 1, 1, 1, 4, 4] # MT64x64, 16 waves
+        - MIArchVgpr: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [1]
+        - SourceSwap: [True]
+        - StreamK: [3]
+        - StreamKFixupTreeReduction: [0]
+        - TransposeLDS: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WorkGroupMapping: [1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 32896]   # under-utilized, K-heavy, K % DepthU == 0
+          - Exact: [256, 256, 1, 32888]   # K tail: K % 64 != 0 and K % 32 != 0 -> K remainder/tail loop under SK splitting
+          - Exact: [200, 100, 1, 8192]    # edge M/N: not multiples of the 64x64 macrotile -> partial tiles + SK fixup
+          - Exact: [2048, 2048, 1, 4096]  # well-utilized: 32x32 tile grid, few/no K-splits -> SIA1 compute-bound regime

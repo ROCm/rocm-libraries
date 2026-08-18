@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@ Definitions:
   - &alpha_beta_range_checkin
     - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   0.0, beta:  1.0,  alphai:  0.0, betai:  0.0 }
 
   - &alpha_beta_range_1
     - { alpha:   1.0, beta:  1.0,  alphai:  1.0, betai:  1.0 }
@@ -50,7 +51,7 @@ Tests:
 - name: bsrxmv
   category: pre_checkin
   function: bsrxmv
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M: [8, 16]
   N: [8, 16]
   block_dim: [2, 5, 81]

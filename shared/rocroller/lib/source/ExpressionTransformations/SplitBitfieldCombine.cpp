@@ -61,7 +61,8 @@ namespace rocRoller
                 uint32_t dwordEndBit   = dwordStartBit + dwordSize - 1;
 
                 // Get new destination dword
-                ExpressionPtr dstDWord = bfe(DataType::Raw32, expr.rhs, dwordStartBit, dwordSize);
+                ExpressionPtr dstDWord
+                    = simplify(bfe(DataType::Raw32, expr.rhs, dwordStartBit, dwordSize));
 
                 // No overlap with this dword
                 if(combineStartBit > dwordEndBit || combineEndBit < dwordStartBit)

@@ -108,7 +108,9 @@ namespace
                                      "--batch_count",
                                      batch_count,
                                      "--compute_type",
-                                     ex_type_str);
+                                     ex_type_str,
+                                     "--alpha_stride",
+                                     handle->get_stride_alpha());
                 }
             }
             else if(layer_mode & rocblas_layer_mode_log_trace)
@@ -146,7 +148,9 @@ namespace
                                    "batch_count",
                                    batch_count,
                                    "compute_type",
-                                   ex_type_str);
+                                   ex_type_str,
+                                   "alpha_stride",
+                                   handle->get_stride_alpha());
             }
         }
 
@@ -156,7 +160,7 @@ namespace
                                                                         n,
                                                                         alpha,
                                                                         alpha_type,
-                                                                        stride_0,
+                                                                        handle->get_stride_alpha(),
                                                                         x,
                                                                         x_type,
                                                                         offset_0,

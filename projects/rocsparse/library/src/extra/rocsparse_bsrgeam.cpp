@@ -710,17 +710,17 @@ namespace rocsparse
             rocsparse_int end   = 0;
             if(bsr_row_ptr_C != nullptr)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(&end,
-                                                   &bsr_row_ptr_C[mb],
-                                                   sizeof(rocsparse_int),
-                                                   hipMemcpyDeviceToHost,
-                                                   handle->stream));
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(&start,
-                                                   &bsr_row_ptr_C[0],
-                                                   sizeof(rocsparse_int),
-                                                   hipMemcpyDeviceToHost,
-                                                   handle->stream));
-                RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&end,
+                                                             &bsr_row_ptr_C[mb],
+                                                             sizeof(rocsparse_int),
+                                                             hipMemcpyDeviceToHost,
+                                                             handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&start,
+                                                             &bsr_row_ptr_C[0],
+                                                             sizeof(rocsparse_int),
+                                                             hipMemcpyDeviceToHost,
+                                                             handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
             }
 
             const rocsparse_int nnzb_C = (end - start);

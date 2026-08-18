@@ -177,12 +177,12 @@ To use special data ordering for ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_O
 |  BF16 | BF16  |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL        |  HIPBLASLT_ORDER_COL16_4R8  | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
 +-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 
-There are restrictions on the supported problem sizes for the ``HIP_R_4F_E2M1``, ``HIP_R_6F_E2M3``, ``HIP_R_6F_E3M2``,
+There are restrictions on the supported problem sizes for the ``HIP_R_4F_E2M1``,
 ``HIP_R_8F_E4M3``, and ``HIP_R_8F_E5M2`` data types.
 When ``HIPBLASLT_MATMUL_DESC_A_SCALE_MODE`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_MODE`` are both set
 to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0``, the following restrictions apply:
 
-*  Atype and Btype can be any combination of: ``HIP_R_8F_E4M3``, ``HIP_R_8F_E5M2``, ``HIP_R_6F_E2M3``, ``HIP_R_6F_E3M2``, and ``HIP_R_4F_E2M1``.
+*  Atype and Btype can be any combination of: ``HIP_R_8F_E4M3``, ``HIP_R_8F_E5M2``, and ``HIP_R_4F_E2M1``.
 *  Ctype must be the same as Dtype.
 *  Dtype can be any of the following: ``HIP_R_32F``, ``HIP_R_16F``, or ``HIP_R_16BF``.
 *  ``m % 16`` must be equal to ``0``.

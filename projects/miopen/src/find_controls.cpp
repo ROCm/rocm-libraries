@@ -175,8 +175,12 @@ std::optional<std::vector<solver::Id>> GetEnvFindOnlySolver()
 {
     if(miopen::debug::IsWarmupOngoing)
         return {};
+#ifdef MIOPEN_BUILD_TESTING
+    return GetEnvFindOnlySolverImpl();
+#else
     static const auto once = GetEnvFindOnlySolverImpl();
     return once;
+#endif
 }
 
 namespace {

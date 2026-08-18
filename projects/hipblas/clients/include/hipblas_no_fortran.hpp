@@ -48,6 +48,10 @@
 #define hipblasGetMatrixAsyncFortran hipblasGetMatrixAsync
 #define hipblasSetAtomicsModeFortran hipblasSetAtomicsMode
 #define hipblasGetAtomicsModeFortran hipblasGetAtomicsMode
+#define hipblasSetBatchAlphaStrideFortran hipblasSetBatchAlphaStride
+#define hipblasGetBatchAlphaStrideFortran hipblasGetBatchAlphaStride
+#define hipblasSetBatchBetaStrideFortran hipblasSetBatchBetaStride
+#define hipblasGetBatchBetaStrideFortran hipblasGetBatchBetaStride
 
 /* ==========
  *    L1
@@ -1201,6 +1205,8 @@
 #define hipblasDgemmBatchedFortran hipblasDgemmBatched
 #define hipblasCgemmBatchedFortran hipblasCgemmBatched
 #define hipblasZgemmBatchedFortran hipblasZgemmBatched
+#define hipblasSgemmGroupedBatchedFortran hipblasSgemmGroupedBatched
+#define hipblasDgemmGroupedBatchedFortran hipblasDgemmGroupedBatched
 #define hipblasHgemmStridedBatchedFortran hipblasHgemmStridedBatched
 #define hipblasSgemmStridedBatchedFortran hipblasSgemmStridedBatched
 #define hipblasDgemmStridedBatchedFortran hipblasDgemmStridedBatched
@@ -1217,6 +1223,8 @@
 #define hipblasDgemmBatched_64Fortran hipblasDgemmBatched_64
 #define hipblasCgemmBatched_64Fortran hipblasCgemmBatched_64
 #define hipblasZgemmBatched_64Fortran hipblasZgemmBatched_64
+#define hipblasSgemmGroupedBatched_64Fortran hipblasSgemmGroupedBatched_64
+#define hipblasDgemmGroupedBatched_64Fortran hipblasDgemmGroupedBatched_64
 #define hipblasHgemmStridedBatched_64Fortran hipblasHgemmStridedBatched_64
 #define hipblasSgemmStridedBatched_64Fortran hipblasSgemmStridedBatched_64
 #define hipblasDgemmStridedBatched_64Fortran hipblasDgemmStridedBatched_64
@@ -1241,6 +1249,8 @@
 #define hipblasGemmStridedBatchedExFortran hipblasGemmStridedBatchedEx
 #define hipblasGemmExWithFlagsFortran hipblasGemmExWithFlags
 #define hipblasGemmBatchedExWithFlagsFortran hipblasGemmBatchedExWithFlags
+#define hipblasGemmGroupedBatchedExFortran hipblasGemmGroupedBatchedEx
+#define hipblasGemmGroupedBatchedExWithFlagsFortran hipblasGemmGroupedBatchedExWithFlags
 #define hipblasGemmStridedBatchedExWithFlagsFortran hipblasGemmStridedBatchedExWithFlags
 
 #define hipblasGemmEx_64Fortran hipblasGemmEx_64
@@ -1248,6 +1258,8 @@
 #define hipblasGemmStridedBatchedEx_64Fortran hipblasGemmStridedBatchedEx_64
 #define hipblasGemmExWithFlags_64Fortran hipblasGemmExWithFlags_64
 #define hipblasGemmBatchedExWithFlags_64Fortran hipblasGemmBatchedExWithFlags_64
+#define hipblasGemmGroupedBatchedEx_64Fortran hipblasGemmGroupedBatchedEx_64
+#define hipblasGemmGroupedBatchedExWithFlags_64Fortran hipblasGemmGroupedBatchedExWithFlags_64
 #define hipblasGemmStridedBatchedExWithFlags_64Fortran hipblasGemmStridedBatchedExWithFlags_64
 
 #define hipblasSyrkExFortran hipblasSyrkEx

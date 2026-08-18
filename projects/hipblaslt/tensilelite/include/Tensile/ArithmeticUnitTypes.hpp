@@ -32,9 +32,7 @@
 #include <stdexcept>
 #include <string>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -150,4 +148,3 @@ namespace std
     };
 } // namespace std
 
-TENSILE_HIDDEN_END

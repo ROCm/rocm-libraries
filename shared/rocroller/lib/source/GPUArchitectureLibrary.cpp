@@ -62,7 +62,8 @@ namespace rocRoller
 
         HIP_CHECK(hipGetDeviceProperties(&deviceProps, deviceIdx));
 
-        return GetArch(GPUArchitectureTarget::fromString(deviceProps.gcnArchName));
+        return GetArch(
+            GPUArchitectureTarget::fromString(deviceProps.gcnArchName, deviceProps.asicRevision));
     }
 
     GPUArchitecture GPUArchitectureLibrary::GetDefaultHipDeviceArch(int& deviceIdx)

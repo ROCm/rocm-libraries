@@ -1,0 +1,51 @@
+# serializer version: 1
+# name: test_predicate_and
+  dict({
+    'empty': dict({
+      'type': 'TruePred',
+    }),
+    'multi_tag': 'And',
+    'single': dict({
+      'index': 0,
+      'type': 'EqualSize',
+      'value': 1,
+    }),
+  })
+# ---
+# name: test_predicate_or
+  dict({
+    'empty': dict({
+      'type': 'TruePred',
+    }),
+    'multi_tag': 'Or',
+    'single': dict({
+      'index': 0,
+      'type': 'EqualSize',
+      'value': 1,
+    }),
+  })
+# ---
+# name: test_property_from_original_state
+  dict({
+    'index': 1,
+    'state': dict({
+      'index': 1,
+      'type': 'EqualSize',
+      'value': 64,
+    }),
+    'tag': 'EqualSize',
+    'value': 64,
+  })
+# ---
+# name: test_property_state_full
+  dict({
+    'index': 2,
+    'type': 'EqualSize',
+    'value': 128,
+  })
+# ---
+# name: test_property_state_minimal
+  dict({
+    'type': 'Foo',
+  })
+# ---

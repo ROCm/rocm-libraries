@@ -10,23 +10,18 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/ops/common/utils.hpp"
 
-#include <cstdint>
 #include <stdio.h>
 #include <type_traits>
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 #include <concepts>
-#include <utility>
 #endif
 
-#if __clang_major__ >= 23
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-#endif
 namespace ck_tile::core::arch::mma {
 
 /**---------------------------------------------------
@@ -129,15 +124,25 @@ namespace ck_tile::core::arch::mma {
  * case, we have M = kCMBlock * M2 * M1 * M0 instead.
  *
  * ------------------------------------------
- *  Compression and packed data types
+ * Packed data types
  * ------------------------------------------
- * For sparse intrisics we have 4:2 compression of the A matrix, meaning one element of the packed
- * (compressed) A matrix represents two elements of the original (uncompressed) A matrix
- * (kCompressionRatio = 2). In a similar vein, for packed datatypes (pk_fp4_t, pk_int4_t,
- * pk_fp6x16_t), each datatype element represents multiple logical / mathematical elements of the
- * original A / B matrix. In these cases, we follow the convention that the layout parameters always
- * describe logical / mathematical uncompressed matrix elements, while the registers and tile
- * distribution encodings always describe compressed / packed *Datatype* elements.
+ * For packed datatypes (pk_fp4_t, pk_int4_t, pk_fp6x16_t, pk_bf6x16_t), each datatype element
+ * represents multiple logical / mathematical elements of the original A / B matrix. The layout
+ * parameters and tile distribution encodings always describe logical / mathematical matrix elements
+ * (completely ignoring the packed datatype abstraction). The packedness of the datatype *ONLY*
+ * requires consideration when indexing into the A / B fragment vectors (registers).
+ *
+ * ------------------------------------------
+ *  Compression (sparse intrinsics)
+ * ------------------------------------------
+ * For sparse intrisics we have 4:2 compression of the A matrix, meaning 2 elements of the
+ * compressed A matrix represent 4 elements of the original (uncompressed) A matrix
+ * (kCompressionRatio = 2). The layout parameters always describe uncompressed A matrix elements.
+ * The A fragment vectors (registers) and tile distribution encodings by default describe compressed
+ * elements. The tile distribution encoding calculator does have an option to describe the A matrix
+ * mapping in terms of uncompressed elements, which is used for WarpGemm / MmaPipeline level tile
+ * distribution encodings, since the MmaPipeline expects to ingest uncompressed A matrices, and the
+ * compression is handled internally.
  */
 
 /**
@@ -237,24 +242,13 @@ CK_TILE_HOST_DEVICE constexpr const char* to_string(Unsupported) { return "Unsup
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 /**
- * @concept HasExecSignature
- * @brief  Helper concept for exec signature check.
- */
-template <typename MmaOp, typename... ExecArgs>
-concept HasExecSignature = requires {
-    {
-        MmaOp::exec(typename MmaOp::AVecType{},
-                    typename MmaOp::BVecType{},
-                    typename MmaOp::CVecType{},
-                    std::declval<ExecArgs>()...)
-    } -> std::convertible_to<typename MmaOp::CVecType>;
-};
-
-/**
  * @concept MmaOpI
  * @brief  Expresses the meta-data interface required for each MmaOp policy.
  */
 // TODO: Make sure this actually matches amdgcn_mma.
+// NOTE: It is no longer possible to perform a check on the exec() function, since it is now
+// templated over the variadic WarpGemmParams template pack for intrinsic flags. It seems like
+// concepts do not work for templated device functions.
 template <typename MmaOp>
 concept MmaOpI = requires(MmaOp op) {
     // Requires an op context
@@ -277,7 +271,7 @@ concept MmaOpI = requires(MmaOp op) {
     { MmaOp::kCMPerLane } -> std::convertible_to<unsigned int>;
     { MmaOp::kCMNumAccess } -> std::convertible_to<unsigned int>;
     { MmaOp::kCompressionRatio } -> std::convertible_to<unsigned int>;
-} && (HasExecSignature<MmaOp> || HasExecSignature<MmaOp, int> || HasExecSignature<MmaOp, int, int>);
+};
 
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
@@ -295,7 +289,6 @@ concept MmaOpI = requires(MmaOp op) {
  *  @tparam FragM M-dimension of mma intrinsic (MmaTile)
  *  @tparam FragN N-dimension of mma intrinsic (MmaTile)
  *  @tparam FragK K-dimension of mma intrinsic (MmaTile)
- *  @tparam CtrlFlags Control flags for mma operation
  *  @tparam CompilerTarget The current compiler target
  *  @tparam OpFamily_ The type of operation (dense, sparse, scale, etc.)
  *  @tparam Enabler SFINAE enabler
@@ -306,7 +299,6 @@ template <typename ADataType,
           uint32_t FragM,
           uint32_t FragN,
           uint32_t FragK,
-          typename CtrlFlags,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>
@@ -316,7 +308,8 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 // clang-format on
 {
     // This is a default pass-through implementation that doesn't do anything practical.
-    CK_TILE_DEVICE static auto
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
     exec(AVecType const& regsA, BVecType const& regsB, CVecType const& regsC)
     {
         // Prints once across all thread blocks and threads.
@@ -334,10 +327,9 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 template <typename ADataType,
           typename BDataType,
           typename CDataType,
-          std::uint32_t FragM,
-          std::uint32_t FragN,
-          std::uint32_t FragK,
-          typename CtrlFlags,
+          uint32_t FragM,
+          uint32_t FragN,
+          uint32_t FragK,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>
@@ -347,7 +339,6 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
                                           FragM,
                                           FragN,
                                           FragK,
-                                          CtrlFlags,
                                           CompilerTarget,
                                           OpFamily_,
                                           Enabler> const& mmaObj)
@@ -382,14 +373,7 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
     printf("               kCNBlocks                : %d\n", mmaObj.kCNBlocks);
     printf("               CBlockDimInVecDim        : %d\n", mmaObj.CBlockDimInVecDim);
     printf("Instruction    name                     : %s\n", ObjType::instruction_name);
-    if constexpr(!std::is_same_v<CtrlFlags, void>)
-    {
-        print_flags(CtrlFlags{});
-    }
     print(CompilerTarget{});
 }
 
 } // namespace ck_tile::core::arch::mma
-#if __clang_major__ >= 23
-#pragma clang diagnostic pop
-#endif

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BackendEnumStringUtils.hpp"
+#include "FlatbufferUtilities.hpp"
 #include "Helpers.hpp"
 #include "HipdnnException.hpp"
 #include "descriptors/BackendDescriptor.hpp"
@@ -18,9 +19,12 @@
 
 #include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
 #include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
 
 #include <cstring>
+#include <vector>
 
 using namespace hipdnn_backend;
 
@@ -244,8 +248,27 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
                   graphByteSize);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
-        hipdnn_backend::DescriptorFactory::createGraphExt(
-            descriptor, serializedGraph, graphByteSize);
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedGraph,
+                                                                         graphByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedGraph, graphByteSize);
+            const auto* graphBlob = container->graph_blob();
+
+            // Reject a container with no graph, matching createGraphExt's
+            // zero-byte-size HIPDNN_STATUS_BAD_PARAM behavior.
+            THROW_IF_TRUE(graphBlob == nullptr || graphBlob->empty(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Serialized graph-and-plan container carries no graph.");
+            hipdnn_backend::DescriptorFactory::createGraphExt(
+                descriptor, graphBlob->data(), graphBlob->size());
+        }
+        else
+        {
+            hipdnn_backend::DescriptorFactory::createGraphExt(
+                descriptor, serializedGraph, graphByteSize);
+        }
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
@@ -355,6 +378,103 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryGraphAndPlan_ext(
+    hipdnnBackendDescriptor_t graphDescriptor,
+    hipdnnBackendDescriptor_t executionPlanDescriptor,
+    size_t requestedByteSize,
+    size_t* blobByteSize,
+    uint8_t* serializedBlob)
+{
+    LOG_API_ENTRY("graphDescriptor={}, executionPlanDescriptor={}, requestedByteSize={}, "
+                  "blobByteSize_ptr={:p}, serializedBlob_ptr={:p}",
+                  logPtr(graphDescriptor),
+                  logPtr(executionPlanDescriptor),
+                  requestedByteSize,
+                  static_cast<void*>(blobByteSize),
+                  static_cast<void*>(serializedBlob));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(graphDescriptor);
+        throwIfNull(blobByteSize);
+
+        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        graphDesc->buildSerializedGraph();
+        auto graphData = graphDesc->getSerializedGraph();
+
+        std::vector<uint8_t> planBytes;
+        if(executionPlanDescriptor != nullptr)
+        {
+            throwIfInvalidDescriptor(executionPlanDescriptor);
+            auto executionPlanDesc
+                = executionPlanDescriptor->asDescriptor<hipdnn_backend::ExecutionPlanDescriptor>();
+
+            size_t planSize = 0;
+            executionPlanDesc->serializeBackendPlan(0, &planSize, nullptr);
+            planBytes.resize(planSize);
+            executionPlanDesc->serializeBackendPlan(planSize, &planSize, planBytes.data());
+        }
+
+        const auto container
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::buildGraphAndPlanContainer(
+                graphData.ptr, graphData.size, planBytes.data(), planBytes.size());
+
+        *blobByteSize = container.size();
+
+        if(serializedBlob != nullptr)
+        {
+            THROW_IF_LT(requestedByteSize,
+                        container.size(),
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the serialized graph-and-plan size ("
+                            + std::to_string(container.size()) + ")");
+            std::memcpy(serializedBlob, container.data(), container.size());
+        }
+
+        LOG_API_SUCCESS(apiName, "blobByteSize={}", *blobByteSize);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryContents_ext(
+    const uint8_t* serializedBlob, size_t blobByteSize, int* contentFlags)
+{
+    LOG_API_ENTRY("serializedBlob_ptr={:p}, blobByteSize={}, contentFlags_ptr={:p}",
+                  static_cast<const void*>(serializedBlob),
+                  blobByteSize,
+                  static_cast<void*>(contentFlags));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(serializedBlob);
+        throwIfNull(contentFlags);
+
+        *contentFlags = 0;
+
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedBlob,
+                                                                         blobByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedBlob, blobByteSize);
+
+            if(container->graph_blob() != nullptr && !container->graph_blob()->empty())
+            {
+                *contentFlags |= HIPDNN_SERIALIZED_CONTENT_GRAPH;
+            }
+            if(container->plan_blob() != nullptr && !container->plan_blob()->empty())
+            {
+                *contentFlags |= HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN;
+            }
+        }
+        else
+        {
+            // No container identifier (or too short to be one): legacy bare-graph blob.
+            *contentFlags = HIPDNN_SERIALIZED_CONTENT_GRAPH;
+        }
+
+        LOG_API_SUCCESS(apiName, "contentFlags={}", *contentFlags);
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendCreateAndDeserializeExecutionPlan_ext(hipdnnHandle_t handle,
                                                        hipdnnBackendDescriptor_t* descriptor,
@@ -371,9 +491,27 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfNull(handle);
         throwIfNull(descriptor);
 
+        const uint8_t* planData = serializedPlan;
+        size_t planDataSize = planByteSize;
+
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedPlan,
+                                                                         planByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedPlan, planByteSize);
+            const auto* planBlob = container->plan_blob();
+
+            THROW_IF_TRUE(planBlob == nullptr || planBlob->empty(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Serialized graph-and-plan container carries no execution plan.");
+            planData = planBlob->data();
+            planDataSize = planBlob->size();
+        }
+
         auto executionPlanDesc = std::make_shared<hipdnn_backend::ExecutionPlanDescriptor>();
         executionPlanDesc->deserializeBackendPlan(
-            handle->getPluginResourceManager(), serializedPlan, planByteSize);
+            handle->getPluginResourceManager(), planData, planDataSize);
         *descriptor = HipdnnBackendDescriptor::packDescriptor(executionPlanDesc);
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));

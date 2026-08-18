@@ -87,7 +87,7 @@ std::vector<AdamTestCase> AdamTestConfigs()
         {{255,640,1,1}, 0.001, 0.9, 0.999, 0.0005, 0.000001, false, false, false, false},
         {{256,512,3,3}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false},
         {{256,512,8,8}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false}
-    
+
     };
     // clang-format on
     std::vector<AdamTestCase> result;

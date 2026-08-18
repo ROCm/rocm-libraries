@@ -421,13 +421,14 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
     // Deterministic mode: only iterate over kernels (index), split_k is always 1
     if(is_deterministic)
     {
-        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        if((index + 1) < static_cast<int>(valid_kernels.size()))
         {
-            return false; // All kernels exhausted
+            ++index;
+            split_k   = 1;
+            kernel_id = valid_kernels[index] + "+1";
+            return true;
         }
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+1";
-        return true;
+        return false; // All kernels exhausted
     }
 
     // General (non-deterministic) mode: iterate over both split_k and kernels
@@ -529,8 +530,6 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(
     if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
         return false;
     if(problem.HasMixedDataTypes())
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(!problem.IsDirectionBackwardWrW())
         return false;

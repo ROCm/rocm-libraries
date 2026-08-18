@@ -96,13 +96,31 @@ public:
                  const uint8_t* serializedPlan,
                  size_t planByteSize),
                 (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetSerializedBinaryGraphAndPlanExt,
+                (hipdnnBackendDescriptor_t graphDescriptor,
+                 hipdnnBackendDescriptor_t executionPlanDescriptor,
+                 size_t requestedByteSize,
+                 size_t* blobByteSize,
+                 uint8_t* serializedBlob),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetSerializedBinaryContentsExt,
+                (const uint8_t* serializedBlob, size_t blobByteSize, int* contentFlags),
+                (override));
     MOCK_METHOD(void, loggingCallbackExt, (hipdnnSeverity_t severity, const char* msg), ());
     MOCK_METHOD(hipdnnStatus_t,
                 setEnginePluginPathsExt,
                 (size_t num_paths,
                  const char* const* plugin_paths,
                  hipdnnPluginLoadingMode_ext_t mode),
-                ());
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                setHeuristicPluginPathsExt,
+                (size_t num_paths,
+                 const char* const* plugin_paths,
+                 hipdnnPluginLoadingMode_ext_t mode),
+                (override));
     MOCK_METHOD(
         hipdnnStatus_t,
         getLoadedEnginePluginPathsExt,
@@ -125,6 +143,18 @@ public:
                  size_t* pluginVersionLen,
                  char* apiVersion,
                  size_t* apiVersionLen),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                setUserLogCallbackExt,
+                (hipdnnUserLogCallback_t callback,
+                 hipdnnSeverity_t minLevel,
+                 hipdnnLogCallbackMode_t mode,
+                 hipdnnUserLogCallbackHandle_t userHandle),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t, backendSetGlobalLogLevelExt, (hipdnnSeverity_t level), (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetGlobalLogLevelExt,
+                (hipdnnSeverity_t * level),
                 (override));
 };
 

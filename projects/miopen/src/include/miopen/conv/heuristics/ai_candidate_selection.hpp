@@ -38,6 +38,42 @@ namespace ai {
 namespace tuning {
 namespace candidate_selection {
 
+class CandidateSelectionMetadata;
+
+// Declarative description of a CK kernel whose type-string layout is variable. Loaded from the
+// "conditional_layouts" metadata section; absence means the kernel is fully static.
+struct ConditionalLayout
+{
+    // Kind of a data-dependent (conditional) parameter.
+    enum class ConditionalKind
+    {
+        present_if_gt_one,      // CK emits it only when value > 1, at base_index
+        appended_suffix,        // appended after '>' as "+<int>"; last token when present
+        inline_after_optionals, // always present at base_index, shifted right by the number of
+                                // optional (present_if_gt_one) params that actually appear
+    };
+    struct ConditionalParam
+    {
+        ConditionalKind kind;
+        std::size_t base_index = 0; // meaningful for present_if_gt_one and inline_after_optionals
+    };
+    // Codec for a packed token that unpacks into several features.
+    enum class PackedCodec
+    {
+        tile_load_math_lm, // "{load}l+{math}m" -> two numeric features
+    };
+    struct PackedParam
+    {
+        std::size_t index = 0; // type-string index of the packed token
+        PackedCodec codec;
+        std::vector<std::string> outputs; // produced feature names, in order
+    };
+
+    std::size_t base_param_count = 0;
+    std::map<std::string, ConditionalParam> conditional_params; // by param name (e.g. "SplitK")
+    std::map<std::string, PackedParam> packed_params;           // by packed param name
+};
+
 // Forward declarations for the helpers implemented in ai_heuristics.cpp
 std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& features,
                                                 const std::string& arch,
@@ -47,6 +83,22 @@ std::vector<std::vector<float>>
 EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_candidates,
                              const std::string& arch,
                              const std::string& solver);
+
+/// Expands problem features into the vector consumed by the input_encoder submodel.
+/// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp) --
+/// they share the derived-feature math via common::EngineeredConvFeatures -- except the direction
+/// one-hot is omitted here when direction is a CandidateSelection constant.
+/// All metadata-driven quantities (precision/layout one-hot encodings and widths, and num_cu for
+/// the derived block) are read from `metadata`.
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& features_by_name,
+                                        const CandidateSelectionMetadata& metadata);
+
+/// Expands metadata-ordered encoded kernel params into the vector consumed by the
+/// kernel_config_encoder submodel (one-hot + raw numerical + derived features).
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features,
+                                               const CandidateSelectionMetadata& metadata);
 
 using ValidationFunc = std::function<bool(int, int)>;
 
@@ -78,6 +130,22 @@ public:
     sequence_encodings() const;
     MIOPEN_INTERNALS_EXPORT float GetMissingValueToken() const;
     MIOPEN_INTERNALS_EXPORT const std::vector<int>& GetSplitKValues() const;
+    // Number of one-hot classes for an input feature (e.g. "precision"), from the metadata's
+    // input encodings. Returns 0 when the feature has no encoding (i.e. is not categorical).
+    MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingClassCount(const std::string& name) const;
+    // One-hot index of a categorical input value (e.g. feature "precision", key "FP32"), from the
+    // metadata's input encodings. Returns GetInputEncodingClassCount(feature) (an out-of-range
+    // index) when the value is absent, so an unsupported value degrades cleanly rather than
+    // colliding with a valid class.
+    MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingIndex(const std::string& feature,
+                                                              const std::string& key) const;
+    // Compute-unit count the model was trained with, from the metadata's "gpu.num_cu". Used to
+    // normalize hardware-aware derived features. Returns 0 when absent.
+    MIOPEN_INTERNALS_EXPORT std::size_t GetNumCu() const;
+    // Conditional/packed layout for a kernel, or nullptr when the kernel is fully static (the
+    // common case). Loaded from the metadata's "conditional_layouts" section.
+    MIOPEN_INTERNALS_EXPORT const ConditionalLayout*
+    GetConditionalLayout(const std::string& kernel_name) const;
 
 private:
     // Internal mappings and encodings
@@ -93,6 +161,8 @@ private:
     std::map<std::string, std::map<std::string, std::string>> kernel_str_mapping_;
     float missing_value_token_;
     std::vector<int> split_k_values_;
+    std::map<std::string, ConditionalLayout> conditional_layouts_;
+    std::size_t num_cu_ = 0;
 };
 
 class CandidateSelectionModel
@@ -122,7 +192,8 @@ GetCandidateSelectionModel(const std::string& arch, const std::string& solver);
 
 MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
-                   const CandidateSelectionMetadata& metadata);
+                   const CandidateSelectionMetadata& metadata,
+                   bool use_split_k);
 
 struct MIOPEN_INTERNALS_EXPORT CandidateSelectionResult
 {

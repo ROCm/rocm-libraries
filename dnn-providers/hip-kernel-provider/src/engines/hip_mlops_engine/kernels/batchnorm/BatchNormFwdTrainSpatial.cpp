@@ -526,9 +526,8 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         unsigned int grpid = blockIdx.x;
         unsigned int cidx = grpid * hip_plugin_bn_config::hw;
 
-#if(HIP_PLUGIN_BN_N < HIP_PLUGIN_BN_MAXN)
+        // Unused if hip_plugin_bn_config::n >= hip_plugin_bn_config::max_n
         FpType minibatch[HIP_PLUGIN_BN_N];
-#endif
 
         if(lid == 0)
         {
@@ -545,9 +544,10 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
                     mean += xin;
                     variance = fma(xin, xin, variance);
 
-#if(HIP_PLUGIN_BN_N < HIP_PLUGIN_BN_MAXN)
-                    minibatch[n] = (*(in + index));
-#endif
+                    if constexpr(hip_plugin_bn_config::n < hip_plugin_bn_config::max_n)
+                    {
+                        minibatch[n] = (*(in + index));
+                    }
                 }};
         }
         __syncthreads();
@@ -592,12 +592,15 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
             static_unroll_count<unsigned int, 0, hip_plugin_bn_config::n, 1, 2>{
                 [&](unsigned int n) { // apply normalization
                     index = n * hip_plugin_bn_config::chw + cidx + lid;
-#if(HIP_PLUGIN_BN_N < HIP_PLUGIN_BN_MAXN)
-                    inhat = (cast<FpPrecType>(minibatch[n]) - mean)
-                            * invVariance; // (in[index] - mean) * invVariance;
-#else
-                    inhat = (cast<FpPrecType>(*(in + index)) - mean) * invVariance;
-#endif
+                    if constexpr(hip_plugin_bn_config::n < hip_plugin_bn_config::max_n)
+                    {
+                        inhat = (cast<FpPrecType>(minibatch[n]) - mean)
+                                * invVariance; // (in[index] - mean) * invVariance;
+                    }
+                    else
+                    {
+                        inhat = (cast<FpPrecType>(*(in + index)) - mean) * invVariance;
+                    }
                     out[index] = cast<FpType>(
                         hip_kernel_provider::applyActivation<FpPrecType,
                                                              hip_kernel_provider::ActivationMode{

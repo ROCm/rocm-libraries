@@ -36,21 +36,30 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
-                    roundUpToNearestMultiple
+                    roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
+                    streamKMulticast, streamK2DMulticast
 from Tensile.Common.DataType import DataType
+from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
-                                               get_fp16_mt_config, get_fp32_mt_config
+                                               get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
-from Tensile.Common.ValidParameters import validParameters
+from Tensile.Common.ValidParameters import validParameters, \
+                                            _getExpectedTypes, \
+                                            _expectedParamTypes, \
+                                            _skipTypeCheck, \
+                                            normalizeSwInstructionPrefetch, \
+                                            SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
+                                            SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
+from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
 from Tensile.Toolchain.Component import Assembler
 from Tensile.Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
-from .Utilities import reject, roundupRatio, pvar
+from .Utilities import isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
@@ -162,6 +171,63 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _disableRuntimeStaggerU(state):
+  state["StaggerU"] = 0
+  state["StaggerUMapping"] = 0
+  state["StaggerUStride"] = 0
+  state["InternalSupportParams"]["SupportCustomStaggerU"] = False
+
+
+def _disableUnsupportedRuntimeStaggerU(state):
+  # PAP+TDM StaggerU is not implemented (the staggered TDM descriptor isn't carried
+  # across the PAP persistent-tile handoff), so force runtime StaggerU off.
+  if state["PrefetchAcrossPersistent"] and state["TDMInst"] == 3:
+    _disableRuntimeStaggerU(state)
+  # Workgroup cluster: staggerU breaks cross-WG multicast, so force the runtime
+  # StaggerU path off too (KernelWriter already gates staggerUCode off for clusters).
+  if state.get("ClusterDim", [1, 1]) != [1, 1]:
+    _disableRuntimeStaggerU(state)
+
+
+def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
+  # TODO: TEMPORARY FIX. Encodes the trigger for the subtile global-read
+  # cooperative-group + K-partition LDS bug (see fix_subtile_gr_missing_k_partition):
+  # when one buffer_load covers multiple consecutive M-subtiles (loadRatioGR > 1)
+  # and the per-wave M-subtile count (localSubtileGrid[0]) is not a multiple of
+  # loadRatioGR, the last partial M-group writes a "ghost" slot that overlaps the
+  # next K-partition's data, and the K>=1 representative subtile can be silently
+  # dropped. This only manifests when there is more than one K-partition
+  # (localSubtileGrid[1] > 1). Remove once the emit-side fix lands.
+  return (loadRatioGR > 1
+          and localSubtileGrid[1] > 1
+          and localSubtileGrid[0] % int(loadRatioGR) != 0)
+
+
+def _validateSubtileGRKPartition(state, printRejectionReason):
+  # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
+  # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
+  # fix_subtile_gr_missing_k_partition is merged.
+  if not state["UseSubtileImpl"]:
+    return True
+  if tuple(state["ISA"]) != (9, 5, 0):
+    return True
+  # Lazy import: Components/Subtile pulls the Components package and would
+  # deadlock at module-load time if imported from Solution.py's top level.
+  from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
+  for tc in ("A", "B"):
+    tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
+    loadRatioGR = tileInfo.loadRatioGR
+    localSubtileGrid = tileInfo.localSubtileGrid
+    if _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
+      reject(state, printRejectionReason,
+             "UseSubtileImpl=1 hits the subtile GR K-partition bug on tensor %s: "
+             "loadRatioGR=%s with localSubtileGrid=%s (M-subtile count %d is not a "
+             "multiple of loadRatioGR and there is more than one K-partition)"
+             % (tc, loadRatioGR, localSubtileGrid, localSubtileGrid[0]))
+      return False
+  return True
+
+
 def _validateStreamKForceDPOnly(state, printRejectionReason):
   if state["StreamKForceDPOnly"]:
     if state["StreamK"] != 3:
@@ -173,43 +239,101 @@ def _validateStreamKForceDPOnly(state, printRejectionReason):
   return True
 
 
-def _getExpectedTypes(validParams):
-  """Build a map from parameter name to the set of allowed Python types.
+def _validateStreamKClusterShape(cs, ck):
+  """Shape check for a StreamK cluster [Cs, Ck].
 
-  Uses the validParameters registry as the source of truth.  For each
-  parameter whose allowed-value list is not the sentinel ``-1``, we
-  collect the concrete ``type()`` of every allowed value.  Because
-  Python ``bool`` is a subclass of ``int``, we use ``type()`` (not
-  ``isinstance``) so that ``bool`` and ``int`` are kept distinct.
-
-  Returns:
-      dict[str, set[type]]: e.g. {"UseCustomMainLoopSchedule": {int},
-                                   "BufferLoad": {bool}, ...}
+  Cs and Ck must each be powers of two and the total cluster C = Cs*Ck must lie
+  in the hardware-supported [2, 16] range. The mask bit-math assumes powers of
+  two, so a non-pow2 factoring is rejected. A 1-D [Cs, 1] cluster is the Ck == 1
+  case of the same check.
   """
-  typeMap = {}
-  for name, allowedValues in validParams.items():
-    if allowedValues == -1:
-      continue
-    if isinstance(allowedValues, list) and len(allowedValues) > 0:
-      typeMap[name] = set(type(v) for v in allowedValues)
-  return typeMap
+  return isPow2(cs) and isPow2(ck) and 2 <= cs * ck <= 16
 
-# Pre-compute once at import time so the per-Solution cost is a dict lookup.
-_expectedParamTypes = _getExpectedTypes(validParameters)
 
-# Parameters to skip during type validation because YAML serialization
-# inherently produces a different type (e.g. [9, 0, 10] -> list) and the
-# conversion to the canonical type happens downstream in the pipeline.
-# Also skip DataType* parameters as they are converted from strings/ints to DataType objects.
-_skipTypeCheck = {
-    "ISA",
-    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
-    "MacDataTypeA", "MacDataTypeB",
-    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
-    "DataTypeMXSA", "DataTypeMXSB",
-    "DestDataType", "ComputeDataType",
-    "F32XdlMathOp",  # Also converted to DataType
-}
+def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
+  """Validate the gfx1250 StreamK cluster cooperative-load (multicast) path.
+
+  The cluster co-locates ClusterDim = [Cs, Ck] StreamK workgroups: the Cs
+  M-adjacent peers share the same B over full K and the Ck N-adjacent peers
+  share the same A, so each operand is TDM-multicast across the peers that reuse
+  it. Sizes that are not a cluster multiple need no build-time check: the launch
+  rounds the grid up, the padded boundary peers s_endpgm before the -3 cluster
+  barrier, and the broadcast masks are trimmed to the peers actually present.
+
+  The path is auto-derived from StreamK=3 + ClusterDim != [1, 1] +
+  StreamKForceDPOnly=1, so the checks below reject an unusable cluster rather
+  than an explicit opt-in. They deliberately do not reach the FDPO=0 SK3
+  cluster (cluster reduction), which develop never constrained.
+  """
+  if not streamKMulticast(state):
+    return True
+
+  # SK3 (StreamKTwoTileDPFirst) only: the DP schedule + skIndexToWG addressing
+  # the mask derivation relies on are SK3-specific.
+  if state["StreamK"] != 3:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires StreamK=3 (two-tile DP-first)")
+    return False
+
+  # The atomic path skips the workspace/tile DP structure the cooperative loads
+  # rely on.
+  if state["StreamKAtomic"]:
+    reject(state, printRejectionReason,
+           "StreamKMulticast is not supported with StreamKAtomic")
+    return False
+
+  # StreamKXCCMapping remap is bypassed under clustering and XCC=3 overflows the
+  # SGPR budget alongside the cluster coords; require the default (no remap).
+  if state["StreamKXCCMapping"] != 0:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires StreamKXCCMapping=0 (WGM/XCC remap is bypassed under clustering)")
+    return False
+
+  # Cluster shape: Cs = ClusterDim[0] M-axis peers sharing B, Ck = ClusterDim[1]
+  # N-axis peers sharing A. Ck == 1 (the 1-D [Cs, 1] cluster) is the degenerate
+  # case where A has no peers, so one shape check covers both.
+  clusterDim = state["ClusterDim"]
+  if not _validateStreamKClusterShape(clusterDim[0], clusterDim[1]):
+    reject(state, printRejectionReason,
+           "StreamK cluster multicast requires Cs=ClusterDim[0] and "
+           "Ck=ClusterDim[1] each a power of two with C=Cs*Ck in [2, 16] "
+           "(got %s)" % clusterDim)
+    return False
+
+  # gfx1250 with TDM multicast loads (multicast is a TDM feature).
+  isa = tuple(state["ISA"])
+  if isa != (12, 5, 0):
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires gfx1250 ISA (12, 5, 0)")
+    return False
+  if not isaInfoMap[isa].asmCaps.get("HasTDM", False):
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires asmCap HasTDM")
+    return False
+  # The cluster-scope barrier handshake that keeps the C multicast peers in
+  # lockstep around each tensor_load_to_lds needs the HasClusterBarrier asm cap.
+  if not isaInfoMap[isa].asmCaps.get("HasClusterBarrier", False):
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires asmCap HasClusterBarrier (cluster-scope "
+           "barrier handshake around the multicast loads)")
+    return False
+  # ClusterLoadTDM (the component that emits/applies the multicast masks) matches
+  # only TDMInst == 3, so TDMInst in {1, 2} would produce no multicast component
+  # and silently drop the masks. Require TDMInst == 3.
+  if state["TDMInst"] != 3:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires TDMInst == 3 (TDM multicast loads on A and B)")
+    return False
+
+  return True
+
+
+# _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
+# Tensile/Common/ValidParameters.py to keep the registry and its derived
+# type map co-located (and to keep the Common -> Solution import direction).
+# They are re-imported above and re-exported here for the existing test
+# module (Tensile/Tests/unit/test_validateParameterTypes.py) that imports
+# them from Solution.
 
 _cacheHintTensors = ("A", "B", "C", "D", "E", "MXSA", "MXSB", "WS", "Metadata")
 _cacheHintLoadTensors = ("A", "B", "C", "E", "MXSA", "MXSB", "WS", "Metadata")
@@ -258,6 +382,36 @@ def mergeTypeMismatchCollector(data):
     _typeMismatchCollector[key]["files"] |= entry["files"]
 
 
+def mergeMismatchRecords(records):
+  """Fold a list of mismatch records into the module-level collector.
+
+  This is the single place that knows the collector's internal dict
+  shape. Each record is a ``(collectorKey, valueRepr, srcFile)`` tuple as
+  returned by :func:`validateParameterTypes`, where ``collectorKey`` is
+  ``(param_name, actual_type_name, expected_type_str)``.
+
+  The records are an in-process return value; this merge populates the
+  same module-level ``_typeMismatchCollector`` that
+  ``getTypeMismatchCollector`` snapshots across the joblib worker
+  boundary, so the cross-process transport is unchanged.
+
+  Args:
+      records: list of ``(collectorKey, valueRepr, srcFile)`` tuples.
+  """
+  for collectorKey, valueRepr, srcFile in records:
+    if collectorKey not in _typeMismatchCollector:
+      _typeMismatchCollector[collectorKey] = {
+        "count": 0,
+        "values": set(),
+        "files": set(),
+      }
+    entry = _typeMismatchCollector[collectorKey]
+    entry["count"] += 1
+    entry["values"].add(valueRepr)
+    if srcFile:
+      entry["files"].add(srcFile)
+
+
 def validateParameterTypes(state, srcFile=""):
   """Validate that every solution parameter has the correct Python type.
 
@@ -267,15 +421,22 @@ def validateParameterTypes(state, srcFile=""):
   are different Python types and produce different msgpack wire types,
   which causes ``std::bad_cast`` at C++ deserialization time.
 
-  Instead of raising on the first mismatch, mismatches are collected into
-  the module-level ``_typeMismatchCollector`` dict.  Call
-  ``printTypeMismatchSummary()`` at the end of the build to emit a
-  consolidated warning.
+  Instead of raising on the first mismatch, the function builds and
+  returns a list of mismatch records (one per offending key) without
+  touching module-level state. A record is a
+  ``(collectorKey, valueRepr, srcFile)`` tuple, where ``collectorKey`` is
+  ``(param_name, actual_type_name, expected_type_str)``. Returning ``[]``
+  means the state is clean. Callers fold the records into the warn-only
+  collector via :func:`mergeMismatchRecords`.
 
   Args:
       state: The solution state dict (parameter name -> value).
       srcFile: The YAML source file path, included in warning messages.
+
+  Returns:
+      list: mismatch records, empty if every parameter is well-typed.
   """
+  records = []
   for key, value in state.items():
     if key not in _expectedParamTypes or key in _skipTypeCheck:
       continue
@@ -285,38 +446,19 @@ def validateParameterTypes(state, srcFile=""):
     if actualType not in expectedTypes:
       expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
       collectorKey = (key, actualType.__name__, expectedStr)
-      if collectorKey not in _typeMismatchCollector:
-        _typeMismatchCollector[collectorKey] = {
-          "count": 0,
-          "values": set(),
-          "files": set(),
-        }
-      entry = _typeMismatchCollector[collectorKey]
-      entry["count"] += 1
-      entry["values"].add(repr(value))
-      if srcFile:
-        entry["files"].add(srcFile)
+      records.append((collectorKey, repr(value), srcFile))
+  return records
 
 
-def printTypeMismatchSummary(numFiles=0):
-  """Print a summary of all collected type mismatches to stdout.
+def raiseIfTypeMismatches() -> None:
+  """Raise when collected type mismatches exist.
 
-  If no mismatches have been collected, prints a confirmation message
-  showing how many files were checked cleanly, and returns 0.  Otherwise
-  it emits a WARNING block with one line per unique (parameter,
-  actual_type) combination showing the count, observed values, and
-  expected type.
-
-  Args:
-      numFiles: Total number of YAML logic files that were checked.
-
-  Returns:
-      int: The total number of individual mismatches (0 if clean).
+  The library-logic loading path intentionally collects mismatches from every
+  parsed file before reporting. This checker preserves that aggregate behavior
+  but makes the final create-library gate fatal.
   """
   if not _typeMismatchCollector:
-    if numFiles > 0:
-      print(f"Checked {numFiles} YAML logic files - no type mismatches found.", flush=True)
-    return 0
+    return
 
   totalCount = sum(e["count"] for e in _typeMismatchCollector.values())
   allFiles = set()
@@ -324,10 +466,9 @@ def printTypeMismatchSummary(numFiles=0):
     allFiles |= e["files"]
 
   lines = []
-  lines.append("")
   lines.append("===========================================================")
   lines.append(
-    f"WARNING: YAML parameter type mismatches detected "
+    f"ERROR: YAML parameter type mismatches detected "
     f"({totalCount} total across {len(allFiles)} files):"
   )
   lines.append("===========================================================")
@@ -345,11 +486,10 @@ def printTypeMismatchSummary(numFiles=0):
   lines.append("-----------------------------------------------------------")
   lines.append("  This will cause std::bad_cast at runtime because msgpack")
   lines.append("  serializes bool and int as different wire types.")
-  lines.append("  Fix these to prevent future build failures.")
+  lines.append("  Fix these type mismatches before building.")
   lines.append("===========================================================")
 
-  print("\n".join(lines), flush=True)
-  return totalCount
+  raise ConfigTypeError("\n".join(lines))
 
 
 class Fbs(Enum):
@@ -400,6 +540,27 @@ class BiasTypeArgs:
     s = "BiasTypesArgs\n"
     return s
 
+class GateTypeArgs:
+
+  ########################################
+  def __init__(self, problemType, config):
+    self.gateTypes = []
+    self.totalProblemSizes = 0
+    if problemType["UseGateResidual"]:
+      for btype in config:
+        datatype = DataType(btype)
+        if datatype not in problemType["GateResidualDataTypeList"]:
+          printWarning("Datatype: %s not support in this kernel (%s)"%(datatype, str(problemType["GateResidualDataTypeList"])))
+        self.gateTypes.append(datatype)
+
+      if not self.gateTypes:
+        printExit("Must provide a gate type in benchmark parameters if UseGateResidual is set to True.")
+
+      self.totalProblemSizes = len(self.gateTypes)
+
+  def __str__(self):
+    s = "GateTypesArgs\n"
+    return s
 ################################################################################
 # Activation
 ################################################################################
@@ -467,8 +628,11 @@ class Solution(collections.abc.Mapping):
     printIndexAssignmentInfo: bool,
     assembler: Assembler,
     isaInfoMap: Dict[IsaVersion, IsaInfo],
-    srcName: str = ""
+    srcName: str = "",
+    *,
+    raiseProblemTypeOnTypeMismatch: bool = True,
   ):
+    """Construct a Solution."""
 
     self._name = None
     self.assembler = assembler
@@ -481,7 +645,12 @@ class Solution(collections.abc.Mapping):
     self._state = {}
     # problem type
     if "ProblemType" in config:
-      self["ProblemType"] = ProblemType(config["ProblemType"], printIndexAssignmentInfo)
+      self["ProblemType"] = ProblemType(
+          config["ProblemType"],
+          printIndexAssignmentInfo,
+          srcFile=srcName,
+          raiseOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+      )
     else:
       self["ProblemType"] = ProblemType.FromDefaultConfig(printIndexAssignmentInfo)
 
@@ -495,11 +664,6 @@ class Solution(collections.abc.Mapping):
     # Assign solution state from config, filling missing from the defaultSolution
     for key in defaultSolution:
       assignParameterWithDefault(self._state, key, config, defaultSolution)
-
-    # Validate parameter types against the validParameters registry.
-    # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
-    # std::bad_cast at C++ msgpack deserialization time.
-    validateParameterTypes(self._state, srcFile=srcName)
 
     if 'ISA' not in self._state:
       if 'ISA' in config:
@@ -528,6 +692,24 @@ class Solution(collections.abc.Mapping):
       self["AssignedProblemIndependentDerivedParameters"] = False
     if "AssignedDerivedParameters" not in self._state:
       self["AssignedDerivedParameters"] = False
+
+    # Validate parameter types against the validParameters registry.
+    # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
+    # std::bad_cast at C++ msgpack deserialization time. The mismatch
+    # records are folded into the module-level warn-only collector here;
+    # the library-logic path snapshots that collector across the joblib
+    # worker boundary for the end-of-run summary. On the input-YAML path
+    # the state was already type-checked strictly upstream
+    # (checkParametersAreValid in BenchmarkStructs, ProblemType's
+    # raise-mode validator), so validateParameterTypes returns [] and
+    # nothing is merged -- no duplicate collector noise.
+    #
+    # Validate the complete pre-derived state. We still run derivation to preserve
+    # existing Solution construction behavior, but if this state is already bad we
+    # skip post-derived validation to avoid cascading/noisy type mismatch records.
+    pre_records = validateParameterTypes(self._state, srcFile=srcName)
+    mergeMismatchRecords(pre_records)
+    
     Solution.assignDerivedParameters(
       self._state,
       splitGSU,
@@ -537,6 +719,11 @@ class Solution(collections.abc.Mapping):
       assembler.rocm_version
     )
     self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
+
+    # Only merge and report mismatches if there were no pre-existing mismatches
+    # To avoid duplicates and noise from cascading issues.
+    if not pre_records:
+      mergeMismatchRecords(validateParameterTypes(self._state, srcFile=srcName))
 
   # these keys are copied from ProblemType to internal that may be overridden
   InternalKeys = ["UseSgprForGRO","VectorStore"]
@@ -615,6 +802,33 @@ class Solution(collections.abc.Mapping):
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
 
+    # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
+    # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
+    # is never rejected; legacy bool aliases (True->Relative, False->Off) never request Absolute.
+    # Only an explicit Absolute request on an unsupported target is rejected here (users should
+    # pick Auto(-1) or Relative(1) instead).
+    swpMode = normalizeSwInstructionPrefetch(
+        state.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO))
+    if swpMode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+      if state.get("StreamK", 0) != 0:
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
+      if tuple(state["ISA"]) != (12, 5, 0):
+        reject(state, printRejectionReason,
+               f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
+               "use Auto(-1) or Off(0)")
+        return
+      if state["ProblemType"]["DataType"].isDouble():
+        # f64: OptNLL epilogue routinely exceeds the 64 KiB I-cache (bucket-c fleet-wide) so the
+        # abs cover/ladder yields no reliable benefit, and sgprAlpha is a 2-dword pair (the
+        # OptNLL-aware Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported for f64 (double) kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
+
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
 
@@ -636,8 +850,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "EnableMatrixInstruction undetermined")
 
     if EnableMatrixInstruction == True:
-      state["MatrixInstM"]         = state["MIBlock"][0]
-      state["MatrixInstN"]         = state["MIBlock"][1]
+      # MatrixInstM/N hold the *effective* per-instruction extents: SourceSwap on a
+      # non-square MI transposes the accumulator, so M/N swap. The *physical* opcode
+      # dims stay in MIBlock[0]/[1] (used for the WMMA opcode + hardware lane layout).
+      state["MatrixInstM"], state["MatrixInstN"] = \
+          effectiveMatrixInstMN(state["MIBlock"][0], state["MIBlock"][1], state.get("SourceSwap", False))
       state["MatrixInstK"]         = state["MIBlock"][2]
       state["MatrixInstB"]         = state["MIBlock"][3]
       state["MatrixInstBM"]        = state["MIBlock"][4]
@@ -648,7 +865,7 @@ class Solution(collections.abc.Mapping):
 
       state["MIOutputVectorWidth"], state["MIRegPerOut"] = Solution.getMIOutputInfo(state, isaInfoMap)
 
-      if state["MatrixInstM"] == 4:
+      if state["MIBlock"][0] == 4:
         state["ThreadTile0"] = state["MIWaveTile"][0] * state["MIOutputVectorWidth"]
         state["ThreadTile1"] = state["MIWaveTile"][1]
         state["SubGroup0"]   = state["MIWaveGroup"][0] * state["MatrixInstM"] * state["MatrixInstBM"] // state["MIOutputVectorWidth"]
@@ -663,6 +880,13 @@ class Solution(collections.abc.Mapping):
       if not "MIInputPerThreadA" in state:
         state["MIInputPerThreadA"] = state["MIInputPerThread"]
         state["MIInputPerThreadB"] = state["MIInputPerThread"]
+
+      # SS1 non-square: SourceSwap feeds B into wide src0 / A into narrow src1, so swap
+      # per-thread input counts (A sized for N-side, B for M-side) to match mfmaIter;
+      # else B has too few VGPRs for src0 -> "invalid operand for instruction".
+      if state.get("SourceSwap", False) and state["MatrixInstM"] != state["MatrixInstN"]:
+        state["MIInputPerThreadA"], state["MIInputPerThreadB"] = \
+            state["MIInputPerThreadB"], state["MIInputPerThreadA"]
 
     elif EnableMatrixInstruction == False:
       state["ThreadTile0"] = state["ThreadTile"][0]
@@ -766,6 +990,12 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]:
       state["NonDTLTailLoopMetadata"] = True
 
+    # tailLoopOpt (mode 3) uses wide unguarded loads that rely on buffer
+    # load SRD limits for K-edge protection.  Flat loads lack an SRD, so
+    # force mode 2 (globalReadGuardK with per-element exec-mask checks).
+    if not state["BufferLoad"]:
+      state["tailLoopOptA"] = False
+      state["tailLoopOptB"] = False
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
@@ -823,6 +1053,24 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
+
+    # UseDualFMAC (VOPD v_dual_fmac_f32) applies only to plain f32 source/MAC (non-MFMA) kernels
+    # on archs whose assembler accepts the dual-issue form (gfx11/gfx12). The 2x2 block-diagonal
+    # pairing requires an even x even ThreadTile for full coverage. Auto-disable elsewhere so a
+    # config may enable it broadly without rejecting unrelated solutions.
+    # Exclude xf32: DataType=f32 but F32XdlMathOp selects xf32 rounding; v_dual_fmac_f32 is plain-f32 only.
+    _isXF32 = ("F32XdlMathOp" in state["ProblemType"]
+                and not state["ProblemType"]["F32XdlMathOp"].isSingle()
+                and state["ProblemType"]["DataType"].isSingle())
+    if state.get("UseDualFMAC", False) and (
+        state["KernelLanguage"] != "Assembly"
+        or EnableMatrixInstruction
+        or not state["ProblemType"]["DataType"].isSingle()
+        or _isXF32
+        or (state["ThreadTile0"] % 2) or (state["ThreadTile1"] % 2)
+        or not isaInfoMap[state["ISA"]].asmCaps.get("v_dual_fmac_f32", False)):
+      state["UseDualFMAC"] = False
+
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
     isa = tuple(state["ISA"])
     isgfx950 = isa[:2] == (9, 5)
@@ -836,9 +1084,9 @@ class Solution(collections.abc.Mapping):
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
       state["SourceSwap"] = False
-      # Force BufferStore=1: UseSubtileImpl optimized storeD path is only implemented
+      # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
-      state["BufferStore"] = 1
+      state["BufferStore"] = True
       # Not currently implemented in subtile implementation
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
@@ -899,37 +1147,40 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
-      if state["StreamK"] != 3 and state["StreamK"] != 4:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
+        if state["GlobalSplitU"] != 1:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 with StreamK=0 requires GlobalSplitU=1 (no GSU reduction support)")
+        state["InternalSupportParams"]["SupportUserGSU"] = False
+      # Lazy import: Components/StreamK.py pulls ..Component which
+      # back-imports the Components package and would deadlock at
+      # module-load time if pulled from Solution.py's top-level
+      # imports.
+      from Tensile.Components.StreamK import streamKVariantClass
+      if state["StreamK"] != 0 and not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4, 5}")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
+      if state["PrefetchAcrossPersistent"]:
+        if state["ISA"] != (9, 5, 0):
+          reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent is currently audited only for gfx950")
+        if state["PrefetchGlobalRead"] != 2:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent requires PrefetchGlobalRead=2")
+        if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
-    # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
-    if state["ISA"] == (12, 5, 0):
-      if ((state["LdsBlockSizePerPadMXSA"] > 0) or (state["LdsBlockSizePerPadMXSB"] > 0 )):
-        reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
-        return
-
-    state["Multicast"] = False
-    if state["ClusterDim"] != [1, 1]:
-      state["Multicast"] = True
-    else:
-      if state["ClusterBarrier"] == True:
-        reject(state, printRejectionReason, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
-
-    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
-    # when TDM is enabled.
-    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
-      reject(state, printRejectionReason, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
-
-    # ClusterBarrier codegen emits s_barrier_signal/wait -3, which require the
-    # HasClusterBarrier assembler capability. Otherwise rocisa::SBarrier silently
-    # falls back to code -1 and produces incorrect cluster-scope synchronization.
-    if state["ClusterBarrier"] == True \
-       and not isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
-      reject(state, printRejectionReason,
-             "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
+    # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
+    # each WG's tile per iteration, so the broadcast would target the wrong partner.
+    # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K
+    # -- except on the DP-only SK3 cluster, where every WG owns one whole tile, so the
+    # peers stay the spatial tile neighbours the ClusterLoad component broadcasts between.
+    clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
+                                  and (state["StreamK"] == 0 or streamKMulticast(state)))
+    # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
+    # clustering and ClusterBarrier are separate features kept even where it is absent.
+    state["Multicast"] = bool(clusterPeersShareTiles
+                              and isaInfoMap[state["ISA"]].archCaps.get("HasTDMMulticast", True))
+    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
+    state["ClusterBarrier"] = bool(clusterPeersShareTiles and state["TDMInst"] != 0
+                                   and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False))
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -948,8 +1199,37 @@ class Solution(collections.abc.Mapping):
     # Skip GRVW range check for subtile impl: scale uses serial*loadWidth DTL addressing, not standard GRVW chunks
     if grvw not in [1,2,4,8,16,32] and not state["UseSubtileImpl"]:
       validDepthU = False
+    # TDM uses tensor_load_to_lds (not per-thread buffer_load), so the
+    # per-thread NumLoads* tile-split params are meaningless — normalize them
+    # to 1 so the later setGlobalLoadTileDimClassic nlc/nlp checks stay
+    # consistent. GRVW is kept as small as possible so small-size solution
+    # rejection still fires, but the global-read width (GRVW*bpe/bpr) must map
+    # to a real load instruction: the smallest is b8 = 0.25 dwords (1 byte),
+    # and the matcher requires width to be a whole multiple of it. That means
+    # GRVW*bpe must be a whole number of bytes. For sub-byte types GRVW=1 is
+    # too small (FP4: 0.5B -> 0.125 dw; FP6: 0.75B -> 0.1875 dw), so bump GRVW
+    # to the minimum that yields an integer byte count: FP4 -> 2 (1 byte),
+    # FP6 -> 4 (3 bytes = exactly 4 packed 6-bit elements).
+    usesTDM = tc in ("A", "B", "MXSA", "MXSB") and state.get("TDMInst", 0) == 3
+    if usesTDM:
+      tdmGrvw = 1
+      if tc in ("A", "B"):
+        if state["ProblemType"]["DataType%s"%tc].isFloat4():
+          tdmGrvw = 2
+        elif state["ProblemType"]["DataType%s"%tc].is6bitFloat():
+          tdmGrvw = 4
+        # The sparse tensor (Sparse==1 -> A, Sparse==2 -> B) loads 2:4 metadata
+        # that requires GRVW % 4 == 0, so it cannot be forced down to 1.
+        elif (state["ProblemType"]["Sparse"] == 1 and tc == "A") or (state["ProblemType"]["Sparse"] == 2 and tc == "B"):
+          tdmGrvw = 4
+      state["GlobalReadVectorWidth%s"%tc] = tdmGrvw
+      state["NumLoads%s"%tc] = 1
+      state["NumLoadsCoalesced%s"%tc] = 1
+      state["NumLoadsPerpendicular%s"%tc] = 1
+      return validDepthU
+
     if totalVectors % state["NumThreads"] != 0:
-      reject(None, printRejectionReason, "totalVectors%s %u %% NumThreads %u != 0" \
+      reject(state, printRejectionReason, "totalVectors%s %u %% NumThreads %u != 0" \
           % (tc, totalVectors, state["NumThreads"]))
       validDepthU = False
 
@@ -1302,6 +1582,10 @@ class Solution(collections.abc.Mapping):
     if state["UseSubtileImpl"]:
       return True
 
+    if not isaInfoMap[isa].asmCaps["HasDirectToLds"]:
+      reject(state, printRejectionReason, "DirectToLds not supported on ISA %s" % (isa,))
+      return False
+
     # x4 support for directToLds
     canDTLx4 = isaInfoMap[isa].asmCaps["HasDirectToLdsx4"]
 
@@ -1534,8 +1818,43 @@ class Solution(collections.abc.Mapping):
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
+      if state["ClusterDim"] != [1, 1]:
+        # WG-cluster support is StreamK==3-only: the cluster cooperative load is
+        # derived from the SK3 tile schedule, and the dynamic (SK4) / hybrid (SK5)
+        # work-queue modes have no cluster-load implementation, so a ClusterDim
+        # there would only decode a cluster WG-id that no feature consumes. Reject
+        # outright rather than emit an unusable cluster kernel.
+        if state["StreamK"] in (4, 5):
+          reject(state, printRejectionReason,
+                 "StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim "
+                 "(cluster support is SK3-only)")
+        # A Y-extent > 1 means the Ck peers share A on N-adjacent tiles, which only
+        # works when the launch spans the real M x N tile space and the Y rank is
+        # folded back into a unique tile index (StreamK.preLoop). That is the
+        # ForceDPOnly cluster multicast; anywhere else a Y-extent > 1 would collide
+        # WorkGroup0 across work-groups that differ only in Y. A [1, Ck] cluster has
+        # no B-sharing X peers at all and is not a multicast shape.
+        if state["ClusterDim"][1] != 1 and not (streamK2DMulticast(state)
+                                                and state["StreamKForceDPOnly"]):
+          reject(state, printRejectionReason,
+                 "Stream-K + ClusterDim Y-extent > 1 requires StreamKForceDPOnly=1 "
+                 "and a cluster [Cs, Ck] with both axes > 1; got %s"
+                 % state["ClusterDim"])
+        # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
+        state["StreamKXCCMapping"] = 0
+        # WorkGroupMappingXCC is the second WorkGroup0 remap (the wgmXCC CU-count
+        # remap, as opposed to the StreamKXCCMapping chiplet remap) and carries the
+        # same hazard: a cluster's peers are only adjacent in the unremapped id
+        # space, so any reshuffle breaks the tile adjacency the cooperative load
+        # and the cluster reduction both rely on. Force it to identity here rather
+        # than reject, and do it before the auto-WGMXCC check below so a clustered
+        # kernel never reaches that check still holding -1.
+        state["WorkGroupMappingXCC"] = 1
       if not state["EnableMatrixInstruction"]:
-        reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
+        # Source/MAC (non-MI) Stream-K: partial-write + fixup are datapath-agnostic,
+        # so allow it for Assembly source kernels (other SK constraints still apply).
+        if state["KernelLanguage"] != "Assembly":
+          reject(state, printRejectionReason, "Stream-K (non-MatrixInstruction) requires Assembly source kernels")
       # if state["PersistentKernel"]:
       #   reject(state, printRejectionReason, "Cannot enable both Stream-K and PersistentKernel")
       if not state["ProblemType"]["StridedBatched"]:
@@ -1546,26 +1865,108 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      isSia0TdmPgr = state["_ScheduleIterAlg"] == 0 \
-        and state["TDMInst"] == 3 \
-        and state["PrefetchGlobalRead"] in (1, 2)
-      if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
+      # SIA 4 is remapped to _ScheduleIterAlg 0 upstream, so it is covered here too.
+      if state["_ScheduleIterAlg"] not in (0, 1, 2, 3):
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
+      if state["TDMInst"] == 3 and state["PrefetchGlobalRead"] not in (1, 2) \
+          and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason,
+               "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
+      if not state["BufferStore"]:
+        reject(state, printRejectionReason, "Stream-K requires BufferStore")
       _validateStreamKForceDPOnly(state, printRejectionReason)
+      _validateStreamKMulticast(state, printRejectionReason, isaInfoMap)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
+        if state["StreamK"] == 5:
+          reject(state, printRejectionReason, "Atomic Stream-K is not supported with hybrid mode (StreamK=5)")
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
-        if not state["BufferStore"]:
-          reject(state, printRejectionReason, "Atomic Stream-K requires BufferStore")
         if state["LocalSplitU"] > 1:
           reject(state, printRejectionReason, "Atomic Stream-K not working with LocalSplitU")
-      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
+      if state.get("PrefetchAcrossPersistent", 0):
+        # StreamK PAP emits a next-tile first-PGR handoff inside the NLL
+        # window, then restores borrowed tile identity, descriptors/shadow
+        # limits, stagger state, and LDS bank state before current-tile code
+        # resumes. Keep rejecting axes whose borrowed-state contract is not
+        # audited below.
+        if state["StreamK"] != 3:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK=3")
+        if not state["BufferLoad"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires BufferLoad")
+        if state["PrefetchGlobalRead"] < 1:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires PGR >= 1")
+        if state["PrefetchGlobalRead"] > 2:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires PrefetchGlobalRead in [1, 2]")
+        if state["1LDSBuffer"] == 1:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires 1LDSBuffer != 1 (double LDS buffer)")
+        if state["DirectToVgprA"] or state["DirectToVgprB"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with DirectToVgpr")
+        if state["ProblemType"]["NumIndicesSummation"] > 1:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with multiple summation indices")
+        if not state["BufferStore"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
+        # HalfPLR sets SuppressNoLoadLoop after this guard runs. Its supported
+        # out-of-line PAP path is validated in the HalfPLR block below. Add a
+        # condition here for clarity.
+        if state.get("SuppressNoLoadLoop", False) and not state["HalfPLR"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop if not using HalfPLR")
+        if state["ProblemType"]["Sparse"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
+        if state["StoreRemapVectorWidth"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with StoreRemap")
+        # DP-only (StreamKForceDPOnly) + PAP is supported (mirror phase): DP-only
+        # StreamK==3 is a persistent grid-stride kernel (graWorkGroup pre-advances
+        # StreamKIter += skGrid*ItersPerTile each persistent iteration), so the
+        # standard PAP next-tile handoff applies unchanged. AddressFlags is
+        # non-zero for DP-only (tree reduction passes the Synchronizer pointer),
+        # so the PAP AddressFlags guard falls through correctly. All
+        # partial/fixup/workspace machinery is already bypassed by
+        # StreamKForceDPOnly guards in storeBranches/writePartials/
+        # computeStoreSrdStart, and StreamKLocalStart/End are constant
+        # (0 / ItersPerTile). No DP-only-specific gating is required here;
+        # Phase 2 strips the now-redundant snapshot/restore of those constants.
+      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] != 3:
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
-               "DebugPersistentKernelLoopForever requires StreamK in {1,2,3} (got %d)"
+               "DebugPersistentKernelLoopForever requires StreamK=3 (got %d)"
                % state["StreamK"])
+      if state["StreamKWorkStealing"]:
+        # Codegen-time rejections only; there is no hardware context here
+        # (MI300A/MI300X both compile as gfx942). The kernel bakes a power-of-two
+        # per-XCD queue count from origami; the host (ContractionSolution.cpp)
+        # enforces the device's runtime NUM_XCD against that baked count and
+        # otherwise serves a non-work-stealing solution. Work stealing only exists
+        # in the dynamic-queue fetch (auto-mode SK4 and the SK4 sub-path of SK5).
+        if state["StreamK"] not in (4, 5):
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires StreamK in {4,5} (got %d)"
+                 % state["StreamK"])
+        # Stealing is only defined for the non-atomic partials+fixup path.
+        # Atomic SK4/SK5 is already rejected above; keep this explicit guard so
+        # the combination can never slip through.
+        if state["StreamKAtomic"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing is not supported with StreamKAtomic")
+        # Reject DebugStreamK with work stealing: it can leave a tile-owning
+        # queue with no home workgroup, breaking the W_q>=1 auto-reset precondition.
+        if state["DebugStreamK"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires DebugStreamK=0 (the per-queue "
+                 "auto-reset relies on W_q>=1 whenever tiles_q>=1); got %d"
+                 % state["DebugStreamK"])
+        # The steal path (streamKWorkStealingSteal) emits s_atomic_inc
+        # unconditionally, but the home fetch (_fetchNextWorkItem) only falls
+        # back to a returning vector atomic when scalar atomics are absent. On
+        # arches without scalar atomics (HasSAtomic=false, e.g. gfx1250) the
+        # steal would emit an unsupported s_atomic_inc with no vector fallback,
+        # so reject work stealing there.
+        if not isaInfoMap[isa].asmCaps["HasSAtomic"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires scalar atomics (HasSAtomic); the "
+                 "work-stealing steal path emits s_atomic_inc with no vector "
+                 "fallback (e.g. gfx1250 has HasSAtomic=false)")
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return
@@ -1573,10 +1974,18 @@ class Solution(collections.abc.Mapping):
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
       state["StreamKForceDPOnly"] = 0
       state["StreamKAtomic"] = 0
+      state["StreamKWorkStealing"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
+      state["PrefetchAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False
+
+    if not state["BufferStore"]:
+      if state["GlobalSplitU"] != 0:
+        reject(state, printRejectionReason, "GlobalSplitU requires BufferStore (flat store workspace addressing not supported)")
+      elif state["_GlobalAccumulation"]:
+        reject(state, printRejectionReason, "GlobalAccumulation requires BufferStore (workspace SRD addressing not supported)")
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_WorkspaceSizePerElemC"] = computeBytes
@@ -1695,6 +2104,16 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["DataType"].isDouble() and not (isaInfoMap[isa].asmCaps["HasMFMA_f64"] or isaInfoMap[isa].asmCaps["HasWMMA_V3_f64"]):
         reject(state, printRejectionReason, f"isa {isa} doesn't support matrix instruction with type f64")
         return
+      # Complex on WMMA (K>1) de-interleaves operands into temps just before each
+      # matrix op; SIA3 flat-schedules the mac items individually, separating the
+      # de-interleave moves from their consuming WMMA and recycling the temps early
+      # -> wrong results. Reject SIA3 only (gfx1250 uses SIA4).
+      if state["ProblemType"]["DataType"].isComplex() \
+         and isaInfoMap[isa].asmCaps["HasWMMA_V3"] \
+         and state["MatrixInstK"] > 1 \
+         and state["_ScheduleIterAlg"] == 3:
+        reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
+        return
       if state["InterleaveAlpha"]:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return
@@ -1777,7 +2196,7 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileB"]
         if state["DirectToLdsMetadata"] and not state["DirectToLdsB"]:
-          state["DirectToLdsMetadata"] = False
+          state["DirectToLdsMetadata"] = 0
       else:
         if not state["DirectToVgprSparseMetadata"]:
           state["ThreadTileMetadata"] = state["ThreadTileA"]
@@ -1789,10 +2208,10 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"]:
           state["MIWaveTileMetadata"] = state["MIWaveTileA"]
         if state["DirectToLdsMetadata"] and not state["DirectToLdsA"]:
-          state["DirectToLdsMetadata"] = False
+          state["DirectToLdsMetadata"] = 0
     elif not state["ProblemType"]["Sparse"]:
       state["DirectToVgprSparseMetadata"] = False
-      state["DirectToLdsMetadata"] = False
+      state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
     if state["NonTemporal"] != -1:
@@ -1800,6 +2219,7 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalB"] = state["NonTemporal"]
       state["NonTemporalC"] = state["NonTemporal"]
       state["NonTemporalD"] = state["NonTemporal"]
+      state["NonTemporalGate"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
@@ -1929,12 +2349,34 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsA"] = False
       state["DirectToLdsB"] = False
       state["_UseSgprForGRO"] = False
+      # StaggerU only works with source kernels, or with BufferLoad.
+      state["StaggerU"] = 0
       if state["PrefetchGlobalRead"] >= 2:
         reject(state, printRejectionReason, "BufferLoad=0 does not support PrefetchGlobalRead>=2")
         return
-
+      if state["DirectToVgprA"]:
+        reject(state, printRejectionReason, "DirectToVgprA requires BufferLoad")
+        return
+      if state["DirectToVgprB"]:
+        reject(state, printRejectionReason, "DirectToVgprB requires BufferLoad")
+        return
       if problemType["UseBias"]:
         reject(state, printRejectionReason, "BufferLoad=0 does not support UseBias due to no suppress no load.")
+        return
+      if problemType["Sparse"]:
+        reject(state, printRejectionReason, "BufferLoad=0 does not support Sparse due to VGPR pressure from non-SRD addressing")
+        return
+      if problemType["GroupedGemm"]:
+        reject(state, printRejectionReason, "BufferLoad=0 does not support GroupedGemm")
+        return
+      # Sub-dword types (fp8, int8, fp16, bf16) have correctness issues with flat
+      # addressing: tail loop reload uses globalread_gpr_record not populated for
+      # flat path, and edge/tail global reads produce wrong results.
+      if problemType["DataType"].numBytes() < 4:
+        reject(state, printRejectionReason, "BufferLoad=0 does not support sub-dword data types (flat addressing not validated)")
+        return
+      if state["TDMInst"]:
+        reject(state, printRejectionReason, "BufferLoad=0 does not support TDMInst")
         return
 
     #These modes only work under certain conditions, apply them here:
@@ -2288,6 +2730,15 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasTDM"]:
         reject(state, printRejectionReason, "This arch does not support TDM")
         return
+      # TDM data_size is a 2-bit field (max element 8B); f64-complex is 16B.
+      if state["ProblemType"]["DataType"].isDoubleComplex():
+        reject(state, printRejectionReason, "TDM does not support f64-complex (16B exceeds data_size field)")
+        return
+
+    if state["CompactLoopStore"]:
+      if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
+        reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
+        return
 
     # MX scale layout + transport derivation and validation. See
     # _deriveAndValidateMXScaleLayoutAndTransport for the full set of rules.
@@ -2318,6 +2769,27 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
 
+    if state.get("PrefetchAcrossPersistent", 0) and (state["enableTDMA"] or state["enableTDMB"]):
+      if not (state["enableTDMA"] and state["enableTDMB"]):
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires TDMInst == 3 (enableTDMA and enableTDMB)")
+        return
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires StreamK == 3")
+        return
+      if state["TDMInst"] == 3 and state["StaggerU"] != 0:
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent with StaggerU is not implemented")
+        return
+      if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) \
+          and (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent with MX supports TN only")
+        return
+      if math.prod(state["MIWaveGroup"]) <= 1:
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires wave-separated mode (prod(MIWaveGroup) > 1)")
+        return
+      # Multi-wave TDMSplit recomputes split increments transiently instead of
+      # persisting SGPRs, so MX-scaled SK+PAP tiles are allowed here; the
+      # SGPR-overflow check still drops any tile that overflows.
+
     # Wave-separated TDM splits waves by parity (even=A, odd=B) and requires
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves
     # itself must be a power of two (>= 2).
@@ -2326,6 +2798,15 @@ class Solution(collections.abc.Mapping):
       if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
+
+    # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
+    # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
+    if state["TDMLoadWaveSync"]:
+      if state["ScheduleIterAlg"] != 4:
+        reject(state, printRejectionReason, "TDMLoadWaveSync requires ScheduleIterAlg=4 (StinkyTofu backend)")
+        return
+      if not ((state["enableTDMA"] or state["enableTDMB"]) and state["NumWaves"] > 1):
+        state["TDMLoadWaveSync"] = False
 
     # DepthU == -1?
     if state["DepthU"] == -1:
@@ -2339,7 +2820,7 @@ class Solution(collections.abc.Mapping):
         backupValues.append([key, value])
     # Skip this check for subtile impl?
     # TODO: Add this check back
-    
+
     # Save auto-derived VW for restoration across DepthU loop iterations.
     # TDM VW fallback in depthUIteration may reduce VW for a specific DepthU;
     # each DepthU attempt should start from the original auto-derived VW.
@@ -2379,14 +2860,21 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
+      state["ExpandPointerSwap"] = False
+      if state.get("PrefetchAcrossPersistent", 0):
+        if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
+          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")
+          return
+      # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
+      # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "HalfPLR is not supported with UseSubtileImpl (subtile main loop does not honor SuppressNoLoadLoop)")
+        return
       if state["PrefetchLocalRead"] != 1:
         reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
         return
       if state["PrefetchGlobalRead"] == 0:
         reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
-        return
-      if state["LoopIters"] == 1:
-        reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
         return
       if not (state["enableTDMA"] and state["enableTDMB"]):
         reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
@@ -2399,7 +2887,13 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
         return
       if state["_ScheduleIterAlg"] != 0:
-        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0")
+        reject(state, printRejectionReason, "Currently HalfPLR only supports SIA = 0 or 4")
+        return
+      # SIA=4 is remapped to _ScheduleIterAlg=0 + _StinkyTofuOptLevel=3, so both
+      # SIA=0 and SIA=4 pass the check above. On StreamK, HalfPLR requires the
+      # StinkyTofu backend (SIA=4); plain SIA=0 is only allowed for non-StreamK.
+      if state["StreamK"] != 0 and state["ScheduleIterAlg"] != 4:
+        reject(state, printRejectionReason, "HalfPLR on StreamK requires ScheduleIterAlg = 4 (StinkyTofu)")
         return
       if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
         (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
@@ -2440,6 +2934,8 @@ class Solution(collections.abc.Mapping):
     # UseSubtileImpl has its own main loop scheduler; CMS is not compatible.
     if state["UseSubtileImpl"] and state["UseCustomMainLoopSchedule"] == 1:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with UseSubtileImpl")
+    if state.get("PrefetchAcrossPersistent", 0) and state["UseCustomMainLoopSchedule"] == 1:
+      reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with custom main-loop scheduling")
 
     # additional setting for non CMS
     if state["UseCustomMainLoopSchedule"] == 0:
@@ -2520,6 +3016,7 @@ class Solution(collections.abc.Mapping):
         "GroupLoadStore": not state["GroupLoadStore"],
         "StreamK": not state["StreamK"],
         "StreamKAtomic": not state["StreamKAtomic"],
+        "StreamKWorkStealing": not state["StreamKWorkStealing"],
         "StreamKXCCMapping": not state["StreamKXCCMapping"],
         "StreamKFixupTreeReduction": not state["StreamKFixupTreeReduction"],
         "DebugStreamK": not state["DebugStreamK"],
@@ -2538,7 +3035,24 @@ class Solution(collections.abc.Mapping):
       # Currently, only the mode that disables VA_VDST and VM_VSRC checks is supported.
       return 2
 
+    # StinkyTofu expert scheduling mode2 (EnableStinkyTofuESM2) — independent of the rocisa ExpertSchedulingMode rules.
+    def evaluateStinkyTofuESM2() -> bool:
+      if not isaInfoMap[isa].archCaps["HasSchedMode"]: return False
+      if state["ProblemType"]["Sparse"]: return False
+      # stinkytofu does not yet support f64 (double / double-complex) datatypes
+      if state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex(): return False
+      if state["ProblemType"]["MacDataTypeB"].isDouble() or state["ProblemType"]["MacDataTypeB"].isDoubleComplex(): return False
+      if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
+      return True
+
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
+    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    def evaluateEnableESM2TrackValuVsrc() -> bool:
+      return bool(state["ProblemType"]["Sparse"])
+
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
+    state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
+    state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
@@ -2546,6 +3060,18 @@ class Solution(collections.abc.Mapping):
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
     isFloat6 = state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat()
     if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and (isFloat4 or isFloat6):
+      # gfx1250 v0 silicon lacks the fp4 32x16 WMMA opcode. Gate on the *physical* opcode dims
+      # MIBlock[0]/[1], not the effective MatrixInstM/N: under SourceSwap the effective extents
+      # transpose (32x16 -> 16x32) while the physical opcode is unchanged. Real 32x16 fp4 configs
+      # ship with SourceSwap both ways (true in mxf4_gfx1250.yaml, false in
+      # streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml), so only the physical dims identify the opcode.
+      if isFloat4 and not isaInfoMap[isa].asmCaps.get("HasWMMA_f4_32x16", True) \
+          and len(state.get("MIBlock", [])) >= 2 \
+          and state["MIBlock"][0] == 32 and state["MIBlock"][1] == 16:
+        reject(state, printRejectionReason,
+               "This gfx1250 stepping does not support the fp4 32x16 matrix-instruction shape; "
+               "use a 16x16 MatrixInstruction or build for gfx1250")
+        return
       if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():
         if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
@@ -2609,6 +3135,7 @@ class Solution(collections.abc.Mapping):
     resetLocalReadVectorWidthB = state["LocalReadVectorWidthB"]
     resetGlobalReadVectorWidthA = state["GlobalReadVectorWidthA"]
     resetGlobalReadVectorWidthB = state["GlobalReadVectorWidthB"]
+    tuning = (state.get("SolutionIndex", -1) == -1)
 
     while True:
       userDepthU = depthuList[index[0]]
@@ -2631,22 +3158,53 @@ class Solution(collections.abc.Mapping):
         else:
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
-      state["_DepthU"] = state["DepthU"]# internal
-      state["_DepthUA"] = depthUA# internal
+      if state["MXScaleFormat"] == "HostPreSwizzle":
+        mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
+        # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.
+        # MXFP4/BF16 subtile (AB_B4/B16) use a different data layout; keep full DepthU.
+        enableMultiDu = (
+          state.get("UseSubtileImpl")
+          and state.get("_ABTilePairA") == "AB_B8"
+          and state.get("_ABTilePairB") == "AB_B8"
+        )
+        if mxBlock and enableMultiDu:
+          swizzleSize1 = 256
+          dataDU = depthU * state["MatrixInstK"] // swizzleSize1
+          if dataDU < depthU and max(state["MacroTileA"], state["MacroTileB"]) > dataDU:
+            depthUA = dataDU
+            depthUB = dataDU
+            if state["PrefetchGlobalRead"] > 1:
+              reject(state, printRejectionReason,
+                     f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) is incompatible "
+                     f"with PrefetchGlobalRead={state['PrefetchGlobalRead']}")
+
+      state["_DepthU"] = depthU
+      state["DepthU"] = depthU
+
+      state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = depthUA // state["ProblemType"]["MXBlockA"]
-      state["_DepthUB"] = depthUB# internal
+        state["_DepthUMXSA"] = depthU // state["ProblemType"]["MXBlockA"]
+      state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
+
+      # Runs here (not earlier) because it needs MacroTileA/B and _DepthUA/B,
+      # which TileInfo reads and which are only set by this point.
+      if not _validateSubtileGRKPartition(state, printRejectionReason):
+        return
 
       # fp6 doesn't support LDS padding yet.
       for tc in ["A", "B"]:
-        if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat() and (
-            state["LdsPad%s" % tc] != 0 or state["LdsBlockSizePerPad%s" % tc] != 0):
-          reject(state, printRejectionReason,
-                 f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
-          return
+        if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat():
+          if state["LdsPad%s" % tc] == -1:
+            state["LdsPad%s" % tc] = 0
+          if state["LdsBlockSizePerPad%s" % tc] == -1:
+            state["LdsBlockSizePerPad%s" % tc] = 0
+          if state["LdsPad%s" % tc] != 0 or state["LdsBlockSizePerPad%s" % tc] != 0:
+            reject(state, printRejectionReason,
+                   f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
+            return
 
       iterModeMask = state["TDMIterateMode"]
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
@@ -2727,9 +3285,15 @@ class Solution(collections.abc.Mapping):
 
       if state["StaggerUStride"] == -1 or state["StaggerUStride"] < (state["DepthU"] * bpeAB):
         # (StaggerUStride) shoud be greater than or equal to (DepthU * bpeAB)
-        state["StaggerUStride"] = state["DepthU"] * bpeAB
-
-      state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
+        target_stagger_stride = state["DepthU"] * bpeAB
+        # Assert that it is an int or a float with no fractional part
+        is_integer = isinstance(target_stagger_stride, int) \
+                     or (isinstance(target_stagger_stride, float) and target_stagger_stride.is_integer())
+        assert is_integer, "StaggerUStride must be an int or a float with no fractional part"
+        state["StaggerUStride"] = int(target_stagger_stride)
+        state["_staggerStrideShift"] = 0
+      else:
+        state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
         # SubtileImpl: LDS padding is disabled.
@@ -2846,14 +3410,28 @@ class Solution(collections.abc.Mapping):
 
           if ldsPadM == -1:
             ldsPadM = 0
-            if not state["ProblemType"]["TLUMetadata"]:
-              if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"]:
-                ldsPadM = max(grvwM, optPadM)
-              else:
-                ldsPadM = vwM
-              ## turn-off padding for directToLds
-              if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
-                ldsPadM = 0
+            if state["EnableMatrixInstruction"] and state["UnrollMajorLDSMetadata"]:
+              ldsPadM = max(grvwM, optPadM)
+            elif wmmaV3 and state["EnableMatrixInstruction"] and state.get("enableLDSTrMetadata", False):
+              # TileMajor (UnrollMajorLDSMetadata=False): metadata is
+              # byte-typed and its TileMajor LDS read uses ds_load_tr8_b64.
+              # reuse FP8 bank-conflict search instead of the coarse vwM fallback.
+              mIdx = 0 if state["ProblemType"]["Sparse"] == 1 else 1
+              miwtM = state["MIWaveTile"][mIdx]
+              miwgM = state["MIWaveGroup"][mIdx]
+              lrvwBytesM = state.get("LocalReadVectorWidthMetadata", 0) // 4
+              miInputPerThreadBytesM = state.get("MIInputPerThreadMetadata", 0)
+              ldsPadM = get_metadata_mt_config(state["MacroTileMetadata"], "pad",
+                                               miwtM, miwgM, lrvwBytesM, miInputPerThreadBytesM)
+            elif not state["ProblemType"]["TLUMetadata"]:
+              # Legacy (MetadataLayout=0) TileMajor-without-LDSTr fallback (not UnrollMajorLDSMetadata).
+              ldsPadM = vwM
+            ## turn-off padding for directToLds
+            if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
+              ldsPadM = 0
+            # TDM's pad_amount field is dword-granular
+            if state["TDMInst"] and ldsPadM != 0:
+              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), 4)
           assert(ldsPadM >= 0)
 
         def removeLdsPadLogicForDTL(tc, ldsPad):
@@ -2895,24 +3473,37 @@ class Solution(collections.abc.Mapping):
 
         if state["TDMInst"]:
           pads = {"A": ldsPadA * state["ProblemType"]["MacDataTypeA"].numBytes(), "B": ldsPadB * state["ProblemType"]["MacDataTypeB"].numBytes(), "MXSA": ldsPadMXSA, "MXSB": ldsPadMXSB}
+          if state["ProblemType"]["Sparse"]:
+            pads["Metadata"] = ldsPadM  # already in bytes (metadata bpe=1)
           for tc, val in pads.items():
             if val == 0: continue
+            if tc == "Metadata" and val % 4 != 0:
+              reject(state, printRejectionReason, f"ldsPad{tc}={val} (bytes) must be a multiple of 4 for TDM hardware encoding (dword-granular pad_amount)")
+              continue
             pad_amount = TensorDataMoverLoad.calPadAmount(val)
             if pad_amount > 127:
               reject(state, printRejectionReason, f"pad_amount=(ldsPad//4-1)={pad_amount} should be smaller than or equal to 127 for ldsPad{tc}={val}")
 
         return ldsPadA, ldsPadB, ldsPadM, ldsPadMXSA, ldsPadMXSB
 
-      def checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA: int, ldsBlockSizePerPadB: int, ldsBlockSizePerPadMXSA: int, ldsBlockSizePerPadMXSB: int):
+      def checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA: int, ldsBlockSizePerPadB: int, ldsBlockSizePerPadMXSA: int, ldsBlockSizePerPadMXSB: int, ldsBlockSizePerPadMetadata: int = 0):
         if state["TDMInst"]:
           pads = {"A": ldsBlockSizePerPadA, "B": ldsBlockSizePerPadB, "MXSA": ldsBlockSizePerPadMXSA, "MXSB": ldsBlockSizePerPadMXSB}
+          if state["ProblemType"]["Sparse"]:
+            pads["Metadata"] = ldsBlockSizePerPadMetadata
           for tc, val in pads.items():
-            if val == 0: continue
             # A/B in iterate-mode bypass the pad_interval encoding; skip their
-            # check. MXSA/MXSB do not support iterate-mode, so their LBSPP
-            # must still satisfy the pad_interval constraints.
-            if tc in ("A", "B") and state.get("_TDMIterateMode%s" % tc, False):
+            # check. MXSA/MXSB/Metadata do not support iterate-mode, so their
+            # LBSPP must still satisfy the pad_interval constraints.
+            if tc in ("A", "B") and (state.get("_TDMIterateMode%s" % tc, False)
+                                      or isSubtileIterateMode(state, tc)):
+              if val == 0:
+                reject(state, printRejectionReason,
+                       f"TDMIterateMode set for {tc} but LdsBlockSizePerPad{tc}=0; "
+                       f"iterate-mode needs a non-zero pad block.")
+                return
               continue
+            if val == 0: continue
             dwords = val // 4
             if dwords == 0 or (dwords & (dwords - 1)) != 0:
               reject(state, printRejectionReason, f"LdsBlockSizePerPad{tc}={val}: val//4={dwords} must be a positive power of 2 for TDM hardware encoding")
@@ -2939,9 +3530,44 @@ class Solution(collections.abc.Mapping):
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
 
+      def calcMetadataLdsBlockSizePerPad() -> int:
+        """Auto-resolve LdsBlockSizePerPadMetadata when left on -1.
+          - UnrollMajorLDS (K-major): same roundUpToNearestMultiple(DepthU*bpe)
+            heuristic A/B use for their K-major layout (bpe=1, metadata is
+            byte-typed).
+          - TileMajor (UnrollMajorLDSMetadata=False; note
+            `state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"]`,
+            so this is also TransposeLDSMetadata=False) with enableLDSTrMetadata:
+            reuse the FP8 ds_load_tr8_b64 bank-conflict search
+            (get_metadata_mt_config), since enableLDSTrMetadata shares that
+            exact HW cap/instruction.
+        """
+        if not state["ProblemType"]["Sparse"] or state["DirectToVgprSparseMetadata"]:
+          return 0
+        LdsBlockSizePerPad = state["LdsBlockSizePerPadMetadata"]
+        if LdsBlockSizePerPad == -1:
+          LdsBlockSizePerPad = 0
+          if state["EnableMatrixInstruction"]:
+            multiple = 256 if wmmaV3 else 128
+            if state["UnrollMajorLDSMetadata"]:
+              LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthUMetadata"]), multiple)
+            elif wmmaV3 and state.get("enableLDSTrMetadata", False):
+              mIdx = 0 if state["ProblemType"]["Sparse"] == 1 else 1
+              miwtM = state["MIWaveTile"][mIdx]
+              miwgM = state["MIWaveGroup"][mIdx]
+              lrvwBytesM = state.get("LocalReadVectorWidthMetadata", 0) // 4
+              miInputPerThreadBytesM = state.get("MIInputPerThreadMetadata", 0)
+              LdsBlockSizePerPad = get_metadata_mt_config(state["MacroTileMetadata"], "perBlock",
+                                                          miwtM, miwgM, lrvwBytesM, miInputPerThreadBytesM)
+        if state["DirectToLdsMetadata"]:
+          LdsBlockSizePerPad = 0
+        return int(LdsBlockSizePerPad)
+
       def calcLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
         if "MXS" in tc:
           return calcMXSLdsBlockSizePerPad(tc, lrvw)
+        if tc == "Metadata":
+          return calcMetadataLdsBlockSizePerPad()
         mt = state["MacroTile0"] if ("A" in tc) else state["MacroTile1"]
         LdsBlockSizePerPad = state["LdsBlockSizePerPad%s"%tc]
         tmpBpe = getLdsBpe(tc)
@@ -3143,11 +3769,13 @@ class Solution(collections.abc.Mapping):
               ldsBlockSizePerPadB = calcLdsBlockSizePerPad("B", state["LocalReadVectorWidthB"])
               ldsBlockSizePerPadMXSA = calcLdsBlockSizePerPad("MXSA", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockA"] else 0
               ldsBlockSizePerPadMXSB = calcLdsBlockSizePerPad("MXSB", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockB"] else 0
+              ldsBlockSizePerPadMetadata = calcLdsBlockSizePerPad("Metadata", 0)
               ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
               ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
               ldsBlockSizePerPadMXSA = 0 if padMXSA == 0 else ldsBlockSizePerPadMXSA
               ldsBlockSizePerPadMXSB = 0 if padMXSB == 0 else ldsBlockSizePerPadMXSB
-              checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA, ldsBlockSizePerPadB, ldsBlockSizePerPadMXSA, ldsBlockSizePerPadMXSB)
+              ldsBlockSizePerPadMetadata = 0 if padM == 0 else ldsBlockSizePerPadMetadata
+              checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA, ldsBlockSizePerPadB, ldsBlockSizePerPadMXSA, ldsBlockSizePerPadMXSB, ldsBlockSizePerPadMetadata)
               (ldsNumBytesA, ldsNumBytesAlignedA) = calcLdsNumBytesAB("A", padA, ldsBlockSizePerPadA)
               (ldsNumBytesB, ldsNumBytesAlignedB) = calcLdsNumBytesAB("B", padB, ldsBlockSizePerPadB)
               (ldsNumBytesMXSA, ldsNumBytesAlignedMXSA) = calcLdsNumBytesAB("MXSA", padMXSA, ldsBlockSizePerPadMXSA) if state["ProblemType"]["MXBlockA"] else (0, 0)
@@ -3648,7 +4276,7 @@ class Solution(collections.abc.Mapping):
 
           tvm = totalElementsM // grvw
 
-          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, grvw, printRejectionReason):
+          if tuning and (not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, grvw, printRejectionReason)):
             validDepthU = False
 
           if state["EnableMatrixInstruction"] and state["GlobalReadVectorWidthMetadata"]:
@@ -3669,7 +4297,7 @@ class Solution(collections.abc.Mapping):
                   glvwMlimit  = state["MIOutputVectorWidth"] * (state["WavefrontSize"] // matrixInstN)
 
               # reduce GLVMetadata if GLVMetadata larger than MIOVW
-              if state["GlobalReadVectorWidthMetadata"] > glvwMlimit:
+              if tuning and (state["GlobalReadVectorWidthMetadata"] > glvwMlimit):
                 tvm = totalElementsM // glvwMlimit
                 if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, glvwMlimit, printRejectionReason):
                   validDepthU = False
@@ -3697,7 +4325,7 @@ class Solution(collections.abc.Mapping):
             if depthUB < state["GlobalReadVectorWidthB"]:
               validDepthU = False
 
-          if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
+          if state["ProblemType"]["Sparse"] and (not state["DirectToVgprSparseMetadata"]):
             if not state["ProblemType"]["TLUMetadata"]:
               if depthUM < state["GlobalReadVectorWidthMetadata"]:
                 validDepthU = False
@@ -3715,6 +4343,9 @@ class Solution(collections.abc.Mapping):
               if depthUB < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
+
+          # Subtile bypasses the 1024B pad_interval limit via iterate mode;
+          # non-subtile TDM handles it earlier via _TDMIterateMode + VW halving.
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU
@@ -3791,8 +4422,22 @@ class Solution(collections.abc.Mapping):
         // state["GlobalWriteVectorWidth"]
 
 
+    # NumWaveSplitK requires BufferStore for thread masking in emitLdChange
+    if state["NumWaveSplitK"] > 1:
+      if not state["BufferStore"]:
+        reject(state, printRejectionReason, "NumWaveSplitK > 1 requires BufferStore")
+        return
+
+    # SingleBuffer GSU workspace addressing not yet implemented for flat stores
+    if not state["BufferStore"] and state["_GlobalAccumulation"] == "SingleBuffer":
+      reject(state, printRejectionReason, "GlobalAccumulation SingleBuffer requires BufferStore")
+      return
+
     # LocalSplitU but can't NumThreads%MacroTile doesn't support sideways store
     if state["LocalSplitU"] > 1:
+      if not state["BufferStore"]:
+        reject(state, printRejectionReason, "LocalSplitU > 1 requires BufferStore")
+        return
       if not state["SourceSwap"] and state["StoreVectorWidth"] > state["VectorWidthA"]:
         reject(state, printRejectionReason, "LSU and non-SourceSwap doesn't support StoreVectorWidth(%u)>VWA(%u)." \
             % (state["StoreVectorWidth"], state["VectorWidthA"]))
@@ -3898,41 +4543,35 @@ class Solution(collections.abc.Mapping):
       GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
       totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
 
-      # Try to enlarge GLVW for metadata
-      bGlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
-      glvwMlimit = 16
-      if state["GlobalReadVectorWidthMetadata"] < glvwMlimit:
-        # If SolutionIndex is present and non-negative, this means we are during TensileCreateLibrary stage
-        # Don't print rejection reason for the first attempt to expand GRVWM.
-        _printRejectionReason = (state.get("SolutionIndex", -1) == -1) and printRejectionReason
-        if state["ProblemType"]["Sparse"] == 2:
-          GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularB"], depthUM, glvwMlimit) #sum all need read
-          tvm = totalElementsM // GlobalReadVectorWidth
-          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, _printRejectionReason):
-            #fallback
-            tvm = totalElementsM // bGlobalReadVectorWidthMetadata
-            Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
+      if tuning:
+        # Try to enlarge GLVW for metadata
+        bGlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
+        glvwMlimit = 16
 
-          GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
-          if GlobalReadVectorWidthMetadata == 0:
-            GlobalReadVectorWidthMetadata = 1
-          totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
-        else:
-          GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularA"], depthUM, glvwMlimit) #sum all need read
-          tvm = totalElementsM // GlobalReadVectorWidth
-          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, _printRejectionReason):
-            #fallback
-            tvm = totalElementsM // bGlobalReadVectorWidthMetadata
-            Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
+        if state["GlobalReadVectorWidthMetadata"] < glvwMlimit:
+          if state["ProblemType"]["Sparse"] == 2:
+            GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularB"], depthUM, glvwMlimit) #sum all need read
+            tvm = totalElementsM // GlobalReadVectorWidth
+            if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
+              #fallback
+              tvm = totalElementsM // bGlobalReadVectorWidthMetadata
+              Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)            
+          else:
+            GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularA"], depthUM, glvwMlimit) #sum all need read
+            tvm = totalElementsM // GlobalReadVectorWidth
+            if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
+              #fallback
+              tvm = totalElementsM // bGlobalReadVectorWidthMetadata
+              Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
 
-          GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
-          if GlobalReadVectorWidthMetadata == 0:
-            GlobalReadVectorWidthMetadata = 1
-          totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
-
-      if not Solution.setGlobalLoadTileDimClassic(state, "Metadata", state["NumLoadsMetadata"], \
-          totalVectorsCoalescedM, totalElementsPerpM, depthUM, printRejectionReason):
-        return
+        GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
+        if GlobalReadVectorWidthMetadata == 0:
+          GlobalReadVectorWidthMetadata = 1
+        totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
+            
+        if not Solution.setGlobalLoadTileDimClassic(state, "Metadata", state["NumLoadsMetadata"], \
+            totalVectorsCoalescedM, totalElementsPerpM, depthUM, printRejectionReason):
+          return
 
     # TODO
     if (0 and state["LSCA"] % state["GlobalReadVectorWidthA"] != 0):
@@ -4003,7 +4642,8 @@ class Solution(collections.abc.Mapping):
          state["NoTailLoop"] or \
          (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)) or \
          state["LocalSplitU"] > 1 or \
-         state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+         state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or \
+         not bufferLoad:
         state["TailloopInNll"] = False
 
       # need restrictions for TailloopInNll
@@ -4016,11 +4656,9 @@ class Solution(collections.abc.Mapping):
       # - MX + StreamK (not enough sgpr)
       if state["TailloopInNll"] or \
          (state["StreamK"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])):
-        # need to disable StaggerU
-        state["StaggerU"] = 0
-        state["StaggerUMapping"] = 0
-        state["StaggerUStride"] = 0
-        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for no StagggerU code
+        _disableRuntimeStaggerU(state)
+
+    _disableUnsupportedRuntimeStaggerU(state)
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
@@ -4086,10 +4724,10 @@ class Solution(collections.abc.Mapping):
       grvwm = state["GlobalReadVectorWidthMetadata"]
       grvwmCheck = (grvwm == 4) or (grvwm == 16 and isaInfoMap[state["ISA"]].asmCaps["HasDirectToLdsx4"])
       if state["DirectToLds%s"%sparseTc] and (not state["DirectToVgprSparseMetadata"]) and grvwmCheck:
-        state["DirectToLdsMetadata"] = True
+        state["DirectToLdsMetadata"] = 1
         state["LocalWriteUseSgprMetadata"] = True
       else:
-        state["DirectToLdsMetadata"] = False
+        state["DirectToLdsMetadata"] = 0
         state["LocalWriteUseSgprMetadata"] = False
 
     # Update parent variable so kernel display is accurate
@@ -4170,10 +4808,11 @@ class Solution(collections.abc.Mapping):
     state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad("B", state["LocalReadVectorWidthB"])
     state["LdsBlockSizePerPadMXSA"] = calcLdsBlockSizePerPad("MXSA", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockA"] else 0
     state["LdsBlockSizePerPadMXSB"] = calcLdsBlockSizePerPad("MXSB", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockB"] else 0
-    checkLdsBlockSizePerPadForTDM(state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"], state["LdsBlockSizePerPadMXSA"], state["LdsBlockSizePerPadMXSB"])
-
-    if state["LdsBlockSizePerPadMetadata"] == -1:
-      state["LdsBlockSizePerPadMetadata"] = state["LdsBlockSizePerPadA"]
+    # Metadata has its own MacroTile/DepthU/bpe (byte-typed), so it cannot
+    # reuse A's block size; calcLdsBlockSizePerPad("Metadata", ...) derives it
+    # from Metadata's own dimensions instead (see calcMetadataLdsBlockSizePerPad).
+    state["LdsBlockSizePerPadMetadata"] = calcLdsBlockSizePerPad("Metadata", 0)
+    checkLdsBlockSizePerPadForTDM(state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"], state["LdsBlockSizePerPadMXSA"], state["LdsBlockSizePerPadMXSB"], state["LdsBlockSizePerPadMetadata"])
 
     if state["EnableMatrixInstruction"]:
       if state["LdsBlockSizePerPadA"] and not state["UseGeneralizedNLCOneA"]:
@@ -4569,11 +5208,27 @@ class Solution(collections.abc.Mapping):
       if rawLdsOffsetB % 8 != 4:
         rawLdsOffsetB += (4 - rawLdsOffsetB % 8) % 8
     state["LdsOffsetB"] = rawLdsOffsetB
+    _oneLdsBufAtEval = state["1LDSBuffer"]   # may still be -1 (auto) here; resolved to 0/1 below
+    _segRes = segIntEval(state)
+    _segApplicable = _segRes["applicable"]                   # resolved to LDSSegmentInterleave 0/1 below
+    state["LDSSegInterleaveOffsets"] = _segRes["offsets"]    # consumed by emit sites when applied
+    _segAligned = _segRes["applicable"] and _segRes["aligned"]
+    _segReason = _segRes["reason"]                           # why not applied (may change if budget disables aligned)
     if state["PrefetchGlobalRead"]:
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
       # Buffer-swap delta must be 8-aligned to keep buffer 1 in half-wave mode.
       if (halfBankShiftA > 0 or halfBankShiftB > 0) and offsetBlk % 8 != 0:
         offsetBlk += 8 - (offsetBlk % 8)
+      # Aligned interleave grows the per-buffer block; keep it only if it still double-buffers
+      # within MaxLDS, else disable (a too-tight forced kernel is rejected below, not run baseline).
+      if _segAligned:
+        _ok, _inflated = segAlignedBudget(_segRes["blockSpan"], numLdsBlk, offsetBlk, state["MaxLDS"])
+        if _ok:
+          offsetBlk = _inflated   # already a power of two -> roundup below is a no-op
+        else:
+          _segApplicable = False
+          _segAligned = False
+          _segReason = "aligned needs more LDS than MaxLDS"
       roundupOffsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2)))) if offsetBlk > 0 else 0
 
       if not isaInfoMap[isa].asmCaps["HasWMMA"]:
@@ -4590,6 +5245,10 @@ class Solution(collections.abc.Mapping):
         offsetBlk = roundupOffsetBlk
 
       ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
+      if _segAligned:
+        # setLdsOffsets assumes an [A|B] span, but aligned spreads A1 a segment further,
+        # so reserve the real per-buffer span (max() never shrinks the baseline).
+        ldsNumBytesAB = max(ldsNumBytesAB, (numLdsBlk - 1) * offsetBlk + _segRes["blockSpan"])
       # decrement numLdsBlk for DtlPlusLdsBuf if it exceeds MaxLDS
       # PGR 2 case, reject kernel (need to use StoreSwapAddr in that case)
       if state["DtlPlusLdsBuf"] and ldsNumBytesAB > state["MaxLDS"]:
@@ -4607,6 +5266,15 @@ class Solution(collections.abc.Mapping):
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
+
+    # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
+    _segRequested = state["LDSSegmentInterleave"]
+    _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
+    if not _segDeferForBuf:
+      # 1 = applied, 0 = not; split vs bcontig is read from the offsets, not this value.
+      state["LDSSegmentInterleave"] = 1 if _segApplicable else 0
+      if _segRequested == 1 and not _segApplicable:
+        reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason))
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
@@ -4633,6 +5301,21 @@ class Solution(collections.abc.Mapping):
         state["1LDSBuffer"] = 0
       else:
         state["1LDSBuffer"] = 1
+
+    if _segDeferForBuf:
+      # 1LDSBuffer resolved now; re-run the oracle. A newly-eligible tight interleave is safe (pure
+      # reorder, no LDS growth); an aligned one needs LDS not reserved above, so a forced request is
+      # rejected rather than run as baseline.
+      _segRes2 = segIntEval(state)
+      if _segRes2["applicable"] and not _segRes2["aligned"]:
+        state["LDSSegInterleaveOffsets"] = _segRes2["offsets"]
+        state["LDSSegmentInterleave"] = 1
+      else:
+        state["LDSSegmentInterleave"] = 0
+        if _segRequested == 1:
+          _segReason2 = "aligned needs LDS reserved before 1LDSBuffer resolution" \
+            if _segRes2["applicable"] else _segRes2["reason"]
+          reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason2))
 
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:
@@ -4722,7 +5405,21 @@ class Solution(collections.abc.Mapping):
 
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
 
-    # SourceSwap
+    # GuaranteeNoPartial skips graShift (KernelWriter.py, "global read addresses: shift")
+    # and permits _UseSgprForGRO, both on the assumption that BufferLoad gives a
+    # hardware bounds check. global_load_tr has no num_records field, so that
+    # assumption does not hold for it: the free-dim overhang then reads past the
+    # tensor (page fault), and the dropped soffset in chooseGlobalRead's tr branch
+    # makes every transpose load address the same element (wrong results).
+    # Reachable only by tuning with AssertFree{0,1}ElementMultiple >= GRVW; no
+    # shipped solution does. Reject rather than mis-generate.
+    for tc in ("A", "B"):
+      if state["enableGLTr%s"%tc] and state["GuaranteeNoPartial%s"%tc]:
+        reject(state, printRejectionReason, "enableGLTr%s with GuaranteeNoPartial%s: "
+               "global_load_tr has no hardware bounds check, so AssertFree%uElementMultiple "
+               "must not remove graShift"%(tc, tc, 0 if tc == "A" else 1))
+        return
+
     if state["StoreRemapVectorWidth"]:
       if state["SourceSwap"]:
         reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
@@ -4740,7 +5437,7 @@ class Solution(collections.abc.Mapping):
         if state["PrefetchGlobalRead"] == 1:
           reject(state, printRejectionReason, "Sparse + DirectToLds + PrefetchGlobalRead=1 currently unsupported")
           return False
-      
+
       # if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
       #   reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
       #   return
@@ -4761,13 +5458,13 @@ class Solution(collections.abc.Mapping):
                         and not state["ForceUnrollSubIter"] \
                         and not state["ProblemType"]["DataType"].isComplex() \
                         and not state["ProblemType"]["Sparse"] \
-                        and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False) \
-                        and state["ScheduleIterAlg"] != 4
+                        and state["ProblemType"]["NumIndicesSummation"] == 1 \
+                        and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False)
     if state["InitCIterWmma"] == -1:
       state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
     elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
       reject(state, printRejectionReason,
-             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse, and SIA!=4")
+             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, single summation index, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
       return
 
     # force MIArchVgpr when using WMMA
@@ -4878,10 +5575,9 @@ class Solution(collections.abc.Mapping):
 
     # Calcualte the correct LDS usages
     def calcEpilogueTurns(factorDims: List) -> int:
-      divisor = state["SubGroup0"] * state["SubGroup1"]
-      # d will be a list containing 0 or 1
       maxTurn = 0
-      for d in range(len(factorDims)):
+      divisor = state["SubGroup0"] * state["SubGroup1"]
+      for d in factorDims:
         turn = math.ceil(state["MacroTile%d"%d] / divisor)
         maxTurn = max(maxTurn, turn)
       return maxTurn
@@ -4990,6 +5686,18 @@ class Solution(collections.abc.Mapping):
     if state["LoopIters"] < 1:
       reject(state, printRejectionReason, "LoopIters need to greater than 0")
       return
+    if state["HalfPLR"] and state["LoopIters"] == 1:
+      reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
+      return
+
+    # Reject SIA3 + PLR>0 + PGR2 + BufferLoad=0 when LoopIters <= 1.
+    # With flat addressing the prefetch scheduling duplicates a load.
+    # BufferLoad=1 is unaffected because SRD-based offsets avoid the duplication.
+    if not state["BufferLoad"] \
+       and state["ScheduleIterAlg"] == 3 and state["PrefetchLocalRead"] > 0 \
+       and state["PrefetchGlobalRead"] == 2 and state["LoopIters"] <= 1:
+      reject(state, printRejectionReason, "BufferLoad=0 with ScheduleIterAlg=3, PrefetchLocalRead and PrefetchGlobalRead=2 requires LoopIters > 1")
+      return
 
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
@@ -5052,43 +5760,23 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasGlobalPrefetch"]:
         reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)
         return
-      def isPowerOf2(x):
-        return x > 0 and (x & (x - 1)) == 0
-      # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, may remove them in the future
-      # Check # threads are power of 2
-      if not isPowerOf2(state["NumThreads"]):
-        reject(state, printRejectionReason, "PrefetchGL2 requires NumThreads to be power of 2")
-        return
-      # Check ClusterDim is power of 2 and not [1,1]
-      if state["ClusterDim"] == [1, 1]:
-        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1]")
-        return
-      if not all(isPowerOf2(x) for x in state["ClusterDim"]):
-        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim components to be power of 2")
-        return
-      # Check DepthU is power of 2
-      if not isPowerOf2(state["DepthU"]):
-        reject(state, printRejectionReason, "PrefetchGL2 requires DepthU to be power of 2")
-        return
-      # Check MT is power of 2
-      if not isPowerOf2(state["MacroTile0"]) or not isPowerOf2(state["MacroTile1"]):
-        reject(state, printRejectionReason, "PrefetchGL2 requires MacroTile to be power of 2")
-        return
-      # Check if DataTypeA or DataTypeB is 6-bit float
-      if state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat():
-        reject(state, printRejectionReason, "PrefetchGL2 does not support 6-bit float")
-        return
+      # TODO: support staggerU if needed
+      _disableRuntimeStaggerU(state)
       # TODO: support GSU if needed
       state["InternalSupportParams"]["SupportUserGSU"] = False
       if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
         reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
         return
-      if state["StreamK"] != 0:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support Stream-K")
+      if state["StreamK"] != 0 and state["StreamK"] != 3:
+        reject(state, printRejectionReason, "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K")
         return
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
         reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
         return
+      if state["ProblemType"]["Sparse"]:
+        if state["DirectToVgprSparseMetadata"]:
+          reject(state, printRejectionReason, "PrefetchGL2 with Sparse requires DirectToVgprSparseMetadata=0 (TDM metadata path)")
+          return
       
 
     # # reject conditions with lower performance

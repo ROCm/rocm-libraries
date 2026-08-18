@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ rocsparse::trm_info_t::~trm_info_t()
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->row_map));
     this->row_map = nullptr;
@@ -227,43 +227,43 @@ rocsparse::trm_info_t::trm_info_t(const rocsparse::trm_info_t& that)
     if(that.row_map != nullptr)
     {
         THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&this->row_map, J_size * that.m));
-        THROW_IF_HIP_ERROR(
-            hipMemcpy(this->row_map, that.row_map, J_size * that.m, hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->row_map, that.row_map, J_size * that.m, hipMemcpyDeviceToDevice));
     }
 
     if(that.diag_ind != nullptr)
     {
         THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->diag_ind), I_size * that.m));
-        THROW_IF_HIP_ERROR(
-            hipMemcpy(this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
     }
 
     if(that.transposed_perm != nullptr)
     {
         THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_perm), I_size * that.nnz));
-        THROW_IF_HIP_ERROR(hipMemcpy(this->transposed_perm,
-                                     that.transposed_perm,
-                                     I_size * that.nnz,
-                                     hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_perm,
+                                               that.transposed_perm,
+                                               I_size * that.nnz,
+                                               hipMemcpyDeviceToDevice));
     }
 
     if(that.transposed_row_ptr != nullptr)
     {
         THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_row_ptr), I_size * (that.m + 1)));
-        THROW_IF_HIP_ERROR(hipMemcpy(this->transposed_row_ptr,
-                                     that.transposed_row_ptr,
-                                     I_size * (that.m + 1),
-                                     hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_row_ptr,
+                                               that.transposed_row_ptr,
+                                               I_size * (that.m + 1),
+                                               hipMemcpyDeviceToDevice));
     }
 
     if(that.transposed_col_ind != nullptr)
     {
         THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_col_ind), J_size * that.nnz));
 
-        THROW_IF_HIP_ERROR(hipMemcpy(this->transposed_col_ind,
-                                     that.transposed_col_ind,
-                                     J_size * that.nnz,
-                                     hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_col_ind,
+                                               that.transposed_col_ind,
+                                               J_size * that.nnz,
+                                               hipMemcpyDeviceToDevice));
     }
 }
 
@@ -289,8 +289,8 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
         {
             THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->row_map), J_size * that.m));
         }
-        THROW_IF_HIP_ERROR(
-            hipMemcpy(this->row_map, that.row_map, J_size * that.m, hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->row_map, that.row_map, J_size * that.m, hipMemcpyDeviceToDevice));
     }
 
     if(that.diag_ind != nullptr)
@@ -299,8 +299,8 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
         {
             THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->diag_ind), I_size * that.m));
         }
-        THROW_IF_HIP_ERROR(
-            hipMemcpy(this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
     }
 
     if(that.transposed_perm != nullptr)
@@ -309,10 +309,10 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
         {
             THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_perm), I_size * that.nnz));
         }
-        THROW_IF_HIP_ERROR(hipMemcpy(this->transposed_perm,
-                                     that.transposed_perm,
-                                     I_size * that.nnz,
-                                     hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_perm,
+                                               that.transposed_perm,
+                                               I_size * that.nnz,
+                                               hipMemcpyDeviceToDevice));
     }
 
     if(that.transposed_row_ptr != nullptr)
@@ -322,10 +322,10 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
             THROW_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&(this->transposed_row_ptr), I_size * (that.m + 1)));
         }
-        THROW_IF_HIP_ERROR(hipMemcpy(this->transposed_row_ptr,
-                                     that.transposed_row_ptr,
-                                     I_size * (that.m + 1),
-                                     hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_row_ptr,
+                                               that.transposed_row_ptr,
+                                               I_size * (that.m + 1),
+                                               hipMemcpyDeviceToDevice));
     }
 
     if(that.transposed_col_ind != nullptr)
@@ -334,10 +334,10 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
         {
             THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_col_ind), J_size * that.nnz));
         }
-        THROW_IF_HIP_ERROR(hipMemcpy(this->transposed_col_ind,
-                                     that.transposed_col_ind,
-                                     J_size * that.nnz,
-                                     hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->transposed_col_ind,
+                                               that.transposed_col_ind,
+                                               J_size * that.nnz,
+                                               hipMemcpyDeviceToDevice));
     }
 
     this->max_nnz      = that.max_nnz;

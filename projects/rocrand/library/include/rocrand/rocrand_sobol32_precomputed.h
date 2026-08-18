@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,14 @@
 #endif // SOBOL_DIM
 #define SOBOL32_N 640000
 
-extern "C" [[deprecated(
-    "Use 'rocrand_get_direction_vectors32(...)' instead.")]] ROCRANDAPI const unsigned int
-    rocrand_h_sobol32_direction_vectors[SOBOL32_N];
+namespace rocrand_device
+{
+namespace detail
+{
+
+extern "C" ROCRANDAPI const unsigned int rocrand_h_sobol32_direction_vectors[SOBOL32_N];
+
+} // end namespace detail
+} // end namespace rocrand_device
 
 #endif // ROCRAND_SOBOL32_PRECOMPUTED_H_

@@ -32,6 +32,10 @@ namespace ExpressionTest
             auto a = Expression::literal(1);
             auto b = Expression::literal(2);
 
+            auto fixRegs = [&](std::string instr) {
+                return FixupInstructionStringsForVGPRIndexing(context->targetArchitecture(), instr);
+            };
+
             auto rc = std::make_shared<Register::Value>(
                 context.get(), Register::Type::Vector, DataType::Int32, 1);
             rc->allocateNow();
@@ -61,7 +65,8 @@ namespace ExpressionTest
             {
                 CHECK(toString(expr1) == "Add(1:I, 2:I)I");
                 CHECK(toString(expr2) == "Multiply(2:I, Add(1:I, 2:I)I)I");
-                CHECK(toString(expr3) == "Subtract(Multiply(2:I, Add(1:I, 2:I)I)I, v0:I)I");
+                CHECK(toString(expr3)
+                      == fixRegs("Subtract(Multiply(2:I, Add(1:I, 2:I)I)I, v0:I)I"));
                 CHECK(toString(expr4)
                       == "GreaterThan(Add(1:I, 2:I)I, Multiply(2:I, Add(1:I, 2:I)I)I)BL");
                 CHECK(toString(expr5)

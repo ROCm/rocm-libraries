@@ -152,7 +152,7 @@ inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
     {
         for(auto& [name, value] : node.at("outputs").items())
         {
-            if(name.find("_tensor_uid") == std::string::npos)
+            if(name.find("_tensor_uid") == std::string::npos || value.is_null())
             {
                 continue;
             }

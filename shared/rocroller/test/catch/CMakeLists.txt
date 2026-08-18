@@ -108,6 +108,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKFixupTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SubDwordExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SwizzleScaleTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDataMoverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TernaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext.cpp"
@@ -118,6 +119,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/UnrollLoopsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UpdateParametersTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UtilsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VGPRIndexingObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAHazardObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAObserverUnitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitcntObserverTest.cpp"
@@ -138,3 +140,4 @@ target_sources(rocroller-tests-catch
 target_include_directories(rocroller-tests-catch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include
 )
+

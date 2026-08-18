@@ -23,10 +23,18 @@
 ################################################################################
 
 """
-Load optional known-bugs YAML for TensileLogic --check-all.
+Load the known-bugs YAML for TensileLogic --check-all.
 
-Paths in the file are relative to the library logic root (the LogicPath argument),
-using forward slashes — the same form as validation error messages.
+Each skip is keyed on (relative_path, solution_name), where solution_name is the
+solution's ``SolutionNameMin`` — a canonical, content-derived name (macro tile,
+MatrixInstruction, all kernel params). Unlike a positional ``SolutionIndex``,
+the name is stable across library re-tuning/regeneration, so a documented skip
+keeps matching the same buggy kernel without hand-editing the file when indices
+shift. If the kernel is genuinely changed or removed, the name no longer
+matches, which is the correct signal to prune the entry.
+
+Paths in the file are relative to the library logic root (the LogicPath
+argument), using forward slashes — the same form as validation error messages.
 """
 
 from __future__ import annotations
@@ -39,7 +47,8 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None  # type: ignore
 
-KnownBugKey = Tuple[str, int]
+# A known-bug lookup key: (normalized relative path, solution_name).
+KnownBugKey = Tuple[str, str]
 
 
 def normalize_logic_relative_path(path: Path) -> str:
@@ -49,7 +58,7 @@ def normalize_logic_relative_path(path: Path) -> str:
 
 def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
     """
-    Parse known-bugs YAML into a set of (relative_path, solution_index).
+    Parse known-bugs YAML into a set of (relative_path, solution_name).
 
     If config_path is None or the file is missing, returns an empty frozenset.
     If a file path is given but PyYAML is not installed, raises RuntimeError.
@@ -91,22 +100,20 @@ def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
             raise ValueError(
                 f"Known-bugs skips[{i}] requires string 'path': {config_path}"
             )
-        sol_idx = entry.get("solution_index")
-        if sol_idx is None:
+        sol_name = entry.get("solution_name")
+        if not sol_name or not isinstance(sol_name, str):
             raise ValueError(
-                f"Known-bugs skips[{i}] requires integer 'solution_index': {config_path}"
+                f"Known-bugs skips[{i}] requires string 'solution_name': {config_path}"
             )
-        if not isinstance(sol_idx, int):
-            raise ValueError(
-                f"Known-bugs skips[{i}].solution_index must be int: {config_path}"
-            )
-        key = (normalize_logic_relative_path(Path(path_str)), sol_idx)
+        key = (normalize_logic_relative_path(Path(path_str)), sol_name)
         out.add(key)
 
     return frozenset(out)
 
 
 def is_known_bug(
-    known: FrozenSet[KnownBugKey], rel_file: Path, solution_index: int
+    known: FrozenSet[KnownBugKey], rel_file: Path, solution_name: Optional[str]
 ) -> bool:
-    return (normalize_logic_relative_path(rel_file), int(solution_index)) in known
+    if solution_name is None:
+        return False
+    return (normalize_logic_relative_path(rel_file), solution_name) in known

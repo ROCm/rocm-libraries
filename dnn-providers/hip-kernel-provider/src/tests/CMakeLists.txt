@@ -24,11 +24,45 @@ add_executable(
     core/TestPluginPublic.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
+    compilation/TestModuleCache.cpp
 )
 
 # Add the dummy kernel for running the tests
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/KernelEmbedding.cmake")
-add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp)
+add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp)
+
+# Test binary needs its own copy of each pack's kernel (embedding is per-target).
+# Copied via configure_file: registering the same source for embedding in two
+# directories doubles its CMAKE_CONFIGURE_DEPENDS entry, which Ninja rejects as two
+# rules for one file. A loop, so a new pack adds its kernel to one list.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(HIP_KERNEL_PROVIDER_INGESTOR_TEST_KERNELS PointwiseAdd PointwiseSub)
+    foreach(kernel IN LISTS HIP_KERNEL_PROVIDER_INGESTOR_TEST_KERNELS)
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/kernels/${kernel}.cpp
+            ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
+            COPYONLY
+        )
+        add_kernels_for_embedding(
+            TARGET hip_kernel_provider_tests
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
+        )
+    endforeach()
+endif()
+embed_kernel_sources(
+    TARGET hip_kernel_provider_tests
+    OUTPUT_SRCS_CPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
+    OUTPUT_SRCS_HPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.hpp
+    OUTPUT_INCS_CPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp
+    OUTPUT_INCS_HPP ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.hpp
+)
+set(HIP_KERNEL_PROVIDER_GENERATED_TEST_SOURCES
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_sources.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/engines/kernel_includes.cpp)
+
+set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_TEST_SOURCES} TARGET_DIRECTORY hip_kernel_provider_tests PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
+
+target_sources(hip_kernel_provider_tests PRIVATE "${HIP_KERNEL_PROVIDER_GENERATED_TEST_SOURCES}")
 
 target_compile_options(hip_kernel_provider_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
@@ -38,7 +72,7 @@ target_link_libraries(
 )
 
 # make it so tests inside folders can find files without having to use a relative path.
-target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_BINARY_DIR}/src/engines})
+target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_BINARY_DIR}/src/tests/engines)
 
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
@@ -52,6 +86,10 @@ endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
     add_subdirectory(engines/hip_mlops_engine)
+endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_subdirectory(engines/kernel_ingestor_engine)
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

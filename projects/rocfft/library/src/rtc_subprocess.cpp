@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,10 +50,6 @@ static fs::path find_rtc_helper()
     // candidate directories for the helper
     std::vector<fs::path> helper_dirs;
 
-    auto var = rocfft_getenv("ROCFFT_RTC_PROCESS_HELPER");
-    if(!var.empty())
-        return var;
-
     fs::path library_path = get_library_path();
     if(!library_path.empty())
     {
@@ -76,13 +72,18 @@ static fs::path find_rtc_helper()
     throw std::runtime_error("unable to find rtc helper");
 }
 
-std::vector<char> compile_subprocess(const std::string& kernel_src, const std::string& gpu_arch)
+const std::string& find_rtc_helper_string()
 {
-    static std::string rtc_helper_exe = find_rtc_helper().string();
+    static std::string rtc_helper = find_rtc_helper().string();
+    return rtc_helper;
+}
 
-    // HACK: on Windows, rtc_helper_exe seems to have an embedded NUL
-    // byte at the end.  Append c_str() to hide this.
-    auto code = execute_subprocess(rtc_helper_exe.c_str(), {gpu_arch}, kernel_src);
+std::vector<char> compile_subprocess(const std::string&                kernel_src,
+                                     const std::string&                gpu_arch,
+                                     const std::optional<std::string>& forced_rtc_helper)
+{
+    auto code = execute_subprocess(
+        forced_rtc_helper ? *forced_rtc_helper : find_rtc_helper_string(), {gpu_arch}, kernel_src);
     if(code.empty())
     {
         throw std::runtime_error("child process failed to produce code");

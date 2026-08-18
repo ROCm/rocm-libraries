@@ -16,6 +16,7 @@ namespace rocRoller
         m_isSplitCounter = arch.HasCapability(GPUCapability::HasSplitWaitCounters);
         m_hasVSCnt       = arch.HasCapability(GPUCapability::SeparateVscnt);
         m_hasEXPCnt      = arch.HasCapability(GPUCapability::HasExpcnt);
+        m_hasTensorCnt   = arch.HasCapability(GPUCapability::HasTensorcnt);
         if(message.length() > 0)
         {
             m_comments = {message};
@@ -28,16 +29,19 @@ namespace rocRoller
                          int                    vscnt,
                          int                    dscnt,
                          int                    kmcnt,
-                         int                    expcnt)
+                         int                    expcnt,
+                         int                    tensorcnt)
         : m_loadcnt(loadcnt)
         , m_storecnt(storecnt)
         , m_vscnt(vscnt)
         , m_dscnt(dscnt)
         , m_kmcnt(kmcnt)
         , m_expcnt(expcnt)
+        , m_tensorcnt(tensorcnt)
         , m_isSplitCounter(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
         , m_hasVSCnt(arch.HasCapability(GPUCapability::SeparateVscnt))
         , m_hasEXPCnt(arch.HasCapability(GPUCapability::HasExpcnt))
+        , m_hasTensorCnt(arch.HasCapability(GPUCapability::HasTensorcnt))
     {
     }
 
@@ -48,9 +52,11 @@ namespace rocRoller
         , m_dscnt(-1)
         , m_kmcnt(-1)
         , m_expcnt(-1)
+        , m_tensorcnt(-1)
         , m_isSplitCounter(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
         , m_hasVSCnt(arch.HasCapability(GPUCapability::SeparateVscnt))
         , m_hasEXPCnt(arch.HasCapability(GPUCapability::HasExpcnt))
+        , m_hasTensorCnt(arch.HasCapability(GPUCapability::HasTensorcnt))
     {
         switch(queue)
         {
@@ -71,6 +77,9 @@ namespace rocRoller
             break;
         case GPUWaitQueue::VSQueue:
             m_vscnt = count;
+            break;
+        case GPUWaitQueue::TensorQueue:
+            m_tensorcnt = count;
             break;
         case GPUWaitQueue::None:
         case GPUWaitQueue::Count:
@@ -136,6 +145,15 @@ namespace rocRoller
         return rv;
     }
 
+    WaitCount
+        WaitCount::TensorCnt(GPUArchitecture const& arch, int value, std::string const& message)
+    {
+        WaitCount rv{arch, message};
+        rv.m_tensorcnt = value;
+
+        return rv;
+    }
+
     WaitCount WaitCount::Zero(GPUArchitecture const& architecture, std::string const& message)
     {
         WaitCount rv{architecture, message};
@@ -151,6 +169,10 @@ namespace rocRoller
         if(architecture.HasCapability(GPUCapability::HasExpcnt))
         {
             rv.m_expcnt = 0;
+        }
+        if(architecture.HasCapability(GPUCapability::HasTensorcnt))
+        {
+            rv.m_tensorcnt = 0;
         }
 
         return rv;
@@ -176,6 +198,12 @@ namespace rocRoller
            && architecture.HasCapability(GPUCapability::MaxExpcnt))
         {
             rv.m_expcnt = architecture.GetCapability(GPUCapability::MaxExpcnt);
+        }
+
+        if(architecture.HasCapability(GPUCapability::HasTensorcnt)
+           && architecture.HasCapability(GPUCapability::MaxTensorcnt))
+        {
+            rv.m_tensorcnt = architecture.GetCapability(GPUCapability::MaxTensorcnt);
         }
 
         return rv;
@@ -217,16 +245,18 @@ namespace rocRoller
 
     WaitCount& WaitCount::combine(WaitCount const& other)
     {
-        m_loadcnt  = CombineValues(m_loadcnt, other.m_loadcnt);
-        m_storecnt = CombineValues(m_storecnt, other.m_storecnt);
-        m_vscnt    = CombineValues(m_vscnt, other.m_vscnt);
-        m_dscnt    = CombineValues(m_dscnt, other.m_dscnt);
-        m_kmcnt    = CombineValues(m_kmcnt, other.m_kmcnt);
-        m_expcnt   = CombineValues(m_expcnt, other.m_expcnt);
+        m_loadcnt   = CombineValues(m_loadcnt, other.m_loadcnt);
+        m_storecnt  = CombineValues(m_storecnt, other.m_storecnt);
+        m_vscnt     = CombineValues(m_vscnt, other.m_vscnt);
+        m_dscnt     = CombineValues(m_dscnt, other.m_dscnt);
+        m_kmcnt     = CombineValues(m_kmcnt, other.m_kmcnt);
+        m_expcnt    = CombineValues(m_expcnt, other.m_expcnt);
+        m_tensorcnt = CombineValues(m_tensorcnt, other.m_tensorcnt);
 
         m_isSplitCounter = other.m_isSplitCounter;
         m_hasVSCnt       = other.m_hasVSCnt;
         m_hasEXPCnt      = other.m_hasEXPCnt;
+        m_hasTensorCnt   = other.m_hasTensorCnt;
 
         m_comments.insert(m_comments.end(), other.m_comments.begin(), other.m_comments.end());
 
@@ -263,6 +293,10 @@ namespace rocRoller
     {
         return m_expcnt;
     }
+    int WaitCount::tensorcnt() const
+    {
+        return m_tensorcnt;
+    }
 
     int WaitCount::getCount(GPUWaitQueue queue) const
     {
@@ -280,6 +314,8 @@ namespace rocRoller
             return m_expcnt;
         case GPUWaitQueue::VSQueue:
             return m_vscnt;
+        case GPUWaitQueue::TensorQueue:
+            return m_tensorcnt;
         default:
             return -1;
         }
@@ -308,6 +344,10 @@ namespace rocRoller
     void WaitCount::setExpcnt(int value)
     {
         m_expcnt = value;
+    }
+    void WaitCount::setTensorcnt(int value)
+    {
+        m_tensorcnt = value;
     }
 
     WaitCount& WaitCount::combineLoadcnt(int value)
@@ -346,6 +386,12 @@ namespace rocRoller
         return *this;
     }
 
+    WaitCount& WaitCount::combineTensorcnt(int value)
+    {
+        m_tensorcnt = CombineValues(m_tensorcnt, value);
+        return *this;
+    }
+
     std::vector<std::string> const& WaitCount::comments() const
     {
         return m_comments;
@@ -363,12 +409,13 @@ namespace rocRoller
 
     WaitCount WaitCount::getAsSaturatedWaitCount(GPUArchitecture const& arch) const
     {
-        int loadcnt  = m_loadcnt;
-        int storecnt = m_storecnt;
-        int vscnt    = m_vscnt;
-        int dscnt    = m_dscnt;
-        int kmcnt    = m_kmcnt;
-        int expcnt   = m_expcnt;
+        int loadcnt   = m_loadcnt;
+        int storecnt  = m_storecnt;
+        int vscnt     = m_vscnt;
+        int dscnt     = m_dscnt;
+        int kmcnt     = m_kmcnt;
+        int expcnt    = m_expcnt;
+        int tensorcnt = m_tensorcnt;
 
         if(arch.HasCapability(GPUCapability::MaxVmcnt))
         {
@@ -387,14 +434,20 @@ namespace rocRoller
             expcnt = std::min(expcnt, arch.GetCapability(GPUCapability::MaxExpcnt));
         }
 
-        return WaitCount(arch, loadcnt, storecnt, vscnt, dscnt, kmcnt, expcnt);
+        if(arch.HasCapability(GPUCapability::MaxTensorcnt))
+        {
+            tensorcnt = std::min(tensorcnt, arch.GetCapability(GPUCapability::MaxTensorcnt));
+        }
+
+        return WaitCount(arch, loadcnt, storecnt, vscnt, dscnt, kmcnt, expcnt, tensorcnt);
     }
 
     void WaitCount::toStream(std::ostream& os, LogLevel level) const
     {
         auto commentIter = level > LogLevel::Terse ? m_comments.begin() : m_comments.end();
 
-        if(m_loadcnt >= 0 || m_storecnt >= 0 || m_kmcnt >= 0 || m_dscnt >= 0 || m_expcnt >= 0)
+        if(m_loadcnt >= 0 || m_storecnt >= 0 || m_kmcnt >= 0 || m_dscnt >= 0 || m_expcnt >= 0
+           || m_tensorcnt >= 0)
         {
             if(m_isSplitCounter)
             {
@@ -420,7 +473,16 @@ namespace rocRoller
 
                 if(m_expcnt >= 0)
                 {
+                    AssertFatal(m_hasEXPCnt,
+                                "EXPCnt is not a valid counter in target architecture");
                     os << "s_wait_expcnt " << m_expcnt << std::endl;
+                }
+
+                if(m_tensorcnt >= 0)
+                {
+                    AssertFatal(m_hasTensorCnt,
+                                "TensorCnt is not a valid counter in target architecture");
+                    os << "s_wait_tensorcnt " << m_tensorcnt << std::endl;
                 }
             }
             else

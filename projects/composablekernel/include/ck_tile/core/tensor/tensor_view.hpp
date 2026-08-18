@@ -196,6 +196,7 @@ struct tensor_view
     async_get_vectorized_elements(CK_TILE_LDS_ADDR DataType_* smem,
                                   index_t offset,
                                   index_t wave_offset,
+                                  bool is_valid,
                                   number<IMM>                          = {},
                                   bool_constant<oob_conditional_check> = {}) const
     {
@@ -203,7 +204,7 @@ struct tensor_view
                                           offset / PackedSize,
                                           wave_offset,
                                           number<IMM / PackedSize>{},
-                                          true,
+                                          is_valid,
                                           bool_constant<oob_conditional_check>{});
     }
 
@@ -239,11 +240,13 @@ struct tensor_view
                                   number<IMM>,
                                   bool_constant<oob_conditional_check> = {}) const
     {
-        return buf_.template async_get<X>(smem,
-                                          coord.get_offset() / PackedSize,
-                                          linear_offset / PackedSize,
-                                          number<IMM / PackedSize>{},
-                                          bool_constant<oob_conditional_check>{});
+        return buf_.template async_get<X>(
+            smem,
+            coord.get_offset() / PackedSize,
+            linear_offset / PackedSize,
+            number<IMM / PackedSize>{},
+            coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
+            bool_constant<oob_conditional_check>{});
     }
 
     template <typename X,

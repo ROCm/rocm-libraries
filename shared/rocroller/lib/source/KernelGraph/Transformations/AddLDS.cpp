@@ -15,6 +15,7 @@ unrolled) into LDS.  Subsequent loads in the loop read from LDS.
 
 */
 
+#include "rocRoller/DataTypes/DataTypes.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
@@ -138,7 +139,8 @@ namespace rocRoller
 
             if(not(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
                    || tile.memoryType == MemoryType::WAVE_Direct2LDS
-                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL))
+                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL
+                   || tile.memoryType == MemoryType::WAVE_TDMToLDS))
                 return;
 
             rocRoller::Log::getLogger()->debug(
@@ -197,7 +199,8 @@ namespace rocRoller
                 const auto isDirect2LDS = tile.memoryType == MemoryType::WAVE_Direct2LDS;
 
                 // Update tile
-                if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
+                if(tile.memoryType == MemoryType::WAVE_Direct2LDS
+                   || tile.memoryType == MemoryType::WAVE_TDMToLDS)
                     tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::WAVE_LDS)
                     tile.memoryType = MemoryType::WAVE;

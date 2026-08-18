@@ -23,9 +23,12 @@ SOFTWARE.
 ]]
 
 if(NOT TARGET analyze)
-    add_custom_target(analyze)
+    add_custom_target(analyze
+        COMMENT "Run analyzer targets"
+    )
 endif()
 
+## Register analyzer targets under the aggregate analyze target.
 function(mark_as_analyzer)
     add_dependencies(analyze ${ARGN})
 endfunction()

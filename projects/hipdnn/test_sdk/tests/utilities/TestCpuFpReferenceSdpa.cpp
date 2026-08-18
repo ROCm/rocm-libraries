@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <cmath>
+#include <functional>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -499,7 +500,7 @@ TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, GenericWindowTopLeftSquare)
+TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 {
     // Generic sliding window with leftBound=1, rightBound=1 (TopLeft alignment).
     // Square shape Sq=Skv=4. Window is centered at sq, width 3.
@@ -543,7 +544,7 @@ TEST(TestCpuFpReferenceSdpaFp64, GenericWindowTopLeftSquare)
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0) / 2.0, 1e-5);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricTopLeft)
+TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
 {
     // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
@@ -586,7 +587,7 @@ TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricTopLeft)
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (2.0 + 3.0 + 4.0 + 5.0) / 4.0, 1e-5);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricBottomRight)
+TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
 {
     // Generic sliding window with leftBound=2, rightBound=1 (BottomRight alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
@@ -632,7 +633,7 @@ TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricBottomRight)
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0 + 5.0) / 3.0, 1e-5);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, GenericWindowBottomRightLargerSkv)
+TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
 {
     // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
     // Sq=2, Skv=4 → diagonal offset = Skv - Sq = 2.
@@ -672,7 +673,7 @@ TEST(TestCpuFpReferenceSdpaFp64, GenericWindowBottomRightLargerSkv)
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (3.0 + 4.0) / 2.0, 1e-5);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, GenericWindowBottomRightLargerSq)
+TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
 {
     // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
     // Sq=4, Skv=2 → diagonal offset = Skv - Sq = -2.
@@ -808,7 +809,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
     Tensor<double> k({1, 1, 2, 2});
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o({1, 1, 2, 2});
-    Tensor<float> lse({1, 1, 2});
+    Tensor<float> lse({1, 1, 2, 1});
 
     q.fillWithValue(0.0);
     k.fillWithValue(0.0);
@@ -837,14 +838,14 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
     const float sumExp0 = std::exp(scale - maxVal0) + std::exp(0.0f - maxVal0);
     const float expectedLse0 = maxVal0 + std::log(sumExp0);
 
-    EXPECT_NEAR(lse.getHostValue(0, 0, 0), expectedLse0, 1e-5f);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), expectedLse0, 1e-5f);
 
     // For sq=1: dot products are [0,1] → scores = [0, scale]
     const float maxVal1 = scale;
     const float sumExp1 = std::exp(0.0f - maxVal1) + std::exp(scale - maxVal1);
     const float expectedLse1 = maxVal1 + std::log(sumExp1);
 
-    EXPECT_NEAR(lse.getHostValue(0, 0, 1), expectedLse1, 1e-5f);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 1, 0), expectedLse1, 1e-5f);
 }
 
 TYPED_TEST(CpuFpReferenceSdpaFwd, LseAlwaysFloatType)
@@ -856,7 +857,7 @@ TYPED_TEST(CpuFpReferenceSdpaFwd, LseAlwaysFloatType)
     Tensor<InT> k({1, 2, 4, 8});
     Tensor<InT> v({1, 2, 4, 8});
     Tensor<InT> o({1, 2, 4, 8});
-    Tensor<float> lse({1, 2, 4});
+    Tensor<float> lse({1, 2, 4, 1});
 
     q.fillWithRandomValues(safeTestTypeCast<InT>(-1.0f), safeTestTypeCast<InT>(1.0f), 100);
     k.fillWithRandomValues(safeTestTypeCast<InT>(-1.0f), safeTestTypeCast<InT>(1.0f), 101);
@@ -872,7 +873,7 @@ TYPED_TEST(CpuFpReferenceSdpaFwd, LseAlwaysFloatType)
         {
             for(int sq = 0; sq < 4; ++sq)
             {
-                const float lseVal = lse.getHostValue(b, h, sq);
+                const float lseVal = lse.getHostValue(b, h, sq, 0);
                 EXPECT_FALSE(std::isnan(lseVal)) << "NaN at [" << b << "," << h << "," << sq << "]";
                 // LSE typically in range [-10, 10] for random inputs with default scale
                 EXPECT_GT(lseVal, -20.0f)
@@ -892,7 +893,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithMultipleBatchHeads)
     Tensor<double> k({2, 4, 16, 32});
     Tensor<double> v({2, 4, 16, 32});
     Tensor<double> o({2, 4, 16, 32});
-    Tensor<float> lse({2, 4, 16});
+    Tensor<float> lse({2, 4, 16, 1});
 
     q.fillWithRandomValues(-1.0, 1.0, 200);
     k.fillWithRandomValues(-1.0, 1.0, 201);
@@ -908,7 +909,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithMultipleBatchHeads)
         {
             for(int sq = 0; sq < 16; ++sq)
             {
-                const float lseVal = lse.getHostValue(b, h, sq);
+                const float lseVal = lse.getHostValue(b, h, sq, 0);
                 EXPECT_TRUE(std::isfinite(lseVal))
                     << "LSE not finite at [" << b << "," << h << "," << sq << "]";
             }
@@ -925,7 +926,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithCausalMask)
     Tensor<double> k({1, 1, 4, 8});
     Tensor<double> v({1, 1, 4, 8});
     Tensor<double> o({1, 1, 4, 8});
-    Tensor<float> lse({1, 1, 4});
+    Tensor<float> lse({1, 1, 4, 1});
 
     q.fillWithValue(1.0);
     k.fillWithValue(1.0);
@@ -939,10 +940,10 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithCausalMask)
     // sq=3: 4 valid positions → larger sumExp → larger LSE
     // LSE should increase monotonically as sq increases
 
-    const float lse0 = lse.getHostValue(0, 0, 0);
-    const float lse1 = lse.getHostValue(0, 0, 1);
-    const float lse2 = lse.getHostValue(0, 0, 2);
-    const float lse3 = lse.getHostValue(0, 0, 3);
+    const float lse0 = lse.getHostValue(0, 0, 0, 0);
+    const float lse1 = lse.getHostValue(0, 0, 1, 0);
+    const float lse2 = lse.getHostValue(0, 0, 2, 0);
+    const float lse3 = lse.getHostValue(0, 0, 3, 0);
 
     EXPECT_LT(lse0, lse1) << "LSE should increase with more unmasked positions";
     EXPECT_LT(lse1, lse2);
@@ -958,7 +959,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithFullyMaskedRow)
     Tensor<double> k({1, 1, 2, 2});
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o({1, 1, 2, 2});
-    Tensor<float> lse({1, 1, 2});
+    Tensor<float> lse({1, 1, 2, 1});
 
     q.fillWithValue(1.0);
     k.fillWithValue(1.0);
@@ -976,14 +977,14 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithFullyMaskedRow)
     CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, maskPtr, false, &lse);
 
     // sq=0: all masked → LSE = -inf (or NaN due to -inf - (-inf) in exp)
-    const float lse0 = lse.getHostValue(0, 0, 0);
+    const float lse0 = lse.getHostValue(0, 0, 0, 0);
     // When all scores are -inf: maxVal = -inf, exp(-inf - (-inf)) = exp(NaN) = NaN
     // So LSE may be NaN rather than -inf. Both indicate "no valid attention weights"
     EXPECT_TRUE((std::isinf(lse0) && lse0 < 0) || std::isnan(lse0))
         << "LSE should be -inf or NaN for fully masked row, got: " << lse0;
 
     // sq=1: normal → LSE finite
-    const float lse1 = lse.getHostValue(0, 0, 1);
+    const float lse1 = lse.getHostValue(0, 0, 1, 0);
     EXPECT_TRUE(std::isfinite(lse1)) << "LSE should be finite for normal row";
 }
 
@@ -996,8 +997,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithAdditiveMask)
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o1({1, 1, 2, 2});
     Tensor<double> o2({1, 1, 2, 2});
-    Tensor<float> lse1({1, 1, 2});
-    Tensor<float> lse2({1, 1, 2});
+    Tensor<float> lse1({1, 1, 2, 1});
+    Tensor<float> lse2({1, 1, 2, 1});
 
     // One-hot Q/K for predictable scores
     q.fillWithValue(0.0);
@@ -1020,8 +1021,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithAdditiveMask)
     CpuFpReferenceSdpa::forward(q, k, v, o2, std::nullopt, &mask, false, &lse2);
 
     // LSE should differ between masked and unmasked cases
-    const float lseNomask = lse1.getHostValue(0, 0, 0);
-    const float lseWithmask = lse2.getHostValue(0, 0, 0);
+    const float lseNomask = lse1.getHostValue(0, 0, 0, 0);
+    const float lseWithmask = lse2.getHostValue(0, 0, 0, 0);
 
     EXPECT_NE(lseNomask, lseWithmask) << "LSE should change with additive mask";
 
@@ -1036,8 +1037,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongRank)
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o({1, 1, 2, 2});
 
-    // Wrong rank: rank-4 instead of rank-3
-    Tensor<float> lseWrong({1, 1, 2, 1});
+    // Wrong rank: rank-3 instead of rank-4
+    Tensor<float> lseWrong({1, 1, 2});
 
     EXPECT_THROW(
         {
@@ -1057,8 +1058,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongShape)
     Tensor<double> v({2, 4, 16, 32});
     Tensor<double> o({2, 4, 16, 32});
 
-    // Wrong shape: [2, 4, 8] instead of [2, 4, 16]
-    Tensor<float> lseWrong({2, 4, 8});
+    // Wrong shape: [2, 4, 8, 1] instead of [2, 4, 16, 1]
+    Tensor<float> lseWrong({2, 4, 8, 1});
 
     EXPECT_THROW(
         {
@@ -1078,8 +1079,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseMismatchedBatch)
     Tensor<double> v({2, 1, 4, 8});
     Tensor<double> o({2, 1, 4, 8});
 
-    // Wrong batch: [1, 1, 4] instead of [2, 1, 4]
-    Tensor<float> lseWrong({1, 1, 4});
+    // Wrong batch: [1, 1, 4, 1] instead of [2, 1, 4, 1]
+    Tensor<float> lseWrong({1, 1, 4, 1});
 
     EXPECT_THROW(
         {
@@ -1101,7 +1102,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
     Tensor<double> k({1, 2, 16, 32});
     Tensor<double> v({1, 2, 16, 32});
     Tensor<double> o({1, 8, 16, 32});
-    Tensor<float> lse({1, 8, 16});
+    Tensor<float> lse({1, 8, 16, 1});
 
     q.fillWithRandomValues(-1.0, 1.0, 300);
     k.fillWithRandomValues(-1.0, 1.0, 301);
@@ -1115,7 +1116,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
     {
         for(int sq = 0; sq < 16; ++sq)
         {
-            const float lseVal = lse.getHostValue(0, h, sq);
+            const float lseVal = lse.getHostValue(0, h, sq, 0);
             EXPECT_TRUE(std::isfinite(lseVal)) << "LSE not finite at h=" << h << ", sq=" << sq;
             EXPECT_GT(lseVal, -20.0f);
             EXPECT_LT(lseVal, 20.0f);
@@ -1124,8 +1125,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
 
     // Different Q heads using same KV head should have different LSE
     // (because Q differs, even though K/V are shared)
-    const float lseH0 = lse.getHostValue(0, 0, 0);
-    const float lseH1 = lse.getHostValue(0, 1, 0);
+    const float lseH0 = lse.getHostValue(0, 0, 0, 0);
+    const float lseH1 = lse.getHostValue(0, 1, 0, 0);
 
     // With random Q, LSE should almost certainly differ
     EXPECT_NE(lseH0, lseH1) << "LSE should differ for different Q heads even with shared KV";
@@ -1373,7 +1374,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardWithLSE)
     Tensor<float> k({1, 2, 4, 8});
     Tensor<float> v({1, 2, 4, 8});
     Tensor<float> o({1, 2, 4, 8});
-    Tensor<float> lse({1, 2, 4});
+    Tensor<float> lse({1, 2, 4, 1});
     Tensor<float> dO({1, 2, 4, 8});
     Tensor<float> dQWithLse({1, 2, 4, 8});
     Tensor<float> dKWithLse({1, 2, 4, 8});
@@ -1440,6 +1441,22 @@ using hipdnn_test_sdk::detail::compareGradients;
 using hipdnn_test_sdk::detail::computeDotProductLoss;
 using hipdnn_test_sdk::detail::numericalGradient;
 
+static void checkGradient(Tensor<float>& input,
+                          const Tensor<float>& analyticalGrad,
+                          const std::vector<int64_t>& shape,
+                          const std::function<double()>& fwdLoss,
+                          const std::string& label,
+                          double eps = 1e-3,
+                          double relTol = 1e-2,
+                          double absTol = 1e-4)
+{
+    Tensor<float> numericalGrad(shape);
+    numericalGradient(input, numericalGrad, eps, fwdLoss);
+    auto result = compareGradients(analyticalGrad, numericalGrad, relTol, absTol);
+    EXPECT_EQ(result.failCount, 0) << label << " grad check failed: maxRelErr=" << result.maxRelErr
+                                   << ", maxAbsErr=" << result.maxAbsErr;
+}
+
 TEST(TestCpuFpReferenceSdpaGradCheck, MHA)
 {
     // MHA: H_q == H_kv, no masks
@@ -1470,45 +1487,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, MHA)
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
 
-    // Numerical gradient check (float precision)
-    constexpr double EPS = 1e-3;
-    constexpr double REL_TOL = 1e-2;
-    constexpr double ABS_TOL = 1e-4;
-
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o);
         return computeDotProductLoss(dO, o);
     };
 
-    // dQ check
-    {
-        Tensor<float> dQNum({BATCH, HEADS, SEQ_Q, HEAD_DIM});
-        numericalGradient(q, dQNum, EPS, fwdLoss);
-        auto result = compareGradients(dQ, dQNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dQ grad check failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr << ", failures=" << result.failCount;
-    }
-
-    // dK check
-    {
-        Tensor<float> dKNum({BATCH, HEADS, SEQ_KV, HEAD_DIM});
-        numericalGradient(k, dKNum, EPS, fwdLoss);
-        auto result = compareGradients(dK, dKNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dK grad check failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr << ", failures=" << result.failCount;
-    }
-
-    // dV check
-    {
-        Tensor<float> dVNum({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-        numericalGradient(v, dVNum, EPS, fwdLoss);
-        auto result = compareGradients(dV, dVNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dV grad check failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr << ", failures=" << result.failCount;
-    }
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV");
 }
 
 TEST(TestCpuFpReferenceSdpaGradCheck, GQA)
@@ -1541,44 +1527,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQA)
     Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
 
-    constexpr double EPS = 1e-3;
-    constexpr double REL_TOL = 1e-2;
-    constexpr double ABS_TOL = 1e-4;
-
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o);
         return computeDotProductLoss(dO, o);
     };
 
-    // dQ check
-    {
-        Tensor<float> dQNum({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
-        numericalGradient(q, dQNum, EPS, fwdLoss);
-        auto result = compareGradients(dQ, dQNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dQ grad check failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr << ", failures=" << result.failCount;
-    }
-
-    // dK check — accumulates from 4 Q heads
-    {
-        Tensor<float> dKNum({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
-        numericalGradient(k, dKNum, EPS, fwdLoss);
-        auto result = compareGradients(dK, dKNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dK grad check failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr << ", failures=" << result.failCount;
-    }
-
-    // dV check — accumulates from 4 Q heads
-    {
-        Tensor<float> dVNum({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
-        numericalGradient(v, dVNum, EPS, fwdLoss);
-        auto result = compareGradients(dV, dVNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dV grad check failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr << ", failures=" << result.failCount;
-    }
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ");
+    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dK");
+    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV");
 }
 
 TEST(TestCpuFpReferenceSdpaGradCheck, CausalMask)
@@ -1612,41 +1568,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, CausalMask)
     CpuFpReferenceSdpa::backward(
         q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, noMask, /*causalMask=*/true);
 
-    constexpr double EPS = 1e-3;
-    constexpr double REL_TOL = 1e-2;
-    constexpr double ABS_TOL = 1e-4;
-
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
         return computeDotProductLoss(dO, o);
     };
 
-    {
-        Tensor<float> dQNum({BATCH, HEADS, SEQ_Q, HEAD_DIM});
-        numericalGradient(q, dQNum, EPS, fwdLoss);
-        auto result = compareGradients(dQ, dQNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dQ grad check (causal) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dKNum({BATCH, HEADS, SEQ_KV, HEAD_DIM});
-        numericalGradient(k, dKNum, EPS, fwdLoss);
-        auto result = compareGradients(dK, dKNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dK grad check (causal) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dVNum({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-        numericalGradient(v, dVNum, EPS, fwdLoss);
-        auto result = compareGradients(dV, dVNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dV grad check (causal) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (causal)");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (causal)");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (causal)");
 }
 
 TEST(TestCpuFpReferenceSdpaGradCheck, CustomScale)
@@ -1679,41 +1608,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, CustomScale)
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, customScale);
 
-    constexpr double EPS = 1e-3;
-    constexpr double REL_TOL = 1e-2;
-    constexpr double ABS_TOL = 1e-4;
-
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o, customScale);
         return computeDotProductLoss(dO, o);
     };
 
-    {
-        Tensor<float> dQNum({BATCH, HEADS, SEQ_Q, HEAD_DIM});
-        numericalGradient(q, dQNum, EPS, fwdLoss);
-        auto result = compareGradients(dQ, dQNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dQ grad check (scale=0.3) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dKNum({BATCH, HEADS, SEQ_KV, HEAD_DIM});
-        numericalGradient(k, dKNum, EPS, fwdLoss);
-        auto result = compareGradients(dK, dKNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dK grad check (scale=0.3) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dVNum({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-        numericalGradient(v, dVNum, EPS, fwdLoss);
-        auto result = compareGradients(dV, dVNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dV grad check (scale=0.3) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (scale=0.3)");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (scale=0.3)");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (scale=0.3)");
 }
 
 TEST(TestCpuFpReferenceSdpaGradCheck, AdditiveMask)
@@ -1751,41 +1653,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, AdditiveMask)
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, &mask, false);
 
-    constexpr double EPS = 1e-3;
-    constexpr double REL_TOL = 1e-2;
-    constexpr double ABS_TOL = 1e-4;
-
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask);
         return computeDotProductLoss(dO, o);
     };
 
-    {
-        Tensor<float> dQNum({BATCH, HEADS, SEQ_Q, HEAD_DIM});
-        numericalGradient(q, dQNum, EPS, fwdLoss);
-        auto result = compareGradients(dQ, dQNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dQ grad check (additive mask) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dKNum({BATCH, HEADS, SEQ_KV, HEAD_DIM});
-        numericalGradient(k, dKNum, EPS, fwdLoss);
-        auto result = compareGradients(dK, dKNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dK grad check (additive mask) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dVNum({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-        numericalGradient(v, dVNum, EPS, fwdLoss);
-        auto result = compareGradients(dV, dVNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dV grad check (additive mask) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (additive mask)");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (additive mask)");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (additive mask)");
 }
 
 TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
@@ -1820,41 +1695,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
     CpuFpReferenceSdpa::backward(
         q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, noMask, /*causalMask=*/true);
 
-    constexpr double EPS = 1e-3;
-    constexpr double REL_TOL = 1e-2;
-    constexpr double ABS_TOL = 1e-4;
-
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
         return computeDotProductLoss(dO, o);
     };
 
-    {
-        Tensor<float> dQNum({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
-        numericalGradient(q, dQNum, EPS, fwdLoss);
-        auto result = compareGradients(dQ, dQNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dQ grad check (GQA+causal) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dKNum({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
-        numericalGradient(k, dKNum, EPS, fwdLoss);
-        auto result = compareGradients(dK, dKNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dK grad check (GQA+causal) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
-
-    {
-        Tensor<float> dVNum({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
-        numericalGradient(v, dVNum, EPS, fwdLoss);
-        auto result = compareGradients(dV, dVNum, REL_TOL, ABS_TOL);
-        EXPECT_EQ(result.failCount, 0)
-            << "dV grad check (GQA+causal) failed: maxRelErr=" << result.maxRelErr
-            << ", maxAbsErr=" << result.maxAbsErr;
-    }
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (GQA+causal)");
+    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (GQA+causal)");
+    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (GQA+causal)");
 }
 
 TEST(TestCpuFpReferenceSdpaBwdBf16, BackwardBasic)
@@ -2083,7 +1931,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongRank)
     Tensor<float> dQ({1, 1, 4, 8});
     Tensor<float> dK({1, 1, 4, 8});
     Tensor<float> dV({1, 1, 4, 8});
-    Tensor<float> lseWrong({1, 1, 4, 1}); // rank-4 instead of rank-3
+    Tensor<float> lseWrong({1, 1, 4}); // rank-3 instead of rank-4
 
     q.fillWithRandomValues(-1.0f, 1.0f, 700);
     k.fillWithRandomValues(-1.0f, 1.0f, 701);
@@ -2106,7 +1954,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongShape)
     Tensor<float> dQ({2, 4, 16, 8});
     Tensor<float> dK({2, 4, 16, 8});
     Tensor<float> dV({2, 4, 16, 8});
-    Tensor<float> lseWrong({2, 4, 8}); // Sq=8 instead of Sq=16
+    Tensor<float> lseWrong({2, 4, 8, 1}); // Sq=8 instead of Sq=16
 
     q.fillWithRandomValues(-1.0f, 1.0f, 710);
     k.fillWithRandomValues(-1.0f, 1.0f, 711);
@@ -2117,4 +1965,523 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongShape)
 
     EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, &lseWrong),
                  std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Backward mask tests: full leftBound / rightBound / topLeftAlignment support
+// ---------------------------------------------------------------------------
+//
+// Validates that the new full-signature backward() correctly handles all mask
+// types by comparing analytical gradients against finite-difference numerical
+// gradients computed from the forward pass.
+
+TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardCausalMaskExplicitBounds)
+{
+    // Verify that backward(..., leftBound=-1, rightBound=0, topLeftAlignment=true)
+    // produces identical results to backward(..., causalMask=true).
+    // [B=1, H=1, Sq=4, Skv=4, D=4, Dv=4]
+    Tensor<float> q({1, 1, 4, 4});
+    Tensor<float> k({1, 1, 4, 4});
+    Tensor<float> v({1, 1, 4, 4});
+    Tensor<float> o({1, 1, 4, 4});
+    Tensor<float> dO({1, 1, 4, 4});
+    Tensor<float> dQBool({1, 1, 4, 4});
+    Tensor<float> dKBool({1, 1, 4, 4});
+    Tensor<float> dVBool({1, 1, 4, 4});
+    Tensor<float> dQExplicit({1, 1, 4, 4});
+    Tensor<float> dKExplicit({1, 1, 4, 4});
+    Tensor<float> dVExplicit({1, 1, 4, 4});
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 8000);
+    k.fillWithRandomValues(-1.0f, 1.0f, 8001);
+    v.fillWithRandomValues(-1.0f, 1.0f, 8002);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 8003);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
+
+    // Bool convenience overload
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQBool,
+                                 dKBool,
+                                 dVBool,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 /*causalMask=*/true);
+
+    // Explicit bounds overload (equivalent to TOP_LEFT_CAUSAL)
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQExplicit,
+                                 dKExplicit,
+                                 dVExplicit,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 /*leftBound=*/static_cast<int64_t>(-1),
+                                 /*rightBound=*/static_cast<int64_t>(0),
+                                 /*topLeftAlignment=*/true);
+
+    const float tol = 1e-6f;
+    for(int sq = 0; sq < 4; ++sq)
+    {
+        for(int d = 0; d < 4; ++d)
+        {
+            EXPECT_NEAR(dQBool.getHostValue(0, 0, sq, d), dQExplicit.getHostValue(0, 0, sq, d), tol)
+                << "dQ mismatch at sq=" << sq << ", d=" << d;
+            EXPECT_NEAR(dKBool.getHostValue(0, 0, sq, d), dKExplicit.getHostValue(0, 0, sq, d), tol)
+                << "dK mismatch at sq=" << sq << ", d=" << d;
+            EXPECT_NEAR(dVBool.getHostValue(0, 0, sq, d), dVExplicit.getHostValue(0, 0, sq, d), tol)
+                << "dV mismatch at sq=" << sq << ", d=" << d;
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaGradCheck, BottomRightCausalMask)
+{
+    // BOTTOM_RIGHT_CAUSAL: leftBound=-1, rightBound=0, topLeftAlignment=false
+    // [B=1, H=1, Sq=3, Skv=5, D=4, Dv=4]  (Skv > Sq to exercise BR offset)
+    constexpr int64_t BATCH = 1;
+    constexpr int64_t HEADS = 1;
+    constexpr int64_t SEQ_Q = 3;
+    constexpr int64_t SEQ_KV = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr int64_t HEAD_DIM_V = 4;
+
+    Tensor<float> q({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    Tensor<float> o({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+    Tensor<float> dO({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+
+    q.fillWithRandomValues(-0.5f, 0.5f, 8100);
+    k.fillWithRandomValues(-0.5f, 0.5f, 8101);
+    v.fillWithRandomValues(-0.5f, 0.5f, 8102);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 8103);
+
+    const TensorBase<float>* noMask = nullptr;
+    constexpr int64_t LEFT_BOUND = -1;
+    constexpr int64_t RIGHT_BOUND = 0;
+    constexpr bool TOP_LEFT = false;
+
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+
+    Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    auto fwdLoss = [&]() -> double {
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        return computeDotProductLoss(dO, o);
+    };
+
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (BR causal)");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (BR causal)");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (BR causal)");
+}
+
+TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskSymmetricTopLeft)
+{
+    // WINDOW_GENERIC: symmetric window (leftBound=1, rightBound=1) with top-left alignment
+    // [B=1, H=1, Sq=4, Skv=4, D=4, Dv=4]
+    constexpr int64_t BATCH = 1;
+    constexpr int64_t HEADS = 1;
+    constexpr int64_t SEQ_Q = 4;
+    constexpr int64_t SEQ_KV = 4;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr int64_t HEAD_DIM_V = 4;
+
+    Tensor<float> q({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    Tensor<float> o({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+    Tensor<float> dO({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+
+    q.fillWithRandomValues(-0.5f, 0.5f, 8200);
+    k.fillWithRandomValues(-0.5f, 0.5f, 8201);
+    v.fillWithRandomValues(-0.5f, 0.5f, 8202);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 8203);
+
+    const TensorBase<float>* noMask = nullptr;
+    constexpr int64_t LEFT_BOUND = 1;
+    constexpr int64_t RIGHT_BOUND = 1;
+    constexpr bool TOP_LEFT = true;
+
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+
+    Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    auto fwdLoss = [&]() -> double {
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        return computeDotProductLoss(dO, o);
+    };
+
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (window TL sym)");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (window TL sym)");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (window TL sym)");
+}
+
+TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskAsymmetricBottomRight)
+{
+    // WINDOW_GENERIC: asymmetric window (leftBound=2, rightBound=1) with bottom-right alignment
+    // [B=1, H=1, Sq=4, Skv=5, D=4, Dv=4]  (Skv > Sq to exercise BR offset)
+    constexpr int64_t BATCH = 1;
+    constexpr int64_t HEADS = 1;
+    constexpr int64_t SEQ_Q = 4;
+    constexpr int64_t SEQ_KV = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr int64_t HEAD_DIM_V = 4;
+
+    Tensor<float> q({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    Tensor<float> o({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+    Tensor<float> dO({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+
+    q.fillWithRandomValues(-0.5f, 0.5f, 8300);
+    k.fillWithRandomValues(-0.5f, 0.5f, 8301);
+    v.fillWithRandomValues(-0.5f, 0.5f, 8302);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 8303);
+
+    const TensorBase<float>* noMask = nullptr;
+    constexpr int64_t LEFT_BOUND = 2;
+    constexpr int64_t RIGHT_BOUND = 1;
+    constexpr bool TOP_LEFT = false;
+
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+
+    Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    auto fwdLoss = [&]() -> double {
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        return computeDotProductLoss(dO, o);
+    };
+
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (window BR asym)");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (window BR asym)");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (window BR asym)");
+}
+
+TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskLargerSq)
+{
+    // WINDOW_GENERIC with Sq > Skv to test edge where some rows are fully masked
+    // [B=1, H=1, Sq=5, Skv=3, D=4, Dv=4]
+    constexpr int64_t BATCH = 1;
+    constexpr int64_t HEADS = 1;
+    constexpr int64_t SEQ_Q = 5;
+    constexpr int64_t SEQ_KV = 3;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr int64_t HEAD_DIM_V = 4;
+
+    Tensor<float> q({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    Tensor<float> o({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+    Tensor<float> dO({BATCH, HEADS, SEQ_Q, HEAD_DIM_V});
+
+    q.fillWithRandomValues(-0.5f, 0.5f, 8400);
+    k.fillWithRandomValues(-0.5f, 0.5f, 8401);
+    v.fillWithRandomValues(-0.5f, 0.5f, 8402);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 8403);
+
+    const TensorBase<float>* noMask = nullptr;
+    constexpr int64_t LEFT_BOUND = 1;
+    constexpr int64_t RIGHT_BOUND = 1;
+    constexpr bool TOP_LEFT = false;
+
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+
+    Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    auto fwdLoss = [&]() -> double {
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        return computeDotProductLoss(dO, o);
+    };
+
+    checkGradient(q, dQ, {BATCH, HEADS, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (window BR Sq>Skv)");
+    checkGradient(k, dK, {BATCH, HEADS, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (window BR Sq>Skv)");
+    checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (window BR Sq>Skv)");
+}
+
+TEST(TestCpuFpReferenceSdpaGradCheck, GQABottomRightCausalMask)
+{
+    // Combined: GQA + bottom-right causal mask
+    // [B=1, H_q=4, H_kv=2, Sq=3, Skv=5, D=4, Dv=4]
+    constexpr int64_t BATCH = 1;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t HEADS_KV = 2;
+    constexpr int64_t SEQ_Q = 3;
+    constexpr int64_t SEQ_KV = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr int64_t HEAD_DIM_V = 4;
+
+    Tensor<float> q({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
+    Tensor<float> o({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM_V});
+    Tensor<float> dO({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM_V});
+
+    q.fillWithRandomValues(-0.5f, 0.5f, 8500);
+    k.fillWithRandomValues(-0.5f, 0.5f, 8501);
+    v.fillWithRandomValues(-0.5f, 0.5f, 8502);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 8503);
+
+    const TensorBase<float>* noMask = nullptr;
+    constexpr int64_t LEFT_BOUND = -1;
+    constexpr int64_t RIGHT_BOUND = 0;
+    constexpr bool TOP_LEFT = false;
+
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+
+    Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    auto fwdLoss = [&]() -> double {
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        return computeDotProductLoss(dO, o);
+    };
+
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (GQA+BR causal)");
+    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (GQA+BR causal)");
+    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (GQA+BR causal)");
+}
+
+TEST(TestCpuFpReferenceSdpaGradCheck, GQAWindowMask)
+{
+    // Combined: GQA + window mask (leftBound=1, rightBound=2, topLeftAlignment=true)
+    // [B=1, H_q=4, H_kv=1, Sq=4, Skv=4, D=4, Dv=4]
+    constexpr int64_t BATCH = 1;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t HEADS_KV = 1;
+    constexpr int64_t SEQ_Q = 4;
+    constexpr int64_t SEQ_KV = 4;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr int64_t HEAD_DIM_V = 4;
+
+    Tensor<float> q({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
+    Tensor<float> o({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM_V});
+    Tensor<float> dO({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM_V});
+
+    q.fillWithRandomValues(-0.5f, 0.5f, 8600);
+    k.fillWithRandomValues(-0.5f, 0.5f, 8601);
+    v.fillWithRandomValues(-0.5f, 0.5f, 8602);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 8603);
+
+    const TensorBase<float>* noMask = nullptr;
+    constexpr int64_t LEFT_BOUND = 1;
+    constexpr int64_t RIGHT_BOUND = 2;
+    constexpr bool TOP_LEFT = true;
+
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+
+    Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    auto fwdLoss = [&]() -> double {
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        return computeDotProductLoss(dO, o);
+    };
+
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (GQA+window)");
+    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (GQA+window)");
+    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (GQA+window)");
+}
+
+TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
+{
+    // Verifies LSE-based backward and scratch backward produce identical results
+    // when a window mask is applied.
+    // [B=1, H=2, Sq=4, Skv=4, D=4, Dv=4]
+    Tensor<float> q({1, 2, 4, 4});
+    Tensor<float> k({1, 2, 4, 4});
+    Tensor<float> v({1, 2, 4, 4});
+    Tensor<float> o({1, 2, 4, 4});
+    Tensor<float> lse({1, 2, 4, 1});
+    Tensor<float> dO({1, 2, 4, 4});
+    Tensor<float> dQWithLse({1, 2, 4, 4});
+    Tensor<float> dKWithLse({1, 2, 4, 4});
+    Tensor<float> dVWithLse({1, 2, 4, 4});
+    Tensor<float> dQNoLse({1, 2, 4, 4});
+    Tensor<float> dKNoLse({1, 2, 4, 4});
+    Tensor<float> dVNoLse({1, 2, 4, 4});
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 8700);
+    k.fillWithRandomValues(-1.0f, 1.0f, 8701);
+    v.fillWithRandomValues(-1.0f, 1.0f, 8702);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 8703);
+
+    const TensorBase<float>* noMask = nullptr;
+    constexpr int64_t LEFT_BOUND = 1;
+    constexpr int64_t RIGHT_BOUND = 1;
+    constexpr bool TOP_LEFT = true;
+
+    // Forward pass with LSE and window mask
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT, &lse);
+
+    // Backward WITH LSE
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQWithLse,
+                                 dKWithLse,
+                                 dVWithLse,
+                                 std::nullopt,
+                                 &lse,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    // Backward WITHOUT LSE (recompute from scratch)
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQNoLse,
+                                 dKNoLse,
+                                 dVNoLse,
+                                 std::nullopt,
+                                 nullptr,
+                                 noMask,
+                                 LEFT_BOUND,
+                                 RIGHT_BOUND,
+                                 TOP_LEFT);
+
+    const float tol = 1e-5f;
+    for(int h = 0; h < 2; ++h)
+    {
+        for(int sq = 0; sq < 4; ++sq)
+        {
+            for(int d = 0; d < 4; ++d)
+            {
+                EXPECT_NEAR(
+                    dQWithLse.getHostValue(0, h, sq, d), dQNoLse.getHostValue(0, h, sq, d), tol)
+                    << "dQ mismatch at h=" << h << ", sq=" << sq << ", d=" << d;
+                EXPECT_NEAR(
+                    dKWithLse.getHostValue(0, h, sq, d), dKNoLse.getHostValue(0, h, sq, d), tol)
+                    << "dK mismatch at h=" << h << ", sq=" << sq << ", d=" << d;
+                EXPECT_NEAR(
+                    dVWithLse.getHostValue(0, h, sq, d), dVNoLse.getHostValue(0, h, sq, d), tol)
+                    << "dV mismatch at h=" << h << ", sq=" << sq << ", d=" << d;
+            }
+        }
+    }
 }

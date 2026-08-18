@@ -8,6 +8,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include <rocRoller/Utilities/Logging.hpp>
@@ -21,6 +22,9 @@ namespace rocRoller
         AssertFatal(context);
         m_wavefrontSize
             = context->targetArchitecture().GetCapability(GPUCapability::DefaultWavefrontSize);
+
+        if(context->targetArchitecture().HasCapability(GPUCapability::HasWorkgroupClusters))
+            m_workgroupClusterSize = context->kernelOptions()->workgroupClusterSize;
 
         setKernelName(kernelName);
     }
@@ -281,6 +285,12 @@ namespace rocRoller
         return m_workitemCount;
     }
 
+    inline std::optional<std::array<unsigned int, 3>> const&
+        AssemblyKernel::workgroupClusterSize() const
+    {
+        return m_workgroupClusterSize;
+    }
+
     inline Expression::ExpressionPtr const& AssemblyKernel::dynamicSharedMemBytes() const
     {
         return m_dynamicSharedMemBytes;
@@ -299,6 +309,15 @@ namespace rocRoller
         AssemblyKernel::setWorkitemCount(std::array<Expression::ExpressionPtr, 3> const& val)
     {
         m_workitemCount = val;
+    }
+
+    inline void AssemblyKernel::setWorkgroupClusterSize(std::array<unsigned int, 3> const& val)
+    {
+        for(auto const& v : val)
+        {
+            AssertFatal(v != 0);
+        }
+        m_workgroupClusterSize = val;
     }
 
     inline void AssemblyKernel::setDynamicSharedMemBytes(Expression::ExpressionPtr const& val)

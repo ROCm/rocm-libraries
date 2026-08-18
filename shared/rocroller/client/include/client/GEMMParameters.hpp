@@ -150,6 +150,10 @@ namespace rocRoller
                 bool workgroupRemapXCC      = false;
                 int  workgroupRemapXCCValue = -1;
 
+                unsigned int workgroupClusterSizeX = 0;
+                unsigned int workgroupClusterSizeY = 0;
+                unsigned int workgroupClusterSizeZ = 0;
+
                 // Datatype of inputs and outputs
                 TypeParameters types;
 

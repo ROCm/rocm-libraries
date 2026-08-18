@@ -4,7 +4,9 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <utility>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/Visibility.hpp>
@@ -76,11 +78,27 @@ public:
                                                     const uint8_t* serializedPlan,
                                                     size_t planByteSize)
         = 0;
+    virtual hipdnnStatus_t
+        backendGetSerializedBinaryGraphAndPlanExt(hipdnnBackendDescriptor_t graphDescriptor,
+                                                  hipdnnBackendDescriptor_t executionPlanDescriptor,
+                                                  size_t requestedByteSize,
+                                                  size_t* blobByteSize,
+                                                  uint8_t* serializedBlob)
+        = 0;
+    virtual hipdnnStatus_t backendGetSerializedBinaryContentsExt(const uint8_t* serializedBlob,
+                                                                 size_t blobByteSize,
+                                                                 int* contentFlags)
+        = 0;
     virtual void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) = 0;
 
     virtual hipdnnStatus_t setEnginePluginPathsExt(size_t numPaths,
                                                    const char* const* pluginPaths,
                                                    hipdnnPluginLoadingMode_ext_t mode)
+        = 0;
+
+    virtual hipdnnStatus_t setHeuristicPluginPathsExt(size_t numPaths,
+                                                      const char* const* pluginPaths,
+                                                      hipdnnPluginLoadingMode_ext_t mode)
         = 0;
 
     virtual hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
@@ -105,11 +123,33 @@ public:
                                                   size_t* apiVersionLen)
         = 0;
 
+    virtual hipdnnStatus_t setUserLogCallbackExt(hipdnnUserLogCallback_t callback,
+                                                 hipdnnSeverity_t minLevel,
+                                                 hipdnnLogCallbackMode_t mode,
+                                                 hipdnnUserLogCallbackHandle_t userHandle)
+        = 0;
+    virtual hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t level) = 0;
+    virtual hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* level) = 0;
+
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()
     {
         const std::lock_guard<std::mutex> lock(backendMutex());
         return backendInstance();
+    }
+
+    template <typename BackendFactory>
+    HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend>
+        getOrCreateInstance(BackendFactory&& factory)
+    {
+        const std::lock_guard<std::mutex> lock(backendMutex());
+        auto& instance = backendInstance();
+        if(!instance)
+        {
+            instance = std::forward<BackendFactory>(factory)();
+        }
+
+        return instance;
     }
 
     HIPDNN_HIDDEN static void setInstance(std::shared_ptr<IHipdnnBackend> instance)

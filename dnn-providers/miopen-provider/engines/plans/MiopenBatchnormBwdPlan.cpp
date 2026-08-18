@@ -152,29 +152,29 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
     const double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer
-        = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto dyBuffer
-        = miopen_utils::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
     auto dxBuffer
-        = miopen_utils::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer
-        = miopen_utils::findDeviceBuffer(_params.scale().uid(), deviceBuffers, numDeviceBuffers);
-    auto dscaleBuffer
-        = miopen_utils::findDeviceBuffer(_params.dscale().uid(), deviceBuffers, numDeviceBuffers);
-    auto dbiasBuffer
-        = miopen_utils::findDeviceBuffer(_params.dbias().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale().uid(), deviceBuffers, numDeviceBuffers);
+    auto dscaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dscale().uid(), deviceBuffers, numDeviceBuffers);
+    auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dbias().uid(), deviceBuffers, numDeviceBuffers);
 
     hipdnnPluginDeviceBuffer_t meanBuffer = {0, nullptr};
     if(_params.optMean().has_value())
     {
-        meanBuffer = miopen_utils::findDeviceBuffer(
+        meanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.optMean().value().uid(), deviceBuffers, numDeviceBuffers);
     }
 
     hipdnnPluginDeviceBuffer_t invVarianceBuffer = {0, nullptr};
     if(_params.optInvVariance().has_value())
     {
-        invVarianceBuffer = miopen_utils::findDeviceBuffer(
+        invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.optInvVariance().value().uid(), deviceBuffers, numDeviceBuffers);
     }
 
@@ -185,7 +185,7 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
 
     if(_params.optActivation().has_value() && _params.optBias().has_value())
     {
-        auto biasBuffer = miopen_utils::findDeviceBuffer(
+        auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.optBias().value().uid(), deviceBuffers, numDeviceBuffers);
         biasDescriptor = _params.optBias().value().tensorDescriptor();
         biasPtr = biasBuffer.ptr;

@@ -167,6 +167,7 @@ namespace rocRoller::KernelGraph
         void operator()(int                                  node,
                         CIsAnyOf<CG::LoadTileDirect2LDS, //
                                  CG::LoadTiled,
+                                 CG::LoadTiledTDMToLDS,
                                  CG::StoreTiled> auto const& op)
         {
             auto [target, dir] = getOperationTarget(node, m_graph);

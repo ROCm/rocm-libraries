@@ -1,5 +1,5 @@
 invoke
-cmake>=3.25.2
+cmake>=3.25.2,<4
 PyYAML
 joblib>=1.4.0
 packaging

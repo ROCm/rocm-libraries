@@ -730,27 +730,19 @@ struct device_histogram_benchmark_generator
                      unsigned int ActiveChannels,
                      unsigned int items_per_thread = ItemsPerThread>
             auto create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage,
-                        const std::vector<unsigned int>&                              cases) ->
-                typename std::enable_if<(items_per_thread * Channels <= max_items_per_thread),
-                                        void>::type
+                        const std::vector<unsigned int>&                              cases)
             {
-                storage.emplace_back(
-                    std::make_unique<device_multi_histogram_even_benchmark<T,
-                                                                           Channels,
-                                                                           ActiveChannels,
-                                                                           true,
-                                                                           generated_config>>(
-                        cases));
+                if constexpr(items_per_thread * Channels <= max_items_per_thread)
+                {
+                    storage.emplace_back(
+                        std::make_unique<device_multi_histogram_even_benchmark<T,
+                                                                               Channels,
+                                                                               ActiveChannels,
+                                                                               true,
+                                                                               generated_config>>(
+                            cases));
+                }
             }
-
-            template<unsigned int Channels,
-                     unsigned int ActiveChannels,
-                     unsigned int items_per_thread = ItemsPerThread>
-            auto create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& /*storage*/,
-                        const std::vector<unsigned int>& /*cases*/) ->
-                typename std::enable_if<!(items_per_thread * Channels <= max_items_per_thread),
-                                        void>::type
-            {}
 
             void operator()(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage,
                             const std::vector<unsigned int>&                              cases)

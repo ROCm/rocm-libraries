@@ -42,6 +42,7 @@ from gpu_test_helpers import (
     setup_roundtrip_writer,
     build_roundtrip_inner_asm,
     collect_tile_vgprs,
+    requires_gpu,
 )
 
 # ---------------------------------------------------------------------------
@@ -380,7 +381,7 @@ def compare_mfma_output(actual_bytes, expected_pairs, debug=False):
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+@requires_gpu
 class TestMfmaFP8:
     """GPU tests for FP8 GR->LDS->LR->MFMA roundtrip."""
 

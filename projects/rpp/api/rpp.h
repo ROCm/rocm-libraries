@@ -52,31 +52,29 @@ namespace fs = std::experimental::filesystem;
 /*! \brief Construct type name from a struct
  * \ingroup group_rpp
  */
-#define RPP_DECLARE_OBJECT(name)    \
-    struct name                     \
-    {                               \
-    };                              \
+#define RPP_DECLARE_OBJECT(name) \
+    struct name {};              \
     typedef struct name* name##_t;
 
 /*! \brief RPP handle type creation.
  * \ingroup group_rpp
  */
-RPP_DECLARE_OBJECT(rppHandle);      // Create the rppHandle_t type
+RPP_DECLARE_OBJECT(rppHandle);  // Create the rppHandle_t type
 
 /*! \brief RPP handle.
  * \ingroup group_rpp
  */
-typedef rppHandle_t RppHandle_t;    // Create typedef for RppHandle_t
+typedef rppHandle_t RppHandle_t;  // Create typedef for RppHandle_t
 
 #if _WIN32
 #define SHARED_PUBLIC __declspec(dllexport)
 #else
-#define SHARED_PUBLIC __attribute__ ((visibility ("default")))
+#define SHARED_PUBLIC __attribute__((visibility("default")))
 #endif
 
+#include "rpp_version.h"
 #include "rppdefs.h"
 #include "rppt.h"
-#include "rpp_version.h"
 
 /*! \brief Handles RPP context allocations.
  * \details Custom allocator function to allow for user-defined custom allocation.
@@ -102,11 +100,12 @@ extern "C" {
  * \details Function to create a RPP handle, and the necessary host/device memory allocations.
  * \param [in] handle A pointer to RPP handle of type <tt> \ref rppHandle_t</tt>.
  * \param [in] nBatchSize Batch size.
- * \param [in] numThreads Number of threads to use if backend = RppBackend::RPP_HOST_BACKEND. (Pass 0 if backend = RppBackend::RPP_HIP_BACKEND).
- * \param [in] stream A pointer to an accelerator queue of type <tt> \ref rppAcceleratorQueue_t</tt> - hipStream_t if backend = RppBackend::RPP_HIP_BACKEND. (Pass nullptr if backend = RppBackend::RPP_HOST_BACKEND).
- * \param [in] backend RPP backend to run augmentations (backend = RppBackend::RPP_HOST_BACKEND / RppBackend::RPP_HIP_BACKEND)
- * \ingroup group_rpp
- * \return A <tt> \ref rppStatus_t</tt> enumeration.
+ * \param [in] numThreads Number of threads to use if backend = RppBackend::RPP_HOST_BACKEND. (Pass
+ * 0 if backend = RppBackend::RPP_HIP_BACKEND). \param [in] stream A pointer to an accelerator queue
+ * of type <tt> \ref rppAcceleratorQueue_t</tt> - hipStream_t if backend =
+ * RppBackend::RPP_HIP_BACKEND. (Pass nullptr if backend = RppBackend::RPP_HOST_BACKEND). \param
+ * [in] backend RPP backend to run augmentations (backend = RppBackend::RPP_HOST_BACKEND /
+ * RppBackend::RPP_HIP_BACKEND) \ingroup group_rpp \return A <tt> \ref rppStatus_t</tt> enumeration.
  * \retval rppStatusSuccess
  * \retval rppStatusNotInitialized
  * \retval rppStatusInvalidValue
@@ -117,16 +116,16 @@ extern "C" {
  * \retval rppStatusUnknownError
  * \retval rppStatusUnsupportedOp
  */
-extern "C" SHARED_PUBLIC rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatchSize, Rpp32u numThreads = 0, void* stream = nullptr, RppBackend backend = RppBackend::RPP_HOST_BACKEND);
+extern "C" SHARED_PUBLIC rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatchSize,
+                                               Rpp32u numThreads = 0, void* stream = nullptr,
+                                               RppBackend backend = RppBackend::RPP_HOST_BACKEND);
 
 /*! \brief Destroys RPP handle for HOST/HIP backend batch processing.
- * \details Function to destroy a RPP handle's host/device memory allocation. To be called in the end to break down the RPP environment.
- * \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>.
- * \param [in] backend RPP backend to run augmentations (backend = RppBackend::RPP_HOST_BACKEND / RppBackend::RPP_HIP_BACKEND)
- * \ingroup group_rpp
- * \return A <tt> \ref rppStatus_t</tt> enumeration.
- * \retval rppStatusSuccess
- * \retval rppStatusNotInitialized
+ * \details Function to destroy a RPP handle's host/device memory allocation. To be called in the
+ * end to break down the RPP environment. \param [in] handle RPP handle of type <tt> \ref
+ * rppHandle_t</tt>. \param [in] backend RPP backend to run augmentations (backend =
+ * RppBackend::RPP_HOST_BACKEND / RppBackend::RPP_HIP_BACKEND) \ingroup group_rpp \return A <tt>
+ * \ref rppStatus_t</tt> enumeration. \retval rppStatusSuccess \retval rppStatusNotInitialized
  * \retval rppStatusInvalidValue
  * \retval rppStatusBadParm
  * \retval rppStatusAllocFailed
@@ -135,7 +134,8 @@ extern "C" SHARED_PUBLIC rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatc
  * \retval rppStatusUnknownError
  * \retval rppStatusUnsupportedOp
  */
-extern "C" SHARED_PUBLIC rppStatus_t rppDestroy(rppHandle_t handle, RppBackend backend = RppBackend::RPP_HOST_BACKEND);
+extern "C" SHARED_PUBLIC rppStatus_t rppDestroy(rppHandle_t handle,
+                                                RppBackend backend = RppBackend::RPP_HOST_BACKEND);
 
 /*! \brief Set batch size given a RPP handle.
  * \details Function to set batch size for handle previously created.
@@ -171,52 +171,44 @@ extern "C" SHARED_PUBLIC rppStatus_t rppSetBatchSize(rppHandle_t handle, size_t 
  * \retval rppStatusUnknownError
  * \retval rppStatusUnsupportedOp
  */
-extern "C" SHARED_PUBLIC rppStatus_t rppGetBatchSize(rppHandle_t handle, size_t *batchSize);
+extern "C" SHARED_PUBLIC rppStatus_t rppGetBatchSize(rppHandle_t handle, size_t* batchSize);
 
 #if RPP_BACKEND_HIP
 
 /*! \brief Set accelerator stream given a RPP handle.
  * \details Function to set an accelerator stream previously created.
  * \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>.
- * \param [in] stream An accelerator queue of type <tt> \ref rppAcceleratorQueue_t</tt> (hipStream_t for HIP).
- * \ingroup group_rpp
- * \return A <tt> \ref rppStatus_t</tt> enumeration.
- * \retval rppStatusSuccess
- * \retval rppStatusNotInitialized
- * \retval rppStatusInvalidValue
- * \retval rppStatusBadParm
- * \retval rppStatusAllocFailed
- * \retval rppStatusInternalError
- * \retval rppStatusNotImplemented
- * \retval rppStatusUnknownError
- * \retval rppStatusUnsupportedOp
+ * \param [in] stream An accelerator queue of type <tt> \ref rppAcceleratorQueue_t</tt> (hipStream_t
+ * for HIP). \ingroup group_rpp \return A <tt> \ref rppStatus_t</tt> enumeration. \retval
+ * rppStatusSuccess \retval rppStatusNotInitialized \retval rppStatusInvalidValue \retval
+ * rppStatusBadParm \retval rppStatusAllocFailed \retval rppStatusInternalError \retval
+ * rppStatusNotImplemented \retval rppStatusUnknownError \retval rppStatusUnsupportedOp
  */
-extern "C" SHARED_PUBLIC rppStatus_t rppSetStream(rppHandle_t handle, rppAcceleratorQueue_t streamID);
+extern "C" SHARED_PUBLIC rppStatus_t rppSetStream(rppHandle_t handle,
+                                                  rppAcceleratorQueue_t streamID);
 
 /*! \brief Get accelerator stream given a RPP handle.
  * \details Function to get an accelerator stream previously created.
  * \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>.
- * \param [in] stream An accelerator queue of type <tt> \ref rppAcceleratorQueue_t</tt> (hipStream_t for HIP).
- * \ingroup group_rpp
- * \return A <tt> \ref rppStatus_t</tt> enumeration.
- * \retval rppStatusSuccess
- * \retval rppStatusNotInitialized
- * \retval rppStatusInvalidValue
- * \retval rppStatusBadParm
- * \retval rppStatusAllocFailed
- * \retval rppStatusInternalError
- * \retval rppStatusNotImplemented
- * \retval rppStatusUnknownError
- * \retval rppStatusUnsupportedOp
+ * \param [in] stream An accelerator queue of type <tt> \ref rppAcceleratorQueue_t</tt> (hipStream_t
+ * for HIP). \ingroup group_rpp \return A <tt> \ref rppStatus_t</tt> enumeration. \retval
+ * rppStatusSuccess \retval rppStatusNotInitialized \retval rppStatusInvalidValue \retval
+ * rppStatusBadParm \retval rppStatusAllocFailed \retval rppStatusInternalError \retval
+ * rppStatusNotImplemented \retval rppStatusUnknownError \retval rppStatusUnsupportedOp
  */
-extern "C" SHARED_PUBLIC rppStatus_t rppGetStream(rppHandle_t handle, rppAcceleratorQueue_t* streamID);
+extern "C" SHARED_PUBLIC rppStatus_t rppGetStream(rppHandle_t handle,
+                                                  rppAcceleratorQueue_t* streamID);
 
 /*! \brief Set allocator given a RPP handle.
- * \details Function to set allocator for a previously created RPP handle of type <tt> \ref rppHandle_t</tt>.
- * \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>.
- * \param [in] allocator A callback function rpp will use for internal memory allocations. The provided callback function should allocate device memory with requested size and return a pointer to this memory. Passing 0 will restore the default RPP allocator and deallocator.
- * \param [in] deallocator A callback function rpp will use to for internal memory deallocation. The provided callback function should free the specified memory pointer.
- * \param [in] allocatorContext User-specified pointer which is passed to allocator and deallocator. This allows the callback function to access state set by the caller to this function, for example a stateful heap allocator or a c++ class.
+ * \details Function to set allocator for a previously created RPP handle of type <tt> \ref
+ * rppHandle_t</tt>. \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>. \param [in]
+ * allocator A callback function rpp will use for internal memory allocations. The provided callback
+ * function should allocate device memory with requested size and return a pointer to this memory.
+ * Passing 0 will restore the default RPP allocator and deallocator. \param [in] deallocator A
+ * callback function rpp will use to for internal memory deallocation. The provided callback
+ * function should free the specified memory pointer. \param [in] allocatorContext User-specified
+ * pointer which is passed to allocator and deallocator. This allows the callback function to access
+ * state set by the caller to this function, for example a stateful heap allocator or a c++ class.
  * \ingroup group_rpp
  * \return A <tt> \ref rppStatus_t</tt> enumeration.
  * \retval rppStatusSuccess
@@ -229,13 +221,15 @@ extern "C" SHARED_PUBLIC rppStatus_t rppGetStream(rppHandle_t handle, rppAcceler
  * \retval rppStatusUnknownError
  * \retval rppStatusUnsupportedOp
  */
-extern "C" SHARED_PUBLIC rppStatus_t rppSetAllocator(rppHandle_t handle, rppAllocatorFunction allocator, rppDeallocatorFunction deallocator, void* allocatorContext);
+extern "C" SHARED_PUBLIC rppStatus_t rppSetAllocator(rppHandle_t handle,
+                                                     rppAllocatorFunction allocator,
+                                                     rppDeallocatorFunction deallocator,
+                                                     void* allocatorContext);
 
 /*! \brief Get time taken by previous kernel.
- * \details Function to get time for last kernel launched. This function is used only when profiling mode has been enabled.
- * \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>.
- * \param [in] time Pointer to a float type to contain kernel time in milliseconds.
- * \ingroup group_rpp
+ * \details Function to get time for last kernel launched. This function is used only when profiling
+ * mode has been enabled. \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>. \param
+ * [in] time Pointer to a float type to contain kernel time in milliseconds. \ingroup group_rpp
  * \return A <tt> \ref rppStatus_t</tt> enumeration.
  * \retval rppStatusSuccess
  * \retval rppStatusNotInitialized
@@ -267,10 +261,10 @@ extern "C" SHARED_PUBLIC rppStatus_t rppGetKernelTime(rppHandle_t handle, float*
  */
 extern "C" SHARED_PUBLIC rppStatus_t rppEnableProfiling(rppHandle_t handle, bool enable);
 
-#endif // GPU_SUPPORT
+#endif  // GPU_SUPPORT
 
 #ifdef __cplusplus
 }
-#endif    // __cplusplus
+#endif  // __cplusplus
 
-#endif    // RPP_H
+#endif  // RPP_H

@@ -15,6 +15,12 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -26,7 +32,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.4.0" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.4.1" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -113,6 +119,7 @@ if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
 else()
     tensilelite_validate_gpu_targets("${GPU_TARGETS}")
 endif()
+tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 find_package(hip REQUIRED)
@@ -170,34 +177,48 @@ endif()
 
 if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
     if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-        execute_process(
-            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
-            OUTPUT_VARIABLE ASAN_LIB_PATH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
-        # rather than /path/to/libclang_rt.asan-x86_64.so then
-        # we failed to locate it and HAS_PARENT_PATH is false.
-        cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
-        if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+        set(_suffix "asan")
+        set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+        foreach(_clang_rt_name ${_clang_rt_names})
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=${_clang_rt_name}
+                OUTPUT_VARIABLE _clang_rt_path
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            # If _clang_rt_path is libclang_rt.asan-x86_64.so
+            # rather than /path/to/libclang_rt.asan-x86_64.so then
+            # we failed to locate it.
+            if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+                set(ASAN_LIB_PATH "${_clang_rt_path}")
+                break()
+            endif()
+        endforeach()
+        if(NOT ASAN_LIB_PATH)
+            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so or libclang_rt.asan.so")
         endif()
         # Disable a few asan options to get builds going but these should be addressed
-        set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
+        set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0,malloc_context_size=0,quarantine_size_mb=0")
     elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
-        execute_process(
-            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan-x86_64.so
-            OUTPUT_VARIABLE TSAN_LIB_PATH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        # If TSAN_LIB_PATH is libclang_rt.tsan-x86_64.so
-        # rather than /path/to/libclang_rt.tsan-x86_64.so then
-        # we failed to locate it and HAS_PARENT_PATH is false.
-        cmake_path(HAS_PARENT_PATH TSAN_LIB_PATH result)
-        if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so ")
+        set(_suffix "tsan")
+        set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+        foreach(_clang_rt_name ${_clang_rt_names})
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=${_clang_rt_name}
+                OUTPUT_VARIABLE _clang_rt_path
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            # If _clang_rt_path is libclang_rt.tsan-x86_64.so
+            # rather than /path/to/libclang_rt.tsan-x86_64.so then
+            # we failed to locate it.
+            if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+                set(TSAN_LIB_PATH "${_clang_rt_path}")
+                break()
+            endif()
+        endforeach()
+        if(NOT TSAN_LIB_PATH)
+            message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so or libclang_rt.tsan.so")
         endif()
         # Disable a few tsan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${TSAN_LIB_PATH}" "TSAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
@@ -249,27 +270,21 @@ if(NOT HIPBLASLT_ENABLE_YAML)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
-    # Re-enable once origami is available in TheRock.
-    # if(HIPBLASLT_ENABLE_THEROCK)
-    #     find_package(origami REQUIRED)
-    if(FALSE)
-    else()
-        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+    if(HIPBLASLT_ENABLE_THEROCK)
+        find_package(origami CONFIG QUIET)
+    endif()
+    if(NOT TARGET roc::origami)
         block(SCOPE_FOR VARIABLES)
-            set(ORIGAMI_ENABLE_INSTALL OFF)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+            set(ORIGAMI_ENABLE_FETCH ON)
+            set(ORIGAMI_BUILD_TESTING OFF)
+            set(ORIGAMI_ENABLE_PYTHON OFF)
+            set(BUILD_TESTING OFF)
+            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami" EXCLUDE_FROM_ALL)
         endblock()
     endif()
 endif()
 
-# INTERFACE library that owns the public hipblaslt API headers (the in-tree
-# `library/include` subtree plus its build-tree counterpart, where
-# `hipblaslt-export.h` and `hipblaslt-version.h` are generated). Routing the
-# include directories through a target lets consumers pick them up via the
-# build graph rather than via `target_include_directories(<tgt> BEFORE
-# PRIVATE .../library/include ...)`. `hip::host` is exposed as an INTERFACE
-# link because the in-tree headers `#include <hip/...>`.
 add_library(hipblaslt-headers INTERFACE)
 add_library(hipblaslt::headers ALIAS hipblaslt-headers)
 target_include_directories(hipblaslt-headers
@@ -288,6 +303,37 @@ configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
 )
+
+# Configure the Windows version resource (PE VERSIONINFO) embedded into
+# libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
+# DLL reports file/product version metadata in its Windows file properties.
+# A resource compiler is required to compile version.rc; the ROCm toolchain
+# detects one (llvm-rc/rc) or sets CMAKE_RC_COMPILER to a NOTREQUIRED/NOTFOUND
+# sentinel when none is available. When no real compiler is present, warn and
+# skip the resource rather than fail configuration, so the DLL still builds
+# (without version metadata) on machines lacking a resource compiler.
+if(WIN32 AND CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND")
+    if(GIT)
+        execute_process(
+            COMMAND "${GIT}" log -1 --format=%H .
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE hipblaslt_VERSION_COMMIT_ID
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
+    string(TIMESTAMP HIPBLASLT_COPYRIGHT_YEAR "%Y")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
+        @ONLY)
+    set(_hipblaslt_have_version_rc TRUE)
+elseif(WIN32)
+    message(WARNING
+        "hipBLASLt: no Windows resource compiler (llvm-rc/rc) detected; "
+        "libhipblaslt.dll will be built WITHOUT VERSIONINFO metadata. Install the "
+        "Windows SDK or make llvm-rc available (e.g. on PATH or in the ROCm "
+        "llvm/bin directory) to embed version info.")
+endif()
 
 # `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
 # only built when at least one consumer needs it. tensilelite/client and
@@ -310,6 +356,11 @@ add_subdirectory(tensilelite)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
+        # Embed Windows version resource (PE VERSIONINFO) into the shared DLL,
+        # only when a resource compiler was found (see version.rc guard above).
+        if(_hipblaslt_have_version_rc)
+            target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc")
+        endif()
     else()
         add_library(hipblaslt STATIC)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
@@ -328,7 +379,7 @@ if(HIPBLASLT_ENABLE_HOST)
             roc::${hipblas_target}
         PRIVATE
             hip::device
-            tensilelite::tensilelite-host
+            roc::tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
@@ -418,8 +469,12 @@ if(HIPBLASLT_ENABLE_HOST)
 
     rocm_install_targets(TARGETS hipblaslt)
 
+    set(_hipblaslt_export_targets roc::hipblaslt)
+    if(TENSILELITE_BUILD_SHARED_LIBS)
+        list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
+    endif()
     rocm_export_targets(
-        TARGETS roc::hipblaslt
+        TARGETS ${_hipblaslt_export_targets}
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
         NAMESPACE roc::
@@ -428,7 +483,13 @@ if(HIPBLASLT_ENABLE_HOST)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
-        COPYONLY
+        @ONLY
+    )
+
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipBLASLtCodegen.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
+        COMPONENT devel
     )
 
     if( LEGACY_HIPBLAS_DIRECT )
@@ -534,6 +595,21 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    # Cotenant CU-contention helper: the kernel and its launcher install side by
+    # side in bin/ so hipblaslt-cotenant finds the precompiled kernel next to it.
+    # POSIX-only (see clients/CMakeLists.txt); not built/installed on Windows.
+    if(NOT WIN32)
+        rocm_install(
+            TARGETS hipblaslt-cotenant-kernel
+            COMPONENT benchmarks
+        )
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/cotenant/hipblaslt-cotenant"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT benchmarks
+        )
+    endif()
+
     if(HIPBLASLT_ENABLE_MARKER)
         rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0")
     endif()
@@ -590,8 +666,19 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     # Scripts used by unit tests
     install(
-        FILES "${_tensilelite_src}/scripts/analyze_timing.py"
+        FILES
+            "${_tensilelite_src}/scripts/analyze_timing.py"
+            "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
+        COMPONENT tests
+    )
+
+    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
+    # ship at the tensilelite root, not under scripts/.
+    install(
+        FILES
+            "${_tensilelite_src}/AMaxGenerator.py"
+        DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
     )
     # Preserve executable permissions on entry points
@@ -648,8 +735,22 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
-    # common/generator tests are enabled in CI.
+    # Test filter standardization config consumed by TheRock's pytest_runner.py
+    # to drive quick/standard/comprehensive/full categories from the installed tree.
+    install(
+        FILES "${_tensilelite_src}/test_categories.yaml"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+        OPTIONAL
+    )
+
+    if(TENSILELITE_ENABLE_CLIENT)
+        install(
+            TARGETS tensilelite-client
+            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            COMPONENT tests
+        )
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
@@ -732,17 +833,18 @@ if(HIPBLASLT_ENABLE_COVERAGE)
 
     target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    # Allow GTEST_FILTER to be set via environment variable to filter tests during coverage runs.
+    # Usage: GTEST_FILTER="*quick*" make coverage
+    # Default: Run all tests if GTEST_FILTER is not set
     add_custom_target(
         code_cov_tests
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw"
-                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG
-                                        $<TARGET_FILE:hipblaslt-test>
-                                        --precompile=hipblaslt-test-precompile.db
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_coverage_tests.sh" "$<TARGET_FILE:hipblaslt-test>" "${coverage_dir}"
         COMMENT "Running hipblaslt testcases for coverage report"
       )
 
@@ -764,9 +866,9 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
-        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
         COMMENT "Generating code coverage report"
       )
 endif()

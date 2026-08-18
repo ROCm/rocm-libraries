@@ -23,6 +23,11 @@ namespace rocRoller
         std::string getModifier(DataType dataType);
 
         /**
+         * @brief Get the modifier string for MI's input matrix scale types
+         */
+        std::string getScaleTypeModifier(DataType dtype);
+
+        /**
          * Returns opsel modifiers to index byte `lhsByte` for a lhs operand and `rhsByte` for a rhs operand.
          *
          * This means:

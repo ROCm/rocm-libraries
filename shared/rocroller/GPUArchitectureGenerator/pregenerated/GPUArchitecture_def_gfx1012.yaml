@@ -39,6 +39,7 @@ Architectures:
       v_pk_fma_f16: 0
     ISAVersion:
       ArchString: gfx1012
+      AsicRevisionId: -1
       Sramecc: false
       Xnack: false
     InstructionInfos:

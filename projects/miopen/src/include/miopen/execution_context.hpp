@@ -83,13 +83,12 @@ struct ExecutionContext
     std::string general_compile_options;
 
     // Operation modes & environment
-    bool do_search               = false;
-    bool db_update               = false;
-    bool use_asm_kernels         = false;
-    bool use_hip_kernels         = true;
-    bool use_opencl_convolutions = true;
-    rocm_meta_version rmv        = rocm_meta_version::Default;
-    bool disable_search_enforce  = false;
+    bool do_search              = false;
+    bool db_update              = false;
+    bool use_asm_kernels        = false;
+    bool use_hip_kernels        = true;
+    rocm_meta_version rmv       = rocm_meta_version::Default;
+    bool disable_search_enforce = false;
     // Skip perf-db reads and use the default performance configuration. This is used, for example,
     // to optimize the getWorkspaceSize() calls for speed. This specific optimization is correct
     // because Solvers shall be written so that the required workspace size does not depend on the

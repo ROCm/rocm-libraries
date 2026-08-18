@@ -4,9 +4,11 @@
 #pragma once
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
+#include <rocRoller/WorkgroupClusters_detail.hpp>
 
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMSolution.hpp"
@@ -615,6 +617,48 @@ namespace rocRoller
                     uint workgroup_size_y = 1;
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+
+                    if(solutionParams.workgroupClusterSizeX > 0
+                       or solutionParams.workgroupClusterSizeY > 0
+                       or solutionParams.workgroupClusterSizeZ > 0)
+                    {
+#ifndef ROCROLLER_HAS_HIP_WORKGROUP_CLUSTERS
+                        Throw<FatalError>(
+                            "Workgroup cluster feature requested but the installed ROCm/HIP "
+                            "version does not support hipLaunchAttributeClusterDimension. "
+                            "Please upgrade to a ROCm version that includes workgroup cluster "
+                            "support.");
+#endif
+                        AssertFatal(arch.HasCapability(GPUCapability::HasWorkgroupClusters),
+                                    "Workgroup clusters are not available on: ",
+                                    arch.target().toString());
+
+                        auto const workgroupClusterSizeX
+                            = solutionParams.workgroupClusterSizeX > 0
+                                  ? solutionParams.workgroupClusterSizeX
+                                  : 1;
+                        auto const workgroupClusterSizeY
+                            = solutionParams.workgroupClusterSizeY > 0
+                                  ? solutionParams.workgroupClusterSizeY
+                                  : 1;
+                        auto const workgroupClusterSizeZ
+                            = solutionParams.workgroupClusterSizeZ > 0
+                                  ? solutionParams.workgroupClusterSizeZ
+                                  : 1;
+
+                        AssertFatal(workgroupClusterSizeX * workgroupClusterSizeY
+                                            * workgroupClusterSizeZ
+                                        <= WorkgroupClustersDetail::MaxWorkgroupsPerCluster,
+                                    fmt::format("Requested ClusterSize {}x{}x{} exceeds maximum "
+                                                "allowed number of workgroups per cluster ({})",
+                                                ShowValue(workgroupClusterSizeX),
+                                                ShowValue(workgroupClusterSizeY),
+                                                ShowValue(workgroupClusterSizeZ),
+                                                WorkgroupClustersDetail::MaxWorkgroupsPerCluster));
+
+                        params->setManualWorkgroupClusterSize(
+                            {workgroupClusterSizeX, workgroupClusterSizeY, workgroupClusterSizeZ});
+                    }
 
                     if(solutionParams.workgroupMappingDim != -1)
                     {

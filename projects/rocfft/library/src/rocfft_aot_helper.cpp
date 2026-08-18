@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -774,9 +774,6 @@ int main(int argc, char** argv)
     // an in-memory DB which will always be empty
     rocfft_setenv("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
 
-    // tell RTC where the compile helper is
-    rocfft_setenv("ROCFFT_RTC_PROCESS_HELPER", rtc_helper.c_str());
-
     RTCCache::single = std::make_unique<RTCCache>();
 
     RTCCache::single->enable_write_mostly();
@@ -788,7 +785,7 @@ int main(int argc, char** argv)
     threads.reserve(NUM_THREADS);
     for(size_t i = 0; i < NUM_THREADS; ++i)
     {
-        threads.emplace_back([&queue, &gpu_archs]() {
+        threads.emplace_back([&queue, &gpu_archs, &rtc_helper]() {
             while(true)
             {
                 auto item = queue.pop();
@@ -799,15 +796,21 @@ int main(int argc, char** argv)
                 {
                     if(item.sol_arch_name.empty())
                     {
-                        RTCCache::cached_compile(
-                            item.kernel_name, gpu_arch, item.generate_src, generator_sum());
+                        RTCCache::cached_compile(item.kernel_name,
+                                                 gpu_arch,
+                                                 item.generate_src,
+                                                 generator_sum(),
+                                                 rtc_helper);
                     }
                     else if(gpu_arch.find(item.sol_arch_name) != std::string::npos)
                     {
                         // std::cout << "arch: " << gpu_arch
                         //           << ", solution-kernel: " << item.kernel_name << std::endl;
-                        RTCCache::cached_compile(
-                            item.kernel_name, gpu_arch, item.generate_src, generator_sum());
+                        RTCCache::cached_compile(item.kernel_name,
+                                                 gpu_arch,
+                                                 item.generate_src,
+                                                 generator_sum(),
+                                                 rtc_helper);
                     }
                 }
             }

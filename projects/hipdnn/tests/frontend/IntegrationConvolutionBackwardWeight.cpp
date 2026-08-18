@@ -186,6 +186,7 @@ protected:
             tensors.dw->set_uid(uid++);
         }
         tensors.dw->set_data_type(DataType_t::FLOAT);
+        tensors.dw->set_dim(tensorBundle.dwTensor.dims());
 
         return {graph, tensors};
     }

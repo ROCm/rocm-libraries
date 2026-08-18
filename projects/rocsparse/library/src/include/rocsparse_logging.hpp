@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -345,9 +345,9 @@ namespace rocsparse
 
                     if(capture_status == hipStreamCaptureStatusNone)
                     {
-                        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                             &host, value, sizeof(host), hipMemcpyDeviceToHost, handle->stream));
-                        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                         value = &host;
                     }
                     else
@@ -383,9 +383,9 @@ namespace rocsparse
 
                 if(capture_status == hipStreamCaptureStatusNone)
                 {
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                         &host, value, sizeof(host), hipMemcpyDeviceToHost, handle->stream));
-                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                     value = &host;
                 }
                 else

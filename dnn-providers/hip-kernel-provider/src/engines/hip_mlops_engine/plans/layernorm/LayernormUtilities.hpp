@@ -61,12 +61,4 @@ size_t guessNormalizedDim(
     std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> affineAttr,
     std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> statAttr);
 
-size_t guessNormalizedDim(
-    int64_t ioTensorId,
-    std::optional<int64_t> affineTensorId,
-    std::optional<int64_t> statTensorId,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
 } // namespace hip_kernel_provider::layernorm

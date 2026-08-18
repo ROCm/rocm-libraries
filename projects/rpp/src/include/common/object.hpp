@@ -33,17 +33,14 @@ SOFTWARE.
 #define RPP_OBJECT_CAST static_cast
 #endif
 
-#define RPP_DEFINE_OBJECT(object, ...)                                \
-    inline __VA_ARGS__& rpp_get_object(object& obj)                   \
-    {                                                                    \
-        return RPP_OBJECT_CAST<__VA_ARGS__&>(obj);                    \
-    }                                                                    \
-    inline const __VA_ARGS__& rpp_get_object(const object& obj)       \
-    {                                                                    \
-        return RPP_OBJECT_CAST<const __VA_ARGS__&>(obj);              \
-    }                                                                    \
-    inline void rpp_destroy_object(object* p)                         \
-    {                                                                    \
+#define RPP_DEFINE_OBJECT(object, ...)                             \
+    inline __VA_ARGS__& rpp_get_object(object& obj) {              \
+        return RPP_OBJECT_CAST<__VA_ARGS__&>(obj);                 \
+    }                                                              \
+    inline const __VA_ARGS__& rpp_get_object(const object& obj) {  \
+        return RPP_OBJECT_CAST<const __VA_ARGS__&>(obj);           \
+    }                                                              \
+    inline void rpp_destroy_object(object* p) {                    \
         rpp::detail::delete_obj(RPP_OBJECT_CAST<__VA_ARGS__*>(p)); \
     }
 
@@ -52,31 +49,27 @@ namespace rpp {
 namespace detail {
 
 template <class T>
-void delete_obj(T* x)
-{
-    delete x; // NOLINT
+void delete_obj(T* x) {
+    delete x;  // NOLINT
 }
 
 template <class T>
-T& get_object_impl(rank<0>, T& x)
-{
+T& get_object_impl(rank<0>, T& x) {
     return x;
 }
 
 template <class T>
-auto get_object_impl(rank<1>, T& x) -> decltype(rpp_get_object(x))
-{
+auto get_object_impl(rank<1>, T& x) -> decltype(rpp_get_object(x)) {
     return rpp_get_object(x);
 }
 
-} // namespace detail
+}  // namespace detail
 
 template <class T>
-auto get_object(T& x) -> decltype(detail::get_object_impl(rank<1>{}, x))
-{
+auto get_object(T& x) -> decltype(detail::get_object_impl(rank<1>{}, x)) {
     return detail::get_object_impl(rank<1>{}, x);
 }
 
-} // namespace rpp
+}  // namespace rpp
 
 #endif

@@ -359,11 +359,12 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
             reg2lds
                 = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
             lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_partial_pass_input_function());
+                kernel_pp->generate_lds_to_reg_partial_pass_steps_1_2_input_function());
             reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_partial_pass_output_function());
-            device    = std::make_unique<Function>(kernel_pp->generate_device_function());
-            device_pp = std::make_unique<Function>(kernel_pp->generate_pp_device_function());
+                kernel_pp->generate_lds_from_reg_partial_pass_steps_1_2_output_function());
+            device = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp
+                = std::make_unique<Function>(kernel_pp->generate_pp_steps_1_2_device_function());
             break;
         }
         case PPT_SBCC:
@@ -374,13 +375,14 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
             reg2lds
                 = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
             lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_partial_pass_input_function());
+                kernel_pp->generate_lds_to_reg_partial_pass_steps_3_4_input_function());
             reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_partial_pass_output_function());
+                kernel_pp->generate_lds_from_reg_partial_pass_steps_3_4_output_function());
             local_transpose_pp
                 = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
-            device    = std::make_unique<Function>(kernel_pp->generate_device_function());
-            device_pp = std::make_unique<Function>(kernel_pp->generate_pp_device_function());
+            device = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp
+                = std::make_unique<Function>(kernel_pp->generate_pp_steps_3_4_device_function());
             break;
         }
         default:

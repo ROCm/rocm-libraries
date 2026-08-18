@@ -367,4 +367,54 @@ namespace rocRoller::KernelGraph
         }
         return rv;
     }
+
+    template <std::predicate<int> Predicate>
+    std::vector<std::pair<int, int>> getLoadTiledStoreLDSTilePairs(KernelGraph const& kgraph,
+                                                                   Predicate          predicate)
+    {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
+
+        std::vector<std::pair<int, int>> rv;
+
+        for(auto loadTiledTag : kgraph.control.findElements(predicate))
+        {
+            const auto storeLDSTags{
+                getAssociatedOps<LoadTiled, StoreLDSTile>(kgraph, loadTiledTag)};
+
+            if(storeLDSTags.size() == 1)
+            {
+                rv.push_back({loadTiledTag, storeLDSTags[0]});
+            }
+            else
+            {
+                AssertFatal(storeLDSTags.size() <= 2,
+                            "getLoadTiledStoreLDSTilePairs: More than 2 ComputeIndex operation "
+                            "required for StoreLDSTile.",
+                            ShowValue(loadTiledTag),
+                            ShowValue(storeLDSTags.size()));
+                for(const auto& storeLDS : storeLDSTags)
+                {
+                    auto maybeForLoopOfLoad
+                        = findContainingOperation<ForLoopOp>(loadTiledTag, kgraph);
+                    auto maybeForLoopOfStore = findContainingOperation<ForLoopOp>(storeLDS, kgraph);
+
+                    const auto isLoadInLoop  = maybeForLoopOfLoad.has_value();
+                    const auto isStoreInLoop = maybeForLoopOfStore.has_value();
+
+                    const auto bothInSameLoop
+                        = isLoadInLoop && isStoreInLoop
+                          && maybeForLoopOfLoad.value() == maybeForLoopOfStore.value();
+
+                    const auto bothNotInLoop = not isLoadInLoop && not isStoreInLoop;
+
+                    if(bothInSameLoop || bothNotInLoop)
+                    {
+                        rv.push_back({loadTiledTag, storeLDS});
+                    }
+                }
+            }
+        }
+        return rv;
+    }
 }

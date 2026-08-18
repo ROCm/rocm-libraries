@@ -53,7 +53,8 @@ namespace rocRoller
         {
             constexpr bool is_half  = std::is_same_v<T, Half>;
             constexpr bool is_float = std::is_same_v<T, float>;
-            static_assert(wm + we == 7, "the number of bits of mantissa and exponent must be 7");
+            static_assert(wm + we == 7 || wm + we == 8,
+                          "the number of bits of mantissa and exponent must be 7 or 8");
             static_assert(is_half || is_float, "Only half and float can be cast to f8");
 
             const int mfmt = (sizeof(T) == 4) ? 23 : 10;

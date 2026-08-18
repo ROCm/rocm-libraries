@@ -20,9 +20,11 @@
 
 #include "tree_node_real.h"
 #include "../../shared/arithmetic.h"
+#include "../../shared/precision_type.h"
 #include "function_pool.h"
 #include "node_factory.h"
 #include "real2complex.h"
+#include <algorithm>
 
 // work out the real and complex lengths on a real-complex plan, and
 // return pointers to those lengths
@@ -111,6 +113,25 @@ static bool SBCR_dim_available(const function_pool&       pool,
     return pool.has_SBCR_kernel(length[sbcr_dim], precision);
 }
 
+// True if a fused real-Stockham kernel of the given cfft length / precision
+// fits in this device's per-workgroup LDS.  Fused mode disables half-LDS and
+// adds 1 padding element per batch, so
+//   lds_bytes = (cfftLength + 1) * transforms_per_block * bytes_per_complex
+// Budget matches the runtime check in LeafNode::SetupGridParam (tree_node.cpp).
+// Returns false if no Stockham kernel is registered for this length.
+static bool fused_real_stockham_fits_lds(const function_pool&   pool,
+                                         size_t                 cfftLength,
+                                         rocfft_precision       precision,
+                                         const hipDeviceProp_t& deviceProp)
+{
+    FMKey key(cfftLength, precision, CS_KERNEL_STOCKHAM);
+    if(!pool.has_function(key))
+        return false;
+    const size_t batch_width     = std::max<size_t>(pool.get_kernel(key).transforms_per_block, 1);
+    const size_t fused_lds_bytes = (cfftLength + 1) * batch_width * complex_type_size(precision);
+    return fused_lds_bytes <= deviceProp.sharedMemPerBlock;
+}
+
 /*****************************************************
  * CS_REAL_TRANSFORM_USING_CMPLX
  *****************************************************/
@@ -118,7 +139,7 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 {
     bool noSolution = child_scheme_trees.empty();
 
-    // Embed the data into a full-length complex array, perform a
+    // Embed the data into a full-length complex array, perform
     // complex transform, and then extract the relevant output.
     bool          r2c            = inArrayType == rocfft_array_type_real;
     ComputeScheme copyHeadScheme = r2c ? CS_KERNEL_COPY_R_TO_CMPLX : CS_KERNEL_COPY_HERM_TO_CMPLX;
@@ -268,12 +289,14 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         if(try_fuse_pre_post_processing)
             try_fuse_pre_post_processing = cfftPlan->isLeafNode();
 
-        // Enable fusion for small simple 1D cases only.
-        // TODO: remove it after full solution done.
+        // fuse 1D pre/post when the fused Stockham kernel fits in LDS.
+        // Use cfftPlan->length[0] (always = realLength/2) rather than length[0]/2:
+        // for C2R, set_complex_length swaps node.length to the Hermitian side,
+        // making length[0]/2 wrong.
         if((cfftPlan->scheme == CS_KERNEL_STOCKHAM) && // simple decomposition
            (length.size() == 1) && // 1D
-           (length[0] < 512) && // < small case < 512
-           (inArrayType != rocfft_array_type_hermitian_planar) && // no planar
+           fused_real_stockham_fits_lds(pool, cfftPlan->length[0], precision, deviceProp)
+           && (inArrayType != rocfft_array_type_hermitian_planar) && // no planar
            (outArrayType != rocfft_array_type_hermitian_planar))
         {
             try_fuse_pre_post_processing = true;
@@ -557,9 +580,9 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // first row fft + postproc is mandatory for fastest dimension
         auto rcplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // R2C: length is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(rcplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
         rcplan->length    = length;
         rcplan->dimension = 1;
@@ -595,9 +618,9 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // c2r
         auto crplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // C2R: outputLength is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
         crplan->length    = outputLength;
         crplan->dimension = 1;
@@ -634,8 +657,9 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
         row1Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
         // first transpose
-        auto trans1Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans1Plan->length = row1Plan->outputLength;
+        auto trans1Plan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        trans1Plan->length    = row1Plan->outputLength;
+        trans1Plan->dimension = 2;
         trans1Plan->SetTransposeOutputLength();
 
         // second row fft
@@ -646,8 +670,9 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
         row2Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
         // second transpose
-        auto trans2Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans2Plan->length = trans1Plan->outputLength;
+        auto trans2Plan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        trans2Plan->length    = trans1Plan->outputLength;
+        trans2Plan->dimension = 2;
         trans2Plan->SetTransposeOutputLength();
 
         // --------------------------------
@@ -879,7 +904,14 @@ void Real2DEvenNode::AssignParams_internal_TR_pair()
 
             trans1Plan->outStride.push_back(trans1Plan->length[1]);
             trans1Plan->outStride.push_back(1);
-            trans1Plan->oDist = trans1Plan->length[0] * trans1Plan->outStride[0];
+            auto tmp = trans1Plan->length[0] * trans1Plan->outStride[0];
+            for(size_t len_dim = 2; len_dim < trans1Plan->length.size(); len_dim++)
+            {
+                // extra batch dimension(s)
+                trans1Plan->outStride.push_back(tmp);
+                tmp *= trans1Plan->length[len_dim];
+            }
+            trans1Plan->oDist = tmp;
         }
 
         auto& row2Plan = childNodes[2];
@@ -915,7 +947,14 @@ void Real2DEvenNode::AssignParams_internal_TR_pair()
 
             trans1Plan->outStride.push_back(trans1Plan->length[1]);
             trans1Plan->outStride.push_back(1);
-            trans1Plan->oDist = trans1Plan->length[0] * trans1Plan->outStride[0];
+            auto tmp = trans1Plan->length[0] * trans1Plan->outStride[0];
+            for(size_t len_dim = 2; len_dim < trans1Plan->length.size(); len_dim++)
+            {
+                // extra batch dimension(s)
+                trans1Plan->outStride.push_back(tmp);
+                tmp *= trans1Plan->length[len_dim];
+            }
+            trans1Plan->oDist = tmp;
         }
         auto& c2cPlan = childNodes[1];
         {
@@ -936,7 +975,7 @@ void Real2DEvenNode::AssignParams_internal_TR_pair()
 
             trans2Plan->outStride = trans1Plan->inStride;
             std::swap(trans2Plan->outStride[0], trans2Plan->outStride[1]);
-            trans2Plan->oDist = trans2Plan->length[0] * trans2Plan->outStride[0];
+            trans2Plan->oDist = trans2Plan->iDist;
         }
         auto& c2rPlan = childNodes[3];
         {
@@ -1218,9 +1257,9 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // first row fft + postproc is mandatory for fastest dimension
         auto rcplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // R2C: length is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(rcplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
         rcplan->length    = length;
         rcplan->dimension = 1;
@@ -1249,9 +1288,9 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 
         // c2r
         auto crplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        // for length > 2048, don't try pre/post because LDS usage is too high
+        // C2R: outputLength is the real-side count; fused cfft is half-length
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
-            = length[0] <= 2048;
+            = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
         crplan->length    = outputLength;
         crplan->dimension = 1;
@@ -1336,7 +1375,7 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         auto trans1    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
         trans1->length = rcplan->outputLength;
         trans1->SetTransposeOutputLength();
-        trans1->dimension = 2;
+        trans1->dimension = 3;
 
         // first column
         NodeMetaData c1planData(this);
@@ -1350,7 +1389,7 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         auto trans2    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
         trans2->length = trans1->outputLength;
         trans2->SetTransposeOutputLength();
-        trans2->dimension = 2;
+        trans2->dimension = 3;
 
         // second column
         NodeMetaData c2planData(this);
@@ -1364,7 +1403,7 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         auto trans3    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
         trans3->length = trans2->outputLength;
         trans3->SetTransposeOutputLength();
-        trans3->dimension = 2;
+        trans3->dimension = 3;
 
         // --------------------------------
         // Fuse Shims: [RealEven + T][RT][RT]
@@ -1451,7 +1490,7 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         trans3->length = length;
         trans3->SetTransposeOutputLength();
         std::swap(trans3->length[1], trans3->length[2]);
-        trans3->dimension = 2;
+        trans3->dimension = 3;
 
         // column
         NodeMetaData c2planData(this);
@@ -1466,7 +1505,7 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         trans2->length = trans3->outputLength;
         trans2->SetTransposeOutputLength();
         std::swap(trans2->length[1], trans2->length[2]);
-        trans2->dimension = 2;
+        trans2->dimension = 3;
 
         // column
         NodeMetaData c1planData(this);
@@ -1481,7 +1520,7 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         trans1->length = trans2->outputLength;
         trans1->SetTransposeOutputLength();
         std::swap(trans1->length[1], trans1->length[2]);
-        trans1->dimension = 2;
+        trans1->dimension = 3;
 
         // --------------------------------
         // Fuse Shims:
@@ -1865,14 +1904,14 @@ size_t Real3DPPNode::GetPPOffDim() const
 {
     auto key
         = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
-    if(!pool.has_function(key))
+    if(!pool.has_function(key, batch))
         throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
 
     // CS_REAL_3D_PP will have two corresponding kernels in
     // the function pool, both will have the same off-dim
     // value, and at least of one them must be an SBCC PP
     auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
-    auto kernel       = pool.get_kernel(key, child_scheme);
+    auto kernel       = pool.get_kernel(key, child_scheme, batch);
 
     return kernel.pp_params.off_dim;
 }
@@ -2022,7 +2061,7 @@ size_t PrePostKernelNode::GetTwiddleTableLength()
     if(scheme == CS_KERNEL_CMPLX_TO_R)
         return 2 * (length[0] - 1);
     else if(scheme == CS_KERNEL_TRANSPOSE_CMPLX_TO_R)
-        return 2 * (length.back() - 1);
+        return 2 * (length[dimension - 1] - 1);
 
     throw std::runtime_error("GetTwiddleTableLength: Unexpected scheme in PrePostKernelNode: "
                              + PrintScheme(scheme));
@@ -2037,12 +2076,14 @@ size_t PrePostKernelNode::GetTwiddleTableLengthLimit()
 std::vector<size_t> PrePostKernelNode::CollapsibleDims()
 {
     // regular non-transposing kernel can collapse everything but the
-    // fastest dimension where the real-complex processing happens
-    if(scheme != CS_KERNEL_R_TO_CMPLX_TRANSPOSE && scheme != CS_KERNEL_TRANSPOSE_CMPLX_TO_R)
-    {
-        std::vector<size_t> ret(length.size() - 1);
-        std::iota(ret.begin(), ret.end(), 1);
-        return ret;
-    }
-    return {};
+    // fastest dimension where the real-complex processing happens.
+    // Transposing kernels can collapse every length dimension turned
+    // batch dimension.
+
+    if(length.size() <= dimension)
+        return {};
+
+    std::vector<size_t> ret(length.size() - dimension);
+    std::iota(ret.begin(), ret.end(), dimension);
+    return ret;
 }

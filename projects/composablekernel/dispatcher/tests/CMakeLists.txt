@@ -10,6 +10,38 @@ cmake_minimum_required(VERSION 3.16)
 # Find Python
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
+add_test(
+    NAME dispatcher_test_batched_gemm_gpu_correctness
+    # Run the script directly: this module is script-style (a parameterized
+    # function + main() guard), not unittest.TestCase, so `unittest discover`
+    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # GPU/built lib and returns nonzero only on a real correctness failure.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_gemm_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_batched_gemm_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
+add_test(
+    NAME dispatcher_test_batched_contraction_gpu_correctness
+    # Run the script directly: this module is script-style (a parameterized
+    # function + main() guard), not unittest.TestCase, so `unittest discover`
+    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # GPU/built lib and returns nonzero only on a real correctness failure.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_contraction_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_batched_contraction_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # =============================================================================
 # Python Tests
 # =============================================================================
@@ -24,6 +56,33 @@ add_test(
 set_tests_properties(dispatcher_test_autocorrect PROPERTIES
     LABELS "dispatcher;python;validation"
     TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Operator tile-constraints table regression test
+add_test(
+    NAME dispatcher_test_arch_filter_constraints
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_arch_filter_constraints.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# gemm_utils host-helper + runner-shape regression test. Also acts as an import
+# canary: a merge that truncates python/gemm_utils.py (see #9308) makes this fail.
+add_test(
+    NAME dispatcher_test_gemm_utils
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_gemm_utils.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 60
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
@@ -123,6 +182,36 @@ add_test(
 set_tests_properties(dispatcher_test_fmha_parity PROPERTIES
     LABELS "dispatcher;python;fmha;parity;gpu"
     TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Stream-K deep-core registry test (requires GPU + hipcc; SKIPs otherwise).
+# Pass the gfx target CMake already configured with so the test does not have to
+# detect it at runtime (no rocminfo dependency); it falls back to ROCm env vars
+# / amdgpu-arch if none is set here.
+set(_streamk_test_arch "")
+if(GPU_TARGETS)
+    list(GET GPU_TARGETS 0 _streamk_test_arch)
+elseif(CMAKE_HIP_ARCHITECTURES)
+    list(GET CMAKE_HIP_ARCHITECTURES 0 _streamk_test_arch)
+elseif(AMDGPU_TARGETS)
+    list(GET AMDGPU_TARGETS 0 _streamk_test_arch)
+endif()
+set(_streamk_arch_arg "")
+if(_streamk_test_arch)
+    set(_streamk_arch_arg --arch ${_streamk_test_arch})
+endif()
+
+add_test(
+    NAME dispatcher_test_streamk_registry
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_registry.py ${_streamk_arch_arg}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_streamk_registry PROPERTIES
+    LABELS "dispatcher;python;streamk;gpu"
+    TIMEOUT 900
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 

@@ -1,0 +1,163 @@
+# serializer version: 1
+# name: test_parameter_binary_ops[add]
+  dict({
+    'pp': 16,
+    'ps': 15,
+    'sp': 60,
+  })
+# ---
+# name: test_parameter_binary_ops[and]
+  dict({
+    'pp': 4,
+    'ps': 0,
+    'sp': 0,
+  })
+# ---
+# name: test_parameter_binary_ops[div]
+  dict({
+    'pp': 3.0,
+    'ps': 4.0,
+    'sp': 4.0,
+  })
+# ---
+# name: test_parameter_binary_ops[floordiv]
+  dict({
+    'pp': 3,
+    'ps': 4,
+    'sp': 4,
+  })
+# ---
+# name: test_parameter_binary_ops[lshift]
+  dict({
+    'pp': 192,
+    'ps': 96,
+    'sp': 196608,
+  })
+# ---
+# name: test_parameter_binary_ops[mod]
+  dict({
+    'pp': 0,
+    'ps': 0,
+    'sp': 0,
+  })
+# ---
+# name: test_parameter_binary_ops[mul]
+  dict({
+    'pp': 48,
+    'ps': 36,
+    'sp': 576,
+  })
+# ---
+# name: test_parameter_binary_ops[or]
+  dict({
+    'pp': 12,
+    'ps': 15,
+    'sp': 60,
+  })
+# ---
+# name: test_parameter_binary_ops[pow]
+  dict({
+    'pp': 20736,
+    'ps': 1728,
+    'sp': 149587343098087735296,
+  })
+# ---
+# name: test_parameter_binary_ops[rshift]
+  dict({
+    'pp': 0,
+    'ps': 1,
+    'sp': 0,
+  })
+# ---
+# name: test_parameter_binary_ops[sub]
+  dict({
+    'pp': 8,
+    'ps': 9,
+    'sp': 36,
+  })
+# ---
+# name: test_parameter_binary_ops[xor]
+  dict({
+    'pp': 8,
+    'ps': 15,
+    'sp': 60,
+  })
+# ---
+# name: test_parameter_comparisons[eq]
+  dict({
+    'pp': False,
+    'ps': False,
+    'sp': False,
+  })
+# ---
+# name: test_parameter_comparisons[ge]
+  dict({
+    'pp': True,
+    'ps': True,
+    'sp': False,
+  })
+# ---
+# name: test_parameter_comparisons[gt]
+  dict({
+    'pp': True,
+    'ps': True,
+    'sp': False,
+  })
+# ---
+# name: test_parameter_comparisons[le]
+  dict({
+    'pp': False,
+    'ps': False,
+    'sp': True,
+  })
+# ---
+# name: test_parameter_comparisons[lt]
+  dict({
+    'pp': False,
+    'ps': False,
+    'sp': True,
+  })
+# ---
+# name: test_parameter_comparisons[ne]
+  dict({
+    'pp': True,
+    'ps': True,
+    'sp': True,
+  })
+# ---
+# name: test_parameter_reflected_comparisons_explicit[req]
+  dict({
+    'vs_param': False,
+    'vs_scalar': False,
+  })
+# ---
+# name: test_parameter_reflected_comparisons_explicit[rge]
+  dict({
+    'vs_param': False,
+    'vs_scalar': False,
+  })
+# ---
+# name: test_parameter_reflected_comparisons_explicit[rgt]
+  dict({
+    'vs_param': False,
+    'vs_scalar': False,
+  })
+# ---
+# name: test_parameter_reflected_comparisons_explicit[rle]
+  dict({
+    'vs_param': True,
+    'vs_scalar': True,
+  })
+# ---
+# name: test_parameter_reflected_comparisons_explicit[rlt]
+  dict({
+    'vs_param': True,
+    'vs_scalar': True,
+  })
+# ---
+# name: test_parameter_reflected_comparisons_explicit[rne]
+  dict({
+    'vs_param': True,
+    'vs_scalar': True,
+  })
+# ---

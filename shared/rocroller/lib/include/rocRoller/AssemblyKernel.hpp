@@ -142,7 +142,10 @@ namespace rocRoller
         std::array<unsigned int, 3> const&              workgroupSize() const;
         Expression::ExpressionPtr                       workgroupCount(size_t index);
         std::array<Expression::ExpressionPtr, 3> const& workitemCount() const;
-        Expression::ExpressionPtr const&                dynamicSharedMemBytes() const;
+
+        std::optional<std::array<unsigned int, 3>> const& workgroupClusterSize() const;
+
+        Expression::ExpressionPtr const& dynamicSharedMemBytes() const;
 
         void setWorkgroupSize(std::array<unsigned int, 3> const& val);
         void setWorkitemCount(std::array<Expression::ExpressionPtr, 3> const& val);
@@ -150,6 +153,8 @@ namespace rocRoller
         void setKernelGraphMeta(KernelGraph::KernelGraphPtr graph);
         void setCommandMeta(CommandPtr graph);
         void setWavefrontSize(int);
+
+        void setWorkgroupClusterSize(std::array<unsigned int, 3> const& val);
 
         std::array<Register::ValuePtr, 3> const& workgroupIndex() const;
         std::array<Register::ValuePtr, 3> const& workitemIndex() const;
@@ -204,6 +209,8 @@ namespace rocRoller
         int                                     m_argumentSize = 0;
 
         int m_wavefrontSize = 64;
+
+        std::optional<std::array<unsigned int, 3>> m_workgroupClusterSize;
 
         KernelGraph::KernelGraphPtr m_kernelGraph;
         CommandPtr                  m_command;

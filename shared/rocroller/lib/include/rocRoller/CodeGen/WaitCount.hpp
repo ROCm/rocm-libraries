@@ -33,7 +33,8 @@ namespace rocRoller
                   int                    vscnt,
                   int                    dscnt,
                   int                    kmcnt,
-                  int                    expcnt);
+                  int                    expcnt,
+                  int                    tensorcnt);
 
         /// Issues a waitcnt with the given count for the given queue.
         WaitCount(GPUArchitecture const& arch, GPUWaitQueue queueForCount, int count);
@@ -48,7 +49,8 @@ namespace rocRoller
         bool operator==(WaitCount const& a) const
         {
             return a.m_loadcnt == m_loadcnt && a.m_storecnt == m_storecnt && a.m_vscnt == m_vscnt
-                   && a.m_dscnt == m_dscnt && a.m_kmcnt == m_kmcnt && a.m_expcnt == m_expcnt;
+                   && a.m_dscnt == m_dscnt && a.m_kmcnt == m_kmcnt && a.m_expcnt == m_expcnt
+                   && a.m_tensorcnt == m_tensorcnt;
         }
         bool operator!=(WaitCount const& a) const
         {
@@ -67,6 +69,8 @@ namespace rocRoller
             KMCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
         static WaitCount
             EXPCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
+        static WaitCount
+            TensorCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
 
         static WaitCount Zero(GPUArchitecture const& arch, std::string const& message = " ");
 
@@ -100,6 +104,7 @@ namespace rocRoller
         int dscnt() const;
         int kmcnt() const;
         int expcnt() const;
+        int tensorcnt() const;
 
         /**
          * vmcnt is the combination of loadcnt and storecnt for non-split counters
@@ -114,6 +119,7 @@ namespace rocRoller
         void setDScnt(int value);
         void setKMcnt(int value);
         void setExpcnt(int value);
+        void setTensorcnt(int value);
 
         WaitCount& combineLoadcnt(int value);
         WaitCount& combineStorecnt(int value);
@@ -121,6 +127,7 @@ namespace rocRoller
         WaitCount& combineDScnt(int value);
         WaitCount& combineKMcnt(int value);
         WaitCount& combineExpcnt(int value);
+        WaitCount& combineTensorcnt(int value);
 
         std::vector<std::string> const& comments() const;
 
@@ -138,18 +145,20 @@ namespace rocRoller
          * On machines without separate vscnt, the vscnt field should not be used.
          *
          */
-        int m_loadcnt  = -1;
-        int m_storecnt = -1;
-        int m_vscnt    = -1;
-        int m_dscnt    = -1;
-        int m_kmcnt    = -1;
-        int m_expcnt   = -1;
+        int m_loadcnt   = -1;
+        int m_storecnt  = -1;
+        int m_vscnt     = -1;
+        int m_dscnt     = -1;
+        int m_kmcnt     = -1;
+        int m_expcnt    = -1;
+        int m_tensorcnt = -1;
 
         std::vector<std::string> m_comments;
 
         bool m_isSplitCounter = false;
         bool m_hasVSCnt       = false;
         bool m_hasEXPCnt      = false;
+        bool m_hasTensorCnt   = false;
 
         EnumBitset<GPUWaitQueueType> m_queuesToSync;
     };

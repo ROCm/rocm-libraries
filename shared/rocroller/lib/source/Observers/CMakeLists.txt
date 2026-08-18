@@ -24,6 +24,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/VALUWriteSGPRVMEM.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/VALUWriteVCCVDIVFMAS.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/VCMPXWrite94x.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VGPRIndexingObserver.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitcntObserver.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAObserver.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAReadSrcD.cpp"
@@ -36,3 +37,5 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/XDLWrite90a.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/XDLWrite94x.cpp"
 )
+
+add_subdirectory(WMMA)

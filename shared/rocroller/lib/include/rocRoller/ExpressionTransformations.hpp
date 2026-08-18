@@ -6,6 +6,7 @@
 #include <rocRoller/Expression_fwd.hpp>
 
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
 
 namespace rocRoller
@@ -202,5 +203,6 @@ namespace rocRoller
          * @return ExpressionPtr Transformed expression
          */
         ExpressionPtr lowerBitfieldCombine(ExpressionPtr expr);
+
     }
 }

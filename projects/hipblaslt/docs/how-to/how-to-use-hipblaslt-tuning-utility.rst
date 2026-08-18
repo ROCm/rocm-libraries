@@ -27,9 +27,9 @@ input for the ``find_exact.py`` script, as described below.
         DataTypeB: s
         DataTypeC: s
         DataTypeD: s
-        TransposeA: 0
-        TransposeB: 0
-        UseBias: False
+        TransposeA: false
+        TransposeB: false
+        UseBias: 0
     TestConfig:
         ColdIter: 20
         Iter: 100  # You can change this to a larger value for a more stable result, but the executing time also increases.

@@ -1,0 +1,55 @@
+{
+  "arch": "gfx90a",
+  "arch_union_lines": 18587,
+  "ranked": [
+    {
+      "id": "gfx90a__BBS_yaml",
+      "whole_project_lines": 17875,
+      "marginal_lines": 17875,
+      "kernels": 1,
+      "likely_params": [
+        "DataType=BF16",
+        "ComputeDataType=Single"
+      ]
+    },
+    {
+      "id": "gfx90a__DB_yaml",
+      "whole_project_lines": 16834,
+      "marginal_lines": 660,
+      "kernels": 2,
+      "likely_params": [
+        "DataType=Double(FP64)",
+        "ShiftVectorComponents/edge-store paths"
+      ]
+    },
+    {
+      "id": "gfx90a__HSS_yaml",
+      "whole_project_lines": 17866,
+      "marginal_lines": 28,
+      "kernels": 1,
+      "likely_params": [
+        "DataType=Half/DestDataType=Single",
+        "PackData"
+      ]
+    },
+    {
+      "id": "gfx90a__HHS_yaml",
+      "whole_project_lines": 17863,
+      "marginal_lines": 15,
+      "kernels": 1,
+      "likely_params": [
+        "DataType=Half/DestDataType=Half",
+        "GlobalWriteBatch packing"
+      ]
+    },
+    {
+      "id": "gfx90a__SB_yaml",
+      "whole_project_lines": 17681,
+      "marginal_lines": 9,
+      "kernels": 1,
+      "likely_params": [
+        "DataType=Single/DestDataType=BF16 conversion"
+      ]
+    }
+  ]
+}

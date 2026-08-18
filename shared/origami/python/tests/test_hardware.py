@@ -92,6 +92,7 @@ def test_hardware_for_arch_gfx950():
         arch=origami.architecture_t.gfx950,
         N_CU=304,
         lds_capacity=64 * 1024,
+        rf_capacity=512 * 1024,
         L2_capacity=32 * 1024 * 1024,
         compute_clock_khz=2100000
     )
@@ -99,6 +100,7 @@ def test_hardware_for_arch_gfx950():
     # Verify basic properties
     assert hardware.N_CU == 304
     assert hardware.lds_capacity == 64 * 1024
+    assert hardware.rf_capacity == 512 * 1024
     assert hardware.L2_capacity == 32 * 1024 * 1024
     assert hardware.compute_clock_ghz == pytest.approx(2.1, rel=1e-6)
     
@@ -111,12 +113,35 @@ def test_hardware_for_arch_gfx950():
 
 
 @pytest.mark.integration
+def test_gfx950_pci_chip_id_0x75a8_differs_from_default():
+    """gfx950 pci_chip_id 0x75a8 uses alternate mem constants vs omitted / id75a0 path."""
+    args = {
+        "arch": origami.architecture_t.gfx950,
+        "N_CU": 256,
+        "lds_capacity": 64 * 1024,
+        "rf_capacity": 512 * 1024,
+        "L2_capacity": 32 * 1024 * 1024,
+        "compute_clock_khz": 2_100_000,
+    }
+    h_def = origami.get_hardware_for_arch(**args, pci_chip_id=None)
+    h_v2 = origami.get_hardware_for_arch(**args, pci_chip_id=0x75A8)
+    assert h_def.mem1_perf_ratio != h_v2.mem1_perf_ratio
+    assert h_def.mem2_perf_ratio != h_v2.mem2_perf_ratio
+    assert h_def.mem3_perf_ratio != h_v2.mem3_perf_ratio
+    assert h_def.mem_bw_per_wg_coefficients != h_v2.mem_bw_per_wg_coefficients
+    assert h_def.parallel_mi_cu == h_v2.parallel_mi_cu == 4
+    assert h_def.pci_chip_id is None
+    assert h_v2.pci_chip_id == 0x75A8
+
+
+@pytest.mark.integration
 def test_hardware_for_arch_gfx942():
     """Test creating hardware object for gfx942 using get_hardware_for_arch."""
     hardware = origami.get_hardware_for_arch(
         arch=origami.architecture_t.gfx942,
         N_CU=228,
         lds_capacity=64 * 1024,
+        rf_capacity=512 * 1024,
         L2_capacity=24 * 1024 * 1024,
         compute_clock_khz=1700000
     )
@@ -139,6 +164,7 @@ def test_hardware_for_arch_gfx90a():
         arch=origami.architecture_t.gfx90a,
         N_CU=110,
         lds_capacity=64 * 1024,
+        rf_capacity=512 * 1024,
         L2_capacity=8 * 1024 * 1024,
         compute_clock_khz=1700000
     )
@@ -153,12 +179,34 @@ def test_hardware_for_arch_gfx90a():
 
 
 @pytest.mark.integration
+def test_hardware_for_arch_gfx1200():
+    """Test creating hardware object for gfx1200 using get_hardware_for_arch."""
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx1200,
+        N_CU=32,
+        lds_capacity=128 * 1024,
+        rf_capacity=512 * 1024,
+        L2_capacity=4 * 1024 * 1024,
+        compute_clock_khz=2700000
+    )
+
+    # Verify basic properties
+    assert hardware.N_CU == 32
+    assert hardware.lds_capacity == 128 * 1024
+
+    # Verify architecture-specific constants
+    assert hardware.NUM_XCD == 1
+    assert hardware.parallel_mi_cu == 2
+
+
+@pytest.mark.integration
 def test_hardware_for_arch_gfx1201():
     """Test creating hardware object for gfx1201 using get_hardware_for_arch."""
     hardware = origami.get_hardware_for_arch(
         arch=origami.architecture_t.gfx1201,
         N_CU=60,
         lds_capacity=128 * 1024,
+        rf_capacity=512 * 1024,
         L2_capacity=6 * 1024 * 1024,
         compute_clock_khz=2500000
     )
@@ -180,6 +228,7 @@ def test_enumerate_tiles_with_hardware():
         arch=origami.architecture_t.gfx950,
         N_CU=304,
         lds_capacity=64 * 1024,
+        rf_capacity=512 * 1024,
         L2_capacity=32 * 1024 * 1024,
         compute_clock_khz=2100000
     )

@@ -263,7 +263,12 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         activationMode = (*_params.optActivation()).mode;
     }
 
-    BatchnormKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_params.x(),
+                                          _params.dx(),
+                                          _params.savedMean(),
+                                          _params.scale(),
+                                          deviceProperties,
+                                          activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
@@ -293,7 +298,6 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
         options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
         options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
-        options.update("HIP_PLUGIN_BN_MAXN", 65);
         options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
@@ -400,28 +404,38 @@ void BatchnormBwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "BatchnormBwdPlan::execute() called before compile()");
     }
 
-    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dyBuffer = findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dxBuffer = findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dscaleBuffer = findDeviceBuffer(_params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dbiasBuffer = findDeviceBuffer(_params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dyBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dxBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dscaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
 
     void* biasPtr = nullptr;
     if(_params.bias() != nullptr)
     {
-        biasPtr = findDeviceBuffer(_params.bias()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+        biasPtr = hipdnn_plugin_sdk::findDeviceBuffer(
+                      _params.bias()->uid(), deviceBuffers, numDeviceBuffers)
+                      .ptr;
     }
 
     void* savedMeanPtr = nullptr;
     void* savedInvVariancePtr = nullptr;
     if(_usesSavedStats)
     {
-        savedMeanPtr
-            = findDeviceBuffer(_params.savedMean()->uid(), deviceBuffers, numDeviceBuffers).ptr;
-        savedInvVariancePtr
-            = findDeviceBuffer(_params.savedInvVariance()->uid(), deviceBuffers, numDeviceBuffers)
-                  .ptr;
+        savedMeanPtr = hipdnn_plugin_sdk::findDeviceBuffer(
+                           _params.savedMean()->uid(), deviceBuffers, numDeviceBuffers)
+                           .ptr;
+        savedInvVariancePtr = hipdnn_plugin_sdk::findDeviceBuffer(_params.savedInvVariance()->uid(),
+                                                                  deviceBuffers,
+                                                                  numDeviceBuffers)
+                                  .ptr;
     }
 
     if(_kernelVariant != 2)

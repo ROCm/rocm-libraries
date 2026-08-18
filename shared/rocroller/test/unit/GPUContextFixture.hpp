@@ -214,3 +214,14 @@ bool hasAnyOfTheseArchCaps(rocRoller::ContextPtr const context, Caps... caps)
                          << " has capability " << cap << std::endl;             \
         }                                                                       \
     } while(0)
+
+#define REQUIRE_ARCH_REVISION_ID(id)                                                         \
+    do                                                                                       \
+    {                                                                                        \
+        int targetRevId = m_context->targetArchitecture().target().asicRevisionId;           \
+        if(targetRevId != id)                                                                \
+        {                                                                                    \
+            GTEST_SKIP() << "Test requires revision id " << id                               \
+                         << " but current gpu has revision id " << targetRevId << std::endl; \
+        }                                                                                    \
+    } while(0)

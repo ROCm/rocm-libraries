@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 
+#include <cstdint>
 #include <iostream>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"

@@ -407,6 +407,7 @@ namespace rocRoller
         DEFAULT_DIM_NAME(Workgroup);
         DEFAULT_DIM_NAME(Workitem);
         DEFAULT_DIM_NAME(VGPR);
+        DEFAULT_DIM_NAME(VGPRBlockSet);
         DEFAULT_DIM_NAME(VGPRBlockNumber);
         DEFAULT_DIM_NAME(VGPRBlockIndex);
         DEFAULT_DIM_NAME(LDS);
