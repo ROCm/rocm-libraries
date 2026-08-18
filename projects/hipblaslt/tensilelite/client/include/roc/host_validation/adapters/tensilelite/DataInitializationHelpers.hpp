@@ -10,8 +10,10 @@
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include "DataInitialization.hpp"
+#include <hipblaslt/host_validation/Types.hpp>
 #include <hip/hip_runtime.h>
 #include <mxDataGen.hpp>
+#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include <stdexcept>
 
 namespace TensileLite
@@ -26,19 +28,8 @@ namespace TensileLite
             // ----------------------------------------------------------------
             inline hipDataType hipMxScaleTypeForDataGenerator(rocisa::DataType mxType)
             {
-                switch(mxType)
-                {
-                case rocisa::DataType::Float8:
-                    return HIP_R_8F_E4M3;
-                case rocisa::DataType::E5M3:
-                    return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
-                case rocisa::DataType::E8:
-                case rocisa::DataType::None:
-                    return HIP_R_8F_UE8M0;
-                default:
-                    throw std::runtime_error(
-                        "initializeMXData: unsupported MX scale element type for generateMXInput");
-                }
+                return hipblaslt::host_validation::hipDataTypeForScalarType(
+                    toHostValidationMxScaleType(mxType));
             }
             // ----------------------------------------------------------------
             //  MX *data*-element dtype mapper. generateMXInput() takes a
@@ -51,18 +42,15 @@ namespace TensileLite
             // ----------------------------------------------------------------
             inline hipDataType hipMxDataTypeForDataGenerator(rocisa::DataType dataType)
             {
-                switch(dataType)
+                const auto scalarType = toHostValidationScalarType(dataType);
+                switch(scalarType)
                 {
-                case rocisa::DataType::Float4:
-                    return static_cast<hipDataType>(HIP_R_4F_E2M1);
-                case rocisa::DataType::Float6:
-                    return static_cast<hipDataType>(HIP_R_6F_E2M3);
-                case rocisa::DataType::BFloat6:
-                    return static_cast<hipDataType>(HIP_R_6F_E3M2);
-                case rocisa::DataType::Float8:
-                    return HIP_R_8F_E4M3;
-                case rocisa::DataType::BFloat8:
-                    return HIP_R_8F_E5M2;
+                case roc::host_validation::ScalarType::Float4E2M1:
+                case roc::host_validation::ScalarType::Float6E2M3:
+                case roc::host_validation::ScalarType::Float6E3M2:
+                case roc::host_validation::ScalarType::Float8E4M3:
+                case roc::host_validation::ScalarType::Float8E5M2:
+                    return hipblaslt::host_validation::hipDataTypeForScalarType(scalarType);
                 default:
                     throw std::runtime_error(
                         "initializeMXData: unsupported MX data element type for generateMXInput");

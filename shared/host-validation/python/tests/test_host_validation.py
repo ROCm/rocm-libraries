@@ -1502,7 +1502,7 @@ class TensorAndGemmTests(unittest.TestCase):
                     )
                 )
 
-    def test_mx_rejects_unsupported_independent_scale_recipe(self):
+    def test_mx_scale_policy_is_independent_of_data_recipe(self):
         problem = hv.MxGenerationProblem()
         problem.data_type = hv.ScalarType.Float4E2M1
         problem.scale_type = hv.ScalarType.E8M0
@@ -1513,14 +1513,14 @@ class TensorAndGemmTests(unittest.TestCase):
         data_recipe.mode = hv.MxGenerationMode.Bounded
         data_recipe.parameter0 = -1.0
         data_recipe.parameter1 = 1.0
-        scale_recipe = hv.MxGenerationRecipe()
-        scale_recipe.mode = hv.MxGenerationMode.Normal
-        scale_recipe.parameter0 = 0.0
-        scale_recipe.parameter1 = 1.0
         problem.data = data_recipe
-        problem.scale = scale_recipe
-        with self.assertRaises(ValueError):
-            hv.generate_mx(problem)
+        problem.scale = hv.MxScaleGenerationMode.One
+
+        observed = hv.generate_mx(problem)
+        np.testing.assert_array_equal(
+            hv.to_numpy(observed.scales),
+            np.ones(observed.scales.shape[0], dtype=np.float32),
+        )
 
     def test_gemm_object_api_retains_owned_inputs_and_scaling(self):
         a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)

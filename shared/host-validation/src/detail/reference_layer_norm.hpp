@@ -85,7 +85,7 @@ LayerNormRunInfo referenceLayerNormTyped(const LayerNormProblem& problem) {
     if (problem.beta) beta.emplace(*problem.beta);
 
     const size_t axisElements = problem.input.shape()[problem.axis];
-    const size_t slices = problem.input.shape().elementCount() / axisElements;
+    const size_t slices = problem.input.shape().elementCountExcluding(problem.axis);
     const Accumulator epsilon = static_cast<Accumulator>(problem.epsilon);
 
     for (size_t slice = 0; slice < slices; ++slice) {

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <roc/host_validation/amd_gpu_layout/mx.hpp>
 #include <stdexcept>
 #include <utility>
@@ -23,6 +24,7 @@ namespace
     using roc::host_validation::MxGenerationMode;
     using roc::host_validation::MxGenerationProblem;
     using roc::host_validation::MxGenerationRecipe;
+    using roc::host_validation::MxScaleGenerationMode;
     using roc::host_validation::ScalarType;
 
     std::pair<int, int> randIntRangeFor(ScalarType dataType)
@@ -64,22 +66,26 @@ namespace
                || mode == MxGenerationMode::Unbounded || mode == MxGenerationMode::Normal;
     }
 
-    bool isConstantScaleRecipe(MxGenerationMode mode)
+    std::optional<MxScaleGenerationMode> scaleGenerationMode(MxGenerationMode mode)
     {
         switch(mode)
         {
         case MxGenerationMode::Zeros:
+            return MxScaleGenerationMode::Minimum;
         case MxGenerationMode::Ones:
         case MxGenerationMode::NegativeOnes:
-        case MxGenerationMode::Twos:
-        case MxGenerationMode::Maximum:
         case MxGenerationMode::DenormalMinimum:
         case MxGenerationMode::DenormalMaximum:
-        case MxGenerationMode::NaN:
         case MxGenerationMode::Infinity:
-            return true;
+            return MxScaleGenerationMode::One;
+        case MxGenerationMode::Twos:
+            return MxScaleGenerationMode::Two;
+        case MxGenerationMode::Maximum:
+            return MxScaleGenerationMode::Maximum;
+        case MxGenerationMode::NaN:
+            return MxScaleGenerationMode::NaN;
         default:
-            return false;
+            return std::nullopt;
         }
     }
 
@@ -231,9 +237,11 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     {
         MxGenerationRecipe const scaleRecipe
             = generationRecipe(scaleInitMethod, hostDataType, -1.0f, 1.0f);
-        if(recipesEqual(problem.data, scaleRecipe)
-           || (isRandomLike(problem.data.mode) && isConstantScaleRecipe(scaleRecipe.mode)))
-            problem.scale = scaleRecipe;
+        if(!recipesEqual(problem.data, scaleRecipe) && isRandomLike(problem.data.mode))
+        {
+            if(const auto scaleMode = scaleGenerationMode(scaleRecipe.mode))
+                problem.scale = *scaleMode;
+        }
     }
     problem.seed = seed;
 

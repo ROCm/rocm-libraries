@@ -44,7 +44,7 @@ SoftmaxRunInfo referenceSoftmaxTyped(const SoftmaxProblem& problem) {
     const RuntimeTensorReader<Accumulator> input(problem.input);
     const RuntimeTensorWriter<Accumulator> output(problem.output);
     const size_t axisElements = problem.input.shape()[problem.axis];
-    const size_t slices = problem.input.shape().elementCount() / axisElements;
+    const size_t slices = problem.input.shape().elementCountExcluding(problem.axis);
     std::vector<Accumulator> exponentials(axisElements);
 
     for (size_t slice = 0; slice < slices; ++slice) {
