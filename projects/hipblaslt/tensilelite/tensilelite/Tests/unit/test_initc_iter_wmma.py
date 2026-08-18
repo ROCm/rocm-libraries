@@ -38,7 +38,7 @@ def _endCounter(pgr, suppress=False, halfPLR=False):
     # unrollLoopEntryEndCounter reads only kernel[...] (not self), so a dummy
     # self (None) and a plain dict kernel are sufficient. Import lazily to keep
     # module import light.
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
     kernel = {
         "PrefetchGlobalRead": pgr,

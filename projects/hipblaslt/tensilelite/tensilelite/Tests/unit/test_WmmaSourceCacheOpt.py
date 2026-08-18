@@ -7,14 +7,14 @@ import re
 import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     MFMATileRange, ReadGranularity, SchedulerConfig, MFMAPlacement,
 )
-from Tensile.Components.Subtile.InstructionEmitter import _zigzag_order
-from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
-from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, CD_F32
+from tensilelite.Components.Subtile.InstructionEmitter import _zigzag_order
+from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
+from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16, CD_F32
 
 
 # ── Helpers ─────────────────────────────────────────────────────
