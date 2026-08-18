@@ -123,7 +123,10 @@ namespace
         canary_workspace& operator=(const canary_workspace&) = delete;
 
         bool   valid() const { return m_valid; }
-        void*  ptr() const { return m_storage; }
+        void*  ptr() const
+        {
+            return const_cast<unsigned char*>(static_cast<const unsigned char*>(m_storage));
+        }
         size_t bytes() const { return m_workspace_bytes; }
 
     private:
@@ -131,6 +134,48 @@ namespace
         size_t                       m_workspace_bytes = 0;
         device_vector<unsigned char> m_storage;
         bool                         m_valid           = false;
+    };
+
+    // device_vector<T> initializes elements and cannot hold pointer arrays.
+    class device_pointer_array
+    {
+    public:
+        explicit device_pointer_array(size_t count)
+            : m_count(count)
+        {
+            if(count > 0)
+                EXPECT_EQ(hipMalloc(&m_ptr, count * sizeof(void*)), hipSuccess);
+        }
+
+        ~device_pointer_array()
+        {
+            if(m_ptr)
+                EXPECT_EQ(hipFree(m_ptr), hipSuccess);
+        }
+
+        device_pointer_array(const device_pointer_array&)            = delete;
+        device_pointer_array& operator=(const device_pointer_array&) = delete;
+
+        hipError_t memcheck() const
+        {
+            return m_count == 0 || m_ptr ? hipSuccess : hipErrorOutOfMemory;
+        }
+
+        template <typename T>
+        T** as()
+        {
+            return reinterpret_cast<T**>(m_ptr);
+        }
+
+        template <typename T>
+        const T* const* as_const() const
+        {
+            return reinterpret_cast<const T* const*>(m_ptr);
+        }
+
+    private:
+        void*  m_ptr   = nullptr;
+        size_t m_count = 0;
     };
 
     template <typename T>
@@ -154,8 +199,9 @@ namespace
 
         const T         alpha_t(1);
         const T         beta_t(1);
-        const float     alpha_r = 1;
-        const float     beta_r  = 1;
+        using U           = real_t<T>;
+        const U         alpha_h(1);
+        const U         beta_h(1);
         const T* const* null_A  = nullptr;
         T* const*       null_C  = nullptr;
         const T*        null_As = nullptr;
@@ -170,11 +216,11 @@ namespace
                                                      transA,
                                                      n,
                                                      k,
-                                                     &alpha_r,
+                                                     &alpha_h,
                                                      null_As,
                                                      lda,
                                                      0,
-                                                     &beta_r,
+                                                     &beta_h,
                                                      null_Cs,
                                                      ldc,
                                                      0,
@@ -187,10 +233,10 @@ namespace
                                              transA,
                                              n,
                                              k,
-                                             &alpha_r,
+                                             &alpha_h,
                                              null_A,
                                              lda,
-                                             &beta_r,
+                                             &beta_h,
                                              null_C,
                                              ldc,
                                              batch_count);
@@ -290,10 +336,11 @@ namespace
         ASSERT_EQ(hipMemset((T*)dA, 0, a_storage * sizeof(T)), hipSuccess);
         ASSERT_EQ(hipMemset((T*)dC, 0, c_elems * sizeof(T)), hipSuccess);
 
-        const T     alpha_t(1);
-        const T     beta_t(1);
-        const float alpha_r = 1;
-        const float beta_r  = 1;
+        const T alpha_t(1);
+        const T beta_t(1);
+        using U     = real_t<T>;
+        const U alpha_h(1);
+        const U beta_h(1);
 
         if(strided)
         {
@@ -305,11 +352,11 @@ namespace
                                                           transA,
                                                           n,
                                                           k,
-                                                          &alpha_r,
+                                                          &alpha_h,
                                                           (const T*)dA,
                                                           lda,
                                                           0,
-                                                          &beta_r,
+                                                          &beta_h,
                                                           (T*)dC,
                                                           ldc,
                                                           rocblas_stride(ldc) * n,
@@ -342,16 +389,16 @@ namespace
             for(rocblas_int b = 0; b < batch_count; ++b)
                 hC[b] = (T*)dC + size_t(b) * size_t(ldc) * size_t(n);
 
-            device_vector<const T*> dA_array(batch_count);
-            device_vector<T*>       dC_array(batch_count);
+            device_pointer_array dA_array(batch_count);
+            device_pointer_array dC_array(batch_count);
             ASSERT_EQ(dA_array.memcheck(), hipSuccess);
             ASSERT_EQ(dC_array.memcheck(), hipSuccess);
-            ASSERT_EQ(hipMemcpy(dA_array,
+            ASSERT_EQ(hipMemcpy(dA_array.as<const T>(),
                                 hA.data(),
                                 sizeof(const T*) * size_t(batch_count),
                                 hipMemcpyHostToDevice),
                       hipSuccess);
-            ASSERT_EQ(hipMemcpy(dC_array,
+            ASSERT_EQ(hipMemcpy(dC_array.as<T>(),
                                 hC.data(),
                                 sizeof(T*) * size_t(batch_count),
                                 hipMemcpyHostToDevice),
@@ -364,11 +411,11 @@ namespace
                                                   transA,
                                                   n,
                                                   k,
-                                                  &alpha_r,
-                                                  dA_array,
+                                                  &alpha_h,
+                                                  dA_array.as_const<T>(),
                                                   lda,
-                                                  &beta_r,
-                                                  dC_array,
+                                                  &beta_h,
+                                                  dC_array.as<T>(),
                                                   ldc,
                                                   batch_count),
                           rocblas_status_success);
@@ -381,10 +428,10 @@ namespace
                                                   n,
                                                   k,
                                                   &alpha_t,
-                                                  dA_array,
+                                                  dA_array.as_const<T>(),
                                                   lda,
                                                   &beta_t,
-                                                  dC_array,
+                                                  dC_array.as<T>(),
                                                   ldc,
                                                   batch_count),
                           rocblas_status_success);
