@@ -197,11 +197,11 @@ github actions:
     - 'projects/composablekernel/{example,test,client_example}/*/*{conv_,conv.,convnd,conv1d,conv2d,conv3d,convolution,convscale,convinvscale}*'
     - 'projects/composablekernel/{example,test,client_example}/*/*{im2col,img2col,col2im,image_to_column,column_to_image}*'
 
-"ck: fmha":
+"ck: attention-moe":
 - changed-files:
   - any-glob-to-any-file:
-    - 'projects/composablekernel/**/*{fmha,mha,attention,attn,softmax_gemm}*'
-    - 'projects/composablekernel/**/*{fmha,mha,attention,attn,softmax_gemm}*/**'
+    - 'projects/composablekernel/**/*{fmha,mha,attention,attn,softmax_gemm,moe,topk}*'
+    - 'projects/composablekernel/**/*{fmha,mha,attention,attn,softmax_gemm,moe,topk}*/**'
     # Attention-only files whose names carry none of the tokens above.
     - 'projects/composablekernel/include/ck/tensor_operation/gpu/device/masking_specialization.hpp'
     - 'projects/composablekernel/test/position_embedding/**'
