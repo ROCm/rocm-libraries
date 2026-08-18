@@ -1987,6 +1987,26 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             for (auto& beforeGroup : exclusiveBeforeGroups) {
                 int adjustedAfterEnd = afterGroup.threshold;
                 int adjustedBeforeBegin = beforeGroup.threshold;
+                PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion after-before exclusive overlap] "
+                                     << " afterThreshold=" << afterGroup.threshold
+                                     << " beforeThreshold=" << beforeGroup.threshold
+                                     << " afterWindow=" << afterGroup.window << " beforeWindow="
+                                     << beforeGroup.window << " totalWmma=" << totalWmma << "\n");
+                const int adjustedAfterBegin = std::max(0, adjustedAfterEnd - afterGroup.window);
+                const int adjustedBeforeEnd = adjustedBeforeBegin + beforeGroup.window;
+                const bool overlap = (adjustedAfterBegin < adjustedBeforeEnd) &&
+                                     (adjustedBeforeBegin <= adjustedAfterEnd);
+                if (overlap) {
+                    const int deltaAfter = (adjustedAfterEnd - adjustedBeforeBegin + 1) / 2 + 1;
+                    const int deltaBefore = (adjustedAfterEnd - adjustedBeforeBegin) / 2 + 1;
+                    adjustedAfterEnd = std::clamp(adjustedAfterEnd - deltaAfter, 0, totalWmma);
+                    adjustedBeforeBegin =
+                        std::clamp(adjustedBeforeBegin + deltaBefore, 0, totalWmma);
+                    afterGroup.threshold = adjustedAfterEnd;
+                    beforeGroup.threshold = adjustedBeforeBegin;
+                    setGroupThreshold(afterGroup, adjustedAfterEnd);
+                    setGroupThreshold(beforeGroup, adjustedBeforeBegin);
+                }
                 if (targetTensorLoadWmmaSpace > 0) {
                     const int deltaAfter = targetTensorLoadWmmaSpace / 2;
                     const int deltaBefore = (targetTensorLoadWmmaSpace + 1) / 2;
@@ -1998,27 +2018,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     setGroupThreshold(afterGroup, adjustedAfterEnd);
                     setGroupThreshold(beforeGroup, adjustedBeforeBegin);
                 }
-                const int adjustedAfterBegin = std::max(0, adjustedAfterEnd - afterGroup.window);
-                const int adjustedBeforeEnd = adjustedBeforeBegin + beforeGroup.window;
-                const bool overlap = (adjustedAfterBegin < adjustedBeforeEnd) &&
-                                     (adjustedBeforeBegin < adjustedAfterEnd);
-                if (overlap) {
-                    const int mergedThreshold = (adjustedAfterEnd + adjustedBeforeBegin) / 2;
-                    afterGroup.threshold = mergedThreshold;
-                    beforeGroup.threshold = mergedThreshold;
-                    setGroupThreshold(afterGroup, mergedThreshold);
-                    setGroupThreshold(beforeGroup, mergedThreshold);
-                }
 
                 PASS_DEBUG(
                     std::cerr
                     << "[CDNA5 onInitRegion after-before exclusive overlap] afterGroupAnchor="
                     << afterGroup.anchor << " afterGroupSize=" << afterGroup.barriers.size()
                     << " beforeGroupAnchor=" << beforeGroup.anchor << " beforeGroupSize="
-                    << beforeGroup.barriers.size() << " afterThreshold=" << adjustedAfterEnd
-                    << " afterWmmaWindow=" << afterGroup.window
-                    << " beforeThreshold=" << adjustedBeforeBegin
+                    << beforeGroup.barriers.size() << " afterWmmaWindow=" << afterGroup.window
                     << " beforeWmmaWindow=" << beforeGroup.window << " overlap=" << overlap
+                    << "adjustedAfterEnd=" << adjustedAfterEnd
+                    << " adjustedBeforeBegin=" << adjustedBeforeBegin
                     << " targetTensorLoadWmmaSpace=" << targetTensorLoadWmmaSpace << "\n");
             }
         }

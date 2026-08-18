@@ -111,7 +111,10 @@ int cycleDistance(IRList::iterator afterIt, IRList::iterator beforeIt) {
     for (auto it = std::next(afterIt); it != beforeIt; ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
-        cycles += inst->issueCycles;
+        if (isMatrixInstruction(*inst))
+            cycles += inst->latencyCycles;
+        else
+            cycles += inst->issueCycles;
     }
     return cycles;
 }
