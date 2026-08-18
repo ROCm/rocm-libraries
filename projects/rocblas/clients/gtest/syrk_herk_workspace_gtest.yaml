@@ -5,16 +5,42 @@ include: rocblas_common.yaml
 # overrun. Aliases A and supplies an exact-sized workspace with a trailing
 # guard, so the case fits pre_checkin rather than stress. Values alone cannot
 # detect this defect: save/restore use the same offset map.
+#
+# batch_count 65536 is intentionally omitted: on the second grid-z pass only
+# blockIdx.z=0 runs, so the pre-fix compounded offset error is zero there.
 
 Tests:
-- name: syrk_herk_workspace_overrun
+- name: syrk_herk_workspace_overrun_worst
   category: pre_checkin
+  uplo: [ U, L ]
+  arguments:
+    - { N: 2, K: 500, lda: 500, ldc: 2, batch_count: 131070, transA: T }
   function:
     - syrk_batched_workspace_canary
     - syrk_strided_batched_workspace_canary
     - herk_batched_workspace_canary
     - herk_strided_batched_workspace_canary
-  precision: *single_precision
+    - dsyrk_batched_workspace_canary
+    - dsyrk_strided_batched_workspace_canary
+    - zherk_batched_workspace_canary
+    - zherk_strided_batched_workspace_canary
+  os_flags: [ LINUX ]
+  gpu_arch: ['90a','942']
+
+- name: syrk_herk_workspace_overrun_small
+  category: pre_checkin
+  uplo: [ U, L ]
+  arguments:
+    - { N: 2, K: 500, lda: 500, ldc: 2, batch_count: 65539, transA: T }
+  function:
+    - syrk_batched_workspace_canary
+    - syrk_strided_batched_workspace_canary
+    - herk_batched_workspace_canary
+    - herk_strided_batched_workspace_canary
+    - dsyrk_batched_workspace_canary
+    - dsyrk_strided_batched_workspace_canary
+    - zherk_batched_workspace_canary
+    - zherk_strided_batched_workspace_canary
   os_flags: [ LINUX ]
   gpu_arch: ['90a','942']
 ...

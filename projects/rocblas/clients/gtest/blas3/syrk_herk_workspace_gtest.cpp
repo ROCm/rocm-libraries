@@ -25,6 +25,7 @@
 #include "device_vector.hpp"
 #include "rocblas.hpp"
 #include "rocblas_data.hpp"
+#include "rocblas_datatype2string.hpp"
 #include "rocblas_test.hpp"
 
 #include <cstring>
@@ -36,13 +37,20 @@ namespace
     // Regression for rocblas_copy_triangular_syrk_herk_kernel batch-sweep pointer
     // mutation. Values alone cannot detect it: save/restore use the same map.
     // Supply an exact-sized workspace with a contiguous canary behind it.
-    constexpr rocblas_int   c_n           = 2;
-    constexpr rocblas_int   c_k           = 500; // syrk_k_lower_threshold
-    constexpr rocblas_int   c_batch_count = 131070; // two saturated grid-z passes
-    constexpr rocblas_int   c_lda         = 500;
-    constexpr rocblas_int   c_ldc         = 2;
-    constexpr unsigned char c_guard_byte  = 0xA5;
-    constexpr size_t        c_guard_bytes = 8192;
+    //
+    // batch_count notes (pre-fix compounded W_C offset bug):
+    //   65536 — intentionally omitted: second grid-z pass has blockIdx.z=0 only,
+    //           so the extra offset is zero and the canary cannot fail.
+    //   65539 — small-magnitude detector (second pass z=2,3 write past the end).
+    //   131070 — two saturated grid-z passes; strongest reproducer for n=2.
+    //
+    // ILP64 (_64) batched syrk/herk above c_i64_grid_YZ_chunk (65520 production)
+    // is chunked into rocblas_internal_syr2k_her2k_template and never reaches
+    // this kernel; no _64 canary is required for this defect class.
+    constexpr unsigned char c_guard_byte = 0xA5;
+    // tri(n)=1 at n=2; pre-fix worst two-pass error is 65534 slots (~262 KiB for
+    // float). 8192 bytes catches the leading guard trip for this fixed shape.
+    constexpr size_t c_guard_bytes = 8192;
 
     bool fill_guard(void* workspace, size_t workspace_bytes)
     {
@@ -119,15 +127,21 @@ namespace
         size_t bytes() const { return m_workspace_bytes; }
 
     private:
-        rocblas_handle              m_handle;
-        size_t                      m_workspace_bytes = 0;
+        rocblas_handle               m_handle;
+        size_t                       m_workspace_bytes = 0;
         device_vector<unsigned char> m_storage;
-        bool                        m_valid           = false;
+        bool                         m_valid           = false;
     };
 
     template <typename T>
     bool query_workspace(rocblas_handle    handle,
                          rocblas_operation transA,
+                         rocblas_fill      uplo,
+                         rocblas_int       n,
+                         rocblas_int       k,
+                         rocblas_int       lda,
+                         rocblas_int       ldc,
+                         rocblas_int       batch_count,
                          bool              strided,
                          bool              herk,
                          size_t*           bytes)
@@ -152,34 +166,34 @@ namespace
             if(strided)
             {
                 st = rocblas_herk_strided_batched<T>(handle,
-                                                     rocblas_fill_upper,
+                                                     uplo,
                                                      transA,
-                                                     c_n,
-                                                     c_k,
+                                                     n,
+                                                     k,
                                                      &alpha_r,
                                                      null_As,
-                                                     c_lda,
+                                                     lda,
                                                      0,
                                                      &beta_r,
                                                      null_Cs,
-                                                     c_ldc,
+                                                     ldc,
                                                      0,
-                                                     c_batch_count);
+                                                     batch_count);
             }
             else
             {
                 st = rocblas_herk_batched<T>(handle,
-                                             rocblas_fill_upper,
+                                             uplo,
                                              transA,
-                                             c_n,
-                                             c_k,
+                                             n,
+                                             k,
                                              &alpha_r,
                                              null_A,
-                                             c_lda,
+                                             lda,
                                              &beta_r,
                                              null_C,
-                                             c_ldc,
-                                             c_batch_count);
+                                             ldc,
+                                             batch_count);
             }
         }
         else
@@ -187,34 +201,34 @@ namespace
             if(strided)
             {
                 st = rocblas_syrk_strided_batched<T>(handle,
-                                                     rocblas_fill_upper,
+                                                     uplo,
                                                      transA,
-                                                     c_n,
-                                                     c_k,
+                                                     n,
+                                                     k,
                                                      &alpha_t,
                                                      null_As,
-                                                     c_lda,
+                                                     lda,
                                                      0,
                                                      &beta_t,
                                                      null_Cs,
-                                                     c_ldc,
+                                                     ldc,
                                                      0,
-                                                     c_batch_count);
+                                                     batch_count);
             }
             else
             {
                 st = rocblas_syrk_batched<T>(handle,
-                                             rocblas_fill_upper,
+                                             uplo,
                                              transA,
-                                             c_n,
-                                             c_k,
+                                             n,
+                                             k,
                                              &alpha_t,
                                              null_A,
-                                             c_lda,
+                                             lda,
                                              &beta_t,
                                              null_C,
-                                             c_ldc,
-                                             c_batch_count);
+                                             ldc,
+                                             batch_count);
             }
         }
 
@@ -229,8 +243,15 @@ namespace
     }
 
     template <typename T>
-    void run_workspace_canary(bool strided, bool herk)
+    void run_workspace_canary(const Arguments& arg, bool strided, bool herk)
     {
+        const rocblas_int  n           = arg.N;
+        const rocblas_int  k           = arg.K;
+        const rocblas_int  lda         = arg.lda;
+        const rocblas_int  ldc         = arg.ldc;
+        const rocblas_int  batch_count = arg.batch_count;
+        const rocblas_fill uplo        = char2rocblas_fill(arg.uplo);
+
         // Default-constructed handle: do not go through user_allocated_workspace.
         rocblas_local_handle handle;
 
@@ -238,7 +259,17 @@ namespace
             = herk ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose;
 
         size_t workspace_bytes = 0;
-        ASSERT_TRUE(query_workspace<T>(handle, transA, strided, herk, &workspace_bytes));
+        ASSERT_TRUE(query_workspace<T>(handle,
+                                       transA,
+                                       uplo,
+                                       n,
+                                       k,
+                                       lda,
+                                       ldc,
+                                       batch_count,
+                                       strided,
+                                       herk,
+                                       &workspace_bytes));
         // Path must be live: a zero query means rocblas_use_only_gemm did not select
         // the workspace path (yaml gpu_arch also restricts these cases to gfx90a/gfx942).
         if(workspace_bytes == 0)
@@ -249,8 +280,8 @@ namespace
 
         // Alias A across batches (read-only). Keep C distinct so writers do not race.
         // For transA = T/C, A is k x n with lda >= k. Storage lda * n.
-        const size_t a_storage = size_t(c_lda) * size_t(c_n);
-        const size_t c_elems   = size_t(c_ldc) * size_t(c_n) * size_t(c_batch_count);
+        const size_t a_storage = size_t(lda) * size_t(n);
+        const size_t c_elems   = size_t(ldc) * size_t(n) * size_t(batch_count);
 
         device_vector<T> dA(a_storage);
         device_vector<T> dC(c_elems);
@@ -270,92 +301,92 @@ namespace
             if(herk)
             {
                 ASSERT_EQ(rocblas_herk_strided_batched<T>(handle,
-                                                          rocblas_fill_upper,
+                                                          uplo,
                                                           transA,
-                                                          c_n,
-                                                          c_k,
+                                                          n,
+                                                          k,
                                                           &alpha_r,
                                                           (const T*)dA,
-                                                          c_lda,
+                                                          lda,
                                                           0,
                                                           &beta_r,
                                                           (T*)dC,
-                                                          c_ldc,
-                                                          rocblas_stride(c_ldc) * c_n,
-                                                          c_batch_count),
+                                                          ldc,
+                                                          rocblas_stride(ldc) * n,
+                                                          batch_count),
                           rocblas_status_success);
             }
             else
             {
                 ASSERT_EQ(rocblas_syrk_strided_batched<T>(handle,
-                                                          rocblas_fill_upper,
+                                                          uplo,
                                                           transA,
-                                                          c_n,
-                                                          c_k,
+                                                          n,
+                                                          k,
                                                           &alpha_t,
                                                           (const T*)dA,
-                                                          c_lda,
+                                                          lda,
                                                           0,
                                                           &beta_t,
                                                           (T*)dC,
-                                                          c_ldc,
-                                                          rocblas_stride(c_ldc) * c_n,
-                                                          c_batch_count),
+                                                          ldc,
+                                                          rocblas_stride(ldc) * n,
+                                                          batch_count),
                           rocblas_status_success);
             }
         }
         else
         {
-            std::vector<const T*> hA(c_batch_count, (const T*)dA);
-            std::vector<T*>       hC(c_batch_count);
-            for(rocblas_int b = 0; b < c_batch_count; ++b)
-                hC[b] = (T*)dC + size_t(b) * size_t(c_ldc) * size_t(c_n);
+            std::vector<const T*> hA(batch_count, (const T*)dA);
+            std::vector<T*>       hC(batch_count);
+            for(rocblas_int b = 0; b < batch_count; ++b)
+                hC[b] = (T*)dC + size_t(b) * size_t(ldc) * size_t(n);
 
-            device_vector<const T*> dA_array(c_batch_count);
-            device_vector<T*>       dC_array(c_batch_count);
+            device_vector<const T*> dA_array(batch_count);
+            device_vector<T*>       dC_array(batch_count);
             ASSERT_EQ(dA_array.memcheck(), hipSuccess);
             ASSERT_EQ(dC_array.memcheck(), hipSuccess);
             ASSERT_EQ(hipMemcpy(dA_array,
                                 hA.data(),
-                                sizeof(const T*) * size_t(c_batch_count),
+                                sizeof(const T*) * size_t(batch_count),
                                 hipMemcpyHostToDevice),
                       hipSuccess);
             ASSERT_EQ(hipMemcpy(dC_array,
                                 hC.data(),
-                                sizeof(T*) * size_t(c_batch_count),
+                                sizeof(T*) * size_t(batch_count),
                                 hipMemcpyHostToDevice),
                       hipSuccess);
 
             if(herk)
             {
                 ASSERT_EQ(rocblas_herk_batched<T>(handle,
-                                                  rocblas_fill_upper,
+                                                  uplo,
                                                   transA,
-                                                  c_n,
-                                                  c_k,
+                                                  n,
+                                                  k,
                                                   &alpha_r,
                                                   dA_array,
-                                                  c_lda,
+                                                  lda,
                                                   &beta_r,
                                                   dC_array,
-                                                  c_ldc,
-                                                  c_batch_count),
+                                                  ldc,
+                                                  batch_count),
                           rocblas_status_success);
             }
             else
             {
                 ASSERT_EQ(rocblas_syrk_batched<T>(handle,
-                                                  rocblas_fill_upper,
+                                                  uplo,
                                                   transA,
-                                                  c_n,
-                                                  c_k,
+                                                  n,
+                                                  k,
                                                   &alpha_t,
                                                   dA_array,
-                                                  c_lda,
+                                                  lda,
                                                   &beta_t,
                                                   dC_array,
-                                                  c_ldc,
-                                                  c_batch_count),
+                                                  ldc,
+                                                  batch_count),
                           rocblas_status_success);
             }
         }
@@ -363,17 +394,37 @@ namespace
         expect_guard_clean(handle, workspace.ptr(), workspace.bytes());
     }
 
+    bool is_workspace_canary_function(const char* fn)
+    {
+        return !strcmp(fn, "syrk_batched_workspace_canary")
+               || !strcmp(fn, "syrk_strided_batched_workspace_canary")
+               || !strcmp(fn, "herk_batched_workspace_canary")
+               || !strcmp(fn, "herk_strided_batched_workspace_canary")
+               || !strcmp(fn, "dsyrk_batched_workspace_canary")
+               || !strcmp(fn, "dsyrk_strided_batched_workspace_canary")
+               || !strcmp(fn, "zherk_batched_workspace_canary")
+               || !strcmp(fn, "zherk_strided_batched_workspace_canary");
+    }
+
     void testing_syrk_herk_workspace(const Arguments& arg)
     {
         const char* fn = arg.function;
         if(!strcmp(fn, "syrk_batched_workspace_canary"))
-            run_workspace_canary<float>(false, false);
+            run_workspace_canary<float>(arg, false, false);
         else if(!strcmp(fn, "syrk_strided_batched_workspace_canary"))
-            run_workspace_canary<float>(true, false);
+            run_workspace_canary<float>(arg, true, false);
         else if(!strcmp(fn, "herk_batched_workspace_canary"))
-            run_workspace_canary<rocblas_float_complex>(false, true);
+            run_workspace_canary<rocblas_float_complex>(arg, false, true);
         else if(!strcmp(fn, "herk_strided_batched_workspace_canary"))
-            run_workspace_canary<rocblas_float_complex>(true, true);
+            run_workspace_canary<rocblas_float_complex>(arg, true, true);
+        else if(!strcmp(fn, "dsyrk_batched_workspace_canary"))
+            run_workspace_canary<double>(arg, false, false);
+        else if(!strcmp(fn, "dsyrk_strided_batched_workspace_canary"))
+            run_workspace_canary<double>(arg, true, false);
+        else if(!strcmp(fn, "zherk_batched_workspace_canary"))
+            run_workspace_canary<rocblas_double_complex>(arg, false, true);
+        else if(!strcmp(fn, "zherk_strided_batched_workspace_canary"))
+            run_workspace_canary<rocblas_double_complex>(arg, true, true);
         else
             FAIL() << "unexpected function " << fn;
     }
@@ -397,10 +448,7 @@ namespace
 
         static bool function_filter(const Arguments& arg)
         {
-            return !strcmp(arg.function, "syrk_batched_workspace_canary")
-                   || !strcmp(arg.function, "syrk_strided_batched_workspace_canary")
-                   || !strcmp(arg.function, "herk_batched_workspace_canary")
-                   || !strcmp(arg.function, "herk_strided_batched_workspace_canary");
+            return is_workspace_canary_function(arg.function);
         }
 
         static std::string name_suffix(const Arguments& arg)
