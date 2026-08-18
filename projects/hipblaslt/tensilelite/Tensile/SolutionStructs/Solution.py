@@ -3171,6 +3171,16 @@ class Solution(collections.abc.Mapping):
                  "%d, so the per-wave tile extent would truncate"
                  % (state["TDMWaveSpread"], tc, numComp, mtKey, state[mtKey], numComp))
           return
+      # Last in the block, so a malformed request still gets its own message above
+      # and this one declines a well-formed one. The offset arithmetic reads
+      # tdmWavePartition, but two dispatch sites still hardcode the two-way
+      # parity: the de-aliased fill gate and the single parity MulticastMask.
+      reject(state, printRejectionReason,
+             "TDMWaveSpread=%d is not implemented: the de-aliased TDM fill is issued under a "
+             "two-way wave-parity gate, so the components on the waves that gate excludes are "
+             "addressed and never transferred, and half of each tile reaches LDS unwritten"
+             % state["TDMWaveSpread"])
+      return
 
     # DepthU == -1?
     if state["DepthU"] == -1:

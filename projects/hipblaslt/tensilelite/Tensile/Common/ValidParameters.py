@@ -1273,6 +1273,12 @@ validParameters = { # we need to make sure this matches develop
     #      waves 1 and 3. This is the 2/2/4 overlay the OAI reference kernel uses.
     #      Requires the de-aliased {A} + {B} + {MXSA,MXSB} grouping: with A and B
     #      sharing one set neither can be on all four waves.
+    # Row 1 is described by tdmWavePartition and addressed from it correctly, but
+    # is rejected as unimplemented: two dispatch sites still hardcode the two-way
+    # parity rather than reading the partition -- the de-aliased fill gate in
+    # KernelWriterAssembly._emitTdmDealiasedIssue, and the single parity
+    # MulticastMask. Under either, the components on the waves the parity excludes
+    # are addressed and never moved.
     "TDMWaveSpread": [0, 1],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
