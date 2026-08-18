@@ -25,15 +25,11 @@ _common_excludes: &common_excludes
 #   - quick:         commented out below. The standard tier now carries the
 #                    Smoke set, so a separate quick tier is redundant until
 #                    label-based selection lands.
-#   - standard:      the quick-tier bundles ("quick_*") plus any C++ Smoke GPU
-#                    cases ("Smoke/*"). The full "*" tier is ~28 min, dominated
-#                    by full-tier large-shape cases, so PR runs are trimmed to
-#                    the quick tier. The harness auto-skips ops
-#                    HIP_MLOPS_ENGINE can't service (see the engine-support
-#                    note above), so the patterns are safe here. Bundles are
-#                    the CI driver; "Smoke/*" now only picks up the few
-#                    always-built C++ tests, plus everything else on a
-#                    -DBUILD_CPP_GRAPH_TESTS=ON branch.
+#   - standard:      all Smoke GPU cases ("Smoke/*"). The full "*" tier is
+#                    ~28 min, dominated by Full-tier large-shape cases, so PR
+#                    runs are trimmed to Smoke (~4-5 min). The harness auto-skips
+#                    ops HIP_MLOPS_ENGINE can't service (see the engine-support
+#                    note above), so the pattern is safe here.
 #   - comprehensive: commented out below (an empty test_patterns list no longer
 #                    validates, so the tier is commented out -> runs nothing).
 #   - full:          commented out below (same reason).
@@ -55,9 +51,8 @@ test_categories:
   #     - "smoke"
 
   standard:
-    description: "External integration coverage (temporary: runs the quick tier only; the full '*' tier is ~28 min, dominated by full-tier large shapes, until CI label support lands)"
+    description: "External integration coverage (temporary: runs the Smoke tier only; the full '*' tier is ~28 min, dominated by Full-tier large shapes, until CI label support lands)"
     test_patterns:
-      - "quick_*"
       - "Smoke/*"
     exclude: *common_excludes
     labels:
