@@ -742,6 +742,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return
     if self.codes.globalReadA is None or not self.codes.globalReadA.middle.itemsSize():
       return
+    # itemsSize() counts sub-modules, not instructions, so a group of empty ones
+    # -- what ScheduleIterAlg=3 leaves here -- reaches this point. Re-slotting it
+    # guards nothing and leaves the single-buffered fill at the top of the loop,
+    # wrong from K = 2*DepthU.
+    assert any(isinstance(item, TensorLoadToLds) for item in src.flatitems()), \
+      "decoupled PGR: the fill group to re-slot carries no tensor_load_to_lds"
 
     assert self.isTdmWaveSeparated(kernel), \
       "decoupled PGR with divergent block counts needs the wave-separated TDM descriptor"
