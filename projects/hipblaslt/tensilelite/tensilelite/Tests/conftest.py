@@ -119,7 +119,7 @@ def assign_gpu_to_worker(worker_id):
         return
 
     import re
-    from Tensile.ParallelExecution import detectAvailableGpus
+    from tensilelite.ParallelExecution import detectAvailableGpus
 
     base_memfile = os.environ.get("HSA_MODEL_MEMFILE", "")
     if base_memfile:
@@ -184,7 +184,7 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
         if pytestconfig.getoption("--prebuilt-client"):
             rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
 
-    # Forward --gpu-targets to Tensile. Do NOT forward --build-only or
+    # Forward --gpu-targets to tensilelite. Do NOT forward --build-only or
     # --use-cache here — those are hardcoded in each test function's args.
     if pytestconfig.getoption("--gpu-targets"):
         rv += ["--gpu-targets", pytestconfig.getoption("--gpu-targets")]
@@ -247,8 +247,8 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture
 def useGlobalParameters(tensile_args):
-    from Tensile import Common
-    from Tensile import Tensile
+    from tensilelite import Common
+    from tensilelite import tensilelite
     import argparse
 
     class gpUpdater:
@@ -257,7 +257,7 @@ def useGlobalParameters(tensile_args):
 
         def __enter__(self):
             argParser = argparse.ArgumentParser()
-            Tensile.addCommonArguments(argParser)
+            tensilelite.addCommonArguments(argParser)
             args = argParser.parse_args(tensile_args)
 
             Common.restoreDefaultGlobalParameters()
@@ -266,7 +266,7 @@ def useGlobalParameters(tensile_args):
             isa = Common.detectGlobalCurrentISA(args.device)
             Common.assignGlobalParameters({}, isa)
 
-            overrideParameters = Tensile.argUpdatedGlobalParameters(args)
+            overrideParameters = tensilelite.argUpdatedGlobalParameters(args)
             for key, value in overrideParameters.items():
                 Common.globalParameters[key] = value
 
@@ -279,4 +279,3 @@ def useGlobalParameters(tensile_args):
             Common.restoreDefaultGlobalParameters()
 
     return gpUpdater
-
