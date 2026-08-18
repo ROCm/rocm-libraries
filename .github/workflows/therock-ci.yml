@@ -53,6 +53,7 @@ jobs:
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
+      miopen_selected: ${{ steps.dbsync_gate.outputs.miopen_selected }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -122,6 +123,27 @@ jobs:
           CI_CONFIG_PATH: ci-config
         run: |
           python .github/scripts/therock_configure_ci.py
+
+      # linux_projects' "projects_to_test" is a comma-separated STRING per bundle (not a JSON
+      # array of individual strings), e.g. "hipblas,miopen,rocblas" -- a naive
+      # contains(linux_projects, 'miopen') substring check on the raw JSON would also match
+      # "miopenprovider", so this parses it properly and checks "miopen" as an exact
+      # comma-delimited token across all bundles. Used to gate the GPU-free rocjitsu dbsync job
+      # the same way MIOpen's own Test miopen job is effectively gated.
+      - name: Determine if MIOpen dbsync gate should run
+        id: dbsync_gate
+        env:
+          LINUX_PROJECTS: ${{ steps.linux_projects.outputs.linux_projects }}
+        run: |
+          python3 -c "
+          import json, os
+          bundles = json.loads(os.environ['LINUX_PROJECTS'])
+          selected = any(
+              'miopen' in bundle.get('projects_to_test', '').split(',')
+              for bundle in bundles
+          )
+          print(f'miopen_selected={str(selected).lower()}')
+          " >> "$GITHUB_OUTPUT"
 
       - name: Fetch Linux targets for build and test
         env:
@@ -196,17 +218,18 @@ jobs:
   # GPU-free MIOpen dbsync (StaticFDBSync) via the rocjitsu KMD interposer, for arches TheRock
   # builds AND rocjitsu has a functional-emulation config for (gfx942/cdna3, gfx950/cdna4 --
   # gfx90a/cdna2 has no rocjitsu config, out of scope for now). Gated the same way MIOpen's own
-  # `Test miopen` job is gated (needs.setup.outputs.linux_projects containing "miopen"), so this
-  # only runs when TheRock's MIOpen CI would run. Self-references github.run_id for the artifact
-  # (this job runs within the same GHA run as the build, no external input needed) -- see
-  # therock-dbsync-rocjitsu-prototype.yml for the standalone workflow_dispatch version used for
-  # manual/diagnostic runs against a pinned commit.
+  # `Test miopen` job is effectively gated: needs.setup.outputs.miopen_selected (computed from
+  # linux_projects' per-bundle "projects_to_test" comma-lists, see the "Determine if MIOpen
+  # dbsync gate should run" step above), so this only runs when TheRock's MIOpen CI would run.
+  # Self-references github.run_id for the artifact (this job runs within the same GHA run as the
+  # build, no external input needed) -- see therock-dbsync-rocjitsu-prototype.yml for the
+  # standalone workflow_dispatch version used for manual/diagnostic runs against a pinned commit.
   dbsync-rocjitsu:
     name: "dbsync rocjitsu (${{ matrix.arch }})"
     permissions:
       contents: read
     needs: setup
-    if: ${{ contains(needs.setup.outputs.linux_projects, '"miopen"') }}
+    if: ${{ needs.setup.outputs.miopen_selected == 'true' }}
     strategy:
       fail-fast: false
       matrix:
