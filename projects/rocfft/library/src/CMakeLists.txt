@@ -260,7 +260,6 @@ set( rocfft_source
   tree_node_real.cpp
   fuse_shim.cpp
   assignment_policy.cpp
-  callback_map.cpp
   node_factory.cpp
   enum_printer.cpp
   rtc_exports.cpp

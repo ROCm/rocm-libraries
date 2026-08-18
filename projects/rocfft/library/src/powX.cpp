@@ -525,13 +525,12 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 
 // Internal plan executor.
 // For in-place transforms, in_buffer == out_buffer.
-void TransformPowX(const rocfft_plan_t&                    plan,
-                   const ExecPlan&                         execPlan,
-                   void*                                   in_buffer[],
-                   void*                                   out_buffer[],
-                   const rocfft_execution_info_internal&   info,
-                   size_t                                  multiPlanIdx,
-                   const std::map<int, device_callback_t>& callbacks)
+void TransformPowX(const rocfft_plan_t&                  plan,
+                   const ExecPlan&                       execPlan,
+                   void*                                 in_buffer[],
+                   void*                                 out_buffer[],
+                   const rocfft_execution_info_internal& info,
+                   size_t                                multiPlanIdx)
 {
     assert(execPlan.execSeq.size() == execPlan.gridParam.size());
 
@@ -559,49 +558,49 @@ void TransformPowX(const rocfft_plan_t&                    plan,
 
     // assign callbacks to the node that are actually doing the
     // loading and storing to/from global memory
-    TreeNode* load_node             = nullptr;
-    TreeNode* store_node            = nullptr;
+    const TreeNode* load_node       = nullptr;
+    const TreeNode* store_node      = nullptr;
     std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
+
+    UserCallbacks cb_ptrs;
 
     if(execPlan.rootPlan->loadOps)
     {
-        // use JIT load callback if specified
-        if(plan.desc.loadOps.has_spirv())
+        // (Ab)use the BufferPtr::get method to get the right funcptr +
+        // cbdata from the user-provided arrays.  BufferPtr::get
+        // already knows the index of the input buffer array, so the
+        // callback funcptr/data would be at the same index
+
+        // funcptr callback
+        if(!plan.desc.loadOps.has_spirv() && info.get_load_cb_fns())
         {
-            load_node->callbacks.load_cb_data
-                = plan.desc.loadOps.spirv_cb.cb_data[execPlan.location.device];
+            cb_ptrs.load_cb_fn = execPlan.inputPtr.get(
+                info.get_load_cb_fns(), nullptr, execPlan.location.comm_rank, info);
         }
-        // otherwise, legacy callback
-        else
+        if(info.get_load_cb_data())
         {
-            auto it = callbacks.find(execPlan.location.device);
-            if(it != callbacks.end())
-            {
-                load_node->callbacks.load_cb_fn        = it->second.load_fn;
-                load_node->callbacks.load_cb_data      = it->second.load_data;
-                load_node->callbacks.load_cb_lds_bytes = info.get_load_cb_lds_bytes();
-            }
+            cb_ptrs.load_cb_data = execPlan.inputPtr.get(
+                info.get_load_cb_data(), nullptr, execPlan.location.comm_rank, info);
         }
     }
 
     if(execPlan.rootPlan->storeOps)
     {
-        // use JIT store callback if specified
-        if(plan.desc.storeOps.has_spirv())
+        // (Ab)use the BufferPtr::get method to get the right funcptr +
+        // cbdata from the user-provided arrays.  BufferPtr::get
+        // already knows the index of the input buffer array, so the
+        // callback funcptr/data would be at the same index
+
+        // funcptr callback
+        if(!plan.desc.storeOps.has_spirv() && info.get_store_cb_fns())
         {
-            store_node->callbacks.store_cb_data
-                = plan.desc.storeOps.spirv_cb.cb_data[execPlan.location.device];
+            cb_ptrs.store_cb_fn = execPlan.outputPtr.get(
+                info.get_store_cb_fns(), nullptr, execPlan.location.comm_rank, info);
         }
-        // otherwise, legacy callback
-        else
+        if(info.get_store_cb_data())
         {
-            auto it = callbacks.find(execPlan.location.device);
-            if(it != callbacks.end())
-            {
-                store_node->callbacks.store_cb_fn        = it->second.store_fn;
-                store_node->callbacks.store_cb_data      = it->second.store_data;
-                store_node->callbacks.store_cb_lds_bytes = info.get_store_cb_lds_bytes();
-            }
+            cb_ptrs.store_cb_data = execPlan.outputPtr.get(
+                nullptr, info.get_store_cb_data(), execPlan.location.comm_rank, info);
         }
     }
 
@@ -760,21 +759,6 @@ void TransformPowX(const rocfft_plan_t&                    plan,
                 (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
         }
 
-        // if callbacks are enabled, make sure load_cb_fn and store_cb_fn are not nullptrs
-        if((data.node->callbacks.load_cb_fn == nullptr
-            && data.node->callbacks.store_cb_fn != nullptr))
-        {
-            // set default load callback
-            SetDefaultCallback(data.node, SetCallbackType::LOAD, &data.node->callbacks.load_cb_fn);
-        }
-        else if((data.node->callbacks.load_cb_fn != nullptr
-                 && data.node->callbacks.store_cb_fn == nullptr))
-        {
-            // set default store callback
-            SetDefaultCallback(
-                data.node, SetCallbackType::STORE, &data.node->callbacks.store_cb_fn);
-        }
-
         data.gridParam = execPlan.gridParam[i];
 
         // chirp kernel has no input - it constructs the chirp buffer from nothing
@@ -854,7 +838,31 @@ void TransformPowX(const rocfft_plan_t&                    plan,
                 throw std::runtime_error("hipEventRecord failure");
 
         // give callback parameters to kernel launcher
-        data.callbacks = execPlan.execSeq[i]->callbacks;
+        if(execPlan.execSeq[i] == load_node)
+        {
+            data.callbacks.load_cb_fn        = cb_ptrs.load_cb_fn;
+            data.callbacks.load_cb_data      = cb_ptrs.load_cb_data;
+            data.callbacks.load_cb_lds_bytes = cb_ptrs.load_cb_lds_bytes;
+        }
+        if(execPlan.execSeq[i] == store_node)
+        {
+            data.callbacks.store_cb_fn        = cb_ptrs.store_cb_fn;
+            data.callbacks.store_cb_data      = cb_ptrs.store_cb_data;
+            data.callbacks.store_cb_lds_bytes = cb_ptrs.store_cb_lds_bytes;
+        }
+
+        // Since our kernels either call funcptr callbacks for both
+        // load and store, or don't call funcptr callbacks at all,
+        // fill in the opposite side with a default funcptr if the
+        // node only wants a funcptr callback on one side.
+        if(data.callbacks.load_cb_fn == nullptr && data.callbacks.store_cb_fn != nullptr)
+        {
+            SetDefaultCallback(data.node, SetCallbackType::LOAD, &data.callbacks.load_cb_fn);
+        }
+        else if(data.callbacks.load_cb_fn != nullptr && data.callbacks.store_cb_fn == nullptr)
+        {
+            SetDefaultCallback(data.node, SetCallbackType::STORE, &data.callbacks.store_cb_fn);
+        }
 
         // choose which compiled kernel to run
         RTCKernel* localCompiledKernel = data.get_callback_type() == CallbackType::NONE

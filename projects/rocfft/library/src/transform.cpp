@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,6 @@
 
 #include "../../shared/array_predicate.h"
 #include "../../shared/precision_type.h"
-#include "callback_map.h"
 #include "logging.h"
 #include "plan.h"
 #include "rocfft/rocfft.h"
@@ -371,8 +370,6 @@ void rocfft_plan_t::Execute(void*                                 in_buffer[],
 
     LogSortedPlan(sortedIdx);
 
-    auto callbacks = DeviceCallbackMap(info, desc, local_comm_rank);
-
     for(auto i = sortedIdx.begin(); i != sortedIdx.end(); ++i)
     {
         const auto idx = *i;
@@ -404,7 +401,7 @@ void rocfft_plan_t::Execute(void*                                 in_buffer[],
         // Launch this item async:
         if(item.ExecutesOnRank(local_comm_rank))
         {
-            item.ExecuteAsync(this, in_buffer, out_buffer, info, idx, callbacks);
+            item.ExecuteAsync(this, in_buffer, out_buffer, info, idx);
         }
     }
 
@@ -464,12 +461,11 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
-                            void*                                   in_buffer[],
-                            void*                                   out_buffer[],
-                            const rocfft_execution_info_internal&   exec_info,
-                            size_t                                  multiPlanIdx,
-                            const std::map<int, device_callback_t>& callbacks)
+void ExecPlan::ExecuteAsync(const rocfft_plan                     plan,
+                            void*                                 in_buffer[],
+                            void*                                 out_buffer[],
+                            const rocfft_execution_info_internal& exec_info,
+                            size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(location.device);
 
@@ -531,8 +527,7 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
                       (rootPlan->placement == rocfft_placement_inplace) ? in_transform_ptrs
                                                                         : out_transform_ptrs,
                       exec_info,
-                      multiPlanIdx,
-                      callbacks);
+                      multiPlanIdx);
         // all work is enqueued to the stream, record the event on
         // the stream. Not needed for single-device plans.
         if(mgpuPlan)

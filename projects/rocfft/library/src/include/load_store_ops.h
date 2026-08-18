@@ -36,20 +36,11 @@ class TreeNode;
 struct rocfft_spirv_cb_t
 {
     rocfft_spirv_cb_t() = default;
-    void set(const char* _symbol_name,
-             const void* _bitcode_data,
-             size_t      _bitcode_len_bytes,
-             void**      _cb_data)
+    void set(const char* _symbol_name, const void* _bitcode_data, size_t _bitcode_len_bytes)
     {
         symbol_name       = _symbol_name;
         bitcode_data      = _bitcode_data;
         bitcode_len_bytes = _bitcode_len_bytes;
-        // caller gives us a (potentially temporary) array of
-        // void*'s, so copy them to an owned vector
-        auto device_count = rocfft_scoped_device::device_count();
-        cb_data.resize(device_count);
-        if(_cb_data)
-            std::copy(_cb_data, _cb_data + device_count, cb_data.begin());
     }
     bool enabled() const
     {
@@ -64,8 +55,6 @@ struct rocfft_spirv_cb_t
     const char* symbol_name       = nullptr;
     const void* bitcode_data      = nullptr;
     size_t      bitcode_len_bytes = 0;
-    // one pointer per visible HIP device
-    std::vector<void*> cb_data;
 };
 
 struct LoadOps
