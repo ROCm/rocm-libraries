@@ -1001,8 +1001,7 @@ def main() -> int:
         tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
         vs = "  ".join(
-            _fmt_variant(v)
-            for v in expand_variant_keys(args.variants, rec["variants"])
+            _fmt_variant(v) for v in expand_variant_keys(args.variants, rec["variants"])
         )
         best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
         tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""

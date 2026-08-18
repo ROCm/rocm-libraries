@@ -164,9 +164,7 @@ def expand_variant_keys(args_variants, rec_variants):
         if v == "sweep":
             out.extend(
                 sorted(
-                    k
-                    for k in rec_variants
-                    if k == "sweep" or k.startswith("sweep:")
+                    k for k in rec_variants if k == "sweep" or k.startswith("sweep:")
                 )
             )
         else:

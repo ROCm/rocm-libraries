@@ -155,17 +155,19 @@ pre-existing candidate's behavior is byte-identical with and without it.
 
 `attention_sweep_space(req)` returns the deduped `select_spec` of every candidate
 that supports `req` — the "evaluate multiple engines for one problem" primitive.
-The prefill benches (`benchmarks/gfx{942,950}/attention/prefill/
-benchmark_prefill2d_live.py`) consume it via the opt-in `--variants sweep` lane
-(`_run_sweep`), which times each launched path the registry offers and records
-which engine names mapped to it. Contract tests:
+It can time 2D/3D paths from the **prefill** harness only; the dedicated decode
+benchmarks have no sweep lane. The prefill benches
+(`benchmarks/gfx{942,950}/attention/prefill/benchmark_prefill2d_live.py`) consume
+it via the opt-in `--variants sweep` lane — a shared helper
+(`benchmarks/common/attention_sweep.py:run_sweep`) that times each launched path
+the registry offers and records which engine names mapped to it. Contract tests:
 `tests/dispatch/attention/test_sweep_space.py`.
 
 Framework-phase caveat: because geometry is deferred (see below), engines that
 route to the same launched path collapse to one timed entry. The decode benches
 (`benchmark_decode_live.py`) do **not** yet have a sweep lane — they lack a
-variant-loop; adding one is a mechanical follow-up reusing the same `_run_sweep`
-pattern.
+variant-loop; adding one is a mechanical follow-up reusing the same shared
+`run_sweep` helper.
 
 ## DEFERRED — production wiring + heuristic selection
 
