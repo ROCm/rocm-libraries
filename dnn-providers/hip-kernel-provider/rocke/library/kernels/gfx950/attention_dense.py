@@ -303,6 +303,11 @@ class AttentionDenseSpec:
                 raise ValueError("varlen is not supported with persistent=True")
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
+        if self.waves_per_eu < 1 or self.waves_per_eu > 8:
+            raise ValueError(
+                f"waves_per_eu must be in [1, 8], got {self.waves_per_eu} "
+                "(note: 3+ caps VGPRs at <=170 and causes spills on this kernel)"
+            )
         if self.paged:
             # --- Hard layout / hardware invariants (permanent contract) ---
             if self.block_size <= 0:
@@ -1987,12 +1992,14 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # `batch` is baked into the kernel (K/V buffer extents + persistent work-item count)
-    # but deliberately kept OUT of kernel_name() to keep existing IR hashes stable, so it
-    # is keyed here. Paged `num_kv_blocks` is also IR-live (it sets the buffer-resource
-    # bound) but IS in kernel_name() (a paged-only tag, no golden impact), so the name
-    # alone distinguishes paged specs -- no separate key term needed.
-    key = (spec.kernel_name(), spec.batch)
+    # `batch` and `waves_per_eu` are baked into the kernel (K/V buffer extents /
+    # persistent work-item count W = NQB*Hq*B, and the amdgpu-waves-per-eu
+    # register-file hint respectively) but are NOT part of kernel_name(), so they
+    # must be part of the cache key: otherwise two specs differing only in either
+    # field collide and the second silently reuses the first binary. Keying here
+    # rather than widening kernel_name() keeps the emitted IR (and its hash)
+    # untouched.
+    key = (spec.kernel_name(), spec.batch, spec.waves_per_eu)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(
