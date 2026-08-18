@@ -126,6 +126,18 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_host_conversion_generic.cpp
   unit_test_host_conversion_sort.cpp
+  # --- Core/misc unit tests (level1, aux, generic, info, reordering) [AISPARSE-644]
+  # Distinct anchor (right after the conversion group) so this leaf does not
+  # conflict with sibling unit-test branches that append after
+  # rocsparse_unit_test_main or at the end of the level-2 group.
+  unit_test_device_level1.cpp
+  unit_test_primitives.cpp
+  unit_test_host_level1.cpp
+  unit_test_host_level1_classic.cpp
+  unit_test_host_auxiliary.cpp
+  unit_test_host_info.cpp
+  unit_test_host_generic.cpp
+  unit_test_host_reordering.cpp
   unit_test_internal_collectives_blockreduce.cpp
   unit_test_internal_collectives_warpreduce.cpp
   unit_test_internal_collectives_segmented.cpp
@@ -246,6 +258,16 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
 # directly into this GPU test binary. They pull in rocprim, hence roc::rocprim
 # is added to the link libraries below. (No library source changes.)
 set(ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES
+  # Primitive library TUs exercised by unit_test_primitives.cpp that are not
+  # already compiled into this target via ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
+  # above (exclusive_scan / segmented_radix_sort_keys / radix_sort_pairs are
+  # already present there; do not re-add them or the object is defined twice).
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_inclusive_scan.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_max.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_sum.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_run_length_encode.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_keys.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_pairs.cpp
 )
 
 add_executable(rocsparse-unit-test-device
