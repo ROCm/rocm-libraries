@@ -458,6 +458,7 @@ if(BUILD_BENCHMARK)
       LOG_INSTALL   TRUE
     )
     FetchContent_MakeAvailable(rocrand)
+    set(BUILD_BENCHMARK ON)
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
