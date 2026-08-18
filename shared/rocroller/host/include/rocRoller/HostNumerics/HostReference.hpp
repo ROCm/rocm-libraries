@@ -36,14 +36,14 @@ namespace rocRoller::HostNumerics
         {
         }
 
-        roc::host_validation::Tensor                    a;
-        roc::host_validation::Tensor                    b;
-        roc::host_validation::Tensor                    c;
-        std::optional<roc::host_validation::Tensor>     scaleA;
-        std::optional<roc::host_validation::Tensor>     scaleB;
-        size_t                                          scaleBlockSize = 0;
-        float                                           alpha          = 1.0f;
-        float                                           beta           = 0.0f;
+        roc::host_validation::Tensor                a;
+        roc::host_validation::Tensor                b;
+        roc::host_validation::Tensor                c;
+        std::optional<roc::host_validation::Tensor> scaleA;
+        std::optional<roc::host_validation::Tensor> scaleB;
+        size_t                                      scaleBlockSize = 0;
+        float                                       alpha          = 1.0f;
+        float                                       beta           = 0.0f;
     };
 
     struct AcceptableGEMMError
@@ -138,16 +138,18 @@ namespace rocRoller::HostNumerics
     template <typename Output>
     std::vector<Output> convertHostReference(roc::host_validation::Tensor floatOutput)
     {
-        static_assert(std::is_same_v<Output, float> || std::is_same_v<Output, Half>
-                      || std::is_same_v<Output, BFloat16>);
+        static_assert(
+            std::is_same_v<
+                Output,
+                float> || std::is_same_v<Output, Half> || std::is_same_v<Output, BFloat16>);
 
         using namespace roc::host_validation;
         if(floatOutput.type() != ScalarType::Float32 || floatOutput.shape().rank() != 2)
             throw std::invalid_argument(
                 "rocRoller output conversion requires a rank-two F32 tensor.");
 
-        const size_t        rows    = floatOutput.shape()[0];
-        const size_t        columns = floatOutput.shape()[1];
+        const size_t rows    = floatOutput.shape()[0];
+        const size_t columns = floatOutput.shape()[1];
         if(columns != 0 && rows > std::numeric_limits<size_t>::max() / columns)
             throw std::overflow_error("rocRoller output conversion element count overflow.");
         std::vector<Output> result(rows * columns);

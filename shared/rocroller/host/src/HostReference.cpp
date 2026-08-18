@@ -220,8 +220,8 @@ namespace rocRoller::HostNumerics
         options.maxReportedMismatches      = 0;
 
         ComparisonResult statistics = compare(observed, expected, options);
-        const bool   hasNonFinite = statistics.matchedNaNs != 0 || statistics.matchedInfinities != 0
-                                    || statistics.nonFiniteMismatches != 0;
+        const bool hasNonFinite = statistics.matchedNaNs != 0 || statistics.matchedInfinities != 0
+                                  || statistics.nonFiniteMismatches != 0;
         const double relativeNormL2
             = hasNonFinite ? std::numeric_limits<double>::quiet_NaN()
                            : statistics.frobeniusDifference / statistics.frobeniusExpected;
