@@ -109,16 +109,15 @@ TEST_F(TestResampleBwdPlanBuilder, IsNotApplicableForNonF32ComputeType)
 
 TEST_F(TestResampleBwdPlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 {
+    setupMockCompileChain();
+
     auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
 
-    EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
-        .WillOnce(::testing::Return(hipDeviceProp_t{}));
-
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
 }
 
 // ============================================================================
