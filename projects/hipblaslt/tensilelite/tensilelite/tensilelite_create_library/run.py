@@ -39,7 +39,7 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from .ParseArguments import parseArguments
+from .parse_arguments import parseArguments
 
 
 from .. import LibraryIO
