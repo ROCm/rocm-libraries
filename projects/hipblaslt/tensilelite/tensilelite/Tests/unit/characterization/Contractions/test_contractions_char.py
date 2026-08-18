@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Contractions``: the index value classes
+"""Characterization tests for ``tensilelite.Contractions``: the index value classes
 and the ``ProblemType`` / predicate / ``SizeMapping`` / ``Solution`` builders,
 driven from the vendored LibraryIO logic fixture's original-state dicts."""
 
@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-import Tensile.LibraryIO as L
+import tensilelite.LibraryIO as L
 
-C = importlib.import_module("Tensile.Contractions")
+C = importlib.import_module("tensilelite.Contractions")
 
 pytestmark = pytest.mark.unit
 
@@ -38,10 +38,10 @@ def problem_type(raw):
 def solution_state():
     # The fully-derived solution state (all keys MasterSolutionLibrary needs),
     # obtained by parsing the fixture into a real Solution.
-    from Tensile.Common.Architectures import SUPPORTED_ISA
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Common.Architectures import SUPPORTED_ISA
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
@@ -54,7 +54,7 @@ def solution_state():
 # --- index value classes ----------------------------------------------------
 
 def test_index_classes(snapshot):
-    from Tensile.Common.Utilities import state
+    from tensilelite.Common.Utilities import state
     fi = C.FreeIndex(isA=True, i=0, c=0, d=0)
     bi = C.BatchIndex(a=0, b=1, c=0, d=0)
     bo = C.BoundIndex(a=2, b=2, aMirror=True, bMirror=False)
@@ -86,7 +86,7 @@ def test_problem_type_predicates(problem_type, snapshot):
 # --- SizeMapping / InternalArgsSupport / Solution ---------------------------
 
 def test_size_mapping(solution_state, snapshot):
-    from Tensile.Common.Utilities import state
+    from tensilelite.Common.Utilities import state
     sm = C.SizeMapping.FromOriginalState(solution_state)
     assert isinstance(state(sm), dict)
 

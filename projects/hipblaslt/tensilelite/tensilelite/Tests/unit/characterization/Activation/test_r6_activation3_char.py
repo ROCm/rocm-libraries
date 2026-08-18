@@ -66,8 +66,8 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Lazy module references (same pattern as test_r4_activation2_char.py)
 # ---------------------------------------------------------------------------
-A = importlib.import_module("Tensile.Activation")
-DataType = importlib.import_module("Tensile.Common.DataType").DataType
+A = importlib.import_module("tensilelite.Activation")
+DataType = importlib.import_module("tensilelite.Common.DataType").DataType
 
 
 def _init_rocisa():
