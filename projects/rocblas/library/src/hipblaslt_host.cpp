@@ -126,6 +126,34 @@ namespace
         }                                                                                       \
     } while(0)
 
+    // User-requested hipBLASLt solution index (rocblas_gemm_algo_solution_index, index > 0).
+    inline bool explicit_hipblaslt_solution_index(rocblas_gemm_algo algo, int32_t solution_index)
+    {
+        return algo == rocblas_gemm_algo_solution_index && solution_index > 0;
+    }
+
+    // Match Tensile behavior when canSolve fails for a chosen solution: invalid_value, not
+    // internal_error, when the index does not apply to this problem.
+    inline rocblas_status map_explicit_solution_index_status(rocblas_status    status,
+                                                             rocblas_gemm_algo algo,
+                                                             int32_t           solution_index)
+    {
+        if(!explicit_hipblaslt_solution_index(algo, solution_index))
+            return status;
+
+        switch(status)
+        {
+        case rocblas_status_success:
+        case rocblas_status_invalid_value:
+        case rocblas_status_memory_error:
+        case rocblas_status_invalid_handle:
+        case rocblas_status_invalid_pointer:
+            return status;
+        default:
+            return rocblas_status_invalid_value;
+        }
+    }
+
     /********************************************************************
      * Variable template to map alpha and beta types to compute type    *
      ********************************************************************/
@@ -560,6 +588,9 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               rocblas_gemm_algo                            algo,
                                               int32_t solution_index)
 {
+    bool solution_query = algo == rocblas_gemm_algo_solution_index
+                          && prob.flags & rocblas_gemm_flags_check_solution_index;
+
 #if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
     && defined(HIPBLASLT_VERSION_PATCH)                                  \
     && (HIPBLASLT_VERSION_MAJOR > 1                                      \
@@ -567,7 +598,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             && (HIPBLASLT_VERSION_MINOR > 4                              \
                 || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
     hipblasLtHandle_t&          handle     = *(prob.handle->getHipblasLtHandle());
-    int                         batchMode  = 0; // General Batched GEMM support in hipBLASLt
+    int                         batchMode  = prob.strided_batch ? 0 : 1;
     int                         batchCount = prob.batch_count > 0 ? prob.batch_count
                                                                   : 1; // Default to batch count of 1 if not specified
     hipblasLtMatrixLayout_t     matA{}, matB{}, matC{}, matD{};
@@ -584,10 +615,9 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     hipblasLtMatmulPreference_t pref{};
     size_t                      workspaceSize = 0;
     rocblas_status              status        = rocblas_status_success;
+    const bool explicit_solution = explicit_hipblaslt_solution_index(algo, solution_index);
     try
     {
-        if(!prob.strided_batch)
-            batchMode = 1;
 
         if(prob.trans_a == rocblas_operation_none)
         {
@@ -666,37 +696,22 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                                   HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                                   &max_workspace_size,
                                                   sizeof(max_workspace_size)));
-        hipblasLtMatmulHeuristicResult_t heuristicResult{};
-        bool                             solution_query = algo == rocblas_gemm_algo_solution_index
-                              && prob.flags & rocblas_gemm_flags_check_solution_index;
+
+        hipblasLtMatmulHeuristicResult_t              heuristicResult{};
         std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
-        if(algo == rocblas_gemm_algo_solution_index && solution_index > 0)
+        if(explicit_solution)
         {
             std::vector<int> solution_index_vec(1, solution_index - 1);
             if(hipblaslt_ext::getAlgosFromIndex(handle, solution_index_vec, heuristicResults)
-               != HIPBLAS_STATUS_SUCCESS)
+                   != HIPBLAS_STATUS_SUCCESS
+               || heuristicResults.empty())
             {
-                if(!solution_query)
-                {
-                    rocblas_internal_ostream msg;
-                    print_if_verbose(
-                        msg << "rocBLAS warning: hipBLASLt cannot find specified solution index!");
-                    throw rocblas_status_invalid_value;
-                }
+                rocblas_internal_ostream msg;
+                print_if_verbose(
+                    msg << "rocBLAS warning: hipBLASLt cannot find specified solution index!");
+                throw rocblas_status_invalid_value;
             }
-            if(heuristicResults.empty())
-            {
-                if(!solution_query)
-                {
-                    rocblas_internal_ostream msg;
-                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
-                    throw rocblas_status_invalid_value;
-                }
-            }
-            else
-            {
-                heuristicResult = heuristicResults[0];
-            }
+            heuristicResult = heuristicResults[0];
         }
         if(heuristicResult.algo.data[0] != 0)
         {
@@ -726,8 +741,12 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                                                      &returnedAlgoCount));
             workspaceSize = heuristicResult.workspaceSize;
         }
+
         CHECK_SOLUTION_FOUND(returnedAlgoCount);
         CHECK_RETURNED_WORKSPACE_SIZE(workspaceSize, max_workspace_size);
+        if(solution_query)
+            return rocblas_status_success;
+
         auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspaceSize);
         if(!gsu_malloc)
         {
@@ -855,14 +874,14 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         rocblas_internal_ostream msg;
         print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with rocblas_status: "
                              << rocblas_status_to_string(e));
-        status = e;
+        status = map_explicit_solution_index_status(e, algo, solution_index);
     }
     catch(std::exception& e)
     {
         rocblas_internal_ostream msg;
         print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: "
                              << e.what());
-        status = rocblas_status_internal_error;
+        status = explicit_solution ? rocblas_status_invalid_value : rocblas_status_internal_error;
     }
     if(devicePtrArray_D)
         HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()), status);
@@ -884,12 +903,10 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB), status);
     if(matA)
         HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA), status);
-    return status;
+    return map_explicit_solution_index_status(status, algo, solution_index);
 #else
-    bool solution_query = algo == rocblas_gemm_algo_solution_index
-                          && prob.flags & rocblas_gemm_flags_check_solution_index;
 
-    if(prob.strided_batch)
+    if(prob.strided_batch) // strided or non batched
     {
         auto gemm = ConstructHipBlasLTGemm(prob);
 
@@ -925,13 +942,15 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         {
             rocblas_internal_ostream msg;
             print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
-            return rocblas_status_internal_error;
+            return map_explicit_solution_index_status(
+                rocblas_status_internal_error, algo, solution_index);
         }
         if(gemm.run(prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
         {
             rocblas_internal_ostream msg;
             print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
-            return rocblas_status_internal_error;
+            return map_explicit_solution_index_status(
+                rocblas_status_internal_error, algo, solution_index);
         }
     }
     else
@@ -971,7 +990,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         {
             rocblas_internal_ostream msg;
             print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
-            return rocblas_status_internal_error;
+            return map_explicit_solution_index_status(
+                rocblas_status_internal_error, algo, solution_index);
         }
 
         hipblaslt_ext::UserArguments* userArgs;
@@ -989,7 +1009,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         {
             rocblas_internal_ostream msg;
             print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
-            return rocblas_status_internal_error;
+            return map_explicit_solution_index_status(
+                rocblas_status_internal_error, algo, solution_index);
         }
     }
     return rocblas_status_success;

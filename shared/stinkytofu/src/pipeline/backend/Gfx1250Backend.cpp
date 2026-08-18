@@ -65,6 +65,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -191,7 +192,9 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // the module opts in. Must precede InsertVgprMsbPass so the new
         // branches/labels are present when MSB configuration is materialized.
         if (moduleOptions.ClusterBarrier) {
-            pm.addPass(createInsertClusterBarrierPass());
+            pm.addPass(createInsertClusterBarrierPass(
+                /*streamKMulticast=*/moduleOptions.StreamKMulticast,
+                /*pgrValue=*/moduleOptions.PrefetchGlobalRead));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can match its
@@ -199,6 +202,17 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
         // inherit the loop's src C MSB).
         pm.addPass(createCFGBuilderPass());
+
+        // TDM load wave-sync barrier insertion (kernel scope). Must run after tensorcnt
+        // insertion (StinkyWaitCntInsertionPass, in the region adaptor above), so the
+        // s_wait_tensorcnt structure it keys on exists, and after this CFGBuilderPass,
+        // so predecessors are populated for the backward scan. Before RegionClone so
+        // cloned regions carry the barrier too. Inserts a workgroup barrier between an
+        // urgent and a deferrable tensor_load group. Off by default.
+        if (moduleOptions.TDMLoadWaveSync) {
+            pm.addPass(createTDMLoadWaveSyncPass());
+        }
+
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
@@ -217,12 +231,15 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));
 
+    if (runScheduler) {
+        mpm.addPass(createFunctionToModuleAdaptor(createInsertDelayAluPass(/*minWavesPerSimd=*/2)));
+    }
+
     {
         PassManager pm = makeEntryPM(module, debugStreams);
         pm.addPass(createMemTokenConsistencyCheckPass());
 
         if (runScheduler) {
-            pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
             pm.addPass(createLoopRegionRemarkPass());
         }
         pm.addPass(createEstimateAsmCyclesPass());

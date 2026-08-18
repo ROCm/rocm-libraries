@@ -558,6 +558,24 @@ protected:
     }
 };
 
+/// @brief A callable that fills underlying tensor memory with user defined values.
+///
+/// Signature: void(T* data, size_t count)
+/// The generator is called once per tensor fill and must fill `count` elements of
+/// the `data` pointer. If `fillWithValues` sets `hostFill` to true, then the data
+/// pointer will be a pointer to a host memory allocation. Otherwise, if `hostFill`
+/// was set to false, then this is a pointer to a device allocation. `count` is
+/// the element space of the tensor, i.e. it will contain padding elements if the
+/// tensor is not packed.
+///
+/// It is not the responsibility of the generator to mark the tensor as host or
+/// device modified.
+///
+/// For device fills the operation must be complete before the generator returns,
+/// or use the same HIP stream as the migratable memory object backing the tensor.
+template <typename T>
+using ValueGenerator = std::function<void(T* data, size_t count)>;
+
 template <typename T>
 class TensorBase : public ITensor
 {
@@ -663,6 +681,31 @@ public:
 
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
+
+    void fillWithValues(const ValueGenerator<T>& generator, bool hostFill)
+    {
+        if(!generator)
+        {
+            throw std::invalid_argument(
+                "generator must not be nullptr when calling TensorBase::fillWithValues");
+        }
+
+        MigratableMemoryBase<T>& migratableMem = memory();
+        if(hostFill)
+        {
+            // Call will overwrite the whole allocation, mark host modified before getting the pointer
+            // to avoid synchronizing device-to-host copy when calling `hostData()`
+            migratableMem.markHostModified();
+            generator(migratableMem.hostData(), migratableMem.count());
+        }
+        else
+        {
+            // Call will overwrite the whole allocation, mark device modified before getting
+            // the pointer to avoid synchronizing host-to-device copy when calling `deviceData()`
+            migratableMem.markDeviceModified();
+            generator(static_cast<T*>(migratableMem.deviceData()), migratableMem.count());
+        }
+    }
 
     ITensorIterator<false> begin() override
     {
