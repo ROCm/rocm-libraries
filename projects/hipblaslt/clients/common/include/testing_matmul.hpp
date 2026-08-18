@@ -2877,8 +2877,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 = mxScaleLayoutForFormat(arg.scaleA, mxProp.gcnArchName);
             size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
+            // Only the CPU reference computation reads this, and it runs under the
+            // same condition. Building it otherwise costs 4 bytes per element of A
+            // for nothing -- 8x the packed size for mxfp4.
+            bool const keepRefA = arg.unit_check || arg.norm_check || arg.allclose_check;
             std::vector<float> refAAll;
-            refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
+            if(keepRefA)
+                refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
                 auto* dataPtrA  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
@@ -2899,7 +2904,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
-                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+                if(keepRefA)
+                    refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
@@ -2988,8 +2994,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                         ? elementsToBytes(stride_b[i], TiB)
                                                         : 0;
             size_t             scaleBatchBytesB   = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+            // Only the CPU reference computation reads this, and it runs under the
+            // same condition. Building it otherwise costs 4 bytes per element of B
+            // for nothing -- 8x the packed size for mxfp4.
+            bool const keepRefB = arg.unit_check || arg.norm_check || arg.allclose_check;
             std::vector<float> refBAll;
-            refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
+            if(keepRefB)
+                refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
                 auto* dataPtrB  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
@@ -3010,7 +3021,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
-                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
+                if(keepRefB)
+                    refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
