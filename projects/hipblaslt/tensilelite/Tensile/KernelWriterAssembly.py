@@ -14660,7 +14660,8 @@ class KernelWriterAssembly(KernelWriter):
       # pure-SALU address math never touches vmcnt/lgkmcnt/vscnt/dscnt, so relocating
       # it between MFMAs (which never touch SCC) is register- and counter-safe;
       # _splitHoistableStoreInit fences off any branch/label/memory content.
-      _largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+      from .Components.Subtile.Plsin import plsinLargeTile
+      _largeTile = plsinLargeTile(kernel)
       _hoistStoreInit = not _largeTile
       _hoistUnits = None
       if _hoistStoreInit:

@@ -50,7 +50,7 @@ from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
-from .Components.Subtile.Plsin import computeSubtilePlsin
+from .Components.Subtile.Plsin import computeSubtilePlsin, PLSIN_WEAVE_LOOKAHEAD
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -408,7 +408,7 @@ class StateValues:
   # default to the "not weaving" value, so a non-PLSIN kernel is unaffected.
   subtileFusedWeave: bool                = False   # inside the fused-NLL weave store
   subtileFusedFullTileStore: bool        = False   # fused store is the full-tile (no-edge) arm
-  subtileWeaveLookahead: int             = 2       # store-pairs ahead a pair's MFMAs are issued (always set to weaveLA before use)
+  subtileWeaveLookahead: int             = PLSIN_WEAVE_LOOKAHEAD  # store-pairs ahead a pair's MFMAs are issued (always set to weaveLA before use)
   subtileWeavePairCounter: int           = 0       # next store-pair index being emitted
   subtileMBlockSize: int                 = 0       # OOB-guard M block size (MatrixInstM)
   subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven

@@ -22,6 +22,26 @@
 #
 ################################################################################
 
+# Store-pairs ahead a pair's terminal MFMAs are issued (the MFMA->accvgpr_read
+# latency window). Single source of truth shared by the eligibility gate
+# (computeSubtilePlsin) and the scheduler weave (LogicalScheduler): the gate admits
+# a tile only when numStorePairs > this value, so at least one pair is left in the
+# loop to hide the woven ones under. They MUST move together.
+PLSIN_WEAVE_LOOKAHEAD = 2
+
+
+def plsinLargeTile(kernel):
+    """Tiles whose macro tile exceeds 256 in either dimension.
+
+    Such tiles already peak at the architectural VGPR ceiling inside the loop, so
+    the fused store keeps its terminal MFMAs in-loop (no weave) and lends the
+    now-dead input-tile VGPRs to the store pool instead. Single source of truth
+    for the LogicalScheduler weave/hoist decisions and the KernelWriterAssembly
+    store-init hoist gate.
+    """
+    return (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+
+
 def computeSubtilePlsin(kernel):
     """Derive the PostLoopStoreInNll (PLSIN) eligibility for a subtile kernel.
 
@@ -70,10 +90,10 @@ def computeSubtilePlsin(kernel):
                          min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
     # Overlap feasibility: the weave only weaves store-pairs with pair index >=
     # weaveLA. numStorePairs = MIWT0*MIWT1//2; at or below the threshold no pair
-    # is woven, so PLSIN would be pure overhead. weaveLA matches the scheduler's
-    # production lookahead (Components/Subtile/LogicalScheduler.py) so the gate and
-    # the weave move together.
-    weaveLA = 2
+    # is woven, so PLSIN would be pure overhead. weaveLA is the shared constant the
+    # scheduler weave (Components/Subtile/LogicalScheduler.py) reads too, so the gate
+    # and the weave move together.
+    weaveLA = PLSIN_WEAVE_LOOKAHEAD
     numStorePairs = (miwt[0] * miwt[1] // 2) if (bool(miwt) and len(miwt) == 2) else 0
     overlapPossible = numStorePairs > weaveLA
     # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the gfx9 SGPR

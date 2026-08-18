@@ -42,6 +42,7 @@ from rocisa.instruction import SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
     MFMAInstruction, MXMFMAInstruction
 
 from ...Common.GlobalParameters import globalParameters
+from .Plsin import PLSIN_WEAVE_LOOKAHEAD, plsinLargeTile
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
@@ -3601,7 +3602,7 @@ class LogicalScheduler:
         # accumulates across copies). Restricted to tiles <= 256x256: larger tiles
         # already peak at the arch-VGPR occupancy budget in the loop and cannot afford
         # the extra live coord registers.
-        largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+        largeTile = plsinLargeTile(kernel)
         ngllInit = self._emitLoop(writer, kernel, f"{label}_INIT", initEmitted)
         # Coord-hoist weaving is ON for eligible (<=256x256) PLSIN tiles (spill tiles
         # are already excluded upstream, so largeTile never trips for an eligible
@@ -3678,11 +3679,11 @@ class LogicalScheduler:
         # LA = how many store-pairs ahead a pair's terminal MFMAs are issued (the
         # MFMA->accvgpr_read latency window). The first LA pairs keep their MFMAs in
         # the loop (natural large distance); pairs >= LA are woven.
-        # Must stay in step with the eligibility gate's default in
-        # Components/Subtile/Plsin.py (computeSubtilePlsin), which admits a
-        # tile only when numStorePairs > weaveLA so at least one pair is left in
-        # the loop to hide the woven ones under.
-        weaveLA = 2
+        # Shared with the eligibility gate in Components/Subtile/Plsin.py
+        # (computeSubtilePlsin), which admits a tile only when numStorePairs >
+        # weaveLA so at least one pair is left in the loop to hide the woven ones
+        # under. Both read PLSIN_WEAVE_LOOKAHEAD so they can never diverge.
+        weaveLA = PLSIN_WEAVE_LOOKAHEAD
         fusedEmitted = copy.deepcopy(emitted_3d)
         # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
         # fused store's temporaries (valuC window, coord0/1, and the element batch)
@@ -3693,7 +3694,7 @@ class LogicalScheduler:
         # to buildSubtileFusedStore to lend to the store pool (non-destructively) so
         # the store batch reuses the freed holes instead of extending the watermark.
         # Tiles <= 256x256 keep the existing weave (they already fit at occupancy).
-        largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+        largeTile = plsinLargeTile(kernel)
         # Store-bound small tiles (#1): on shapes where the terminal-MFMA drain is
         # too small to hide the woven store (drain-MFMA cycles << store-epilogue
         # cycles), weaving buys nothing but forces the store to run while the input
