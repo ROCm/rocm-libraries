@@ -566,4 +566,5 @@ const double lambdas[] = {1.0, 5.5, 20.0, 100.0, 1234.5, 5000.0};
 
 INSTANTIATE_TEST_SUITE_P(rocrand_kernel_scrambled_sobol64_poisson,
                          rocrand_kernel_scrambled_sobol64_poisson,
-                         ::testing::ValuesIn(lambdas));
+                         ::testing::ValuesIn(lambdas),
+                         lambda_param_name);

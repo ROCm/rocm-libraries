@@ -46,7 +46,8 @@ using threefry2x32_20_generator_prng_offset_tests_types
 
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_generator,
                                generator_prng_tests,
-                               threefry2x32_20_generator_prng_tests_types);
+                               threefry2x32_20_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_generator,
                                generator_prng_continuity_tests,
@@ -88,7 +89,8 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_host_generator,
 // threefry2x32_20-specific generator API tests
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_generator,
                                threefryNx32_20_generator_prng_tests,
-                               threefry2x32_20_generator_prng_tests_types);
+                               threefry2x32_20_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 // Engine API tests
 class threefry2x32_engine_type_test : public threefry2x32_20_generator::engine_type

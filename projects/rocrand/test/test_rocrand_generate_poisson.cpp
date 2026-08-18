@@ -199,4 +199,5 @@ TEST_P(rocrand_generate_poisson_tests, multiple_lambdas_non_blocking_stream)
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_poisson_tests,
                          rocrand_generate_poisson_tests,
-                         ::testing::ValuesIn(rng_types));
+                         ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);

@@ -220,5 +220,6 @@ TEST(rocrand_generate_uniform_tests, neg_test)
 }
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_uniform_tests,
-                        rocrand_generate_uniform_tests,
-                        ::testing::ValuesIn(rng_types));
+                         rocrand_generate_uniform_tests,
+                         ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);

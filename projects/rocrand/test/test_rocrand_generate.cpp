@@ -158,8 +158,9 @@ TEST(rocrand_generate_tests, neg_test)
 }
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_tests,
-                        rocrand_generate_tests,
-                        ::testing::ValuesIn(rng_types));
+                         rocrand_generate_tests,
+                         ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);
 
 class rocrand_generate_long_long_tests : public ::testing::TestWithParam<rocrand_rng_type>
 {};
@@ -197,4 +198,5 @@ TEST_P(rocrand_generate_long_long_tests, long_long_test)
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_long_long_tests,
                          rocrand_generate_long_long_tests,
-                         ::testing::ValuesIn(long_long_rng_types));
+                         ::testing::ValuesIn(long_long_rng_types),
+                         rocrand_rng_type_test_name);

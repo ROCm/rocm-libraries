@@ -50,7 +50,8 @@ using lfsr113_generator_prng_offset_tests_types = ::testing::Types<
 
 INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_generator,
                                generator_prng_tests,
-                               lfsr113_generator_prng_tests_types);
+                               lfsr113_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_generator,
                                generator_prng_continuity_tests,
@@ -107,7 +108,9 @@ struct lfsr113_generator_prng_tests : public testing::Test
     }
 };
 
-TYPED_TEST_SUITE(lfsr113_generator_prng_tests, lfsr113_generator_prng_tests_types);
+TYPED_TEST_SUITE(lfsr113_generator_prng_tests,
+                 lfsr113_generator_prng_tests_types,
+                 generator_prng_test_name);
 
 TYPED_TEST(lfsr113_generator_prng_tests, different_seed_test)
 {

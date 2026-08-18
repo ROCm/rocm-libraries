@@ -197,4 +197,5 @@ TEST(rocrand_hipgraph_generate_tests, hipgraphs_doc_sample){
 
 INSTANTIATE_TEST_SUITE_P(rocrand_hipgraph_generate_tests,
                          rocrand_hipgraph_generate_tests,
-                         ::testing::ValuesIn(rng_types));
+                         ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);

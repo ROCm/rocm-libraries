@@ -50,7 +50,8 @@ using philox_generator_prng_offset_tests_types
 
 INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_generator,
                                generator_prng_tests,
-                               philox_generator_prng_tests_types);
+                               philox_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_generator,
                                generator_prng_continuity_tests,

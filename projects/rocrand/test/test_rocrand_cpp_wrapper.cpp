@@ -30,6 +30,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <numeric>
+#include <string>
+#include <tuple>
 #include <type_traits>
 
 TEST(rocrand_cpp_wrapper, rocrand_error)
@@ -106,6 +108,53 @@ using rocrand_cpp_distributions = test_utils::test_matrix<
                rocrand_cpp::lognormal_distribution<double>,
                rocrand_cpp::poisson_distribution<unsigned int>>>::test_types;
 
+// Map types to names so test filters can target a generator (or generator x distribution)
+// by name instead of positional index.
+template<class T>
+struct rocrand_cpp_type_name;
+
+// clang-format off
+template<> struct rocrand_cpp_type_name<rocrand_cpp::lfsr113>           { static constexpr const char* value = "Lfsr113"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::mrg31k3p>          { static constexpr const char* value = "Mrg31k3p"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::mrg32k3a>          { static constexpr const char* value = "Mrg32k3a"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::mt19937>           { static constexpr const char* value = "Mt19937"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::mtgp32>            { static constexpr const char* value = "Mtgp32"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::philox4x32_10>     { static constexpr const char* value = "Philox4x32_10"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::threefry2x32>      { static constexpr const char* value = "Threefry2x32"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::threefry2x64>      { static constexpr const char* value = "Threefry2x64"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::threefry4x32>      { static constexpr const char* value = "Threefry4x32"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::threefry4x64>      { static constexpr const char* value = "Threefry4x64"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::scrambled_sobol32> { static constexpr const char* value = "ScrambledSobol32"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::scrambled_sobol64> { static constexpr const char* value = "ScrambledSobol64"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::sobol32>           { static constexpr const char* value = "Sobol32"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::sobol64>           { static constexpr const char* value = "Sobol64"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::xorwow>            { static constexpr const char* value = "Xorwow"; };
+
+template<> struct rocrand_cpp_type_name<rocrand_cpp::uniform_int_distribution<unsigned char>>          { static constexpr const char* value = "UniformIntUChar"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::uniform_int_distribution<unsigned short>>         { static constexpr const char* value = "UniformIntUShort"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::uniform_int_distribution<unsigned int>>           { static constexpr const char* value = "UniformIntUInt"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::uniform_int_distribution<unsigned long long int>> { static constexpr const char* value = "UniformIntULongLong"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::uniform_real_distribution<half>>                  { static constexpr const char* value = "UniformRealHalf"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::uniform_real_distribution<float>>                 { static constexpr const char* value = "UniformRealFloat"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::uniform_real_distribution<double>>                { static constexpr const char* value = "UniformRealDouble"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::normal_distribution<half>>                        { static constexpr const char* value = "NormalHalf"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::normal_distribution<float>>                       { static constexpr const char* value = "NormalFloat"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::normal_distribution<double>>                      { static constexpr const char* value = "NormalDouble"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::lognormal_distribution<half>>                     { static constexpr const char* value = "LognormalHalf"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::lognormal_distribution<float>>                    { static constexpr const char* value = "LognormalFloat"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::lognormal_distribution<double>>                   { static constexpr const char* value = "LognormalDouble"; };
+template<> struct rocrand_cpp_type_name<rocrand_cpp::poisson_distribution<unsigned int>>               { static constexpr const char* value = "PoissonUInt"; };
+// clang-format on
+
+struct rocrand_cpp_generator_name
+{
+    template<class T>
+    static std::string GetName(int)
+    {
+        return rocrand_cpp_type_name<T>::value;
+    }
+};
+
 template<typename test_tuple>
 struct rocrand_cpp_wrapper_distributions : public ::testing::Test
 {
@@ -119,7 +168,7 @@ struct rocrand_cpp_wrapper : public ::testing::Test
     using generator_t = GeneratorType;
 };
 
-TYPED_TEST_SUITE(rocrand_cpp_wrapper, Generators);
+TYPED_TEST_SUITE(rocrand_cpp_wrapper, Generators, rocrand_cpp_generator_name);
 
 TYPED_TEST(rocrand_cpp_wrapper, rocrand_rng_ctor)
 {
@@ -516,7 +565,21 @@ auto rocrand_dist_test() -> typename std::enable_if<
     }
 }
 
-TYPED_TEST_SUITE(rocrand_cpp_wrapper_distributions, rocrand_cpp_distributions);
+struct rocrand_cpp_distributions_name
+{
+    template<class Tuple>
+    static std::string GetName(int)
+    {
+        using generator_t    = typename std::tuple_element<0, Tuple>::type;
+        using distribution_t = typename std::tuple_element<1, Tuple>::type;
+        return std::string(rocrand_cpp_type_name<generator_t>::value) + "_"
+               + rocrand_cpp_type_name<distribution_t>::value;
+    }
+};
+
+TYPED_TEST_SUITE(rocrand_cpp_wrapper_distributions,
+                 rocrand_cpp_distributions,
+                 rocrand_cpp_distributions_name);
 
 TYPED_TEST(rocrand_cpp_wrapper_distributions, rocrand_dist)
 {

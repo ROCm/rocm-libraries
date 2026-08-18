@@ -52,7 +52,8 @@ using mtgp32_generator_prng_tests_types = ::testing::Types<
 
 INSTANTIATE_TYPED_TEST_SUITE_P(mtgp32_generator,
                                generator_prng_tests,
-                               mtgp32_generator_prng_tests_types);
+                               mtgp32_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 // Continuity cannot be implemented for MTGP32, as 'offset' is not supported for this
 // generator. Therefore, continuity tests fail.
