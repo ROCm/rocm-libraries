@@ -82,7 +82,8 @@ Implementation status (the optimization plan holds the full ordered work list)
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
   * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast for
-        ALL configs incl. bf16 D128; fused rescale bit-identical, bf16 D64 exp2_fast)
+        ALL configs incl. bf16 D128; fused rescale bit-identical, and is what
+        enabled bf16 D64 exp2_fast)
   * P3  occupancy: waves-per-eu tune (bf16 D64 -> wpe4 = 2 WG/CU),
         D64 K bank-pad, wide4 (WG=256), K single-buffer ........... IN PROGRESS
         (waves-per-eu DONE via _tuned_waves_per_eu; **D64 K bank-pad DONE and ADOPTED**
@@ -326,9 +327,10 @@ class Gfx942DenseTuning:
 
     # use_exp2_fast: force the P2 single-instruction exp2 on/off.
     #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
-    #   (now on for ALL configs; the former bf16-D128 spill holdout is stale). Numerically safe in both
-    #   directions here -- both softmax arguments are always <= 0 -- so unlike
-    #   ``use_cfvst`` this one is a pure perf A/B and is not gated.
+    #   (now on for ALL configs; the former bf16-D128 spill holdout is stale).
+    #   Numerically safe in both directions here -- both softmax arguments are
+    #   always <= 0 -- so unlike ``use_cfvst`` this one is a pure perf A/B and
+    #   is not gated.
     use_exp2_fast: bool | None = None
 
     # waves_per_eu: override the emitted ``amdgpu-waves-per-eu`` attribute.
@@ -523,17 +525,16 @@ def _use_exp2_fast(head_size: int, dtype: str) -> bool:
     softmax args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly exp2_fast's
     precondition, independent of head_size and dtype.
 
-    bf16 D128 was previously the sole holdout. An earlier fused-rescale schedule
-    (plan §6.1) spilled with exp2_fast (175 -> 256 VGPR / 22 spill, over the
-    waves-per-eu=2 cap), so the policy disabled it. The current lazy-rescale schedule
-    does not spill: rocprofv3 register capture on the shipped bf16-D128 causal kernel
-    (GQA 32/8, Sq 1024-16384, both the default and persistent grids) reads a lower VGPR
-    count with exp2_fast than without, 0 scratch, numerically identical to plain exp2.
-    The holdout is therefore stale and removed. (The stale numbers were measured against
-    the pre-lazy-rescale body; the register profile has since changed sign.) head_size is
-    no longer a gate -- correctness holds for every head_size (the <= 0 precondition is
-    universal); a new head_size would only warrant a fresh occupancy check, never a
-    correctness one.
+    bf16 D128 was previously the sole holdout, disabled on a measurement (plan §6.1:
+    175 -> 256 VGPR / 22 spill over the waves-per-eu=2 cap) that no longer reproduces
+    on the current kernel: rocprofv3 register capture on the shipped bf16-D128 causal
+    kernel (GQA 32/8, Sq 1024-16384, both the default and persistent grids) reads a
+    lower VGPR count with exp2_fast than without, 0 scratch, numerically identical to
+    plain exp2. The softmax/rescale body has not changed since the kernel was first
+    committed, so this is a stale measurement rather than a schedule that shifted under
+    it; the holdout is removed. head_size is no longer a gate -- correctness holds for
+    every head_size (the <= 0 precondition is universal); a new head_size would only
+    warrant a fresh occupancy check, never a correctness one.
     """
     return True
 
@@ -1449,8 +1450,8 @@ def _build_attention_dense_single_buffer(
             # s) -- exactly exp2_fast's precondition (no overflow; v_exp_f32 flushes
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled for
-            # every config, including bf16 D128 -- its former spill holdout is stale on
-            # the current lazy-rescale schedule; rationale + matrix in _use_exp2_fast's docstring.
+            # every config, including bf16 D128 -- its former spill holdout no
+            # longer reproduces; rationale + matrix in _use_exp2_fast's docstring.
             exp2 = b.exp2_fast if tuning.resolved_use_exp2_fast(spec) else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 

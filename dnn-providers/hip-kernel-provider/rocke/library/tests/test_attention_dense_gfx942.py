@@ -225,7 +225,7 @@ _TUNING_PERTURBATIONS = {
 
 # Base configurations the perturbations are applied to, one field at a time. Chosen
 # so every structurally distinct arm of the builder is a base: cfvst on (fp16 D128),
-# cfvst off at D128 (bf16, plain exp2), both D64 dtypes (packed 2-rows-per-DMA + the
+# cfvst off at D128 (bf16, exp2_fast), both D64 dtypes (packed 2-rows-per-DMA + the
 # K row-group pad + the wpe=4 tune), and the P4 persistent grid -- without which
 # num_persistent / interleave / persist_decode are inert and their coverage vacuous.
 _INJECTIVITY_BASES = {
@@ -531,8 +531,8 @@ def test_dataclass_rejects_out_of_scope_headsize():
 # Tuning fields deliberately left ungated. Recorded rather than assumed so that
 # adding a gate (or forgetting one) is a visible, reviewed decision.
 #   use_exp2_fast: numerically safe in both directions here (both softmax args are
-#     always <= 0), so the known bf16-D128 spill is a perf A/B, not a correctness or
-#     tile-exactness hazard. Gating it would make the config unsweepable.
+#     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
+#     hazard. Gating it would make the config unsweepable.
 #   iglp: a compile-time scheduler directive (llvm.amdgcn.iglp.opt) that leaves no
 #     runtime instruction and is legal on every config.
 _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "iglp"})
@@ -583,10 +583,7 @@ _CONTRACT_GRID = [
     (dict(dtype="bf16", head_size=128), dict(use_cfvst=True)),  # REJECTED: spills
     # --- tuning: use_exp2_fast (no rejected region -- see the comment above) ---
     (dict(), dict(use_exp2_fast=False)),
-    (
-        dict(),
-        dict(use_exp2_fast=True),
-    ),  # accepted: exp2_fast has no rejected region (default True everywhere)
+    (dict(), dict(use_exp2_fast=True)),  # accepted: policy is True for every config
     # --- tuning: waves_per_eu ---
     (dict(), dict(waves_per_eu=4)),  # accepted
     (dict(), dict(waves_per_eu=0)),  # REJECTED: must resolve positive
@@ -836,7 +833,7 @@ def test_tile_end_barrier_drains_lds_before_the_barrier():
 
 
 # --------------------------------------------------------------------------- #
-# P2 exp2_fast gate (spill-driven) + fused/lazy rescale
+# P2 exp2_fast policy + fused rescale
 # --------------------------------------------------------------------------- #
 def _walk_op_names(op):
     """Yield every op name in the op tree (op + all nested region ops)."""
@@ -852,59 +849,58 @@ def _walk_op_names(op):
         (64, "fp16", True),
         (128, "fp16", True),
         (64, "bf16", True),  # fused rescale gave the headroom (P2)
-        (
-            128,
-            "bf16",
-            True,
-        ),  # lazy-rescale: 0 scratch, VGPR-neutral -> last holdout enabled
+        (128, "bf16", True),  # re-measured: no spill -> last holdout enabled
     ],
 )
-def test_exp2_fast_gate_matches_the_spill_measured_matrix(head_size, dtype, expected):
+def test_exp2_fast_is_enabled_for_every_config(head_size, dtype, expected):
     """exp2_fast is enabled for EVERY config. It is numerically safe everywhere (both
     softmax args -- alpha's m_i - m_new and p's s - m_new -- are <= 0, exactly
     exp2_fast's precondition, independent of head_size/dtype) and a strict VALU win.
-    bf16 D128 was the last holdout under the earlier fused-rescale schedule (spilled
-    175->256 VGPR over the waves-per-eu=2 cap); the current lazy-rescale schedule does
-    not spill (rocprofv3: 0 scratch, VGPR-neutral vs plain exp2, numerically identical),
-    so the holdout is removed. This pins the enabled set (now all configs) so a future
-    edit that re-introduces a rejected arm has to update this matrix on purpose.
+    bf16 D128 was the last holdout on a measurement that no longer reproduces on the
+    current kernel (re-measured: 0 scratch and lower VGPR than plain exp2 on both
+    grids, numerically identical), so it is removed. This pins the enabled set (now
+    all configs) so a future edit that re-introduces a rejected arm has to update
+    this matrix on purpose.
     """
     assert _use_exp2_fast(head_size, dtype) is expected
 
 
 @pytest.mark.parametrize(
-    "head_size, dtype",
-    [(128, "fp16"), (64, "fp16"), (64, "bf16"), (128, "bf16")],
+    "head_size, dtype", [(128, "fp16"), (64, "fp16"), (64, "bf16"), (128, "bf16")]
 )
-def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype):
-    """The gate actually selects the intrinsic in the emitted IR.
+@pytest.mark.parametrize("use_exp2_fast", [False, True])
+def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype, use_exp2_fast):
+    """The resolved exp2_fast decision actually selects the intrinsic in the IR.
 
     exp2_fast lowers to ``math.exp2_fast`` (llvm.amdgcn.exp2.f32 -> one v_exp_f32);
     plain exp2 lowers to ``math.exp2`` (llvm.exp2.f32, guarded range reduction). The
-    softmax path must emit exactly one family, matching :func:`_use_exp2_fast`, so
-    the bf16-D128 spill guard is not silently defeated by an IR-level fallback.
-    Parametrized (not a plain loop) so each config's failure is isolated -- the gate
-    boundary case bf16 D128 must be reported even if an earlier config regresses.
+    softmax path must emit exactly one family, matching the resolved tuning. This is
+    parametrized on the tuning rather than the policy: the policy is now True for
+    every config, so branching on it would make the plain-exp2 arm dead and leave
+    ``b.exp2`` untested -- yet ``use_exp2_fast=False`` is still an accepted, swept
+    override. Forcing both values keeps both codegen arms pinned. Each config is
+    isolated, so a failure is reported even if an earlier one regresses.
     """
     spec = _spec(head_size=head_size, dtype=dtype)
-    kernel = build_attention_dense(spec, arch="gfx942")
+    tuning = Gfx942DenseTuning(use_exp2_fast=use_exp2_fast)
+    kernel = build_attention_dense(spec, arch="gfx942", tuning=tuning)
     names = [n for op in kernel.body.ops for n in _walk_op_names(op)]
     has_fast = "math.exp2_fast" in names
     has_plain = "math.exp2" in names
-    if _use_exp2_fast(head_size, dtype):
+    if tuning.resolved_use_exp2_fast(spec):
         assert has_fast and not has_plain, (
-            f"{dtype} D{head_size}: gate says exp2_fast but IR has "
+            f"{dtype} D{head_size}: tuning says exp2_fast but IR has "
             f"fast={has_fast} plain={has_plain}"
         )
     else:
         assert has_plain and not has_fast, (
-            f"{dtype} D{head_size}: gate says plain exp2 but IR has "
+            f"{dtype} D{head_size}: tuning says plain exp2 but IR has "
             f"fast={has_fast} plain={has_plain}"
         )
 
 
 @pytest.mark.parametrize(
-    "head_size, dtype", [(128, "fp16"), (64, "fp16"), (64, "bf16")]
+    "head_size, dtype", [(128, "fp16"), (64, "fp16"), (64, "bf16"), (128, "bf16")]
 )
 def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
     """P2 fused/lazy rescale: exp2 -> l_local accumulate -> cast -> pack in one pass.
