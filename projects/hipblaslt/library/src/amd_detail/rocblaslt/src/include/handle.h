@@ -35,6 +35,8 @@
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 struct _rocblaslt_attribute
@@ -126,6 +128,57 @@ struct _rocblaslt_handle
     bool                  check_numerics_stop_on_first = false;
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
+
+    // Stream-K and MBSK kernels treat the synchronizer buffer as inter-workgroup
+    // flags that they set, spin on, and reset themselves, so the buffer may only
+    // be touched by one kernel at a time. GEMMs issued on different streams run
+    // concurrently and would clear each other's flags, leaving a workgroup
+    // spinning forever. Grouped GEMM already separates its flags per problem
+    // index; give each stream its own buffer for the same reason.
+    static constexpr size_t c_syncSlotElements  = 409600;
+    static constexpr size_t c_syncGroupedSlots  = 16;
+    static constexpr size_t c_syncTotalElements = c_syncGroupedSlots * c_syncSlotElements;
+    // Bounds the extra device memory this can hold (each buffer is 1.6 MB).
+    static constexpr size_t c_syncMaxStreamBuffers = 64;
+
+    void* synchronizerForStream(hipStream_t stream)
+    {
+        if(Synchronizer == nullptr)
+            return nullptr;
+
+        std::lock_guard<std::mutex> guard(m_syncLock);
+        auto                        it = m_syncOfStream.find(stream);
+        if(it != m_syncOfStream.end())
+            return it->second;
+
+        if(m_syncOfStream.size() >= c_syncMaxStreamBuffers)
+            return Synchronizer;
+
+        constexpr size_t bytes = c_syncSlotElements * sizeof(int);
+        void*            buf   = nullptr;
+        if(hipMalloc(&buf, bytes) != hipSuccess || hipMemset(buf, 0, bytes) != hipSuccess)
+        {
+            // Out of memory: fall back to the shared buffer. Results stay
+            // correct; only the cross-stream hazard comes back.
+            if(buf != nullptr)
+                static_cast<void>(hipFree(buf));
+            return Synchronizer;
+        }
+
+        m_syncOfStream.emplace(stream, buf);
+        return buf;
+    }
+
+    void releaseStreamSynchronizers()
+    {
+        std::lock_guard<std::mutex> guard(m_syncLock);
+        for(auto& entry : m_syncOfStream)
+            static_cast<void>(hipFree(entry.second));
+        m_syncOfStream.clear();
+    }
+
+    std::mutex                             m_syncLock;
+    std::unordered_map<hipStream_t, void*> m_syncOfStream;
 };
 
 /********************************************************************************
