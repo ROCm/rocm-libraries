@@ -11,6 +11,7 @@
     'RequireGfx1250v0Overlay': False,
     'StrictKnownBugs': False,
     'Verbose': 2,
+    'logic_filter': '**/*.yaml',
   })
 # ---
 # name: test_defaults_only_logicpath
@@ -25,6 +26,7 @@
     'RequireGfx1250v0Overlay': False,
     'StrictKnownBugs': False,
     'Verbose': 1,
+    'logic_filter': '**/*.yaml',
   })
 # ---
 # name: test_minimal_check_all
@@ -39,5 +41,6 @@
     'RequireGfx1250v0Overlay': False,
     'StrictKnownBugs': False,
     'Verbose': 1,
+    'logic_filter': '**/*.yaml',
   })
 # ---
