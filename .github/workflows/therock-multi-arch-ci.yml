@@ -93,7 +93,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: main
+          ref: main  # Use main for configure (test branch only for setup/build)
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -141,7 +141,8 @@ jobs:
 
   setup:
     needs: [configure, resolve_therock_ref]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    # TEST BRANCH: using users/geomin12/build-only-retrieve instead of main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/build-only-retrieve
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -156,9 +157,8 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
-      # checked-out commit as needs.setup.outputs.ref for downstream jobs.
-      ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
+      # TEST BRANCH: force using our test branch instead of resolved ref
+      ref: users/geomin12/build-only-retrieve
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
