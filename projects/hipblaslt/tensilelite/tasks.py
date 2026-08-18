@@ -638,6 +638,7 @@ def build_coverage(
         *build_env.cmake_args(),
         "-DTENSILELITE_ENABLE_COVERAGE=ON",
         "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DROCISA_BUILD_PYTHON=ON",
         "-DTENSILELITE_BUILD_TESTING=ON",
         "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
     ]
