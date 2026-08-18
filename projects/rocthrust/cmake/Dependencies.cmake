@@ -443,6 +443,10 @@ if(BUILD_BENCHMARK)
     if(CMAKE_CXX_COMPILER_LAUNCHER)
       set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
     endif()
+
+    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON leaks into
+    # rocrand and causes its benchmarks to build. Suppress that here.
+    set(BUILD_BENCHMARK OFF)
     
     FetchContent_Declare(
       rocrand
