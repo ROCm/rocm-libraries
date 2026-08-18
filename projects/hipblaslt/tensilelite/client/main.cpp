@@ -55,6 +55,7 @@
 
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
+#include "TensileLiteClientVersion.hpp"
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
@@ -75,6 +76,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <string_view>
 
 namespace TensileLite
 {
@@ -793,6 +795,12 @@ namespace TensileLite
 
 int main(int argc, const char* argv[])
 {
+    if(argc == 2 && std::string_view(argv[1]) == "--version")
+    {
+        std::cout << TENSILELITE_CLIENT_VERSION << '\n';
+        return 0;
+    }
+
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
