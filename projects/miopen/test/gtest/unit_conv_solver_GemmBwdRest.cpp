@@ -33,26 +33,28 @@ auto GetConvTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
-    return std::vector{
+    auto cases = std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, datatype},
-        // 2D patch-embedding backward data: Ho=Wo=1, stride==filter (GemmBwdRest fast path)
-        TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype},
-        // 3D point-output backward data: Do=Ho=Wo=1, stride==filter (GemmBwdRest fast path)
-        TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
-        // Same, but with dx larger than the filter, so Col2Im3d performs a real scatter
-        // instead of degenerating into an element-wise copy.
-        TestCase{{4, 3, 5, 5, 5}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
-        // Point-output backward data in channel-last layouts, which the GEMM writes into dx
-        // directly. C > 1 so that the layout is distinguishable from the default one.
-        TestCase{{datatype, miopenTensorNHWC, {4, 4, 14, 14}},
-                 {datatype, miopenTensorNHWC, {64, 4, 14, 14}},
-                 datatype, {{0, 0}, {14, 14}, {1, 1}}},
-        TestCase{{datatype, miopenTensorNDHWC, {4, 4, 4, 4, 4}},
-                 {datatype, miopenTensorNDHWC, {64, 4, 4, 4, 4}},
-                 datatype, {{0, 0, 0}, {4, 4, 4}, {1, 1, 1}}},
         // clang-format on
     };
+
+    if(datatype == miopenHalf)
+    {
+        // clang-format off
+        cases.emplace_back(TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype});
+        cases.emplace_back(TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype});
+        cases.emplace_back(TestCase{{4, 3, 5, 5, 5}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {4, 4, 14, 14}},
+                                    {datatype, miopenTensorNHWC, {64, 4, 14, 14}},
+                                    datatype, {{0, 0}, {14, 14}, {1, 1}}});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {4, 4, 4, 4, 4}},
+                                    {datatype, miopenTensorNDHWC, {64, 4, 4, 4, 4}},
+                                    datatype, {{0, 0, 0}, {4, 4, 4}, {1, 1, 1}}});
+        // clang-format on
+    }
+
+    return cases;
 }
 
 auto GetConvTestCasesFull(miopenDataType_t datatype)

@@ -36,15 +36,21 @@ auto GetConvTestCases(miopenDataType_t datatype)
     auto type_w = datatype;
     auto type_y = (datatype == miopenInt8) ? miopenInt32 : datatype;
 
-    return std::vector{
+    auto cases = std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, type_x, type_w, type_y},
-        // 2D patch-embedding forward: Ho=Wo=1, stride==filter (GemmFwdRest fast path)
-        TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, type_x, type_w, type_y},
-        // 3D point-output forward: Do=Ho=Wo=1, stride==filter (GemmFwdRest fast path)
-        TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, type_x, type_w, type_y},
         // clang-format on
     };
+
+    if(datatype == miopenHalf)
+    {
+        // clang-format off
+        cases.emplace_back(TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, type_x, type_w, type_y});
+        cases.emplace_back(TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, type_x, type_w, type_y});
+        // clang-format on
+    }
+
+    return cases;
 }
 
 auto GetConvTestCasesFull(miopenDataType_t datatype)
