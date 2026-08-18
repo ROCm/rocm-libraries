@@ -3304,10 +3304,87 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
-    def _splicePreloopCoverModules(self, em_list, cover_modules) -> bool:
+    def _mt0_preloop_gr_end(self, em_list) -> int:
+        """Index in em_list where MT0 prefetch GR placements end (before GRInc/initC/wait)."""
+        for i, em in enumerate(em_list):
+            if em.opType in ('gr_inc', 'wait_gr') or (
+                    em.opType == 'inline'
+                    and getattr(em.source, 'label', None) == 'initC_overlap'):
+                return i
+        return len(em_list)
+
+    def _injectPreloopFineCover(self, em_list, cover_modules) -> bool:
+        """Path 4 fine: GR shadow fill with initC + cover interleaved between MT0 loads.
+
+        Reorders MT0 prefetch to:
+          GR(A) -> initC -> GR(B) -> cover(LRA,…) -> GR(SA,SB) -> GRInc -> wait
+
+        Both initC and the cover now run while the A/B buffer_loads are in flight,
+        where before they sat after the whole prefetch batch. SkipPreloopGR still
+        lands on the initC module (initC_overlap label), so the K<DepthU tail path
+        enters at initC and branches out before reaching GR(B).
+        """
+        init_idx = next((i for i, em in enumerate(em_list)
+                         if em.opType == 'inline'
+                         and getattr(em.source, 'label', None) == 'initC_overlap'), None)
+        if init_idx is None:
+            return False
+
+        wait_idx = next((i for i, em in enumerate(em_list) if em.opType == 'wait_gr'), None)
+        if wait_idx is None:
+            return False
+
+        mt0_end = self._mt0_preloop_gr_end(em_list)
+        init_em = em_list.pop(init_idx)
+        if init_idx < wait_idx:
+            wait_idx -= 1
+        if init_idx < mt0_end:
+            mt0_end -= 1
+
+        head, tail = em_list[:wait_idx], em_list[wait_idx:]
+        prefix, mt0_gr, gr_incs = [], {}, []
+        for em in head:
+            if em.opType == 'gr' and em.source is not None:
+                mt0_gr[em.source.tensor] = em
+            elif em.opType == 'gr_inc':
+                gr_incs.append(em)
+            else:
+                prefix.append(em)
+
+        if 'A' not in mt0_gr or 'B' not in mt0_gr:
+            insert_at = min(mt0_end, len(head))
+            head.insert(insert_at, init_em)
+            em_list[:] = head + tail
+            return False
+
+        new_id = max((em.moduleId for em in em_list), default=-1) + 1
+
+        new_head = list(prefix)
+        new_head.append(mt0_gr['A'])
+        new_head.append(init_em)
+        new_head.append(mt0_gr['B'])
+        new_head.append(EmittedModule(moduleId=new_id,
+                                      instructions=list(cover_modules),
+                                      before=None,
+                                      source=None))
+        for tensor in ('SA', 'SB'):
+            if tensor in mt0_gr:
+                new_head.append(mt0_gr[tensor])
+        new_head.extend(gr_incs)
+
+        em_list[:] = new_head + tail
+        return True
+
+    def _injectPreloopPipelinedCover(self, em_list, cover_modules) -> bool:
+        """Legacy alias — Path 4b coarse split (cover only, initC after full GR batch)."""
+        return self._injectPreloopFineCover(em_list, cover_modules)
+
+    def _splicePreloopCoverModules(self, em_list, cover_modules, pipelined=False) -> bool:
         """Insert deferred cover modules (LRA trio + extensions) into preloop."""
         if not cover_modules:
             return False
+        if pipelined:
+            return self._injectPreloopFineCover(em_list, cover_modules)
         drain_idx = next((i for i, em in enumerate(em_list)
                           if em.opType == 'wait_gr'), len(em_list))
         new_id = max((em.moduleId for em in em_list), default=-1) + 1
@@ -4210,9 +4287,13 @@ class LogicalScheduler:
         # the address math is front-loaded into the shadow. The preloop is emitted
         # unscheduled (schedule=False), so the sequential list splice lands them in order.
         # TENSILE_PRELOOP_COVER_INTERLEAVE widens this from PLSIN1-only (Change A) to
-        # every subtile PGR>=1 kernel; see _preloopCoverInterleaveEligible.
+        # every subtile PGR>=1 kernel; see _preloopCoverInterleaveEligible. On PGR>=1
+        # it also pipelines the splice into
+        #   GR(A) -> initC -> GR(B) -> cover -> GR(SA,SB) -> GRInc -> wait_gr
+        # so initC joins the LRA math inside the A/B prefetch shadow.
         from Tensile.Common.Utilities import preloopCoverInterleaveEnabled
         _coverFlag = preloopCoverInterleaveEnabled()
+        _pipelinedCover = _coverFlag and self.config.pgr >= 1
         _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
         _coverDeferred = getattr(writer, "_deferredPreloopCoverModules", None)
         _coverModules = None
@@ -4226,7 +4307,8 @@ class LogicalScheduler:
                 and self._preloop_emitted
                 and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
             em_list = self._preloop_emitted[0][0]
-            if self._splicePreloopCoverModules(em_list, _coverModules):
+            if self._splicePreloopCoverModules(em_list, _coverModules,
+                                               pipelined=_pipelinedCover):
                 self._coverDeferredIntoPreloop = True
                 self._lraDeferredIntoPreloop = True
 
