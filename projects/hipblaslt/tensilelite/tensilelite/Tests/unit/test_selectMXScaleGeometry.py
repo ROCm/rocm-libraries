@@ -27,9 +27,9 @@ import sys
 import importlib
 import pytest
 from rocisa.enum import DataTypeEnum
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
-from Tensile.Components.Subtile.Kernel import (
+from tensilelite.Components.Subtile.Kernel import (
     selectMXScaleGeometry,
     MXSA_B4,
     MXSB_B4,
