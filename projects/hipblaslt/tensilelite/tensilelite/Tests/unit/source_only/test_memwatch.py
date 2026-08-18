@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
+scripts_dir = Path(__file__).resolve().parents[4] / "scripts"
 sys.path.insert(0, str(scripts_dir))
 
 import memwatch  # noqa: E402
