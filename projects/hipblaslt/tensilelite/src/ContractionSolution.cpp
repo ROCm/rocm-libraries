@@ -178,8 +178,8 @@ namespace TensileLite
         split.skItersPerWG = static_cast<uint32_t>(skTiles * itersPerTile / skGrid);
         // Global leftover under the historical first-E mapping. The device may
         // redistribute these extras within each tile when
-        // InternalArgsSupport::perTileExtraIters is set and skGrid % skTiles == 0
-        // (AIHPBLAS-4253); the packed value itself is unchanged.
+        // InternalArgsSupport::perTileExtraIters is set and skGrid % skTiles == 0;
+        // the packed value itself is unchanged.
         split.extraIters   = static_cast<uint32_t>(static_cast<size_t>(skTiles) * itersPerTile
                                                  - static_cast<size_t>(split.skItersPerWG)
                                                        * skGrid);
@@ -205,7 +205,7 @@ namespace TensileLite
         //                      into I/skItersPerWG equal chunks at identical
         //                      offsets; equivalent to tiles | grid and
         //                      (grid/tiles) | I.
-        //  AIHPBLAS-4253: skTiles == tiles && grid % tiles == 0 with a kernel
+        //  per-tile extras: skTiles == tiles && grid % tiles == 0 with a kernel
         //                      that redistributes extras within each tile.
         //                      extraIters may be nonzero; fold signatures still
         //                      match because each tile gets the same intra-tile
