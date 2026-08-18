@@ -14,10 +14,10 @@ This is the dispatcher equivalent of tile_engine's gemm_universal_benchmark.py
 driven with TILE_ENGINE_SAMPLING_TIER=daily.
 
 Usage:
-    python3 run_gemm_search_space.py --arch gfx942 --budget 500
-    python3 run_gemm_search_space.py --dtypes fp16,bf16 --layouts rcr,rrr
-    python3 run_gemm_search_space.py --budget 0   # full space, no cap
-    python3 run_gemm_search_space.py --budget 500 --seed 42 --json results.json
+    python3 test_gemm_search_space.py --arch gfx942 --budget 500
+    python3 test_gemm_search_space.py --dtypes fp16,bf16 --layouts rcr,rrr
+    python3 test_gemm_search_space.py --budget 0   # full space, no cap
+    python3 test_gemm_search_space.py --budget 500 --seed 42 --json results.json
 """
 
 import argparse
