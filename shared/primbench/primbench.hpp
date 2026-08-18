@@ -22,7 +22,9 @@
 
 #ifdef _WIN32
     // Disables the min() and max() macros from windows.h
-    #define NOMINMAX
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
 
     #include <io.h>
     #include <windows.h>
