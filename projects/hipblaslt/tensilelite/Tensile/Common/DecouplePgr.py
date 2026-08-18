@@ -186,8 +186,12 @@ def decoupledSingleBuffered(ks):
 def tdmDealiasAB(ks):
     """True when A and B get their own TDM descriptor sets instead of sharing one.
 
-    Costs 12 SGPRs -- Group0 is 4 and Group1 is 8, the fixed tuple widths of
-    tensor_load_to_lds -- against an architectural ceiling of 106.
+    Costs 14 SGPRs -- next_free_sgpr 88 -> 102 -- against an architectural
+    ceiling of 106, leaving 4. Group0 is 4 and Group1 is 8, the fixed tuple
+    widths of tensor_load_to_lds, and both land 4-aligned and contiguous, so
+    none of this is alignment padding: the other 2 are the pool high-water
+    moving 3 once those twelve fill the holes the shared layout left free for
+    the tail temporaries, less the 1 tdmABIncs the shared set no longer needs.
 
     Never derived, only selected by TDMFuse=6, so that 0 stays inert. Equal
     block counts keep the alias, because their byte-identity with a legacy
