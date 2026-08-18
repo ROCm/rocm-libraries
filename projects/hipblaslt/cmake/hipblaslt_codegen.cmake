@@ -158,10 +158,10 @@ function(create_device_library)
             "create_device_library: CODEGEN_ROOT is required; pass the TensileLite source root "
             "or set HIPBLASLT_CODEGEN_ROOT.")
     endif()
-    set(_known_bugs_resource "${_codegen_dir}/tensilelite/TensileLogic/known_bugs.yaml")
+    set(_known_bugs_resource "${_codegen_dir}/tensilelite/tensilelite_logic/known_bugs.yaml")
     foreach(_required_path
             "${_codegen_dir}/tensilelite/bin/TensileLogic"
-            "${_codegen_dir}/tensilelite/TensileCreateLibrary/__main__.py"
+            "${_codegen_dir}/tensilelite/tensilelite_create_library/__main__.py"
             "${_known_bugs_resource}")
         if(NOT EXISTS "${_required_path}")
             message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
@@ -322,7 +322,7 @@ function(create_device_library)
 
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${_python_command} -m tensilelite.TensileCreateLibrary
+        ${_python_command} -m tensilelite.tensilelite_create_library
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"
