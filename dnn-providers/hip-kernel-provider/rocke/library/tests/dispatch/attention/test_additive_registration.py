@@ -13,12 +13,13 @@ a fresh ``CandidateRegistry`` is seeded from ``attention_candidates()`` and the
 example candidate is registered only into that copy. The example candidate is a
 throwaway defined in this module (never shipped) -- it exists solely to prove the
 registration mechanics, following the ``_make_d256_decode_candidate`` factory
-shape in ``dispatch/attention.py``.
+shape in ``dispatch/attention/generic.py``.
 """
 
 from __future__ import annotations
 
 import unittest
+from dataclasses import asdict
 from typing import Tuple
 
 import kernels.common.attention_unified as au
@@ -158,13 +159,32 @@ def _fresh_registry_with(extra: KernelCandidate | None = None) -> CandidateRegis
     return reg
 
 
-def _support_verdicts(reg: CandidateRegistry) -> dict:
-    """{(candidate_name, request_index): (ok, why)} over the sample requests."""
-    out = {}
-    for i, req in enumerate(_SAMPLE_REQUESTS):
-        for c in reg.candidates():
-            out[(c.name, i)] = c.admits(req)
-    return out
+def _supports_snapshot(reg: CandidateRegistry) -> dict:
+    """{(request_index, candidate_name): (spec_id, priority, admits-verdict)}.
+
+    Captured as plain data over ``reg.supported()`` -- so it records the
+    registry's actual membership/verdicts at a point in time, not references to
+    live candidate objects. Comparing two such snapshots (before vs after adding
+    a candidate) is a real diff; comparing the shared objects to themselves is
+    not.
+    """
+    return {
+        (i, c.name): (c.spec_id, c.priority, c.admits(req))
+        for i, req in enumerate(_SAMPLE_REQUESTS)
+        for c in reg.supported(req)
+    }
+
+
+def _select_spec_snapshot(reg: CandidateRegistry) -> dict:
+    """{(request_index, candidate_name): asdict(select_spec)} over supported().
+
+    Serialized to plain dicts so the before/after comparison is against recorded
+    state rather than the same live objects."""
+    return {
+        (i, c.name): asdict(c.select_spec(req))
+        for i, req in enumerate(_SAMPLE_REQUESTS)
+        for c in reg.supported(req)
+    }
 
 
 class TestAdditiveRegistration(unittest.TestCase):
@@ -190,35 +210,53 @@ class TestAdditiveRegistration(unittest.TestCase):
 
     def test_existing_supports_verdicts_unchanged(self):
         # The open/closed invariant: adding the example changes NO pre-existing
-        # candidate's supports() verdict for any sample request.
+        # candidate's admits() verdict for any sample request. Snapshot the
+        # baseline registry's state as plain data BEFORE the example exists, then
+        # diff against the state after -- so the comparison is before-vs-after,
+        # not an object compared to itself.
         with _PinnedArch("gfx942"):
-            baseline = _support_verdicts(_fresh_registry_with(None))
-            with_example = _support_verdicts(
-                _fresh_registry_with(_make_example_candidate())
-            )
-        for key, verdict in baseline.items():
-            self.assertEqual(
-                verdict,
-                with_example[key],
-                msg=f"supports() changed for {key} after adding example candidate",
-            )
+            reg = _fresh_registry_with(None)
+            before = _supports_snapshot(reg)
+            reg.register(_make_example_candidate())
+            after = _supports_snapshot(reg)
+        # Guard the premise: the snapshots must actually cover shipped candidates
+        # (an empty baseline would make the invariant vacuous).
+        self.assertTrue(before, "no shipped candidate supported any sample request")
+        # Every pre-existing entry is unchanged; the only new key is the example.
+        self.assertEqual(before, {k: v for k, v in after.items() if k in before})
+        new_keys = set(after) - set(before)
+        self.assertTrue(
+            all(name == "attention_example_probe" for _, name in new_keys),
+            f"adding the example perturbed candidates other than itself: {new_keys}",
+        )
 
     def test_existing_select_specs_unchanged(self):
         # And it changes NO pre-existing candidate's select_spec() output.
         with _PinnedArch("gfx942"):
-            base = _fresh_registry_with(None)
-            withx = _fresh_registry_with(_make_example_candidate())
-            for i, req in enumerate(_SAMPLE_REQUESTS):
-                for c in base.candidates():
-                    ok, _ = c.admits(req)
-                    if not ok:
-                        continue
-                    other = next(x for x in withx.candidates() if x.name == c.name)
-                    self.assertEqual(
-                        c.select_spec(req),
-                        other.select_spec(req),
-                        msg=f"select_spec changed for {c.name} on request #{i}",
-                    )
+            reg = _fresh_registry_with(None)
+            before = _select_spec_snapshot(reg)
+            reg.register(_make_example_candidate())
+            after = _select_spec_snapshot(reg)
+        self.assertTrue(before, "no shipped candidate supported any sample request")
+        self.assertEqual(before, {k: v for k, v in after.items() if k in before})
+
+    def test_selection_winner_unchanged_by_lower_priority_add(self):
+        # Open/closed at the selection level: the example (priority 7) overlaps
+        # the shipped cohort but never outranks the specialist (priority 5), so
+        # the winning candidate for each sample request must be unchanged. This
+        # is the assertion that actually fails if a newly registered spec
+        # perturbs routing for an existing problem.
+        with _PinnedArch("gfx942"):
+            reg = _fresh_registry_with(None)
+            before = {
+                i: reg.select(req).name
+                for i, req in enumerate(_SAMPLE_REQUESTS)
+                if reg.supported(req)
+            }
+            reg.register(_make_example_candidate())
+            after = {i: reg.select(_SAMPLE_REQUESTS[i]).name for i in before}
+        self.assertTrue(before, "no sample request had a supported candidate")
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":
