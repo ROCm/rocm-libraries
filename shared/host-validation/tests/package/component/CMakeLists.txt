@@ -104,6 +104,16 @@ elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "Tiled")
     set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../tiled.cpp")
 elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "BLAS")
     set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../blas.cpp")
+    if(NOT "${ROCHostValidation_BLAS_INTEGER_SIZE}" STREQUAL "4")
+        message(FATAL_ERROR
+            "The installed BLAS component did not report its LP64 integer ABI."
+        )
+    endif()
+    if(NOT ROCHostValidation_BLAS_BUILD_PROVIDER)
+        message(FATAL_ERROR
+            "The installed BLAS component did not report its build provider."
+        )
+    endif()
 elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "MX")
     set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../mx.cpp")
 elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "AMDGPULayout")

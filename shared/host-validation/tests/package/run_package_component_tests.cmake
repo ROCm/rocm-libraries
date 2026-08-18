@@ -302,6 +302,13 @@ file(
     "${_full_install_dir}/*ROCHostValidationBLASTargets.cmake"
 )
 if(_blas_target_files)
+    list(GET _blas_target_files 0 _blas_target_file)
+    file(READ "${_blas_target_file}" _blas_targets)
+    if(NOT _blas_targets MATCHES "CBLAS::CBLAS")
+        message(FATAL_ERROR
+            "The installed BLAS target does not link through CBLAS::CBLAS."
+        )
+    endif()
     _run_component(
         "${_full_install_dir}"
         full-blas
@@ -310,10 +317,18 @@ if(_blas_target_files)
     )
     _expect_component_failure(
         "${_full_install_dir}"
-        missing-blas-dependency
+        missing-cblas-dependency
         BLAS
-        "the BLAS component requires BLAS::BLAS"
-        -DCMAKE_DISABLE_FIND_PACKAGE_BLAS=TRUE
+        "the BLAS component requires CBLAS::CBLAS"
+        -DCMAKE_DISABLE_FIND_PACKAGE_CBLAS=TRUE
+    )
+    _expect_component_failure(
+        "${_full_install_dir}"
+        incompatible-cblas-integer-abi
+        BLAS
+        "the BLAS component requires CBLAS::CBLAS"
+        "-DCMAKE_MODULE_PATH=${PACKAGE_SOURCE_DIR}/fake-ilp64-cblas"
+        "-DCBLAS_INCLUDE_DIR=${PACKAGE_SOURCE_DIR}/fake-ilp64-cblas"
     )
 endif()
 
