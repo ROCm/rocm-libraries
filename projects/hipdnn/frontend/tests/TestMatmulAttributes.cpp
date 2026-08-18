@@ -232,8 +232,8 @@ TEST(TestMatmulAttributes, LogicalAndStrictEquality)
     // Sanity check on the trivial hooks themselves: since MatmulAttributes has
     // no extra fields, two default-constructed instances (no tensors, no name,
     // NOT_SET compute type) should still be logically and strictly equal.
-    hipdnn_frontend::graph::MatmulAttributes emptyAttr1;
-    hipdnn_frontend::graph::MatmulAttributes emptyAttr2;
+    const hipdnn_frontend::graph::MatmulAttributes emptyAttr1;
+    const hipdnn_frontend::graph::MatmulAttributes emptyAttr2;
     EXPECT_TRUE(emptyAttr1 == emptyAttr2);
     EXPECT_TRUE(emptyAttr1.logicallyEquals(emptyAttr2));
 }

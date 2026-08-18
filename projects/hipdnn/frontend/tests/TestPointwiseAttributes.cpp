@@ -297,13 +297,13 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     attr1.set_elu_alpha(1.0f);
     attr1.set_softplus_beta(1.0f);
 
-    auto in0_1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    in0_1->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    attr1.set_input_0(in0_1);
+    auto in01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    in01->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_input_0(in01);
 
-    auto out0_1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    out0_1->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    attr1.set_output_0(out0_1);
+    auto out01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    out01->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_output_0(out01);
 
     hipdnn_frontend::graph::PointwiseAttributes attr2;
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -316,13 +316,13 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     attr2.set_elu_alpha(1.0f);
     attr2.set_softplus_beta(1.0f);
 
-    auto in0_2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    in0_2->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    attr2.set_input_0(in0_2);
+    auto in02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    in02->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_input_0(in02);
 
-    auto out0_2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    out0_2->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    attr2.set_output_0(out0_2);
+    auto out02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    out02->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_output_0(out02);
 
     // Initial check: everything matches exactly
     EXPECT_TRUE(attr1 == attr2);
@@ -337,7 +337,7 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1 != attr2);
     EXPECT_FALSE(attr1 == attr2);
     EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
-    attr2.set_input_0(in0_2); // Revert
+    attr2.set_input_0(in02); // Revert
 
     // Mode mismatch: semantic, must fail both checks
     attr2.set_mode(hipdnn_frontend::PointwiseMode::SIGMOID_FWD);
@@ -405,8 +405,8 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
     auto logicalMatchIn0 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchIn0
-        ->set_uid(555) // Diverges from attr1's in0_1 (uid: 1)
-        .set_name("DIVERGENT_NAME") // Diverges from attr1's in0_1 ("IN_0")
+        ->set_uid(555) // Diverges from attr1's in01 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's in01 ("IN_0")
         .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
     attr2.set_input_0(logicalMatchIn0);
 

@@ -299,7 +299,7 @@ TEST(TestMoeGroupedMatmulAttributes, LogicalAndStrictEquality)
 
     // Unset-vs-unset optional fields: two default-constructed attrs with
     // matching tensors should still compare equal
-    MoeGroupedMatmulAttributes sparse1;
+    const MoeGroupedMatmulAttributes sparse1;
     MoeGroupedMatmulAttributes sparse2;
     EXPECT_TRUE(sparse1 == sparse2);
     EXPECT_TRUE(sparse1.logicallyEquals(sparse2));

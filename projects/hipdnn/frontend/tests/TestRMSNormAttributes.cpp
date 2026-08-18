@@ -344,7 +344,7 @@ TEST(TestRMSNormAttributes, LogicalAndStrictEquality)
 
     // Unset-vs-unset forward_phase: two default-constructed attrs (both
     // NOT_SET) should still compare equal
-    hipdnn_frontend::graph::RMSNormAttributes sparse1;
+    const hipdnn_frontend::graph::RMSNormAttributes sparse1;
     hipdnn_frontend::graph::RMSNormAttributes sparse2;
     EXPECT_TRUE(sparse1 == sparse2);
     EXPECT_TRUE(sparse1.logicallyEquals(sparse2));
