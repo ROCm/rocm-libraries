@@ -1244,7 +1244,7 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) >= 4)
+    if constexpr(sizeof(Ti) >= 4 && !std::is_same_v<Ti, float>)
     {
         // TODO remove after tuning
         if(rocblas_internal_get_arch(prob.handle) == 950 && !prob.handle->isHipBLASLtForcedOn())
