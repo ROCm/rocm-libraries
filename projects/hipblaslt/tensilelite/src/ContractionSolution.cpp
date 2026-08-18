@@ -1313,10 +1313,12 @@ namespace TensileLite
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
-                        .size  = {sizes[0], sizes[1], sizes[3]},
-                        .batch = sizes[2],
+                        .size    = {sizes[0], sizes[1], sizes[3]},
+                        .batch   = sizes[2],
                         // CU budget hint; 0 = use all CUs.
                         .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1918,9 +1920,26 @@ namespace TensileLite
 
         if(sizeMapping.streamK != 0)
         {
-            rv.numWorkGroups.x = sk.grid;
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
+            if(sizeMapping.streamKForceDPOnly != 0
+               && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1))
+            {
+                // ForceDPOnly cluster multicast [Cs, Ck]: launch a grid spanning
+                // the full M x N tile space -- gridX = nWG0 (M-tiles), gridY = nWG1
+                // (N-tiles), gridZ = batch -- so the kernel's StreamKIdx fold
+                // (StreamK.preLoop) gives each work-group exactly one tile and the
+                // Cs X-peers of a cluster always land M-adjacent (sharing B). A 1-D
+                // [Cs, 1] cluster is the Ck == 1 case of the same launch. The
+                // round-up below pads non-multiple extents; sk.grid == tiles here.
+                rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
+                // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
+            }
+            else
+            {
+                // Linear Stream-K launch (no cluster, or ForceDPOnly=0).
+                rv.numWorkGroups.x = sk.grid;
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
         }
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
@@ -1937,11 +1956,23 @@ namespace TensileLite
         rv.clusterDim = sizeMapping.clusterDim;
 
         // The HIP driver rejects a cluster launch whose grid is not divisible by
-        // clusterDim, so round up. The extra padded WGs early-exit in the kernel
-        // prologue; their WAVEDONE decrements the barrier's live member count.
-        // Stream-K has its own cluster-aware 1-D grid (sk.grid) and WG-id decode,
-        // so leave it untouched.
-        if(enableCluster && sizeMapping.streamK == 0)
+        // clusterDim, so round up. The grid set above holds the REAL extents and
+        // need not be a cluster multiple. The extra padded work-groups early-exit
+        // in the kernel prologue (StreamK.streamKClusterPadEarlyExit on the
+        // ForceDPOnly cluster path) BEFORE the -3 cluster barrier, so their
+        // WAVEDONE decrements the barrier's live member count, and the surviving
+        // peers' broadcast masks are trimmed to the present lanes
+        // (computeMulticastMaskReduction).
+        //
+        // Only the ForceDPOnly cluster multicast needs this: it is the path whose
+        // grid spans the real M x N tile space and whose padded peers have a
+        // pad-exit. A ForceDPOnly==0 Stream-K cluster keeps develop's launch --
+        // its 1-D sk.grid is not a tile space and it has no pad-exit, so rounding
+        // up would only add work-groups that run the whole Stream-K prologue
+        // before falling out on an empty iteration range.
+        bool skClusterMulticast = sizeMapping.streamK != 0
+                                  && sizeMapping.streamKForceDPOnly != 0 && enableCluster;
+        if(enableCluster && (sizeMapping.streamK == 0 || skClusterMulticast))
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
@@ -4393,6 +4424,18 @@ namespace TensileLite
                 {
                     skGrid = tiles;
                 }
+            }
+
+            // StreamK ForceDPOnly cluster multicast (gfx1250, ClusterDim-driven):
+            // one work-group per output tile (not a K-split), so skGrid == tiles.
+            // The launch pads up to the cluster dims and the boundary peers
+            // pad-exit (StreamK.preLoop) when the size is not a cluster multiple.
+            if(self.sizeMapping.streamK == 3 && self.sizeMapping.streamKForceDPOnly
+               && (static_cast<size_t>(self.sizeMapping.clusterDim.x)
+                   * static_cast<size_t>(self.sizeMapping.clusterDim.y))
+                      > 1)
+            {
+                skGrid = tiles;
             }
 
             return skGrid;
