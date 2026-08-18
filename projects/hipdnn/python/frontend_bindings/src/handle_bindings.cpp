@@ -112,7 +112,7 @@ public:
         {
             throw std::runtime_error("Failed to resolve engine name");
         }
-        return std::string(engineName.data());
+        return {engineName.data()};
     }
 
     EngineInfo getEngineInfo(int64_t engineId) const

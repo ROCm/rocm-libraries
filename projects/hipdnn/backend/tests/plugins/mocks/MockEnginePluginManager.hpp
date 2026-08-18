@@ -10,7 +10,9 @@
 #include <filesystem>
 #include <gmock/gmock.h>
 #include <map>
+#include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -65,6 +67,15 @@ public:
             }
         }
         return _live;
+    }
+
+    /// Admission fills the real cache and a mock plugin never runs it, so ask the
+    /// owning plugin: a test names an engine the same way a plugin does.
+    std::optional<std::string> engineEntryPointName(int64_t engineId) const override
+    {
+        const auto* owner = engineOwner(engineId);
+        return owner != nullptr && owner->hasEngineName() ? owner->getEngineName(engineId)
+                                                          : std::optional<std::string>{};
     }
 
 private:

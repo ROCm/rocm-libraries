@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "EnginePlugin.hpp"
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 namespace hipdnn_backend
 {
@@ -158,15 +159,33 @@ std::optional<std::string> EnginePlugin::getEngineName(int64_t engineId) const
 
     if(_funcGetEngineName == nullptr)
     {
+        HIPDNN_BACKEND_LOG_WARN("Plugin '{}' was asked to name engine {} but does not export "
+                                "hipdnnEnginePluginGetEngineName; the engine keeps its ID.",
+                                cachedName(),
+                                hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
         return std::nullopt;
     }
 
     const char* name = nullptr;
     const auto status = _funcGetEngineName(engineId, &name);
 
-    // Any non-success status means the plugin has no name to give for this
-    // engine, so this path is silent rather than an error.
-    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS || name == nullptr || *name == '\0')
+    // The SDK emits this entry point even when the container defines no
+    // getEngineName, so NOT_APPLICABLE is how a plugin declines.
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        return std::nullopt;
+    }
+
+    // Any other status is a defect, not a way to decline.
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Failed to get engine name. Status: ") + toString(status)
+                                  + "(" + std::to_string(status)
+                                  + "), Error: " + std::string(getLastErrorString()));
+    }
+
+    if(name == nullptr || *name == '\0')
     {
         return std::nullopt;
     }

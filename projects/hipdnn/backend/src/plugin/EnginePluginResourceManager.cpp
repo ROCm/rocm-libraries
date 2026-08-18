@@ -238,12 +238,10 @@ std::string EnginePluginResourceManager::resolveEngineName(
                                             : std::string_view("<unknown>");
 
     // The entry point is the only channel a plugin can name an engine through,
-    // because it is the only one load-time admission can reach.
-    std::optional<std::string> entryPointName;
-    if(owningPlugin != nullptr && owningPlugin->hasEngineName())
-    {
-        entryPointName = owningPlugin->getEngineName(engineId);
-    }
+    // because it is the only one load-time admission can reach. Admission resolved
+    // it once, so this reads a map.
+    const std::optional<std::string> entryPointName
+        = _pm ? _pm->engineEntryPointName(engineId) : std::optional<std::string>{};
 
     if(entryPointName.has_value())
     {

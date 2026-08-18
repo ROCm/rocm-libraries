@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -3786,6 +3787,7 @@ std::shared_ptr<MockEnginePlugin>
     auto plugin = std::make_shared<MockEnginePlugin>();
 
     EXPECT_CALL(*plugin, getAllEngineIds()).WillRepeatedly(::testing::Return(engineIds));
+    EXPECT_CALL(*plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*plugin, getEngineName(::testing::_))
         .WillRepeatedly(::testing::Return(std::optional<std::string>()));
     for(const auto& [id, name] : names)
@@ -3918,6 +3920,112 @@ TEST(TestEnginePluginAdmission, EngineReportingNoNameStaysSubjectToIdUniqueness)
     // in for the absent name must not also excuse it from the duplicate check.
     EXPECT_EQ(pluginManager.engineOwner(sharedId), first.get());
     EXPECT_EQ(pluginManager.liveEngines().size(), 1U);
+}
+
+TEST(TestEnginePluginAdmission, DuplicateEngineDropsItselfAndNoneOfItsSiblings)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t sharedId = hipdnn_data_sdk::utilities::engineNameToId("OVERLAPPING_ENGINE");
+    const int64_t soleId = hipdnn_data_sdk::utilities::engineNameToId("SURVIVING_ENGINE");
+
+    // Overlapping on one engine and not the other is the shape that separates
+    // dropping an engine from dropping a plugin.
+    auto first = makeNamingPlugin({sharedId}, {{sharedId, "OVERLAPPING_ENGINE"}});
+    auto second = makeNamingPlugin(
+        {sharedId, soleId}, {{sharedId, "OVERLAPPING_ENGINE"}, {soleId, "SURVIVING_ENGINE"}});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*first);
+    pluginManager.actionAfterAdding(*second);
+
+    // The overlap costs the second plugin that engine and nothing else.
+    EXPECT_EQ(pluginManager.engineOwner(sharedId), first.get());
+    EXPECT_EQ(pluginManager.engineOwner(soleId), second.get());
+    EXPECT_EQ(pluginManager.acceptedEngineIds(*second), std::vector<int64_t>{soleId});
+    EXPECT_EQ(pluginManager.liveEngines().size(), 2U);
+
+    const auto survivingName = pluginManager.engineEntryPointName(soleId);
+    ASSERT_TRUE(survivingName.has_value());
+    EXPECT_EQ(*survivingName, "SURVIVING_ENGINE");
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "dropping the duplicate"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, PluginWithoutTheNameEntryPointIsWarnedAboutOnce)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    EXPECT_CALL(*plugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{0x5150, 0x5151}));
+    EXPECT_CALL(*plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    // The hoisted guard is what keeps EnginePlugin's own warning unreachable.
+    EXPECT_CALL(*plugin, getEngineName(::testing::_)).Times(0);
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    // The warning is about how the engines are addressed, not whether they load.
+    EXPECT_EQ(pluginManager.liveEngines().size(), 2U);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "identified by their IDs"))
+        << recorder.getRecordedLogsAsString();
+
+    // The two causes take different fixes, so the warning has to say which one.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "does not export hipdnnEnginePluginGetEngineName"))
+        << recorder.getRecordedLogsAsString();
+
+    // Per plugin, not per engine.
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1U) << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, PluginDecliningEveryEngineNameIsWarnedAboutOnce)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    // Symbol present, every engine declined: what an SDK plugin whose container
+    // defines no getEngineName looks like. A symbol check alone misses it.
+    auto plugin = makeNamingPlugin({0x5150, 0x5151}, {});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    EXPECT_EQ(pluginManager.liveEngines().size(), 2U);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "identified by their IDs"))
+        << recorder.getRecordedLogsAsString();
+
+    // Points at the container rather than the symbol, which is exported here.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "give it a static getEngineName"))
+        << recorder.getRecordedLogsAsString();
+
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1U) << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, PluginNamingItsEnginesIsNotWarnedAbout)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t namedId = hipdnn_data_sdk::utilities::engineNameToId("FULLY_NAMED_ENGINE");
+    auto plugin = makeNamingPlugin({namedId}, {{namedId, "FULLY_NAMED_ENGINE"}});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    // Pins the trigger from the other side; a count-based condition is easy to
+    // leave firing always.
+    EXPECT_EQ(pluginManager.liveEngines().size(), 1U);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 }
 
 // ---------------------------------------------------------------------------
@@ -4078,8 +4186,11 @@ TEST(TestEnginePluginResourceManager, EnginePluginRejectsEveryMalformedPluginEng
         << "SUCCESS with a null name must not produce a name";
     EXPECT_FALSE(lyingPlugin->getEngineName(K_LYING_EMPTY_NAME_ENGINE_ID).has_value())
         << "SUCCESS with an empty name must not produce a name";
-    EXPECT_FALSE(lyingPlugin->getEngineName(K_LYING_ERROR_STATUS_ENGINE_ID).has_value())
-        << "A failure status must suppress the name the plugin wrote anyway";
+
+    // Only NOT_APPLICABLE declines. A failure status is a defect, so the name
+    // written alongside it is never reachable to be suppressed.
+    EXPECT_THROW(std::ignore = lyingPlugin->getEngineName(K_LYING_ERROR_STATUS_ENGINE_ID),
+                 HipdnnException);
 }
 
 TEST(TestEnginePluginResourceManager, LyingEngineNameResolvesToHexThroughResourceManager)

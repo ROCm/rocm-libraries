@@ -182,13 +182,13 @@ The status contract is:
 Other requirements:
 
 - The string is owned by the plugin and must stay valid for the lifetime of the loaded library. Use a string literal or an entry in a static table; returning a stack buffer is a use-after-free.
-- On any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, hipDNN doesn't read ``*name``.
+- On any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, hipDNN doesn't read ``*name``. ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` is the supported way to leave an engine unnamed; any other failure is treated as a plugin defect and drops that engine with an error naming the status.
 - The engine ID must be the hash of the reported name, so that ``engineNameToId(name) == engineId``. Deriving both from ``HIPDNN_REGISTER_ENGINE`` satisfies this automatically. hipDNN verifies it when it loads the plugin and drops any engine that fails; see :ref:`engine-name-conflicts`.
 - The implementation must be thread-safe.
 
 ``getEngineName`` is optional. The entry point is emitted whether or not your container defines the member; when the member is absent, it reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.
 
-Detection is by exact signature, so a near-miss reads as opting out: the engine falls back to a hex ID and the plugin logs ``API not applicable: [hipdnnEnginePluginGetEngineName]`` at INFO. To have the compiler confirm the member is seen, assert the trait the SDK uses:
+Detection is by exact signature, so a near-miss reads as opting out: the engine falls back to a hex ID and the plugin logs ``API not applicable: [hipdnnEnginePluginGetEngineName]`` at INFO, followed by a warning that the plugin's engines are identified by ID because its container supplies no name for any of them. To have the compiler confirm the member is seen, assert the trait the SDK uses:
 
 .. code:: cpp
 
@@ -216,6 +216,8 @@ An engine name is a key, not just a display label. hipDNN admits an engine only 
 - **The engine ID must be unused**: the first plugin to declare an ID keeps it.
 
 Because names hash to IDs and IDs are unique, engine names are unique across loaded engines as well, and a name can never resolve to an engine other than the one that reports it. The same rules apply to names in the built-in registry, whose IDs are hashes of the same names.
+
+Since a name is a key, namespace it. Prefix every engine name with your vendor or plugin name — ``acme::fast_conv`` or ``ACME_FAST_CONV`` — so a generic name such as ``FAST_CONV`` cannot collide with an engine hipDNN or another vendor ships under the same name. A collision drops one of the two engines, and which one survives depends on load order, so a namespaced name is what keeps your engine available.
 
 Addressing an engine by name
 ----------------------------

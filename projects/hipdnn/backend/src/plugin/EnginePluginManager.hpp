@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -48,6 +49,17 @@ public:
         const auto& live = liveEngines();
         const auto it = live.find(engineId);
         return it == live.end() ? nullptr : it->second;
+    }
+
+    /// @brief The name @p engineId reported through its plugin's
+    /// `hipdnnEnginePluginGetEngineName`, or nullopt when it reported none or the
+    /// engine is not live.
+    ///
+    /// Resolved once at admission, so naming an engine never re-enters the plugin.
+    [[nodiscard]] virtual std::optional<std::string> engineEntryPointName(int64_t engineId) const
+    {
+        const auto it = _engineNames.find(engineId);
+        return it == _engineNames.end() ? std::optional<std::string>{} : it->second;
     }
 
     /// @brief The live engine IDs a single plugin contributes, ascending.
@@ -138,12 +150,39 @@ protected:
 
         const auto engineIds = plugin.getAllEngineIds();
 
+        // A plugin with no entry point cannot answer for any engine.
+        const bool pluginNamesEngines = plugin.hasEngineName();
+        size_t namedEngines = 0;
+
         for(const auto id : engineIds)
         {
             // The name entry point is optional, so an engine reporting no name is
             // exempt and plugins predating it keep loading. Substituting its own ID
             // skips the hash check while keeping it on the uniqueness check below.
-            const auto engineName = plugin.getEngineName(id);
+            // Failing outright is a defect, but this hook must not throw once the
+            // plugin is in the list, so it costs that one engine.
+            std::optional<std::string> engineName;
+            if(pluginNamesEngines)
+            {
+                try
+                {
+                    engineName = plugin.getEngineName(id);
+                }
+                catch(const HipdnnException& e)
+                {
+                    HIPDNN_BACKEND_LOG_ERROR("Plugin '{}' failed to report a name for engine {}: "
+                                             "{}. Dropping the engine.",
+                                             plugin.cachedName(),
+                                             utilities::formatEngineIdHex(id),
+                                             e.what());
+                    continue;
+                }
+            }
+
+            // Counted where the plugin answers, so the warning below reports what
+            // it supplied rather than what survived admission.
+            namedEngines += engineName.has_value() ? 1 : 0;
+
             const auto nameId
                 = engineName.has_value() ? utilities::engineNameToId(*engineName) : id;
             if(nameId != id)
@@ -185,18 +224,47 @@ protected:
                     plugin.cachedName(),
                     utilities::formatEngineIdHex(id),
                     owner->second->cachedName());
+                continue;
             }
+
+            // Cached alongside the ownership it was validated against, so later
+            // lookups never call back into the plugin.
+            if(engineName.has_value())
+            {
+                _engineNames.emplace(id, std::move(*engineName));
+            }
+        }
+
+        // Still supported, but such a plugin's engines can only be addressed by ID.
+        // The two ways to arrive here take different fixes, so name the one that applies.
+        if(namedEngines == 0)
+        {
+            const char* const remedy
+                = pluginNamesEngines
+                      ? "Its engine container supplies no name for any of them; give it a static "
+                        "getEngineName."
+                      : "It does not export hipdnnEnginePluginGetEngineName, which engine plugin "
+                        "API 1.4.0 added.";
+
+            HIPDNN_BACKEND_LOG_WARN(
+                "Plugin '{}' names none of its engines, so they are identified by their IDs. {}",
+                plugin.cachedName(),
+                remedy);
         }
     }
 
     void actionAfterClearing() override
     {
         _engineOwner.clear();
+        _engineNames.clear();
     }
 
     // The plugin pointers stay valid because PluginManagerBase holds the plugins
     // by shared_ptr and only ever drops them all at once.
     std::unordered_map<int64_t, const EnginePlugin*> _engineOwner;
+
+    // Only engines in _engineOwner, and only those their plugin named.
+    std::unordered_map<int64_t, std::string> _engineNames;
 };
 
 } // namespace hipdnn_backend::plugin
