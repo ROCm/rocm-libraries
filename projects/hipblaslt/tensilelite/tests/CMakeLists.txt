@@ -172,6 +172,12 @@ endif()
 
 enable_testing()
 
+if(TARGET tensilelite-client)
+    add_test(NAME TensileLiteClient.version COMMAND tensilelite-client --version)
+    set_tests_properties(TensileLiteClient.version PROPERTIES
+        PASS_REGULAR_EXPRESSION "^[0-9]+\\.[0-9]+\\.[0-9]+\\+rocm[0-9]+\\.[0-9]+\\.[0-9]+.*$")
+endif()
+
 #################################################
 #        Tests for cpu-gemm-driver              #
 #################################################
