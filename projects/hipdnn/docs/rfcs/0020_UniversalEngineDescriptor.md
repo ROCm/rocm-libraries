@@ -129,7 +129,7 @@ and a separate `version` field (`major.minor`) that the accept rule gates on (§
   // Three role-scoped, arch-keyed UHD maps (§ 4.4). Each maps a gfx target — or the
   // "default" catch-all — to a UHD id. All three are optional; the common case sets
   // only sort_kernel_catalog.
-  "sort_kernel_catalog": {                         // kernel-selection heuristic: ranks the catalog (required in practice)
+  "sort_kernel_catalog": {                         // optional: kernel-selection heuristic, ranks the catalog
     "gfx950":  "ae896b07-80cd-473c-b3f4-6a8892998519",
     "gfx942":  "1f0c8d22-4b7e-49a1-9d3c-6e2a5f8b1074",
     "default": "c93e17aa-2d6b-4f10-8e75-3a9c04b6f2e1"
@@ -168,10 +168,10 @@ metadata reference, up to three role-scoped heuristic maps, and optional annotat
 | `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)). No duplicates. Absent => none. |
 | `numerical_notes` | no | array of string | hipDNN numerical-note tags. No duplicates. Absent => none. |
 
-All heuristic maps and the three trailing optional fields may be omitted; a valid engine can
-carry only its identity and `metadata`. A UED that names no `sort_kernel_catalog` is still valid
-— its kernels are ordered deterministically (RFC 0019 § 5) — though in practice every trained
-engine sets it.
+All three heuristic maps and the three trailing optional fields may be omitted; a valid engine can
+carry only its identity and `metadata`. A UED that names no `sort_kernel_catalog` orders its kernels
+deterministically instead (RFC 0019 § 5), which is the state a pack ships in before a heuristic is
+generated for it.
 
 ### 4.4 Heuristic roles and arch keying
 
@@ -185,8 +185,9 @@ selection job and they run at different points in the pipeline:
 | `predict_applicable_kernels` | Generates the candidate set to be ranked | During applicability, for a combinatorial/JIT space | future candidate generator (C) |
 
 The pipeline is therefore `predict_engine_tflops` (rank engines) → `predict_applicable_kernels`
-(produce candidates, when present) → `sort_kernel_catalog` (rank and pick). Each is **independently
-optional**: the common AOT engine sets only `sort_kernel_catalog`; `predict_engine_tflops` earns its
+(produce candidates, when present) → `sort_kernel_catalog` (rank and pick). Every role is **optional**,
+including `sort_kernel_catalog`: an engine with none ranks deterministically (RFC 0019 § 5), and the
+common trained AOT engine sets only `sort_kernel_catalog`. `predict_engine_tflops` earns its
 place once engines compete or an opaque engine must report an estimate; `predict_applicable_kernels`
 is reserved for the JIT case where no enumerable catalog exists until something produces one.
 

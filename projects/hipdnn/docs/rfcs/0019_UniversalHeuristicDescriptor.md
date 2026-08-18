@@ -1,11 +1,13 @@
 # RFC 0019: Universal Heuristic Descriptor (UHD): Data-Driven Kernel Selection
 
-- Contributors: jascampb, cderb
-- Status: Draft
+- Contributors: Jason Campbell, Chris Erb
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs).
-- Sibling: [RFC 0018 Universal Match Descriptor (UMD) and the Graph Matcher](https://github.com/ROCm/rocm-libraries/pull/10341) — the matcher follow-up from the same series. It defines the expression language and binding system and the `$`-token namespaces (`$q.*`, `$kernel.*`, `$device.*`) that this RFC's `features_signature` consumes ([Section 6](#6-feature-extraction)); its compile-once / evaluate-many expression implementation is the evaluator this RFC's feature extractor reuses. RFC 0018 is the normative reference for the language ([Section 6.2](#62-the-features_signature)).
+- Siblings:
+  - [RFC 0020 Universal Engine Descriptor](0020_UniversalEngineDescriptor.md) — owns engine identity, the UED's `nodes` pattern, and the **symbol table matching it publishes**. That table is the binding this RFC's `features_signature` reads, and the set every UHD is validated against ([Section 6.1](#61-feature-sources), [Section 6.3](#63-contract-enforcement)).
+  - [RFC 0018 Universal Match Descriptor](0018_UniversalMatchDescriptor.md) — the UMD's criteria, applicability evaluated over that same table. A sibling consumer of the binding, not its owner.
+  - The **descriptor expression language**, the shared syntax criteria, dispatch formulas, and feature entries are written in. Specified in its own follow-up; see [Open Question 15](#operational).
 - Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md), [RFC 0013 Autotune](0013_Autotune.md) (the benchmarking substrate for heuristic generation, [Section 13](#13-model-generation-pipeline))
-- Series: **0018** is the UMD / graph matcher, **0019** is this document (UHD + kernel selection), **0020** is the UED + engine registry.
+- Series: **0018** is the UMD's criteria, **0019** is this document (UHD + kernel selection), **0020** is the UED, graph matching, and symbol binding.
 
 Sections marked **OPEN** identify decisions deferred to review or to a named follow-up. The design is
 grounded in the heuristic-generation tooling — a training-and-export pipeline any package author runs to
@@ -213,7 +215,7 @@ The consequences:
   `set(UED.knobs) == set($kernel.* fields reachable from UHD.features_signature)`. Stronger than today's
   one-way "every knob names a KMD field" check, and it catches a UED and UHD regenerated out of step.
   Note *reachable*: `$kernel.*` references nested inside a computed feature count too, so
-  `{"ceil_div": ["$q.seqlen_q", "$kernel.tile_m0"]}` makes `tile_m0` a knob even though the signature
+  `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` makes `tile_m0` a knob even though the signature
   never names it on its own ([Section 6.2](#62-the-features_signature)).
 - **Non-knob KMD fields are dispatch-only, and invisible to selection.** `UHD features ⊆ KMD fields`
   still holds; what is new is that the *complement* has a defined role — launch geometry and workspace
@@ -352,9 +354,9 @@ identity, versioning, and the feature contract without understanding the ranking
   "features_signature": [
     "$device.cu_count", "$device.lds_size",            // device props → arch-aware
     "$kernel.tile_m", "$kernel.split_k",               // KMD fields, exposed as knobs (Section 3.2)
-    "$sdpa_fwd.head_size", "$q.seqlen_q",              // graph node attr + tensor dim
+    "$q.dims[3]", "$q.dims[2]",              // graph node attr + tensor dim
     {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]},     // computed inline — no $derived.* (Section 6.4)
-    {"ceil_div": ["$q.seqlen_q", "$kernel.tile_m"]}    // tile quantization, also inline
+    {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]}    // tile quantization, also inline
   ],
   "categorical_encoding": { … },                       // string → code maps, generated (Section 6.5)
   "features_hash": "sha256:…",                         // contract guard: signature + encoding
@@ -569,15 +571,16 @@ the design, and generalizing it is the central problem this RFC addresses.
 
 ### 6.1 Feature Sources
 
-A feature row is assembled from three sources, all available at plan time, and all drawn from the field
-namespaces the [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) criteria read
-(`$q.*`, `$graph.*`, `$<node>.*`, `$kernel.*`, `$device.*`, referenced bare, no `var` wrapper). The UHD's
-`features_signature` is another consumer of that vocabulary, so matching, launch, and selection share one
-binding:
+A feature row is assembled from three sources, all available at plan time. All are drawn from the symbol
+table the **engine's pattern publishes**: the UED carries a `nodes` block, and matching it binds every
+tensor, dim, stride, and attribute the pattern names
+([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). The UHD's
+`features_signature` is one of that table's consumers, alongside UMD criteria and UDD dispatch formulas,
+so matching, launch, and selection read one binding.
 
 | Source | Namespace | Examples | Scope |
 |--------|-----------|----------|-------|
-| **Problem** | `$q.*`, `$<node>.*` | `$q.seqlen_q`, `$sdpa_fwd.head_size` | Shared across candidates |
+| **Problem** | pattern variables (`$q`, `$k`), `$graph.*`, `$<node>.*` | `$q.dims[2]`, `$q.dtype`, `$graph.node_count` | Shared across candidates |
 | **Device** | `$device.*` | `$device.cu_count`, `$device.lds_size` | Shared across candidates |
 | **Kernel** | `$kernel.*` | `$kernel.tile_m`, `$kernel.split_k` | Per-candidate (from UKD `metadata`) |
 
@@ -585,57 +588,65 @@ Computed features are not a fourth source. Quantization, ratios, and intensity a
 same three, written inline in the `features_signature`; there is no `$derived.*` namespace and no
 named-value block ([Section 6.4](#64-computed-features)).
 
-Problem features are dims, dtypes, stride order, and op attributes bound by the matcher set.
+**Dims are positional, not named.** A bound tensor exposes each dim as `$q.dims[i]` and each stride as
+`$q.strides[i]`, plus the derived facts `$q.rank`, `$q.dtype`, `$q.stride_order`, and `$q.packed`. Sizes
+that read like attributes are dims: for a rank-4 SDPA tensor laid out as
+`(batch, heads, sequence, head_dim)`, batch is `$q.dims[0]`, head count `$q.dims[1]`, sequence length
+`$q.dims[2]`, and head size `$q.dims[3]`. A node's `$<node>.*` namespace carries **scalar attributes**
+only — `$sdpa_fwd.dropout_probability` and the like — so a signature that reads a size reads a dim.
 
-> **Implementation note — `$q.*` is op-specific.** The problem namespace differs per operation: SDPA
-> exposes `batch`, `seqlen_q`, `seqlen_k`, `num_heads`, `head_dim`; convolution exposes `n`, `c`, `h`,
-> `w`, `k`, `r`, `s`, `pad`, `stride`, `dilation`; MoE exposes `num_experts`, `top_k`, `hidden_dim`,
-> etc. The engine is op-scoped, so its UHD's `$q.*` references are implicitly valid for that op. The
-> extractor evaluates whatever fields the signature names; the caller provides them from the bound
-> match variables.
+> **Implementation note — the bound set is op-specific.** Which tensors a pattern binds, and what each
+> dim index means, differ per operation; the engine is op-scoped, so its UHD's references are valid for
+> that op by construction. The extractor evaluates whatever the signature names, and the engine's
+> published symbol set is the authority on what exists
+> ([Section 6.3](#63-contract-enforcement)).
 
 Device features come from the same device-facts path [RFC 0007 §6](0007_EngineSelectionHeuristicsFramework.md#6-device-properties)
-defines. Kernel features are the compilation knobs the pack's KMD declares ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)) —
-these distinguish candidates within a pack and are what make argmax meaningful.
+defines. Kernel features are the compilation knobs the engine's KMD declares
+([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)); these distinguish candidates
+and are what make argmax meaningful.
 
-> **Implementation note — `$device.*` fields.** The device namespace exposes what rocminfo (or
-> equivalent HIP runtime queries) provides and what proves predictive for kernel selection. Expected
-> fields include: `arch` (e.g., `gfx942`, `gfx950`), `cu_count`, `lds_size`, `sgpr_count`, `vgpr_count`,
-> `max_waves_per_cu`, `memory_clock_mhz`, `memory_bus_width`, `peak_bandwidth_gbps`. The exact set will
-> be finalized against rocKE's existing device-feature vocabulary and extended as real sweeps reveal
-> additional predictive properties.
+> **Implementation note — `$device.*` fields.** The device namespace exposes what rocminfo (or equivalent
+> HIP runtime queries) provides and what proves predictive for kernel selection. Expected fields include
+> `cu_count`, `lds_size`, `warp_size`, `sgpr_count`, `vgpr_count`, `max_waves_per_cu`, `memory_clock_mhz`,
+> `memory_bus_width`, and `peak_bandwidth_gbps`; the set is extended additively as the checks that need it
+> land. **Architecture is not among them for an AOT engine:** `arch` is a KDP property gated at selection
+> ([Section 3.3](#33-coupling-rules)), and per-arch model choice is the UED's arch-keyed heuristic maps
+> ([Section 3.1](#31-descriptor-relationships)), so a `features_signature` does not read `$device.arch`.
 
 ### 6.2 The `features_signature`
 
 The feature contract is the UHD's inline `features_signature` — an ordered list of model inputs, bound
 the same way a UDD's `args_signature` binds kernel arguments. Each entry is either a direct field (a
-bare `$`-prefixed reference) or a derived expression over those fields, using the
-[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) expression tree (`{"op": [args]}`).
+bare `$`-prefixed reference) or an expression over those fields, written as a `{"op": [args]}` tree.
 Order and form must match training exactly.
 
 ```jsonc
 "features_signature": [
-  // --- direct fields (shared namespaces) ---
-  "$q.seqlen_q",                                   // graph tensor dim
-  "$sdpa_fwd.head_size",                           // graph node attribute
-  "$device.cu_count",                              // device property (arch-aware)
+  // --- direct fields ---
+  "$q.dims[2]",                                    // sequence length (positional dim)
+  "$q.dims[3]",                                    // head size (positional dim)
+  "$device.cu_count",                              // device property
   "$kernel.tile_m",                                // KMD field (per-candidate)
 
-  // --- derived features, computed by the shared interpreter ---
-  {"log2": ["$q.seqlen_q"]},
-  {"/": ["$q.seqlen_q", "$k.seqlen_k"]},                          // aspect ratio
-  {"ceil_div": ["$q.seqlen_q", "$kernel.tile_m"]},                // num_tiles_m
-  {"/": [{"*": ["$q.seqlen_q", "$k.seqlen_k", "$sdpa_fwd.head_size"]}, "$q.bytes"]}  // ~arithmetic intensity
+  // --- computed features, evaluated by the shared interpreter ---
+  {"log2": ["$q.dims[2]"]},
+  {"/": ["$q.dims[2]", "$k.dims[2]"]},                           // aspect ratio
+  {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]},                // tile quantization
+  {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}                  // arithmetic intensity (Section 13.6)
 ]
 ```
 
-The expression language is the UMD's, and RFC 0018 is its normative definition. RFC 0018 (UMD,
-[PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)) fixes the form that
-[RFC 0017 §5–6](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) left open: a `{"op": [args]}`
-tree where any string beginning with `$` is a variable reference and every other scalar is a literal. The
-language is JsonLogic-like but simpler — most visibly, variable references are bare `$`-prefixed strings
-rather than JsonLogic's `{"var": …}` wrapper, resolved through the UMD's binding system. No external
-JsonLogic specification is normative here; where the two differ, the UMD governs.
+**The expression language is the descriptor expression language**, shared with UMD criteria
+(boolean-rooted) and UDD dispatch formulas (value-rooted), over the same symbol table; one parser,
+validator, and interpreter serve all three. A feature entry is value-rooted like a dispatch formula.
+
+The language is specified in its own RFC and is not restated here. It is JsonLogic-like but simpler —
+most visibly, variable references are bare `$`-prefixed strings rather than JsonLogic's `{"var": …}`
+wrapper, resolved through the engine's binding. Any JSON string beginning with `$` is a reference; every
+other JSON scalar is a literal. No external JsonLogic specification is normative for this RFC.
+**OPEN:** the expression-language RFC is deferred, so its section references cannot be cited yet; see
+[Open Question 15](#operational).
 
 The `features_signature` is a third consumer of that same language, alongside UMD criteria
 (boolean-valued) and UDD dispatch formulas (value-valued); a feature entry is value-valued like a
@@ -652,37 +663,29 @@ operation, and uses checked-width integers. A computation outside this closed se
 occupancy model) uses a compiled scorer ([Section 7](#7-model-adapters)) rather than extending the
 interpreter.
 
-**Implementation status (from the UMD PoC, [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)).**
-The shared implementation already provides the arithmetic and comparison operators this RFC's features
-need (`+ - * /`, `min`, `max`, `ceil_div`, `abs`, `pow`, `log2`, `rsqrt`, `value_or_default`, `if`) as a
-compile-once / evaluate-many `Expression<DataT>` over any `getData(path) → Value` source — which is
-exactly the shape the feature extractor wants ([Section 9](#9-performance)). Two caveats carry into
-this RFC:
+**Implementation status.** The shared implementation provides the arithmetic and comparison operators
+this RFC's features need (`+ - * /`, `min`, `max`, `ceil_div`, `abs`, `pow`, `log2`, `rsqrt`,
+`value_or_default`, `if`) as a compile-once / evaluate-many `Expression<DataT>` over any
+`getData(path) → Value` source, which is the shape the feature extractor requires
+([Section 9](#9-performance)). Two caveats carry into this RFC:
 
-- **`shape` is a compiler short-hand, not a runtime op** — the UMD compiler lowers it at
-  compile-time. A feature spec should treat `shape`/`rank`-style helpers as lowered forms, not runtime
-  operators.
-- **The custom-operation (native-predicate) hook is deferred** in the PoC. Until it lands, a UHD that
-  needs a computation outside the closed operator set has no in-language path; that is the boundary at
-  which a compiled scorer ([Section 7](#7-model-adapters)) takes over.
+- **`shape` is a compiler short-hand, not a runtime op**; the compiler lowers it at compile time. A
+  feature spec treats `shape`/`rank`-style helpers as lowered forms rather than runtime operators.
+- **The custom-operation (native-predicate) hook is deferred.** Until it lands, a UHD needing a
+  computation outside the closed operator set has no in-language path; that is the boundary at which a
+  compiled scorer ([Section 7](#7-model-adapters)) takes over.
 
-RFC 0018 (UMD) asks whether the UMD's bindings should be the canonical feature source for kernel
-selection, since the bound symbol table overlaps the feature vector a UHD consumes. This RFC specifies
-that they are: the `features_signature` draws its problem features from the symbols the matcher bound,
-plus `$device.*` and the candidate's `$kernel.*` ([Section 6.1](#61-feature-sources)). One binding pass
-feeds matching, dispatch, and selection, with no parallel feature-extraction path.
+**The engine's published symbols are the feature source.** The `features_signature` draws its problem
+features from the symbol table the engine's pattern binds, plus `$device.*` and the candidate's
+`$kernel.*` ([Section 6.1](#61-feature-sources)). One binding pass feeds matching, dispatch, and
+selection, with no parallel feature-extraction path.
 
-> **OPEN — must every referenceable token be declared up front in the UMD?** Taking the bindings as the
-> feature source raises a question this RFC cannot settle alone. If a feature may only reference symbols
-> the UMD declared, then a UHD wanting a field the matcher did not need forces that field into the UMD
-> purely to make it addressable — bloating matchers with declarations that exist only for the heuristic.
-> The alternative is **lazy resolution**: expressions resolve variable references at evaluation time
-> against the data provider, with caching, so a token need not be pre-declared. That is simpler for
-> authors and avoids the bloat, at the cost of moving "is this token valid?" from load time to first
-> evaluation — which matters here, because load-time validation is what
-> [Section 6.3](#63-contract-enforcement)'s contract check depends on. **This is a cross-RFC decision
-> owned with the UMD** ([Open Question 15](#operational)); this RFC assumes declared-up-front and should
-> be revisited if the UMD adopts lazy resolution.
+Because the pattern is engine-wide and singular, the UHD — which is itself engine-wide — has an
+engine-level binding to resolve against, and every token it names is declared before it is read. A
+reference the engine's pattern does not publish is a **load error** at build and at drop-in load, not a
+runtime decline ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)).
+The UHD is validated against that published set exactly as a pack's UMD and UDD are, which is what makes
+the [Section 6.3](#63-contract-enforcement) contract check mechanical rather than per-pack.
 
 **Derived features commonly needed:**
 
@@ -708,10 +711,17 @@ This RFC keeps that principle but makes the `features_signature` the single sour
 - **Training:** The same signature drives the offline featurizer, so dataset columns match the runtime
   row by construction.
 
-A three-part, model-agnostic contract check replaces the tooling's bare feature-count guard, and
+A four-part, model-agnostic contract check replaces the tooling's bare feature-count guard, and
 generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 
-1. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
+1. **Signature → published symbols.** Every non-`$kernel.*` reference the `features_signature` names —
+   pattern variables and their `dims[i]`/`strides[i]`/derived facts, `$graph.*`, `$<node>.*`, and
+   `$device.*` — must resolve against the symbol set the engine's pattern publishes
+   ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). An
+   unresolvable reference is a load error at build and at drop-in load, with both descriptors named. The
+   UHD is checked against the same published set as the engine's UMDs and UDDs, so one publisher serves
+   all three consumers.
+2. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
    reachable from the `features_signature`, including those nested inside computed (expression) entries:
    - `F ⊆ KMD.fields` — a feature can never read a variant field the kernels don't carry.
    - `F == set(UED.knobs)` — the exposed knobs *are* the model's feature axes
@@ -723,7 +733,7 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    emits the engine and the loader re-checks. Because the generation tool derives the knob list *from*
    the trained feature set, the equality holds by construction — the check exists to catch a UED and UHD
    that were regenerated out of step, or hand-edited.
-2. **Signature → model.** The UHD carries `features_hash`; the model artifact embeds the hash it was
+3. **Signature → model.** The UHD carries `features_hash`; the model artifact embeds the hash it was
    trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). At load, assert
    `model.trained_hash == UHD.features_hash`. This check works for every model adapter because it
    fingerprints the *input contract*, not the model internals.
@@ -737,7 +747,7 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    as [Section 6.5](#65-categorical-encoding) changes value semantics without changing feature names.
    The input is canonicalized before hashing so that whitespace and key order do not produce spurious
    mismatches.
-3. **Vector → input.** Each adapter verifies its artifact accepts the resolved vector: `tree_data`
+4. **Vector → input.** Each adapter verifies its artifact accepts the resolved vector: `tree_data`
    checks feature count, `onnx` checks input arity/shape.
 
 A failed check disables the model rather than failing the request. These run at load, so a violation
@@ -760,7 +770,7 @@ open-ended, because the set of extractable fields is fixed.
 ### 6.4 Computed Features
 
 Many of the features a model ranks on are not raw fields but **computed** ones: tile/wave quantization
-(`ceil_div($q.seqlen_q, $kernel.tile_m0)`), aspect ratios, arithmetic intensity, occupancy proxies. These
+(`ceil_div($q.dims[2], $kernel.tile_m0)`), aspect ratios, arithmetic intensity, occupancy proxies. These
 are written inline in the `features_signature`, as expressions over the three sources
 ([Section 6.2](#62-the-features_signature)). There is no separate namespace and no named-value block: a
 computed feature is an entry that is an expression rather than a bare `$` token.
@@ -852,13 +862,13 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 
 | rocKE feature | RFC mapping |
 |---|---|
-| `batch, seqlen_q, seqlen_k, nhead_q, nhead_k, hdim_q, hdim_v` | `$q.batch`, `$q.seqlen_q`, `$k.seqlen_k`, `$q.nhead_q`, `$k.nhead_k`, `$q.hdim_q`, `$v.hdim_v` |
+| `batch, seqlen_q, seqlen_k, nhead_q, nhead_k, hdim_q, hdim_v` | `$q.dims[0]`, `$q.dims[2]`, `$k.dims[2]`, `$q.dims[1]`, `$k.dims[1]`, `$q.dims[3]`, `$v.dims[3]` |
 | `dtype_enc` | `$q.dtype` (encoded) |
 | `log2_batch … log2_hdim_v` (7) | computed: `{"log2": ["$q.<dim>"]}` |
-| `gqa_ratio` = nhead_q/nhead_k | `{"/": ["$q.nhead_q", "$k.nhead_k"]}` |
-| `aspect_sq_sk` = seqlen_q/seqlen_k | `{"/": ["$q.seqlen_q", "$k.seqlen_k"]}` |
+| `gqa_ratio` = nhead_q/nhead_k | `{"/": ["$q.dims[1]", "$k.dims[1]"]}` |
+| `aspect_sq_sk` = seqlen_q/seqlen_k | `{"/": ["$q.dims[2]", "$k.dims[2]"]}` |
 | `log2_ops` | `{"log2": ["$sdpa_fwd.flops"]}` |
-| `decode_flag` = (seqlen_q ≤ 1) | `{"<=": ["$q.seqlen_q", 1]}` |
+| `decode_flag` = (seqlen_q ≤ 1) | `{"<=": ["$q.dims[2]", 1]}` |
 
 **Kernel — `$kernel.*` (from the `kernel` dict = KMD fields) — 20**
 
@@ -875,14 +885,14 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 | rocKE feature | RFC inline expression (schematic) |
 |---|---|
 | `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
-| `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.seqlen_q", "$kernel.tile_m0"]}` |
-| `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.seqlen_k", "$kernel.tile_n0"]}` |
+| `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` |
+| `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.dims[2]", "$kernel.tile_n0"]}` |
 | `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
 | `tile_eff_sq, tile_eff_sk, overall_tile_efficiency` | remainder-based tile-efficiency ratios |
-| `cu_utilization` = total_tiles/num_cus | `total_tiles` expression ÷ `$device.num_cus` — spans computed × device |
+| `cu_utilization` = total_tiles/num_cus | `total_tiles` expression ÷ `$device.cu_count` — spans computed × device |
 | `tile_volume, tile_area` | products of `$kernel.tile_*` (graph-independent — cacheable per kernel) |
 | `lds_usage_estimate` | `(tile_m0·tile_k0 + tile_n0·tile_k0)·dtype_bytes` |
-| `lds_usage_ratio` | `lds_usage_estimate` expression ÷ `$device.lds_capacity` |
+| `lds_usage_ratio` | `lds_usage_estimate` expression ÷ `$device.lds_size` |
 | `ratio_d_to_tk0, ratio_dv_to_tn1` | `$kernel` ratios (hdim vs. tile) |
 | `sq_le_tm0, sk_le_tn0, d_eq_dv, gqa_flag` | boolean fit/shape flags |
 | `total_q_elems, total_kv_elems` | element-count products |
@@ -890,23 +900,27 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 **Device — `$device.*` — 8**
 
 `hw_num_cus, hw_simds_per_cu, hw_total_simds, hw_shader_engines, hw_max_clock_mhz, hw_wavefront_size,
-hw_lds_capacity, hw_num_xcd` → `$device.num_cus`, `$device.simds_per_cu`, … (from the device-facts path
+hw_lds_capacity, hw_num_xcd` → `$device.cu_count`, `$device.simds_per_cu`, … (from the device-facts path
 of [Section 6.1](#61-feature-sources)).
 
 *(`feature_count` is a bookkeeping constant, not a real feature.)*
 
 **What this validates:**
 
-- The 69 features partition exactly into the three namespaces — **no feature falls outside**
-  `$q.* / $kernel.* / $device.*`, whether read raw or computed over. The RFC vocabulary is sufficient
-  for a real model.
-- The split is roughly **~20 problem, ~20 kernel, ~20 computed, ~8 device** — so about 30% of the vector
-  is expressions rather than raw fields, which is why the expression language has to carry its weight
+- The 69 features partition exactly into the published namespaces — **no feature falls outside** the
+  engine's bound tensors, `$kernel.*`, and `$device.*`, whether read raw or computed over. The published
+  vocabulary is sufficient for a real model.
+- Every rocKE "problem" quantity resolves to a **positional dim** of a bound tensor, not a node attribute
+  ([Section 6.1](#61-feature-sources)): `batch`, `nhead_q`, `seqlen_q`, and `hdim_q` are `$q.dims[0..3]`,
+  and `seqlen_k` / `nhead_k` are `$k.dims[2]` / `$k.dims[1]`. `dtype_enc` is the derived fact `$q.dtype`,
+  encoded per [Section 6.5](#65-categorical-encoding).
+- The split is roughly **~20 problem, ~20 kernel, ~20 computed, ~8 device** — about 30% of the vector is
+  expressions rather than raw fields, which is the load the expression language carries
   ([Section 6.4](#64-computed-features)).
-- One subtlety worth carrying forward: rocKE's `mask/bias/lse/…` are **kernel capability flags** sourced
-  from the kernel config, so they are `$kernel.*` (KMD fields), *not* problem attributes — even though
-  the *problem* also has a mask. The KMD field records "does this compiled variant support masking,"
-  which is what the model ranks on; problem-side mask presence is a matcher concern.
+- rocKE's `mask/bias/lse/…` are **kernel capability flags** sourced from the kernel config, so they are
+  `$kernel.*` (KMD fields) rather than problem attributes, even though the problem also has a mask. The
+  KMD field records whether the compiled variant supports masking, which is what the model ranks on;
+  problem-side mask presence is a matcher concern.
 - `arithmetic_intensity` here is the **problem/ideal** intensity (identical across all candidates for a
   graph) — a shared-prefix context feature, not a per-candidate discriminator; the algorithm-level
   differences are carried by the `$kernel.*` tile fields and the quantization derivations, exactly as
@@ -1107,8 +1121,12 @@ field resolves, and the hash matches. Only the values are new. Two approaches ap
 This RFC specifies **(a) for v1, with two exact-match exceptions.** Both are discrete lookups rather than
 per-feature range checks, so they cost little and catch the highest-impact cases:
 
-- **Arch** — compare the device's GFX name (already resolved as a device property for the pack-level arch
-  gate) against the arch set in the model's training metadata.
+- **Arch** — compare the device's GFX name against the arch set in the model's training metadata. This is
+  a **loader-side** check against a resolved device fact, not a `features_signature` read: `arch` is a KDP
+  property gated at selection and is not a token an AOT signature may reference
+  ([Section 6.1](#61-feature-sources)). The GFX name is already resolved for the pack-level arch gate and
+  for selecting the arch-keyed heuristic ([Section 3.1](#31-descriptor-relationships)), so it costs
+  nothing additional.
 - **Categorical values** — a string outside the UHD's `categorical_encoding`
   ([Section 6.5](#65-categorical-encoding)) is an exact-lookup miss, and therefore free.
 
@@ -1235,7 +1253,7 @@ make each iteration as small as possible:
 
 - **Lower the `features_signature` at load, never walk the expression tree per candidate.** The UMD PoC
   already compiles a rule to an `Expression<DataT>` once
-  ([Section 6](#6-feature-extraction), [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341));
+  ([Section 6](#6-feature-extraction));
   the feature extractor reuses that so per-candidate scoring is a tight loop over a compiled expression
   and a flat tree table — no strings, no JSON, no map lookups.
 - **Split the row into a shared prefix + per-candidate suffix.** Problem and device features
@@ -1244,16 +1262,12 @@ make each iteration as small as possible:
   only the varying slots per candidate, turning O(N × full-featurize) into O(full-featurize + N × small)
   for N candidates. The kernel-dependent tail is the part that cannot be hoisted or cached across
   candidates, and keeping it small is the main lever on selection cost.
-- **Reuse the matcher's bound symbols — don't re-extract.** The UMD matcher already bound `$q.*` /
-  `$device.*` deciding applicability; selection reads that table rather than re-featurizing. (This is
-  the mechanism behind the [Section 6](#6-feature-extraction) answer that the matcher bindings *are* the
-  feature source.) **This depends on in-flight work.** In the current ingestor foundation the bound
-  tokens reach the matcher and the dispatch handler but *not* the scorer, so a heuristic would have to
-  re-extract from the raw graph — the second extraction path this RFC exists to avoid. The graph matcher
-  and its bindings are being moved onto the UED
-  ([RFC 0018 branch](https://github.com/ROCm/rocm-libraries/pull/10341)); this section should be
-  reconciled with the resulting binding surface once that lands, and the requirement it places on that
-  work is simply that **the scorer sees the same bound tokens the matcher produced**.
+- **Reuse the engine's bound symbols; do not re-extract.** Matching the engine's pattern binds the
+  problem tokens once per graph, and selection reads that table rather than re-featurizing
+  ([Section 6.1](#61-feature-sources)). The scorer receives the bound symbol table alongside the
+  candidate, so a heuristic never walks the raw graph — a second extraction path is what the single
+  binding exists to prevent. Because the pattern is engine-wide, the binding is shared by every pack
+  joining the engine and is computed once, not once per matcher.
 - **Single-candidate short-circuit.** If only one UKD survives matching, skip the model and return it —
   common, and it makes the load-on-ranking case above nearly free.
 
@@ -1640,10 +1654,10 @@ propose a first pass rather than requiring an author to hand-write the feature l
 "map the graph to features" spans **two layers**, and only the first is shared/derivable:
 
 - **Layer 1 — op-intrinsic vocabulary (per op, shared).** The fields that *exist and are bindable*:
-  tensor/dim bindings (`$q.seqlen_q`), node attributes (`$sdpa_fwd.head_size`), device properties
+  tensor/dim bindings (`$q.dims[2]`), node attributes (`$q.dims[3]`), device properties
   (`$device.*`), and **precomputed fields the binding system supplies automatically**. These are facts
   about the op, identical for every engine that implements it
-  ([Section 6](#6-feature-extraction), [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)).
+  ([Section 6](#6-feature-extraction)).
 - **Layer 2 — the `features_signature` (per package/UHD, not shared).** *Which* of those fields a given
   model consumes, plus derived transforms. This is per-UHD: two packages of the same op may rank on
   different subsets.
@@ -1652,7 +1666,7 @@ The tool auto-derives Layer 1 and proposes a Layer-2 first pass from it, in thre
 
 | Tier | Feature kind | Derivable from | Author input needed |
 |---|---|---|---|
-| 1 | Raw fields (`$kernel.*` = KMD fields; `$q.*`/attrs = UMD bindings; `$device.*`) | KMD schema + UMD op-schema registry + device vocab | **none** |
+| 1 | Raw fields (`$kernel.*` = KMD fields; tensor dims/attrs = the engine's published symbols; `$device.*`) | KMD schema + the UED's published symbol set + device vocab | **none** |
 | 2 | Generic transforms (logs, ratios) and **tile/wave quantization** | Tier 1 + an expression pairing a problem dim with a `$kernel.*` tile axis | the **dim↔tile correspondence** — which dim goes with which tile field |
 | 3 | **Physics** — arithmetic intensity, roofline bound | the op's FLOP and byte counts, divided inline | **none** — supplied as precomputed op fields (below) |
 
@@ -1667,10 +1681,13 @@ memory-bound problems, which is exactly the split that decides which kernel wins
 closed-form over the bound dims and dtype sizes, but they are **op-specific** and cannot be inferred
 from the KMD field list, so something has to supply them per op.
 
-**They are precomputed binding-system fields, defined in code.** The binding system already exposes
-computed values that no descriptor declares — `stride_ordering` on every tensor is the existing example:
-a field derived from the tensor's own data, available automatically wherever tensors are bound. FLOP and
-byte counts fit that pattern exactly, and land as per-op precomputed fields:
+**They are precomputed fields, declared in the hipDNN schema.** The binding layer already publishes
+derived values that no descriptor declares: `$q.stride_order` and `$q.packed` stand in for
+contiguous-stride arithmetic, and `$q.value_f32` coerces a tensor's compile-time value to a single typed
+token. Each is declared in the schema like any other field and versioned with it, so adding one is an
+additive schema change rather than a per-pack extension point
+([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). FLOP and
+byte counts fit that mechanism, as per-op precomputed fields:
 
 ```jsonc
 // available wherever an sdpa_fwd node is bound — no descriptor declares these
@@ -1688,7 +1705,7 @@ justify it. What needs a rebuild to change belongs in code, as a precomputed bin
 
 Because they are **op-intrinsic** (SDPA does `4·B·H·Sq·Sk·D` FLOPs regardless of engine or package),
 these fields live at Layer 1 and are shared by every package of that op — defined once per op-family.
-A `features_signature` then references intensity *identically* to a raw dim like `$q.seqlen_q`, and the
+A `features_signature` then references intensity *identically* to a raw dim like `$q.dims[2]`, and the
 Tier-3 "physics" distinction disappears at the point of use.
 
 > **Coordinate with the UMD.** This says the op vocabulary should carry a *set* of useful precomputed
@@ -1712,7 +1729,8 @@ Caveats:
 **A data-free structural first pass.** Tiers 1–2 alone (no benchmarking) already support a real
 model-free heuristic better than `static_order`: prefer the kernel whose tile best divides the problem
 (minimize quantization waste), tie-break on an occupancy proxy. That is a legitimate `table`/rule UHD
-computable from KMD + matcher bindings + device facts, and it is the zero-benchmark starting point before
+computable from the KMD, the engine's bound symbols, and device facts, and it is the zero-benchmark
+starting point before
 the autotune-trained `tree_data` model replaces it.
 
 ---
@@ -1942,11 +1960,10 @@ dependency-gated and land only when a concrete need appears.
    *(The expression-op question is resolved — the UMD's operator set already covers the derived
    features.)* *(Impacts [Section 6.2](#62-the-features_signature).)*
    **Auto-derivation dependency:** the physics features (arithmetic intensity, roofline bound) need
-   per-op **FLOP and byte counts as precomputed binding fields**, defined in code alongside the existing
-   precomputed values like tensor `stride_ordering`
-   ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)). Open, and **owned with the
-   UMD**: what the full set of universal-vs-per-op precomputed fields should be, where it is defined,
-   how per-op entries are registered, and the mixed-dtype byte convention. Tier-2 quantization (the
+   per-op **FLOP and byte counts as precomputed fields**, declared in the hipDNN schema alongside the
+   existing precomputed values such as `$q.stride_order` and `$q.packed`
+   ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)). The mechanism and its home are
+   settled; what remains open is which per-op counts to declare, and the mixed-dtype byte convention. Tier-2 quantization (the
    dim↔tile correspondence) is written inline in the signature
    ([Section 6.4](#64-computed-features)), from an author-supplied list of (problem dim, tile field)
    pairs.
@@ -2042,13 +2059,13 @@ dependency-gated and land only when a concrete need appears.
     uniqueness), and does it run per-provider or centrally over all shipped packs?
     *(Impacts [Section 6.3](#63-contract-enforcement), [Section 12](#12-observability).)*
 
-15. **Must every referenceable token be declared up front in the UMD?** Taking matcher bindings as the
-    feature source means a UHD can only reference declared symbols — so a feature needing a field the
-    matcher did not require forces a declaration into the UMD purely to make it addressable. The
-    alternative is lazy resolution at evaluation time with caching, which avoids the bloat but moves
-    token validation out of load time — where this RFC's contract check lives. **Cross-RFC, owned with
-    the UMD**; this RFC assumes declared-up-front.
-    *(Impacts [Section 6.2](#62-the-features_signature), [Section 6.3](#63-contract-enforcement).)*
+15. **The expression-language reference.** The descriptor expression language is specified in its own
+    RFC, which is deferred and not yet written, so this document states the language's properties
+    ([Section 6.2](#62-the-features_signature)) without being able to cite its sections. Two things
+    settle when it lands: the normative operator list this RFC recaps, and whether the custom-operation
+    hook arrives, which fixes the boundary at which a compiled scorer takes over
+    ([Section 7](#7-model-adapters)). Until then, the operator set recapped here is the working contract.
+    *(Impacts [Section 6.2](#62-the-features_signature), [Section 7](#7-model-adapters).)*
 
 16. **Out-of-distribution detection.** Ship per-feature training-coverage metadata and check the
     resolved row at runtime, or manage it purely by versioning discipline
