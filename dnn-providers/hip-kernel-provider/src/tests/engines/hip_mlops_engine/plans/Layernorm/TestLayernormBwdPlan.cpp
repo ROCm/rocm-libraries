@@ -118,10 +118,11 @@ std::pair<flatbuffers::FlatBufferBuilder, LayernormBwdPlan>
     createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
                         const std::vector<int64_t>& dims = {1, 3, 224, 224},
                         hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
-                        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                        bool optionalTensors = true)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
-        strides, dims, true, inputDataType);
+        strides, dims, optionalTensors, inputDataType);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -148,6 +149,27 @@ TEST(TestLayernormBwdPlan, GetWorkspaceSizeReturnsZero)
     auto [fbb, plan] = createPlanFromGraph();
     const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
+}
+
+TEST(TestLayernormBwdPlan, GetWorkspaceSizeParallelReturnsNonzero)
+{
+    SKIP_IF_NO_DEVICES(); // getWorkspaceSize requires a device
+
+    auto [fbb, plan] = createPlanFromGraph({768, 256, 16, 1}, {1024, 3, 16, 16});
+    const Handle handle;
+    EXPECT_EQ(plan.getWorkspaceSize(handle), 196608u);
+}
+
+TEST(TestLayernormBwdPlan, GetWorkspaceSizeWithoutOptionalTensorsReturnsNonzero)
+{
+    SKIP_IF_NO_DEVICES(); // getWorkspaceSize requires a device
+
+    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1},
+                                           {2, 3, 224, 224},
+                                           hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                           false);
+    const Handle handle;
+    EXPECT_EQ(plan.getWorkspaceSize(handle), 16u);
 }
 
 TEST(TestLayernormBwdPlan, IsMoveConstructible)
@@ -271,6 +293,63 @@ TEST(TestLayernormBwdPlanFp32, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=0"));
 }
 
+TEST(TestLayernormBwdPlanFp32, CompileSetsCorrectDefinesParallel)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto kernelScaleBiasParallel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernelScaleBiasParallel,
+                        setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            EXPECT_CALL(*kernelScaleBiasParallel,
+                        setGridSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            auto kernelScaleBiasReduceSum = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernelScaleBiasReduceSum,
+                        setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            EXPECT_CALL(*kernelScaleBiasReduceSum,
+                        setGridSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasParallel"))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBiasParallel))));
+            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasReduceSum"))
+                .WillOnce(
+                    ::testing::Return(::testing::ByMove(std::move(kernelScaleBiasReduceSum))));
+            return program;
+        });
+
+    auto [fbb, plan] = createPlanFromGraph({768, 256, 16, 1}, {1024, 3, 16, 16});
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INNER_SIZE=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTER_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_LOCAL_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=32"));
+}
+
 TEST(TestLayernormBwdPlanFp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
@@ -319,6 +398,65 @@ TEST(TestLayernormBwdPlanFp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=0"));
 }
 
+TEST(TestLayernormBwdPlanFp16, CompileSetsCorrectDefinesParallel)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto kernelScaleBiasParallel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernelScaleBiasParallel,
+                        setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            EXPECT_CALL(*kernelScaleBiasParallel,
+                        setGridSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            auto kernelScaleBiasReduceSum = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernelScaleBiasReduceSum,
+                        setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            EXPECT_CALL(*kernelScaleBiasReduceSum,
+                        setGridSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasParallel"))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBiasParallel))));
+            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasReduceSum"))
+                .WillOnce(
+                    ::testing::Return(::testing::ByMove(std::move(kernelScaleBiasReduceSum))));
+            return program;
+        });
+
+    auto [fbb, plan] = createPlanFromGraph(
+        {768, 256, 16, 1}, {1024, 3, 16, 16}, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INPUT_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTPUT_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INNER_SIZE=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTER_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_LOCAL_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=32"));
+}
+
 TEST(TestLayernormBwdPlanBfp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
@@ -365,6 +503,66 @@ TEST(TestLayernormBwdPlanBfp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_LOCAL_SIZE=1024"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_STRIDE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=0"));
+}
+
+TEST(TestLayernormBwdPlanBfp16, CompileSetsCorrectDefinesParallel)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto kernelScaleBiasParallel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernelScaleBiasParallel,
+                        setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            EXPECT_CALL(*kernelScaleBiasParallel,
+                        setGridSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            auto kernelScaleBiasReduceSum = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernelScaleBiasReduceSum,
+                        setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            EXPECT_CALL(*kernelScaleBiasReduceSum,
+                        setGridSize(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel("LayernormBwd"))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasParallel"))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernelScaleBiasParallel))));
+            EXPECT_CALL(*program, getKernel("LayernormBwdScaleBiasReduceSum"))
+                .WillOnce(
+                    ::testing::Return(::testing::ByMove(std::move(kernelScaleBiasReduceSum))));
+            return program;
+        });
+
+    auto [fbb, plan]
+        = createPlanFromGraph({768, 256, 16, 1},
+                              {1024, 3, 16, 16},
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INPUT_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTPUT_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INNER_SIZE=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTER_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_LOCAL_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=32"));
 }
 
 TEST(TestLayernormBwdPlan, CompileWithUnsupportedDimensionThrows)

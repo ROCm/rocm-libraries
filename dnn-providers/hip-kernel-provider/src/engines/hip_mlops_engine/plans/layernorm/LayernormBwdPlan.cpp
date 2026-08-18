@@ -135,7 +135,7 @@ LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
     _outerSize = outerSize;
     _innerSize = innerSize;
     _stride = stride;
-    _localSize = 1024;
+    _localSize = LayernormBwdParams::MAX_LOCAL_SIZE;
 }
 
 size_t LayernormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
@@ -165,6 +165,15 @@ size_t LayernormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle)
 void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                const hipDeviceProp_t& deviceProperties)
 {
+    // Ensure that the input tensor is either 4D or 5D
+    const auto* xDims = _params.x()->dims();
+    if(xDims->size() != 4 && xDims->size() != 5)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported tensor dimension: "
+                                                           + std::to_string(xDims->size()));
+    }
+
     // Determine input/output data type configuration
     const auto inputDataType = _params.x()->data_type();
     const auto outputDataType = _params.dy()->data_type();
@@ -341,7 +350,7 @@ bool LayernormBwdPlan::isParallel(const hipDeviceProp_t& deviceProperties,
                                   size_t outerSize)
 {
     const size_t reqdWorkItemCount = getReqdWorkItemCount(deviceProperties, localSize);
-    return !(innerSize > reqdWorkItemCount) && (innerSize * outerSize > reqdWorkItemCount);
+    return innerSize <= reqdWorkItemCount && innerSize * outerSize > reqdWorkItemCount;
 }
 
 size_t LayernormBwdPlan::getParallelSize(const hipDeviceProp_t& deviceProperties,

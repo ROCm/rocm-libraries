@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstdio>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -13,9 +14,83 @@
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormUtilities.hpp"
+#include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
 namespace hip_kernel_provider::layernorm
 {
+
+namespace
+{
+
+size_t getMaxBwdWorkspaceSize(const Handle& handle,
+                              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
+    // Workspace only needed for the parallel backward pass or for fallback mean/rstd calculations
+    const auto& node = opGraph.getNode(0);
+    auto deviceProperties = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
+    auto attr = node.attributes_as_LayernormBackwardAttributes();
+    auto xTensorAttr = opGraph.getTensorMap().at(attr->x_tensor_uid());
+    auto scaleTensorAttr = std::make_optional(opGraph.getTensorMap().at(attr->scale_tensor_uid()));
+    auto meanTensorAttr
+        = attr->mean_tensor_uid().has_value()
+              ? std::make_optional(opGraph.getTensorMap().at(attr->mean_tensor_uid().value()))
+              : std::nullopt;
+    const auto* xDims = xTensorAttr->dims();
+    const auto* xStrides = xTensorAttr->strides();
+    const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
+        std::vector<int64_t>(xStrides->begin(), xStrides->end()));
+
+    const size_t normalizedDim
+        = layernorm::guessNormalizedDim(xTensorAttr, scaleTensorAttr, meanTensorAttr);
+    int64_t outerSize = 1;
+    int64_t innerSize = 1;
+    int64_t stride = 1;
+    const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
+    const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
+
+    if(normalizedDim > 1
+       && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
+    {
+        stride = static_cast<int64_t>(xDims->Get(1));
+    }
+
+    for(unsigned int i = 0; i < xDims->size(); ++i)
+    {
+        if(i < normalizedDim)
+        {
+            if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
+            {
+                outerSize *= static_cast<int64_t>(xDims->Get(i));
+            }
+        }
+        else
+        {
+            innerSize *= static_cast<int64_t>(xDims->Get(i));
+        }
+    }
+    const bool parallel
+        = LayernormBwdPlan::isParallel(deviceProperties,
+                                       static_cast<size_t>(LayernormBwdParams::MAX_LOCAL_SIZE),
+                                       static_cast<size_t>(innerSize),
+                                       static_cast<size_t>(outerSize));
+    const size_t parallelSize
+        = LayernormBwdPlan::getParallelSize(deviceProperties,
+                                            static_cast<size_t>(LayernormBwdParams::MAX_LOCAL_SIZE),
+                                            static_cast<size_t>(innerSize),
+                                            static_cast<size_t>(outerSize));
+    const size_t sizeFromParallel
+        = parallel ? 2 * static_cast<size_t>(innerSize) * parallelSize : 0;
+    const size_t sizeFromFallbackMeanRstd
+        = !attr->mean_tensor_uid().has_value() || !attr->inv_variance_tensor_uid().has_value()
+              ? 2 * static_cast<size_t>(outerSize) * static_cast<size_t>(stride)
+              : 0;
+    return 4 * (sizeFromParallel + sizeFromFallbackMeanRstd);
+}
+
+} // namespace
 
 LayernormPlanBuilder::LayernormPlanBuilder(const IKernelCompiler& kernelCompiler,
                                            const IDevicePropertyProvider& devicePropertyProvider)
@@ -104,12 +179,22 @@ bool LayernormPlanBuilder::isApplicable(
 }
 
 size_t LayernormPlanBuilder::getMaxWorkspaceSize(
-    [[maybe_unused]] const Handle& handle,
-    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const Handle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const Settings& executionSettings) const
 {
-    // Layernorm plan builder does not require workspace size
-    return 0;
+    const auto& node = opGraph.getNode(0);
+    switch(node.attributes_type())
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes:
+        // Layernorm fwd plan builder does not require workspace size
+        return 0;
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes:
+        return getMaxBwdWorkspaceSize(handle, opGraph);
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Unexpected node attribute type");
+    }
 }
 
 namespace

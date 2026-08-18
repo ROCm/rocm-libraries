@@ -29,6 +29,7 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
         float tmpPmean;
         float tmpPrstd;
         calculateMeanRstd(ltmp1, ltmp2, ltmp3, x, eps, lid, o, s, tmpPmean, tmpPrstd);
+        __syncthreads();
         workspace[gid + 2 * PARALLEL_SIZE * INNER_SIZE] = tmpPmean;
         workspace[gid + OUTER_SIZE * STRIDE + 2 * PARALLEL_SIZE * INNER_SIZE] = tmpPrstd;
         if(!mean)
@@ -70,9 +71,9 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
 
     sum_dy_scale = ltmp1[0];
     sum_dy_scale_x = ltmp2[0];
-    constexpr float pscale = 1.0f / INNER_SIZE;
-    float a = prstd * prstd * prstd * pscale * (sum_dy_scale_x - sum_dy_scale * pmean);
-    float b = prstd * sum_dy_scale * pscale - a * pmean;
+    constexpr float inverseInnerSize = 1.0f / INNER_SIZE;
+    float a = prstd * prstd * prstd * inverseInnerSize * (sum_dy_scale_x - sum_dy_scale * pmean);
+    float b = prstd * sum_dy_scale * inverseInnerSize - a * pmean;
 
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
@@ -107,7 +108,7 @@ extern "C" __global__ void LayernormBwdScaleBias(const OutputType* __restrict__ 
     {
         for(unsigned int s = 0; s < STRIDE; ++s)
         {
-            unsigned int idx = o * INNER_SIZE * STRIDE + gid * STRIDE + s;
+            size_t idx = o * INNER_SIZE * STRIDE + gid * STRIDE + s;
 
             float pmean = mean != nullptr
                               ? hip_kernel_provider::cast<float>(mean[o * STRIDE + s])
@@ -150,7 +151,7 @@ extern "C" __global__ void
     {
         unsigned int o = i / STRIDE;
         unsigned int s = i % STRIDE;
-        unsigned int idx = o * INNER_SIZE * STRIDE + s_lid + s;
+        size_t idx = o * INNER_SIZE * STRIDE + s_lid + s;
 
         float pmean = mean ? hip_kernel_provider::cast<float>(mean[i])
                            : workspace[i + 2 * PARALLEL_SIZE * INNER_SIZE];
@@ -182,7 +183,7 @@ extern "C" __global__ void LayernormBwdScaleBiasReduceSum(const float* __restric
 
     for(unsigned int i = 0; i < PARALLEL_SIZE; ++i)
     {
-        unsigned int idx = i * INNER_SIZE + gid;
+        size_t idx = i * INNER_SIZE + gid;
         sum_ds += workspace[idx];
         sum_db += workspace[idx + PARALLEL_SIZE * INNER_SIZE];
     }

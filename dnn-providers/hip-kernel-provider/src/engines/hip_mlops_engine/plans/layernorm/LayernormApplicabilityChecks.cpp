@@ -250,7 +250,7 @@ void LayernormValidator::checkTensorConfigSupported(
 void LayernormValidator::checkTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr)
 {
-    std::vector<int64_t> ioTensorIds
+    const std::vector<int64_t> ioTensorIds
         = {lnAttr.dy_tensor_uid(), lnAttr.x_tensor_uid(), lnAttr.dx_tensor_uid()};
     const std::vector<int64_t> affineTensorIds
         = {lnAttr.scale_tensor_uid(), lnAttr.dscale_tensor_uid(), lnAttr.dbias_tensor_uid()};
@@ -269,11 +269,7 @@ void LayernormValidator::checkTensorConfigSupported(
         epsilonTensorIds.push_back(lnAttr.epsilon_tensor_uid().value());
     }
 
-    std::vector<int64_t> ioAndStatTensorIds
-        = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
-    ioAndStatTensorIds.insert(ioAndStatTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
-
-    checkTensorLayoutsAndDimsSupported(ioAndStatTensorIds);
+    checkTensorLayoutsAndDimsSupported(ioTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);

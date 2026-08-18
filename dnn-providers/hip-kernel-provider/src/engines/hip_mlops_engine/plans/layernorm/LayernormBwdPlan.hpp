@@ -48,6 +48,8 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dscale() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dbias() const;
 
+    static const int64_t MAX_LOCAL_SIZE = 1024;
+
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dy;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
@@ -80,18 +82,21 @@ public:
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
-private:
-    LayernormBwdParams _params;
-    int64_t _innerSize, _outerSize, _stride, _localSize;
     static size_t getReqdWorkItemCount(const hipDeviceProp_t& deviceProperties, size_t localSize);
+
     static bool isParallel(const hipDeviceProp_t& deviceProperties,
                            size_t localSize,
                            size_t innerSize,
                            size_t outerSize);
+
     static size_t getParallelSize(const hipDeviceProp_t& deviceProperties,
                                   size_t localSize,
                                   size_t innerSize,
                                   size_t outerSize);
+
+private:
+    LayernormBwdParams _params;
+    int64_t _innerSize, _outerSize, _stride, _localSize;
 
     // Populated by compile()
     std::unique_ptr<ICompiledProgram> _compiledProgram;
