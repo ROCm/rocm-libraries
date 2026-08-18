@@ -787,81 +787,65 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
     endif()
 endif()
 
-# Install TensileLite Python packages and test tools for artifact-based testing.
-# Produces:
-#   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
-#   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
-#   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+# Install ROCm-versioned wheels and installed tests for artifact-based testing.
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
-    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
-
-    # TensileLite Python package
     install(
-        DIRECTORY "${_tensilelite_src}/tensilelite/"
-        DESTINATION "${_tensilelite_install_dest}/tensilelite"
+        FILES "${_tensilelite_canonical_wheel}" "${_tensilelite_compatibility_wheel}"
+        DESTINATION "${_tensilelite_install_dest}/wheels"
+        COMPONENT tests
+    )
+
+    install(
+        DIRECTORY "${_tensilelite_src}/tensilelite/Tests/"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/Tests"
         COMPONENT tests
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
+        PATTERN ".codex" EXCLUDE
+        PATTERN ".agents" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+        PATTERN "build_tmp" EXCLUDE
+        PATTERN "build" EXCLUDE
+        PATTERN "tmp" EXCLUDE
+        PATTERN "a.out" EXCLUDE
+        PATTERN "*.o" EXCLUDE
+        PATTERN "CMakeFiles" EXCLUDE
+        PATTERN "CMakeCache.txt" EXCLUDE
         PATTERN "source_only" EXCLUDE
     )
 
-    # Scripts used by unit tests
     install(
-        FILES
-            "${_tensilelite_src}/scripts/analyze_timing.py"
-            "${_tensilelite_src}/scripts/precommit_affected_tests.py"
-        DESTINATION "${_tensilelite_install_dest}/scripts"
+        DIRECTORY "${_tensilelite_src}/compat/tests/"
+        DESTINATION "${_tensilelite_install_dest}/compat/tests"
         COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
     )
 
-    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
-    # ship at the tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/tensilelite/_extops/AMaxGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
-    # Preserve executable permissions on entry points
-    install(
-        PROGRAMS
-            "${_tensilelite_src}/tensilelite/bin/Tensile"
-            "${_tensilelite_src}/tensilelite/bin/TensileCreateLibrary"
-        DESTINATION "${_tensilelite_install_dest}/tensilelite/bin"
-        COMPONENT tests
-    )
-
-    # rocisa Python package — normalize rocisa/rocisa/ to top-level rocisa/
+    if(NOT TARGET _rocisa)
+        message(FATAL_ERROR
+            "HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS requires the in-tree _rocisa target")
+    endif()
     install(
         DIRECTORY "${_tensilelite_src}/rocisa/rocisa/"
         DESTINATION "${_tensilelite_install_dest}/rocisa"
         COMPONENT tests
+        FILES_MATCHING PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
-        PATTERN "*.pyc" EXCLUDE
     )
-    # rocisa native extension
-    if(TARGET _rocisa)
-        install(
-            TARGETS _rocisa
+    install(TARGETS _rocisa
+        LIBRARY DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
+        RUNTIME DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
+    )
+    if(TARGET stinkytofu::stinkytofu AND NOT WIN32)
+        install(FILES
+            "$<TARGET_FILE:stinkytofu::stinkytofu>"
+            "$<TARGET_SONAME_FILE:stinkytofu::stinkytofu>"
             DESTINATION "${_tensilelite_install_dest}/rocisa"
             COMPONENT tests
         )
     endif()
-    # Co-install stinkytofu shared library next to _rocisa
-    if(TARGET stinkytofu AND NOT WIN32)
-        install(FILES $<TARGET_FILE:stinkytofu>
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
-        install(FILES $<TARGET_SONAME_FILE:stinkytofu>
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
-    endif()
-
-    # rocisa tests
     install(
         DIRECTORY "${_tensilelite_src}/rocisa/test/"
         DESTINATION "${_tensilelite_install_dest}/rocisa_tests"
@@ -870,7 +854,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "*.pyc" EXCLUDE
     )
 
-    # pytest config (marker registration, xfail_strict)
     install(
         FILES "${_tensilelite_src}/pytest.ini"
         DESTINATION "${_tensilelite_install_dest}"
@@ -878,8 +861,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    # Test filter standardization config consumed by TheRock's pytest_runner.py
-    # to drive quick/standard/comprehensive/full categories from the installed tree.
     install(
         FILES "${_tensilelite_src}/test_categories.yaml"
         DESTINATION "${_tensilelite_install_dest}"
