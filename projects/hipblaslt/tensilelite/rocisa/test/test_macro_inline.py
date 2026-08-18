@@ -21,8 +21,8 @@
 ################################################################################
 
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
-from rocisa.code import Module, KernelBody
-from rocisa.instruction import MacroInstruction
+from rocisa.code import Module, KernelBody, Macro
+from rocisa.instruction import MacroInstruction, SNop
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 
 
@@ -68,7 +68,9 @@ def test_prnd_generator():
     body.add(MacroInstruction(name="PRND_GENERATOR", args=["v5", "v6", "v7", "v8"]))
     result = _run_pass(body)
     assert ".macro" not in result
-    assert "PRND_GENERATOR" not in result
+    # The inlined comment says "/* PRND_GENERATOR: ... */" (colon, no register),
+    # so "PRND_GENERATOR v" only appears in an un-inlined call-site.
+    assert "PRND_GENERATOR v" not in result
     assert "v_and_b32 v7, 0xFFFF, v6" in result
     assert "v_xor_b32 v5" in result
 
@@ -87,3 +89,19 @@ def test_macro_in_submodule():
     result = _run_pass(body)
     assert ".macro" not in result
     assert "v_mul_hi_u32 v1, v1, s2" in result
+
+
+def test_textblock_in_macro_body():
+    # TextBlock items added via addComment0 must survive inlining without
+    # triggering the unexpected-item-type assertion.
+    body = Module("body")
+    macro = Macro("COMMENTED_NOP", [])
+    macro.addComment0("mainloop body start")
+    macro.add(SNop(waitState=0, comment="nop"))
+    body.add(macro)
+    body.add(MacroInstruction(name="COMMENTED_NOP", args=[]))
+    result = _run_pass(body)
+    assert ".macro" not in result
+    assert "COMMENTED_NOP" not in result
+    assert "mainloop body start" in result
+    assert "s_nop" in result
