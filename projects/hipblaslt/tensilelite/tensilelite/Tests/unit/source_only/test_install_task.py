@@ -14,7 +14,7 @@ import tasks
 
 pytestmark = pytest.mark.unit
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_SOURCE_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_invoke_install_is_a_discoverable_developer_workflow():
