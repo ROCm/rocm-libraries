@@ -2048,6 +2048,37 @@ TEST(TestDescriptorLoader, RejectsAnInlineKernelCarryingAVersion)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, ".kdp.json"));
 }
 
+/// The shape the build-time descriptor packager emits: `kpack` kind, the archive
+/// coordinates beside it, and a `provenance` block on the kernel entry. It still fails,
+/// because no adapter can dispatch a kpack kernel -- but it must fail naming that, not an
+/// unknown key, or the message sends a reader to fix the packager's vocabulary instead of
+/// waiting for the adapter.
+TEST(TestDescriptorLoader, RejectsAPackagedKernelForTheMissingAdapterNotItsKeys)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packaged_kernel"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto packaged = makeSetDocuments('2', "test:packaged");
+    auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+    kernel["kernel_source"] = {{"kind", "kpack"},
+                               {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                               {"toc_key", "PointwiseAdd/block64"},
+                               {"symbol", "PointwiseAdd"},
+                               {"sha256", std::string(64, 'a')}};
+    kernel["provenance"] = {{"origin_kind", "hip"}, {"entry", "PointwiseAdd"}};
+    writeDocuments(dir.path(), packaged);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel source kind 'kpack'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no implementation yet"));
+}
+
 /// A typo in an OPTIONAL key is the case the extension rule exists to catch: `heuristik`
 /// leaves a UED with no heuristic at all, which is legal, so warning about it would let
 /// the engine load and rank by the fallback forever with the default log level off.

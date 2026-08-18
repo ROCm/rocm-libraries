@@ -188,7 +188,7 @@ struct DispatchDescriptor
 enum class KernelSourceKind
 {
     EMBEDDED_SOURCE, ///< Source file plus entry point, compiled at plan-build time.
-    KPACK_SYMBOL, ///< Prebuilt kpack library plus symbol. No adapter yet.
+    KPACK, ///< Prebuilt kpack archive plus toc key and symbol. No adapter yet.
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };

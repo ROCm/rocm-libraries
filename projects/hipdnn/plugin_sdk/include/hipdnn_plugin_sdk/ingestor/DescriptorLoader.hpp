@@ -442,9 +442,9 @@ inline KernelSourceKind kernelSourceKindFromString(const std::string& text,
     {
         return KernelSourceKind::EMBEDDED_SOURCE;
     }
-    if(text == "kpack_symbol")
+    if(text == "kpack")
     {
-        return KernelSourceKind::KPACK_SYMBOL;
+        return KernelSourceKind::KPACK;
     }
     if(text == "hsaco_file")
     {
@@ -774,7 +774,15 @@ inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
 inline KernelSource parseKernelSource(const nlohmann::json& root, const std::string& where)
 {
     requireObject(root, where);
-    requireKnownKeys(root, {"kind", "source_file", "entry_point"}, where);
+    // `library`/`toc_key`/`symbol`/`sha256` belong to the `kpack` kind and are named here
+    // before any adapter reads them: this check runs ahead of the kind switch, so leaving
+    // them out would fail a packaged descriptor with "unknown key 'library'" instead of
+    // the honest "no implementation yet" below. They are not modelled on KernelSource
+    // until something can dispatch them.
+    requireKnownKeys(
+        root,
+        {"kind", "source_file", "entry_point", "library", "toc_key", "symbol", "sha256"},
+        where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
