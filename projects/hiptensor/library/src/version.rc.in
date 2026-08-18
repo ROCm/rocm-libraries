@@ -26,7 +26,7 @@
 
 #include <winver.h>
 
-#ifdef DEBUG
+#ifdef _DEBUG
 #define VER_DEBUG VS_FF_DEBUG
 #else
 #define VER_DEBUG 0
