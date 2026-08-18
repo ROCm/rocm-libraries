@@ -39,7 +39,7 @@ def _endCounter(pgr, suppress=False, halfPLR=False, rap=False):
     # a bare stub self are sufficient. Import lazily to keep module import light.
     from types import SimpleNamespace
 
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
     kernel = {
         "PrefetchGlobalRead": pgr,

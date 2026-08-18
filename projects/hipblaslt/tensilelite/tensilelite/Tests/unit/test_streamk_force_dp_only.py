@@ -22,11 +22,11 @@
 #
 ################################################################################
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.RequiredParameters import getRequiredParametersMin
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Contractions import SizeMapping
-from Tensile.SolutionStructs.Solution import _validateStreamKForceDPOnly, validateParameterTypes
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.RequiredParameters import getRequiredParametersMin
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Contractions import SizeMapping
+from tensilelite.SolutionStructs.Solution import _validateStreamKForceDPOnly, validateParameterTypes
 
 
 def minimal_size_mapping_state():
