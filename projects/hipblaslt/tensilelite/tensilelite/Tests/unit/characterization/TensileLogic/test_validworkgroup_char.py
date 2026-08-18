@@ -49,7 +49,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.TensileLogic.ValidWorkGroup import _validateWorkGroup
+from tensilelite.logic.valid_work_group import _validateWorkGroup
 
 pytestmark = pytest.mark.unit
 

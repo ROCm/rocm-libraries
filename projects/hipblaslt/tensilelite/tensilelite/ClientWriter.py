@@ -46,7 +46,7 @@ from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchN
                                    capOverrideKeyOf, isaToGfx)
 from .Common.GlobalParameters import globalParameters
 from .Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .create_library import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType

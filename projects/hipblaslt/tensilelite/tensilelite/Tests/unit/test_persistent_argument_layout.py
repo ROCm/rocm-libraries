@@ -263,7 +263,7 @@ def _data_parallel_signature_agreement(tmp_path, use_beta, initial_strides):
     from test_persistent_config_generation import _config
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     config = _config({"TileProcessingStrategy": ["DataParallel"], "WorkAssignment": ["StaticGrid"]})
     config["BenchmarkProblems"][0][0].update(UseBeta=use_beta, UseInitialStridesAB=initial_strides,
@@ -406,7 +406,7 @@ def _reject_invalid_data_parallel_descriptor(tmp_path):
     from test_persistent_config_generation import _config
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     config = _config({"TileProcessingStrategy": ["DataParallel"], "WorkAssignment": ["StaticGrid"]})
     path = tmp_path / "data_parallel.yaml"

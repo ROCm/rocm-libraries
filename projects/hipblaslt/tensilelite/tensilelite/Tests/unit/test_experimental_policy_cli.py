@@ -198,7 +198,7 @@ def _main_cli_policy_lines(tmp_path, yaml_globals, overrides):
     from tensilelite.Contractions import ProblemType as ContractionProblemType
     from tensilelite.SolutionStructs import FactorDimArgs
     from tensilelite.SolutionStructs.Problem import ProblemSizesMockDummy, ProblemType
-    from tensilelite.Tensile import Tensile
+    from tensilelite.tensilelite import tensilelite
 
     config = tmp_path / "input.yaml"
     config.write_text(yaml.safe_dump({"GlobalParameters": dict(PrintLevel=0, **yaml_globals)}))
@@ -208,7 +208,7 @@ def _main_cli_policy_lines(tmp_path, yaml_globals, overrides):
     with _isolated_globals_with_isa(_toolchain_for("gfx942")[1]):
         # No benchmark steps are needed to exercise the real entry point's
         # YAML/CLI precedence and the resulting client configuration.
-        Tensile(argv)
+        tensilelite(argv)
         problem = ProblemType({"OperationType": "GEMM", "DataType": "s", "Batched": True}, False)
         ini = tmp_path / "ClientParameters.ini"
         writeClientConfigIni(
