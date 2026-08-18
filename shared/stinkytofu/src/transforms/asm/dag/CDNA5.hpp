@@ -993,15 +993,18 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
-    std::tuple<bool, int> bestKey{};
+    std::tuple<bool, int, int> bestKey{};
 
     // Ordering, highest key first: (1) free work beats a hidden-stall candidate;
-    // (2) smallest id. Producer-side hazard hoisting is handled separately by
+    // (2) global_read beats other non-WMMA kinds; (3) smallest id.
+    // Producer-side hazard hoisting is handled separately by
     // decidePromote(), not here — a flagged producer competes on equal terms with
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
-        if (considerBest(cand, std::make_tuple(candWait > 0, (int)cand->id), best, bestKey)) {
+        const int kindRank = (candKind == kGlobalRead) ? 0 : 1;
+        if (considerBest(cand, std::make_tuple(candWait > 0, kindRank, (int)cand->id), best,
+                         bestKey)) {
             kind = candKind;
             bestWait = candWait;
         }
