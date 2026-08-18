@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Properties``: the ``Property`` base
+"""Characterization tests for ``tensilelite.Properties``: the ``Property`` base
 (state / equality / hash / FromOriginalState) and the ``Predicate`` subclass
 (``And`` / ``Or`` factories and the matching-order ``__lt__``)."""
 
 import pytest
 
-from Tensile.Properties import Property, Predicate
+from tensilelite.Properties import Property, Predicate
 
 pytestmark = pytest.mark.unit
 
