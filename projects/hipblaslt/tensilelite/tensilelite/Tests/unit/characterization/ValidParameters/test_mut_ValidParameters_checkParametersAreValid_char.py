@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.ValidParameters.checkParametersAreValid``.
+``tensilelite.Common.ValidParameters.checkParametersAreValid``.
 
 These pin the validator's current boundary behavior and type-mismatch reporting:
 unknown-name diagnostics include the global valid-parameter roster, value-list
@@ -12,8 +12,8 @@ mismatches report the current source/key/value/expected-type fields.
 
 import pytest
 
-import Tensile.Common.ValidParameters as VP
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
+import tensilelite.Common.ValidParameters as VP
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
 
 pytestmark = pytest.mark.unit
 

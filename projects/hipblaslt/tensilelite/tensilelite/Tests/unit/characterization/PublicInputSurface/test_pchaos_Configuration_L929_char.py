@@ -71,7 +71,7 @@ def test_constraints_key_present_false_when_other_keys_present():
 
 def test_constraints_key_absent_in_fresh_config():
     """Fresh ProjectConfig has no constraints -> ConstraintsKey NOT in self (FALSE branch)."""
-    from Tensile.Configuration import ProjectConfig
+    from tensilelite.Configuration import ProjectConfig
 
     cfg = ProjectConfig()
     assert (cfg.ConstraintsKey in cfg) is False
@@ -79,7 +79,7 @@ def test_constraints_key_absent_in_fresh_config():
 
 def test_constraints_key_present_after_add_constraint():
     """After addConstraint(), ConstraintsKey IS in self (TRUE branch)."""
-    from Tensile.Configuration import ProjectConfig
+    from tensilelite.Configuration import ProjectConfig
 
     cfg = ProjectConfig()
     cfg.createValue("X", 1)
@@ -89,7 +89,7 @@ def test_constraints_key_present_after_add_constraint():
 
 def test_constraints_key_value_is_underscore_constraints():
     """Pin the constant: ConstraintsKey == "_Constraints" (Configuration.py:818)."""
-    from Tensile.Configuration import ProjectConfig
+    from tensilelite.Configuration import ProjectConfig
 
     cfg = ProjectConfig()
     assert cfg.ConstraintsKey == "_Constraints"
@@ -97,7 +97,7 @@ def test_constraints_key_value_is_underscore_constraints():
 
 def test_check_constraints_returns_true_when_constraint_satisfied():
     """TRUE branch downstream: checkConstraints() returns True when constraint holds."""
-    from Tensile.Configuration import ProjectConfig
+    from tensilelite.Configuration import ProjectConfig
 
     cfg = ProjectConfig()
     cfg.createValue("X", 1)
@@ -111,7 +111,7 @@ def test_check_constraints_raises_unbound_local_error_when_no_constraints():
     """FALSE branch latent bug (pinned ACTUAL): when no constraints exist,
     checkConstraints() skips the loop and hits `return value` (line 935)
     with `value` unbound -> raises UnboundLocalError."""
-    from Tensile.Configuration import ProjectConfig
+    from tensilelite.Configuration import ProjectConfig
 
     cfg = ProjectConfig()
     # "_Constraints" NOT present -> FALSE branch -> UnboundLocalError
