@@ -1,0 +1,56 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# A returning MUBUF/FLAT/GLOBAL atomic completes on the same loadcnt counter
+# as an ordinary load (see isReturningAtomic() in StinkyAsmIR.hpp), so a real
+# consumer of the atomic's destination register must get a wait, exactly like
+# an ordinary global load would.
+
+#--- Consumer of the atomic's return value gets a loadcnt wait.
+# CHECK-LABEL: @waitcnt_insertion_returning_atomic_before_consumer
+# CHECK: global_atomic_inc_u32
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 0
+# CHECK-NEXT: v_readfirstlane_b32
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_kmcnt
+
+st.func @waitcnt_insertion_returning_atomic_before_consumer() {
+^entry:
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  s17 = "st.v_readfirstlane_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- A returning atomic shares the CK_Buffer FIFO with an ordinary load: a
+#--- load issued after the atomic still gets drained correctly.
+# CHECK-LABEL: @waitcnt_insertion_returning_atomic_shares_queue_with_load
+# CHECK: global_atomic_inc_u32
+# CHECK-NEXT: flat_load_b32
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 1
+# CHECK-NEXT: v_readfirstlane_b32
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 0
+# CHECK-NEXT: v_add_f32
+
+st.func @waitcnt_insertion_returning_atomic_shares_queue_with_load() {
+^entry:
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  v5 = "st.flat_load_b32"(v[6:7], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  s17 = "st.v_readfirstlane_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
+  v8 = "st.v_add_f32"(v5, v5) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- A non-returning atomic (no real destination register) has no consumer
+#--- to drain for, so it must not be tracked as a CK_Buffer producer.
+# CHECK-LABEL: @waitcnt_insertion_non_returning_atomic_not_tracked
+# CHECK: global_atomic_inc_u32
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_kmcnt
+
+st.func @waitcnt_insertion_non_returning_atomic_not_tracked() {
+^entry:
+  "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  v6 = "st.v_add_f32"(v0, v0) { issueCycles = 1, latencyCycles = 1 }
+}

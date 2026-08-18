@@ -155,7 +155,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.2)
+rocm_setup_version(VERSION 3.6.0)
 
 include(TargetFlags)
 
@@ -726,7 +726,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030)
+set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
@@ -895,6 +895,7 @@ if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)
 endif()
 add_subdirectory(addkernels)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/MiopenCkCompileDefs.cmake)
 add_subdirectory(src)
 if(MIOPEN_BUILD_DRIVER)
     add_subdirectory(driver)

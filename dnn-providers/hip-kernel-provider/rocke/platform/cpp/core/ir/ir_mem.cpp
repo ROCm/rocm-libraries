@@ -128,6 +128,28 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
     return rocke_b_global_load(b, ptr, idx, rocke_bf16(), align <= 0 ? 2 : align);
 }
 
+rocke_value_t*
+    rocke_b_global_load_i8(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_i8(), align <= 0 ? 1 : align);
+}
+
+rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_i16(), align <= 0 ? 2 : align);
+}
+
+rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
+                                           rocke_value_t* ptr,
+                                           rocke_value_t* idx,
+                                           int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_bf8e5m2(), align <= 0 ? 1 : align);
+}
+
 rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
                                            rocke_value_t* ptr,
                                            rocke_value_t* idx,
@@ -505,6 +527,41 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
     rocke_attr_set_str(b, &a, "ordering", ordering);
     return rocke_i_op1(
         b, ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16, ops, 3, value->type, &a, "atom_bf16");
+}
+
+rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
+                                                const char* ordering)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!ptr || !idx || !value)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_atomic_add_pk_f16: null operand");
+    if(ordering == NULL)
+        ordering = "monotonic";
+    if(!rocke_i_ordering_ok(ordering))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unknown ordering '%s'", ordering);
+    if(!rocke_i_is_vector(value->type, "f16", 2))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "global_atomic_add_pk_f16 expects <2 x f16> input, got %s",
+            value->type->name);
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = value;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "elem_type", "f16");
+    rocke_attr_set_int(b, &a, "vec", 2);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    return rocke_i_op1(
+        b, ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16, ops, 3, value->type, &a, "atom_f16");
 }
 
 void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b,

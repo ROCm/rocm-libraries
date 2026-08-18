@@ -41,7 +41,7 @@ Capabilities
 rocALUTION provides a wide range of iterative solvers for sparse linear systems:
 
 - **Fixed-point iteration methods**
-  
+
   - Jacobi
   - Gauss-Seidel
   - Symmetric Gauss-Seidel
@@ -49,7 +49,7 @@ rocALUTION provides a wide range of iterative solvers for sparse linear systems:
   - SSOR
 
 - **Krylov subspace methods**
-  
+
   - CR
   - CG
   - BiCGStab
@@ -61,7 +61,7 @@ rocALUTION provides a wide range of iterative solvers for sparse linear systems:
   - Flexible CG
 
 - **Additional solvers**
-  
+
   - Mixed-precision defect-correction schemes
   - Chebyshev iteration
   - Geometric and algebraic multigrid methods
@@ -69,7 +69,7 @@ rocALUTION provides a wide range of iterative solvers for sparse linear systems:
 You can improve solver performance using a broad set of preconditioners:
 
 - **Matrix splitting methods**
-  
+
   - Jacobi
   - (Multi-colored) Gauss-Seidel
   - Symmetric Gauss-Seidel
@@ -77,7 +77,7 @@ You can improve solver performance using a broad set of preconditioners:
   - SSOR
 
 - **Factorization-based methods**
-  
+
   - ILU(0)
   - ILU(p) based on level-of-fill
   - ILU(p,q) using the power(q)-pattern method
@@ -86,14 +86,14 @@ You can improve solver performance using a broad set of preconditioners:
   - IC(0)
 
 - **Approximate inverse methods**
-  
+
   - Chebyshev matrix-valued polynomials
   - SPAI
   - FSAI
   - TNS
 
 - **Additional preconditioners**
-  
+
   - Diagonal-based preconditioners for saddle-point problems
   - Block-type sub-preconditioners and solvers
   - Additive Schwarz and Restricted Additive Schwarz methods
@@ -120,4 +120,5 @@ rocALUTION supports multiple sparse and dense matrix storage formats:
 - Diagonal (DIA)
 - Hybrid ELL and COO (HYB)
 
-rocALUTION is open source software released under the `MIT License <./license.html>`_. The source code is hosted in the `https://github.com/ROCm/rocALUTION <https://github.com/ROCm/rocALUTION>`__ repository.
+rocALUTION is open source software released under the `MIT License <./license.html>`__.
+You can find the source code in the `https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocalution <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocalution>`__ repository.

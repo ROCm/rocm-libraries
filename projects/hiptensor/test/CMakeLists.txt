@@ -339,87 +339,276 @@ add_subdirectory(00_unit)
 add_subdirectory(01_contraction)
 add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
-add_subdirectory(python)
 
-# FFM test entries.
+add_subdirectory(python)
+# Test entries for the install-tree category filters.
 #
-# These are appended to the main install-tree fragment (bin/hiptensor/CTestTestfile.cmake).
+# Two building-block lists keep the three filters distinct in intent:
+#   _HIPTENSOR_HOST_TESTS   - host-only (non-device) tests. They take no config and
+#                             no run-count flags.
+#   _HIPTENSOR_DEVICE_TESTS - device tests. Each runs with --hot_runs 1 --cold_runs 0
+#                             and, where applicable, a custom config via -y.
 #
-# Each row is encoded as "binary|yaml-or-NONE|SMOKE-or-NONE":
-#   binary - the test executable under bin/; the test name is "<binary> smoke ffm"
-#            (each smoke binary appears exactly once in the set)
-#   yaml   - path of the emulation/smoke config to pass via -y, relative to
-#            bin/hiptensor/ffm/configs/, or NONE for bare runs
-#   params - SMOKE to append --hot_runs 1 --cold_runs 0, or NONE
-set(_HT_FFM_ENTRIES
-  "bilinear_contraction_test_m1n1k1|01_contraction/smoke/bilinear_test_params_rank1.yaml|SMOKE"
-  "bilinear_contraction_test_m2n2k2|01_contraction/smoke/bilinear_test_params_rank2.yaml|SMOKE"
-  "bilinear_contraction_test_m3n3k3|01_contraction/smoke/bilinear_test_params_rank3.yaml|SMOKE"
-  "bilinear_contraction_test_m4n4k4|01_contraction/smoke/bilinear_test_params_rank4.yaml|SMOKE"
-  "bilinear_contraction_test_m5n5k5|01_contraction/smoke/bilinear_test_params_rank5.yaml|SMOKE"
-  "bilinear_contraction_test_m6n6k6|01_contraction/smoke/bilinear_test_params_rank6.yaml|SMOKE"
-  "complex_bilinear_contraction_test_m1n1k1|01_contraction/smoke/complex_bilinear_test_params_rank1.yaml|SMOKE"
-  "complex_bilinear_contraction_test_m2n2k2|01_contraction/smoke/complex_bilinear_test_params_rank2.yaml|SMOKE"
-  "complex_bilinear_contraction_test_m3n3k3|01_contraction/smoke/complex_bilinear_test_params_rank3.yaml|SMOKE"
-  "complex_bilinear_contraction_test_m4n4k4|01_contraction/smoke/complex_bilinear_test_params_rank4.yaml|SMOKE"
-  "complex_bilinear_contraction_test_m5n5k5|01_contraction/smoke/complex_bilinear_test_params_rank5.yaml|SMOKE"
-  "complex_bilinear_contraction_test_m6n6k6|01_contraction/smoke/complex_bilinear_test_params_rank6.yaml|SMOKE"
-  "scale_contraction_test_m1n1k1|01_contraction/smoke/scale_test_params_rank1.yaml|SMOKE"
-  "scale_contraction_test_m2n2k2|01_contraction/smoke/scale_test_params_rank2.yaml|SMOKE"
-  "scale_contraction_test_m3n3k3|01_contraction/smoke/scale_test_params_rank3.yaml|SMOKE"
-  "scale_contraction_test_m4n4k4|01_contraction/smoke/scale_test_params_rank4.yaml|SMOKE"
-  "scale_contraction_test_m5n5k5|01_contraction/smoke/scale_test_params_rank5.yaml|SMOKE"
-  "scale_contraction_test_m6n6k6|01_contraction/smoke/scale_test_params_rank6.yaml|SMOKE"
-  "complex_scale_contraction_test_m1n1k1|01_contraction/smoke/complex_scale_test_params_rank1.yaml|SMOKE"
-  "complex_scale_contraction_test_m2n2k2|01_contraction/smoke/complex_scale_test_params_rank2.yaml|SMOKE"
-  "complex_scale_contraction_test_m3n3k3|01_contraction/smoke/complex_scale_test_params_rank3.yaml|SMOKE"
-  "complex_scale_contraction_test_m4n4k4|01_contraction/smoke/complex_scale_test_params_rank4.yaml|SMOKE"
-  "complex_scale_contraction_test_m5n5k5|01_contraction/smoke/complex_scale_test_params_rank5.yaml|SMOKE"
-  "complex_scale_contraction_test_m6n6k6|01_contraction/smoke/complex_scale_test_params_rank6.yaml|SMOKE"
-  "trinary_bilinear_contraction_test|NONE|SMOKE"
-  "trinary_scale_contraction_test|NONE|SMOKE"
-  "bilinear_contraction_with_unary_ops_test|NONE|SMOKE"
-  "scale_contraction_with_unary_ops_test|NONE|SMOKE"
-  "rank2_elementwise_permute_test|02_elementwise/smoke/permutation/rank2_test_params.yaml|SMOKE"
-  "rank3_elementwise_permute_test|02_elementwise/smoke/permutation/rank3_test_params.yaml|SMOKE"
-  "rank4_elementwise_permute_test|02_elementwise/smoke/permutation/rank4_test_params.yaml|SMOKE"
-  "rank5_elementwise_permute_test|02_elementwise/smoke/permutation/rank5_test_params.yaml|SMOKE"
-  "rank6_elementwise_permute_test|02_elementwise/smoke/permutation/rank6_test_params.yaml|SMOKE"
-  "rank2_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank2_binary_op_test_params.yaml|SMOKE"
-  "rank3_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank3_binary_op_test_params.yaml|SMOKE"
-  "rank4_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank4_binary_op_test_params.yaml|SMOKE"
-  "rank5_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank5_binary_op_test_params.yaml|SMOKE"
-  "rank6_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank6_binary_op_test_params.yaml|SMOKE"
-  "rank2_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank2_trinary_op_test_params.yaml|SMOKE"
-  "rank3_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank3_trinary_op_test_params.yaml|SMOKE"
-  "rank4_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank4_trinary_op_test_params.yaml|SMOKE"
-  "rank5_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank5_trinary_op_test_params.yaml|SMOKE"
-  "rank6_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank6_trinary_op_test_params.yaml|SMOKE"
-  "rank1_reduction_test|03_reduction/smoke/rank1_test_params.yaml|SMOKE"
-  "rank2_reduction_test|03_reduction/smoke/rank2_test_params.yaml|SMOKE"
-  "rank3_reduction_test|03_reduction/smoke/rank3_test_params.yaml|SMOKE"
-  "rank4_reduction_test|03_reduction/smoke/rank4_test_params.yaml|SMOKE"
-  "rank5_reduction_test|03_reduction/smoke/rank5_test_params.yaml|SMOKE"
-  "rank6_reduction_test|03_reduction/smoke/rank6_test_params.yaml|SMOKE"
+# From these, families of install-tree entries are emitted:
+#   filter          test name suffix   members         config dir
+#   quick           " quick"           host + device   validation/quick
+#   standard        " standard"        host + device   validation/standard
+#   comprehensive   " comprehensive"   host + device   validation/comprehensive
+#   full            " full"            host + device   validation/full
+#   ffm-quick       " ffm-quick"       device only      emulation/quick
+#   ffm-full        " ffm-full"        device only      emulation/full
+#   bench           " bench"           device (bench)   bench
+# where "config dir" is the bin/hiptensor/configs/<dir>/ subtree the -y path
+# points at. Host tests are emitted once under quick; the shared parser's tier
+# nesting (quick->standard->comprehensive->full) carries them up, so they run
+# under every tier without duplicate entries. Labels are attached by the shared
+# category parser from test_categories.yaml.
+
+set(_HIPTENSOR_HOST_TESTS
+  contraction_mode_test
+  elementwise_cpu_test
+  elementwise_op_test
+  hiptensor_options_test
+  logger_test
+  reduction_cpu_impl_test
+  util_test
+  yaml_test
 )
 
-foreach(_ffm_entry IN LISTS _HT_FFM_ENTRIES)
-    string(REPLACE "|" ";" _ffm_fields "${_ffm_entry}")
-    list(GET _ffm_fields 0 _ffm_bin)
-    list(GET _ffm_fields 1 _ffm_yaml)
-    list(GET _ffm_fields 2 _ffm_params)
+# Device tests encoded as "binary|config-or-NONE". The config path is
+# relative to a per-category config root (bin/hiptensor/configs/<category>/),
+# with <category> supplied per family below. NONE means no -y (the binary
+# carries its own config) but the run-count flags are still applied.
+set(_HIPTENSOR_DEVICE_TESTS
+  "bilinear_contraction_test_m1n1k1|01_contraction/bilinear_test_params_rank1.yaml"
+  "bilinear_contraction_test_m2n2k2|01_contraction/bilinear_test_params_rank2.yaml"
+  "bilinear_contraction_test_m3n3k3|01_contraction/bilinear_test_params_rank3.yaml"
+  "bilinear_contraction_test_m4n4k4|01_contraction/bilinear_test_params_rank4.yaml"
+  "bilinear_contraction_test_m5n5k5|01_contraction/bilinear_test_params_rank5.yaml"
+  "bilinear_contraction_test_m6n6k6|01_contraction/bilinear_test_params_rank6.yaml"
+  "complex_bilinear_contraction_test_m1n1k1|01_contraction/complex_bilinear_test_params_rank1.yaml"
+  "complex_bilinear_contraction_test_m2n2k2|01_contraction/complex_bilinear_test_params_rank2.yaml"
+  "complex_bilinear_contraction_test_m3n3k3|01_contraction/complex_bilinear_test_params_rank3.yaml"
+  "complex_bilinear_contraction_test_m4n4k4|01_contraction/complex_bilinear_test_params_rank4.yaml"
+  "complex_bilinear_contraction_test_m5n5k5|01_contraction/complex_bilinear_test_params_rank5.yaml"
+  "complex_bilinear_contraction_test_m6n6k6|01_contraction/complex_bilinear_test_params_rank6.yaml"
+  "scale_contraction_test_m1n1k1|01_contraction/scale_test_params_rank1.yaml"
+  "scale_contraction_test_m2n2k2|01_contraction/scale_test_params_rank2.yaml"
+  "scale_contraction_test_m3n3k3|01_contraction/scale_test_params_rank3.yaml"
+  "scale_contraction_test_m4n4k4|01_contraction/scale_test_params_rank4.yaml"
+  "scale_contraction_test_m5n5k5|01_contraction/scale_test_params_rank5.yaml"
+  "scale_contraction_test_m6n6k6|01_contraction/scale_test_params_rank6.yaml"
+  "complex_scale_contraction_test_m1n1k1|01_contraction/complex_scale_test_params_rank1.yaml"
+  "complex_scale_contraction_test_m2n2k2|01_contraction/complex_scale_test_params_rank2.yaml"
+  "complex_scale_contraction_test_m3n3k3|01_contraction/complex_scale_test_params_rank3.yaml"
+  "complex_scale_contraction_test_m4n4k4|01_contraction/complex_scale_test_params_rank4.yaml"
+  "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
+  "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
+  "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
+  "plan_lifetime_test|NONE"
+  "trinary_bilinear_contraction_test|NONE"
+  "trinary_scale_contraction_test|NONE"
+  "bilinear_contraction_with_unary_ops_test|NONE"
+  "scale_contraction_with_unary_ops_test|NONE"
+  "rank2_elementwise_permute_test|02_elementwise/permutation/rank2_test_params.yaml"
+  "rank3_elementwise_permute_test|02_elementwise/permutation/rank3_test_params.yaml"
+  "rank4_elementwise_permute_test|02_elementwise/permutation/rank4_test_params.yaml"
+  "rank5_elementwise_permute_test|02_elementwise/permutation/rank5_test_params.yaml"
+  "rank6_elementwise_permute_test|02_elementwise/permutation/rank6_test_params.yaml"
+  "rank2_elementwise_binary_op_test|02_elementwise/binary_op/rank2_binary_op_test_params.yaml"
+  "rank3_elementwise_binary_op_test|02_elementwise/binary_op/rank3_binary_op_test_params.yaml"
+  "rank4_elementwise_binary_op_test|02_elementwise/binary_op/rank4_binary_op_test_params.yaml"
+  "rank5_elementwise_binary_op_test|02_elementwise/binary_op/rank5_binary_op_test_params.yaml"
+  "rank6_elementwise_binary_op_test|02_elementwise/binary_op/rank6_binary_op_test_params.yaml"
+  "rank2_elementwise_trinary_op_test|02_elementwise/trinary_op/rank2_trinary_op_test_params.yaml"
+  "rank3_elementwise_trinary_op_test|02_elementwise/trinary_op/rank3_trinary_op_test_params.yaml"
+  "rank4_elementwise_trinary_op_test|02_elementwise/trinary_op/rank4_trinary_op_test_params.yaml"
+  "rank5_elementwise_trinary_op_test|02_elementwise/trinary_op/rank5_trinary_op_test_params.yaml"
+  "rank6_elementwise_trinary_op_test|02_elementwise/trinary_op/rank6_trinary_op_test_params.yaml"
+  "rank1_reduction_test|03_reduction/rank1_test_params.yaml"
+  "rank2_reduction_test|03_reduction/rank2_test_params.yaml"
+  "rank3_reduction_test|03_reduction/rank3_test_params.yaml"
+  "rank4_reduction_test|03_reduction/rank4_test_params.yaml"
+  "rank5_reduction_test|03_reduction/rank5_test_params.yaml"
+  "rank6_reduction_test|03_reduction/rank6_test_params.yaml"
+)
 
-    set(_ffm_cmd "\"./bin/${_ffm_bin}\"")
-    if(NOT _ffm_yaml STREQUAL "NONE")
-        string(APPEND _ffm_cmd " -y ./bin/${PROJECT_NAME}/ffm/configs/${_ffm_yaml}")
+# Bench (performance) tests encoded as "binary|config". Same encoding as
+# _HIPTENSOR_DEVICE_TESTS, but the bench config set is distinct: it has no
+# trinary/unary contraction variants, and its elementwise configs are flat
+# (no permutation/binary_op/trinary_op subdirs). Paths are relative to the
+# bench config root (bin/hiptensor/configs/bench/). Bench runs use different
+# run-count flags (see the bench family below).
+set(_HIPTENSOR_BENCH_TESTS
+  "bilinear_contraction_test_m1n1k1|01_contraction/bilinear_test_params_rank1.yaml"
+  "bilinear_contraction_test_m2n2k2|01_contraction/bilinear_test_params_rank2.yaml"
+  "bilinear_contraction_test_m3n3k3|01_contraction/bilinear_test_params_rank3.yaml"
+  "bilinear_contraction_test_m4n4k4|01_contraction/bilinear_test_params_rank4.yaml"
+  "bilinear_contraction_test_m5n5k5|01_contraction/bilinear_test_params_rank5.yaml"
+  "bilinear_contraction_test_m6n6k6|01_contraction/bilinear_test_params_rank6.yaml"
+  "complex_bilinear_contraction_test_m1n1k1|01_contraction/complex_bilinear_test_params_rank1.yaml"
+  "complex_bilinear_contraction_test_m2n2k2|01_contraction/complex_bilinear_test_params_rank2.yaml"
+  "complex_bilinear_contraction_test_m3n3k3|01_contraction/complex_bilinear_test_params_rank3.yaml"
+  "complex_bilinear_contraction_test_m4n4k4|01_contraction/complex_bilinear_test_params_rank4.yaml"
+  "complex_bilinear_contraction_test_m5n5k5|01_contraction/complex_bilinear_test_params_rank5.yaml"
+  "complex_bilinear_contraction_test_m6n6k6|01_contraction/complex_bilinear_test_params_rank6.yaml"
+  "scale_contraction_test_m1n1k1|01_contraction/scale_test_params_rank1.yaml"
+  "scale_contraction_test_m2n2k2|01_contraction/scale_test_params_rank2.yaml"
+  "scale_contraction_test_m3n3k3|01_contraction/scale_test_params_rank3.yaml"
+  "scale_contraction_test_m4n4k4|01_contraction/scale_test_params_rank4.yaml"
+  "scale_contraction_test_m5n5k5|01_contraction/scale_test_params_rank5.yaml"
+  "scale_contraction_test_m6n6k6|01_contraction/scale_test_params_rank6.yaml"
+  "complex_scale_contraction_test_m1n1k1|01_contraction/complex_scale_test_params_rank1.yaml"
+  "complex_scale_contraction_test_m2n2k2|01_contraction/complex_scale_test_params_rank2.yaml"
+  "complex_scale_contraction_test_m3n3k3|01_contraction/complex_scale_test_params_rank3.yaml"
+  "complex_scale_contraction_test_m4n4k4|01_contraction/complex_scale_test_params_rank4.yaml"
+  "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
+  "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
+  "rank2_elementwise_permute_test|02_elementwise/rank2_test_params.yaml"
+  "rank2_elementwise_binary_op_test|02_elementwise/rank2_binary_op_test_params.yaml"
+  "rank2_elementwise_trinary_op_test|02_elementwise/rank2_trinary_op_test_params.yaml"
+  "rank3_elementwise_permute_test|02_elementwise/rank3_test_params.yaml"
+  "rank3_elementwise_binary_op_test|02_elementwise/rank3_binary_op_test_params.yaml"
+  "rank3_elementwise_trinary_op_test|02_elementwise/rank3_trinary_op_test_params.yaml"
+  "rank4_elementwise_permute_test|02_elementwise/rank4_test_params.yaml"
+  "rank4_elementwise_binary_op_test|02_elementwise/rank4_binary_op_test_params.yaml"
+  "rank4_elementwise_trinary_op_test|02_elementwise/rank4_trinary_op_test_params.yaml"
+  "rank5_elementwise_permute_test|02_elementwise/rank5_test_params.yaml"
+  "rank5_elementwise_binary_op_test|02_elementwise/rank5_binary_op_test_params.yaml"
+  "rank5_elementwise_trinary_op_test|02_elementwise/rank5_trinary_op_test_params.yaml"
+  "rank6_elementwise_permute_test|02_elementwise/rank6_test_params.yaml"
+  "rank6_elementwise_binary_op_test|02_elementwise/rank6_binary_op_test_params.yaml"
+  "rank6_elementwise_trinary_op_test|02_elementwise/rank6_trinary_op_test_params.yaml"
+  "rank1_reduction_test|03_reduction/rank1_test_params.yaml"
+  "rank2_reduction_test|03_reduction/rank2_test_params.yaml"
+  "rank3_reduction_test|03_reduction/rank3_test_params.yaml"
+  "rank4_reduction_test|03_reduction/rank4_test_params.yaml"
+  "rank5_reduction_test|03_reduction/rank5_test_params.yaml"
+  "rank6_reduction_test|03_reduction/rank6_test_params.yaml"
+)
+
+# Helper: append one add_test + set_tests_properties to the main install
+# fragment. We deliberately do NOT set WORKING_DIRECTORY: when it is unset,
+# CTest runs the test from (and resolves a relative COMMAND against) the
+# directory containing this CTestTestfile.cmake fragment, i.e. the installed
+# bin/hiptensor/. So callers spell the executable relative to bin/hiptensor/
+# ("../<binary>") and the -y config relative to it ("configs/<...>").
+function(_hiptensor_emit_test test_name command)
+    file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${test_name}\" ${command})\n")
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${test_name}\" PROPERTIES SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+endfunction()
+
+# A config yaml is "effectively empty" when it carries no test parameters.
+# This is TRUE when the file:
+#   - does not exist, or
+#   - is completely empty (0 bytes), or
+#   - contains nothing beyond YAML document markers (---, ...), blank lines,
+#     and comments.
+# Any of these is a deliberate signal that a device test is fully covered by an
+# earlier tier and should NOT run in this one: registering it would hand the
+# test an empty parameter set, which the GTest-parameterized harness cannot
+# digest (empty ValuesIn / out-of-bounds param access -> SegFault). We resolve
+# this at configure time by not emitting the add_test for that (test, tier).
+function(_hiptensor_config_is_empty config_path out_var)
+    # Default TRUE covers the non-existent and 0-byte cases (file(STRINGS) on an
+    # empty file yields no lines, so the loop below never flips it to FALSE).
+    set(${out_var} TRUE PARENT_SCOPE)
+    if(NOT EXISTS "${config_path}")
+        return()
     endif()
-    if(_ffm_params STREQUAL "SMOKE")
-        string(APPEND _ffm_cmd " --hot_runs 1 --cold_runs 0")
+    file(STRINGS "${config_path}" _lines)
+    foreach(_line IN LISTS _lines)
+        string(REGEX REPLACE "#.*$" "" _stripped "${_line}")   # drop comments
+        string(STRIP "${_stripped}" _stripped)
+        if(_stripped STREQUAL "" OR _stripped STREQUAL "---" OR _stripped STREQUAL "...")
+            continue()
+        endif()
+        set(${out_var} FALSE PARENT_SCOPE)
+        return()
+    endforeach()
+endfunction()
+
+# Tiers (quick / standard / comprehensive / full): host + device.
+# Each family is "<test name suffix>|<config dir under configs/>".
+# Tier & ffm entries omit run-count flags (the binary defaults are
+# --hot_runs 1 --cold_runs 0). Host tests are emitted once, under quick, and
+# nest up into the higher tiers via the parser.
+foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard" "comprehensive|validation/comprehensive" "full|validation/full")
+    string(REPLACE "|" ";" _hiptensor_ff "${_hiptensor_family}")
+    list(GET _hiptensor_ff 0 _hiptensor_suffix)
+    list(GET _hiptensor_ff 1 _hiptensor_cfgdir)
+
+    if(_hiptensor_suffix STREQUAL "quick")
+        foreach(_hiptensor_host IN LISTS _HIPTENSOR_HOST_TESTS)
+            _hiptensor_emit_test("${_hiptensor_host} ${_hiptensor_suffix}" "\"../${_hiptensor_host}\"")
+        endforeach()
     endif()
 
-    set(_ffm_name "${_ffm_bin} smoke ffm")
-    file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${_ffm_name}\" ${_ffm_cmd})\n")
-    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${_ffm_name}\" PROPERTIES WORKING_DIRECTORY \"../..\" SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+    foreach(_hiptensor_dev IN LISTS _HIPTENSOR_DEVICE_TESTS)
+        string(REPLACE "|" ";" _hiptensor_dev_fields "${_hiptensor_dev}")
+        list(GET _hiptensor_dev_fields 0 _hiptensor_dev_bin)
+        list(GET _hiptensor_dev_fields 1 _hiptensor_dev_cfg)
+        set(_hiptensor_cmd "\"../${_hiptensor_dev_bin}\"")
+        if(NOT _hiptensor_dev_cfg STREQUAL "NONE")
+            # dev_cfg is "<component>/<rest>"; the on-disk source lives at
+            # <component>/configs/<cfgdir>/<rest>. Skip this (test, tier) when
+            # that config is empty (covered by an earlier tier).
+            string(FIND "${_hiptensor_dev_cfg}" "/" _hiptensor_dev_slash)
+            string(SUBSTRING "${_hiptensor_dev_cfg}" 0 ${_hiptensor_dev_slash} _hiptensor_dev_comp)
+            math(EXPR _hiptensor_dev_after "${_hiptensor_dev_slash}+1")
+            string(SUBSTRING "${_hiptensor_dev_cfg}" ${_hiptensor_dev_after} -1 _hiptensor_dev_rest)
+            _hiptensor_config_is_empty(
+                "${CMAKE_CURRENT_SOURCE_DIR}/${_hiptensor_dev_comp}/configs/${_hiptensor_cfgdir}/${_hiptensor_dev_rest}"
+                _hiptensor_cfg_empty)
+            if(_hiptensor_cfg_empty)
+                continue()
+            endif()
+            string(APPEND _hiptensor_cmd " -y configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
+        endif()
+        _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
+    endforeach()
+endforeach()
+
+# ffm-quick / ffm-full: device only. ffm-quick uses emulation/quick, ffm-full
+# uses emulation/full (they are now distinct sets, not aliases).
+foreach(_hiptensor_family "ffm-quick|emulation/quick" "ffm-full|emulation/full")
+    string(REPLACE "|" ";" _hiptensor_ff "${_hiptensor_family}")
+    list(GET _hiptensor_ff 0 _hiptensor_suffix)
+    list(GET _hiptensor_ff 1 _hiptensor_cfgdir)
+
+    foreach(_hiptensor_dev IN LISTS _HIPTENSOR_DEVICE_TESTS)
+        string(REPLACE "|" ";" _hiptensor_dev_fields "${_hiptensor_dev}")
+        list(GET _hiptensor_dev_fields 0 _hiptensor_dev_bin)
+        list(GET _hiptensor_dev_fields 1 _hiptensor_dev_cfg)
+        set(_hiptensor_cmd "\"../${_hiptensor_dev_bin}\"")
+        if(NOT _hiptensor_dev_cfg STREQUAL "NONE")
+            # Skip this (test, tier) when its config is empty (see tier loop).
+            string(FIND "${_hiptensor_dev_cfg}" "/" _hiptensor_dev_slash)
+            string(SUBSTRING "${_hiptensor_dev_cfg}" 0 ${_hiptensor_dev_slash} _hiptensor_dev_comp)
+            math(EXPR _hiptensor_dev_after "${_hiptensor_dev_slash}+1")
+            string(SUBSTRING "${_hiptensor_dev_cfg}" ${_hiptensor_dev_after} -1 _hiptensor_dev_rest)
+            _hiptensor_config_is_empty(
+                "${CMAKE_CURRENT_SOURCE_DIR}/${_hiptensor_dev_comp}/configs/${_hiptensor_cfgdir}/${_hiptensor_dev_rest}"
+                _hiptensor_cfg_empty)
+            if(_hiptensor_cfg_empty)
+                continue()
+            endif()
+            string(APPEND _hiptensor_cmd " -y configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
+        endif()
+        _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
+    endforeach()
+endforeach()
+
+# bench: performance runs. Uses the "bench" config category and performance
+# run-count flags (more hot runs for stable timings, matching the reference
+# scripts under scripts/performance/). Named "<binary> bench".
+foreach(_hiptensor_bench IN LISTS _HIPTENSOR_BENCH_TESTS)
+    string(REPLACE "|" ";" _hiptensor_bench_fields "${_hiptensor_bench}")
+    list(GET _hiptensor_bench_fields 0 _hiptensor_bench_bin)
+    list(GET _hiptensor_bench_fields 1 _hiptensor_bench_cfg)
+    set(_hiptensor_cmd "\"../${_hiptensor_bench_bin}\" -y configs/bench/${_hiptensor_bench_cfg}")
+    string(APPEND _hiptensor_cmd " --hot_runs 5 --cold_runs 1")
+    _hiptensor_emit_test("${_hiptensor_bench_bin} bench" "${_hiptensor_cmd}")
 endforeach()
 
 # Bake YAML-driven category labels into each install-tree
@@ -486,14 +675,22 @@ rocm_install(
     RENAME "CTestTestfile.cmake"
 )
 
-# Install the emulation/smoke config subtrees so the FFM entries' `-y`
-# paths resolve at ctest runtime.
-foreach(_ffm_component 01_contraction 02_elementwise 03_reduction)
-    rocm_install(
-        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${_ffm_component}/configs/emulation/smoke"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/ffm/configs/${_ffm_component}"
-        COMPONENT tests
-    )
+# Install the config subtrees so the validation / ffm / bench entries' `-y` paths
+# resolve at ctest runtime. The on-disk config layout mirrors the install
+# layout 1:1, so the install path segment IS the on-disk source subtree:
+#   src  <component>/configs/<dir>/
+#   dest bin/hiptensor/configs/<dir>/<component>/
+foreach(_hiptensor_cfg_dir
+        validation/quick validation/standard validation/comprehensive validation/full
+        emulation/quick emulation/full
+        bench)
+    foreach(_hiptensor_cfg_component 01_contraction 02_elementwise 03_reduction)
+        rocm_install(
+            DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${_hiptensor_cfg_component}/configs/${_hiptensor_cfg_dir}/"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/configs/${_hiptensor_cfg_dir}/${_hiptensor_cfg_component}"
+            COMPONENT tests
+        )
+    endforeach()
 endforeach()
 
 rocm_install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/performance/
@@ -508,10 +705,3 @@ rocm_install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/performance/
         GROUP_READ GROUP_EXECUTE GROUP_WRITE
         WORLD_READ WORLD_EXECUTE
 )
-
-foreach(_bench_component 01_contraction 02_elementwise 03_reduction)
-    rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${_bench_component}/configs/bench/
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/${_bench_component}"
-        COMPONENT tests
-    )
-endforeach()

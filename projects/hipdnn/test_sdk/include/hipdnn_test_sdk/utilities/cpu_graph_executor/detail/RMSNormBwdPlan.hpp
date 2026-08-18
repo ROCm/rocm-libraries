@@ -169,6 +169,8 @@ public:
                 tensorMap, nodeAttributes->dbias_tensor_uid().value(), ScaleDataTypeEnum);
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 

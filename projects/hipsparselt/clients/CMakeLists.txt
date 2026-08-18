@@ -21,7 +21,9 @@ target_compile_features(hipsparselt-clients-common PRIVATE cxx_std_17)
 target_compile_definitions(hipsparselt-clients-common PUBLIC HIPSPARSELT_INTERNAL_API)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
+    if(HIPSPARSELT_CXX_HAS_MF16C)
+        target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
+    endif()
 endif()
 
 target_sources(

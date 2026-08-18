@@ -12,25 +12,6 @@
 using namespace miopen_plugin;
 using namespace miopen_utils;
 
-TEST(TestMiopenUtils, FindDeviceBufferReturnsCorrectBuffer)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers
-        = {{42, reinterpret_cast<void*>(0x1234)}, {99, reinterpret_cast<void*>(0x5678)}};
-
-    auto result = miopen_utils::findDeviceBuffer(99, buffers.data(), 2);
-    EXPECT_EQ(result.uid, 99);
-    EXPECT_EQ(result.ptr, reinterpret_cast<void*>(0x5678));
-}
-
-TEST(TestMiopenUtils, FindDeviceBufferThrowsIfNotFound)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, reinterpret_cast<void*>(0x1111)}};
-
-    EXPECT_THROW(
-        miopen_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),
-        hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
 TEST(TestMiopenUtils, TensorDataTypeToMiopenDataType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 
 #include "origami/gemm.hpp"
@@ -10,6 +12,140 @@
 #include "origami/heuristics.hpp"
 #include "origami/logger.hpp"
 #include "origami/types.hpp"
+
+namespace {
+
+namespace cms_speedup {
+constexpr uint8_t X100 = 100;
+constexpr uint8_t X105 = 105;
+constexpr uint8_t X110 = 110;
+constexpr uint8_t X115 = 115;
+constexpr uint8_t X120 = 120;
+constexpr uint8_t X123 = 123;
+constexpr uint8_t X126 = 126;
+}  // namespace cms_speedup
+
+constexpr double cms_efficiency(uint8_t speedup_x100) {
+  return 100.0 / static_cast<double>(speedup_x100);
+}
+
+struct cms_kernel_entry_t {
+  origami::data_type_t mi_dtype;
+  origami::transpose_t trans_a;
+  origami::transpose_t trans_b;
+  uint16_t m;
+  uint16_t n;
+  uint16_t k;
+  uint8_t speedup_x100;
+};
+
+// Register new architectures by adding a table here.
+constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
+    // BF16 NT
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 160, 256, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 192, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 208, 256, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 160, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 192, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X115},
+    // BF16 NN
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 208, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X100},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // BF16 TN
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 192, 256, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 96, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 224, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // BF16 TT
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X110},
+    // FP16 NT
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 192, 320, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 208, 256, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 224, 128, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 256, 192, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X115},
+    // FP16 NN
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 128, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 256, 160, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 192, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X100},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // FP16 TN
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 192, 256, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 96, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 224, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // FP16 TT
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X110},
+    // TF32 NN
+    {origami::data_type_t::XFloat32, origami::transpose_t::N, origami::transpose_t::N, 192, 256, 32,
+     cms_speedup::X123},
+    // TF32 TN
+    {origami::data_type_t::XFloat32, origami::transpose_t::T, origami::transpose_t::N, 128, 256, 32,
+     cms_speedup::X126},
+    {origami::data_type_t::XFloat32, origami::transpose_t::T, origami::transpose_t::N, 192, 256, 32,
+     cms_speedup::X123},
+}};
+
+constexpr size_t cms_kernel_entry_count() { return gfx950_cms_kernels.size(); }
+
+void register_cms_kernels(origami::heuristics_database_t& db) {
+  for (const auto& entry : gfx950_cms_kernels) {
+    db.add_hand_optimized_efficiency(
+        origami::hand_optimized_kernel_key_t{origami::hardware_t::architecture_t::gfx950,
+                                           entry.mi_dtype,
+                                           entry.trans_a,
+                                           entry.trans_b,
+                                           entry.m,
+                                           entry.n,
+                                           entry.k},
+        cms_efficiency(entry.speedup_x100));
+  }
+}
+
+}  // namespace
 
 namespace origami {
 
@@ -126,7 +262,10 @@ size_t heuristic_key_t::specificity() const {
 // heuristics_database_t Implementation
 // ============================================================================
 
-heuristics_database_t::heuristics_database_t() { initialize_defaults(); }
+heuristics_database_t::heuristics_database_t() {
+  hand_optimized_map_.reserve(cms_kernel_entry_count());
+  initialize_defaults();
+}
 
 heuristics_database_t& heuristics_database_t::get_instance() {
   static heuristics_database_t instance;
@@ -247,6 +386,11 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
   return result;
 }
 
+void heuristics_database_t::add_hand_optimized_efficiency(hand_optimized_kernel_key_t key,
+                                                          double main_loop_efficiency) {
+  hand_optimized_map_[key].main_loop_efficiency = main_loop_efficiency;
+}
+
 void heuristics_database_t::add_entry(const heuristic_key_t& key,
                                       const heuristic_params_t& params) {
   // If this is a hand-optimized kernel, also add to fast lookup map
@@ -297,135 +441,9 @@ void heuristics_database_t::initialize_defaults() {
   }
 
   // ========================================================================
-  // HEURISTIC 2: CMS Kernel Efficiencies (gfx950, BF16)
+  // HEURISTIC 2: CMS Kernel Efficiencies
   // ========================================================================
-  {
-    // BF16 NT configurations
-    struct cms_config {
-      size_t m, n, k;
-      double eff;
-    };
-    std::vector<cms_config> bf16_nt_configs = {
-        {160, 256, 64, 1.0 / 1.20},
-        {192, 256, 64, 1.0 / 1.10},
-        {208, 256, 64, 1.0 / 1.20},
-        {256, 160, 64, 1.0 / 1.20},
-        {256, 192, 64, 1.0 / 1.20},
-        {256, 256, 64, 1.0 / 1.15},
-    };
-
-    for (const auto& cfg : bf16_nt_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::N,
-                                                transpose_t::T,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // BF16 NN configurations
-    std::vector<cms_config> bf16_nn_configs = {
-        {160, 256, 64, 1.0 / 1.10},
-        {208, 256, 64, 1.0 / 1.10},
-        {256, 192, 64, 1.0 / 1.00},
-        {256, 256, 64, 1.0 / 1.05},
-    };
-
-    for (const auto& cfg : bf16_nn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::N,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // BF16 TN configurations
-    std::vector<cms_config> bf16_tn_configs = {
-        {160, 256, 64, 1.0 / 1.10},
-        {192, 256, 64, 1.0 / 1.05},
-        {256, 96, 64, 1.0 / 1.10},
-        {256, 192, 64, 1.0 / 1.10},
-        {256, 224, 64, 1.0 / 1.05},
-        {256, 256, 64, 1.0 / 1.05},
-    };
-
-    for (const auto& cfg : bf16_tn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::T,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // BF16 TT configurations
-    std::vector<cms_config> bf16_tt_configs = {
-        {256, 256, 64, 1.0 / 1.10},
-    };
-
-    for (const auto& cfg : bf16_tt_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::T,
-                                                transpose_t::T,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // TF32 NN
-    std::vector<cms_config> tf32_nn_configs = {
-        {192, 256, 32, 1.0 / 1.23},
-    };
-
-    for (const auto& cfg : tf32_nn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::XFloat32,
-                                                transpose_t::N,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // TF32 TN
-    std::vector<cms_config> tf32_tn_configs = {
-        {128, 256, 32, 1.0 / 1.26},
-        {192, 256, 32, 1.0 / 1.23},
-    };
-
-    for (const auto& cfg : tf32_tn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::XFloat32,
-                                                transpose_t::T,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-  }
+  register_cms_kernels(*this);
 
   // ========================================================================
   // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K

@@ -15,6 +15,12 @@ dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
+# shared/ctest is only present in a full rocm-libraries checkout; guard the check at the
+# point of use so standalone / sparse checkouts that lack shared/ctest still build.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -41,6 +47,10 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+
+# Gates the generic kernel ingestor (RFC 0017). The ingestor engine compiles its kernel
+# through the HIP kernel engine's compiler, so it only builds alongside that engine.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -139,25 +149,77 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
+# ============================================================================
+# YAML-based CTest categorization detection
+# ============================================================================
+# Hoisted here (rather than src/CMakeLists.txt) so it is available before
+# add_subdirectory(rocke) below: rocke/platform/tests/CMakeLists.txt applies
+# ROCKE_ENGINE_CTEST_CATEGORIES_YAML to its own pre-registered CTest tests in
+# its own directory scope (CMake's set_property(TEST ...) predates 3.28's
+# cross-directory support, so this project's 3.25.2 floor requires it run
+# where the tests were add_test()'d).
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
+    set(HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories.yaml")
+    set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
+    set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
+    set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
+    set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
+    set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
+    if(EXISTS "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}")
+        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
+            "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+            "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+        )
+        set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
+        message(STATUS "hip-kernel-provider: YAML-based CTest categorization enabled")
+    else()
+        message(STATUS "hip-kernel-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
+    endif()
+endif()
+
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
 
-    # rocke/ = library (api / provider plugin) + platform (engine). The engine's
-    # installed CTest entries stage into
-    # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider, so add_subdirectory(rocke)
-    # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
+    # rocke/ = platform (engine + build-time Python). The engine's installed
+    # CTest entries stage into EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider,
+    # so add_subdirectory(rocke) must precede src/ below, which emits
+    # bin/hip_kernel_provider/CTestTestfile.cmake.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
-    # Defer the Python rocKE CI tests (import smoke + golden): their test-artifact
-    # packaging (rocke package + scripts + golden JSON) is not yet wired into
-    # TheRock's hipkernelprovider artifact includes, so staging them here would
-    # fail CI. The C++ smoke tests stay enabled; re-enable once packaging lands.
+
+    # TEMPORARY: do not install the rocKE Python CI tests (rocke_python_import_smoke,
+    # rocke_golden_static, rocke_pytest) in provider mode.
+    #
+    # These three CTest entries import the `rocke` package from the test artifact.
+    # ROCm/TheRock#6849 removed the "bin/hip_kernel_provider/rocke/**" artifact
+    # include on the assumption that the staged rocKE wheels replaced it, but the
+    # wheels are never staged (see below), so neither import source survives and
+    # every rocKE Python entry fails with `ModuleNotFoundError: No module named
+    # 'rocke'`. rocm-libraries builds this component with
+    # HIPKERNELPROVIDER_ENABLE_ROCKE=ON, so the breakage lands on every
+    # hipkernelprovider PR here while TheRock's own CI (flag defaults OFF) stays green.
+    #
+    # This matches what the ROCKE_INSTALL_PYTHON_TESTS option already documents for
+    # provider mode; nothing was actually setting it. The C++ rocKE smoke tests are
+    # unaffected and keep running.
+    #
+    # Revert this line once ROCm/TheRock#7145 has landed and the wheel-staging order
+    # bug in rocke/CMakeLists.txt is fixed (ROCKE_BUILD_PYENV / ROCKE_WHEEL_DIR are
+    # declared after add_subdirectory(platform), so the wheel install() never
+    # registers). Tracked by ROCm/rocm-libraries#10497.
     set(ROCKE_INSTALL_PYTHON_TESTS OFF)
-    # Route rocke-client test targets into hip-kernel-provider's test bucket so
-    # they appear in install_provider_ctest_files("hip_kernel_provider") output.
-    # Without this, _add_test_target_internal uses rocke-client's own PROJECT_NAME
-    # and the targets are never picked up by the parent's finalize_test_targets.
-    set(ROCKE_CLIENT_PARENT_PROJECT "${PROJECT_NAME}")
+
     add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")

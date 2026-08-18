@@ -16,6 +16,7 @@ from .target import (  # noqa: F401
     arch_from_isa,
     known_arches,
     normalize_dtype,
+    validate_arch,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "arch_from_isa",
     "known_arches",
     "normalize_dtype",
+    "validate_arch",
 ]

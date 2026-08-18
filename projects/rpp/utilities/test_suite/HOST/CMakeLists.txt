@@ -99,7 +99,17 @@ else()
         message("-- ${Red}${PROJECT_NAME} is not supported to build and run with RPP HIP backend installation${ColourReset}")
     endif()
 
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rpp::rpp)
+    # In-tree builds: link against the just-built library and use source headers
+    # so new symbols/declarations are available before the next install step.
+    if(TARGET rpp)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rpp)
+        get_target_property(_rpp_src_dir rpp SOURCE_DIR)
+        if(_rpp_src_dir)
+            include_directories(BEFORE ${_rpp_src_dir}/api)
+        endif()
+    else()
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rpp::rpp)
+    endif()
     include_directories(${rpp_INCLUDE_DIR})
 
     # RPP HOST test suite works for RPP built with HIP or HOST backend
@@ -153,7 +163,6 @@ else()
         endif()
 
         if(OpenMP_CXX_FOUND)
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
             set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} OpenMP::OpenMP_CXX)
             message("-- ${Green}${PROJECT_NAME} All Tensor HOST tests set to build with OpenMP${ColourReset}")
 
@@ -191,13 +200,13 @@ else()
 
             # HOST test set 3 - RPP Tensor-Audio HOST test suite
             if(rpp_AUDIO_AUGMENTATIONS_SUPPORT)
-                set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DAUDIO_SUPPORT=1")
                 message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with RPP_AUDIO_SUPPORT set to ON${ColourReset}")
                 if(libsnd_LIBS)
                     include_directories(${SndFile_INCLUDE_DIRS})
                     link_directories(${SndFile_LIBRARIES_DIR} /usr/local/lib/)
                     message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with libsnd${ColourReset}")
                     add_executable(Tensor_audio_host Tensor_audio_host.cpp)
+                    target_compile_definitions(Tensor_audio_host PRIVATE AUDIO_SUPPORT=1)
                     target_link_libraries(Tensor_audio_host ${libsnd_LIBS} -lsndfile ${LINK_LIBRARY_LIST})
                 else()
                     message("-- ${Yellow}Warning: libsnd must be installed to install ${PROJECT_NAME} Tensor-Audio tests successfully!${ColourReset}")

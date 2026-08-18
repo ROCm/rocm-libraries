@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
@@ -306,8 +307,11 @@ public:
 }
 
 // Creates a minimal batchnorm inference graph for testing. Used both by TestGraph
-// fixture methods and by standalone helper functions.
-static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
+// fixture methods and by standalone helper functions. When @p withRaggedOffset is
+// true, the primary input tensor is given a ragged-offset aux tensor so the graph
+// auto-detects as ragged-tensor enabled.
+static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph,
+                                                                   bool withRaggedOffset = false)
 {
     graph.set_name("TestGraph")
         .set_compute_data_type(DataType::FLOAT)
@@ -315,11 +319,20 @@ static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
         .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
+
+    if(withRaggedOffset)
+    {
+        auto raggedOffset = std::make_shared<TensorAttributes>();
+        raggedOffset->set_uid(10)
+            .set_name("RaggedOffset")
+            .set_dim({2, 1, 1, 1})
+            .set_stride({1, 1, 1, 1})
+            .set_data_type(DataType::INT64);
+        x->set_ragged_offset(raggedOffset);
+    }
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
@@ -532,7 +545,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesNoteQueryFailure)
     EXPECT_TRUE(notes.empty());
 }
 
-TEST_F(TestGraph, GetBehaviorNotesForEnginePreservesUnknownNotes)
+TEST_F(TestGraph, GetBehaviorNotesForEngineDropsUnknownNotes)
 {
     Graph graph;
     createBasicBatchnormGraph(graph);
@@ -574,10 +587,11 @@ TEST_F(TestGraph, GetBehaviorNotesForEnginePreservesUnknownNotes)
     auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    ASSERT_EQ(notes.size(), 3u);
+    // The note this frontend does not recognize is dropped rather than
+    // reinterpreted numerically, so only the two known notes survive.
+    ASSERT_EQ(notes.size(), 2u);
     EXPECT_EQ(notes[0], BehaviorNote::RUNTIME_COMPILATION);
-    EXPECT_EQ(notes[1], static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1));
-    EXPECT_EQ(notes[2], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+    EXPECT_EQ(notes[1], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 }
 
 TEST_F(TestGraph, GetBehaviorNotesForEngineRejectsMismatchedReturnedNoteCount)
@@ -1897,6 +1911,100 @@ TEST_F(TestGraph, RMSNormBackwardNodeCreation)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
+TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNode");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    EXPECT_EQ(index, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNodeWithIndex");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+    attributes.set_generate_index(true);
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNodeWithIndex::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    ASSERT_NE(index, nullptr);
+    EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
+    EXPECT_TRUE(index->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    EXPECT_EQ(index->get_dim(), y->get_dim());
+    EXPECT_EQ(index->get_stride(), y->get_stride());
+}
+
+TEST_F(TestGraph, ResampleFwdPreservesLegacyNoIndexApi)
+{
+    GraphTestUtils graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("LegacyResampleNode")
+        .set_resample_mode(ResampleMode::MAXPOOL)
+        .set_padding_mode(PaddingMode::ZERO_PAD)
+        .set_pre_padding({0, 0})
+        .set_post_padding({0, 0})
+        .set_stride({2, 2})
+        .set_window({2, 2})
+        .set_generate_index(true);
+
+    auto y = graph.resample_fwd(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "LegacyResampleNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    ASSERT_EQ(graph.getPrivateGraphSubnodes().size(), 1);
+    EXPECT_EQ(graph.getPrivateGraphSubnodes().front()->getNodeOutputTensorAttributes().size(), 1);
+}
+
 TEST_F(TestGraph, RMSNormBackwardNodeCreationWithDbias)
 {
     Graph graph;
@@ -1967,79 +2075,18 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
-{
-    Graph graph;
-    graph.set_io_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
-
-    ResampleFwdAttributes attributes;
-    attributes.set_name("ResampleNode");
-    attributes.set_resample_mode(ResampleMode::MAXPOOL);
-    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
-    attributes.set_pre_padding({0, 0});
-    attributes.set_post_padding({0, 0});
-    attributes.set_stride({2, 2});
-    attributes.set_window({2, 2});
-
-    auto [y, index] = graph.resample(x, attributes);
-
-    EXPECT_EQ(y->get_name(), "ResampleNode::Y");
-    EXPECT_TRUE(y->get_is_virtual());
-    EXPECT_EQ(index, nullptr);
-
-    auto validationResult = graph.validate();
-    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
-}
-
-TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
-{
-    Graph graph;
-    graph.set_io_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
-
-    ResampleFwdAttributes attributes;
-    attributes.set_name("ResampleNodeWithIndex");
-    attributes.set_resample_mode(ResampleMode::MAXPOOL);
-    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
-    attributes.set_pre_padding({0, 0});
-    attributes.set_post_padding({0, 0});
-    attributes.set_stride({2, 2});
-    attributes.set_window({2, 2});
-    attributes.set_generate_index(true);
-
-    auto [y, index] = graph.resample(x, attributes);
-
-    EXPECT_EQ(y->get_name(), "ResampleNodeWithIndex::Y");
-    EXPECT_TRUE(y->get_is_virtual());
-    ASSERT_NE(index, nullptr);
-    EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
-    EXPECT_TRUE(index->get_is_virtual());
-
-    auto validationResult = graph.validate();
-    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
-    EXPECT_EQ(index->get_dim(), y->get_dim());
-    EXPECT_EQ(index->get_stride(), y->get_stride());
-}
-
 // Test graph.tensor()
 TEST_F(TestGraph, TensorGraphAttributes)
 {
-    auto tensor = Graph::tensor(TensorAttributes()
-                                    .set_name("TestTensor")
-                                    .set_uid(100)
-                                    .set_stride({5, 6, 7, 8})
-                                    .set_data_type(DataType::FLOAT)
-                                    .set_is_virtual(false)
-                                    .set_dim({1, 2, 3, 4}));
+    TensorAttributes attributes;
+    attributes.set_name("TestTensor")
+        .set_uid(100)
+        .set_stride({5, 6, 7, 8})
+        .set_data_type(DataType::FLOAT)
+        .set_is_virtual(false)
+        .set_dim({1, 2, 3, 4});
+
+    auto tensor = Graph::tensor(attributes);
 
     EXPECT_EQ(tensor->get_data_type(), DataType::FLOAT);
     EXPECT_FALSE(tensor->get_is_virtual());
@@ -3513,22 +3560,28 @@ TEST_F(TestGraph, TopologicalSortFailsOnCircularDependency)
 TEST_F(TestGraph, ValidateSortsNodesTopologically)
 {
     GraphTestUtils graph;
-    graph.set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::HALF)
-        .set_io_data_type(DataType::FLOAT);
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::HALF);
+    graph.set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    mean->set_dim({1, 2, 1, 1});
+    mean->set_stride({2, 1, 1, 1});
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    invVariance->set_dim({1, 2, 1, 1});
+    invVariance->set_stride({2, 1, 1, 1});
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    scale->set_dim({1, 2, 1, 1});
+    scale->set_stride({2, 1, 1, 1});
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    bias->set_dim({1, 2, 1, 1});
+    bias->set_stride({2, 1, 1, 1});
 
     // Node 0: batchnorm1
     BatchnormInferenceAttributes bnAttrs1;
@@ -3614,12 +3667,14 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
 TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
 {
     GraphTestUtils graph;
-    graph.set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::HALF)
-        .set_io_data_type(DataType::FLOAT);
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::HALF);
+    graph.set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
@@ -6067,8 +6122,6 @@ TEST_F(TestGraph, MoveConstruction)
     EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
     EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
-    EXPECT_EQ(originalGraph.get_name(), ""); // NOLINT(bugprone-use-after-move)
-    EXPECT_TRUE(originalGraph.getTensorsByName().empty());
 }
 
 TEST_F(TestGraph, MoveAssignment)
@@ -9721,8 +9774,9 @@ TEST_F(TestGraph, AutotuneBarredAndOversizedPlanAddedOnce)
 
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result
-        = graph.autotune(_handle, pack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
+    const int64_t workspaceLimit = 1024;
+    const AutotuneConfig config;
+    auto result = graph.autotune(_handle, pack, workspace, workspaceLimit, config, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 

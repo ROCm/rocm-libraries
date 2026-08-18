@@ -61,6 +61,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         miopendriver_conv_immed.cpp
         miopendriver_regression_half_gfx9.cpp
         unit_conv_solver_ConvCkGroupedConvFwd.cpp
+        unit_conv_solver_ConvDepthwiseBwdData2D_test.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp
@@ -151,7 +152,31 @@ function(add_gtest TEST_NAME TEST_CPP)
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
   endif()
-# Individual binary test are not added if single gtest is being created.
+
+  # CK setup for any test target that compiles CK-including sources. This must
+  # be applied to every test executable so the test objects use the same CK
+  # macro set as MIOpen and the CK plugins.
+  if(MIOPEN_USE_COMPOSABLEKERNEL)
+    if(MIOPEN_BUILD_CK)
+      # The include directories also don't propagate correctly when using the
+      # non-aliased targets. Manually including them fixes this for inline builds.
+      target_include_directories(${TEST_NAME} SYSTEM PRIVATE
+          ${MIOPEN_CK_INCLUDE_DIR}
+          ${MIOPEN_CK_BUILD_INCLUDE_DIR}
+          ${MIOPEN_CK_LIBRARY_INCLUDE_DIR}
+      )
+    else()
+      # While building on TheRock we are missing CK include headers; pull them in
+      # via the utility component (needed by CK utility gtests).
+      if(NOT TARGET composable_kernel::utility)
+        find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS utility)
+      endif()
+      target_link_libraries(${TEST_NAME} composable_kernel::utility)
+    endif()
+    miopen_apply_ck_compile_definitions(${TEST_NAME})
+  endif()
+
+  # Individual binary test are not added if single gtest is being created.
   if(NOT MIOPEN_TEST_SINGLE_GTEST)
     string(CONCAT TEST_ENVIRONMENT_VARIABLES
     "ENVIRONMENT;MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};"
@@ -353,23 +378,8 @@ if(MIOPEN_TEST_SINGLE_GTEST)
   endforeach()
 
   add_gtest(miopen_gtest "${TESTS_CPP}")
-
-  if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
-        # The include directories also dont propagate correctly when using the non aliased targets.
-        # Manually including them fixes this problem for inline builds.
-        target_include_directories(miopen_gtest SYSTEM PRIVATE
-            ../
-            ${MIOPEN_CK_INCLUDE_DIR}
-            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
-            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
-    else()
-        # While building on TheRock we are missing CK include headers for miopen_gtest target
-        # But we need them, for example, for unit_implicitgemm_ck_util.cpp gtest, which is part of miopen_gtest target
-        find_package(composable_kernel 1.0.0 COMPONENTS utility)
-        target_link_libraries(miopen_gtest composable_kernel::utility)
-    endif()
-  endif()
+  # CK include dirs / utility linkage / compile definitions for miopen_gtest
+  # are applied inside add_gtest() (shared with discrete test executables).
 
   add_custom_command(
     OUTPUT test_list

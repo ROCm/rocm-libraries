@@ -38,6 +38,7 @@
 #include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
+#include "common/auxiliary/testing_lahr2.hpp"
 #include "common/auxiliary/testing_lange.hpp"
 #include "common/auxiliary/testing_larf.hpp"
 #include "common/auxiliary/testing_larfb.hpp"
@@ -68,6 +69,7 @@
 #include "common/auxiliary/testing_sterf.hpp"
 
 // lapack
+#include "common/lapack/testing_cholqr.hpp"
 #include "common/lapack/testing_gebd2_gebrd.hpp"
 #include "common/lapack/testing_geblttrf_npvt.hpp"
 #include "common/lapack/testing_geblttrs_npvt.hpp"
@@ -152,12 +154,14 @@ class rocsolver_dispatcher
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},
             {"larf_64", testing_larf<T, int64_t>},
-            {"larft", testing_larft<T>},
+            {"larft", testing_larft<T, rocblas_int>},
+            {"larft_64", testing_larft<T, int64_t>},
             {"larfb", testing_larfb<T>},
             {"lasr", testing_lasr<T>},
             {"latrd", testing_latrd<T>},
             {"latrd_forsytrd", testing_latrd_forsytrd<T>},
             {"labrd", testing_labrd<T>},
+            {"lahr2", testing_lahr2<T>},
             {"bdsqr", testing_bdsqr<T>},
             {"steqr", testing_steqr<T>},
             {"stedc", testing_stedc<T>},
@@ -229,6 +233,13 @@ class rocsolver_dispatcher
             {"geqrf_batched_64", testing_geqr2_geqrf<true, true, 1, T, int64_t>},
             {"geqrf_strided_batched_64", testing_geqr2_geqrf<false, true, 1, T, int64_t>},
             {"geqrf_ptr_batched_64", testing_geqr2_geqrf<true, false, 1, T, int64_t>},
+            // cholqr
+            {"cholqr", testing_cholqr<false, false, T, rocblas_int>},
+            {"cholqr_batched", testing_cholqr<true, true, T, rocblas_int>},
+            {"cholqr_strided_batched", testing_cholqr<false, true, T, rocblas_int>},
+            {"cholqr_64", testing_cholqr<false, false, T, int64_t>},
+            {"cholqr_batched_64", testing_cholqr<true, true, T, int64_t>},
+            {"cholqr_strided_batched_64", testing_cholqr<false, true, T, int64_t>},
             // gerqf
             {"gerq2", testing_gerq2_gerqf<false, false, 0, T>},
             {"gerq2_batched", testing_gerq2_gerqf<true, true, 0, T>},
@@ -406,13 +417,19 @@ class rocsolver_dispatcher
             {"sygst_batched", testing_sygsx_hegsx<true, true, 1, T>},
             {"sygst_strided_batched", testing_sygsx_hegsx<false, true, 1, T>},
             // syev
-            {"syev", testing_syev_heev<false, false, T>},
-            {"syev_batched", testing_syev_heev<true, true, T>},
-            {"syev_strided_batched", testing_syev_heev<false, true, T>},
+            {"syev", testing_syev_heev<false, false, T, rocblas_int>},
+            {"syev_batched", testing_syev_heev<true, true, T, rocblas_int>},
+            {"syev_strided_batched", testing_syev_heev<false, true, T, rocblas_int>},
+            {"syev_64", testing_syev_heev<false, false, T, int64_t>},
+            {"syev_batched_64", testing_syev_heev<true, true, T, int64_t>},
+            {"syev_strided_batched_64", testing_syev_heev<false, true, T, int64_t>},
             // syevd
-            {"syevd", testing_syevd_heevd<false, false, T>},
-            {"syevd_batched", testing_syevd_heevd<true, true, T>},
-            {"syevd_strided_batched", testing_syevd_heevd<false, true, T>},
+            {"syevd", testing_syevd_heevd<false, false, T, rocblas_int>},
+            {"syevd_batched", testing_syevd_heevd<true, true, T, rocblas_int>},
+            {"syevd_strided_batched", testing_syevd_heevd<false, true, T, rocblas_int>},
+            {"syevd_64", testing_syevd_heevd<false, false, T, int64_t>},
+            {"syevd_batched_64", testing_syevd_heevd<true, true, T, int64_t>},
+            {"syevd_strided_batched_64", testing_syevd_heevd<false, true, T, int64_t>},
             // syevdj
             {"syevdj", testing_syevdj_heevdj<false, false, T>},
             {"syevdj_batched", testing_syevdj_heevdj<true, true, T>},
@@ -514,13 +531,19 @@ class rocsolver_dispatcher
             {"hegst_batched", testing_sygsx_hegsx<true, true, 1, T>},
             {"hegst_strided_batched", testing_sygsx_hegsx<false, true, 1, T>},
             // heev
-            {"heev", testing_syev_heev<false, false, T>},
-            {"heev_batched", testing_syev_heev<true, true, T>},
-            {"heev_strided_batched", testing_syev_heev<false, true, T>},
+            {"heev", testing_syev_heev<false, false, T, rocblas_int>},
+            {"heev_batched", testing_syev_heev<true, true, T, rocblas_int>},
+            {"heev_strided_batched", testing_syev_heev<false, true, T, rocblas_int>},
+            {"heev_64", testing_syev_heev<false, false, T, int64_t>},
+            {"heev_batched_64", testing_syev_heev<true, true, T, int64_t>},
+            {"heev_strided_batched_64", testing_syev_heev<false, true, T, int64_t>},
             // heevd
-            {"heevd", testing_syevd_heevd<false, false, T>},
-            {"heevd_batched", testing_syevd_heevd<true, true, T>},
-            {"heevd_strided_batched", testing_syevd_heevd<false, true, T>},
+            {"heevd", testing_syevd_heevd<false, false, T, rocblas_int>},
+            {"heevd_batched", testing_syevd_heevd<true, true, T, rocblas_int>},
+            {"heevd_strided_batched", testing_syevd_heevd<false, true, T, rocblas_int>},
+            {"heevd_64", testing_syevd_heevd<false, false, T, int64_t>},
+            {"heevd_batched_64", testing_syevd_heevd<true, true, T, int64_t>},
+            {"heevd_strided_batched_64", testing_syevd_heevd<false, true, T, int64_t>},
             // heevdj
             {"heevdj", testing_syevdj_heevdj<false, false, T>},
             {"heevdj_batched", testing_syevdj_heevdj<true, true, T>},

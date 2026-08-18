@@ -6,24 +6,6 @@
 namespace miopen_plugin::miopen_utils
 {
 
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers)
-{
-    for(uint32_t i = 0; i < numDeviceBuffers; i++)
-    {
-        if(uid == deviceBuffers[i].uid)
-        {
-            return deviceBuffers[i];
-        }
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-        "Device buffer with the uid: " + std::to_string(uid)
-            + " not found in the provided device buffers.");
-}
-
 miopenDataType_t
     tensorDataTypeToMiopenDataType(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
 {
@@ -208,27 +190,4 @@ ActivationParams mapPointwiseModeToMiopenActivation(
                                                        "Unsupported activation operation");
     }
 }
-
-std::string getDeviceArch(hipStream_t stream)
-{
-    hipDevice_t deviceId = -1;
-    auto status = hipStreamGetDevice(stream, &deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipStreamGetDevice failed: "
-                                                           + std::to_string(status));
-    }
-    hipDeviceProp_t props;
-    status = hipGetDeviceProperties(&props, deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipGetDeviceProperties failed: "
-                                                           + std::to_string(status));
-    }
-    const std::string archStr(props.gcnArchName);
-    return archStr.substr(0, archStr.find(':'));
-}
-
 }

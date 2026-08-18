@@ -189,6 +189,7 @@ globalParameters["DataInitTypeE"] = 0
 globalParameters["DataInitTypeAlpha"] = 2
 globalParameters["DataInitTypeBeta"] = 2
 globalParameters["DataInitTypeBias"] = 3
+globalParameters["DataInitTypeGate"] = 3
 globalParameters["DataInitTypeScaleA"] = 2
 globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
@@ -244,6 +245,7 @@ globalParameters["PrintTensorRef"] = (
     0  # Print reference tensor.  0x1=after init; 0x2=after copy-back; 0x3=both
 )
 globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
+globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
@@ -393,6 +395,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
+# When set, each kernel's StinkyTofu module writes its cost file here via
+# StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
+globalParameters["StinkyTofuCostOutputDir"] = ""
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
@@ -523,8 +530,10 @@ defaultBenchmarkCommonParameters = [
     {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
+    {"LDSSegmentInterleave": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
+    {"NonTemporalGate": [0]},
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
@@ -568,6 +577,7 @@ defaultBenchmarkCommonParameters = [
     {"StreamK": [0]},
     {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
+    {"StreamKWorkStealing": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
@@ -599,14 +609,18 @@ defaultBenchmarkCommonParameters = [
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
-    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
-    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):
+    # -1 Auto, 0 Off, 1 Relative (PC-relative), 2 Absolute (label-fixed base). Default 1 (Relative),
+    # preserving the legacy default kernel naming. Set -1 (Auto) to opt into Absolute on gfx1250
+    # non-Stream-K (Relative otherwise), or 2 for explicit Absolute.
     # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
-    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
-    {"SwInstructionPrefetch": [True]},
+    # ahead of execution. Legacy booleans are accepted as a deprecated alias
+    # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
+    {"SwInstructionPrefetch": [1]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.

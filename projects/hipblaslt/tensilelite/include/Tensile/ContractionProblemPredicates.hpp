@@ -2300,6 +2300,43 @@ namespace TensileLite
                 }
             };
 
+            struct UseGateResidualEqual
+                : public Predicate_CRTP<UseGateResidualEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                UseGateResidualEqual() = default;
+                UseGateResidualEqual(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "UseGateResidual";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.useGateResidual() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.useGateResidual() << ", sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct UseEEqual : public Predicate_CRTP<UseEEqual, ContractionProblemGemm>
             {
                 enum
@@ -2534,6 +2571,59 @@ namespace TensileLite
                     details << "]";
                     if(problem.useBias())
                         details << ", prob_type=" << ToString(problem.bias().dataType());
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            struct GateResidualDataTypeWhiteList
+                : public Predicate_CRTP<GateResidualDataTypeWhiteList, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                GateResidualDataTypeWhiteList() = default;
+
+                std::vector<rocisa::DataType> value;
+
+                static std::string Type()
+                {
+                    return "GateResidualDataTypeWhiteList";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(problem.useGateResidual())
+                    {
+                        for(size_t i = 0; i < value.size(); i++)
+                        {
+                            if(value[i] == problem.gateResidual().dataType())
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "supported_types=[";
+                    for(size_t i = 0; i < value.size(); i++)
+                    {
+                        details << ToString(value[i]);
+                        if(i < value.size() - 1)
+                            details << ", ";
+                    }
+                    details << "]";
+                    if(problem.useGateResidual())
+                        details << ", prob_type=" << ToString(problem.gateResidual().dataType());
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -3023,69 +3113,6 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
-                }
-            };
-
-            struct ClusterDimCheck
-                : public Predicate_CRTP<ClusterDimCheck, ContractionProblemGemm>
-            {
-                enum
-                {
-                    HasIndex = false,
-                    HasValue = true
-                };
-                size_t             index;
-                std::array<int, 5> value;
-
-                ClusterDimCheck() = default;
-                ClusterDimCheck(size_t index, std::array<int, 5> value)
-                    : index(index)
-                    , value(value)
-                {
-                }
-
-                static std::string Type()
-                {
-                    return "ClusterDimCheck";
-                }
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
-                    gsu     = gsu > 1 ? gsu : 1;
-                    int numWG_x = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                                  );
-                    int numWG_y = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
-                                  ) * gsu;
-
-                    bool divisible_x = (numWG_x % value[3]) == 0;
-                    bool divisible_y = (numWG_y % value[4]) == 0;
-
-                    return (divisible_x and divisible_y);
-                }
-                virtual bool debugEval(ContractionProblemGemm const& problem,
-                                       std::ostream&                 stream) const override
-                {
-                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
-                    gsu     = gsu > 1 ? gsu : 1;
-                    int numWG_x = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                                  );
-                    int numWG_y = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
-                                  ) * gsu;
-
-                    std::vector<int> numWG = {numWG_x, numWG_y};
-                    std::vector<int> clusterDim = {value[3], value[4]};
-
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "prob's workgroup number [x, y]",
-                                        numWG,
-                                        "%",
-                                        "cluster dimension [x, y]",
-                                        clusterDim);
                 }
             };
         } // namespace Contraction

@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
@@ -90,9 +91,7 @@ EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
 hipDataType
     tensorDataTypeToHipDataType(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers);
+using hipdnn_plugin_sdk::findDeviceBuffer;
 
 hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensorAttributes(
     const std::unordered_map<int64_t,
@@ -101,5 +100,7 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
     int64_t uid);
 
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
+
+bool isTypeMxOcp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
 } // namespace hipblaslt_plugin::hipblaslt_utils

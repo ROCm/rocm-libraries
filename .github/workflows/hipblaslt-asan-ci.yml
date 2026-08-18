@@ -71,13 +71,11 @@ jobs:
       matrix: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
     container:
       image: ${{ needs.setup.outputs.docker_image }}
-      options: -v /runner/config:/home/awsconfig/
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ matrix.family }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
       ARTIFACT_GROUP: ${{ matrix.family }}-asan
     steps:
       - name: "Check out rocm-libraries"
@@ -215,11 +213,17 @@ jobs:
           ref: ${{ needs.setup.outputs.therock_ref }}
 
       - name: Checkout rocm-libraries repository for scripts
+        timeout-minutes: 30
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           path: rocm-libraries
+          sparse-checkout: |
+            .github/scripts
+            test/therock
+          sparse-checkout-cone-mode: true
 
       - name: Download hipBLASLt ASAN trees
+        timeout-minutes: 30
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: asan-trees-hipblaslt-${{ matrix.family }}
@@ -247,7 +251,7 @@ jobs:
         run: |
           set -euo pipefail
           OUT="${GITHUB_WORKSPACE}/build"
-          ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan-x86_64.so' | head -1)")"
+          ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan*.so' | head -1)")"
           LSAN_SUPP="${GITHUB_WORKSPACE}/rocm-libraries/test/therock/lsan.supp"
           {
             echo "ASAN_OPTIONS=quarantine_size_mb=600"

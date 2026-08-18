@@ -1,0 +1,67 @@
+---
+
+# ============================================================
+# REQUIRED FIELDS — must be provided by the user
+# ============================================================
+
+# Matrix transpose options: 'T' or 'N'
+TRANSA: 'N'
+TRANSB: 'N'
+
+# --- GEMM type (see also geko/config_generator/config_variants/) ----------------
+# Output basename uses: DataType + DestDataType + ComputeDataType + '_' + TRANSA + TRANSB
+# (e.g. BBS_NN = bf16×bf16 → bf16 out, fp32 compute, both operands non-transposed).
+#
+# Shorthand: when each field is one letter, the three letters are (DataType)(DestDataType)(ComputeDataType).
+#   BBS     → DataType B,    DestDataType B,  ComputeDataType S   (config_BBS.yaml)
+#   SSS     → DataType S,    DestDataType S,  ComputeDataType S   (config_SSS.yaml)
+#   HHS     → DataType H,    DestDataType H,  ComputeDataType S   (config_HHS.yaml)
+#   XSS     → DataType X,    DestDataType S,  ComputeDataType S   (config_XSS.yaml)
+#   F8B8_SS → DataType F8B8, DestDataType S,  ComputeDataType S   (config_F8B8_SS.yaml; prefix F8B8SS_)
+
+DataType: "B"
+DestDataType: "B"
+ComputeDataType: "S"
+
+# Hardware target. Valid: gfx950, gfx942, gfx942_80cu, gfx942_38cu, gfx942_20cu, gfx942_228cu
+ARCH: "gfx950"
+
+# Sizes as [M, N, B, K] lists (required when SIZE_OPTION=0, the default)
+Sizes:
+    - [  1,   163840, 1,    128]
+    - [  1,   128,    1,    128]
+    - [  128, 1,      1,    128]
+    - [  8, 8,      1,    128]
+    - [  16, 16,      1,    128]
+    - [  16, 16,      1,    128]
+    - [  128, 163840,      1,    128]
+    - [  512,   2304,      1,   7680]
+    - [  256,   256,      1,   1024]
+    - [  4096,  4096, 1,   4096]
+    - [  8192,  8192, 1,   8192]
+    - [  1024,   1024,      1,   1024]
+    - [  1024,   1024,      1,   8192]
+    - [  2304,   1024,      1, 214336]
+    - [  2304,   1536,      1,  10752]
+    - [  2304,   7680,      1,  30720]
+    - [  3352, 442368,      1,    488]
+
+# ============================================================
+# OPTIONAL FIELDS — defaults depend on ARCH (see CONFIG_DEFAULTS_BY_ARCH)
+# ============================================================
+
+# StreamK: True            # True=StreamK (default), False=DataParallel
+# GA: True                 # True=Ductile/GA tuning, False=exhaustive
+# MACROTILE_OPT: False     # Origami MT tuning (GA only)
+# MT_DU: None              # Fixed [MT0, MT1, DU] for MACROTILE_OPT
+# USE_HEURISTICS: False    # Refined heuristic param lists per size
+# SIZE_OPTION: 0           # 0=size list, 1=grid
+# ONE_SIZE_PER_CONFIG: True # One size per output config file
+# CMS: True                # CMS optimization (default True for gfx950, False for gfx942*)
+# CMS_PRIORITY: True       # Prioritize CMS tiles (same ARCH rule as CMS)
+# MI_FILTER: 2             # MI filtering aggressiveness (0=none, 1=moderate, 2=aggressive)
+# EPILOGUES: True          # Include epilogues in tuning
+# CLUSTER: 0               # 0=all-in-one, 1=cluster by top MI
+# MAX_NUM_KERNELS_PER_CONFIG: 180000000  # Kernel cap per config (non-GA only; ignored in GA mode)
+
+# GRID_DENSITY: 4          # Grid density 1-5 (only for SIZE_OPTION=1)

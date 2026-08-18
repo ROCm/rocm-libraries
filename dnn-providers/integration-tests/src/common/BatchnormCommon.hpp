@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <ostream>
 #include <random>
@@ -13,6 +14,37 @@
 
 namespace test_bn_common
 {
+
+// Scale/bias (affine) tensor shape variants for batchnorm graphs. PR #7566
+// relaxed the frontend to accept broadcastable, reduced-rank affine tensors
+// (e.g. {C}, {1, C}) in addition to the historical full-rank {1, C, 1, ...}.
+// Providers advertise which forms they support; tests parametrized on this run
+// against every engine and skip where the active engine rejects the shape.
+enum class AffineShapeMode
+{
+    FULL_RANK, // {1, C, 1, ...} — derived shape matching the input rank
+    REDUCED_RANK // reduced per-channel shape via NumPy broadcasting (PR #7566)
+};
+
+// Reduced-rank per-channel affine (scale/bias) shape following NumPy broadcasting:
+// {C, 1} for channel-last layouts (NLC/NHWC/NDHWC) and {C, 1, ...} of rank
+// inputRank-1 for channel-first layouts (NCL/NCHW/NCDHW), with the channel at
+// index 0. dims is the canonical N,C,spatial... input shape, so dims[1] is always
+// C. The affine tensor keeps a trailing 1 (>=2D) because the CPU reference indexes
+// scale/bias via getHostValue(0, cidx), which requires at least two dimensions.
+inline std::vector<int64_t>
+    getReducedAffineShape(const hipdnn_data_sdk::utilities::TensorLayout& layout,
+                          const std::vector<int64_t>& dims)
+{
+    using hipdnn_data_sdk::utilities::TensorLayout;
+    const bool isChannelLast = layout.name == TensorLayout::NLC.name
+                               || layout.name == TensorLayout::NHWC.name
+                               || layout.name == TensorLayout::NDHWC.name;
+    // Channel-last: fixed rank 2 ({C, 1}). Channel-first: rank inputRank-1.
+    std::vector<int64_t> affineDims(isChannelLast ? 2 : dims.size() - 1, 1);
+    affineDims[0] = dims[1];
+    return affineDims;
+}
 
 struct BatchnormTestCase
 {
@@ -186,6 +218,7 @@ inline std::vector<BatchnormTestCase> getBnBwdTestCases()
         {{32, 1, 14, 14}, seed},
         {{32, 3, 1, 14}, seed},
         {{32, 3, 14, 1}, seed},
+        {{1, 4, 2, 2}, seed}, // ported from provider-local getBnBwdSmoke2dTestCases()
     };
 }
 
@@ -206,6 +239,7 @@ inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
     return {
         {{2, 3, 3, 1, 1}, seed},
         {{16, 3, 8, 14, 14}, seed},
+        {{2, 3, 2, 4, 4}, seed}, // ported from provider-local getBnBwdSmoke3dTestCases()
     };
 }
 

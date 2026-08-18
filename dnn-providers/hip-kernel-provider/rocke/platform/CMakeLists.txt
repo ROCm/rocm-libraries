@@ -222,15 +222,21 @@ if(ROCKE_INSTALL_PYTHON_PACKAGE)
   else()
     set(_ROCKE_PKG_DEST "${ROCKE_PYTHON_INSTALL_DIR}")
   endif()
-  # Install the whole package (not just *.py): rocke ships runtime data such as
-  # core/arch/data/arch_specs.json that the engine loads at import/build time.
-  # A *.py-only filter silently drops it and breaks ArchTarget.from_gfx(). Use
-  # PATTERN + REGEX (distinct keywords) to drop only build cruft and keep
-  # cmake-lint happy (a second PATTERN would trip its duplicate-keyword check).
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke"
           DESTINATION "${_ROCKE_PKG_DEST}"
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)
+
+  # Also install pre-built wheels when available. These are not yet consumed
+  # by CI (the existing PYTHONPATH=. approach is still used), but shipping
+  # them in the artifact prepares for a future migration to pip-installed
+  # wheels and enables the library tests to run.
+  if(ROCKE_BUILD_PYENV)
+    install(FILES
+            "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl"
+            "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/wheels")
+  endif()
 endif()
 
 if(ROCKE_INSTALL_TESTS)
@@ -252,6 +258,51 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
+
+    # The harness above builds LIBRARY kernels for its attention, attention_dense
+    # and attention_d256 families (the one platform -> library exception), so the
+    # `kernels` and `builders` packages must be importable by both runners.
+    # Without them every attention case degrades to an expected-failure and
+    # rocke_golden_static reports drift instead of passing.
+    #
+    # Destination matters: TheRock's artifact-hipkernelprovider.toml captures the
+    # test component through a fixed glob list whose only recursive entry for this
+    # subtree is bin/hip_kernel_provider/tests/**. Staging the packages one level
+    # down under tests/ therefore gets them into the CI test artifact with no
+    # change to that manifest; installing them at the test root would match no
+    # glob and they would be silently dropped from the artifact.
+    #
+    # Guarded on the sibling library tree so a platform-only copy of this directory
+    # still configures; keep the guard, it is the copy-able contract.
+    set(_ROCKE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
+    if(EXISTS "${_ROCKE_LIBRARY_DIR}/kernels")
+      foreach(_rocke_lib_pkg kernels builders)
+        install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/${_rocke_lib_pkg}"
+                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
+                PATTERN "__pycache__" EXCLUDE
+                REGEX "\\.pyc$" EXCLUDE)
+      endforeach()
+    else()
+      message(WARNING
+              "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
+              "golden gate will fail on its attention cases")
+    endif()
+
+    # Install the full pytest suite for installed/artifact test execution.
+    # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
+    # the differential harness (needs compiler + source), and run_all.py (dev runner).
+    # cmake-lint: disable=E1122
+    block()
+      install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests"
+              PATTERN "__pycache__" EXCLUDE
+              PATTERN "*.pyc" EXCLUDE
+              PATTERN "*.c" EXCLUDE
+              PATTERN "*.cpp" EXCLUDE
+              PATTERN "differential" EXCLUDE
+              PATTERN "run_all.py" EXCLUDE)
+
+    endblock()
   endif()
 
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
@@ -265,21 +316,30 @@ if(ROCKE_INSTALL_TESTS)
   endforeach()
 
   if(ROCKE_INSTALL_PYTHON_TESTS)
-    # Stage the Python import smoke in both modes. It sits next to the
-    # CTestTestfile (provider: bin/<subdir>/, standalone: bin/rocke/ -> "../"), so
-    # the same "${ROCKE_TEST_CTEST_REL}" prefix reaches it. The co-located rocke
-    # package is captured by TheRock's test-artifact includes in provider mode.
+    # Python test entries invoke via "python" (resolved from PATH at test time)
+    # rather than executing the .py directly, so they work on Windows where
+    # shebangs are not supported. The CI test environment activates a venv with
+    # requirements-test.txt before running ctest.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_python_import_smoke \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
+           "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 
-    # Golden IR byte-stability gate (host-only, no GPU). Reached via the same
-    # relative prefix as the smoke; imports the co-located rocke package + harness.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_golden_static \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
+           "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+
+    # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
+    # directory (which contains the installed rocke package) so `import rocke`
+    # resolves without the source-tree sys.path shims.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" -v --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=.\"\n"
+           "  TIMEOUT 300)\n")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

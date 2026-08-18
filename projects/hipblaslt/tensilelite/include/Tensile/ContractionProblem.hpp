@@ -175,6 +175,12 @@ namespace TensileLite
         void setSmCountTarget(int smCountTarget)
         {
             m_smCountTarget = smCountTarget;
+            const bool preciseSMTarget = Debug::Instance().usePreciseSMTarget();
+            // Round down to multiple of 32 if not precise SM target
+            if(!preciseSMTarget)
+            {
+                m_smCountTarget = (m_smCountTarget / 32) * 32;
+            }
         }
 
         int smCountTarget() const
@@ -348,6 +354,7 @@ namespace TensileLite
             COMPRESSED    = 14,
             MXSA          = 15,
             MXSB          = 16,
+            GATE_RESIDUAL = 17,
             TENSOR_COUNT
         };
 
@@ -628,7 +635,8 @@ namespace TensileLite
                                BatchIndices const&     batchIndices,
                                BoundIndices const&     boundIndices,
                                double                  beta,
-                               size_t                  workspaceSize = 0
+                               size_t                  workspaceSize = 0,
+                               TensorDescriptor const& gate = TensorDescriptor()
                                );
 
         ContractionProblemGemm(TensorDescriptor const& a,
@@ -650,7 +658,8 @@ namespace TensileLite
                                TensorOps const&        bOps,
                                TensorOps const&        cOps,
                                TensorOps const&        dOps,
-                               size_t                  workspaceSize = 0
+                               size_t                  workspaceSize = 0,
+                               TensorDescriptor const& gate = TensorDescriptor()
                                );
         
         
@@ -763,6 +772,11 @@ namespace TensileLite
             m_useBias = useBias;
         }
 
+        void setUseGateResidual(bool useGateResidual)
+        {
+            m_useGateResidual = useGateResidual;
+        }
+
         void setUseScaleAB(std::string useScaleAB)
         {
             m_useScaleAB = useScaleAB;
@@ -791,6 +805,16 @@ namespace TensileLite
         int useBias() const
         {
             return m_useBias;
+        }
+
+        bool useGateResidual() const
+        {
+            return m_useGateResidual;
+        }
+
+        rocisa::DataType gateType() const
+        {
+            return m_gateType;
         }
 
         std::string useScaleAB() const
@@ -868,6 +892,28 @@ namespace TensileLite
         ContractionProblemGemm::TENSOR biasSrc() const
         {
             return m_biasSrc;
+        }
+
+        // Gate residual tensor: same sizes/order as D, own type (default = A's type) and strides.
+        // sizes and strides follow D's layout; caller may override strides for custom ld/stride.
+        void setGateResidual(rocisa::DataType           type,
+                             std::vector<size_t> const& sizes,
+                             std::vector<size_t> const& strides)
+        {
+            // Default type to A's datatype when caller passes None
+            rocisa::DataType resolvedType
+                = (type == rocisa::DataType::None) ? m_tensors[TENSOR::A].dataType() : type;
+            m_gateType = resolvedType;
+            if(m_useGateResidual)
+            {
+                m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL]
+                    = {"gate",
+                       resolvedType,
+                       sizes.begin(),
+                       sizes.end(),
+                       strides.begin(),
+                       strides.end()};
+            }
         }
 
         void setScaleA(rocisa::DataType type, size_t length)
@@ -1233,6 +1279,10 @@ namespace TensileLite
         {
             return m_tensors[ContractionProblemGemm::TENSOR::BIAS];
         }
+        TensorDescriptor const& gateResidual() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
+        }
         TensorDescriptor const& scaleAlphaVec() const
         {
             return m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC];
@@ -1407,7 +1457,10 @@ namespace TensileLite
                                  TensorOps const&               aOps,
                                  TensorOps const&               bOps,
                                  TensorOps const&               cOps,
-                                 TensorOps const&               dOps);
+                                 TensorOps const&               dOps,
+                                 bool                                 useGateResidual = false,
+                                 std::vector<rocisa::DataType> const& gateResidualDataTypeWhiteList
+                                 = std::vector<rocisa::DataType>());
 
     private:
         TensorOps m_aOps;
@@ -1434,6 +1487,8 @@ namespace TensileLite
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
         int              m_useBias                 = 0;
+        bool             m_useGateResidual         = false;
+        rocisa::DataType m_gateType               = rocisa::DataType::None;
         std::string      m_useScaleAB              = "";
         bool             m_useScaleCD              = false;
         int              m_useScaleAlphaVec        = 0;
@@ -1572,9 +1627,11 @@ namespace TensileLite
         void const* const* batchB    = nullptr;
         void const* const* batchC    = nullptr;
         void* const*       batchD    = nullptr;
-        void const* const* batchBias = nullptr;
+        void const* const* batchBias         = nullptr;
+        void const* const* batchGateResidual = nullptr;
 
         void const* bias          = nullptr;
+        void const* gateResidual  = nullptr;
         void const* scaleA        = nullptr;
         void const* scaleB        = nullptr;
         void const* scaleC        = nullptr;
@@ -1585,6 +1642,11 @@ namespace TensileLite
 
         unsigned char const* metadata   = nullptr;
         void const*          compressed = nullptr;
+
+        int64_t batchOffsetA = 0;
+        int64_t batchOffsetB = 0;
+        int64_t batchOffsetC = 0;
+        int64_t batchOffsetD = 0;
 
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);

@@ -129,8 +129,8 @@ TEST(TestSdpaAttributes, SetInputTensors)
         .set_offset(offset)
         .set_dropout_mask(dropoutMask)
         .set_dropout_scale(dropoutScale)
-        .set_page_table_k(pageTableK)
-        .set_page_table_v(pageTableV)
+        .set_paged_attention_k_table(pageTableK)
+        .set_paged_attention_v_table(pageTableV)
         .set_block_mask(blockMask)
         .set_sink_token(sinkToken)
         .set_descale_q(descaleQ)
@@ -172,8 +172,8 @@ TEST(TestSdpaAttributes, SetOutputTensors)
     auto amaxO = makeTensor(105);
 
     attrs.set_stats(stats)
-        .set_max(max)
-        .set_sum_exp(sumExp)
+        .set_logit_max(max)
+        .set_score_sum_exp(sumExp)
         .set_rng_dump(rngDump)
         .set_amax_s(amaxS)
         .set_amax_o(amaxO);
@@ -232,7 +232,7 @@ TEST(TestSdpaAttributes, SetScalarAttributes)
 {
     SdpaAttributes attrs;
 
-    attrs.set_attn_scale_value(0.5f);
+    attrs.set_attn_scale(0.5f);
     ASSERT_TRUE(attrs.attn_scale_value.has_value());
     EXPECT_FLOAT_EQ(*attrs.attn_scale_value, 0.5f);
 
@@ -264,4 +264,123 @@ TEST(TestSdpaAttributes, SetEnumAttributes)
 
     attrs.set_implementation(AttentionImplementation::UNIFIED);
     EXPECT_EQ(attrs.implementation, AttentionImplementation::UNIFIED);
+}
+
+//==============================================================================
+// cuDNN source-compatibility setters (native surface)
+//==============================================================================
+
+TEST(TestSdpaAttributes, NativeSetAttnScaleFloatPopulatesValueNotTensor)
+{
+    SdpaAttributes attrs;
+    attrs.set_attn_scale(0.25f);
+
+    ASSERT_TRUE(attrs.attn_scale_value.has_value());
+    EXPECT_FLOAT_EQ(*attrs.attn_scale_value, 0.25f);
+    // The float overload must not populate the Attn_scale tensor input.
+    EXPECT_EQ(attrs.get_attn_scale(), nullptr);
+}
+
+TEST(TestSdpaAttributes, NativeSetLogitMaxRoundTrip)
+{
+    SdpaAttributes attrs;
+    auto logitMax = makeTensor(60);
+    attrs.set_logit_max(logitMax);
+    EXPECT_EQ(attrs.get_max(), logitMax);
+}
+
+TEST(TestSdpaAttributes, NativeSetScoreSumExpRoundTrip)
+{
+    SdpaAttributes attrs;
+    auto sumExp = makeTensor(61);
+    attrs.set_score_sum_exp(sumExp);
+    EXPECT_EQ(attrs.get_sum_exp(), sumExp);
+}
+
+TEST(TestSdpaAttributes, NativeSetSlidingWindowLengthMapsToLeftBound)
+{
+    SdpaAttributes attrs;
+    attrs.set_sliding_window_length(128);
+    ASSERT_TRUE(attrs.left_bound.has_value());
+    EXPECT_EQ(*attrs.left_bound, 128);
+}
+
+TEST(TestSdpaAttributes, NativePagedAttentionTablesRoundTrip)
+{
+    SdpaAttributes attrs;
+    auto kTable = makeTensor(62);
+    auto vTable = makeTensor(63);
+    attrs.set_paged_attention_k_table(kTable);
+    attrs.set_paged_attention_v_table(vTable);
+    EXPECT_EQ(attrs.get_page_table_k(), kTable);
+    EXPECT_EQ(attrs.get_page_table_v(), vTable);
+}
+
+TEST(TestSdpaAttributes, NativeSetMmaCoreMode)
+{
+    SdpaAttributes attrs;
+    EXPECT_EQ(attrs.mma_core_mode, DataType::NOT_SET);
+    attrs._set_mma_core_mode(DataType::HALF);
+    EXPECT_EQ(attrs.mma_core_mode, DataType::HALF);
+}
+
+TEST(TestSdpaAttributes, NativeFusedDropoutTwoArg)
+{
+    SdpaAttributes attrs;
+    auto mask = makeTensor(64);
+    auto scale = makeTensor(65);
+    attrs.set_dropout(mask, scale);
+    EXPECT_EQ(attrs.get_dropout_mask(), mask);
+    EXPECT_EQ(attrs.get_dropout_scale(), scale);
+}
+
+TEST(TestSdpaAttributes, DeprecatedSetIsInferenceMapsToGenerateStats)
+{
+    SdpaAttributes inferAttrs;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    inferAttrs.set_is_inference(true);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+    ASSERT_TRUE(inferAttrs.generate_stats.has_value());
+    EXPECT_FALSE(*inferAttrs.generate_stats);
+
+    SdpaAttributes trainAttrs;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    trainAttrs.set_is_inference(false);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+    ASSERT_TRUE(trainAttrs.generate_stats.has_value());
+    EXPECT_TRUE(*trainAttrs.generate_stats);
+}
+
+TEST(TestSdpaAttributes, NativeSetScoreModRecordsUnsupported)
+{
+    SdpaAttributes attrs;
+    attrs.set_score_mod([](int) { return 0; });
+
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("score modifier"), std::string::npos);
+    // Nothing applied: no stats-related output tensor was created as a side effect.
+    EXPECT_EQ(attrs.get_max(), nullptr);
+    EXPECT_EQ(attrs.get_sum_exp(), nullptr);
+}
+
+TEST(TestSdpaAttributes, NativeSetUnfuseFmaSetsHintNotUnsupported)
+{
+    SdpaAttributes attrs;
+    attrs.set_unfuse_fma(true);
+    EXPECT_TRUE(attrs.unfuse_fma_hint);
+    EXPECT_FALSE(attrs.hasUnsupportedUsage());
+
+    attrs.set_unfuse_fma(false);
+    EXPECT_FALSE(attrs.unfuse_fma_hint);
+    EXPECT_FALSE(attrs.hasUnsupportedUsage());
 }

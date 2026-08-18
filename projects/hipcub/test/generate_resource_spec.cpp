@@ -75,6 +75,11 @@ int main(int argc, char* argv[])
 
     std::ofstream out_file;
     out_file.open(argv[1]);
+    if(!out_file)
+    {
+        std::cerr << "Error: could not open output file: " << argv[1] << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
 
     // Figure out how many devices are in the system.
     int dev_count;

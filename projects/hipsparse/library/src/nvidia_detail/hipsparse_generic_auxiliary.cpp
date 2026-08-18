@@ -928,6 +928,28 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
 }
 #endif
 
+#if(CUDART_VERSION >= 11040)
+hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                          void*                 cooRowInd,
+                                          void*                 cooColInd,
+                                          void*                 cooValues)
+{
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseCooSetPointers((cusparseSpMatDescr_t)spMatDescr, cooRowInd, cooColInd, cooValues));
+}
+#endif
+
+#if(CUDART_VERSION >= 11030)
+hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                          void*                 cscColOffsets,
+                                          void*                 cscRowInd,
+                                          void*                 cscValues)
+{
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCscSetPointers(
+        (cusparseSpMatDescr_t)spMatDescr, cscColOffsets, cscRowInd, cscValues));
+}
+#endif
+
 #if(CUDART_VERSION >= 12000)
 hipsparseStatus_t hipsparseSpMatGetSize(hipsparseConstSpMatDescr_t spMatDescr,
                                         int64_t*                   rows,

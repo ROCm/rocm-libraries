@@ -15,7 +15,7 @@ Prerequisites
 =============
 
 rocSPARSE requires a ROCm enabled platform. For more information, including a list of supported
-GPUs, see the :doc:`ROCm compatibility matrix <compatibility/compatibility-matrix>`.
+GPUs, see the :doc:`ROCm compatibility matrix <rocm:compatibility/compatibility-matrix>`.
 
 Building rocSPARSE from source
 =================================

@@ -105,7 +105,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
     const BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     // Epsilon should be extracted as double
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 // ============================================================================
@@ -217,7 +217,7 @@ TEST(TestBatchnormFwdTrainingActivParams, HasRunningStatsReturnsFalseWhenNotProv
 // Missing Tensor Tests
 // ============================================================================
 
-TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTensor)
+TEST(TestBatchnormFwdTrainingActivParams, ThrowsHipdnnPluginExceptionForMissingEpsilonTensor)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -319,9 +319,11 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTe
     auto* activAttrs = actNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    // Constructor uses tensorMap.at() which throws std::out_of_range for missing key
+    // makeScalarOperand looks up the epsilon uid via tensorMap.find() and throws a
+    // HipdnnPluginException (not std::out_of_range) so the error carries a clear
+    // message and status code across the extern "C" plugin boundary.
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 std::out_of_range);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================

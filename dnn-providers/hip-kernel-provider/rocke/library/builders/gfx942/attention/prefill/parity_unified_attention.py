@@ -12,9 +12,9 @@ runs on any box with torch + a gfx942 GPU.
 
 The harness:
 
-  1. Loads the canonical shapes we validate from the shipped ``shapes.json``
-     (``--scenario`` selects subsets); these mirror the rocke-provider
-     integration-test net plus the case-study perf shapes.
+  1. Defines shapes inline across three scenario groups (``default`` /
+     ``fmha`` / ``creative``); ``--scenario`` selects subsets by group name
+     or exact shape name, defaulting to all groups.
   2. For each shape, builds the gfx942 tiled-2D kernel via
      ``UnifiedAttention2DTiledSpec`` / ``build_unified_attention_2d_tiled``
      (auto-routes to ``instances/gfx942/attention_tiled_2d.py``), gated by
@@ -37,7 +37,7 @@ Run (needs torch + a gfx942 GPU):
 
     PYTHONPATH=python .venv/bin/python \\
         python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
-        --scenario correctness
+        --scenario default
 
     # force the L4 (WG=64) fallback instead of the default wide4:
     HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python .venv/bin/python \\
@@ -54,8 +54,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
-
-SHAPES_JSON = Path(__file__).resolve().parent / "shapes.json"
 
 # Block size for the paged-KV mapping. The dense SDPA problems are mapped onto
 # one contiguous run of paged-KV blocks per sequence; block_size=64 matches the
@@ -79,64 +77,346 @@ class Shape:
     kv_heads: int  # Hkv
     batch: int  # B
     causal: bool
-    group: str  # "correctness" | "perf" | "decode"
+    group: str  # "default" | "fmha" | "creative"
 
     @property
     def num_queries_per_kv(self) -> int:
         return self.heads // self.kv_heads
 
 
-def load_shapes(path: Path = SHAPES_JSON) -> List[Shape]:
-    """Load the shipped canonical shape set from ``shapes.json``."""
-    data = json.loads(path.read_text())
+# ---------------------------------------------------------------------------
+# In-code scenario functions (adapted from gfx950's parity_unified_attention).
+#
+# gfx942 constraints vs. gfx950:
+#   - causal-only (no sliding window / softcap / ALiBi / QQ-bias / sinks)
+#   - BLOCK_SIZE = 64 (tile size T = BLOCK_SIZE)
+#   - head_size ∈ {64, 128} for the shipped paths (+ select 256 decode shapes)
+#   - Scenarios with non-uniform seq_lens are split into one Shape per unique
+#     (seqlen_q, seqlen_k) pair (batch=1) and given a disambiguating suffix.
+# ---------------------------------------------------------------------------
+
+
+def _shape(
+    name: str,
+    dtype: str,
+    seqlen_q: int,
+    seqlen_k: int,
+    heads: int,
+    kv_heads: int,
+    head_size: int,
+    batch: int,
+    group: str,
+) -> Shape:
+    return Shape(
+        name=name,
+        dtype=dtype,
+        seqlen_q=seqlen_q,
+        seqlen_k=seqlen_k,
+        head_size=head_size,
+        heads=heads,
+        kv_heads=kv_heads,
+        batch=batch,
+        causal=True,
+        group=group,
+    )
+
+
+def default_scenarios() -> List[Shape]:
+    """Core production scenarios adapted from the gfx950 default set.
+
+    Sliding-window / softcap / ALiBi / QQ-bias / sinks scenarios are dropped
+    (the harness's torch reference is causal-only, not a kernel limitation).
+    are included; they exercise the T=64 single-query path.
+    Non-uniform seq_lens from the gfx950 mixed/prefill scenarios are split
+    into one Shape per unique (q, k) pair.
+    """
+    g = "default"
     shapes: List[Shape] = []
-    for group, items in data["scenarios"].items():
-        for it in items:
-            shapes.append(
-                Shape(
-                    name=it["name"],
-                    dtype=it["dtype"],
-                    seqlen_q=int(it["seqlen_q"]),
-                    seqlen_k=int(it["seqlen_k"]),
-                    head_size=int(it["head_size"]),
-                    heads=int(it["heads"]),
-                    kv_heads=int(it["kv_heads"]),
-                    batch=int(it["batch"]),
-                    causal=bool(it["causal"]),
-                    group=group,
-                )
-            )
+
+    # decode_d128_b16 / b64 equivalents (block_size pinned to 64 on gfx942)
+    for sq, sk in [(1, 1024), (1, 2048), (1, 4096), (1, 512)]:
+        shapes.append(
+            _shape(f"decode_d128_q{sq}k{sk}", "fp16", sq, sk, 16, 2, 128, 1, g)
+        )
+
+    # decode_d256 (head_size=256, fp16)
+    for sq, sk in [(1, 1024), (1, 2048)]:
+        shapes.append(
+            _shape(f"decode_d256_q{sq}k{sk}", "fp16", sq, sk, 16, 2, 256, 1, g)
+        )
+
+    # bf16 D256 decode — Qwen3-Next-80B-A3B gated_attn GQA 16/2 (d256_decode cohort)
+    for sq, sk in [(1, 1024), (1, 2048), (1, 4096), (1, 8192)]:
+        shapes.append(
+            _shape(f"bf16_decode_d256_q{sq}k{sk}", "bf16", sq, sk, 16, 2, 256, 1, g)
+        )
+
+    # prefill_d128 (uniform batch from gfx950 prefill_d128_b16)
+    for sq, sk in [(64, 64), (128, 256), (32, 256)]:
+        shapes.append(
+            _shape(f"prefill_d128_q{sq}k{sk}", "fp16", sq, sk, 16, 2, 128, 1, g)
+        )
+
+    # mixed_d128 split into individual shapes
+    for sq, sk in [(1, 1328), (5, 18), (129, 463)]:
+        shapes.append(
+            _shape(f"mixed_d128_q{sq}k{sk}", "fp16", sq, sk, 16, 2, 128, 1, g)
+        )
+
+    # bf16 decode
+    for sq, sk in [(1, 1024), (1, 2048), (1, 4096)]:
+        shapes.append(
+            _shape(f"bf16_decode_d128_q{sq}k{sk}", "bf16", sq, sk, 16, 2, 128, 1, g)
+        )
+
+    # GQA non-power-of-2 NQK ratios (from gfx950 gqa_nqk* scenarios)
+    for sq, sk in [(1024, 1024), (512, 512)]:
+        shapes.append(
+            _shape(f"gqa_nqk5_d128_q{sq}k{sk}", "bf16", sq, sk, 40, 8, 128, 1, g)
+        )
+        shapes.append(
+            _shape(f"gqa_nqk7_d128_q{sq}k{sk}", "bf16", sq, sk, 28, 4, 128, 1, g)
+        )
+        shapes.append(
+            _shape(f"gqa_nqk3_d128_q{sq}k{sk}", "bf16", sq, sk, 24, 8, 128, 1, g)
+        )
+        shapes.append(
+            _shape(f"gqa_nqk8_d128_q{sq}k{sk}", "bf16", sq, sk, 32, 4, 128, 1, g)
+        )
+
+    # combo bf16 d64/b32/h64kv8 prefill (from gfx950 combo_bf16_d64_b32_gqa8_64x8)
+    shapes.append(
+        _shape("combo_bf16_d64_h64kv8_q512k1024", "bf16", 512, 1024, 64, 8, 64, 2, g)
+    )
+
     return shapes
 
 
-def select_shapes(shapes: List[Shape], selectors: Optional[List[str]]) -> List[Shape]:
+def fmha_scenarios() -> List[Shape]:
+    """FMHA matrix shapes adapted from gfx950 (causal-compatible subset only).
+
+    Drops sliding-window / softcap / ALiBi / QQ-bias variants. Non-uniform
+    seq_lens are split per (q, k) pair. Batch counts are kept from the
+    gfx950 ``rep(n, q, k)`` helper where the layout is uniform.
+    """
+    g = "fmha"
+    shapes: List[Shape] = []
+
+    # GQA_4to1_Prefill_Basic (32:8 → 16:4 to stay ≤ 16 NQK)
+    shapes.append(
+        _shape("fmha_gqa_4to1_prefill_2k_b1", "fp16", 2048, 2048, 16, 4, 128, 1, g)
+    )
+    shapes.append(
+        _shape("fmha_gqa_4to1_prefill_2k_b4", "fp16", 2048, 2048, 16, 4, 128, 4, g)
+    )
+    shapes.append(
+        _shape("fmha_gqa_4to1_prefill_2k_bf16", "bf16", 2048, 2048, 16, 4, 128, 2, g)
+    )
+
+    # GQA_16to1
+    shapes.append(
+        _shape("fmha_gqa_16to1_prefill_2k_b1", "fp16", 2048, 2048, 16, 1, 128, 1, g)
+    )
+
+    # MQA decode (seqlen_q = 1)
+    shapes.append(
+        _shape("fmha_mqa_16to1_decode_1k_b8", "fp16", 1, 1024, 16, 1, 128, 8, g)
+    )
+    shapes.append(
+        _shape("fmha_mqa_16to1_decode_4k_b8", "bf16", 1, 4096, 16, 1, 128, 8, g)
+    )
+
+    # Tiny sequences (split per pair)
+    for sq, sk in [(1, 10), (3, 99), (33, 33), (1, 33), (3, 10)]:
+        shapes.append(
+            _shape(f"fmha_tiny_seqs_q{sq}k{sk}", "fp16", sq, sk, 16, 1, 128, 1, g)
+        )
+
+    # Asymmetric seqlen (split per pair)
+    for sq, sk in [(100, 256), (51, 99), (256, 1024)]:
+        shapes.append(
+            _shape(f"fmha_asym_b1_q{sq}k{sk}", "fp16", sq, sk, 16, 1, 128, 1, g)
+        )
+    for sq, sk in [(100, 256), (51, 99), (256, 1024)]:
+        shapes.append(
+            _shape(f"fmha_asym_b2_d64_q{sq}k{sk}", "fp16", sq, sk, 16, 2, 128, 2, g)
+        )
+
+    # Cross-attention (sq << sk)
+    for sq, sk in [
+        (1, 1024),
+        (1, 4096),
+        (32, 1024),
+        (32, 4096),
+        (128, 1024),
+        (128, 4096),
+    ]:
+        shapes.append(
+            _shape(f"fmha_cross_attn_q{sq}k{sk}", "fp16", sq, sk, 16, 4, 128, 1, g)
+        )
+
+    # Paged decode (many sequences, short Q)
+    shapes.append(_shape("fmha_paged_decode_b80", "fp16", 1, 4096, 16, 4, 128, 80, g))
+    shapes.append(
+        _shape("fmha_paged_decode_q4_b16", "fp16", 4, 4096, 16, 4, 128, 16, g)
+    )
+
+    # Padding / boundary stress (odd lengths)
+    for sq in [259, 500, 987, 1023]:
+        shapes.append(
+            _shape(f"fmha_pad_boundary_q{sq}", "fp16", sq, sq, 16, 4, 128, 1, g)
+        )
+
+    # Prefill odd lengths
+    for sq, sk in [(113, 203), (339, 339), (799, 799), (1023, 1024), (3131, 3131)]:
+        shapes.append(
+            _shape(f"fmha_prefill_odd_q{sq}k{sk}", "fp16", sq, sk, 16, 4, 128, 1, g)
+        )
+
+    # H256 high-LDS shapes
+    shapes.append(_shape("fmha_h256_2k", "bf16", 2048, 2048, 16, 2, 256, 1, g))
+    shapes.append(_shape("fmha_h256_4k_b2", "bf16", 4096, 4096, 8, 4, 256, 2, g))
+
+    # Long sequence stress (8K / 16K)
+    shapes.append(_shape("fmha_long_8k", "bf16", 8192, 8192, 16, 4, 128, 1, g))
+    shapes.append(_shape("fmha_long_16k", "bf16", 16384, 16384, 16, 4, 128, 1, g))
+
+    # Extreme batch (many short sequences)
+    shapes.append(_shape("fmha_batch_64_s128", "fp16", 128, 128, 8, 8, 128, 64, g))
+    shapes.append(_shape("fmha_batch_128_s128", "fp16", 128, 128, 8, 8, 128, 128, g))
+
+    # CK benchmark standard
+    shapes.append(_shape("fmha_bench_1k_b4", "fp16", 1024, 1024, 16, 16, 128, 4, g))
+    shapes.append(_shape("fmha_bench_4k_b2_d256", "fp16", 4096, 4096, 8, 8, 256, 2, g))
+
+    # Vision transformer shapes
+    shapes.append(_shape("fmha_vit_1k_b4", "fp16", 1024, 1024, 16, 8, 128, 4, g))
+    shapes.append(_shape("fmha_vit_256_b4", "fp16", 256, 256, 16, 8, 128, 4, g))
+
+    return shapes
+
+
+def creative_scenarios() -> List[Shape]:
+    """Exploratory sweep adapted from gfx950 creative scenarios (causal-only).
+
+    Long-context decode, GQA/MQA variants, head_size=256, bf16, chunked
+    prefill, and batch sweeps. Sliding-window / softcap / ALiBi / QQ-bias
+    shapes are omitted entirely.
+    """
+    g = "creative"
+    shapes: List[Shape] = []
+
+    # Long-context decode
+    shapes.append(_shape("creative_decode_8k", "fp16", 1, 8192, 16, 2, 128, 1, g))
+    shapes.append(_shape("creative_decode_32k", "fp16", 1, 32768, 16, 2, 128, 1, g))
+    shapes.append(
+        _shape("creative_decode_64k_bf16", "bf16", 1, 65536, 16, 2, 128, 1, g)
+    )
+
+    # Large decode batch (varied kv per seq → one shape each)
+    for sk in [512, 1024, 2048, 4096, 768, 1536, 3072, 6144, 384, 896, 1280, 2560]:
+        shapes.append(
+            _shape(f"creative_decode_b16_k{sk}", "fp16", 1, sk, 16, 2, 128, 1, g)
+        )
+
+    # Tiny + large prefill
+    shapes.append(_shape("creative_prefill_tiny", "fp16", 4, 4, 16, 2, 128, 1, g))
+    shapes.append(_shape("creative_prefill_512", "fp16", 512, 512, 16, 2, 128, 1, g))
+    shapes.append(_shape("creative_prefill_2k", "fp16", 2048, 2048, 16, 2, 128, 1, g))
+
+    # Chunked prefill (sq < sk)
+    for sq, sk in [(128, 2048), (256, 4096), (512, 8192)]:
+        shapes.append(
+            _shape(
+                f"creative_chunk_prefill_q{sq}k{sk}", "fp16", sq, sk, 16, 2, 128, 1, g
+            )
+        )
+
+    # GQA / MQA variants
+    for sq, sk in [(1, 4096), (1, 8192)]:
+        shapes.append(
+            _shape(f"creative_gqa_h32k4_q{sq}k{sk}", "fp16", sq, sk, 32, 4, 128, 1, g)
+        )
+        shapes.append(
+            _shape(f"creative_mqa_h16k1_q{sq}k{sk}", "fp16", sq, sk, 16, 1, 128, 1, g)
+        )
+    for sq, sk in [(1, 2048), (1, 4096)]:
+        shapes.append(
+            _shape(f"creative_gqa_h64k8_q{sq}k{sk}", "fp16", sq, sk, 64, 8, 128, 1, g)
+        )
+
+    # D64 bf16 (from gfx950 creative_r1r4_bf16_d64_sinks -- sinks dropped)
+    for sq, sk in [(640, 704), (640, 768)]:
+        shapes.append(
+            _shape(f"creative_d64_bf16_q{sq}k{sk}", "bf16", sq, sk, 64, 8, 64, 1, g)
+        )
+
+    # head_size=256 with bf16
+    for sq, sk in [(1, 4096), (1, 8192)]:
+        shapes.append(
+            _shape(
+                f"creative_d256_bf16_decode_q{sq}k{sk}",
+                "bf16",
+                sq,
+                sk,
+                16,
+                2,
+                256,
+                1,
+                g,
+            )
+        )
+    for sq, sk in [(128, 1024), (256, 2048)]:
+        shapes.append(
+            _shape(
+                f"creative_d256_prefill_q{sq}k{sk}", "fp16", sq, sk, 16, 2, 256, 1, g
+            )
+        )
+
+    # bf16 chunked prefill (from gfx950 creative_bf16_b64_chunk)
+    for sq, sk in [(64, 2048), (128, 4096)]:
+        shapes.append(
+            _shape(f"creative_bf16_chunk_q{sq}k{sk}", "bf16", sq, sk, 16, 2, 128, 1, g)
+        )
+
+    return shapes
+
+
+def all_inline_scenarios() -> List[Shape]:
+    return default_scenarios() + fmha_scenarios() + creative_scenarios()
+
+
+def select_shapes(selectors: Optional[List[str]]) -> List[Shape]:
     """Resolve ``--scenario`` selectors to a concrete shape list.
 
-    A selector is either a group name (``correctness`` / ``perf`` / ``all``)
-    or an exact shape name. Multiple ``--scenario`` flags union together.
+    A selector is either a group name (``default`` / ``fmha`` / ``creative`` /
+    ``all``) or an exact shape name. Multiple ``--scenario`` flags union.
+    No selector → all inline scenarios.
     """
+    all_shapes = all_inline_scenarios()
     if not selectors:
-        return shapes
+        return all_shapes
+
     wanted: List[Shape] = []
-    seen = set()
+    seen: set = set()
+
+    def _add(s: Shape) -> None:
+        if s.name not in seen:
+            seen.add(s.name)
+            wanted.append(s)
+
     for sel in selectors:
-        if sel == "all":
-            picked = shapes
-        elif sel in (
-            "correctness",
-            "perf",
-            "decode",
-            "gqa_nqk_nonpow2",
-            "short_prefill",
-            "long_prefill",
-        ):
-            picked = [s for s in shapes if s.group == sel]
+        if sel in ("all", "inline"):
+            for s in all_shapes:
+                _add(s)
+        elif sel in ("default", "fmha", "creative"):
+            for s in all_shapes:
+                if s.group == sel:
+                    _add(s)
         else:
-            picked = [s for s in shapes if s.name == sel]
-        for s in picked:
-            if s.name not in seen:
-                seen.add(s.name)
-                wanted.append(s)
+            for s in all_shapes:
+                if s.name == sel:
+                    _add(s)
     return wanted
 
 
@@ -183,12 +463,29 @@ def ref_paged_attn(
         if q.shape[1] != k.shape[1]:
             k = torch.repeat_interleave(k, q.shape[1] // k.shape[1], dim=1)
             v = torch.repeat_interleave(v, q.shape[1] // v.shape[1], dim=1)
-        attn = torch.einsum("qhd,khd->hqk", q, k).float()
-        empty_mask = torch.ones(query_len, kv_len, device=q.device)
-        mask = torch.triu(empty_mask, diagonal=kv_len - query_len + 1).bool()
-        attn.masked_fill_(mask, float("-inf"))
-        attn = torch.softmax(attn, dim=-1).to(v.dtype)
-        out = torch.einsum("hqk,khd->qhd", attn, v)
+        # Chunk the fp32 attn matrix over heads so peak memory stays bounded: the
+        # full [h, q, k] fp32 tensor is h*Sq*Sk*4 bytes (e.g. 128*8192*8192*4 =
+        # 32 GB), which OOMs the reference on large-head long-context shapes even
+        # though the kernel under test is fine. A per-head-chunk loop keeps the
+        # peak at chunk*Sq*Sk*4 with identical numerics.
+        num_heads = q.shape[1]
+        # Build the causal mask directly as bool -- a float [q,k] tensor here
+        # would be 4x the bytes, working against this loop's peak-memory bound.
+        mask = torch.triu(
+            torch.ones(query_len, kv_len, dtype=torch.bool, device=q.device),
+            diagonal=kv_len - query_len + 1,
+        )
+        head_bytes = query_len * kv_len * 4
+        chunk = max(1, min(num_heads, int(4 * 1024**3) // max(1, head_bytes)))
+        out_chunks = []
+        for h0 in range(0, num_heads, chunk):
+            h1 = min(num_heads, h0 + chunk)
+            attn = torch.einsum("qhd,khd->hqk", q[:, h0:h1], k[:, h0:h1]).float()
+            attn.masked_fill_(mask, float("-inf"))
+            attn = torch.softmax(attn, dim=-1).to(v.dtype)
+            out_chunks.append(torch.einsum("hqk,khd->qhd", attn, v[:, h0:h1]))
+            del attn
+        out = torch.cat(out_chunks, dim=1)
         outputs.append(out)
         start_idx += query_len
     return torch.cat(outputs, dim=0)
@@ -555,7 +852,7 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
         use_alibi=False,
         use_qq_bias=False,
         use_fp8=False,
-        num_sms=120,
+        num_cus=120,
     )
     hip_stream = int(torch.cuda.current_stream().cuda_stream)
     vals = _attn_values(
@@ -663,7 +960,7 @@ def main() -> int:
         "--scenario",
         action="append",
         default=None,
-        help="group (correctness|perf|decode|short_prefill|long_prefill|gqa_nqk_nonpow2|all) or exact shape name; repeatable",
+        help="group (default|fmha|creative|all) or exact shape name; repeatable",
     )
     parser.add_argument("--attempts", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=10)
@@ -717,7 +1014,7 @@ def main() -> int:
     if _q_major_grid_enabled():
         print("HIPDNN_GFX942_Q_MAJOR_GRID -> enabled")
 
-    shapes = select_shapes(load_shapes(), args.scenario)
+    shapes = select_shapes(args.scenario)
     if not shapes:
         print(f"no shapes matched {args.scenario!r}", file=sys.stderr)
         return 2

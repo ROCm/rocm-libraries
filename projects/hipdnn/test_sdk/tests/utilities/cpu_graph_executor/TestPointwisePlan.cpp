@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "PointwiseGraphUtils.hpp"
-#include "PointwiseTensorBundles.hpp"
+#include "hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -210,6 +210,62 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwdWithBeta)
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     CpuReferenceGraphExecutor{}.execute(
         serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    SUCCEED();
+}
+
+TEST_F(TestPointwisePlan, ParameterizedReluBwdBfloat16LowerClipEdgeCase)
+{
+    // In bfloat16, a value higher than lowerClip can be equal to lowerClip if lowerClip itself is cast to bfloat16. However, this value should still register as higher than lowerClip.
+
+    const float lowerClip = 0.1f;
+    const float upperClip = 0.5f;
+    const float lowerSlope = 0.2f;
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    DataType::BFLOAT16,
+                                    DataType::BFLOAT16,
+                                    DataType::FLOAT,
+                                    DataType::BFLOAT16,
+                                    hipdnn_frontend::PointwiseMode::RELU_BWD,
+                                    0,
+                                    TensorLayout::NCHW,
+                                    lowerClip,
+                                    upperClip,
+                                    lowerSlope);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
+    const auto& attributes
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
+
+    auto* dyTensor
+        = static_cast<Tensor<bfloat16>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* yTensor = static_cast<Tensor<bfloat16>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* outputTensor
+        = static_cast<Tensor<bfloat16>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    // Set y to a value slightly above lowerClip. In bfloat16, this is equal to lowerClip
+    dyTensor->setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, 0, 0, 0);
+    dyTensor->markHostModified();
+    yTensor->setHostValue(safeTestTypeCast<bfloat16>(0.10009765625f), 0, 0, 0, 0);
+    yTensor->markHostModified();
+
+    EXPECT_NE(lowerClip, safeTestTypeCast<float>(yTensor->getHostValue(0, 0, 0, 0)));
+    EXPECT_EQ(safeTestTypeCast<bfloat16>(lowerClip), yTensor->getHostValue(0, 0, 0, 0));
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    outputTensor->markDeviceModified();
+
+    EXPECT_EQ(outputTensor->getHostValue(0, 0, 0, 0), dyTensor->getHostValue(0, 0, 0, 0));
 
     SUCCEED();
 }

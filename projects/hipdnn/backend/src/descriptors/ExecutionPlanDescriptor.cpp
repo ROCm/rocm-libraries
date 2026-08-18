@@ -21,9 +21,23 @@ namespace hipdnn_backend
 {
 namespace
 {
-constexpr uint32_t PLAN_SERIALIZATION_VERSION = 1;
+constexpr uint32_t PLAN_SERIALIZATION_VERSION = 2;
 
-std::vector<int64_t> collectTensorUids(const GraphDescriptor& graph)
+// The plan version that introduced the parallel tensor_alignments vector. Plans
+// serialized by older binaries (version < this) predate the field and carry no
+// alignments; they are still deserialized for backward compatibility.
+constexpr uint32_t PLAN_VERSION_WITH_TENSOR_ALIGNMENTS = 2;
+
+// Per-tensor identity extracted from the serialized graph. The two vectors are
+// parallel: alignments[i] is the required device-pointer byte alignment of the
+// tensor whose uid is uids[i].
+struct TensorIdentities
+{
+    std::vector<int64_t> uids;
+    std::vector<int64_t> alignments;
+};
+
+TensorIdentities collectTensorIdentities(const GraphDescriptor& graph)
 {
     auto serializedGraph = graph.getSerializedGraph();
     if(serializedGraph.ptr == nullptr || serializedGraph.size == 0)
@@ -44,13 +58,18 @@ std::vector<int64_t> collectTensorUids(const GraphDescriptor& graph)
         return {};
     }
 
-    std::vector<int64_t> tensorUids;
-    tensorUids.reserve(tensors->size());
+    TensorIdentities identities;
+    identities.uids.reserve(tensors->size());
+    identities.alignments.reserve(tensors->size());
     for(const auto* tensor : *tensors)
     {
-        tensorUids.push_back(tensor->uid());
+        identities.uids.push_back(tensor->uid());
+        // Pass-by-value scalars arrive as host pointers, not device buffers; 0
+        // opts them out of device-pointer alignment enforcement.
+        identities.alignments.push_back(tensor->is_runtime_pass_by_value() ? INT64_C(0)
+                                                                           : tensor->alignment());
     }
-    return tensorUids;
+    return identities;
 }
 } // namespace
 
@@ -72,7 +91,9 @@ void ExecutionPlanDescriptor::finalize()
     auto engineConfigPluginData = _engineConfig->getSerializedEngineConfig();
     _pluginResourceManager = pluginResourceManager;
     _engineId = engineId;
-    _tensorUids = collectTensorUids(*graph);
+    auto tensorIdentities = collectTensorIdentities(*graph);
+    _tensorUids = std::move(tensorIdentities.uids);
+    _tensorAlignments = std::move(tensorIdentities.alignments);
     _isOverrideShapeEnabled = graph->isOverrideShapeEnabled();
 
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContext(
@@ -353,6 +374,15 @@ const std::vector<int64_t>& ExecutionPlanDescriptor::getTensorUids() const
     return _tensorUids;
 }
 
+const std::vector<int64_t>& ExecutionPlanDescriptor::getTensorAlignments() const
+{
+    THROW_IF_FALSE(isFinalized(),
+                   HIPDNN_STATUS_INTERNAL_ERROR,
+                   "ExecutionPlanDescriptor::getTensorAlignments() failed: Not finalized.");
+
+    return _tensorAlignments;
+}
+
 bool ExecutionPlanDescriptor::isOverrideShapeEnabled() const
 {
     THROW_IF_FALSE(isFinalized(),
@@ -397,6 +427,7 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
         flatbuffers::FlatBufferBuilder builder;
         auto serializedPluginPayload = builder.CreateVector(pluginPayload);
         auto serializedTensorUids = builder.CreateVector(_tensorUids);
+        auto serializedTensorAlignments = builder.CreateVector(_tensorAlignments);
         auto executionPlan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
             builder,
             PLAN_SERIALIZATION_VERSION,
@@ -404,7 +435,8 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
             _workspaceSize,
             serializedTensorUids,
             serializedPluginPayload,
-            _isOverrideShapeEnabled);
+            _isOverrideShapeEnabled,
+            serializedTensorAlignments);
         builder.Finish(executionPlan);
 
         _serializedPlanCache.assign(builder.GetBufferPointer(),
@@ -450,13 +482,16 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
 
     auto executionPlan
         = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedPlan);
-    THROW_IF_NE(executionPlan->version(),
-                PLAN_SERIALIZATION_VERSION,
-                HIPDNN_STATUS_NOT_SUPPORTED,
-                "Serialized execution plan version is not supported.");
+    const auto planVersion = executionPlan->version();
+    // Accept any known version up to the current one. Older plans deserialize for
+    // backward compatibility; only a zero or newer-than-known version is rejected.
+    THROW_IF_TRUE(planVersion == 0 || planVersion > PLAN_SERIALIZATION_VERSION,
+                  HIPDNN_STATUS_NOT_SUPPORTED,
+                  "Serialized execution plan version is not supported.");
 
     auto serializedPluginPayload = executionPlan->plugin_payload();
     auto serializedTensorUids = executionPlan->tensor_uids();
+    auto serializedTensorAlignments = executionPlan->tensor_alignments();
 
     THROW_IF_TRUE(serializedPluginPayload == nullptr || serializedPluginPayload->empty(),
                   HIPDNN_STATUS_BAD_PARAM,
@@ -464,6 +499,20 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
     THROW_IF_TRUE(serializedTensorUids == nullptr || serializedTensorUids->empty(),
                   HIPDNN_STATUS_BAD_PARAM,
                   "Serialized execution plan contains no tensor UIDs.");
+    // tensor_alignments was added in v2 and runs parallel to tensor_uids. Require
+    // it only for plans new enough to carry it; legacy plans (no alignments) are
+    // accepted and enforce no per-tensor alignment downstream.
+    if(planVersion >= PLAN_VERSION_WITH_TENSOR_ALIGNMENTS)
+    {
+        THROW_IF_TRUE(serializedTensorAlignments == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "Serialized execution plan contains no tensor alignments.");
+        THROW_IF_NE(serializedTensorAlignments->size(),
+                    serializedTensorUids->size(),
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "Serialized execution plan tensor alignment count does not match tensor UID "
+                    "count.");
+    }
     _engineId = executionPlan->engine_id();
     _workspaceSize = executionPlan->workspace_size();
     _isOverrideShapeEnabled = executionPlan->is_override_shape_enabled();
@@ -473,6 +522,15 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
                 "Serialized execution plan contains an invalid workspace size.");
 
     _tensorUids.assign(serializedTensorUids->begin(), serializedTensorUids->end());
+    if(serializedTensorAlignments != nullptr)
+    {
+        _tensorAlignments.assign(serializedTensorAlignments->begin(),
+                                 serializedTensorAlignments->end());
+    }
+    else
+    {
+        _tensorAlignments.clear();
+    }
     std::vector<uint8_t> pluginPayload(serializedPluginPayload->begin(),
                                        serializedPluginPayload->end());
 

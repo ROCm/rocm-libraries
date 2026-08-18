@@ -156,6 +156,8 @@ void init_code(nb::module_ m)
 
     nb::class_<rocisa::Module, rocisa::Item>(m_code, "Module")
         .def(nb::init<const std::string&>(), nb::arg("name") = "")
+        .def_rw("isCallable", &rocisa::Module::isCallable)
+        .def_rw("callableName", &rocisa::Module::callableName)
         .def("setParent", &rocisa::Module::setParent)
         .def("setNoOpt", &rocisa::Module::setNoOpt)
         .def("isNoOpt", &rocisa::Module::isNoOpt)
@@ -367,6 +369,7 @@ void init_code(nb::module_ m)
              nb::arg("totalVgprs") = 0,
              nb::arg("totalSgprs") = 0)
         .def("setGprs", &rocisa::SignatureCodeMeta::setGprs)
+        .def_ro("offset", &rocisa::SignatureCodeMeta::offset)
         .def("addArg",
              &rocisa::SignatureCodeMeta::addArg,
              nb::arg("name"),
@@ -406,6 +409,8 @@ void init_code(nb::module_ m)
              nb::arg("totalSgprs")      = 0,
              nb::arg("numSgprPreload")  = 0)
         .def("setGprs", &rocisa::SignatureBase::setGprs)
+        .def_prop_ro("offset",
+                     [](const rocisa::SignatureBase& self) { return self.codeMeta.offset; })
         .def("addArg",
              &rocisa::SignatureBase::addArg,
              nb::arg("name"),

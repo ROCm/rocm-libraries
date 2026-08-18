@@ -33,7 +33,7 @@ Defines test organization:
 Python script that:
 - Parses YAML configuration files
 - Detects runtime environment (OS, GPU architecture)
-- Builds gtest filter strings with positive and negative patterns
+- Builds gtest filter strings with positive and negative patterns (default), or emits commands to run an **rtest** driver when **`--use-rtest-driver`** is passed
 - Generates CMake test registration code with proper exclusion syntax
 
 #### 3. **TestCategories.cmake** (Shared)
@@ -135,14 +135,19 @@ execution_settings:
 
 **Environment (optional):** Under `execution_settings`, an `environment` map sets env vars for all category tests (e.g. `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`). Keys and values are strings; they are passed to CTest as `ENVIRONMENT "VAR1=val1;VAR2=val2"`.
 
-**Extra arguments (optional, per-category):** A category may set `extra_args` to a list (or single string) of additional command-line arguments that the parser appends to the test command after `--gtest_filter=...`. Useful for projects whose test binary accepts runtime flags beyond gtest filtering (for example, a flag to select a reduced subset of tests, or to scale a sampling/iteration parameter). Each entry is shell-quoted with `shlex.quote`, so values with spaces or shell metacharacters are preserved as a single argument by CTest.
+**Test YAML (optional, per-category):** A category may set `test_yaml` to a basename (e.g. `rocblas_smoke.yaml`). For direct gtest invocations, the parser injects `--yaml <file>` **before** `--gtest_filter=...`. A category may define `test_yaml` only, `test_patterns` only, or both. When `--use-rtest-driver` is enabled, the project's rtest XML must still define matching `--yaml` / filter behavior for `ctest_<category>` suites.
+
+**Extra arguments (optional, per-category):** A category may set `extra_args` to a list (or single string) of additional command-line arguments that the parser appends to the test command after `--gtest_filter=...` (or after `--yaml` when no filter is used). Useful for projects whose test binary accepts runtime flags beyond gtest filtering (for example, a flag to select a reduced subset of tests, or to scale a sampling/iteration parameter). Each entry is shell-quoted with `shlex.quote`, so values with spaces or shell metacharacters are preserved as a single argument by CTest.
 
 ```yaml
 test_categories:
   quick:
+    test_yaml: rocblas_smoke.yaml
     test_patterns:
-      - "*"
-    extra_args:           # appended after --gtest_filter
+      - "*quick*"
+    exclude:
+      - "*strided*"
+    extra_args:           # appended after --gtest_filter (or after --yaml)
       - "--quick-subset"
     labels:
       - "quick"
@@ -572,7 +577,7 @@ Each test gets labels that enable flexible CTest filtering:
 
 ## Function Reference
 
-### `apply_test_category_labels(target_name yaml_file working_dir [install_test_file])`
+### `apply_test_category_labels(target_name yaml_file working_dir [install_test_file [resource_group [parser_extra]]])`
 
 
 | Parameter           | Required | Description                                                                                         |
@@ -582,7 +587,14 @@ Each test gets labels that enable flexible CTest filtering:
 | `working_dir`       | Yes      | Working directory for test execution (must be a valid directory)                                   |
 | `install_test_file` | No       | Path to the generated install-time `CTestTestfile.cmake`. Not required for local builds, but      |
 |                     |          | required for install/package workflows (for example, TheRock).                                            |
+| `resource_group`    | No       | CTest `RESOURCE_GROUPS` token; when set, suite names include `_<resource>` after the target name. |
+| `parser_extra`      | No       | Extra argument(s) forwarded to `parse_test_categories.py` (for example `--use-rtest-driver`).      |
+
 **Validation:** The function validates all inputs before execution and emits `WARNING` messages if any check fails, returning early without generating tests.
+
+### Optional rtest driver (`--use-rtest-driver`)
+
+By default, generated CTest suites run the **gtest executable** with `--gtest_filter=...`. If the project passes **`--use-rtest-driver`** as the optional **`parser_extra`** argument to `apply_test_category_labels()`, the parser instead emits commands to run the **rtest** Python driver next to the binary. The driver basename is derived from the CTest name prefix (typically `mylib-test` → `mylib_rtest.py`). The driver is invoked as `<python> <stem>_rtest.py -t ctest_<category>` using a platform-appropriate interpreter on `PATH` at CTest run time (`python3` on Linux/macOS, `python` on Windows—not configure-time `Python3_EXECUTABLE`, which may be absent on CI test nodes). **`--cmake-python3`** may be passed explicitly to the parser to override the install-tree interpreter. PR-style labels are read at rtest run time from the **`GITHUB_PR_LABELS`** environment variable (semicolon-separated, same format as rtest’s `--ci_labels`) when that variable is set and `--ci_labels` was not passed on the command line. CTest **`LABELS`** on the suite are unchanged (for `ctest -L`). The project’s rtest XML must define matching `<test sets="ctest_<category>">` entries. GPU-specific exclusion suites still invoke the gtest binary directly. In **rocm-libraries**, only **rocBLAS** enables this via `USE_RTEST_DRIVER` in `projects/rocblas/clients/gtest/CMakeLists.txt`.
 
 ## YAML Reference
 
@@ -651,11 +663,11 @@ When tests are installed (e.g. into `/opt/rocm/bin/`), the **build-tree** test d
 
 **How it works:**
 
-1. **Project enables it** by passing an optional **4th argument** to `apply_test_category_labels()`: a path to a file (e.g. `install_CTestTestfile.cmake`) that the parser will create or append to. The parser writes `add_test(...)` and `set_tests_properties(...)` lines into that file using a **relative** command (e.g. `"../rocblas-test"`), so the test binary is found relative to the directory where the file will live after install.
+1. **Project enables it** by passing an optional **4th argument** to `apply_test_category_labels()`: a path to a file (e.g. `install_CTestTestfile.cmake`) that the parser will create or append to. The parser writes `add_test(...)` and `set_tests_properties(...)` lines into that file using a **relative** command (e.g. `"../my_project_gtest"`), so the test binary is found relative to the directory where the file will live after install.
 
-2. **Project installs that file** to a fixed location under the install prefix, typically a **project-specific subdirectory** of the bin dir (e.g. `bin/rocblas/` or `bin/MIOpen/`) and renames it to `CTestTestfile.cmake`. The test executable is installed in the parent `bin/` directory, so from `bin/rocblas/` the path `../rocblas-test` correctly points at the installed binary.
+2. **Project installs that file** to a fixed location under the install prefix, typically a **project-specific subdirectory** of the bin dir (e.g. `bin/my_project/`) and renames it to `CTestTestfile.cmake`. The test executable is installed in the parent `bin/` directory, so from `bin/my_project/` the path `../my_project_gtest` correctly points at the installed binary.
 
-3. **TheRock (or any consumer)** runs CTest **from that installed directory** (e.g. `cd /opt/rocm/bin/rocblas && ctest -L quick`). CTest reads the local `CTestTestfile.cmake`, runs the tests with the same labels and timeouts as in the build tree, and no build tree is required.
+3. **TheRock (or any consumer)** runs CTest **from that installed directory** (e.g. `cd /opt/rocm/bin/my_project && ctest -L quick`). CTest reads the local `CTestTestfile.cmake`, runs the tests with the same labels and timeouts as in the build tree, and no build tree is required.
 
 **Example (rocBLAS):**
 

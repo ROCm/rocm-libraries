@@ -17,8 +17,6 @@ set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
-set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
-set(HIPDNN_TSL_ROBIN_MAP_VERSION "1.4.1" CACHE STRING "Version of tsl-robin-map to use")
 
 option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
 
@@ -62,9 +60,19 @@ else()
     message(STATUS "hipDNN: SDPA support disabled")
 endif()
 
+# Gates the generic kernel ingestor (RFC 0017: Universal Kernel Descriptors), set by
+# TheRock's THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" OFF)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(STATUS "hipDNN: kernel ingestor enabled")
+    add_compile_definitions(HIPDNN_ENABLE_KERNEL_INGESTOR)
+else()
+    message(STATUS "hipDNN: kernel ingestor disabled")
+endif()
+
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
-# tests (RFC 0012). The shim sources always exist in the tree;
-# this option controls only whether they are installed and tested.
+# tests. The shim sources always exist in the tree; this option controls only
+# whether they are installed and tested.
 option(HIPDNN_ENABLE_CUDNN_COMPATIBILITY
     "Enable the cuDNN compatibility shim (headers + tests)" OFF
 )
@@ -188,8 +196,6 @@ if(DEFINED HIP_DNN_SKIP_TESTS)
 endif()
 option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
-option(HIPDNN_BUILD_PYTHON_BINDINGS "Build Python bindings (requires Python and nanobind)" OFF)
-
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
@@ -252,6 +258,7 @@ list(
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
     $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Clang: disable error for unused command line arguments
+    $<$<CXX_COMPILER_ID:Clang>:-Wunused-template> # Clang: catch unused internal-linkage templates (matches llvm-project CI)
     -Wno-error=null-dereference # Downgrade null-dereference to warning (false positives with flatbuffers in backend/data_sdk)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
@@ -283,9 +290,9 @@ add_subdirectory(plugin_sdk)
 add_subdirectory(tests)
 add_subdirectory(tools)
 
-if(HIPDNN_BUILD_PYTHON_BINDINGS)
-    add_subdirectory(python)
-endif()
+# Python bindings are a standalone CMake project that consumes installed hipDNN
+# artifacts. Configure projects/hipdnn/python/frontend_bindings separately after
+# installing hipDNN.
 
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests

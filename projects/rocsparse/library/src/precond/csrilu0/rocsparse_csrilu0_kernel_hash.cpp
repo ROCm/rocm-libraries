@@ -216,7 +216,6 @@ namespace rocsparse
                     if(lid == 0)
                     {
                         csr_val[row_diag] = rocsparse::assign_ilu0_boost_value(diag_val, boost_val);
-                        __threadfence(); // make sure this is written out before ready flag is set
                     };
                 };
             }

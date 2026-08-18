@@ -22,7 +22,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                              const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,
                              bool useTrainingPhase = false,
-                             bool onePadded = false)
+                             bool onePadded = false,
+                             bool runtimeEpsilon = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("LayernormFpropTest");
@@ -80,12 +81,18 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(uid++)
-        .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_dim({1})
-        .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
+    epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
+    if(runtimeEpsilon)
+    {
+        // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+        // from the variant pack at execute.
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_value(static_cast<float>(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON));
+    }
 
     hipdnn_frontend::graph::LayernormAttributes lnAttrs;
     lnAttrs.set_name("layernorm_fprop");
@@ -169,7 +176,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                              const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,
                              bool meanInvVar = false,
-                             bool onePadded = false)
+                             bool onePadded = false,
+                             bool runtimeEpsilon = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("LayernormBpropTest");
@@ -231,12 +239,18 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(uid++)
-        .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_dim({1})
-        .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
+    epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
+    if(runtimeEpsilon)
+    {
+        // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+        // from the variant pack at execute.
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_value(static_cast<float>(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON));
+    }
 
     hipdnn_frontend::graph::LayernormBackwardAttributes lnAttrs;
     lnAttrs.set_name("layernorm_bprop");

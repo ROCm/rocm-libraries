@@ -14,6 +14,8 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
@@ -171,6 +173,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
 
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
+    // rather than risk a mismatch (RFC 0008 §4.6).
+    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
+                               "Graph has override shapes enabled");
+
     auto& nodeWrappers = opGraph.nodeWrappers();
 
     std::string deviceString;
@@ -193,6 +201,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    != NodeAttributes::SdpaAttributes,
                                "Node attribute type is not SdpaAttributes");
 
+    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->computeDataType() != DataType::FLOAT,
+                               "Compute data type must be FLOAT");
+
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
@@ -208,7 +219,23 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
                                "page_table_v tensor not supported");
 
+    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
+    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
+    if(attrs.scale_tensor_uid().has_value())
+    {
+        const auto& tensorMap = opGraph.getTensorMap();
+        const auto scaleIt = tensorMap.find(attrs.scale_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == tensorMap.end(),
+                                   "scale_tensor_uid not found in tensor map");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
+            "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
+
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
+
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
+                               "mma_core_mode must be unset");
 
     const auto& tensorMap = opGraph.getTensorMap();
 
@@ -386,12 +413,21 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
     auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
 
-    // Get attention scale (default: 1/sqrt(D_qk) if not provided)
-    float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
-    auto scaleValue = sdpaAttrs.attn_scale_value();
-    if(scaleValue.has_value())
+    hipdnn_plugin_sdk::ScalarOperand attnScale{};
+    if(sdpaAttrs.scale_tensor_uid().has_value())
     {
-        attnScale = scaleValue.value();
+        attnScale = hipdnn_plugin_sdk::makeScalarOperand(
+            tensorMap, sdpaAttrs.scale_tensor_uid().value(), "attn_scale");
+    }
+    else
+    {
+        float scaleVal = sdpaAttrs.attn_scale_value().value_or(
+            1.0f / std::sqrt(static_cast<float>(headDimQk)));
+        attnScale = hipdnn_plugin_sdk::ScalarOperand{
+            0,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            false,
+            hipdnn_plugin_sdk::ScalarValue{scaleVal}};
     }
 
     // Extract optional LSE output metadata
@@ -453,7 +489,13 @@ void SdpaFwdPlanBuilder::buildPlan(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to find matching kernel");
+            "SdpaFwdPlanBuilder::buildPlan: failed to find matching kernel for arch=" + deviceString
+                + " dtype="
+                + getDataTypeIdentifier(qTensor->data_type(),
+                                        kTensor->data_type(),
+                                        vTensor->data_type(),
+                                        oTensor->data_type())
+                + " hdim_q=" + std::to_string(headDimQk) + " hdim_v=" + std::to_string(headDimV));
     }
     config = cfg_fmha_fwd.at(kernelKey);
 
@@ -469,7 +511,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module: " + coPath);
+            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module from " + coPath);
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));

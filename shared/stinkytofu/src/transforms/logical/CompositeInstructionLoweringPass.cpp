@@ -168,6 +168,86 @@ class CompositeInstructionLoweringPassImpl : public Pass {
                 // For now, keep as-is (TODO: expand to lshlrev + or)
                 result.push_back(irInst);
             }
+        }
+        // ================================================================
+        // SAddU64: 64-bit scalar add (composite)
+        // ================================================================
+        else if (irInst->getOpcode() == logical::SAddU64) {
+            if (isInstructionSupported("SAddU64", arch)) {
+                result.push_back(irInst);
+            } else {
+                // Fallback: SAddU32(lo) + SAddCU32(hi) via SCC carry
+                const auto& dst = irInst->dests[0];
+                const auto& src0 = irInst->srcs[0];
+                const auto& src1 = irInst->srcs[1];
+
+                auto* addLo = SAddU32(dst, src0, src1, irInst->comment + " (lo)");
+                auto* addHi = SAddCU32(dst, src0, src1, irInst->comment + " (hi+carry)");
+                result.push_back(addLo);
+                result.push_back(addHi);
+            }
+        }
+        // ================================================================
+        // VAddNCU64: 64-bit vector add no-carry (composite)
+        // ================================================================
+        else if (irInst->getOpcode() == logical::VAddNCU64) {
+            if (isInstructionSupported("VAddNCU64", arch)) {
+                result.push_back(irInst);
+            } else {
+                // Fallback: VAddCOU32(lo, carry->VCC) + VAddCCOU32(hi, VCC)
+                const auto& dst = irInst->dests[0];
+                const auto& src0 = irInst->srcs[0];
+                const auto& src1 = irInst->srcs[1];
+
+                auto* addLo = VAddCOU32(dst, src0, src1, std::nullopt, std::nullopt,
+                                        irInst->comment + " (lo)");
+                auto* addHi = VAddCCOU32(dst, src0, src1, std::nullopt, std::nullopt,
+                                         irInst->comment + " (hi+carry)");
+                result.push_back(addLo);
+                result.push_back(addHi);
+            }
+        }
+        // ================================================================
+        // VAddLShiftLeftU32: dst = (src0 + src1) << src2
+        // ================================================================
+        else if (irInst->getOpcode() == logical::VAddLShiftLeftU32) {
+            if (isInstructionSupported("VAddLShiftLeftU32", arch)) {
+                result.push_back(irInst);
+            } else {
+                // Fallback: VAddU32(dst, src0, src1) + VLShiftLeftB32(dst, src2, dst)
+                const auto& dst = irInst->dests[0];
+                const auto& src0 = irInst->srcs[0];
+                const auto& src1 = irInst->srcs[1];
+                const auto& src2 = irInst->srcs[2];
+
+                auto* add = VAddU32(dst, src0, src1, std::nullopt, std::nullopt,
+                                    irInst->comment + " (add)");
+                auto* shift = VLShiftLeftB32(dst, src2, dst, std::nullopt, std::nullopt,
+                                             irInst->comment + " (lshl)");
+                result.push_back(add);
+                result.push_back(shift);
+            }
+        }
+        // ================================================================
+        // VLShiftLeftAddU32: dst = (src0 << src2) + src1
+        // ================================================================
+        else if (irInst->getOpcode() == logical::VLShiftLeftAddU32) {
+            if (isInstructionSupported("VLShiftLeftAddU32", arch)) {
+                result.push_back(irInst);
+            } else {
+                // Fallback: VLShiftLeftB32(dst, src2, src0) + VAddU32(dst, dst, src1)
+                const auto& dst = irInst->dests[0];
+                const auto& src0 = irInst->srcs[0];
+                const auto& src1 = irInst->srcs[1];
+                const auto& src2 = irInst->srcs[2];
+
+                auto* shift = VLShiftLeftB32(dst, src2, src0, std::nullopt, std::nullopt,
+                                             irInst->comment + " (lshl)");
+                auto* add =
+                    VAddU32(dst, dst, src1, std::nullopt, std::nullopt, irInst->comment + " (add)");
+                result.push_back(shift);
+                result.push_back(add);
+            }
         } else {
             // Unknown composite - keep as-is
             result.push_back(irInst);

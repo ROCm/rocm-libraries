@@ -38,6 +38,9 @@ from Tensile.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
+# Safe either way; bandit's B506 check only recognises the SafeLoader/CSafeLoader spelling,
+# so the call sites using this name carry a bare nosec marker. Never spell that marker out
+# with its leading hash here, or bandit parses this comment too (SEC-00404).
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
 except AttributeError:
@@ -115,7 +118,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, DEFAULT_YAML_LOADER)
+            doc = yaml.load(f, DEFAULT_YAML_LOADER)  # nosec B506
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks

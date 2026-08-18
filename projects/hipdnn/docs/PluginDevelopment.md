@@ -650,7 +650,7 @@ Unit tests focus on the internal implementation of your plugin components:
 - **Purpose**: Test individual components in isolation (engines, utilities, kernel logic)
 - **Requirements**:
   - Must be fast-running
-  - GPU operations must be marked with `SKIP_IF_NO_DEVICE()` macro
+  - GPU operations must be marked with `SKIP_IF_NO_DEVICES()` macro
   - Use mocking/stubbing for dependencies where appropriate
   - Should work on both Windows and Linux
 

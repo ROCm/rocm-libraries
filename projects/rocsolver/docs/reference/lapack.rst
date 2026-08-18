@@ -1233,7 +1233,7 @@ rocsolver_<type>sytrs_strided_batched()
 .. doxygenfunction:: rocsolver_ssytrs_strided_batched
 
 .. .. _sytrs2:
-.. 
+..
 .. rocsolver_<type>sytrs2()
 .. ---------------------------------------------------
 .. .. doxygenfunction:: rocsolver_zsytrs2_64
@@ -1251,7 +1251,7 @@ rocsolver_<type>sytrs_strided_batched()
 .. .. doxygenfunction:: rocsolver_dsytrs2
 ..    :outline:
 .. .. doxygenfunction:: rocsolver_ssytrs2
-.. 
+..
 .. rocsolver_<type>sytrs2_batched()
 .. ---------------------------------------------------
 .. .. doxygenfunction:: rocsolver_zsytrs2_batched_64
@@ -1269,7 +1269,7 @@ rocsolver_<type>sytrs_strided_batched()
 .. .. doxygenfunction:: rocsolver_dsytrs2_batched
 ..    :outline:
 .. .. doxygenfunction:: rocsolver_ssytrs2_batched
-.. 
+..
 .. rocsolver_<type>sytrs2_strided_batched()
 .. ---------------------------------------------------
 .. .. doxygenfunction:: rocsolver_zsytrs2_strided_batched_64
@@ -1346,18 +1346,30 @@ Symmetric eigensolvers
 
 rocsolver_<type>syev()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_dsyev_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssyev_64
+   :outline:
 .. doxygenfunction:: rocsolver_dsyev
    :outline:
 .. doxygenfunction:: rocsolver_ssyev
 
 rocsolver_<type>syev_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_dsyev_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssyev_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_dsyev_batched
    :outline:
 .. doxygenfunction:: rocsolver_ssyev_batched
 
 rocsolver_<type>syev_strided_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_dsyev_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssyev_strided_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_dsyev_strided_batched
    :outline:
 .. doxygenfunction:: rocsolver_ssyev_strided_batched
@@ -1366,18 +1378,30 @@ rocsolver_<type>syev_strided_batched()
 
 rocsolver_<type>heev()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_zheev_64
+   :outline:
+.. doxygenfunction:: rocsolver_cheev_64
+   :outline:
 .. doxygenfunction:: rocsolver_zheev
    :outline:
 .. doxygenfunction:: rocsolver_cheev
 
 rocsolver_<type>heev_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_zheev_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_cheev_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_zheev_batched
    :outline:
 .. doxygenfunction:: rocsolver_cheev_batched
 
 rocsolver_<type>heev_strided_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_zheev_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_cheev_strided_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_zheev_strided_batched
    :outline:
 .. doxygenfunction:: rocsolver_cheev_strided_batched
@@ -1386,18 +1410,30 @@ rocsolver_<type>heev_strided_batched()
 
 rocsolver_<type>syevd()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_dsyevd_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssyevd_64
+   :outline:
 .. doxygenfunction:: rocsolver_dsyevd
    :outline:
 .. doxygenfunction:: rocsolver_ssyevd
 
 rocsolver_<type>syevd_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_dsyevd_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssyevd_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_dsyevd_batched
    :outline:
 .. doxygenfunction:: rocsolver_ssyevd_batched
 
 rocsolver_<type>syevd_strided_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_dsyevd_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssyevd_strided_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_dsyevd_strided_batched
    :outline:
 .. doxygenfunction:: rocsolver_ssyevd_strided_batched
@@ -1406,18 +1442,30 @@ rocsolver_<type>syevd_strided_batched()
 
 rocsolver_<type>heevd()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_zheevd_64
+   :outline:
+.. doxygenfunction:: rocsolver_cheevd_64
+   :outline:
 .. doxygenfunction:: rocsolver_zheevd
    :outline:
 .. doxygenfunction:: rocsolver_cheevd
 
 rocsolver_<type>heevd_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_zheevd_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_cheevd_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_zheevd_batched
    :outline:
 .. doxygenfunction:: rocsolver_cheevd_batched
 
 rocsolver_<type>heevd_strided_batched()
 ---------------------------------------------------
+.. doxygenfunction:: rocsolver_zheevd_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_cheevd_strided_batched_64
+   :outline:
 .. doxygenfunction:: rocsolver_zheevd_strided_batched
    :outline:
 .. doxygenfunction:: rocsolver_cheevd_strided_batched

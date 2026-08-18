@@ -22,7 +22,8 @@
  * ************************************************************************ */
 
 /*!\file
- * \brief rocsparse-version.h provides the configured version and settings
+ * \brief rocsparse-version.h provides the configured rocSPARSE version. Build-time
+ * feature configuration lives in rocsparse-config.h.
  */
 
 #ifndef ROCSPARSE_VERSION_H
@@ -34,9 +35,5 @@
 #define ROCSPARSE_VERSION_PATCH     @rocsparse_VERSION_PATCH@
 #define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
 /* clang-format on */
-
-#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
-/* Feature flags baked in at build time. */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
 
 #endif /* ROCSPARSE_VERSION_H */

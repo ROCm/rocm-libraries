@@ -7,9 +7,12 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
+#include <hip/hip_runtime.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 // NOLINTNEXTLINE
@@ -25,6 +28,60 @@ namespace
 {
 constexpr size_t WORKSPACE_DEFAULT_SIZE = 1024;
 constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
+
+// Size of the timing scratch buffer. The plugin's execute is otherwise a
+// host-only no-op, so the autotune START/STOP events would bracket zero device
+// work and hipEventElapsedTime (~1 us resolution) can return a sub-resolution
+// or even negative duration, making the strategy smoke tests flaky. Doing real
+// device work on the profiling stream guarantees a positive, above-resolution
+// measured time. 4 MiB clears the timer resolution on all supported GPUs with
+// margin.
+constexpr size_t TIMING_SCRATCH_SIZE = 4UL * 1024 * 1024;
+
+struct AutotunePluginHandle final : HipdnnEnginePluginHandle
+{
+    ~AutotunePluginHandle() override
+    {
+        if(timingScratch != nullptr)
+        {
+            static_cast<void>(hipFree(timingScratch));
+        }
+    }
+
+    void* timingScratch = nullptr;
+    hipStream_t stream = nullptr;
+};
+
+// Keep one scratch allocation per plugin handle. The first execution allocates
+// it outside any timed device work; later warmup and timed executions only
+// enqueue the memset bracketed by profiling events.
+void enqueueTimingWork(hipdnnEnginePluginHandle_t handle)
+{
+    hipdnn_plugin_sdk::throwIfNull(handle);
+    auto* pluginHandle = static_cast<AutotunePluginHandle*>(handle);
+
+    if(pluginHandle->timingScratch == nullptr)
+    {
+        const auto mallocStatus = hipMalloc(&pluginHandle->timingScratch, TIMING_SCRATCH_SIZE);
+        if(mallocStatus != hipSuccess || pluginHandle->timingScratch == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string("AutotunePlugin: timing scratch allocation failed: ")
+                    + hipGetErrorString(mallocStatus));
+        }
+    }
+
+    const auto memsetStatus
+        = hipMemsetAsync(pluginHandle->timingScratch, 0, TIMING_SCRATCH_SIZE, pluginHandle->stream);
+    if(memsetStatus != hipSuccess)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            std::string("AutotunePlugin: hipMemsetAsync failed: ")
+                + hipGetErrorString(memsetStatus));
+    }
+}
 } // namespace
 
 class AutotunePlugin : public TestPluginBase
@@ -265,6 +322,16 @@ public:
                 // Normal execution succeeds - fall through to base implementation
             }
         }
+
+        // Successful engines: enqueue real device work on the profiling stream so
+        // the autotune timed interval measures a positive, above-resolution time
+        // instead of an empty (possibly negative) hipEventElapsedTime window.
+        const auto timingStatus = hipdnn_plugin_sdk::tryCatch([&]() { enqueueTimingWork(handle); });
+        if(timingStatus != HIPDNN_PLUGIN_STATUS_SUCCESS)
+        {
+            return timingStatus;
+        }
+
         return TestPluginBase::enginePluginExecuteOpGraph(
             handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
     }
@@ -487,7 +554,16 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
 {
-    return TestPluginBase::enginePluginCreate(handle);
+    LOG_API_ENTRY("handlePtr=" << static_cast<void*>(handle));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(handle);
+
+        auto pluginHandle = std::make_unique<AutotunePluginHandle>();
+        *handle = pluginHandle.release();
+
+        LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
+    });
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
@@ -499,7 +575,12 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream)
 {
-    return TestPluginBase::enginePluginSetStream(handle, stream);
+    const auto status = TestPluginBase::enginePluginSetStream(handle, stream);
+    if(status == HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        static_cast<AutotunePluginHandle*>(handle)->stream = stream;
+    }
+    return status;
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t

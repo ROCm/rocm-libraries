@@ -54,80 +54,80 @@ add_hiptensor_unit_test(elementwise_cpu_test ${CpuTestSources})
 # Rank 2 tests
 set (PermutationRank2TestSources ${PermutationCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank2_elementwise_permute_test.cpp)
-set (PermutationRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/permutation/rank2_test_params.yaml)
+set (PermutationRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/permutation/rank2_test_params.yaml)
 add_hiptensor_test(rank2_elementwise_permute_test ${PermutationRank2TestConfig}  ${PermutationRank2TestSources})
 
 set (ElementwiseBinaryOpRank2TestSources ${ElementwiseBinaryOpCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank2_elementwise_binary_op_test.cpp)
-set (ElementwiseBinaryOpRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/binary_op/rank2_binary_op_test_params.yaml)
+set (ElementwiseBinaryOpRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/binary_op/rank2_binary_op_test_params.yaml)
 add_hiptensor_test(rank2_elementwise_binary_op_test ${ElementwiseBinaryOpRank2TestConfig}  ${ElementwiseBinaryOpRank2TestSources})
 
 set (ElementwiseTrinaryOpRank2TestSources ${ElementwiseTrinaryOpCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank2_elementwise_trinary_op_test.cpp)
-set (ElementwiseTrinaryOpRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/trinary_op/rank2_trinary_op_test_params.yaml)
+set (ElementwiseTrinaryOpRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/trinary_op/rank2_trinary_op_test_params.yaml)
 add_hiptensor_test(rank2_elementwise_trinary_op_test ${ElementwiseTrinaryOpRank2TestConfig}  ${ElementwiseTrinaryOpRank2TestSources})
 
 # Rank 3 tests
 set (PermutationRank3TestSources ${PermutationCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank3_elementwise_permute_test.cpp)
-set (PermutationRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/permutation/rank3_test_params.yaml)
+set (PermutationRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/permutation/rank3_test_params.yaml)
 add_hiptensor_test(rank3_elementwise_permute_test ${PermutationRank3TestConfig}  ${PermutationRank3TestSources})
 
 set (ElementwiseBinaryOpRank3TestSources ${ElementwiseBinaryOpCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank3_elementwise_binary_op_test.cpp)
-set (ElementwiseBinaryOpRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/binary_op/rank3_binary_op_test_params.yaml)
+set (ElementwiseBinaryOpRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/binary_op/rank3_binary_op_test_params.yaml)
 add_hiptensor_test(rank3_elementwise_binary_op_test ${ElementwiseBinaryOpRank3TestConfig}  ${ElementwiseBinaryOpRank3TestSources})
 
 set (ElementwiseTrinaryOpRank3TestSources ${ElementwiseTrinaryOpCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank3_elementwise_trinary_op_test.cpp)
-set (ElementwiseTrinaryOpRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/trinary_op/rank3_trinary_op_test_params.yaml)
+set (ElementwiseTrinaryOpRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/trinary_op/rank3_trinary_op_test_params.yaml)
 add_hiptensor_test(rank3_elementwise_trinary_op_test ${ElementwiseTrinaryOpRank3TestConfig}  ${ElementwiseTrinaryOpRank3TestSources})
 
 # Rank 4 tests
 set (PermutationRank4TestSources ${PermutationCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank4_elementwise_permute_test.cpp)
-set (PermutationRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/permutation/rank4_test_params.yaml)
+set (PermutationRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/permutation/rank4_test_params.yaml)
 add_hiptensor_test(rank4_elementwise_permute_test ${PermutationRank4TestConfig}  ${PermutationRank4TestSources})
 
 set (ElementwiseBinaryOpRank4TestSources ${ElementwiseBinaryOpCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank4_elementwise_binary_op_test.cpp)
-set (ElementwiseBinaryOpRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/binary_op/rank4_binary_op_test_params.yaml)
+set (ElementwiseBinaryOpRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/binary_op/rank4_binary_op_test_params.yaml)
 add_hiptensor_test(rank4_elementwise_binary_op_test ${ElementwiseBinaryOpRank4TestConfig}  ${ElementwiseBinaryOpRank4TestSources})
 
 set (ElementwiseTrinaryOpRank4TestSources ${ElementwiseTrinaryOpCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank4_elementwise_trinary_op_test.cpp)
-set (ElementwiseTrinaryOpRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/trinary_op/rank4_trinary_op_test_params.yaml)
+set (ElementwiseTrinaryOpRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/trinary_op/rank4_trinary_op_test_params.yaml)
 add_hiptensor_test(rank4_elementwise_trinary_op_test ${ElementwiseTrinaryOpRank4TestConfig}  ${ElementwiseTrinaryOpRank4TestSources})
 
 # Rank 5 tests
 set (PermutationRank5TestSources ${PermutationCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank5_elementwise_permute_test.cpp)
-set (PermutationRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/permutation/rank5_test_params.yaml)
+set (PermutationRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/permutation/rank5_test_params.yaml)
 add_hiptensor_test(rank5_elementwise_permute_test ${PermutationRank5TestConfig}  ${PermutationRank5TestSources})
 
 set (ElementwiseBinaryOpRank5TestSources ${ElementwiseBinaryOpCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank5_elementwise_binary_op_test.cpp)
-set (ElementwiseBinaryOpRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/binary_op/rank5_binary_op_test_params.yaml)
+set (ElementwiseBinaryOpRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/binary_op/rank5_binary_op_test_params.yaml)
 add_hiptensor_test(rank5_elementwise_binary_op_test ${ElementwiseBinaryOpRank5TestConfig}  ${ElementwiseBinaryOpRank5TestSources})
 
 set (ElementwiseTrinaryOpRank5TestSources ${ElementwiseTrinaryOpCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank5_elementwise_trinary_op_test.cpp)
-set (ElementwiseTrinaryOpRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/trinary_op/rank5_trinary_op_test_params.yaml)
+set (ElementwiseTrinaryOpRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/trinary_op/rank5_trinary_op_test_params.yaml)
 add_hiptensor_test(rank5_elementwise_trinary_op_test ${ElementwiseTrinaryOpRank5TestConfig}  ${ElementwiseTrinaryOpRank5TestSources})
 
 # Rank 6 tests
 set (PermutationRank6TestSources ${PermutationCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank6_elementwise_permute_test.cpp)
-set (PermutationRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/permutation/rank6_test_params.yaml)
+set (PermutationRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/permutation/rank6_test_params.yaml)
 add_hiptensor_test(rank6_elementwise_permute_test ${PermutationRank6TestConfig}  ${PermutationRank6TestSources})
 
 set (ElementwiseBinaryOpRank6TestSources ${ElementwiseBinaryOpCommonSources}
 	 ${CMAKE_CURRENT_SOURCE_DIR}/rank6_elementwise_binary_op_test.cpp)
-set (ElementwiseBinaryOpRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/binary_op/rank6_binary_op_test_params.yaml)
+set (ElementwiseBinaryOpRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/binary_op/rank6_binary_op_test_params.yaml)
 add_hiptensor_test(rank6_elementwise_binary_op_test ${ElementwiseBinaryOpRank6TestConfig}  ${ElementwiseBinaryOpRank6TestSources})
 
 set (ElementwiseTrinaryOpRank6TestSources ${ElementwiseTrinaryOpCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank6_elementwise_trinary_op_test.cpp)
-set (ElementwiseTrinaryOpRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/trinary_op/rank6_trinary_op_test_params.yaml)
+set (ElementwiseTrinaryOpRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/trinary_op/rank6_trinary_op_test_params.yaml)
 add_hiptensor_test(rank6_elementwise_trinary_op_test ${ElementwiseTrinaryOpRank6TestConfig}  ${ElementwiseTrinaryOpRank6TestSources})
 

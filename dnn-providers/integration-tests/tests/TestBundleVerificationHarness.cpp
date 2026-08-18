@@ -26,6 +26,8 @@
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
@@ -46,23 +48,37 @@ class TestableHarness : public IntegrationBundleVerificationHarness
 public:
     using StubFunc = std::function<void(std::unordered_map<int64_t, void*>&)>;
 
-    explicit TestableHarness(StubFunc stub)
-        : IntegrationBundleVerificationHarness(/*requiresDevice=*/false)
-        , _stub(std::move(stub))
+    explicit TestableHarness(StubFunc engineStub,
+                             bool requiresDevice = false,
+                             hipdnn_integration_tests::VerificationMode mode
+                             = hipdnn_integration_tests::VerificationMode::AUTO)
+        : IntegrationBundleVerificationHarness(requiresDevice)
+        , _engineStub(std::move(engineStub))
+        , _mode(mode)
     {
     }
 
-    using IntegrationBundleVerificationHarness::SetUp;
+    void SetUp() override {}
+
+    using IntegrationBundleVerificationHarness::inputFillRecipes;
     using IntegrationBundleVerificationHarness::TestBody;
 
 protected:
     void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
     {
-        _stub(variantPack);
+        _engineStub(variantPack);
     }
 
+    hipdnn_integration_tests::VerificationMode getVerificationMode() const override
+    {
+        return _mode;
+    }
+
+    void applyMetadataGuards() const override {}
+
 private:
-    StubFunc _stub;
+    StubFunc _engineStub;
+    hipdnn_integration_tests::VerificationMode _mode;
 };
 
 class TestGoldenHarnessFixture : public ::testing::Test
@@ -195,7 +211,141 @@ protected:
     }
 };
 
+// uids: x=1, y=2, scale=3, bias=4, epsilon=5, prev_mean=8, prev_variance=9, momentum=10
+std::shared_ptr<IntegrationTestBundle> makeRuntimePbvFillBundle()
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {3, 1},
+        {2, 3},
+        /*withMeanVariance=*/false,
+        /*overrideShapeEnabled=*/false,
+        /*runtimeEpsilon=*/true,
+        /*withRunningStatsAndMomentum=*/true,
+        /*runtimeMomentum=*/true);
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->graphBuffer = builder.Release();
+    bundle->outputTensorUids = {2};
+    return bundle;
+}
+
+std::shared_ptr<IntegrationTestBundle> makeRuntimePassByValueBundle()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> scalarDims = {1};
+    const std::vector<int64_t> scalarStrides = {1};
+    const std::vector<int64_t> outputDims = {1};
+    const std::vector<int64_t> outputStrides = {1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   1,
+                                                   "epsilon",
+                                                   DataType::FLOAT,
+                                                   &scalarStrides,
+                                                   &scalarDims,
+                                                   false,
+                                                   TensorValue::NONE,
+                                                   0,
+                                                   true));
+    // Ordinary (non-runtime-PBV) input, to prove buildVariantPack still
+    // routes normal tensors to device memory alongside a PBV sibling.
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, 3, "scale", DataType::FLOAT, &scalarStrides, &scalarDims));
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, 2, "output", DataType::FLOAT, &outputStrides, &outputDims));
+
+    const std::vector<flatbuffers::Offset<Node>> nodes;
+    const auto graph = CreateGraphDirect(builder,
+                                         "runtime_pbv",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
+    builder.Finish(graph);
+
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->graphBuffer = builder.Release();
+    bundle->outputTensorUids = {2};
+    return bundle;
+}
+
+TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
+{
+    SKIP_IF_NO_DEVICES();
+    auto bundle = makeRuntimePassByValueBundle();
+    const auto wrapper = bundle->graphWrapper();
+    const auto& tensorAttributes = wrapper.getTensorMap();
+
+    TensorMap inputs;
+    inputs.emplace(1, hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(1)));
+    inputs.at(1)->fillTensorWithValue(0.01f);
+    auto* expectedHostPointer = inputs.at(1)->rawHostData();
+
+    // Ordinary (non-PBV) input: must still route to device even though a PBV
+    // sibling is present in the same variant pack.
+    inputs.emplace(3, hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(3)));
+
+    // Uid with no entry in tensorAttributes at all: buildVariantPack must
+    // default isRuntimePassByValue to false (device pointer) rather than
+    // treating an unknown uid as runtime-PBV.
+    static constexpr int64_t K_UNKNOWN_UID = 99;
+    inputs.emplace(K_UNKNOWN_UID,
+                   hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(3)));
+
+    OutputTensors outputs;
+    outputs.emplace(2, hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(2)));
+    auto variantPack = detail::buildVariantPack(
+        inputs, outputs, tensorAttributes, bundle->outputTensorUids, /*useDevice=*/true);
+
+    ASSERT_EQ(variantPack.at(1), expectedHostPointer);
+    EXPECT_FLOAT_EQ(*static_cast<const float*>(variantPack.at(1)), 0.01f);
+    EXPECT_EQ(variantPack.at(3), inputs.at(3)->rawDeviceData());
+    EXPECT_EQ(variantPack.at(K_UNKNOWN_UID), inputs.at(K_UNKNOWN_UID)->rawDeviceData());
+    EXPECT_EQ(variantPack.at(2), outputs.at(2)->rawDeviceData());
+}
 } // namespace
+
+// Full harness seam: start with graph metadata only, then prove allocation,
+// fixed/random fill, and host-pointer delivery all happen before execute.
+TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreFilledEndToEnd)
+{
+    const auto runHarness = [&](float& epsilon, float& momentum) {
+        ::testing::TestPartResultArray results;
+        const auto execute = [&](std::unordered_map<int64_t, void*>& variantPack) {
+            epsilon = *static_cast<const float*>(variantPack.at(5));
+            momentum = *static_cast<const float*>(variantPack.at(10));
+            EXPECT_GE(momentum, 0.0f);
+            EXPECT_LE(momentum, 1.0f);
+            throw hipdnn_integration_tests::EngineNotApplicableError(
+                "value-capture stub completed");
+        };
+        TestableHarness harness(execute);
+
+        auto bundle = makeRuntimePbvFillBundle();
+        harness.setBundle(std::move(bundle), "runtime-pbv-fill");
+        harness.inputFillRecipes().setGlobalSeed(42);
+
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+        harness.TestBody();
+        EXPECT_TRUE(anySkipped(results));
+        EXPECT_FALSE(anyFailed(results));
+    };
+
+    float firstEpsilon = 0.0f;
+    float firstMomentum = 0.0f;
+    runHarness(firstEpsilon, firstMomentum);
+    EXPECT_FLOAT_EQ(firstEpsilon, 1e-5f);
+
+    float secondEpsilon = 0.0f;
+    float secondMomentum = 0.0f;
+    runHarness(secondEpsilon, secondMomentum);
+    EXPECT_FLOAT_EQ(secondEpsilon, 1e-5f);
+    EXPECT_FLOAT_EQ(secondMomentum, firstMomentum);
+}
 
 // An executor that throws ("unsupported graph") must yield a SKIP, not a FAIL —
 // the harness translates the throw into GTEST_SKIP.

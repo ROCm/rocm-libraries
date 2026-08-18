@@ -173,9 +173,10 @@ class DeepFusedConvPoolSpec:
     def conv_spec(self) -> ImplicitGemmConvSpec:
         # ``epilogue_override`` owns the entire write-back for both families, so
         # the built-in epilogue is dead code; ``epilogue`` here only selects the
-        # ``is_valid`` gate. The WMMA conv gate accepts only ``default`` while
-        # the MFMA path historically used ``cshuffle`` -- keep MFMA byte-exact.
-        epilogue = "default" if self.wave_size == 32 else "cshuffle"
+        # ``is_valid`` gate. The default-epilogue gate rejects vec_c > 1, and
+        # vec_c = largest power-of-2 divisor of K, so use cshuffle whenever K
+        # is even (vec_c >= 2) and default only when K is odd (vec_c = 1).
+        epilogue = "default" if self.problem.conv.K % 2 != 0 else "cshuffle"
         conv_name = kernel_name_join(
             self.name,
             (
@@ -231,6 +232,7 @@ def make_deep_fused_conv_pool_spec(
     async_dma: bool = False,
     cache_input_footprint: bool = False,
     direct_conv0_from_input_cache: bool = False,
+    epilogue: Optional[str] = None,
 ) -> DeepFusedConvPoolSpec:
     """Build a deep-fusion spec, auto-deriving the constrained ``tile_m``.
 

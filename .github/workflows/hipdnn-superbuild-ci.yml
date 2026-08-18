@@ -10,9 +10,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
+      - '.github/workflows/hipdnn-superbuild-ci.yml'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
-
 permissions:
   contents: read
 
@@ -28,8 +28,8 @@ jobs:
       run:
         shell: bash
     env:
-      BUILD_DIR: B:\build
       VENV_PATH: B:\rocm_wheels
+      THIRD_PARTY_DEPS_DIR: B:\third-party-deps
       GPU_TARGET: gfx1151
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx1151
@@ -81,7 +81,7 @@ jobs:
       - name: Install build tools
         run: |
           choco source disable -n=chocolatey
-          choco source add -n=internal -s http://10.0.167.96:8081/repository/choco-group/ --priority=1
+          choco source add -n=internal -s http://nexus-service.nexus-ns.svc.cluster.local:8081/repository/choco-group/ --priority=1
           choco install --no-progress -y ccache
           choco install --no-progress -y ninja --version 1.12.1
 
@@ -110,26 +110,84 @@ jobs:
           & "$env:VENV_PATH\Scripts\python.exe" .github/scripts/check_wheel_freshness.py --max-age-days 14
           if ($LASTEXITCODE -ne 0) { throw "ROCm nightly wheels are stale" }
 
+      - name: Download third-party dependency sources
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          & $python projects/hipdnn/python/download_third_party_deps.py `
+            --deps-dir $env:THIRD_PARTY_DEPS_DIR
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
+
       - name: Configure superbuild
         run: |
-          cmake --preset hipdnn-providers-all -GNinja \
+          cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
-            -DENABLE_CLANG_TIDY=OFF
+            -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DENABLE_CLANG_TIDY=OFF \
+            -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
+            -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
+            -DPython_EXECUTABLE="$VENV_PATH/Scripts/python.exe"
 
       - name: Build
         run: cmake --build build
 
-      # Windows tests have a few issues where we are loading plugins and thats causing issues with super build tests
-      # as they end up trying to init a gpu on a non gpu machine.  This work is ticketed to be fixed later.
-      #- name: Add ROCm bin to PATH
-      #  run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
+      - name: Add ROCm bin to PATH
+        run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
-      #- name: Run tests
-      #  run: ctest --test-dir build --output-on-failure
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Patch ROCm SDK with superbuild outputs
+        shell: pwsh
+        run: |
+          cmake --install build --prefix $env:ROCM_SDK_PATH
+          # On Windows, rocm_sdk.initialize_process() preloads "hipdnn" by base
+          # name before the extension module is imported (Windows extension
+          # loading ignores PATH), resolving it via the sibling
+          # _rocm_sdk_libraries package -- not the _rocm_sdk_devel prefix
+          # patched above. Without also patching _rocm_sdk_libraries, that
+          # preload keeps loading the stale nightly-wheel hipdnn_backend.dll
+          # and every superbuild fix here goes untested.
+          $librariesPath = $env:ROCM_SDK_PATH -replace '_rocm_sdk_devel$', '_rocm_sdk_libraries'
+          cmake --install build --prefix $librariesPath
+
+      - name: Install Python build dependencies
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          & $python -m pip install --upgrade build numpy pytest
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install Python build dependencies" }
+
+      - name: Pack frontend wheel
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          & $python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py `
+            --build-dir build `
+            --wheel-dir (Join-Path "build" "wheel_package")
+
+      - name: Install frontend wheel
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          $wheel = Get-ChildItem (Join-Path "build" "wheel_package\hipdnn_frontend-*.whl") | Select-Object -First 1
+          if (-not $wheel) { throw "No hipdnn_frontend wheel found" }
+          & $python -m pip install --force-reinstall $wheel.FullName
+
+      - name: Run frontend wheel tests
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          $env:ROCM_PATH = $env:ROCM_SDK_PATH
+          $env:HIP_PATH = $env:ROCM_SDK_PATH
+          $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:ROCM_SDK_PATH/lib;$env:PATH"
+          & $python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
@@ -163,7 +221,9 @@ jobs:
             test
 
       - name: Set environment
-        run: echo "VENV_PATH=${{ runner.temp }}/rocm_wheels" >> "$GITHUB_ENV"
+        run: |
+          echo "VENV_PATH=${{ runner.temp }}/rocm_wheels" >> "$GITHUB_ENV"
+          echo "THIRD_PARTY_DEPS_DIR=${{ runner.temp }}/third-party-deps" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -200,22 +260,62 @@ jobs:
         run: |
           "$VENV_PATH/bin/python" .github/scripts/check_wheel_freshness.py --max-age-days 14
 
+      - name: Download third-party dependency sources
+        run: |
+          set -euo pipefail
+          "$VENV_PATH/bin/python" projects/hipdnn/python/download_third_party_deps.py \
+            --deps-dir "$THIRD_PARTY_DEPS_DIR"
+
       - name: Configure superbuild
         run: |
-          cmake --preset hipdnn-providers-all -GNinja \
+          cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
-            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20
+            -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
+            -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
+            -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
+            -DPython_EXECUTABLE="$VENV_PATH/bin/python"
 
       - name: Build
         run: cmake --build build
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Patch ROCm SDK with superbuild outputs
+        run: cmake --install build --prefix "$ROCM_SDK_PATH"
+
+      - name: Install Python build dependencies
+        run: |
+          set -euo pipefail
+          "$VENV_PATH/bin/python" -m pip install --upgrade build numpy pytest
+
+      - name: Pack frontend wheel
+        run: |
+          "$VENV_PATH/bin/python" projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
+            --build-dir build \
+            --wheel-dir build/wheel_package
+
+      - name: Install frontend wheel
+        run: |
+          set -euo pipefail
+          wheel=$(ls build/wheel_package/hipdnn_frontend-*.whl)
+          "$VENV_PATH/bin/python" -m pip install --force-reinstall "$wheel"
+
+      - name: Run frontend wheel tests
+        run: |
+          # ROCM_PATH is what conftest.py resolves test_good_plugin from;
+          # LD_LIBRARY_PATH is how the wheel's extension finds libhipdnn_backend.
+          ROCM_PATH="$ROCM_SDK_PATH" \
+            LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
+            "$VENV_PATH/bin/python" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary

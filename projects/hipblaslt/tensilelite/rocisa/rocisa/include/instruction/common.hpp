@@ -293,7 +293,7 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["s_add_u64"])
+            if(capOrDefault(getAsmCaps(), "s_add_u64"))
             {
                 instructions = {std::make_shared<_SAddU64>(dst, srcs, comment)};
             }
@@ -1612,8 +1612,8 @@ namespace rocisa
             , separate(separate)
             , wait(wait)
             , clusterBarrier(clusterBarrier)
-            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
-            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
+            , hasNewBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasNewBarrier")))
+            , hasClusterBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasClusterBarrier")))
         {
             if(hasNewBarrier)
             {
@@ -1709,8 +1709,8 @@ namespace rocisa
                               const std::string& comment = "")
             : Instruction(InstType::INST_NOTYPE, comment)
             , clusterBarrier(clusterBarrier)
-            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
-            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
+            , hasNewBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasNewBarrier")))
+            , hasClusterBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasClusterBarrier")))
         {
             int code = -1;
             if(hasClusterBarrier and clusterBarrier)
@@ -2340,12 +2340,12 @@ namespace rocisa
             {
                 if(lgkmcnt != -1)
                 {
-                    int maxLgkmcnt = getAsmCaps()["MaxLgkmcnt"];
+                    int maxLgkmcnt = capOrDefault(getAsmCaps(), "MaxLgkmcnt");
                     waitStr = "lgkmcnt(" + std::to_string(std::min(lgkmcnt, maxLgkmcnt)) + ")";
                 }
                 if(vmcnt != -1)
                 {
-                    int maxVmcnt = getAsmCaps()["MaxVmcnt"];
+                    int maxVmcnt = capOrDefault(getAsmCaps(), "MaxVmcnt");
                     waitStr += (waitStr != "" ? ", " : "");
                     waitStr += "vmcnt(" + std::to_string(std::min(vmcnt, maxVmcnt)) + ")";
                 }
@@ -2404,7 +2404,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            int maxVscnt = getAsmCaps()["MaxVscnt"];
+            int maxVscnt = capOrDefault(getAsmCaps(), "MaxVscnt");
             return formatWithComment("s_waitcnt_vscnt null "
                                      + std::to_string(std::min(vscnt, maxVscnt)));
         }
@@ -2456,7 +2456,7 @@ namespace rocisa
         {
             std::string kStr;
             setMsb(kStr, {}, nullptr);
-            int maxStorecnt = getAsmCaps()["MaxStorecnt"];
+            int maxStorecnt = capOrDefault(getAsmCaps(), "MaxStorecnt");
             return formatWithComment("s_wait_storecnt "
                                      + std::to_string(std::min(storecnt, maxStorecnt)));
         }
@@ -2468,6 +2468,60 @@ namespace rocisa
 
     private:
         int storecnt;
+    };
+
+    // Wait for outstanding async global stores (e.g. global_store_async_from_lds*)
+    // to complete. These are tracked by the dedicated ASYNC counter, NOT
+    // dscnt/storecnt -- emit `s_wait_asynccnt 0` before reusing the LDS staging
+    // region or before s_endpgm.
+    struct _SWaitAsynccnt : public Instruction
+    {
+        _SWaitAsynccnt(int asynccnt = -1, const std::string& comment = "")
+            : Instruction(InstType::INST_SWAIT, comment)
+            , asynccnt(asynccnt)
+        {
+        }
+
+        _SWaitAsynccnt(const _SWaitAsynccnt& other)
+            : Instruction(other)
+            , asynccnt(other.asynccnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_SWaitAsynccnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {asynccnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {asynccnt};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
+            return formatWithComment("s_wait_asynccnt " + std::to_string(asynccnt));
+        }
+
+        int getAsynccnt() const
+        {
+            return asynccnt;
+        }
+
+    private:
+        int asynccnt;
     };
 
     struct _SWaitLoadcnt : public Instruction
@@ -2508,7 +2562,7 @@ namespace rocisa
         {
             std::string kStr;
             setMsb(kStr, {}, nullptr);
-            int maxLoadcnt = getAsmCaps()["MaxLoadcnt"];
+            int maxLoadcnt = capOrDefault(getAsmCaps(), "MaxLoadcnt");
             return formatWithComment("s_wait_loadcnt "
                                      + std::to_string(std::min(loadcnt, maxLoadcnt)));
         }
@@ -2565,7 +2619,7 @@ namespace rocisa
         {
             std::string kStr;
             setMsb(kStr, {}, nullptr);
-            int maxKmcnt = getAsmCaps()["MaxKmcnt"];
+            int maxKmcnt = capOrDefault(getAsmCaps(), "MaxKmcnt");
             return formatWithComment("s_wait_kmcnt " + std::to_string(std::min(kmcnt, maxKmcnt)));
         }
 
@@ -2611,7 +2665,7 @@ namespace rocisa
         {
             std::string kStr;
             setMsb(kStr, {}, nullptr);
-            int maxDscnt = getAsmCaps()["MaxDscnt"];
+            int maxDscnt = capOrDefault(getAsmCaps(), "MaxDscnt");
             return formatWithComment("s_wait_dscnt " + std::to_string(std::min(dscnt, maxDscnt)));
         }
 
@@ -2674,7 +2728,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            const auto caps    = getAsmCaps();
+            const auto& caps   = getAsmCaps();
             const auto it      = caps.find("MaxXcnt");
             const int  maxXcnt = (it != caps.end()) ? it->second : 63;
             return formatWithComment("s_wait_xcnt " + std::to_string(std::min(xcnt, maxXcnt)));
@@ -2764,7 +2818,7 @@ namespace rocisa
             std::string comment = this->comment;
 
             // Currently these two capabilities should be both enabled or disabled together
-            assert(getAsmCaps()["SeparateVMcnt"] == getAsmCaps()["SeparateLGKMcnt"]);
+            assert(capOrDefault(getAsmCaps(), "SeparateVMcnt") == capOrDefault(getAsmCaps(), "SeparateLGKMcnt"));
 
             if(waitAll)
             {
@@ -2777,7 +2831,7 @@ namespace rocisa
 
             std::vector<std::shared_ptr<Instruction>> instructions;
 
-            if(getAsmCaps()["SeparateVscnt"])
+            if(capOrDefault(getAsmCaps(), "SeparateVscnt"))
             {
                 int lgkmcnt = (dscnt != -1 || kmcnt != -1)
                                   ? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0)
@@ -2792,7 +2846,7 @@ namespace rocisa
                     instructions.push_back(std::make_shared<_SWaitCntVscnt>(vscnt, comment));
                 }
             }
-            else if(getAsmCaps()["SeparateVMcnt"] && getAsmCaps()["SeparateLGKMcnt"])
+            else if(capOrDefault(getAsmCaps(), "SeparateVMcnt") && capOrDefault(getAsmCaps(), "SeparateLGKMcnt"))
             {
                 if(dscnt != -1)
                 {
@@ -2947,7 +3001,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            if(!getArchCaps()["HasSchedMode"])
+            if(!capOrDefault(getArchCaps(), "HasSchedMode"))
                 return "";
 
             std::string result;
@@ -3098,7 +3152,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            if(!getAsmCaps()["s_delay_alu"])
+            if(!capOrDefault(getAsmCaps(), "s_delay_alu"))
                 return "";
 
             std::string result;
@@ -3472,7 +3526,7 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["v_add_nc_u64"])
+            if(capOrDefault(getAsmCaps(), "v_add_nc_u64"))
             {
                 instructions = {std::make_shared<_VAddNCU64>(dst, srcs, comment)};
             }
@@ -3571,8 +3625,10 @@ namespace rocisa
         VAddPKF32(const std::shared_ptr<Container>& dst,
                   const InstructionInput&           src0,
                   const InstructionInput&           src1,
+                  std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                   const std::string&                comment = "")
             : CompositeInstruction(InstType::INST_F32, dst, {src0, src1}, comment)
+            , vop3(vop3)
         {
             setInst("v_pk_add_f32");
         }
@@ -3580,9 +3636,9 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["v_pk_add_f32"])
+            if(capOrDefault(getAsmCaps(), "v_pk_add_f32"))
             {
-                instructions = {std::make_shared<_VAddPKF32>(dst, srcs, std::nullopt, comment)};
+                instructions = {std::make_shared<_VAddPKF32>(dst, srcs, vop3, comment)};
             }
             else
             {
@@ -3591,15 +3647,50 @@ namespace rocisa
                 std::vector<InstructionInput> srcs1;
                 std::vector<InstructionInput> srcs2;
                 splitSrcs(srcs, srcs1, srcs2);
-                instructions
-                    = {std::make_shared<VAddF32>(dst1, srcs1, std::nullopt, std::nullopt, comment),
-                       std::make_shared<VAddF32>(dst2, srcs2, std::nullopt, std::nullopt, comment)};
+                if(!vop3)
+                {
+                    instructions = {
+                        std::make_shared<VAddF32>(dst1, srcs1, std::nullopt, std::nullopt, comment),
+                        std::make_shared<VAddF32>(dst2, srcs2, std::nullopt, std::nullopt, comment)};
+                }
+                else
+                {
+                    if(vop3->op_sel.size() > 0)
+                    {
+                        assert(vop3->op_sel.size() == 3);
+                    }
+                    if(vop3->op_sel_hi.size() > 0)
+                    {
+                        assert(vop3->op_sel_hi.size() == 3);
+                    }
+                    if(!vop3->byte_sel.empty())
+                    {
+                        throw std::runtime_error("Byte sel not supported");
+                    }
+                    auto lowDst = !vop3->op_sel.empty() && vop3->op_sel[2] == 1 ? dst2 : dst1;
+                    auto lowSrc1
+                        = !vop3->op_sel.empty() && vop3->op_sel[0] == 1 ? srcs2[0] : srcs1[0];
+                    auto lowSrc2
+                        = !vop3->op_sel.empty() && vop3->op_sel[1] == 1 ? srcs2[1] : srcs1[1];
+                    auto highDst
+                        = !vop3->op_sel_hi.empty() && vop3->op_sel_hi[2] == 0 ? dst1 : dst2;
+                    auto highSrc1
+                        = !vop3->op_sel_hi.empty() && vop3->op_sel_hi[0] == 0 ? srcs1[0] : srcs2[0];
+                    auto highSrc2
+                        = !vop3->op_sel_hi.empty() && vop3->op_sel_hi[1] == 0 ? srcs1[1] : srcs2[1];
+                    std::vector<InstructionInput> lowSrcs  = {lowSrc1, lowSrc2};
+                    std::vector<InstructionInput> highSrcs = {highSrc1, highSrc2};
+                    instructions
+                        = {std::make_shared<VAddF32>(lowDst, lowSrcs, std::nullopt, std::nullopt, comment),
+                           std::make_shared<VAddF32>(highDst, highSrcs, std::nullopt, std::nullopt, comment)};
+                }
             }
             return std::move(instructions);
         }
 
         VAddPKF32(const VAddPKF32& other)
             : CompositeInstruction(other)
+            , vop3(other.vop3)
         {
         }
 
@@ -3607,6 +3698,9 @@ namespace rocisa
         {
             return std::make_shared<VAddPKF32>(*this);
         }
+
+    private:
+        std::optional<VOP3PModifiers> vop3;
     };
 
     struct VAdd3U32 : public CommonInstruction
@@ -3822,7 +3916,7 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["v_pk_mul_f32"])
+            if(capOrDefault(getAsmCaps(), "v_pk_mul_f32"))
             {
                 instructions
                     = {std::make_shared<_VMulPKF32>(dst, srcs, std::nullopt, vop3, comment)};
@@ -4178,16 +4272,16 @@ namespace rocisa
                 InstType::INST_F32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
             , addDstToSrc(false)
         {
-            if(getAsmCaps()["v_fmac_f32"])
+            if(capOrDefault(getAsmCaps(), "v_fmac_f32"))
             {
                 setInst("v_fmac_f32");
             }
-            else if(getAsmCaps()["v_fma_f32"])
+            else if(capOrDefault(getAsmCaps(), "v_fma_f32"))
             {
                 addDstToSrc = true;
                 setInst("v_fmac_f32");
             }
-            else if(getAsmCaps()["v_mac_f32"])
+            else if(capOrDefault(getAsmCaps(), "v_mac_f32"))
             {
                 setInst("v_mac_f32");
             }
@@ -4469,6 +4563,86 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VFmaF32>(*this);
+        }
+    };
+
+    struct _VFmaPKF32 : public CommonInstruction
+    {
+        _VFmaPKF32(const std::shared_ptr<Container>& dst,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   const InstructionInput&           src2,
+                   std::optional<VOP3PModifiers>     vop3    = std::nullopt,
+                   const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F32, dst, {src0, src1, src2}, std::nullopt, std::nullopt, vop3, comment)
+        {
+            setInst("v_pk_fma_f32");
+        }
+
+        _VFmaPKF32(const std::shared_ptr<Container>&    dst,
+                   const std::vector<InstructionInput>& srcs,
+                   std::optional<VOP3PModifiers>        vop3    = std::nullopt,
+                   const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_F32, dst, srcs, std::nullopt, std::nullopt, vop3, comment)
+        {
+            setInst("v_pk_fma_f32");
+        }
+
+        _VFmaPKF32(const _VFmaPKF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_VFmaPKF32>(*this);
+        }
+    };
+
+    struct VFmaPKF32 : public CompositeInstruction
+    {
+        VFmaPKF32(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const InstructionInput&           src2,
+                  const std::string&                comment = "")
+            : CompositeInstruction(InstType::INST_F32, dst, {src0, src1, src2}, comment)
+        {
+            setInst("v_pk_fma_f32");
+        }
+
+        std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
+        {
+            std::vector<std::shared_ptr<Instruction>> instructions;
+            if(capOrDefault(getAsmCaps(), "v_pk_fma_f32"))
+            {
+                instructions = {std::make_shared<_VFmaPKF32>(dst, srcs, std::nullopt, comment)};
+            }
+            else
+            {
+                auto [dst1, dst2]
+                    = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
+                std::vector<InstructionInput> srcs1;
+                std::vector<InstructionInput> srcs2;
+                splitSrcs(srcs, srcs1, srcs2);
+                instructions = {std::make_shared<VFmaF32>(
+                                    dst1, srcs1[0], srcs1[1], srcs1[2], std::nullopt, comment),
+                                std::make_shared<VFmaF32>(
+                                    dst2, srcs2[0], srcs2[1], srcs2[2], std::nullopt, comment)};
+            }
+            return std::move(instructions);
+        }
+
+        VFmaPKF32(const VFmaPKF32& other)
+            : CompositeInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VFmaPKF32>(*this);
         }
     };
 
@@ -5546,7 +5720,7 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["HasLshlOr"])
+            if(capOrDefault(getAsmCaps(), "HasLshlOr"))
             {
                 std::vector<InstructionInput> srcs1 = {srcs[1], srcs[0], srcs[2]};
                 instructions = {std::make_shared<_VLShiftLeftOrB32>(dst, srcs1, comment)};
@@ -5625,7 +5799,7 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["HasAddLshl"])
+            if(capOrDefault(getAsmCaps(), "HasAddLshl"))
             {
                 instructions = {std::make_shared<_VAddLShiftLeftU32>(dst, srcs, comment)};
             }
@@ -5713,7 +5887,7 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["HasAddLshl"])
+            if(capOrDefault(getAsmCaps(), "HasAddLshl"))
             {
                 std::vector<InstructionInput> srcs1 = {srcs[0], srcs[2], srcs[1]};
                 instructions
@@ -5843,7 +6017,7 @@ namespace rocisa
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
             std::vector<std::shared_ptr<Instruction>> instructions;
-            if(getAsmCaps()["v_mov_b64"])
+            if(capOrDefault(getAsmCaps(), "v_mov_b64"))
             {
                 instructions = {std::make_shared<_VMovB64>(dst, srcs, comment)};
             }

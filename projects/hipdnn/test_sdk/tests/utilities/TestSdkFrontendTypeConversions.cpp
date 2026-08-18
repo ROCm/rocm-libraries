@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <stdexcept>
+
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 using hipdnn_test_sdk::utilities::createTensor;
@@ -145,6 +148,63 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorBoolean)
     EXPECT_EQ(tensor->dims(), dims);
     EXPECT_EQ(tensor->strides(), strides);
     EXPECT_EQ(tensor->elementSize(), sizeof(bool));
+}
+
+TEST(TestSdkFrontendTypeConversions, CreateTensorFp4UnpackedByDefault)
+{
+    const std::vector<int64_t> dims = {2, 4};
+    const std::vector<int64_t> strides = {4, 1};
+
+    auto tensor = createTensor(fe::DataType::FP4_E2M1, dims, strides);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), dims);
+    EXPECT_EQ(tensor->strides(), strides);
+    // Unpacked: one 4-bit code per byte, so per-element size is well-defined.
+    EXPECT_EQ(tensor->elementSize(), sizeof(hipdnn_data_sdk::types::fp4_e2m1));
+}
+
+TEST(TestSdkFrontendTypeConversions, CreateTensorFp4PackedWhenRequested)
+{
+    const std::vector<int64_t> dims = {2, 4};
+    const std::vector<int64_t> strides = {4, 1};
+
+    auto tensor = createTensor(fe::DataType::FP4_E2M1, dims, strides, /*packSubByteElements=*/true);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), dims);
+    // The packed FP4 variant stores two values per byte and has no integer
+    // per-element size, which distinguishes it from the unpacked tensor.
+    EXPECT_THROW(tensor->elementSize(), std::logic_error);
+}
+
+TEST(TestSdkFrontendTypeConversions, PackSubByteElementsIgnoredForNonSubByteTypes)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    // packSubByteElements only affects sub-byte types; a float tensor is unaffected.
+    auto tensor = createTensor(fe::DataType::FLOAT, dims, strides, /*packSubByteElements=*/true);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->elementSize(), sizeof(float));
+}
+
+TEST(TestSdkFrontendTypeConversions, PackSubByteElementsThrowsForUnimplementedSubByteTypes)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    EXPECT_THROW(createTensor(fe::DataType::INT4, dims, strides, /*packSubByteElements=*/true),
+                 std::runtime_error);
+    EXPECT_THROW(createTensor(fe::DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true),
+                 std::runtime_error);
+    EXPECT_THROW(createTensor(fe::DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true),
+                 std::runtime_error);
+
+    EXPECT_NO_THROW(createTensor(fe::DataType::INT4, dims, strides));
+    EXPECT_NO_THROW(createTensor(fe::DataType::FP6_E2M3, dims, strides));
+    EXPECT_NO_THROW(createTensor(fe::DataType::FP6_E3M2, dims, strides));
 }
 
 // ============================================================================

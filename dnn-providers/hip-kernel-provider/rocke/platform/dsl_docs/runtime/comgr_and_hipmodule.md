@@ -166,7 +166,7 @@ extra[] = {
 }
 ```
 
-`args_bytes` is the packed arg buffer (built by `runtime/torch_module.py::pack_args` from the signature dict list). For an `(A, B, C, M, N, K)` GEMM:
+`args_bytes` is the packed arg buffer (built by `runtime/packing.py::pack_args` from the signature dict list). For an `(A, B, C, M, N, K)` GEMM:
 
 ```text
 struct.pack("<QQQiii", A_dev, B_dev, C_dev, M, N, K)
@@ -193,7 +193,7 @@ For everyday DSL use, `KernelLauncher` and `compile_kernel` are the right abstra
 - You need fine-grained event control across multiple streams.
 - You're debugging a launch failure and want to inspect packed args + grid + block + stream manually.
 
-Numpy-only paths (the manifest runner) go through `Runtime.alloc` / `memcpy_h2d` / `launch` / `memcpy_d2h` directly with `struct.pack`-built args. Torch paths go through `runtime/torch_module.pack_args` + `KernelLauncher`. Both end up at the same `hipModuleLaunchKernel`.
+Numpy-only paths (the manifest runner) go through `Runtime.alloc` / `memcpy_h2d` / `launch` / `memcpy_d2h` directly with `struct.pack`-built args. Torch paths go through `runtime/packing.pack_args` + `KernelLauncher`. Both end up at the same `hipModuleLaunchKernel`.
 
 ## Common Failure Modes
 

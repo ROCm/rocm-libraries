@@ -67,7 +67,6 @@ public:
                   hipblaslt_internal_ostream& val_line,
                   const Arguments&            arg,
                   double                      gpu_us,
-                  double                      flush_us,
                   double                      gflops,
                   double                      gbytes,
                   double                      cpu_us,
@@ -82,20 +81,12 @@ public:
 
         constexpr bool has_batch_count = has(e_batch_count);
         int64_t        batch_count     = has_batch_count ? arg.batch_count : 1;
-        int64_t        hot_calls       = arg.iters < 1 ? 1 : arg.iters;
 
-        // gpu time is total cumulative over hot calls, cpu is not
-        if(hot_calls > 1)
-            gpu_us /= hot_calls;
-
-        if(flush_us > 0)
-        {
-            gpu_us -= flush_us;
-        }
-
-        // per/us to per/sec *10^6
-        double hipblaslt_gflops = gflops * batch_count / gpu_us * 1e6;
-        double hipblaslt_GBps   = gbytes / gpu_us * 1e6;
+        // both gpu_us and cpu_us are per-call time
+        double hipblaslt_gflops = hipblaslt_bench::rate_per_second(
+            gflops * batch_count, gpu_us, ArgumentLogging::NA_value);
+        double hipblaslt_GBps
+            = hipblaslt_bench::rate_per_second(gbytes, gpu_us, ArgumentLogging::NA_value);
 
         // append performance fields
         if(gflops != ArgumentLogging::NA_value)
@@ -180,7 +171,6 @@ public:
                   uint32_t                    splitK,
                   uint32_t                    wgm,
                   double                      gpu_us,
-                  double                      flush_us,
                   double                      gflops,
                   double                      gbytes = ArgumentLogging::NA_value,
                   double                      cpu_us = ArgumentLogging::NA_value,
@@ -289,7 +279,6 @@ public:
                      value_list,
                      arg,
                      gpu_us,
-                     flush_us,
                      gflops,
                      gbytes,
                      cpu_us,

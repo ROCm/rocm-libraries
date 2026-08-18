@@ -75,7 +75,7 @@ After the agent finishes, go through the output before opening a PR:
 **Optional (if applicable):**
 
 - **End-user sample** under `samples/<op>/` — add if an engine is available for the op. Wrap `graph->build(handle)` with `HIPDNN_FE_CHECK_SKIPPABLE` so the test is gracefully skipped when no engine supports the configuration. See `samples/convolution/ConvFprop.cpp` as a template.
-- **Python bindings** — the one piece the agent does not generate automatically. Add a `.def(...)` line in `python/src/graph_bindings.cpp` and register the attributes class in `python/src/attributes_bindings.cpp` (check that file for the current curated set). You can also explicitly ask the agent to do this before it finishes.
+- **Python bindings** — the one piece the agent does not generate automatically. Add a `.def(...)` line in `python/frontend_bindings/src/graph_bindings.cpp` and register the attributes class in `python/frontend_bindings/src/attributes_bindings.cpp` (check that file for the current curated set). You can also explicitly ask the agent to do this before it finishes.
 
 ## PR Checklist
 
@@ -179,7 +179,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | Frontend node class | `frontend/include/hipdnn_frontend/node/MatmulNode.hpp` |
 | Frontend Graph API | `frontend/include/hipdnn_frontend/Graph.hpp` (`Graph::matmul(...)`) |
 | JSON utility | `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp` |
-| Python bindings (optional) | `python/src/graph_bindings.cpp`, `python/src/attributes_bindings.cpp` |
+| Python bindings (optional) | `python/frontend_bindings/src/graph_bindings.cpp`, `python/frontend_bindings/src/attributes_bindings.cpp` |
 | Backend descriptor unit test | `backend/tests/descriptors/TestMatmulOperationDescriptor.cpp` |
 | Backend fromNode test | `backend/tests/descriptors/TestMatmulOperationFromNode.cpp` |
 | Backend graph descriptor test | `backend/tests/descriptors/TestGraphDescriptorMatmul.cpp` |

@@ -108,6 +108,22 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
+# Special floating-point inputs on 64x64, FP types only. The inf, neg_inf and nan cases exercise
+# check_special_value_consistency(): CPU and GPU must agree on the IEEE class (no Inf->NaN).
+# The zero and neg_zero cases are ordinary initialization coverage that flows through the normal
+# unit check; the consistency check does not inspect the sign of zero.
+- name: matmul_special_fp_64x64
+  category: pre_checkin
+  function:
+    matmul: *floating_point_precisions_special_fp
+  matrix_size:
+    - { M: 64, N: 64, K: 64 }
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: [ zero, neg_zero, inf, neg_inf, nan ]
+
 # ROCM-1545: hipblasLtMatmul with INF inputs and computeType HIPBLAS_COMPUTE_32F_FAST_TF32
 # returns NaN on gfx950 (MI355). This test expects correct behavior (no NaN in output).
 - {name: matmul_tf32_inf_ROCM1545, category: pre_checkin, precision: *xf32_precision,
@@ -363,7 +379,7 @@ Tests:
   matrix_size: *medium_matrix_size_range
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_batch_medium
   category: pre_checkin
@@ -383,7 +399,7 @@ Tests:
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
   batch_count: 10
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 
 - name: matmul_medium_HMM
@@ -557,7 +573,7 @@ Tests:
   K: 16
   alpha_beta: *complex_alpha_beta_range
   transA_transB: *complex_transA_transB_range
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_24
   category: pre_checkin
@@ -599,7 +615,7 @@ Tests:
   K: 32
   alpha_beta: *complex_alpha_beta_range
   transA_transB: *complex_transA_transB_range
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_48_8_128
   category: nightly
@@ -3000,7 +3016,7 @@ Tests:
   K: 96
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_256_8_16_complex
   category: pre_checkin
@@ -3011,7 +3027,7 @@ Tests:
   K: 16
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_2001_5431_3004_complex
   category: pre_checkin
@@ -3022,7 +3038,7 @@ Tests:
   K: 3004
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_1093_141_7011_complex
   category: pre_checkin
@@ -3033,7 +3049,7 @@ Tests:
   K: 7011
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_4097_2187_2653_complex
   category: pre_checkin
@@ -3044,7 +3060,7 @@ Tests:
   K: 2653
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_one_bf16_fp32dst_precision_gfx90a
   category: quick
@@ -3272,7 +3288,7 @@ Tests:
   bias_vector: 1
   scaleAlpha_vector: 1
   activation_type: [none, relu, gelu, sigmoid, swish]
-  initialization: trig_float
+  initialization: uniform_01
   unit_check: 0
   norm_check: 1
   requested_solution_num: 1
@@ -3326,5 +3342,212 @@ Tests:
   norm_check: 1
   requested_solution_num: 10
   gpu_arch: '950'
+
+# ==============================================================================
+# Batch Offset Tests - 64-bit offset support for general batched GEMM
+# ==============================================================================
+
+# Quick validation test - verifies basic offset functionality
+- name: matmul_batch_offset_quick
+  category: quick
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA: N
+  transB: N
+  M: 256
+  N: 128
+  K: 64
+  lda: 256
+  ldb: 64
+  ldc: 256
+  ldd: 256
+  batch_mode: 1  # Pointer array mode
+  batch_count: 2
+  batch_offset_a: 0
+  batch_offset_b: 64
+  batch_offset_c: 128
+  batch_offset_d: 256
+  alpha: 1.0
+  beta: 0.0
+  unit_check: 1
+  norm_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Offset variation test - various offset values
+# Note: Uses M=256 to avoid known General Batched GEMM issue with larger sizes
+- name: matmul_batch_offset_values
+  category: pre_checkin
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA: N
+  transB: N
+  M: 256
+  N: 128
+  K: 128
+  lda: 256
+  ldb: 128
+  ldc: 256
+  ldd: 256
+  batch_mode: 1
+  batch_count: 3
+  batch_offset_a: [0, 64, 256, 512]
+  batch_offset_b: [0, 64, 256, 512]
+  batch_offset_c: [0, 64, 256, 512]
+  batch_offset_d: [0, 64, 256, 512]
+  alpha: 1.0
+  beta: [0.0, 1.0]
+  unit_check: 1
+  norm_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Transpose with offset
+# Note: lda/ldb must be valid for all transpose combinations
+# For transA=N: lda >= M, for transA=T: lda >= K
+# For transB=N: ldb >= K, for transB=T: ldb >= N
+# Using max(M,K)=256 for lda and max(K,N)=256 for ldb to cover all cases
+- name: matmul_batch_offset_transpose
+  category: pre_checkin
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA: [N, T]
+  transB: [N, T]
+  M: 256
+  N: 256
+  K: 128
+  lda: 256
+  ldb: 256
+  ldc: 256
+  ldd: 256
+  batch_mode: 1
+  batch_count: 3
+  batch_offset_a: 128
+  batch_offset_b: 128
+  batch_offset_c: 128
+  batch_offset_d: 128
+  alpha: 1.0
+  beta: 0.5
+  unit_check: 1
+  norm_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Alpha/Beta edge cases with offset
+- name: matmul_batch_offset_alpha_beta
+  category: pre_checkin
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA: N
+  transB: N
+  M: 256
+  N: 128
+  K: 64
+  batch_mode: 1
+  batch_count: 4
+  batch_offset_a: 64
+  batch_offset_b: 64
+  batch_offset_c: 64
+  batch_offset_d: 64
+  alpha_beta: *alpha_beta_range
+  unit_check: 1
+  norm_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Large offset test
+- name: matmul_batch_offset_large
+  category: nightly
+  function: matmul_batch_offset
+  precision: [*hpa_half_precision, *hpa_bf16_precision]
+  transA: N
+  transB: N
+  M: 1024
+  N: 1024
+  K: 256
+  lda: 1024
+  ldb: 256
+  ldc: 1024
+  ldd: 1024
+  batch_mode: 1
+  batch_count: 2
+  batch_offset_a: 4294967296
+  batch_offset_b: 4294967297
+  batch_offset_c: 4294967298
+  batch_offset_d: 4097
+  alpha: 1.0
+  beta: 1.0
+  unit_check: 1
+  norm_check: 1
+  gpu_arch: '9(42|50)'
+
+# Test all solutions with batch offsets and all transpose combinations
+- name: matmul_batch_offset_all_solutions
+  category: nightly
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA_transB: *transA_transB_range
+  M: 256
+  N: 256
+  K: 128
+  lda: 256
+  ldb: 256
+  ldc: 256
+  ldd: 256
+  batch_mode: 1
+  batch_count: 2
+  batch_offset_a: 256
+  batch_offset_b: 128
+  batch_offset_c: 512
+  batch_offset_d: 256
+  alpha: 1.0
+  beta: 1.0
+  requested_solution_num: -1
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Test with negative batch offsets to verify proper memory layout handling
+- name: matmul_batch_offset_negative
+  category: nightly
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA_transB: *transA_transB_range
+  M: 256
+  N: 256
+  K: 128
+  lda: 256
+  ldb: 256
+  ldc: 256
+  ldd: 256
+  batch_mode: 1
+  batch_count: 2
+  batch_offset_a: -128
+  batch_offset_b: -64
+  batch_offset_c: -256
+  batch_offset_d: -128
+  alpha: 1.0
+  beta: 1.0
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Test with mixed positive and negative offsets
+- name: matmul_batch_offset_mixed
+  category: nightly
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA_transB: *transA_transB_range
+  M: 256
+  N: 256
+  K: 128
+  lda: 256
+  ldb: 256
+  ldc: 256
+  ldd: 256
+  batch_mode: 1
+  batch_count: 2
+  batch_offset_a: -64
+  batch_offset_b: 128
+  batch_offset_c: -128
+  batch_offset_d: 256
+  alpha: 1.0
+  beta: 1.0
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
 
 ...

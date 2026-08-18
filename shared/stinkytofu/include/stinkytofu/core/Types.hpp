@@ -79,6 +79,7 @@ struct PassFeatureConfig {
         int globalReadDrainLatency = 0;
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
+        int dsReadThrottleLatency = 0;
         int dsReadPerWmma = INT_MAX;
     };
 
@@ -93,10 +94,13 @@ enum class VgprMsbMode : uint8_t {
     Msb16,  ///< 16-bit form (`s_set_vgpr_msb 0x0101`) — packs prev + curr MSB
 };
 
-/// Toolchain capabilities discovered by probing the assembler (via comgr or
-/// rocisa's initAsmCaps).  Populated either by the rocisa conversion layer or
-/// by ToolchainCaps::probe() for the standalone path.
+/// Capabilities forwarded from rocisa (asmCaps and archCaps) by the conversion
+/// layer, or discovered by ToolchainCaps::probe() for the standalone path.
 struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
+
+    /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
+    /// path, which has no rocisa to ask; see Gfx1250HazardPass.
+    bool requiresXCntForVolatileVMEM = false;
 };
 }  // namespace stinkytofu

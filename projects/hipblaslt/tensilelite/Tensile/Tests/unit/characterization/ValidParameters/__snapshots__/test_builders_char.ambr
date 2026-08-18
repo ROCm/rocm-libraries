@@ -1406,6 +1406,7 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentInterleave',
     'LDSTrInst',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
@@ -1438,6 +1439,7 @@
     'NonTemporalC',
     'NonTemporalD',
     'NonTemporalE',
+    'NonTemporalGate',
     'NonTemporalMXSA',
     'NonTemporalMXSB',
     'NonTemporalMetadata',
@@ -1480,12 +1482,14 @@
     'StreamKAtomic',
     'StreamKFixupTreeReduction',
     'StreamKForceDPOnly',
+    'StreamKWorkStealing',
     'StreamKXCCMapping',
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
     'TDMInst',
     'TDMIterateMode',
+    'TDMLoadWaveSync',
     'TDMSplit',
     'TailloopInNll',
     'TemporalHint',
@@ -1614,7 +1618,7 @@
         2,
         4,
       ]),
-      'len': 8,
+      'len': 9,
       'type': 'list',
     }),
     'BufferLoad': dict({
@@ -1937,6 +1941,15 @@
       'len': 1,
       'type': 'list',
     }),
+    'LDSSegmentInterleave': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'LDSTrInst': dict({
       'head': list([
         False,
@@ -2218,6 +2231,15 @@
       'type': 'list',
     }),
     'NonTemporalE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalGate': dict({
       'head': list([
         0,
         1,
@@ -2576,6 +2598,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'StreamKWorkStealing': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'StreamKXCCMapping': dict({
       'head': list([
         0,
@@ -2595,10 +2625,11 @@
     }),
     'SwInstructionPrefetch': dict({
       'head': list([
-        False,
-        True,
+        -1,
+        0,
+        1,
       ]),
-      'len': 2,
+      'len': 6,
       'type': 'list',
     }),
     'SwapGlobalReadOrder': dict({
@@ -2625,6 +2656,14 @@
         1,
       ]),
       'len': 5,
+      'type': 'list',
+    }),
+    'TDMLoadWaveSync': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'TDMSplit': dict({

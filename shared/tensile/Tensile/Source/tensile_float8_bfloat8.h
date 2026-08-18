@@ -33,6 +33,22 @@
 // We are clipping in down--conversion by default
 #define DOWNCAST_CLIPPING_ON 1
 
+// gfx942 and gfx950 both have hardware f32->f8 conversion instructions
+// (v_cvt_pk_fp8_f32 / v_cvt_pk_bf8_f32).  Use the hardware path on both so that
+// GSU/conversion kernels match the main-kernel store path.  NOTE the hardware
+// instruction is FNUZ (max fp8 240) on gfx942 but OCP-E4M3 (max fp8 448) on
+// gfx950, so the pre-clip saturation constant must follow the arch.
+#if defined(__gfx942__) || defined(__gfx950__)
+#define TENSILE_USE_HW_F8_CVT 1
+#endif
+#if defined(__gfx950__)
+// OCP E4M3 max normal
+#define TENSILE_FP8_DOWNCAST_CLIP 448.0
+#else
+// FNUZ (NANOO) E4M3 max normal
+#define TENSILE_FP8_DOWNCAST_CLIP 240.0
+#endif
+
 namespace tensile_hip_f8_impl
 {
 
@@ -47,7 +63,7 @@ namespace tensile_hip_f8_impl
 #include "hip_f8_impl.h"
 
 // device specific optimized code
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
 namespace tensile_gfx940_f8_impl
 {
     template <bool isE2M5, bool stochastic_rounding>
@@ -90,7 +106,8 @@ namespace tensile_gfx940_f8_impl
         {
 #ifdef DOWNCAST_CLIPPING_ON
             if((val.i32val & 0x7F800000) != 0x7F800000) // all exp bits  are 1 --> NaN or INF
-                val.fval = __builtin_amdgcn_fmed3f(val.fval, 240.0, -240.0);
+                val.fval = __builtin_amdgcn_fmed3f(
+                    val.fval, TENSILE_FP8_DOWNCAST_CLIP, -TENSILE_FP8_DOWNCAST_CLIP);
 #endif
 
             if(stochastic_rounding)
@@ -184,7 +201,7 @@ struct Float8_BFloat8
     // default constructor
     HIP_HOST_DEVICE Float8_BFloat8() = default;
 
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
     // NOTE: ON-DEVICE... always optimal bias
     explicit HIP_DEVICE Float8_BFloat8(float                v,
                                        hip_f8_rounding_mode rm  = hip_f8_rounding_mode::standard,
@@ -285,7 +302,7 @@ struct Float8_BFloat8
     // explicit HIP_HOST_DEVICE Float8_BFloat8(hip_bfloat16 v, hip_f8_rounding_mode r=hip_f8_rounding_mode::standard, uint32_t rng=0);
 
     // convert to float
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
     // builtin conversion
     explicit inline HIP_DEVICE operator float() const
     {
@@ -558,7 +575,7 @@ inline bool operator>=(tensile_bfloat8 a, tensile_bfloat8 b)
               std::enable_if_t<!(std::is_same<T, Ta>{}), int> = 0>
     inline __host__ __device__ T explicit_downcast(Ta a, uint32_t rng = 0, bool clip = true)
     {
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
         T val;
         if(std::is_same<T, rocblas_f8>::value)
             val.data
@@ -592,7 +609,7 @@ inline __host__ __device__ tensile_float8
     explicit_downcast<tensile_float8, float, true>(float a, uint32_t rng)
 {
     // Use h/w intrinsic and optimized version when__gfx942__
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
     tensile_float8 val;
     val.data = tensile_gfx940_f8_impl::cast_to_f8_from_f32<false, true>(a, rng);
     return val;
@@ -605,7 +622,7 @@ template <>
 inline __host__ __device__ tensile_float8
     explicit_downcast<tensile_float8, float, false>(float a, uint32_t rng)
 {
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
     tensile_float8 val;
     val.data = tensile_gfx940_f8_impl::cast_to_f8_from_f32<false, false>(a, rng);
     return val;
@@ -618,7 +635,7 @@ template <>
 inline __host__ __device__ tensile_bfloat8
     explicit_downcast<tensile_bfloat8, float, true>(float a, uint32_t rng)
 {
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
     tensile_bfloat8 val;
     val.data = tensile_gfx940_f8_impl::cast_to_f8_from_f32<true, true>(a, rng);
     return val;
@@ -631,7 +648,7 @@ template <>
 inline __host__ __device__ tensile_bfloat8
     explicit_downcast<tensile_bfloat8, float, false>(float a, uint32_t rng)
 {
-#if defined(__gfx942__)
+#if defined(TENSILE_USE_HW_F8_CVT)
     tensile_bfloat8 val;
     val.data = tensile_gfx940_f8_impl::cast_to_f8_from_f32<true, false>(a, rng);
     return val;

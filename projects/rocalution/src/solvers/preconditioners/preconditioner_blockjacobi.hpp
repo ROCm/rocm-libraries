@@ -32,10 +32,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class BlockJacobi
-  * \brief Block-Jacobi Preconditioner
-  * \details
-  * The Block-Jacobi preconditioner is designed to wrap any local preconditioner and
-  * apply it in a global block fashion locally on each interior matrix.
+  * \brief Block-Jacobi (MPI) preconditioner wrapping a local preconditioner.
   *
   * \tparam OperatorType - can be GlobalMatrix
   * \tparam VectorType - can be GlobalVector

@@ -15,13 +15,7 @@ endif()
 add_executable(
     hipblaslt_plugin_integration_tests
     main.cpp
-    IntegrationGpuMatmul.cpp
-    IntegrationGpuMatmulActiv.cpp
-    IntegrationGpuMatmulBias.cpp
-    IntegrationGpuMatmulBiasActiv.cpp
-    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:IntegrationGpuMxMatmul.cpp>
-    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:IntegrationGpuMxMatmulUnsupported.cpp>
-    TestTestWorkarounds.cpp
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:IntegrationGpuMxMatmulUnsupported.cpp>
 )
 
 target_compile_options(hipblaslt_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

@@ -16,6 +16,8 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/detail/TensorConstants.hpp>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -26,6 +28,14 @@ namespace hipdnn_frontend::graph
 {
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
+
+/// @brief Selects how a pass-by-value scalar is treated: a runtime parameter
+/// (supplied via the variant pack at execute time) or a compile-time constant.
+enum class ScalarType
+{
+    RUNTIME_PARAM,
+    COMPILE_TIME_CONST
+};
 
 /**
  * @class TensorAttributes
@@ -76,13 +86,21 @@ public:
     using ValueVariant = std::
         variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t, bool>;
 
+    /// cuDNN-parity alias for the pass-by-value scalar variant type.
+    using pass_by_values_t = ValueVariant; // NOLINT(readability-identifier-naming)
+
     /// @brief Default constructor
     TensorAttributes() = default;
 
     /**
-     * @brief Construct a pass-by-value tensor from a scalar
+     * @brief Construct a compile-time-constant pass-by-value tensor from a scalar
      * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
-     * @param scalar The scalar value to store in the tensor
+     * @param scalar The scalar value to bake into the tensor
+     *
+     * Delegates to set_value(), which bakes a baseline-1.0.0 compile-time
+     * constant. See RFC 0016 §4.3. Use the (scalar, ScalarType::RUNTIME_PARAM)
+     * constructor, set_as_runtime_parameter(), or set_is_pass_by_value(true)
+     * for a runtime-with-default scalar that floors the provider at 1.2.0.
      */
     template <typename T>
     TensorAttributes(const T& scalar)
@@ -91,34 +109,116 @@ public:
     }
 
     /**
-     * @brief Check if this tensor is a pass-by-value tensor
-     * @return true if the tensor contains an embedded scalar value
+     * @brief Construct a pass-by-value tensor from a scalar with an explicit mode
+     * @tparam T Scalar type
+     * @param scalar The scalar value to store in the tensor
+     * @param type RUNTIME_PARAM => runtime-with-default; COMPILE_TIME_CONST => compile-time constant
      */
-    bool get_pass_by_value() const // NOLINT(readability-identifier-naming)
+    template <typename T>
+    TensorAttributes(const T& scalar, ScalarType type)
     {
-        return !std::holds_alternative<std::monostate>(_value);
+        set_value(scalar);
+        if(type == ScalarType::RUNTIME_PARAM)
+        {
+            _isRuntimePassByValue = true;
+        }
     }
 
     /**
-     * @brief Get the pass-by-value scalar of a specific type
+     * @brief Check if this tensor is a pass-by-value tensor
+     * @return true if the tensor contains an embedded scalar value
+     */
+    bool get_is_pass_by_value() const // NOLINT(readability-identifier-naming)
+    {
+        return _isRuntimePassByValue || hasValue();
+    }
+
+    /**
+     * @brief Get the runtime pass-by-value scalar (cuDNN parity).
+     * @return The value variant iff runtime-with-default (runtime flag set and a
+     *         value present); std::nullopt otherwise. Inspect the active type with
+     *         std::holds_alternative / std::get on the returned variant.
+     */
+    std::optional<pass_by_values_t>
+        get_pass_by_value() const // NOLINT(readability-identifier-naming)
+    {
+        return _isRuntimePassByValue && hasValue() ? std::optional<pass_by_values_t>{_value}
+                                                   : std::nullopt;
+    }
+
+    /**
+     * @brief Typed convenience wrapper over get_pass_by_value().
      * @tparam T The expected scalar type
-     * @return The scalar value if it matches type T, std::nullopt otherwise
+     * @return The value iff runtime-with-default and the stored scalar is a T;
+     *         std::nullopt otherwise (absent, or present but a different type).
      */
     template <typename T>
     std::optional<T> get_pass_by_value() const // NOLINT(readability-identifier-naming)
     {
-        if(auto p = std::get_if<T>(&_value))
+        const std::optional<pass_by_values_t> value = get_pass_by_value();
+        if(value && std::holds_alternative<T>(*value))
         {
-            return *p;
+            return std::get<T>(*value);
         }
         return std::nullopt;
     }
 
     /**
-     * @brief Set a pass-by-value scalar in this tensor
+     * @brief Get the compile-time constant scalar (cuDNN parity).
+     * @return The value variant iff compile-time constant (runtime flag clear and
+     *         a value present); std::nullopt otherwise.
+     */
+    std::optional<pass_by_values_t>
+        get_compile_time_constant() const // NOLINT(readability-identifier-naming)
+    {
+        return !_isRuntimePassByValue && hasValue() ? std::optional<pass_by_values_t>{_value}
+                                                    : std::nullopt;
+    }
+
+    /**
+     * @brief Typed convenience wrapper over get_compile_time_constant().
+     * @tparam T The expected scalar type
+     * @return The value iff a compile-time constant whose stored scalar is a T;
+     *         std::nullopt otherwise (absent, or present but a different type).
+     */
+    template <typename T>
+    std::optional<T> get_compile_time_constant() const // NOLINT(readability-identifier-naming)
+    {
+        const std::optional<pass_by_values_t> value = get_compile_time_constant();
+        if(value && std::holds_alternative<T>(*value))
+        {
+            return std::get<T>(*value);
+        }
+        return std::nullopt;
+    }
+
+    /**
+     * @brief Check whether this tensor carries a compile-time constant value
+     */
+    bool get_has_compile_time_constant() const // NOLINT(readability-identifier-naming)
+    {
+        return !_isRuntimePassByValue && hasValue();
+    }
+
+    /**
+     * @brief Raw accessor for the stored runtime pass-by-value flag
+     */
+    bool get_is_runtime_pass_by_value() const // NOLINT(readability-identifier-naming)
+    {
+        return _isRuntimePassByValue;
+    }
+
+    /**
+     * @brief Set a compile-time-constant scalar in this tensor
      * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
-     * @param v The scalar value
+     * @param v The scalar value to bake into the tensor
      * @return Reference to this for method chaining
+     *
+     * Bakes a baseline-1.0.0 compile-time constant (clears the runtime
+     * pass-by-value flag). Use set_as_runtime_parameter(),
+     * set_is_pass_by_value(true), or the (scalar, ScalarType::RUNTIME_PARAM)
+     * constructor for a runtime-with-default scalar that floors the provider
+     * at 1.2.0.
      */
     template <typename T>
     TensorAttributes& set_value(T v) // NOLINT(readability-identifier-naming)
@@ -134,6 +234,7 @@ public:
                                          std::is_same<T, bool>>,
                       "Unsupported type for Tensor_attributes::set_value");
         _value = v;
+        _isRuntimePassByValue = false;
         _dataType = getDataTypeEnumFromType<T>();
         _dim = _stride = {1};
         return *this;
@@ -155,6 +256,59 @@ public:
     TensorAttributes& clear_value() // NOLINT(readability-identifier-naming)
     {
         _value = {};
+        return *this;
+    }
+
+    /**
+     * @brief Set a compile-time constant scalar in this tensor (cuDNN parity).
+     * @param v The scalar value, as a pass_by_values_t variant
+     * @return Reference to this for method chaining
+     *
+     * Delegates to the typed set_value (via std::visit) so the per-scalar data
+     * type is derived from the active alternative; set_value() itself bakes a
+     * baseline-1.0.0 compile-time constant, so this is now a thin cuDNN-parity
+     * alias with an ergonomic pass_by_values_t-variant signature. A
+     * std::monostate (empty) variant is a no-op guarded here.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    TensorAttributes& set_compile_time_constant(const pass_by_values_t& v)
+    {
+        std::visit(
+            [this](const auto& scalar) {
+                if constexpr(!std::is_same_v<std::decay_t<decltype(scalar)>, std::monostate>)
+                {
+                    set_value(scalar);
+                }
+            },
+            v);
+        return *this;
+    }
+
+    /**
+     * @brief Mark this tensor as a runtime pass-by-value parameter, clearing any stored value
+     * @return Reference to this for method chaining
+     *
+     * Plugin-side resolution (hipdnn_plugin_sdk::ScalarOperand/resolveScalarOperand) supports
+     * DOUBLE, FLOAT, HALF, BFLOAT16, INT32, INT64, and BOOLEAN. UINT8, INT8, and the FP8/FP6/FP4
+     * families are accepted by the frontend/flatbuffer value union but are not yet wired into
+     * the plugin SDK's scalar resolution; a runtime pass-by-value tensor set to one of those
+     * types throws HIPDNN_PLUGIN_STATUS_BAD_PARAM at plan-build time.
+     */
+    TensorAttributes& set_as_runtime_parameter() // NOLINT(readability-identifier-naming)
+    {
+        clear_value();
+        _isRuntimePassByValue = true;
+        return *this;
+    }
+
+    /**
+     * @brief Set only the runtime pass-by-value flag, leaving any stored value intact
+     * @param b Whether this tensor is a runtime pass-by-value scalar
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes& set_is_pass_by_value(bool b) // NOLINT(readability-identifier-naming)
+    {
+        _isRuntimePassByValue = b;
         return *this;
     }
 
@@ -334,6 +488,56 @@ public:
     }
 
     /**
+     * @brief Get the ragged-offset aux tensor for this tensor
+     * @return Shared pointer to the ragged-offset TensorAttributes, or nullptr if not ragged
+     */
+    std::shared_ptr<TensorAttributes> get_ragged_offset() // NOLINT(readability-identifier-naming)
+    {
+        return _raggedOffset;
+    }
+
+    /**
+     * @brief Set the ragged-offset aux tensor for this tensor
+     * @param value Shared pointer to the TensorAttributes of the ragged-offset aux tensor
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes& set_ragged_offset( // NOLINT(readability-identifier-naming)
+        const std::shared_ptr<TensorAttributes>& value)
+    {
+        _raggedOffset = value;
+        return *this;
+    }
+
+    /**
+     * @brief Check whether this tensor has a ragged-offset aux tensor set
+     * @return true if a ragged-offset aux has been set
+     */
+    bool has_ragged_offset() const // NOLINT(readability-identifier-naming)
+    {
+        return _raggedOffset != nullptr;
+    }
+
+    /**
+     * @brief Get the required byte alignment of the tensor's physical buffer pointer
+     * @return Alignment in bytes (default 16)
+     */
+    int64_t get_alignment() const // NOLINT(readability-identifier-naming)
+    {
+        return _alignment;
+    }
+
+    /**
+     * @brief Set the required byte alignment of the tensor's physical buffer pointer
+     * @param value Alignment in bytes; must be >= 1
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes& set_alignment(const int64_t value) // NOLINT(readability-identifier-naming)
+    {
+        _alignment = value;
+        return *this;
+    }
+
+    /**
      * @brief Fill unset attributes from graph context
      * @param graphAttributes The graph attributes to inherit from
      * @return Reference to this for method chaining
@@ -377,7 +581,10 @@ public:
                     "Tensor " + _name + " does not have a data type set"};
         }
 
-        HIPDNN_RETURN_IF_TRUE(_isVirtual && get_pass_by_value(),
+        HIPDNN_RETURN_IF_TRUE(_isVirtual && _isRuntimePassByValue,
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name + " cannot be virtual and runtime pass by value");
+        HIPDNN_RETURN_IF_TRUE(_isVirtual && hasValue(),
                               ErrorCode::INVALID_VALUE,
                               "Tensor " + _name + " cannot be virtual and pass by value");
         HIPDNN_RETURN_IF_NE(_dim.size(),
@@ -393,6 +600,10 @@ public:
         HIPDNN_RETURN_IF_FALSE(std::all_of(_dim.begin(), _dim.end(), isPositive),
                                ErrorCode::INVALID_VALUE,
                                "Tensor " + _name + " must have only positive dimensions");
+
+        HIPDNN_RETURN_IF_TRUE(_alignment < 1,
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name + " alignment must be >= 1");
 
         return {ErrorCode::OK, ""};
     }
@@ -415,6 +626,10 @@ public:
             return false;
         }
         if(this->_isVirtual != other._isVirtual)
+        {
+            return false;
+        }
+        if(this->_isRuntimePassByValue != other._isRuntimePassByValue)
         {
             return false;
         }
@@ -457,6 +672,11 @@ public:
     }
 
 private:
+    bool hasValue() const
+    {
+        return !std::holds_alternative<std::monostate>(_value);
+    }
+
     int64_t _uid = 0;
     bool _uidSet = false;
     std::string _name;
@@ -464,7 +684,11 @@ private:
     std::vector<int64_t> _stride;
     std::vector<int64_t> _dim;
     bool _isVirtual = false;
+    bool _isRuntimePassByValue = false;
     ValueVariant _value;
+    std::shared_ptr<TensorAttributes> _raggedOffset; ///< nullptr = non-ragged
+    int64_t _alignment
+        = detail::DEFAULT_TENSOR_ALIGNMENT; ///< byte alignment of the physical buffer pointer
 };
 typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

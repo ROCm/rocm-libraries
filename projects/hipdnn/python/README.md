@@ -9,101 +9,138 @@ This project provides Python bindings for the hipDNN frontend library using the 
 ## Project Structure
 
 ```
-python
-├── src
-│   ├── module.cpp               # Main entry point for the nanobind module
-│   ├── bindings.hpp             # Shared declarations for binding functions
-│   ├── graph_bindings.cpp       # Bindings for the Graph class and its methods
-│   ├── handle_bindings.cpp      # Bindings for handle management
-│   ├── memory_bindings.cpp      # Bindings for device memory management
-│   ├── tensor_bindings.cpp      # Bindings for tensor-related functionalities
-│   ├── attributes_bindings.cpp  # Bindings for attribute classes
-│   └── types_bindings.cpp       # Bindings for custom types and enums
-├── hipdnn_frontend
-│   ├── __init__.py              # Initializes the hipdnn_frontend package
-│   ├── samples/                 # Sample scripts (conv_fprop, conv_dgrad, conv_wgrad, matmul)
-│   └── test/                    # Tests for the Python bindings
-├── CMakeLists.txt               # CMake configuration (scikit-build-core + subdirectory dual-mode)
-├── pyproject.toml               # Python project configuration (scikit-build-core backend)
-└── README.md                    # Project documentation
+python/
+├── README.md
+├── download_third_party_deps.py             # Downloads pinned CI third-party source archives
+├── frontend_bindings/
+│   ├── CMakeLists.txt                     # CMake build; superbuild component or standalone
+│   └── src/
+│       ├── module.cpp                     # Main nanobind module entry point
+│       ├── bindings.hpp                   # Shared binding declarations
+│       ├── graph_bindings.cpp
+│       ├── handle_bindings.cpp
+│       ├── memory_bindings.cpp
+│       ├── tensor_bindings.cpp
+│       ├── attributes_bindings.cpp
+│       ├── hip_bindings.cpp
+│       └── types_bindings.cpp
+└── frontend_wheel_package/
+    ├── src/
+    │   └── hipdnn_frontend/
+    │       └── __init__.py                # Runtime package initializer
+    ├── samples/                           # Source-tree sample scripts
+    ├── tests/                             # Source-tree tests
+    ├── pyproject.toml                     # Wheel metadata and pytest config
+    └── pack_frontend_wheel.py             # Stages and packs the wheel package
 ```
 
 ## Prerequisites
 
 - CMake 3.26 or higher
+- Ninja or another CMake generator
 - A C++ compiler with C++17 support (e.g. clang++)
-- Python 3.12 or higher
+- Python 3.12 or higher, including development headers
 - ROCm/HIP runtime and libraries
+- Installed hipDNN development artifacts with `hipdnn_frontendConfig.cmake`,
+  `hipdnn_backendConfig.cmake`, headers, and the backend shared library
+- `nanobind` and `tsl-robin-map` CMake packages, or network access during
+  configure so CMake can fetch the pinned source archives
+- The `build` Python package when creating a wheel
+- The `numpy` and `pytest` Python packages when running source-tree tests or samples
 
 ## Building
 
-There are two ways to build the Python bindings:
-
-### Subdirectory build (via parent hipDNN CMake)
-
-Set `HIPDNN_BUILD_PYTHON_BINDINGS=ON` to compile the nanobind extension module alongside hipDNN and stage it for packaging. It is off by default because it requires Python development headers and fetches nanobind/tsl-robin-map as additional dependencies.
-
-```bash
-cmake -S projects/hipdnn -B build -GNinja -DHIPDNN_BUILD_PYTHON_BINDINGS=ON
-cmake --build build
-cmake --install build --prefix /path/to/install
-```
-
-The bindings are staged to `share/hipdnn/python/hipdnn_frontend/` under the install prefix.
-
-### Standalone build (via pip)
-
-hipDNN must already be built and installed (e.g. at `/opt/rocm`).
-
-#### 1. Setting up a Python Virtual Environment
-
-It's recommended to use a Python virtual environment to isolate the project dependencies:
+The recommended way to build the bindings is as a component of the
+rocm-libraries superbuild, alongside hipDNN itself — no separate install step
+or `CMAKE_PREFIX_PATH` needed since the extension links the in-tree
+`hipdnn_frontend`/`hipdnn_backend` targets directly. From the repository root:
 
 ```bash
-# Create a virtual environment
-python3 -m venv hipdnn_env
-
-# Activate the virtual environment
-# On Linux/Mac:
-source hipdnn_env/bin/activate
-# On Windows:
-# hipdnn_env\Scripts\activate
-
-# Upgrade pip
-pip install --upgrade pip
+cmake --preset hipdnn-python -GNinja -DROCM_PATH=/path/to/rocm
+cmake --build build --target hipdnn_frontend_bindings
 ```
 
-#### 2. Building and Installing
+See [Superbuild](../docs/Building.md#superbuild) for preset details; e.g.
+`hipdnn-dev-all` builds the bindings alongside every provider.
+
+The bindings can also be built standalone against an already-installed hipDNN
+(e.g. a ROCm/hipDNN nightly artifact), which doesn't require a full source
+checkout:
 
 ```bash
-# Navigate to the hipdnn python directory
-cd python
-
-pip install -v .
+cmake -S projects/hipdnn/python/frontend_bindings -B build/hipdnn-python -GNinja \
+    -DCMAKE_PREFIX_PATH=/path/to/hipdnn/install
+cmake --build build/hipdnn-python
 ```
 
-If hipDNN is installed somewhere other than `/opt/rocm`, pass the prefix:
+`CMAKE_PREFIX_PATH` is required for the standalone build: point it at the
+installed hipDNN artifact prefix, or set the `CMAKE_PREFIX_PATH` environment
+variable before configuring.
+
+Either way, the build only produces the nanobind extension in the CMake build
+tree. CMake does not know about wheel packaging, does not configure
+`hipdnn_frontend/__init__.py`, and has no install rules.
+
+Run the wheel packer to create the staged import package under
+`<build-dir>/wheel_package/hipdnn_frontend`; downstream environment wiring
+should use that staged package tree.
+
+For a source-tree development import after staging the package, put the staged
+wheel package root on `PYTHONPATH`:
 
 ```bash
-pip install -v . -Ccmake.define.CMAKE_PREFIX_PATH=/path/to/hipdnn/install
+PYTHONPATH=build/wheel_package python -c "import hipdnn_frontend"
 ```
 
-#### 3. Development Installation
+The backend shared library must also be discoverable at runtime: use
+`LD_LIBRARY_PATH=/path/to/hipdnn/install/lib` on Linux, or set `ROCM_PATH` to the
+artifact prefix on Windows so `hipdnn_frontend/__init__.py` can register `bin/`.
 
-After C++ changes, uninstall and reinstall:
+## Creating a Wheel
+
+After building the bindings, run the packer script:
 
 ```bash
-pip uninstall hipdnn-frontend -y
-pip install -v .
+python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
+    --build-dir <build-dir> \
+    --wheel-dir <build-dir>/wheel_package
 ```
+
+`<build-dir>` is `build` for the superbuild or `build/hipdnn-python` for the
+standalone build; the packer searches the whole tree for the extension, so
+the exact nesting doesn't matter. The wheel is written to
+`<build-dir>/wheel_package/`, beside the `hipdnn_frontend/` package directory.
+The script packs `wheel_package/hipdnn_frontend` into a temporary setuptools
+project. The wheel contains only `hipdnn_frontend/__init__.py` and the native
+extension. It does not include samples or tests, and it does not bundle
+`libhipdnn_backend`; users still need ROCm and hipDNN runtime libraries
+discoverable through ROCm wheels, `ROCM_PATH`, or the platform loader path.
+
+## Testing the Wheel
+
+The `hipDNN Superbuild CI` workflow validates the wheel end-to-end inside the
+matching Linux and Windows superbuild jobs after installing the superbuild
+outputs into the ROCm SDK path. The workflow calls
+`projects/hipdnn/python/download_third_party_deps.py` to download and verify
+pinned third-party source archives from `rocm-third-party-deps`, then passes
+those source directories to CMake FetchContent as part of the single
+superbuild configure. It then builds hipDNN and the bindings together, packs
+the wheel, installs that wheel into the same venv, and runs:
+
+```bash
+python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
+```
+
+The wheel package uses a `src/` layout, so running pytest from
+`frontend_wheel_package/` does not accidentally import the source package.
 
 ## Running the Samples
 
-Sample scripts are located in `hipdnn_frontend/samples/`:
+Sample scripts are source-tree utilities and are not included in the wheel.
 
 ```bash
-python hipdnn_frontend/samples/conv_fprop.py
-python hipdnn_frontend/samples/conv_dgrad.py
-python hipdnn_frontend/samples/conv_wgrad.py
-python hipdnn_frontend/samples/matmul.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_fprop.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_dgrad.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_wgrad.py
+python projects/hipdnn/python/frontend_wheel_package/samples/matmul.py
 ```

@@ -901,7 +901,18 @@ class RegisterTileInfo:
 
 
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
-  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst)."""
+  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst).
+
+  Uses the last MFMA-sized chunk of the D range itself as the zero source:
+  scalar-zero that chunk first, then use it as the A/B operand to MFMA-zero
+  all preceding chunks. No external scratch VGPRs are needed.
+
+  The A/B source is addressed via tileAlias so it lives in the same register
+  file as the accumulator: VGPRs for WMMA / VGPR accumulation, AGPRs for AGPR
+  accumulation (gfx90a+/CDNA MFMA can read A/B from AGPRs). Using vgpr() here
+  unconditionally would read an unzeroed VGPR of the same index on the AGPR path
+  and produce -nan.
+  """
   useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
   tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
   tileCopyInst = VMovB32 if useWmma else (VAccvgprWrite if isAgpr else VMovB32)
@@ -918,26 +929,41 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
     acc2_kwargs = {"acc2": 0}
 
   numInst = totalRegs // regsPerInst
-
-  if numInst > 0:
-    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="zeroRegRange_tmpVgpr")
-    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment="zero A/B"))
-    module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
-    for i in range(numInst):
+  # Scalar-zero the last full chunk (or the only chunk). When numInst > 1 this
+  # chunk doubles as the MFMA zero-source for all preceding chunks, saving one
+  # MFMA and avoiding any scratch allocation.
+  lastChunkBase = firstReg + max(0, numInst - 1) * regsPerInst
+  for i in range(min(regsPerInst, totalRegs)):
+    module.add(tileCopyInst(dst=tileAlias(lastChunkBase + i), src=0,
+                            comment="init%s zero-src v%u" % (tileInfo.tc, lastChunkBase + i)))
+  if numInst > 1:
+    # gfx1250 runs in expert scheduling mode, wait explicitly on the VALU dest.
+    isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
+    if isGfx1250:
+      module.add(SWaitAlu(va_vdst=0, comment="wait for vgpr writes before matrix inst"))
+    else:
+      module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
+    # gfx1250: all initC MFMAs share the same A/B source, so enable matrix reuse
+    # on all but the last (the last has no successor to reuse into).
+    canReuse = useWmma and isGfx1250
+    for i in range(numInst - 1):
       r = firstReg + i * regsPerInst
+      reuseHint = {'reuseA': True, 'reuseB': True} if canReuse and i < numInst - 2 else {}
       module.add(MFMAInstruction(instType=instType, accType=accType,
                                  variant=variant, mfma1k=False,
                                  acc=tileAlias(r, regsPerInst),
-                                 a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
-                                 **acc2_kwargs,
+                                 a=tileAlias(lastChunkBase, 2), b=tileAlias(lastChunkBase, 2),
+                                 **acc2_kwargs, **reuseHint,
                                  comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
-    writer.vgprPool.checkIn(tmpVgpr)
-
+  # Remainder registers (< regsPerInst) that don't fill a full MFMA
   for i in range(numInst * regsPerInst, totalRegs):
     module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
 
 def initVgprTilesToZero(writer, kernel, tileInfo):
-  """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder."""
+  """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder.
+
+  Uses the last MFMA-chunk of D itself as the zero source (no external scratch needed).
+  """
   module = Module()
   module.addComment0("Init %s vgprTiles to zero"%(tileInfo.tc))
 
@@ -1331,7 +1357,6 @@ def mainLoop(writer, kernel):
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
-
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
@@ -1366,7 +1391,6 @@ def mainLoop(writer, kernel):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
-
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
@@ -1384,14 +1408,12 @@ def mainLoop(writer, kernel):
       module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
       kernel["_subtileUnitScaleVgpr"] = unitScaleVgpr
-
   scheduler.populate_instructions(
       writer, kernel,
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
       scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
       tensorParametersA=tensorParametersA,
       tensorParametersB=tensorParametersB)
-
   # gfx1250: enable expert scheduling mode and disable WMMA arb stall
   # before entering the mainloop / any wmma issue.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):

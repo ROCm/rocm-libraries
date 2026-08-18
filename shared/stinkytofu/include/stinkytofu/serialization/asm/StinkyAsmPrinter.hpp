@@ -32,6 +32,8 @@
 #include "stinkytofu/ir/asm/StinkyMacro.hpp"
 
 namespace stinkytofu {
+class StinkyAsmModule;
+
 // AsmPrinter configuration options
 struct AsmPrinterOptions {
     // Indentation for nested structures
@@ -52,6 +54,9 @@ class STINKYTOFU_EXPORT AsmPrinter {
     // Print an entire Function: st.func @name() { ^block: ... }
     void print(const Function& function);
 
+    // Print an entire Module: st.module @name { st.func ... }
+    void print(const StinkyAsmModule& module);
+
     // ^block_id: then body, then Successors/goto line
     void printBlock(const BasicBlock& bb, size_t blockIndex);
 
@@ -59,10 +64,13 @@ class STINKYTOFU_EXPORT AsmPrinter {
     void printIR(const IRBase& ir);
 
    private:
+    void printFunction(const Function& function, int baseIndent);
+    void printBlock(const BasicBlock& bb, size_t blockIndex, int baseIndent);
+    void printIR(const IRBase& ir, int baseIndent);
     void printRegister(const StinkyRegister& reg);
-    void printInstruction(const StinkyInstruction& inst);
-    void printDirective(const AsmDirective& directive);
-    void printSuccessorsLine(const BasicBlock& bb);
+    void printInstruction(const StinkyInstruction& inst, int baseIndent);
+    void printDirective(const AsmDirective& directive, int baseIndent);
+    void printSuccessorsLine(const BasicBlock& bb, int baseIndent);
 
     /// Print modifier as structured dict: { key = value, ... }. Returns true if printed.
     bool printModifierAsDict(const Modifier& mod);
@@ -95,9 +103,23 @@ inline std::string toString(const Function& function,
     return oss.str();
 }
 
+inline std::string toString(const StinkyAsmModule& module,
+                            const AsmPrinterOptions& options = AsmPrinterOptions()) {
+    std::ostringstream oss;
+    AsmPrinter printer(oss, options);
+    printer.print(module);
+    return oss.str();
+}
+
 inline std::ostream& operator<<(std::ostream& os, const Function& function) {
     AsmPrinter printer(os, AsmPrinterOptions());
     printer.print(function);
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const StinkyAsmModule& module) {
+    AsmPrinter printer(os, AsmPrinterOptions());
+    printer.print(module);
     return os;
 }
 
