@@ -51,8 +51,8 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 ### Testing
 - **[Testing](./docs/TESTING.md)** - Synopsis of testing information
 - **[Testing Strategy](./docs/TESTING_STRATEGY.md)** - Specific testing approach
-- **[Feature Readiness Plan](./docs/feature_readiness/FeatureReadinessPlan.md)** - Detailed test planning
-- **[Feature Readiness Run Template](./docs/feature_readiness/FeatureReadinessRunTemplate.md)** - Guidelines for test execution
+- **[Feature Release Plan](./docs/feature_release/TestPlan.md)** - Detailed test planning
+- **[Feature Release Run Template](./docs/feature_release/TestRunTemplate.md)** - Guidelines for test execution
 
 ---
 

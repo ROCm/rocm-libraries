@@ -1,4 +1,4 @@
-# hipDNN Feature Readiness Plan
+# hipDNN Feature Release Plan
 
 This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../TESTING.md) and its [Development Workflow](../TESTING.md#development-workflow).
 
@@ -23,7 +23,7 @@ A verification run only has value if its outcome can be tied back to a specific 
 - **Reproducibility** - the exact commands and observed output let someone re-run the validation and get the same result, rather than trusting a summary.
 - **Auditability** - a release sign-off may be revisited weeks later (for a regression, a hotfix, or a compliance check). The record is the durable proof of what was done.
 
-Capture the run in a [Feature Readiness Run Template](./FeatureReadinessRunTemplate.md) document, which provides the structure for the identifiers, evidence, and reproducible commands described below.
+Capture the run in a [Feature Release Run Template](./TestRunTemplate.md) document, which provides the structure for the identifiers, evidence, and reproducible commands described below.
 
 ---
 
@@ -71,7 +71,7 @@ tar -C rocm-artifacts -zxf therock-dist-<platform>-<group>-tests-<version>.tar.g
 
 The commands below assume the tarball was extracted to `./rocm-artifacts`; adjust the paths if you used a different folder.
 
-**Record what was validated.** The tarball filename encodes the OS, GPU family, and ROCm version, but the authoritative record is the manifest inside the tree (`rocm-artifacts/share/therock/therock_manifest.json`), which also carries the exact source commit the build came from. Capture the ROCm version and the rocm-libraries source commit (`pin_sha`) in your test record; the [Feature Readiness Run Template](./FeatureReadinessRunTemplate.md#4-replication-setup) gives the exact commands and confirms the delivery commit is contained in that commit's history.
+**Record what was validated.** The tarball filename encodes the OS, GPU family, and ROCm version, but the authoritative record is the manifest inside the tree (`rocm-artifacts/share/therock/therock_manifest.json`), which also carries the exact source commit the build came from. Capture the ROCm version and the rocm-libraries source commit (`pin_sha`) in your test record; the [Feature Release Run Template](./TestRunTemplate.md#4-replication-setup) gives the exact commands and confirms the delivery commit is contained in that commit's history.
 
 ### Running the hipDNN Tests
 

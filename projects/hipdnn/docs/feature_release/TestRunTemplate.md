@@ -1,19 +1,19 @@
-# hipDNN Feature Readiness Run Template
+# hipDNN Feature Release Run Template
 
 This is the recording artifact for a **hipDNN milestone / release verification** run. It captures the traceability, evidence, and reproducible commands that show a release build was validated and is ready to ship. It is **not** the per-PR development testing form; for the day-to-day bar during development, see [Testing](../TESTING.md#development-workflow).
 
 **How to use this template:**
 
 - Copy this file to a working notes file for your feature or milestone (e.g. `ROCM-<ticket> <short name> validation.md`) and fill in every `<placeholder>`.
-- The run this template records is a run of the [Feature Readiness Plan](./FeatureReadinessPlan.md). Follow the plan's procedures; record the results here.
+- The run this template records is a run of the [Feature Release Plan](./TestPlan.md). Follow the plan's procedures; record the results here.
 - Replace the illustrative snippets with your own observed commands and output. Keep it evidence-based: paste real command output, not a summary.
 
-**Filling this in as you follow the Feature Readiness Plan.** The sections below are ordered to match the qualifier's path through the plan. Work top to bottom:
+**Filling this in as you follow the Feature Release Plan.** The sections below are ordered to match the qualifier's path through the plan. Work top to bottom:
 
 1. Record identifiers as you go (section 1) and describe what the run covers (section 2).
-2. [Feature Readiness Plan → Prerequisites](./FeatureReadinessPlan.md#prerequisites): record the CI evidence (section 3).
-3. [Feature Readiness Plan → Running Tests From TheRock Builds](./FeatureReadinessPlan.md#running-tests-from-therock-builds): prepare the artifacts and manifest (section 4), then run the tests and paste the output (section 5).
-4. [Feature Readiness Plan → Running Tests From Source Build](./FeatureReadinessPlan.md#running-tests-from-source-build): build from source and record its results (section 6).
+2. [Feature Release Plan → Prerequisites](./TestPlan.md#prerequisites): record the CI evidence (section 3).
+3. [Feature Release Plan → Running Tests From TheRock Builds](./TestPlan.md#running-tests-from-therock-builds): prepare the artifacts and manifest (section 4), then run the tests and paste the output (section 5).
+4. [Feature Release Plan → Running Tests From Source Build](./TestPlan.md#running-tests-from-source-build): build from source and record its results (section 6).
 5. Sign off once every plan step is evidenced (section 7).
 
 ---
@@ -53,7 +53,7 @@ Bulleted test areas covered (delete rows that do not apply):
 
 ## 3. Passing evidence
 
-> Records the [Feature Readiness Plan → Prerequisites](./FeatureReadinessPlan.md#prerequisites) step (CI is green).
+> Records the [Feature Release Plan → Prerequisites](./TestPlan.md#prerequisites) step (CI is green).
 
 Link the CI, superbuild, and release-artifact runs that back this validation.
 
@@ -70,7 +70,7 @@ Link the CI, superbuild, and release-artifact runs that back this validation.
 
 ## 4. Replication setup
 
-> Records the "obtain a ROCm build" step of [Feature Readiness Plan → Running Tests From TheRock Builds](./FeatureReadinessPlan.md#running-tests-from-therock-builds).
+> Records the "obtain a ROCm build" step of [Feature Release Plan → Running Tests From TheRock Builds](./TestPlan.md#running-tests-from-therock-builds).
 
 How to prepare the validated artifacts on a GPU node so a reader can reproduce section 5.
 
@@ -108,13 +108,13 @@ Example output:
 
 > Record the above output from the manifest; the `pin_sha` confirm the delivery commit (section 1) is contained in the history of that SHA. This proves the feature is actually present in the validated build. The manifest lists a `pin_sha` for every submodule, so use the `rocm-libraries` entry specifically, not the first `pin_sha` in the file.
 
-See the [Feature Readiness Plan](./FeatureReadinessPlan.md#running-tests-from-therock-builds) for more on obtaining a ROCm build with the hipDNN test executables.
+See the [Feature Release Plan](./TestPlan.md#running-tests-from-therock-builds) for more on obtaining a ROCm build with the hipDNN test executables.
 
 ---
 
 ## 5. Test commands and expected output
 
-> Records the "running the hipDNN tests" step of [Feature Readiness Plan → Running Tests From TheRock Builds](./FeatureReadinessPlan.md#running-the-hipdnn-tests).
+> Records the "running the hipDNN tests" step of [Feature Release Plan → Running Tests From TheRock Builds](./TestPlan.md#running-the-hipdnn-tests).
 
 The core of the record: repeatable command → observed-output blocks. Paste the **actual** output you saw. Reference the real hipDNN test binaries under `rocm-artifacts/bin/` (e.g. `hipdnn_frontend_tests`, `hipdnn_backend_tests`, `hipdnn_public_frontend_tests`). Numeric timings and tensor values vary by GPU and run.
 
@@ -164,13 +164,13 @@ Observed passing output:
 100% tests passed, 0 tests failed out of <N>
 ```
 
-> Repeat one command/output block per focused area from section 2. For the full-suite requirement in the scope note, run the installed hipDNN CTest suite (see the [Feature Readiness Plan](./FeatureReadinessPlan.md#running-the-hipdnn-tests)) and record its `100% tests passed, 0 tests failed out of <N>` line here as well.
+> Repeat one command/output block per focused area from section 2. For the full-suite requirement in the scope note, run the installed hipDNN CTest suite (see the [Feature Release Plan](./TestPlan.md#running-the-hipdnn-tests)) and record its `100% tests passed, 0 tests failed out of <N>` line here as well.
 
 ---
 
 ## 6. Optional: build from source against installed artifacts
 
-> Records the [Feature Readiness Plan → Running Tests From Source Build](./FeatureReadinessPlan.md#running-tests-from-source-build) step. Reuse the `rocm-artifacts` tree from section 4 as the build's ROCm dependency, as the plan describes.
+> Records the [Feature Release Plan → Running Tests From Source Build](./TestPlan.md#running-tests-from-source-build) step. Reuse the `rocm-artifacts` tree from section 4 as the build's ROCm dependency, as the plan describes.
 
 Only needed when validating the **source** itself, or when the artifact ships runtime/devel packages but no prebuilt test/sample binaries. This builds against the installed artifacts using a user-supplied toolchain, so paths and the CMake prefix are explicit rather than preset-driven.
 
@@ -216,7 +216,7 @@ Sign-off gate. Every box must be checked with real evidence before marking the m
 - [ ] Replaced every `TBD` evidence link in section 3 with the final CI / release-artifact run and sample log.
 - [ ] Ran the focused gtest/ctest filters **and** the full installed hipDNN CTest suite on the final artifacts.
 - [ ] Pasted the passing snippets into section 5 (elapsed times updated if rerun on final artifacts).
-- [ ] Confirmed all [Feature Readiness Plan](./FeatureReadinessPlan.md) prerequisites (CI green, documentation/changelog current) are satisfied.
+- [ ] Confirmed all [Feature Release Plan](./TestPlan.md) prerequisites (CI green, documentation/changelog current) are satisfied.
 
 **Tips for a defensible record:**
 
