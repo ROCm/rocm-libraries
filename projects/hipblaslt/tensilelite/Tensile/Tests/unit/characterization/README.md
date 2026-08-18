@@ -7,7 +7,7 @@ Companion docs in this directory:
 - **`DECISIONS.md`** — the running registry: the at-a-glance catalog of modules accepted below the coverage bar, pinned latent bugs, accepted-equivalent mutants, and the few departures from the add-only rule.
 - **`_codegen/GPU-MOCK.md`** — the GPU-less (`--cpu-only`) seam that makes the client/perf and device-probe paths exercisable without a GPU, and the synthetic-perf caveat that comes with it.
 
-Everything you need to understand or extend the suite is in this directory. Per-module provenance — for each characterized module, the public surface by tier, the determinism strategy, before→after coverage, the mutation-testing outcome, and any accepted coverage ceiling or pinned-bug rationale — is recorded in `DECISIONS.md` and the per-module commit history.
+Everything you need to understand or extend the suite is in this directory. Per-module provenance — for each characterized module, the public surface by tier, the determinism strategy, before→after coverage, and the mutation-testing outcome — is recorded in `DECISIONS.md` and the per-module commit history. Any accepted coverage ceiling or pinned-bug rationale gets a full writeup in an ADR under `adr/`, with a short pointer row in `DECISIONS.md`.
 
 ## Per-module protocol
 
@@ -16,7 +16,7 @@ Each module was characterized the same way, one atomic commit per module, **add-
 1. **Target.** Pick the next module by coverage-per-effort. Write a short `target.md` (archived) describing the module, the public surface by tier, the determinism strategy, and the before→after coverage goal.
 2. **Pin behavior.** Drive the public API with table-driven parametrization; snapshot each output with [syrupy](https://github.com/syrupy-project/syrupy) into `__snapshots__/*.ambr`. Pin raise paths with `pytest.raises` on the raised type/message. Where a module exposes a real latent bug, **pin the bug** (assert the current crash/wrong result), record an **ADR** under `adr/` with a filed defect, and index it in `DECISIONS.md` — rather than working around it.
 3. **Determinism.** No RNG / clock / network / global-state leakage into a snapshot. Normalize incidental fields *in the test*, never by changing production code to make a golden stable. Deep-copy shared globals and reset `globalParameters` between tests.
-4. **Measure.** Run path-mode coverage (below) for the module; aim ≥95% line. When a module can't reach the bar honestly (real fork/IPC paths, GPU/asm emit, integration-only builders), accept it below the bar and document the ceiling in `DECISIONS.md` — do not fake coverage.
+4. **Measure.** Run path-mode coverage (below) for the module; aim ≥95% line. When a module can't reach the bar honestly (real fork/IPC paths, GPU/asm emit, integration-only builders), accept it below the bar: record an **ADR** under `adr/` explaining the structural reason, and index it with a short pointer row in `DECISIONS.md` — do not fake coverage.
 5. **No regression.** Once per batch, run the full `-m unit` suite and confirm it stays green and whole-project coverage does not drop.
 6. **Mutation (widening).** Once a module is covered, mutation testing certifies the assertions actually *catch* changes; survivors are triaged and killed (see **Mutation testing** below).
 
@@ -255,11 +255,13 @@ A real mass update (e.g. an intended change to the snapshot format itself) is al
 
 ## Architecture Decision Records (ADRs)
 
-A genuine decision — pinning a known-wrong behavior, accepting a module below the coverage bar for a structural reason, a departure from the add-only rule, or an accepted-equivalent-mutant policy call — is recorded as an **ADR**: one short, append-only file under [`adr/`](adr/) in [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) form (`Status` / `Context` / `Decision` / `Consequences`), numbered (e.g. `adr/0001-pin-results-only-boolop-crash.md`). When the decision pins a behavior that looks wrong, the ADR carries a `Defect:` tracker link, and that defect tracks the eventual fix.
+A genuine decision — **pinning a known-wrong behavior**, **accepting a module below the coverage bar** for a structural reason, or **a departure from the add-only rule** — is recorded as an **ADR**: one short, append-only file under [`adr/`](adr/) in [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) form (`Status` / `Context` / `Decision` / `Consequences`), numbered (e.g. `adr/0001-pin-results-only-boolop-crash.md`). When the decision pins a behavior that looks wrong, the ADR carries a `Defect:` tracker link, and that defect tracks the eventual fix. This applies every time one of those three forks comes up, not just the once-per-module cases called out in steps 2 and 4 above — e.g. a one-off add-only departure (deleting verified-dead source) gets an ADR too, even though it isn't part of the per-module loop.
 
-ADRs are **append-only and superseded, never edited in place**. If a later change flips a pinned-bug golden (the defect is fixed), update the golden in that PR and add a new ADR that supersedes the old one (set the old one's `Status:` to `Superseded by adr/NNNN`).
+ADRs are **append-only and superseded, never edited in place**. If a later change flips a pinned-bug golden (the defect is fixed), update the golden in that PR and add a new ADR that supersedes the old one (set the old one's `Status:` to `Superseded by adr/NNNN`). Never fold a corrected or revised decision back into an existing ADR's body — write a new one and supersede.
 
-`DECISIONS.md` is the **running registry** — the at-a-glance catalog of pinned behaviors, coverage ceilings, and accepted mutants. Keep the per-decision rationale in an ADR; keep the catalog in `DECISIONS.md`. A catalog row is not its own ADR. See [`adr/README.md`](adr/README.md) for the format and template.
+**Accepted-equivalent mutants are the one exception below the ADR bar**: a mutation survivor that's genuinely unkillable is justified with a one-line `# pragma: no mutate` comment plus an entry in `DECISIONS.md`'s **Mutation testing** section (see below) — not an ADR. The rationale for a single equivalent mutant is rarely more than a sentence, so the full Context/Decision/Consequences form would be ceremony without content; if a mutant's justification grows into a real design discussion, that is itself a sign it belongs in an ADR instead.
+
+`DECISIONS.md` is the **running registry**: an at-a-glance catalog with **one short row per decision** — title, `ADR:` link, `Defect:` link if any, and a one-to-two sentence summary — never the full rationale. The rationale (context, alternatives rejected, consequences) lives in the ADR and only the ADR; a catalog row that repeats it has drifted from this contract and should be trimmed back down when noticed. See [`adr/README.md`](adr/README.md) for the ADR format and template.
 
 ## Mutation testing
 
