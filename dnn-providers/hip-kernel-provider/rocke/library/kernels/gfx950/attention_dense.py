@@ -560,9 +560,9 @@ def build_attention_dense(
     lane_h = b.div(lane, b.const_i32(32))
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
-    rcp_ln2 = b.const_f32(1.4426950408889634)
-    one_f = b.const_f32(1.0)
-    zero_f = b.const_f32(0.0)
+    if use_sinks:
+        rcp_ln2 = b.const_f32(1.4426950408889634)
+        one_f = b.const_f32(1.0)
 
     qb = b.block_id_x()
     hq = b.block_id_y()
@@ -1011,7 +1011,6 @@ def build_attention_dense(
         l_init = one_f
     else:
         m_init = neg_inf
-        l_init = zero_f
 
     m0, _alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
@@ -1022,10 +1021,11 @@ def build_attention_dense(
     for nsub in range(N_SUB):
         for i in range(16):
             l0_local = b.fadd(l0_local, p0_vals[nsub][i])
-    l0_tile = b.fadd(l0_local, b.warp_shuffle_xor(l0_local, 32))
-    # Rescale l_init by alpha0: when m0 > m_init (sink), multiply by alpha0 to change
-    # the sink's contribution from exp(sink - m_init) = 1.0 to exp(sink - m0).
-    l0 = b.fadd(l0_tile, b.fmul(l_init, _alpha0))
+    l0 = b.fadd(l0_local, b.warp_shuffle_xor(l0_local, 32))
+    if use_sinks:
+        # Rescale l_init by alpha0: when m0 > m_init (sink), multiply by alpha0 to change
+        # the sink's contribution from exp(sink - m_init) = 1.0 to exp(sink - m0).
+        l0 = b.fadd(l0, b.fmul(l_init, _alpha0))
     o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
     pk0 = relayout_p(p0_vals)
 
@@ -1274,9 +1274,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     lane_h = b.div(lane, b.const_i32(32))
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
-    rcp_ln2 = b.const_f32(1.4426950408889634)
-    one_f = b.const_f32(1.0)
-    zero_f = b.const_f32(0.0)
+    if use_sinks:
+        rcp_ln2 = b.const_f32(1.4426950408889634)
+        one_f = b.const_f32(1.0)
 
     # 1 row/instr => per-row padded pitch (bank-conflict fix); packed D<128 =>
     # pad between DMA row-GROUPS on K, unpadded on V (see the default builder).
@@ -1541,7 +1541,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             alpha = _exp2(b.fsub(m_i, m_new))
             return m_new, alpha, skip
 
-        def softmax_stats(s_reg, m_i, l_i):
+        def softmax_stats(s_reg, m_i, l_i=None):
             m_new, alpha, _skip = softmax_max(s_reg, m_i)
             p = [
                 [_exp2(b.fsub(s_reg[nsub][i], m_new)) for i in range(16)]
@@ -1551,10 +1551,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             for nsub in range(N_SUB):
                 for i in range(16):
                     l_local = b.fadd(l_local, p[nsub][i])
-            l_sum = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
-            # Rescale l_i by alpha: when m_new > m_i, multiply by alpha to change
-            # the sink's contribution from exp(sink - m_i) to exp(sink - m_new).
-            l_tile = b.fadd(l_sum, b.fmul(l_i, alpha))
+            l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
+            if use_sinks:
+                # Rescale l_i by alpha: when m_new > m_i, multiply by alpha to change
+                # the sink's contribution from exp(sink - m_i) to exp(sink - m_new).
+                l_tile = b.fadd(l_tile, b.fmul(l_i, alpha))
             return m_new, alpha, p, l_tile
 
         def relayout_p(p):
@@ -1737,11 +1738,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
             m_init = sink_f
             l_init = one_f
+            m0, _alpha0, p0, l0 = softmax_stats(s0, m_init, l_init)
         else:
-            m_init = neg_inf
-            l_init = zero_f
+            m0, _alpha0, p0, l0 = softmax_stats(s0, neg_inf)
 
-        m0, _alpha0, p0, l0 = softmax_stats(s0, m_init, l_init)
         o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
         pk0 = relayout_p(p0)
 

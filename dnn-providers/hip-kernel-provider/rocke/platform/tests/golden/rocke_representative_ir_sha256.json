@@ -132,218 +132,218 @@
         },
         "attention_dense/gfx950/bn128_sq512": {
           "arch": "gfx950",
-          "bytes": 598865,
+          "bytes": 598747,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn128_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "7154bfa8ec7bc6677cbdcd4b4fbb8197eac08fb212adcc9f2473689773250424",
+          "sha256": "0c0129af3ef10cbcae74771b30790a10907c0e639678b0a87e78243fc9b27e3a",
           "status": "ok"
         },
         "attention_dense/gfx950/default_causal_sq512": {
           "arch": "gfx950",
-          "bytes": 336287,
+          "bytes": 336175,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "1c75b0c2c8ea8ae223c95638c9afbf08aaf9f117741a53546195ff6164bb7086",
+          "sha256": "60071a493386264d6a64b4fbcbd90afd1b1917b7ee00ef5eb0c150e2143fd586",
           "status": "ok"
         },
         "attention_dense/gfx950/fp16_h64_sq512": {
           "arch": "gfx950",
-          "bytes": 211098,
+          "bytes": 210986,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_fp16_kpad8_sq512_sk512_causal_lazyrs",
-          "sha256": "efcdfca4a600061908644bf459187fa6d6f9557b19ed4e0c7556597b795afdca",
+          "sha256": "b88b4e9b4d184c1ea7d10e82d8109a6a50ecdd0f477ebbf67eec23d1c5fb60af",
           "status": "ok"
         },
         "attention_dense/gfx950/lazy_off_sq512": {
           "arch": "gfx950",
-          "bytes": 332014,
+          "bytes": 331902,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal",
-          "sha256": "7beb2673262722e3dd10d8f84ad7c12a09c5a455326bf8e6839ced677b6ae70f",
+          "sha256": "606f27b50e02364359830fb652f42e812376576a031e192f650dfa03d16c6686",
           "status": "ok"
         },
         "attention_dense/gfx950/noncausal_sq512": {
           "arch": "gfx950",
-          "bytes": 214122,
+          "bytes": 214010,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_full_lazyrs",
-          "sha256": "d3e39f910a7a64563d85e28465ba4407c1456067f85e73fc2abf37406caa02d4",
+          "sha256": "221a93f343a77640acc6fe0015094f6b20ca6829049f88dcc3e879f4d4c32bbe",
           "status": "ok"
         },
         "attention_dense/gfx950/paged_swa_fp16_sq512": {
           "arch": "gfx950",
-          "bytes": 460684,
+          "bytes": 460572,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_fp16_sq512_sk512_causal_swa256_pgd16_nb32_lazyrs",
-          "sha256": "96e9ac1e55c25e5edc4d1ee1535e12e2b5a9f26ceeac3572a3ea8f088858eb16",
+          "sha256": "dd7926b1c0f5a413f91aeac8f03eb3e248f110c7bf1f1ea875cb8f1eda2644c5",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_h64_sq512": {
           "arch": "gfx950",
-          "bytes": 215290,
+          "bytes": 215178,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "e4b4a9136c7bd4bdf75e4ab4212661c8f1aab02b5dc8ad5338059a1e24fb0d7b",
+          "sha256": "5ac5adad5ad54088bf767d75679b37fd8ba844948f4e8a8a5aab8e90fa785b6d",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_hkvmaj_sq512": {
           "arch": "gfx950",
-          "bytes": 320203,
+          "bytes": 320090,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
-          "sha256": "d51c1b0e7c744da24d17306c8fd7da7fb7a71c0c73c7d96ae1c989e4a914888e",
+          "sha256": "3cf82133454d9d48dc484407ba3a0d3c478cbacda360121e3476d7000c038901",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_intl_sq512": {
           "arch": "gfx950",
-          "bytes": 319862,
+          "bytes": 319752,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_intl",
-          "sha256": "011884ce5b51864f727a1ccb6935fc11851d90f6dac191b07e29dfa3698a2795",
+          "sha256": "5ac3f9a4e4e6f0d6f0af053f3711c3062c5fb0b7b96ee9a29619752258fc3f0a",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_lazy_off_sq512": {
           "arch": "gfx950",
-          "bytes": 315114,
+          "bytes": 315002,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_persist256",
-          "sha256": "e1b34c5376ec76c3abd2faefd7d28a00aa896462fe2b61b3b9ee36d5656a84c2",
+          "sha256": "8b7b301936689bbbc318595437aabfbc2fad0a3752a4576b0878bdeac0b77bf7",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_qbmaj_sq512": {
           "arch": "gfx950",
-          "bytes": 319423,
+          "bytes": 319311,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "061e329c0f4b4e92de4212cae1642f2eb669f4deb0b23ad0f2daf009ecdb73dd",
+          "sha256": "6ce869b64b26a831799bc8273946b698faa11e343deef18b15fe8820a89539f4",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_ragged_sq500": {
           "arch": "gfx950",
-          "bytes": 320732,
+          "bytes": 320622,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist256",
-          "sha256": "36159c30dd767a08550e7be1506f03b01538fa6ff15387c2f31e4be48f464752",
+          "sha256": "7c3a5c72acbb0548fe22c57b91ed387232313e44f796067161857dc07750b558",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 320023,
+          "bytes": 320019,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_sinks_lazyrs_persist256",
-          "sha256": "768187fab2f268ea5f9414c5830fbd2af71ef0850da92874eb458b883032895e",
+          "sha256": "a1ce06f111273155b8fadd0057bc268d5bfad0bdc89c589cb463089eeed47a11",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 215744,
+          "bytes": 215742,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_sinks_lazyrs_persist256",
-          "sha256": "b9a8771d3d42059ca3c5e249506911fbd31d7e2d349ebfc7295568d11c800610",
+          "sha256": "1ef2878fa65c92d496571e15015650834eda2d5cb0237d851514173952939ae2",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 435140,
+          "bytes": 435136,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
-          "sha256": "607a5b180753e5d05594d0933ec73c97b5310490ce07e3a45b5607ecb9afc8cb",
+          "sha256": "06f9965b6ab41e879e4bd1db357d48482c3ba1e1a0c631443ed5c9c73b806601",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 298589,
+          "bytes": 298584,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
-          "sha256": "5e9a758a792a17c78b6daa1c44db869764edac4be2f3dfbeeabdceeca2200b0c",
+          "sha256": "6663a2262093ab7814d0053318440e78f1e3e40272c828c35c2851e89b5c9374",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_w128_sq512": {
           "arch": "gfx950",
-          "bytes": 434438,
+          "bytes": 434326,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs_persist256",
-          "sha256": "22ca5c26ee30293b27f78f8e05e9da3b3e9c114b862b8d88713dd937793d66f1",
+          "sha256": "a2bb22c00a0f0e5454ceda1d586eeea0567890d90cc4779f8e335087bde11d19",
           "status": "ok"
         },
         "attention_dense/gfx950/persistent_causal_sq512": {
           "arch": "gfx950",
-          "bytes": 319423,
+          "bytes": 319311,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "061e329c0f4b4e92de4212cae1642f2eb669f4deb0b23ad0f2daf009ecdb73dd",
+          "sha256": "6ce869b64b26a831799bc8273946b698faa11e343deef18b15fe8820a89539f4",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_causal_sq500": {
           "arch": "gfx950",
-          "bytes": 337619,
+          "bytes": 337505,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "211891494128ec3382db4a5a0decd3958a777c05581d5a838af804f311ced04d",
+          "sha256": "f6a308567dde0c53fd7be8082330280b744766f744a92cfada277de03e971871",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_full_sq500": {
           "arch": "gfx950",
-          "bytes": 243964,
+          "bytes": 243850,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_full_ragged_lazyrs",
-          "sha256": "dfa89db9f1b8f317c8b2fa27ad4ce60eaefff7e183530e14bcc4c5a6792dada5",
+          "sha256": "bc2e5854be1e89de5d67aefad35d90bb9cb631f22078f35b4f06f1ac023b6a65",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_h64_sq500": {
           "arch": "gfx950",
-          "bytes": 215314,
+          "bytes": 215206,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "f3d3349b71aa405bcef88484db7ea2f72b1e4484cdd55f8bca178adc5c0394be",
+          "sha256": "18f91926181355d1dd6d18f42acda5030d95ce8eac8c2f0724bf3688f6f03372",
           "status": "ok"
         },
         "attention_dense/gfx950/sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 336887,
+          "bytes": 336885,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_sinks_lazyrs",
-          "sha256": "74a34c1a9aa8566bd2cd1f5a8a05982445c97d2615f856f7a707d784c66477a5",
+          "sha256": "d0ca275f582918ce6e28718d93ea04d46fd667fbc2c4a2ed843095c0774e4a8a",
           "status": "ok"
         },
         "attention_dense/gfx950/sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 214885,
+          "bytes": 214881,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_sinks_lazyrs",
-          "sha256": "f837fde8bb5ef8b9b05a852f3316bf94a843c0f7a15b3fa94a55fda44c3ee742",
+          "sha256": "906df71c2f988d0b6aef83f892430c4e06ebd17db3914836fb488336914ba954",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 456394,
+          "bytes": 456390,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_sinks_lazyrs",
-          "sha256": "8a8a962a3946a945b06062e2e20c60ebaac5be7b1836d20247e9e08c09bac573",
+          "sha256": "683265fe2429846ad417f00d57f338e1261cb13a74c30cd5abd7a82c4f15126d",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 297641,
+          "bytes": 297639,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs",
-          "sha256": "749ad845ffd72a562a75d0ec3018103ee7e9566b91ce3ab1d42d5639ee206258",
+          "sha256": "c3f889aea980fada045220e1084b79f4ebd583d3ff751b72db6c1c9e163fc1ae",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_w128_sq512": {
           "arch": "gfx950",
-          "bytes": 455692,
+          "bytes": 455578,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs",
-          "sha256": "a523de75a4c28330f7f64783547e6ef8cb7127d77382659291d5702bf53fc96d",
+          "sha256": "651d71715d9587c1fb4d9086ae10863b5ced7bfbd9dc74e79f5e52d11690364d",
           "status": "ok"
         },
         "attention_dense/gfx950/varlen_sq512": {
           "arch": "gfx950",
-          "bytes": 337708,
+          "bytes": 337589,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_varlen_lazyrs",
-          "sha256": "be03d9784077784fe56f729776ae646e8f64d5c06d27cf0347412dbd18d66e80",
+          "sha256": "d2b50bcdca579ac3119b80061223b9b1f1bc1d5dfbab4559a81fdfae9a95427a",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
@@ -880,218 +880,218 @@
         },
         "attention_dense/gfx950/bn128_sq512": {
           "arch": "gfx950",
-          "bytes": 598965,
+          "bytes": 598847,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn128_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "19556d352e8e82281c4ecf8414882d41e0d8e2e78abc8f7eff826d659f41d58a",
+          "sha256": "7693e53f40bcef2215dab65932eedd6b8cf8673a513ffcdd85d20749dc628240",
           "status": "ok"
         },
         "attention_dense/gfx950/default_causal_sq512": {
           "arch": "gfx950",
-          "bytes": 336387,
+          "bytes": 336275,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "c908319fff134df980a6d1f82c35138a9d27406434f83db378aa0725fcb2eb54",
+          "sha256": "67b21cad343c170f68894e99b7979a48dd40a4ec4fb8282f9a44d0c30034fddf",
           "status": "ok"
         },
         "attention_dense/gfx950/fp16_h64_sq512": {
           "arch": "gfx950",
-          "bytes": 211194,
+          "bytes": 211082,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_fp16_kpad8_sq512_sk512_causal_lazyrs",
-          "sha256": "cbe016908d8a0e87aea95288db63bbe8c213f1df25c2dcb722aa819b9e9ec7a7",
+          "sha256": "e1bb4a32e589baa43590d6da4140574d058be03d5722111d68294982f885c1c3",
           "status": "ok"
         },
         "attention_dense/gfx950/lazy_off_sq512": {
           "arch": "gfx950",
-          "bytes": 332114,
+          "bytes": 332002,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal",
-          "sha256": "79062c924eb7d95e691273679bab9b9d0bf643a1e1cf81d73e2e1edac93360f6",
+          "sha256": "04410717b66ee5468e73255c7f5d3c5e45eff602e28ff20c210f263fafb27b5c",
           "status": "ok"
         },
         "attention_dense/gfx950/noncausal_sq512": {
           "arch": "gfx950",
-          "bytes": 214218,
+          "bytes": 214106,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_full_lazyrs",
-          "sha256": "56108da4d21a5286eb56e10493ed50b382747340edc1b4e9089f9bc9456567ec",
+          "sha256": "4746f206ac356c019c62a7a9396dc010d56e0fc4928348e1828291d5a463bfe5",
           "status": "ok"
         },
         "attention_dense/gfx950/paged_swa_fp16_sq512": {
           "arch": "gfx950",
-          "bytes": 460784,
+          "bytes": 460672,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_fp16_sq512_sk512_causal_swa256_pgd16_nb32_lazyrs",
-          "sha256": "694db29c4925906abb3f5b5369e917468e9bdbbd86a0be71e78147fcaf6545cc",
+          "sha256": "9e633c0bed1f9b34c8c4e43610efd77d613291198f20eebd6bb6dade439e69a2",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_h64_sq512": {
           "arch": "gfx950",
-          "bytes": 215386,
+          "bytes": 215274,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "a1235433615f1d7678fcdf6fedce6ee29356fe766b32471d5d0cf9b045f4f70a",
+          "sha256": "d9e9b50f1a2c9c6fb0b2209bc3657c02a2c386d1b844754e68664d47be779c71",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_hkvmaj_sq512": {
           "arch": "gfx950",
-          "bytes": 320303,
+          "bytes": 320190,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
-          "sha256": "9988d119387c281c991c4e212a17ee26e2abbcc54bf823408c1aad744b531b05",
+          "sha256": "0daf837981ad031c0d6d7e3f1f023cb9e7863a32ae781243fdbfe09ad5fe8f1e",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_intl_sq512": {
           "arch": "gfx950",
-          "bytes": 319962,
+          "bytes": 319852,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_intl",
-          "sha256": "51d7c417480b8230b5eff8938b7959d59b23669b9e4863a10e1f541567055a07",
+          "sha256": "e547cfa174a4002135543ca6fb349f273692e11a0fe50157e27066fb38371aa2",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_lazy_off_sq512": {
           "arch": "gfx950",
-          "bytes": 315214,
+          "bytes": 315102,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_persist256",
-          "sha256": "38c0db823936a4358d96570f14d150e99b0fb8a910842404a0c130da0b56e0c0",
+          "sha256": "dc8513024c10524602f9c7a4e87e27eb2c89533bc747f9b19ce0367a324fad5f",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_qbmaj_sq512": {
           "arch": "gfx950",
-          "bytes": 319523,
+          "bytes": 319411,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "031076d504c7c7dc722af99ea7a5a1b6a96c7798d81183acbed5152400f55c3b",
+          "sha256": "7eca034bc6c349020460f4573f4a08d2fbb813560f25a141ade52b97780b271f",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_ragged_sq500": {
           "arch": "gfx950",
-          "bytes": 320877,
+          "bytes": 320767,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist256",
-          "sha256": "a092767b8f99db845a4b563ac2c17c03a18d0bcace5688ce05ecb100a0a4966a",
+          "sha256": "69d4f488d57912a1d8555b76e578541648f859635dde2cca1ccc007bfa35151a",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 320123,
+          "bytes": 320119,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_sinks_lazyrs_persist256",
-          "sha256": "473c333c904f32cb880cba963f472c88387532b806c2324e5323de219184a976",
+          "sha256": "88f12864b387dbe69e9f4e4ef5ef27259d0a51a574a3e3019cac413e70b7af95",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 215840,
+          "bytes": 215838,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_sinks_lazyrs_persist256",
-          "sha256": "1cf37c1fb2202c85981cd4471b576c9dcab0d20f9fbc845292169e60d5f3ea3e",
+          "sha256": "ddaa7d1d886ccfef02d0db410cd576842bd61c3100ab895c2e3fa6c1f008f896",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 435240,
+          "bytes": 435236,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
-          "sha256": "161e5821c515bf9d2755c54e70f20c8183ebb38f06784a7e20c64ed5aa218fc6",
+          "sha256": "10dbb408f13e90591ee714c9ba4327305c3d99dcf2c48922b2204071447e8d6f",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 298685,
+          "bytes": 298680,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
-          "sha256": "a8787bbe0e839d86b6a66a6180828e80c8348d0a59ec91e4c8bb78c41fe7e1f6",
+          "sha256": "63794ea3e5996ef84a1c6d396694619d5146e3ca5332ee4a3dbc31f51fe34710",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_w128_sq512": {
           "arch": "gfx950",
-          "bytes": 434538,
+          "bytes": 434426,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs_persist256",
-          "sha256": "ab5df26db0d707f6c81d77796143af813c693e529e99982c08669bb1f1bca0e1",
+          "sha256": "defda8fa152ab32b66eb730b4142699cafa1be38f730b535c8eab3dc3360b986",
           "status": "ok"
         },
         "attention_dense/gfx950/persistent_causal_sq512": {
           "arch": "gfx950",
-          "bytes": 319523,
+          "bytes": 319411,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "031076d504c7c7dc722af99ea7a5a1b6a96c7798d81183acbed5152400f55c3b",
+          "sha256": "7eca034bc6c349020460f4573f4a08d2fbb813560f25a141ade52b97780b271f",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_causal_sq500": {
           "arch": "gfx950",
-          "bytes": 337764,
+          "bytes": 337650,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "350f1f503dc21370bc9ff4dc0a5b56ff38dd2c1141289b6acf39f490074d40c6",
+          "sha256": "ce6cb2b605b4feb3d83b70aab0dd5643ed57b4528332c8296e0cda365f1286cd",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_full_sq500": {
           "arch": "gfx950",
-          "bytes": 244103,
+          "bytes": 243989,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_full_ragged_lazyrs",
-          "sha256": "57d7ddc505c434f551dc71c546cb6009ee23ccff10335291b04c2d8ae8950f9f",
+          "sha256": "27c75b408275a0eb147f28efba6fa67cfef5ee3b66ee1a12f546b4a2fc86773b",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_h64_sq500": {
           "arch": "gfx950",
-          "bytes": 215453,
+          "bytes": 215345,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "bc74f3f6baf55a4e436e6b7b93d62ca567c1e5c1f0c3c03839c9431b8a2cbe8f",
+          "sha256": "4f252c05b2db02883252687a545e8f7667e86970cc159dfa597b14f1838eed2e",
           "status": "ok"
         },
         "attention_dense/gfx950/sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 336987,
+          "bytes": 336985,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_sinks_lazyrs",
-          "sha256": "85e4005c4eed731c0d23e14f162cfee1499d3209471856825f8309a10d51edc1",
+          "sha256": "24a1b2abdf578cda79cd0cec2f1a82af20dcff15186d59fbc3672fc2e4af5564",
           "status": "ok"
         },
         "attention_dense/gfx950/sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 214981,
+          "bytes": 214977,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_sinks_lazyrs",
-          "sha256": "dc2a7c5bcb7110adeff672eab8460649e84595c21877f121f80447f63cbe171b",
+          "sha256": "7500f05e28aaff6b93bf92c4ad9b6a459ed72679808c0eee108d8b824a4da90b",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 456494,
+          "bytes": 456490,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_sinks_lazyrs",
-          "sha256": "a4644cb3c648a612837d27c4d69f39b026378dc41ba22bda9853f6ea3d39026a",
+          "sha256": "6289ba925f15dc1e217fb3c9d4ecbc557e2ddf6b50c2199bab205dbdcb166e51",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 297737,
+          "bytes": 297735,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs",
-          "sha256": "56a563fa9d8556cbaf373a1f0be1e3939a7d4de2d38dfd37920ec97d0ed24b2e",
+          "sha256": "5cf76a1e05eddf0dcfa531b0fe86875de5b97b6beb709ac8612372188d589fba",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_w128_sq512": {
           "arch": "gfx950",
-          "bytes": 455792,
+          "bytes": 455678,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs",
-          "sha256": "c8a2985b2729c00a8546aa0e79a702ace8079de727e49a6cc078dcd3e5165116",
+          "sha256": "598829e9f68acae142c9765d630929e612335bd3af7e5b0334e2199199ad8707",
           "status": "ok"
         },
         "attention_dense/gfx950/varlen_sq512": {
           "arch": "gfx950",
-          "bytes": 337808,
+          "bytes": 337689,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_varlen_lazyrs",
-          "sha256": "9da63a89a9c80bf7fae43fff7469566f3b0e2b52a6d890d29eb8de6b04fccd69",
+          "sha256": "7173d5dee62ecc91be63bf331ac07f4a9ee7ee70b2a27bc1d62f8273f8546325",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
@@ -1628,218 +1628,218 @@
         },
         "attention_dense/gfx950/bn128_sq512": {
           "arch": "gfx950",
-          "bytes": 598969,
+          "bytes": 598851,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn128_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "524e36974b1363e6abc3deb56f0768a9475b6ad9b301781f5cdab045b6e17dc4",
+          "sha256": "16745fee6d39f36116c8b0fc35cf2fbd5e0bc8248a7658970fa8f8ba7cfeb5fe",
           "status": "ok"
         },
         "attention_dense/gfx950/default_causal_sq512": {
           "arch": "gfx950",
-          "bytes": 336391,
+          "bytes": 336279,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "e184fafbd07f3a1ea14760886c2743e8b2717f15d795ddb49a2aaa4f2fe1051e",
+          "sha256": "14c3edc10d6fc6cf61d49a4dbf5fa72b62824f93d484314219a8399135f76575",
           "status": "ok"
         },
         "attention_dense/gfx950/fp16_h64_sq512": {
           "arch": "gfx950",
-          "bytes": 211198,
+          "bytes": 211086,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_fp16_kpad8_sq512_sk512_causal_lazyrs",
-          "sha256": "cb5f18ed7ace315a52f036f0d05802ec8ea02daf31923ecb3a40a42034483ea0",
+          "sha256": "70c06bd0cbf65b4768710a536792d9745cb6ecfb1d6e5d5caf2e932fb34db17e",
           "status": "ok"
         },
         "attention_dense/gfx950/lazy_off_sq512": {
           "arch": "gfx950",
-          "bytes": 332118,
+          "bytes": 332006,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal",
-          "sha256": "bb86a756fae05541274724f6b512a93df7383839ba0b1fcdffd9518b3b2a4e38",
+          "sha256": "72d5d3fd3f2f2ab0de1e9e447c45159e4cae15d86d1d2476bf5f095661fc9b92",
           "status": "ok"
         },
         "attention_dense/gfx950/noncausal_sq512": {
           "arch": "gfx950",
-          "bytes": 214222,
+          "bytes": 214110,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_full_lazyrs",
-          "sha256": "5c3c421848e9debb4be799200ab5b3e957a343306a92ff769c6d6879ad3702f2",
+          "sha256": "c7c30bebbc1fdfd0b3e57fcf23a68cbcd7f4b3e89244991ad979dc6399e32965",
           "status": "ok"
         },
         "attention_dense/gfx950/paged_swa_fp16_sq512": {
           "arch": "gfx950",
-          "bytes": 460788,
+          "bytes": 460676,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_fp16_sq512_sk512_causal_swa256_pgd16_nb32_lazyrs",
-          "sha256": "e6e6c7ba9b181a70ff53e7b5380806fe9fadd3aaec6e2146181a0c09fa0e20b5",
+          "sha256": "a094eaae80c67383905367013e04dbc1dd3fb626ff073815c3d510129b580c05",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_h64_sq512": {
           "arch": "gfx950",
-          "bytes": 215390,
+          "bytes": 215278,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "c974a8cf800c05b44ba883cae77b7cc715b6d7a0c90be738d25a8fbe64ae3c74",
+          "sha256": "2f3a2437992d371755635b18274313a799e07495babbc5f99b8d11e81910764a",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_hkvmaj_sq512": {
           "arch": "gfx950",
-          "bytes": 320307,
+          "bytes": 320194,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
-          "sha256": "4ccc262bac86dff6138e1761d32b84109399c2193b6a322a4a66e3acb81e0583",
+          "sha256": "e125aa896a58114eb501147da26542f9f9048387b2936cfad2ab2252017332e8",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_intl_sq512": {
           "arch": "gfx950",
-          "bytes": 319966,
+          "bytes": 319856,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_intl",
-          "sha256": "aed1c93aaa7d0b363fc30b6d345d49ab088345c39d8d87b80a57d6b04ad0e63f",
+          "sha256": "5e200a4a16b25a69df4ee70bee48b61f53bd9bf03c68c4494cbe39a372aa102a",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_lazy_off_sq512": {
           "arch": "gfx950",
-          "bytes": 315218,
+          "bytes": 315106,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_persist256",
-          "sha256": "186b896ceee8e3d42701c00b9725dcc4fd657f50f4cb42bb16ee70cbc241b8ce",
+          "sha256": "37869a6ac5859c672947b5a9b7d7bcdd2d90e33c90cc64ab09b0331da3a846a8",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_qbmaj_sq512": {
           "arch": "gfx950",
-          "bytes": 319527,
+          "bytes": 319415,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "6991bedaca964a41040ef57500c47d1fcbf15a67c8a379e775326c52c7e01d7e",
+          "sha256": "be9bf1de3193bb32dd08b95a02d9016be2ba1df8598b2ab908b8a01fa9523da7",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_ragged_sq500": {
           "arch": "gfx950",
-          "bytes": 320881,
+          "bytes": 320771,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist256",
-          "sha256": "1e59645001947059629e6c1b8d0c5141f6392404cf6798def753f278ef8fe8c7",
+          "sha256": "f70cacd91eb226e6bb68f9238a8343e147cdba6b3f34c3c47322b375f4c7f576",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 320127,
+          "bytes": 320123,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_sinks_lazyrs_persist256",
-          "sha256": "37f97614901e2bf0d575e2cd506940bf72a3ead3dc3a2b0a00b11bd19929d183",
+          "sha256": "18b761eda91b37a41ebf199b78202a305b4f5c033a70f41a52e2c24916814006",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 215844,
+          "bytes": 215842,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_sinks_lazyrs_persist256",
-          "sha256": "cd2acf5a94cd41bee435a6cac5f3e902cfe269cded1ed379d3ec407a08574c5c",
+          "sha256": "9685ddbf84a4b0b56caed1a822ca87f1a89eea6534f9b87bbb58ee39e6a197af",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 435244,
+          "bytes": 435240,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
-          "sha256": "42ab4bbad5f529ada802f68f7ec7b411cbd5d6a617e37ee7d0188c9c99f41127",
+          "sha256": "4d88161c0c577eb9d9ff7b6ba185b89c04b967925dc02ff72b02ba640c815c5b",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 298689,
+          "bytes": 298684,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
-          "sha256": "4ae3ee12349ef739a6fc2522259576a7ba01a7fd5c5586e02910a98b9318541b",
+          "sha256": "cd3daffe2297655d48b9c984b21f57cb054f1843d97b5cef06159564af612c59",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_w128_sq512": {
           "arch": "gfx950",
-          "bytes": 434542,
+          "bytes": 434430,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs_persist256",
-          "sha256": "cf5193db022564a6fb3c7d851b827741e39b94d0644408fb4b3c3ecc407c6dd6",
+          "sha256": "812badd5b8a85a430ad0f1f11dc798f1013dc0b6f9b5e959b0264d42e279f5ac",
           "status": "ok"
         },
         "attention_dense/gfx950/persistent_causal_sq512": {
           "arch": "gfx950",
-          "bytes": 319527,
+          "bytes": 319415,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "6991bedaca964a41040ef57500c47d1fcbf15a67c8a379e775326c52c7e01d7e",
+          "sha256": "be9bf1de3193bb32dd08b95a02d9016be2ba1df8598b2ab908b8a01fa9523da7",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_causal_sq500": {
           "arch": "gfx950",
-          "bytes": 337768,
+          "bytes": 337654,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "942b0ed070a6abb089264262b6323b6e8560278f74467aa784897cb27218b8f8",
+          "sha256": "29882bd3e1b04a728229fbd7c24cc8430ad9bc07b0dbc0eab9b65f07b753145f",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_full_sq500": {
           "arch": "gfx950",
-          "bytes": 244107,
+          "bytes": 243993,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_full_ragged_lazyrs",
-          "sha256": "ee5c6e6c63ca5f63a130b0874a6e8120fd9fa6d840276575e8b16a729e7225b8",
+          "sha256": "a000d2870faeab11b31bb9ed63b2bf3b57e2b366c9c455584d737a5422ecbfc2",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_h64_sq500": {
           "arch": "gfx950",
-          "bytes": 215457,
+          "bytes": 215349,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "533f2660fb81e664d818f48d01b86f61058184b4aee1de54182b92bd3f75460e",
+          "sha256": "323481d96466c8a685e02db1ac6b0b6d3dd7653c7e58b574f2c93fc020573efb",
           "status": "ok"
         },
         "attention_dense/gfx950/sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 336991,
+          "bytes": 336989,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_sinks_lazyrs",
-          "sha256": "4864a743cad03697cd8d46dc03e0166130dc43ce2feb8620163b8ce26f6a3aa2",
+          "sha256": "9155b235f69144bd24c1fcad6e4376d5e69d627fba7767e19acb8a98e74ad15e",
           "status": "ok"
         },
         "attention_dense/gfx950/sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 214985,
+          "bytes": 214981,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_sinks_lazyrs",
-          "sha256": "56466878316288d15d400e77efd9283c69fd847357db682de3690ae0e0d5084e",
+          "sha256": "31cc90f03b6aa119b3655ce3aa1d2c6bd60f8d854b618727779489aa07a3f25a",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_sinks_d128_sq512": {
           "arch": "gfx950",
-          "bytes": 456498,
+          "bytes": 456494,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_sinks_lazyrs",
-          "sha256": "9fe4ac6d0588df8d8d9674a46933508e31939a73d738e3da8697469346da8148",
+          "sha256": "b52bc861c27198804e29646eba4d40c2f3cc43a0f68a6858a09010b80ebe8fc6",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_sinks_d64_sq512": {
           "arch": "gfx950",
-          "bytes": 297741,
+          "bytes": 297739,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs",
-          "sha256": "2a9ca503be0257008c12495079ca56f56b97e454c577f851ce248c6a09591961",
+          "sha256": "f5aec515804e7292069c13d50175a1e31ed812f3797beecff4feb01d6146b068",
           "status": "ok"
         },
         "attention_dense/gfx950/swa_w128_sq512": {
           "arch": "gfx950",
-          "bytes": 455796,
+          "bytes": 455682,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs",
-          "sha256": "4b8fa5ac0019b6f7628320af9ad3bd8e5b288dc0d351e17a8d7caedb8af77795",
+          "sha256": "8c4b2ff314a6a31cdf6732832e5958286d51b3a23ae96f90897df370353491a6",
           "status": "ok"
         },
         "attention_dense/gfx950/varlen_sq512": {
           "arch": "gfx950",
-          "bytes": 337812,
+          "bytes": 337693,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_varlen_lazyrs",
-          "sha256": "1f57564c5a87fea4db05fc9680edf9978c40a829840e742ad16487244e64ac26",
+          "sha256": "006e8b663ec4fd1da0c0a85ae5fc389d5e7d82e3fd4f60cedba1153f91bfe640",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
