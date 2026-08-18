@@ -14,7 +14,7 @@ import textwrap
 
 import pytest
 
-_SOLUTION_PY = Path(__file__).resolve().parents[2] / "SolutionStructs" / "Solution.py"
+_SOLUTION_PY = Path(__file__).resolve().parents[3] / "SolutionStructs" / "Solution.py"
 
 
 def _func_body() -> str:
