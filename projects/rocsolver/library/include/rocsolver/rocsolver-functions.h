@@ -183,6 +183,97 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_get_alg_mode(rocblas_handle handle,
 
 /*
  * ===========================================================================
+ *      Options
+ * ===========================================================================
+ */
+
+/*! \brief The SET_OPT function sets options that control operation of a function.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    func        #rocsolver_function.
+                The function that will use the selected option.
+    @param[in]
+    opt         #rocsolver_option.
+                The option to set.
+    @param[in]
+    value       #rocsolver_option_value.
+                The value of the option.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_set_opt(rocblas_handle handle,
+                                                       const rocsolver_function func,
+                                                       const rocsolver_option opt,
+                                                       const int64_t value);
+
+/*! \brief The GET_OPT function gets options that control operation of a function.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    func        #rocsolver_function.
+                The function that will use the selected option.
+    @param[in]
+    opt         #rocsolver_option.
+                The option to get.
+    @param[out]
+    value       pointer to #rocsolver_option_value.
+                On exit, the value is overwritten by the current value of the
+                option for the specified function.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_get_opt(rocblas_handle handle,
+                                                       const rocsolver_function func,
+                                                       const rocsolver_option opt,
+                                                       int64_t* value);
+
+/*! \brief The SET_OPT_FP64 function sets floating-point options that control
+    operation of a function.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    func        #rocsolver_function.
+                The function that will use the selected option.
+    @param[in]
+    opt         #rocsolver_option.
+                The option to set.
+    @param[in]
+    value       #rocsolver_option_value.
+                The value of the option. This is a union of a double-precision
+                and int64, depending on opt.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_set_opt_fp64(rocblas_handle handle,
+                                                       const rocsolver_function func,
+                                                       const rocsolver_option opt,
+                                                       const double value);
+
+/*! \brief The GET_OPT_FP64 function gets floating-point options that control
+    operation of a function.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    func        #rocsolver_function.
+                The function that will use the selected option.
+    @param[in]
+    opt         #rocsolver_option.
+                The option to get.
+    @param[out]
+    value       pointer to #rocsolver_option_value.
+                On exit, the value is overwritten by the current value of the
+                option for the specified function.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_get_opt_fp64(rocblas_handle handle,
+                                                       const rocsolver_function func,
+                                                       const rocsolver_option opt,
+                                                       double* value);
+
+/*
+ * ===========================================================================
  *      Auxiliary functions
  * ===========================================================================
  */

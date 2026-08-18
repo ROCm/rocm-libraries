@@ -142,14 +142,21 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
-    // 2-stage BATCHED not currently working. Also update use_2stage in implementation.
+    // 2-stage pointer BATCHED not currently working. Also update use_2stage in implementation.
+    int64_t switch_size_opt = 0;
+    rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                      rocsolver_option_2stage_switch_size, &switch_size_opt);
     const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
-            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= I(switch_size_opt)));
     if(use_2stage)
     {
-        const I kd = SYEVD_2STAGE_KD;
-        const I nb = SYEVD_2STAGE_NB;
+        int64_t kd_opt = 0;
+        rocsolver_get_opt(handle, rocsolver_function_syev_heev, rocsolver_option_kd, &kd_opt);
+        int64_t nb_opt = 0;
+        rocsolver_get_opt(handle, rocsolver_function_syev_heev, rocsolver_option_nb, &nb_opt);
+        const I kd = I(kd_opt);
+        const I nb = I(nb_opt);
 
         // band matrix: (3*kd - 1) rows by n cols
         const I ldab = 3 * kd - 1;
@@ -332,14 +339,21 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
-    // 2-stage BATCHED not currently working. Also update use_2stage in implementation.
+    // 2-stage pointer BATCHED not currently working. Also update use_2stage in implementation.
+    int64_t switch_size_opt = 0;
+    rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                      rocsolver_option_2stage_switch_size, &switch_size_opt);
     const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
-            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= I(switch_size_opt)));
     if(use_2stage)
     {
-        const I kd = SYEVD_2STAGE_KD;
-        const I nb = SYEVD_2STAGE_NB;
+        int64_t kd_opt = 0;
+        rocsolver_get_opt(handle, rocsolver_function_syev_heev, rocsolver_option_kd, &kd_opt);
+        int64_t nb_opt = 0;
+        rocsolver_get_opt(handle, rocsolver_function_syev_heev, rocsolver_option_nb, &nb_opt);
+        const I kd = I(kd_opt);
+        const I nb = I(nb_opt);
 
         // band matrix: (3*kd - 1) rows by n cols
         const I ldab = 3 * kd - 1;
@@ -495,14 +509,23 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
-    // 2-stage BATCHED not currently working. Also update use_2stage in getMemorySize.
+    // 2-stage pointer BATCHED not currently working. Also update use_2stage in getMemorySize.
+    int64_t switch_size_opt = 0;
+    ROCBLAS_CHECK(rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                                    rocsolver_option_2stage_switch_size, &switch_size_opt));
     const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
-            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= I(switch_size_opt)));
     if(use_2stage)
     {
-        const I kd = SYEVD_2STAGE_KD;
-        const I nb = SYEVD_2STAGE_NB;
+        int64_t kd_opt = 0;
+        ROCBLAS_CHECK(rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                                        rocsolver_option_kd, &kd_opt));
+        int64_t nb_opt = 0;
+        ROCBLAS_CHECK(rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                                        rocsolver_option_nb, &nb_opt));
+        const I kd = I(kd_opt);
+        const I nb = I(nb_opt);
         const I ldab = 3 * kd - 1;
         const I ldv_hb2st = 2 * kd - 1;
         const I nt = ceildiv(n - 1, kd);
@@ -795,14 +818,23 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
-    // 2-stage BATCHED not currently working. Also update use_2stage in getMemorySize.
+    // 2-stage pointer BATCHED not currently working. Also update use_2stage in getMemorySize.
+    int64_t switch_size_opt = 0;
+    ROCBLAS_CHECK(rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                                    rocsolver_option_2stage_switch_size, &switch_size_opt));
     const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
-            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= I(switch_size_opt)));
     if(use_2stage)
     {
-        const I kd = SYEVD_2STAGE_KD;
-        const I nb = SYEVD_2STAGE_NB;
+        int64_t kd_opt = 0;
+        ROCBLAS_CHECK(rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                                        rocsolver_option_kd, &kd_opt));
+        int64_t nb_opt = 0;
+        ROCBLAS_CHECK(rocsolver_get_opt(handle, rocsolver_function_syev_heev,
+                                        rocsolver_option_nb, &nb_opt));
+        const I kd = I(kd_opt);
+        const I nb = I(nb_opt);
         const I ldab = 3 * kd - 1;
         const I ldv_hb2st = 2 * kd - 1;
         const I nt = ceildiv(n - 1, kd);

@@ -196,7 +196,7 @@ typedef enum rocsolver_norm_type_
     rocsolver_norm_type_max = 304, /**< Maximum absolute value of any element. */
 } rocsolver_norm_type;
 
-/*! \brief Used to specify a function with multiple supported algorithm modes.
+/*! \brief Used to specify a function with multiple supported algorithm modes or options.
  ********************************************************************************/
 typedef enum rocsolver_function_
 {
@@ -207,5 +207,19 @@ typedef enum rocsolver_function_
     rocsolver_function_syev_heev = 405, /**< Affected by sterf and steqr. */
     rocsolver_function_hetrd = 406, /**< Controls 1-stage vs 2-stage tridiagonalization. */
 } rocsolver_function;
+
+/*! \brief Used to specify algorithm options.
+ ********************************************************************************/
+typedef enum rocsolver_option_
+{
+    rocsolver_option_mode = 501, /**< Algorithm mode. */
+    rocsolver_option_nb = 502, /**< Block size. */
+    rocsolver_option_kd = 503, /**< Bandwidth in 2-stage EVD or SVD. */
+    rocsolver_option_switch_size = 504, /**< Dimension to switch from blocked to non-blocked. */
+    rocsolver_option_2stage_switch_size = 505, /**< Dimension to switch from 1-stage to 2-stage. */
+    rocsolver_option_dc_leaf_size = 506, /**< Minimum size for divide-and-conquer recursion. */
+    rocsolver_option_svd_qr_ratio = 507, /**< Ratio of max(m,n) / min(m,n) above which to do initial QR or LQ in SVD. */
+    rocsolver_option_svd_values_qr_ratio = 508, /**< Ratio of max(m,n) / min(m,n) above which to do initial QR or LQ when computing singular values only. */
+} rocsolver_option;
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */
