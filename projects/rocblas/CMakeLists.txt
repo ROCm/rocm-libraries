@@ -31,6 +31,11 @@ endif()
 # ROCM_BUILD_ID is added to the package name by rocm-cmake ROCMSetupVersion
 unset(ENV{ROCM_BUILD_ID})
 
+if(WIN32)
+    # Required for CMAKE_MSVC_RUNTIME_LIBRARY, must be set prior the first project() or enable_language()
+    cmake_policy(SET CMP0091 NEW)
+endif()
+
 project( rocblas LANGUAGES C CXX )
 
 # ROCm libraries root (for shared/ctest and other shared resources)
@@ -40,6 +45,10 @@ if(NOT DEFINED ROCM_LIBRARIES_ROOT)
 endif()
 
 set(ROCBLAS_EXPORT_HEADER_CUSTOM_CONTENT "")
+
+if(MSGPACK_NO_BOOST)
+  add_compile_definitions($<$<COMPILE_LANGUAGE:C,CXX>:MSGPACK_NO_BOOST>)
+endif()
 
 if(WIN32)
   add_compile_definitions("$<$<COMPILE_LANGUAGE:C,CXX>:_CRT_SECURE_NO_WARNINGS;NOMINMAX;WIN32;_WIN32>")
@@ -203,17 +212,17 @@ else()
   else()
     rocm_check_target_ids(target_list TARGETS "${GPU_TARGETS}")
   endif()
-
-  # if 'target_list' is empty, then compile does not support the gpu arch passed as an argument.
-  if(target_list STREQUAL "")
-    message(FATAL_ERROR "Unsupported target ${GPU_TARGETS} by compiler, List of supported targets: ${SUPPORTED_TARGETS}")
-  endif()
 endif()
+
+# if 'target_list' is empty, then compile does not support the gpu arch passed as an argument.
+if (target_list STREQUAL "")
+  message(FATAL_ERROR "Unsupported target ${GPU_TARGETS} by compiler, List of supported targets: ${SUPPORTED_TARGETS}")
+endif ()
 
 # set GPU_TARGETS and AMDGPU_TARGETS before any find_package( hip ...), via tensile or in this file
 # to set --offload-arch flags via hip-config.cmake hip::device dependency
 set( GPU_TARGETS "${target_list}" CACHE STRING "List of GPUs (gfx targets) to support" FORCE )
-set( AMDGPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of GPUs (gfx targets) to support" FORCE ) # for old hip cmake files backward compatibility
+set( AMDGPU_TARGETS "${target_list}" CACHE STRING "List of GPUs (gfx targets) to support" FORCE ) # for old hip cmake files backward compatibility
 
 option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
@@ -225,8 +234,10 @@ endif()
 
 if(BUILD_WITH_HIPBLASLT)
   # don't wait until after Tensile to find hipblaslt if enabled; needed for clients-only build too
-  find_package( hipblaslt ${HIPBLASLT_VERSION} REQUIRED CONFIG PATHS ${hipblaslt_path} ${ROCM_PATH})
-  message(STATUS "FOUND hipBLASLt, INCLUDE_DIR: ${HIPBLASLT_INCLUDE_DIR}")
+  find_package(hipblaslt ${HIPBLASLT_VERSION} CONFIG REQUIRED PATHS ${hipblaslt_path} ${ROCM_PATH})
+  get_target_property(hipblaslt_INCLUDE_DIR roc::hipblaslt INTERFACE_INCLUDE_DIRECTORIES)
+  list(REMOVE_DUPLICATES hipblaslt_INCLUDE_DIR)
+  message(STATUS "FOUND hipBLASLt, INCLUDE_DIR: ${hipblaslt_INCLUDE_DIR}")
 endif()
 
 function(list_replace list old new)
@@ -244,7 +255,10 @@ if(NOT SKIP_LIBRARY)
   if( BUILD_WITH_TENSILE )
     # we will have expanded "all" for tensile to ensure consistency as we have local rules
     set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
-    list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
+    # GPUEP: disabled for Windows build
+    if(NOT WIN32)
+      list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
+    endif()
 
     set( TENSILE_VERSION 4.47.0 CACHE STRING "The version of Tensile to be used")
 
