@@ -91,7 +91,7 @@ def remediation(paths: list[str]) -> str:
     return (
         "If these drops are intentional, review them and update the baseline with:\n"
         "    tox -e coverage-unit            # regenerate coverage.json, then\n"
-        "    python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py \\\n"
+        "    python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py \\\n"
         f"        update --current coverage.json{named}\n"
         "and commit the reviewed coverage-baseline.json diff."
     )

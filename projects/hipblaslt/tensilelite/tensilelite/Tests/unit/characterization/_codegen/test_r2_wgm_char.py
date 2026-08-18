@@ -9,7 +9,7 @@ Drives the R2 designed WGM config
 harness and asserts every emitted kernel is real gfx942 AMDGCN assembly with
 err==0.
 
-Target coverage: Tensile/Components/WorkGroupMappingAlgos.py lines 369-410,
+Target coverage: tensilelite/Components/WorkGroupMappingAlgos.py lines 369-410,
 430-628, 655-763, 781-841, 850-1037 — the entire SpaceFillingCurveWalk code
 path that is gated by ``len(kernel["SpaceFillingAlgo"]) > 0``.
 

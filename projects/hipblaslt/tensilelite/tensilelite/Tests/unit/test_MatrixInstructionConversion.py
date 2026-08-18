@@ -26,13 +26,13 @@ import pytest
 import yaml
 from pprint import pformat
 
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.Types import IsaVersion
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Toolchain.Validators import validateToolchain
-from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
-from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Toolchain.Validators import validateToolchain
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
+from tensilelite.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
 
 @pytest.fixture(scope="module")

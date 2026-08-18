@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — StreamK big-cluster codegen characterization for gfx942.
 
-Exercises the three large uncovered clusters in ``Tensile/Components/StreamK.py``:
+Exercises the three large uncovered clusters in ``tensilelite/Components/StreamK.py``:
 
   * Lines 630-784  — ``storeBranchesCommon`` tree-reduction arm
                       Gate: ``kernel["StreamKFixupTreeReduction"] == 1``

@@ -5,7 +5,7 @@
 
 The coverage-unit lane runs two disjoint test selections: the characterization
 suite (the ``characterization/`` subtree) and the pure unit tests (the rest of
-``Tensile/Tests/unit``, with the characterization subtree excluded). It feeds
+``tensilelite/Tests/unit``, with the characterization subtree excluded). It feeds
 their two JSON coverage reports here, plus the combined report.
 
 Why this card exists: characterization tests are scaffolding, and the goal is to

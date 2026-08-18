@@ -4,7 +4,7 @@
 ################################################################################
 """R2 — gfx942 StreamK family codegen characterization.
 
-Exercises the uncovered branches of ``Tensile/Components/StreamK.py``
+Exercises the uncovered branches of ``tensilelite/Components/StreamK.py``
 (methodology-A missing ranges: 202, 316, 326-409, 464+ and others)
 by emitting SGEMM kernels that sweep the StreamK knob family:
 

@@ -9,7 +9,7 @@ Drives the P4 designed BenchmarkProblems config
 emit harness and asserts every emitted kernel is real gfx950 AMDGCN assembly
 with err==0.
 
-Target: Tensile/Components/Subtile/SubtileLREmit.py, uncovered ranges:
+Target: tensilelite/Components/Subtile/SubtileLREmit.py, uncovered ranges:
   490-535  (_lraTileAssignment_fp8_legacy) — FP8 block-swap swizzle path,
             activated when tileInfoA.bpe == 1 (DataType: F8, UseSubtileImpl=1)
   613-655  (emitSubtileDsRead, localReadDoSubtile) — called from preLoop when
