@@ -4,3 +4,6 @@ msgpack
 joblib>=1.4.0
 filelock
 numpy
+
+# Optional runtime fallbacks are declared as extras in pyproject.toml:
+# profile (yappi), hip-query (hip-python), orjson, ujson, and simplejson.
