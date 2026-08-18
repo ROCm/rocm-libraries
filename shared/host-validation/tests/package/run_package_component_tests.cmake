@@ -372,6 +372,7 @@ set(
     ${_generator_arguments}
     ${_configure_cache_arguments}
     "-DROCHostValidation_SOURCE_DIR=${COMPONENT_SOURCE_DIR}"
+    "-DCMAKE_MODULE_PATH=${PACKAGE_SOURCE_DIR}/aliased-blas"
 )
 execute_process(
     COMMAND ${_source_compat_configure_command}

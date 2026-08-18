@@ -192,11 +192,30 @@ int main()
 ]=]
 )
 
+# Compile and link the CBLAS ABI probe against one candidate link interface.
 function(_cblas_check_link_interface result_variable)
+    set(_CBLAS_check_libraries)
+    foreach(_CBLAS_check_library IN LISTS ARGN)
+        if(TARGET "${_CBLAS_check_library}")
+            get_target_property(
+                _CBLAS_aliased_target
+                "${_CBLAS_check_library}"
+                ALIASED_TARGET
+            )
+            if(_CBLAS_aliased_target)
+                list(APPEND _CBLAS_check_libraries "${_CBLAS_aliased_target}")
+            else()
+                list(APPEND _CBLAS_check_libraries "${_CBLAS_check_library}")
+            endif()
+        else()
+            list(APPEND _CBLAS_check_libraries "${_CBLAS_check_library}")
+        endif()
+    endforeach()
+
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_QUIET TRUE)
     set(CMAKE_REQUIRED_INCLUDES "${CBLAS_INCLUDE_DIR}")
-    set(CMAKE_REQUIRED_LIBRARIES ${ARGN})
+    set(CMAKE_REQUIRED_LIBRARIES ${_CBLAS_check_libraries})
     unset(_CBLAS_link_interface_works CACHE)
     check_cxx_source_compiles(
         "${_CBLAS_probe_source}"
