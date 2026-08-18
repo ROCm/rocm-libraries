@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -62,8 +62,13 @@ target_compile_definitions(rocsolver-bench PRIVATE
   ROCSOLVER_CLIENTS_BENCH
 )
 
-# Mirror the library's 2-stage eigensolver feature flag so the tests assert the
-# correct behavior (real run when ON, rocblas_status_not_implemented when OFF).
+# Mirror feature flags to test behaviour
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
 if(ROCSOLVER_ENABLE_EIG_2STAGE)
   target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
 endif()

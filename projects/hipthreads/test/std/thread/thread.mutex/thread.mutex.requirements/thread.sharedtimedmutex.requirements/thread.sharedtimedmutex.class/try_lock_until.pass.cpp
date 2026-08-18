@@ -52,7 +52,7 @@ int main(int, char**) {
     ::std::shared_timed_mutex m;
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         ready          = true;
         bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
@@ -86,7 +86,7 @@ int main(int, char**) {
     ::std::shared_timed_mutex m;
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
         assert(!succeeded);

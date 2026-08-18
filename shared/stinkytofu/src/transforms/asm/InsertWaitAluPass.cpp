@@ -38,6 +38,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
@@ -47,6 +48,15 @@
 
 namespace {
 using namespace stinkytofu;
+
+// Gate for the ESM2 VALU source-operand VA_VDST stamp (the src-operand WAR hazard).
+bool g_enableESM2TrackValuVsrc = false;
+
+// TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
+// hazard of GLOBAL-family memory ops — the "valu writes VGPR, global op reads
+// it" case. Only the global op's src RAW va_vdst is dropped; its dst WAW
+// va_vdst, the vm_vsrc WAR, and every non-GLOBAL consumer are untouched.
+constexpr bool g_enableESM2SuppressValuToGlobalVaVdst = true;
 
 // ---------------------------------------------------------------------------
 // Mode 2 counters and events (VA_VDST, VM_VSRC).
@@ -332,15 +342,15 @@ class WaitcntBrackets {
             auto stampVA = [&](unsigned idx, HighBitSel half) {
                 RegKey k = keyer.producerKey(idx, half);
                 VgprStamp& s = scores[k];
-                // Set only this pipe.
                 s.vaOrd[pipe] = ord;
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
                                      << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
                                      << " ord=" << ord << "]\n");
             };
-            forEachVGPR(
-                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
+            if (g_enableESM2TrackValuVsrc)
+                forEachVGPR(
+                    inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
+                    [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
             forEachVGPR(
                 inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
                 [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
@@ -383,12 +393,18 @@ class WaitcntBrackets {
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        forEachVGPR(
-            inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-            [&](unsigned idx, HighBitSel half) {
-                keyer.forEachConsumerKey(
-                    idx, half, [&](RegKey k) { determineWait(CT_VA_VDST, k, wait, "src(RAW)"); });
-            });
+        // TEMP HACK: optionally drop the src RAW va_vdst for valu->global.
+        const bool suppressSrcVaVdst =
+            g_enableESM2SuppressValuToGlobalVaVdst && isGLOBALOrAtomic(inst);
+        if (!suppressSrcVaVdst) {
+            forEachVGPR(
+                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
+                [&](unsigned idx, HighBitSel half) {
+                    keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
+                        determineWait(CT_VA_VDST, k, wait, "src(RAW)");
+                    });
+                });
+        }
 
         forEachVGPR(
             inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
@@ -632,13 +648,14 @@ class WaitcntBrackets {
 // ---------------------------------------------------------------------------
 
 class InsertWaitAluPassImpl : public Pass {
-    StinkyAsmModule* module = nullptr;
     std::unordered_map<BasicBlock*, WaitcntBrackets> blockEntryState;
     GfxArchID archId = GfxArchID{};
     VGPRHalfKeyer keyer{};
 
    public:
-    explicit InsertWaitAluPassImpl(StinkyAsmModule* module) : module(module) {}
+    explicit InsertWaitAluPassImpl(bool enableESM2TrackValuVsrc) {
+        g_enableESM2TrackValuVsrc = enableESM2TrackValuVsrc;
+    }
 
    private:
     StinkyInstruction* emitWaitAlu(BasicBlock& bb, IRBase* insertBefore, const Wait& wait,
@@ -755,7 +772,7 @@ class InsertWaitAluPassImpl : public Pass {
             // at the return-landing site. The callee may leave VALU/VMEM
             // instructions outstanding on VA_VDST/VM_VSRC, so the drain is
             // unconditional. The callee entry is drained separately
-            // (runCalleeConservativeDrain).
+            // (insertCalleeEntryDrain).
             if (isCall(*inst)) {
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]   call — drain va_vdst(0)+vm_vsrc(0) "
                                         "after s_swappc (callee->caller bracket)\n");
@@ -888,42 +905,24 @@ class InsertWaitAluPassImpl : public Pass {
     }
 
    private:
-    // Conservatively drain both counters at the callee entry.
-    //
-    // TODO: also run the full fixed-point WaitAlu analysis over the callee body
-    // (build its CFG, run the scoreboard) so the callee gets its own intra-body
-    // s_wait_alu, matching the entry-function path. Today the callee body is left
-    // un-analyzed.
-    void runCalleeConservativeDrain(Function& callee) {
-        BasicBlock* entry = callee.getEntryBlock();
-        if (!entry) return;
+    // Drain both counters at the callee entry to establish the zero DEPCTR start
+    // the analysis assumes. Lands before the first real instruction, so it stays
+    // after the entry label whether the callee is flat or split by CFGBuilder.
+    void insertCalleeEntryDrain(Function& callee) {
+        for (BasicBlock& bb : callee) {
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (!inst || isPseudoInst(inst)) continue;
 
-        // A callee that never touches a VGPR (e.g. the "None" activation, which
-        // only does s_setpc back) has no hazard to drain — skip it.
-        if (!functionReadsOrWritesVGPR(callee)) {
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu] callee \"" << callee.getName()
-                                 << "\": no VGPR use, skip entry drain\n");
-            return;
-        }
-
-        // Land the drain at the first real instruction.
-        auto it = entry->begin();
-        while (it != entry->end()) {
-            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-            if (inst && isPseudoInst(inst)) {
-                ++it;
-                continue;
+                Wait drain;
+                addWait(drain, CT_VA_VDST, 0);
+                addWait(drain, CT_VM_VSRC, 0);
+                emitWaitAlu(bb, it.getNodePtr(), drain);
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu] callee \"" << callee.getName()
+                                     << "\": entry drain va_vdst(0)+vm_vsrc(0)\n");
+                return;
             }
-            break;
         }
-        IRBase* anchor = (it == entry->end()) ? nullptr : it.getNodePtr();
-
-        Wait drain;
-        addWait(drain, CT_VA_VDST, 0);
-        addWait(drain, CT_VM_VSRC, 0);
-        emitWaitAlu(*entry, anchor, drain);
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] callee \"" << callee.getName()
-                             << "\": entry drain va_vdst(0)+vm_vsrc(0)\n");
     }
 
     // True if any real instruction in func reads or writes a VGPR.
@@ -943,9 +942,20 @@ class InsertWaitAluPassImpl : public Pass {
         return false;
     }
 
-    // Full fixed-point scoreboard analysis + mode2 enable for the entry
-    // (non-callee) function.
-    void runEntryFunction(Function& func, AnalysisManager& AM) {
+    // Full fixed-point scoreboard analysis for one function. A callee is first
+    // drained at entry to establish the zero start the analysis assumes.
+    void runFullAnalysis(Function& func, AnalysisManager& AM, bool isCallee) {
+        if (isCallee) {
+            // A callee that never touches a VGPR (e.g. the "None" activation) has
+            // no hazard to drain or analyze.
+            if (!functionReadsOrWritesVGPR(func)) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu] callee \"" << func.getName()
+                                     << "\": no VGPR use, skip\n");
+                return;
+            }
+            insertCalleeEntryDrain(func);
+        }
+
         const auto& bbIndex = AM.getResult<BBIndexAnalysis>(func);
         const auto& rpo = bbIndex.rpo;
 
@@ -988,55 +998,83 @@ class InsertWaitAluPassImpl : public Pass {
         for (auto* bb : rpo) runOnBasicBlock(*bb, /*emit=*/true);
 
         // Phase 3: enable mode2 at entry label (never disabled thereafter).
-        insertSchedModeLifecycle(func);
+        // Entry-only: mode2 is kernel-global, callees must not re-enable it.
+        if (!isCallee) insertSchedModeLifecycle(func);
 
         blockEntryState.clear();
     }
 
-   public:
-    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+    // Per-arch setup shared by every function run. Idempotent.
+    void setupArch(PassContext& passCtx) {
         auto arch = passCtx.getGemmTileConfig().arch;
         archId = getGfxArchID(arch[0], arch[1], arch[2]);
         const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
         const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
         keyer = VGPRHalfKeyer(hasD16);
-
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
                              << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
+    }
 
-        // Whole-kernel: process the entry function with full analysis, then apply
-        // the conservative entry drain to every callee. The pass is invoked on the
-        // entry function; callees are reached via the module. Guard against being
-        // re-invoked per-function by a future driver: only the non-callee run
-        // drives callee processing.
-        if (func.getIsCallable()) {
-            if (!func.empty()) runCalleeConservativeDrain(func);
-            return PreservedAnalyses::none();
-        }
-
-        if (!func.empty()) runEntryFunction(func, AM);
-
-        // Reach callees only when a module is available (backend pipeline). In
-        // stinkytofu-opt single-pass mode / unit tests there is no module.
-        if (module) {
-            for (Function* fn : module->getFunctions()) {
-                if (fn && fn->getIsCallable() && !fn->empty()) runCalleeConservativeDrain(*fn);
-            }
-        }
-
+   public:
+    // Entry and callees both get full analysis; callees also get the entry drain.
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+        setupArch(passCtx);
+        if (!func.empty()) runFullAnalysis(func, AM, /*isCallee=*/func.getIsCallable());
         return PreservedAnalyses::none();
+    }
+
+    // Full per-function analysis, exposed for the ModulePass driver.
+    void runOnFunction(Function& func, PassContext& passCtx, AnalysisManager& AM, bool isCallee) {
+        setupArch(passCtx);
+        if (!func.empty()) runFullAnalysis(func, AM, isCallee);
     }
 };
 
 char InsertWaitAluPassImpl::ID = 0;
 
+// Whole-kernel driver: full per-function analysis on entry and every callee. A
+// real ModulePass so it owns cross-function iteration and reserves the seam for
+// future callee<->caller analysis.
+class InsertWaitAluModulePass : public ModulePass {
+   public:
+    explicit InsertWaitAluModulePass(bool enableESM2TrackValuVsrc)
+        : enableESM2TrackValuVsrc(enableESM2TrackValuVsrc) {}
+
+    const char* getName() const override {
+        return "InsertWaitAluModulePass";
+    }
+
+    PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
+                          ModuleAnalysisManager& /*MAM*/) override {
+        InsertWaitAluPassImpl impl(enableESM2TrackValuVsrc);
+        AnalysisManager AM;
+        registerAllAnalyses(AM);
+
+        // Uniform per-function flow. The AM caches results by analysis type, not
+        // by Function, so it must be cleared before each function's analysis.
+        for (Function* fn : M.getFunctions()) {
+            if (!fn || fn->empty()) continue;
+            AM.clear();
+            impl.runOnFunction(*fn, passCtx, AM, /*isCallee=*/fn->getIsCallable());
+        }
+
+        // Future: callee<->caller cross-function analysis. The whole module is
+        // available here when a more aggressive policy is needed.
+
+        return PreservedAnalyses::none();
+    }
+
+   private:
+    bool enableESM2TrackValuVsrc;
+};
+
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertWaitAluPass(StinkyAsmModule& module) {
-    return std::make_unique<InsertWaitAluPassImpl>(&module);
+std::unique_ptr<Pass> createInsertWaitAluPass(bool enableESM2TrackValuVsrc) {
+    return std::make_unique<InsertWaitAluPassImpl>(enableESM2TrackValuVsrc);
 }
-std::unique_ptr<Pass> createInsertWaitAluPass() {
-    return std::make_unique<InsertWaitAluPassImpl>(nullptr);
+std::unique_ptr<ModulePass> createInsertWaitAluModulePass(bool enableESM2TrackValuVsrc) {
+    return std::make_unique<InsertWaitAluModulePass>(enableESM2TrackValuVsrc);
 }
 }  // namespace stinkytofu

@@ -1438,8 +1438,7 @@ def getGateResidualDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   gList = []
   for d in ["DataType", "ComputeDataType"]:
     dtype = DataType(problem[d])
-    if dtype.numBytes() > 1:
-      gList.append(dtype)
+    gList.append(dtype)
 
   gateResidualDataTypeList = list(set(gList))
   gateResidualDataTypeList.sort() # Make name unique

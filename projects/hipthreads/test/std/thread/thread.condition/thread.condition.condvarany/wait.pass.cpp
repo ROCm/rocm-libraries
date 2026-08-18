@@ -50,7 +50,7 @@ int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     L1 lk(m0);
-    hip::thread t = support::make_test_thread(f);
+    hip::wthread t = support::make_test_thread(f);
     assert(test1 == 0);
     while (test1 == 0)
         cv.wait(lk);

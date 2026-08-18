@@ -62,7 +62,7 @@ void test() {
     ::std::condition_variable_any cv;
     Mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready = true;
       do {
@@ -75,7 +75,7 @@ void test() {
       assert(Clock::now() < timeout);
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -103,7 +103,7 @@ void test() {
     ::std::condition_variable_any cv;
     Mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ::std::cv_status result;
       do {

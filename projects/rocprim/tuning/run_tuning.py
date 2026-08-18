@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,14 @@ import re
 import sys
 import os
 from pathlib import Path
+from types import ModuleType
 from typing import List, Optional
 from contextlib import contextmanager
 import re
 import traceback
 from utils import Parser
+
+from tuner.base_tuner import TunerArgs
 
 
 @contextmanager
@@ -43,7 +46,7 @@ def working_directory(path: Path):
         os.chdir(prev_cwd)
 
 
-def import_module_from_file(file_path: str, module_name: str) -> Optional[object]:
+def import_module_from_file(file_path: str, module_name: str) -> Optional[ModuleType]:
     """Import a module from a file path."""
     try:
         spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -79,19 +82,18 @@ def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
 
 def run_tuning(
     algorithms: List[str],
-    size: int = None,
-    iterations: int = None,
-    output_dir: str = None,
-    include_default_config: bool = None,
-    max_fevals: int = None,
-    strategy: str = None,
-    simulation_mode: bool = False,
-    arch_name: str = None,
-    seed: int = None,
+    size: int | None = None,
+    output_dir: str | None = None,
+    exclude_default_config: bool | None = None,
+    max_fevals: int | None = None,
+    strategy: str | None = None,
+    simulation_mode: bool | None = False,
+    arch_name: str | None = None,
+    seed: int | None = None,
 ) -> None:
     """Run tuning for specified algorithms."""
     current_dir = Path(__file__).parent
-    tuning_dir = current_dir / "tuning_scripts"
+    tuning_dir = current_dir / "tuner"
 
     with working_directory(tuning_dir):
         for algo in algorithms:
@@ -112,18 +114,19 @@ def run_tuning(
             print(f"Working directory: {Path.cwd()}")
             try:
                 if hasattr(tuning_module, "Tuner"):
-                    tuner = tuning_module.Tuner(
+                    args: TunerArgs = tuning_module.Tuner._get_default_args()
+                    args.update_with_kwargs(
                         algo_full_name=algo,
-                        bytes_size=size,
-                        iterations=iterations,
+                        size=size,
                         output_dir=output_dir,
-                        include_default_config=include_default_config,
+                        exclude_default_config=exclude_default_config,
                         max_fevals=max_fevals,
                         strategy=strategy,
                         simulation_mode=simulation_mode,
                         arch_name=arch_name,
                         seed=seed,
                     )
+                    tuner = tuning_module.Tuner(args)
                     tuner.tune_all()
                 else:
                     print(f"Warning: No tuner class found in {algo} module")
@@ -167,7 +170,6 @@ def main():
         return
 
     args.size = int(args.size) if args.size else None
-    args.iterations = int(args.iterations) if args.iterations else None
 
     matched_algos = filter_algorithms(available_algos, args.algo_regex)
 
@@ -188,9 +190,8 @@ def main():
     run_tuning(
         matched_algos,
         args.size,
-        args.iterations,
         args.output_dir,
-        args.include_default_config,
+        args.exclude_default_config,
         args.max_fevals,
         args.strategy,
         args.simulation_mode,

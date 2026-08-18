@@ -71,7 +71,7 @@ namespace cuda {
  * - Move construct / assign transfers ownership; source is left empty.
  *
  * Invariants:
- * - If owns_lock() is true then mutex() is non-null and locked by this thread.
+ * - If owns_lock() is true then mutex() is non-null and locked by this wthread.
  * - Destruction unlocks only if ownership is held.
  *
  * Timed locking hooks are commented out (TODO) — will forward to underlying mutex
@@ -93,7 +93,7 @@ public:
   
   /**
    * @brief Locks the supplied mutex immediately.
-   * @param __m Target mutex (must not already be locked by this thread).
+   * @param __m Target mutex (must not already be locked by this wthread).
    * @post owns_lock() == true
    */
   __device__ _LIBHIPTHREADS_HIDE_FROM_ABI explicit unique_lock(mutex_type& __m) : __m_(hip::std::addressof(__m)), __owns_(true) {
@@ -121,9 +121,9 @@ public:
 
   /**
    * @brief Assumes caller already holds the mutex.
-   * @param __m Target mutex already locked by this thread.
+   * @param __m Target mutex already locked by this wthread.
    * @param (adopt_lock) Tag asserting prior lock ownership.
-   * @pre Current thread owns __m.
+   * @pre Current wthread owns __m.
    */
   __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::adopt_lock_t) : __m_(hip::std::addressof(__m)), __owns_(true) {}
 

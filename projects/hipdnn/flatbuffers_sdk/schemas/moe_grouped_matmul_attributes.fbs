@@ -1,0 +1,28 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+enum MoeGroupedMatmulMode : byte {
+    NONE = 0,
+    GATHER = 1,
+    SCATTER = 2,
+}
+
+table MoeGroupedMatmulAttributes {
+    // Required input tensor UIDs
+    token_tensor_uid:              long;
+    weight_tensor_uid:             long;
+    first_token_offset_tensor_uid: long;
+
+    // Optional input tensor UIDs
+    token_index_tensor_uid:        long = null;
+    token_ks_tensor_uid:           long = null;
+
+    // Required output tensor UID
+    output_tensor_uid:             long;
+
+    // Routing attributes
+    mode: MoeGroupedMatmulMode = NONE;
+    top_k: int = 0;
+}

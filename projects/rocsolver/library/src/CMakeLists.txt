@@ -143,6 +143,10 @@ set(rocsolver_lapack_source
   lapack/roclapack_gerqf.cpp
   lapack/roclapack_gerqf_batched.cpp
   lapack/roclapack_gerqf_strided_batched.cpp
+  # - Cholesky QR
+  lapack/roclapack_cholqr.cpp
+  lapack/roclapack_cholqr_strided_batched.cpp
+  lapack/roclapack_cholqr_batched.cpp
   #### Problem and Matrix Reductions (Diagonalizations) ####
   ##########################################################
   #- bidiagonalization
@@ -283,6 +287,8 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_stein.cpp
   auxiliary/rocauxiliary_latrd.cpp
   auxiliary/rocauxiliary_latrd_forsytrd.cpp
+  # Hessenberg reduction auxiliary
+  auxiliary/rocauxiliary_lahr2.cpp
   # symmetric matrices
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices
@@ -508,14 +514,6 @@ if(OPTIMAL)
   target_compile_definitions(rocsolver PRIVATE OPTIMAL)
 endif()
 
-# Feature flag: 64-bit eigensolver API (syev/heev/syevd/heevd). Option is declared
-# at the top-level CMakeLists.txt so the library and test client stay in sync.
-# PUBLIC so the definition propagates through the exported roc::rocsolver interface,
-# letting consumers (e.g. hipSOLVER) detect whether the _64 entry points are available.
-if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
-  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
-endif()
-
 if(ROCSOLVER_USE_INTERNAL_BLAS)
   target_compile_definitions(rocsolver PRIVATE USE_INTERNAL_GEMM USE_INTERNAL_TRSM)
 endif()
@@ -524,8 +522,13 @@ if(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
 endif()
 
-# Feature flag: 2-stage eigensolver reduction (he2hb/sy2sb). Option is declared
-# at the top-level CMakeLists.txt so the library and test client stay in sync.
+# Feature flags
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
 if(ROCSOLVER_ENABLE_EIG_2STAGE)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
 endif()

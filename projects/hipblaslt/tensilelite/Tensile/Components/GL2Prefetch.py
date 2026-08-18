@@ -30,6 +30,11 @@ class GL2PrefetchLoad(GL2Prefetch):
         # (WorkGroup0 for A, WorkGroup1 for B) the cluster spans numTileWGs
         # contiguous macro-tiles, so the tile dimension of the prefetched block
         # is scaled accordingly.
+        # TODO: boundary clusters from the padded-WG edge-size path have fewer
+        # than ClusterDim live workgroups, so this full-cluster count over-counts
+        # the cooperative tile span and thread population. The effect is perf-only
+        # (padded WGs early-exit and just skip their prefetch slice; real compute
+        # data is loaded by each WG's own TDM load), so it is left unfixed for now.
         numCooperativeWGs: int = kernel["ClusterDim"][0] * kernel["ClusterDim"][1]
         numCooperativeThreads: int = numCooperativeWGs * kernel["NumThreads"]
 

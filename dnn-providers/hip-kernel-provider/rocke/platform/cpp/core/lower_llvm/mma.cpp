@@ -206,6 +206,21 @@ static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* 
  * disjoint between the two families, so one flat table resolves both: gfx12
  * op_ids carry the "wmma_gfx12_" prefix (8-wide fragments), the rest are
  * RDNA3/3.5 (16-wide). */
+/* The call shape a float-WMMA intrinsic takes. RDNA3/3.5 and RDNA4 share the
+ * plain 3-operand (A, B, C) form; gfx1250 does not, so the shape has to travel
+ * with the spec rather than be inferred from the fragment width. */
+typedef enum _wmma_shape
+{
+    /* (<W x elt> A, <W x elt> B, <8 x float> C) -- gfx11 / gfx12 */
+    WMMA_SHAPE_AB_C = 0,
+    /* (i1 negA, <16 x elt> A, i1 negB, <16 x elt> B, i16 fmt, <8 x float> C,
+     * i1 reuseA, i1 reuseB) -- gfx1250 K=32 f16/bf16 */
+    WMMA_SHAPE_GFX1250,
+    /* (<8 x i32> A, <8 x i32> B, i16 fmt, <8 x float> C, i1, i1) -- gfx1250
+     * K=64 fp8/bf8, where a lane's fragment is 32 packed bytes */
+    WMMA_SHAPE_GFX1250_FP8
+} _wmma_shape_t;
+
 typedef struct _wmma_spec
 {
     const char* op_id; /* the tile.mma op_id (no "tile." prefix)        */
@@ -214,6 +229,7 @@ typedef struct _wmma_spec
     const char* ssa_elt; /* SSA operand element type                      */
     const char* call_elt; /* call-site operand element type                */
     int frag_width; /* A/B operand vector width (16 RDNA3/3.5, 8 RDNA4) */
+    _wmma_shape_t shape; /* which intrinsic signature to emit             */
 } _wmma_spec_t;
 
 static const _wmma_spec_t WMMA_SPECS[] = {
@@ -223,26 +239,76 @@ static const _wmma_spec_t WMMA_SPECS[] = {
      "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16",
      "half",
      "half",
-     16},
+     16,
+     WMMA_SHAPE_AB_C},
     {"wmma_f32_16x16x16_bf16",
      "wmma.f32.16x16x16.bf16",
      "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
      "bfloat",
      "i16",
-     16},
+     16,
+     WMMA_SHAPE_AB_C},
     /* _RDNA_GFX12_WMMA (RDNA4, frag_width 8) */
     {"wmma_gfx12_f32_16x16x16_f16",
      "wmma.gfx12.f32.16x16x16.f16",
      "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v8f16",
      "half",
      "half",
-     8},
+     8,
+     WMMA_SHAPE_AB_C},
     {"wmma_gfx12_f32_16x16x16_bf16",
      "wmma.gfx12.f32.16x16x16.bf16",
      "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16",
      "bfloat",
      "i16",
-     8},
+     8,
+     WMMA_SHAPE_AB_C},
+    /* _GFX1250_WMMA (K=32, frag_width 16). Note bf16 keeps ssa_elt ==
+     * call_elt: the gfx1250 intrinsic takes <16 x bfloat> directly, so unlike
+     * gfx11/gfx12 there is NO i16 bitcast. */
+    {"wmma_gfx1250_f32_16x16x32_f16",
+     "wmma.gfx1250.f32.16x16x32.f16",
+     "llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16",
+     "half",
+     "half",
+     16,
+     WMMA_SHAPE_GFX1250},
+    {"wmma_gfx1250_f32_16x16x32_bf16",
+     "wmma.gfx1250.f32.16x16x32.bf16",
+     "llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16",
+     "bfloat",
+     "bfloat",
+     16,
+     WMMA_SHAPE_GFX1250},
+    /* _GFX1250_WMMA_FP8 (K=64). A/B arrive in SSA already as <8 x i32>. */
+    {"wmma_gfx1250_f32_16x16x64_fp8_fp8",
+     "wmma.gfx1250.f32.16x16x64.fp8.fp8",
+     "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     WMMA_SHAPE_GFX1250_FP8},
+    {"wmma_gfx1250_f32_16x16x64_fp8_bf8",
+     "wmma.gfx1250.f32.16x16x64.fp8.bf8",
+     "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     WMMA_SHAPE_GFX1250_FP8},
+    {"wmma_gfx1250_f32_16x16x64_bf8_fp8",
+     "wmma.gfx1250.f32.16x16x64.bf8.fp8",
+     "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     WMMA_SHAPE_GFX1250_FP8},
+    {"wmma_gfx1250_f32_16x16x64_bf8_bf8",
+     "wmma.gfx1250.f32.16x16x64.bf8.bf8",
+     "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     WMMA_SHAPE_GFX1250_FP8},
 };
 static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
 
@@ -340,19 +406,10 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     }
     if(spec == NULL)
     {
-        /* NAMED GAP (not a port stub): the WMMA_SPECS / WMMA_INT_SPECS tables
-         * above cover exactly the Python _RDNA_WMMA (gfx11), _RDNA_GFX12_WMMA
-         * (gfx12) and _RDNA_WMMA_INT op_ids -- i.e. the full set reachable on
-         * the only RDNA backends rocke_ll_backend_for resolves (gfx1151 / gfx1201
-         * / gfx11-generic). The Python isa backend additionally has the
-         * _GFX1250_WMMA / _GFX1250_WMMA_FP8 families (16x16x32 f16/bf16,
-         * 16x16x64 fp8/bf8), but there is NO gfx1250 entry in
-         * rocke_ll_backend_for, so a gfx1250 build is rejected up front with
-         * ROCKE_ERR_KEY ("unknown arch backend") and those op_ids never reach
-         * here. Wiring them is blocked on porting the gfx1250 ISA backend
-         * (split wait-counters + 57-bit SRD word3) into the C lowerer's
-         * backend table first; until then this is an unreachable-but-faithful
-         * rejection for an unsupported RDNA WMMA op_id. */
+        /* WMMA_SPECS / WMMA_INT_SPECS above cover exactly the Python
+         * _RDNA_WMMA (gfx11), _RDNA_GFX12_WMMA (gfx12), _RDNA_WMMA_INT and
+         * _GFX1250_WMMA / _GFX1250_WMMA_FP8 op_ids -- the full set reachable
+         * on every WMMA backend rocke_ll_backend_for resolves. */
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
                       "unsupported RDNA WMMA op 'tile.%s' for %s",
@@ -395,6 +452,48 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
         b_arg = b_cast;
     }
 
+    if(spec->shape == WMMA_SHAPE_GFX1250)
+    {
+        /* gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C,
+         * i1 reuseA, i1 reuseB). The negate / format / reuse immediates are
+         * pinned to the plain unscaled MMA. */
+        rocke_ll_emitf(L,
+                       "  %s = call <8 x float> @%s("
+                       "i1 false, <%d x %s> %s, "
+                       "i1 false, <%d x %s> %s, "
+                       "i16 0, <8 x float> %s, "
+                       "i1 false, i1 false)",
+                       mma_result_name(L, op),
+                       spec->intrinsic,
+                       w,
+                       spec->call_elt,
+                       a_arg,
+                       w,
+                       spec->call_elt,
+                       b_arg,
+                       rocke_ll_operand(L, c));
+        return;
+    }
+    if(spec->shape == WMMA_SHAPE_GFX1250_FP8)
+    {
+        /* gfx1250 K=64 6-operand form: (A, B, i16 fmt, C, i1, i1), format and
+         * reuse immediates pinned to 0 (plain unscaled MMA). */
+        rocke_ll_emitf(L,
+                       "  %s = call <8 x float> @%s("
+                       "<%d x %s> %s, <%d x %s> %s, "
+                       "i16 0, <8 x float> %s, "
+                       "i1 false, i1 false)",
+                       mma_result_name(L, op),
+                       spec->intrinsic,
+                       w,
+                       spec->call_elt,
+                       a_arg,
+                       w,
+                       spec->call_elt,
+                       b_arg,
+                       rocke_ll_operand(L, c));
+        return;
+    }
     rocke_ll_emitf(L,
                    "  %s = call <8 x float> @%s("
                    "<%d x %s> %s, <%d x %s> %s, <8 x float> %s)",
@@ -615,9 +714,9 @@ void rocke_ll_lower_mfma_fp8_bf8(
     snprintf(key, sizeof(key), "mfma.f32.%s", intrinsic);
     rocke_ll_need(L, key);
 
-    /* LLVM 22 packs the 64-bit-per-lane A/B operand as scalar i64; LLVM 20
-     * uses <2 x i32>. Same bits, different lane packing. */
-    ab_ty = (L->flavor == ROCKE_LLVM_FLAVOR_LLVM22) ? "i64" : "<2 x i32>";
+    /* LLVM 21+ (llvm22 / llvm23) packs the 64-bit-per-lane A/B operand as scalar
+     * i64; LLVM 20 uses <2 x i32>. Same bits, different lane packing. */
+    ab_ty = rocke_ll_flavor_is_modern(L->flavor) ? "i64" : "<2 x i32>";
 
     snprintf(a_hint, sizeof(a_hint), "mfma_a_%s", dtype ? dtype : "f8");
     snprintf(b_hint, sizeof(b_hint), "mfma_b_%s", dtype ? dtype : "f8");

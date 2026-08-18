@@ -14,7 +14,7 @@
 // <thread>
 
 // template<class charT>
-// struct formatter<thread::id, charT>;
+// struct formatter<wthread::id, charT>;
 
 // template<class ParseContext>
 //   constexpr typename ParseContext::iterator
@@ -41,7 +41,7 @@ template <class StringViewT>
 constexpr void test_parse(StringViewT fmt, ::std::size_t offset) {
   using CharT    = typename StringViewT::value_type;
   auto parse_ctx = ::std::basic_format_parse_context<CharT>(fmt);
-  ::std::formatter<hip::thread::id, CharT> formatter;
+  ::std::formatter<hip::wthread::id, CharT> formatter;
   static_assert(::std::semiregular<decltype(formatter)>);
 
   ::std::same_as<typename StringViewT::iterator> auto it = formatter.parse(parse_ctx);

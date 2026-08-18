@@ -1,6 +1,6 @@
 #include "hip/thread"
 #include "hip/mutex"
-#include "hip/pseudo_mutex" // From hip::thread library
+#include "hip/pseudo_mutex" // From hip::wthread library
 #include "hip/pseudo_condition_variable"
 #include "hip/hip_runtime.h"
 #include <cassert>
@@ -8,7 +8,7 @@
 __device__ void gmain() {
     static __device__ hip::pseudo_mutex m1, m2;
     static __device__ hip::pseudo_condition_variable cv;
-    auto other_thread = hip::thread([&] __device__() {
+    auto other_thread = hip::wthread([&] __device__() {
         hip::unique_lock guard1(m1);
         hip::unique_lock guard2(m2);
         assert(guard1.owns_lock());
@@ -32,6 +32,6 @@ __device__ void gmain() {
 }
 
 int main() {
-    hip::thread([] __device__(){gmain();}).join();
+    hip::wthread([] __device__(){gmain();}).join();
     return 0;
 }

@@ -395,7 +395,12 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
-globalParameters["DisableSTWaitCnt"] = True
+# Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
+# When set, each kernel's StinkyTofu module writes its cost file here via
+# StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
+globalParameters["StinkyTofuCostOutputDir"] = ""
+
+globalParameters["DisableSTWaitCnt"] = False
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
@@ -604,14 +609,18 @@ defaultBenchmarkCommonParameters = [
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
-    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
-    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):
+    # -1 Auto, 0 Off, 1 Relative (PC-relative), 2 Absolute (label-fixed base). Default 1 (Relative),
+    # preserving the legacy default kernel naming. Set -1 (Auto) to opt into Absolute on gfx1250
+    # non-Stream-K (Relative otherwise), or 2 for explicit Absolute.
     # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
-    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
-    {"SwInstructionPrefetch": [True]},
+    # ahead of execution. Legacy booleans are accepted as a deprecated alias
+    # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
+    {"SwInstructionPrefetch": [1]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.

@@ -10,7 +10,7 @@
 
 // <thread>
 
-// class thread::id
+// class wthread::id
 
 // id& operator=(const id&) = default;
 
@@ -23,8 +23,8 @@
 
 int main(int, char**)
 {
-    hip::thread::id id0;
-    hip::thread::id id1;
+    hip::wthread::id id0;
+    hip::wthread::id id1;
     id1 = id0;
     assert(id1 == id0);
 #ifdef __HIP_DEVICE_COMPILE__

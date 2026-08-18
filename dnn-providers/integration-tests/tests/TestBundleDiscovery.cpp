@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
 using namespace hipdnn_integration_tests::bundle;
@@ -608,6 +610,55 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseMissingTensorValueIsErro
     EXPECT_EQ(std::get<LoadError>(result), LoadError::INVALID_SWEEP_CASE);
 }
 
+// A tensor_patches "set" that flips is_runtime_pass_by_value to true while the
+// tensor still carries a baked value_type/value is rejected: buildGraphBuffer's
+// validateRuntimePassByValueTensors check runs on the expanded+patched graph, so
+// the contradiction can't slip through the template-sweep path. It throws
+// RuntimePassByValueInvariantError rather than returning INVALID_GRAPH_SCHEMA,
+// so this one contradiction can be routed to a hard failure (see
+// classifyBundle() in BundleRegistration.hpp) instead of the quiet skip every
+// other load failure gets.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithBakedValueAndRuntimePassByValueIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"baked_runtime_scale_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["tensor_patches"] = nlohmann::json::array(
+        {{{"uid", 3},
+          {"set",
+           {{"is_runtime_pass_by_value", true}, {"value_type", "Float32Value"}, {"value", 2.0}}}}});
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    EXPECT_THROW(loadIntegrationTestBundle(discovered.front()),
+                 detail::RuntimePassByValueInvariantError);
+}
+
+// The same invariant must hold for a direct (non-sweep) bundle's graph.json,
+// which never goes through applyTensorPatches. Regression test for the gap
+// where validateRuntimePassByValueTensors lived only in applyTensorPatches and
+// this path loaded a contradictory tensor without complaint.
+TEST_F(TestBundleDiscoveryFixture, LoadDirectBundleWithBakedValueAndRuntimePassByValueIsError)
+{
+    auto dir = _tempDir / "op" / "bakedscale";
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "bakedscale.json")
+        << R"({"tensors": [{"uid": 0, "is_runtime_pass_by_value": true, )"
+           R"("value_type": "Float32Value", "value": 2.0}]})";
+
+    EXPECT_THROW(loadIntegrationTestBundle(dir / "bakedscale.json"),
+                 detail::RuntimePassByValueInvariantError);
+}
+
 TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
 {
     auto dir = _tempDir / "op" / "badbin";
@@ -755,6 +806,139 @@ TEST_F(TestBundleDiscoveryFixture, UnusedSweepValueWarnsButLoadSucceeds)
 
     auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+}
+
+// classifyBundle() is the testable decision step behind registerBundleTests():
+// it makes the same load-and-classify call that loop makes per discovered
+// bundle, without touching ::testing::RegisterTest (which can only run before
+// RUN_ALL_TESTS(), not from inside a running test body). These tests cover the
+// routing itself — a good bundle becomes a LoadedBundle, a bad one becomes a
+// FailedLoad — since nothing previously exercised that routing directly.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundle)
+{
+    auto dir = _tempDir / "op" / "goodbundle";
+    createLoadableBundle(dir, "goodbundle");
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
+    auto& loaded = std::get<detail::LoadedBundle>(outcome);
+    EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
+    EXPECT_EQ(loaded.testName, discovered.front().testName);
+    ASSERT_NE(loaded.bundle, nullptr);
+}
+
+// Reuses the baked-value-plus-runtime-pass-by-value corruption from
+// LoadTemplateSweepCaseWithBakedValueAndRuntimePassByValueIsError: that test
+// confirms loadIntegrationTestBundle() throws RuntimePassByValueInvariantError
+// for this case; this one confirms classifyBundle() catches that specific
+// exception and turns it into a FailedLoad carrying the diagnostic path and
+// reason, which is what lets registerBundleTests() surface it as a failing
+// test instead of a log line.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForRuntimePassByValueInvariant)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"baked_runtime_scale_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["tensor_patches"] = nlohmann::json::array(
+        {{{"uid", 3},
+          {"set",
+           {{"is_runtime_pass_by_value", true}, {"value_type", "Float32Value"}, {"value", 2.0}}}}});
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    auto& failed = std::get<detail::FailedLoad>(outcome);
+    EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
+    EXPECT_EQ(failed.testName, discovered.front().testName);
+    EXPECT_NE(failed.message.find(discovered.front().diagnosticPath().string()), std::string::npos);
+    EXPECT_NE(failed.message.find("is_runtime_pass_by_value=true"), std::string::npos);
+}
+
+// Only the RuntimePassByValueInvariantError contradiction gets a FailedLoad.
+// An ordinary invalid-sweep-case failure (here: a case referencing a golden
+// path that was never created) must keep the original behavior — logged and
+// classified as SkippedLoad, no failing test registered — so this fix doesn't
+// widen every pre-existing load failure into a hard suite failure.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryInvalidSweepCase)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"missing_path_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          true,
+                          false}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::SkippedLoad>(outcome));
+    auto& skipped = std::get<detail::SkippedLoad>(outcome);
+    EXPECT_NE(skipped.message.find(discovered.front().diagnosticPath().string()),
+              std::string::npos);
+    EXPECT_NE(skipped.message.find(toString(LoadError::INVALID_SWEEP_CASE)), std::string::npos);
+}
+
+// Direct regression test for the original review repro: corrupting one sweep
+// case must not affect classification of an unrelated, valid bundle
+// discovered alongside it.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDiscoveredBundles)
+{
+    auto goodDir = _tempDir / "op" / "goodbundle";
+    createLoadableBundle(goodDir, "goodbundle");
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"baked_runtime_scale_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["tensor_patches"] = nlohmann::json::array(
+        {{{"uid", 3},
+          {"set",
+           {{"is_runtime_pass_by_value", true}, {"value_type", "Float32Value"}, {"value", 2.0}}}}});
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    const auto* goodBundle = findByTest(discovered, "goodbundle");
+    const auto* badBundle = findByTest(discovered, "baked_runtime_scale_fp32_nchw");
+    ASSERT_NE(goodBundle, nullptr);
+    ASSERT_NE(badBundle, nullptr);
+
+    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle)));
+    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle)));
+}
+
+// Closes the loop between "classifyBundle() decided this bundle failed" and
+// "the failing test GTest actually runs really fails": constructs the
+// synthetic test body directly and confirms it records exactly the stored
+// message as a non-fatal failure, the same way GTest would run it once
+// registerFailedBundleLoad() has registered it.
+TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadRecordsFailureWithMessage)
+{
+    detail::FailedBundleLoadTest test("boom");
+    EXPECT_NONFATAL_FAILURE(test.TestBody(), "boom");
 }
 
 // NOLINTEND(readability-identifier-naming)
