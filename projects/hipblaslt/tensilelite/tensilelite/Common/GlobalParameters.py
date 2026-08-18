@@ -403,7 +403,7 @@ globalParameters["StinkyTofuCostOutputDir"] = ""
 
 globalParameters["DisableSTWaitCnt"] = True
 
-# Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
+# Internal plumbing for the --cpu-only CLI switch (see tensilelite.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
 # probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.
 # This is undocumented plumbing only: it is NOT exposed via --global-parameters help and
@@ -694,7 +694,7 @@ def restoreDefaultGlobalParameters():
     global globalParameters
     global defaultGlobalParameters
     # Can't just assign globalParameters = deepcopy(defaultGlobalParameters) because that would
-    # result in dangling references, specifically in Tensile.Tensile().
+    # result in dangling references, specifically in tensilelite.Tensile().
     globalParameters.clear()
     for key, value in deepcopy(defaultGlobalParameters).items():
         globalParameters[key] = value
@@ -769,7 +769,7 @@ def _assertOverrideTableCovers(defaults_dict, override_dict):
             "globalParameterTypeOverrides is missing entries for the "
             f"following None-defaulted globalParameters: {missing!r}. "
             "Add type annotations for each to "
-            "Tensile/Common/GlobalParameters.py."
+            "tensilelite/Common/GlobalParameters.py."
         )
 
 

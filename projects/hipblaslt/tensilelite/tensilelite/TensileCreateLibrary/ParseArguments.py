@@ -148,7 +148,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         dest="EnableMarker",
         action="store_true",
         default=False,
-        help="Enable marker in Tensile.",
+        help="Enable marker in tensilelite.",
     )
     argParser.add_argument(
         "--no-generate-solution-table",
