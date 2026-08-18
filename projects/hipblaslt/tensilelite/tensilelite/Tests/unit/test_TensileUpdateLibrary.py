@@ -70,10 +70,10 @@ class TestUpdateLogic:
         mock_solution.getAttributes.return_value = attrs
         return mock_solution
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_updates_logic_file_basic(self, mock_parse):
         """UpdateLogic should convert enums to values and write updated YAML"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_solution = self.create_mock_solution()
@@ -119,10 +119,10 @@ class TestUpdateLogic:
             assert "ProblemType" in updated_data[5][0]
             assert updated_data[5][0]["ProblemType"]["DataType"] == MockDataType.Float.value
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_updates_with_output_path(self, mock_parse):
         """UpdateLogic should write to output path when provided"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_parse.return_value = (None, None, mock_problem_type, [], None, None, None)
@@ -153,10 +153,10 @@ class TestUpdateLogic:
                 original_data = yaml.safe_load(f)
             assert original_data == input_data
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_handles_data_type_metadata(self, mock_parse):
         """UpdateLogic should convert DataTypeMetadata when present"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_problem_type.state["DataTypeMetadata"] = MockDataType.Int8
@@ -178,10 +178,10 @@ class TestUpdateLogic:
 
             assert updated_data[4]["DataTypeMetadata"] == MockDataType.Int8.value
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_converts_isa_tuple_to_list(self, mock_parse):
         """UpdateLogic should convert ISA tuple to list in solution"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_solution = self.create_mock_solution(isa=(9, 4, 2))
@@ -204,10 +204,10 @@ class TestUpdateLogic:
             assert isinstance(updated_data[5][0]["ISA"], list)
             assert updated_data[5][0]["ISA"] == [9, 4, 2]
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_converts_bias_data_type_list(self, mock_parse):
         """UpdateLogic should convert BiasDataTypeList enums to values"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_problem_type.state["BiasDataTypeList"] = [MockDataType.Float, MockDataType.Half]
@@ -229,10 +229,10 @@ class TestUpdateLogic:
             # Verify BiasDataTypeList was converted
             assert updated_data[4]["BiasDataTypeList"] == [MockDataType.Float.value, MockDataType.Half.value]
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_handles_multiple_solutions(self, mock_parse):
         """UpdateLogic should handle multiple solutions correctly"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_solution1 = self.create_mock_solution(isa=(9, 0, 6))
@@ -329,11 +329,11 @@ class TestUpdateLogic:
 class TestTensileUpdateLibrary:
     """Test TensileUpdateLibrary main function"""
 
-    @patch('Tensile.TensileUpdateLibrary.ParallelMap')
-    @patch('Tensile.TensileUpdateLibrary.argUpdatedGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.assignGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.restoreDefaultGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.print1')
+    @patch('tensilelite.TensileUpdateLibrary.ParallelMap')
+    @patch('tensilelite.TensileUpdateLibrary.argUpdatedGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.assignGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.restoreDefaultGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.print1')
     def test_finds_and_processes_logic_files(
         self,
         mock_print1,
@@ -343,7 +343,7 @@ class TestTensileUpdateLibrary:
         mock_parallel
     ):
         """TensileUpdateLibrary should find logic files and process them"""
-        from Tensile.TensileUpdateLibrary import TensileUpdateLibrary
+        from tensilelite.TensileUpdateLibrary import TensileUpdateLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create test logic files using architecture names from architectureMap
@@ -375,11 +375,11 @@ class TestTensileUpdateLibrary:
             assert any("aldebaran" in f for f in file_paths)
             assert not any("other.txt" in f for f in file_paths)
 
-    @patch('Tensile.TensileUpdateLibrary.ParallelMap')
-    @patch('Tensile.TensileUpdateLibrary.argUpdatedGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.assignGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.restoreDefaultGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.print1')
+    @patch('tensilelite.TensileUpdateLibrary.ParallelMap')
+    @patch('tensilelite.TensileUpdateLibrary.argUpdatedGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.assignGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.restoreDefaultGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.print1')
     def test_handles_output_path(
         self,
         mock_print1,
@@ -389,7 +389,7 @@ class TestTensileUpdateLibrary:
         mock_parallel
     ):
         """TensileUpdateLibrary should create output directory when specified"""
-        from Tensile.TensileUpdateLibrary import TensileUpdateLibrary
+        from tensilelite.TensileUpdateLibrary import TensileUpdateLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = os.path.join(tmpdir, "output")
@@ -407,12 +407,12 @@ class TestTensileUpdateLibrary:
             assert os.path.exists(output_dir)
             assert os.path.isdir(output_dir)
 
-    @patch('Tensile.TensileUpdateLibrary.globalParameters', {})
-    @patch('Tensile.TensileUpdateLibrary.ParallelMap')
-    @patch('Tensile.TensileUpdateLibrary.argUpdatedGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.assignGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.restoreDefaultGlobalParameters')
-    @patch('Tensile.TensileUpdateLibrary.print1')
+    @patch('tensilelite.TensileUpdateLibrary.globalParameters', {})
+    @patch('tensilelite.TensileUpdateLibrary.ParallelMap')
+    @patch('tensilelite.TensileUpdateLibrary.argUpdatedGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.assignGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.restoreDefaultGlobalParameters')
+    @patch('tensilelite.TensileUpdateLibrary.print1')
     def test_applies_global_parameter_overrides(
         self,
         mock_print1,
@@ -422,7 +422,7 @@ class TestTensileUpdateLibrary:
         mock_parallel
     ):
         """TensileUpdateLibrary should apply argument-based parameter overrides"""
-        from Tensile.TensileUpdateLibrary import TensileUpdateLibrary, globalParameters
+        from tensilelite.TensileUpdateLibrary import TensileUpdateLibrary, globalParameters
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logic_file = os.path.join(tmpdir, "logic_gfx908.yaml")
@@ -444,11 +444,11 @@ class TestTensileUpdateLibrary:
 class TestMain:
     """Test main entry point"""
 
-    @patch('Tensile.TensileUpdateLibrary.TensileUpdateLibrary')
+    @patch('tensilelite.TensileUpdateLibrary.TensileUpdateLibrary')
     @patch('sys.argv', ['prog', '--logic_path', '/some/path'])
     def test_main_passes_arguments_correctly(self, mock_func):
         """main should pass command line arguments to TensileUpdateLibrary"""
-        from Tensile.TensileUpdateLibrary import main
+        from tensilelite.TensileUpdateLibrary import main
 
         main()
 

@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-# The coverage tox env runs `pytest -m unit Tensile/Tests/unit`; without this
+# The coverage tox env runs `pytest -m unit tensilelite/Tests/unit`; without this
 # explicit declaration the file is silently deselected and reports 0% coverage.
 # GPU-requiring tests within this file are individually skip-gated via
 # @pytest.mark.skipif, so the unit marker is safe here.
@@ -29,8 +29,8 @@ from occupancy_hip_testutil import HIP_AVAILABLE, _hip, _hip_check
 
 # ── rocisa / Tensile imports ────────────────────────────────────────────────────
 from rocisa import rocIsa
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 
 # ── GPU detection ───────────────────────────────────────────────────────────────
@@ -315,7 +315,7 @@ OCCUPANCY_CASES = [
 def test_hip_occupancy_matches_tensile(
     required_gfx, num_vgprs, lds_bytes, num_threads, description, tmp_path
 ):
-    """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with Tensile."""
+    """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with tensilelite."""
     if GFX_TARGET != required_gfx:
         pytest.skip(
             f"Test requires {required_gfx}, detected {GFX_TARGET}"

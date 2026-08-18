@@ -21,7 +21,7 @@
 ################################################################################
 """Corpus-clean CI test.
 
-Walks every input YAML under Tensile/Tests/common/ and Tests/unit/test_data/
+Walks every input YAML under tensilelite/Tests/common/ and Tests/unit/test_data/
 and asserts each one loads + parses + section-validates without raising
 ConfigTypeError. This enforces the tree-cleanliness invariant going forward:
 any new test YAML with a typo'd type fails this gate.
@@ -38,19 +38,19 @@ from pathlib import Path
 
 import pytest
 
-from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import (
+from tensilelite import LibraryIO
+from tensilelite.Common.GlobalParameters import (
     _assertGlobalParametersAreValid,
     _GLOBAL_PARAMETER_IGNORE_KEYS,
     defaultAnalysisParameters,
 )
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Common.ValidParameters import (
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.ValidParameters import (
     checkParametersAreValid,
     validateInternalSupportParams,
     validParameters,
 )
-from Tensile.SolutionStructs.Problem import (
+from tensilelite.SolutionStructs.Problem import (
     validateProblemTypeParameterTypes,
     _defaultProblemType,
 )
@@ -160,8 +160,8 @@ def _validate_library_logic(yaml_data, srcFile):
     if "LibraryLogic" not in yaml_data:
         return
     cfg = yaml_data["LibraryLogic"] or {}
-    from Tensile.Common.TypeValidationErrors import formatMismatch
-    from Tensile.Common.GlobalParameters import libraryLogicTypeOverrides
+    from tensilelite.Common.TypeValidationErrors import formatMismatch
+    from tensilelite.Common.GlobalParameters import libraryLogicTypeOverrides
     errors = []
     for key, value in cfg.items():
         if key not in defaultAnalysisParameters:

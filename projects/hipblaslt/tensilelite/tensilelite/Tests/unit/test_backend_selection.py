@@ -6,7 +6,7 @@ import types
 import pytest
 import yaml
 
-from Tensile import Tensile as TensileModule
+from tensilelite import tensilelite as TensileModule
 
 pytestmark = pytest.mark.unit
 
@@ -86,7 +86,7 @@ def test_invalid_backend_type_exits(monkeypatch, tmp_path):
     # Monkeypatch printExit in both TensileModule and backends.config modules
     exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
     monkeypatch.setattr(TensileModule, "printExit", exit_func)
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", exit_func)
     config_path = _write_config(tmp_path, _base_config(backend="ductile"))
 
