@@ -634,11 +634,11 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
                                      std::multiplies<std::size_t>()) *
                      GetTypeSize(dyDesc.GetType()) * conv.group_count;
 
-    // 2D point-output bwd writes dx directly; 3D needs the whole col buffer for Col2Im.
-    if(problem.Is2d() && miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem))
-        gemm_size = 0;
-    else if(problem.Is3d() && miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem))
-        gemm_size *= in_n;
+    // Point-output bwd writes dx directly when it can; otherwise Col2Im needs the whole
+    // col buffer for all N.
+    if(miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem))
+        gemm_size =
+            miopen::conv::IsBwdDataPointOutputDirectWritable(problem) ? 0 : gemm_size * in_n;
 
     if(gemm_size > handle.GetMaxMemoryAllocSize())
     {
@@ -717,10 +717,11 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
             return false;
         if(!problem.IsDirectionBackwardData())
             return false;
-        // 3D scatters through Col2Im3d, which addresses dx as channel-first.
-        if(problem.Is3d() && !problem.IsLayoutDefault())
-            return false;
         if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
+            return false;
+        // Without a direct write the result goes through Col2Im3d, which addresses dx as
+        // channel-first and so cannot serve a channel-last layout.
+        if(!miopen::conv::IsBwdDataPointOutputDirectWritable(problem) && !problem.IsLayoutDefault())
             return false;
 
         const auto& dyDesc = problem.GetIn();
@@ -731,8 +732,8 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
         if(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported)
             return false;
 
-        // 2D writes dx directly and needs no workspace.
-        if(problem.Is2d())
+        // A direct write needs no workspace.
+        if(miopen::conv::IsBwdDataPointOutputDirectWritable(problem))
             return true;
 
         return GetWorkspaceSize(context, problem) > 0;
@@ -846,14 +847,15 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
             // Point-output bwd: one GEMM over N, dx[N, C*Z*Y*X] = dy[N, K] * w[K, C*Z*Y*X].
             //
-            // In 2D the GEMM writes dx in place: pad=0, dilation=1, stride==filter and dx
-            // spatial equals the filter spatial extent, so a per-batch dx slice enumerates
-            // elements in the same order as a row of w for both NCHW ((c,y,x)) and NHWC
-            // ((y,x,c)). 3D permits a larger dx and therefore scatters the GEMM result out
-            // of the workspace with one batched Col2Im.
+            // The GEMM writes dx in place whenever dx spatial equals the filter spatial
+            // extent: pad=0, dilation=1 and stride==filter then make a per-batch dx slice
+            // enumerate elements in the same order as a row of w, for channel-first
+            // ((c,z,y,x)) and channel-last ((z,y,x,c)) alike. Only 3D admits a larger dx,
+            // which is scattered out of the workspace with one batched Col2Im instead.
             if(miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem))
             {
-                const auto writes_dx_in_place = problem.Is2d();
+                const auto writes_dx_in_place =
+                    miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
 
                 auto single_gemm_desc        = gemm_desc;
                 single_gemm_desc.batch_count = 1;

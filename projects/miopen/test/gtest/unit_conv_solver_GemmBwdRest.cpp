@@ -43,6 +43,14 @@ auto GetConvTestCases(miopenDataType_t datatype)
         // Same, but with dx larger than the filter, so Col2Im3d performs a real scatter
         // instead of degenerating into an element-wise copy.
         TestCase{{4, 3, 5, 5, 5}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
+        // Point-output backward data in channel-last layouts, which the GEMM writes into dx
+        // directly. C > 1 so that the layout is distinguishable from the default one.
+        TestCase{{datatype, miopenTensorNHWC, {4, 4, 14, 14}},
+                 {datatype, miopenTensorNHWC, {64, 4, 14, 14}},
+                 datatype, {{0, 0}, {14, 14}, {1, 1}}},
+        TestCase{{datatype, miopenTensorNDHWC, {4, 4, 4, 4, 4}},
+                 {datatype, miopenTensorNDHWC, {64, 4, 4, 4, 4}},
+                 datatype, {{0, 0, 0}, {4, 4, 4}, {1, 1, 1}}},
         // clang-format on
     };
 }

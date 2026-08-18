@@ -523,10 +523,17 @@ inline bool IsPointOutputStrideEqFilter(const ProblemDescription& problem,
 
 inline bool IsBwdDataPointOutputStrideEqFilter(const ProblemDescription& problem)
 {
-    // 2D writes the GEMM result straight into dx, which is only a valid reinterpretation
-    // when dx spatial equals the filter spatial extent. 3D scatters the result through
-    // Col2Im instead and therefore has no such constraint.
+    // 3D may have a dx larger than the filter and scatters the GEMM result through Col2Im,
+    // so only 2D, which always writes dx directly, constrains the dx spatial extent.
     return IsPointOutputStrideEqFilter(problem, Direction::BackwardData, !problem.Is3d());
+}
+
+inline bool IsBwdDataPointOutputDirectWritable(const ProblemDescription& problem)
+{
+    // When dx spatial equals the filter spatial extent, a per-batch dx slice enumerates its
+    // elements in the same order as a row of w, whatever the layout, so the GEMM can write
+    // dx in place instead of scattering through Col2Im.
+    return IsPointOutputStrideEqFilter(problem, Direction::BackwardData, true);
 }
 
 inline bool IsFwdDataPointOutputStrideEqFilter(const ProblemDescription& problem)
