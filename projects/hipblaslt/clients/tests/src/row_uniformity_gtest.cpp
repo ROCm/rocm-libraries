@@ -989,6 +989,7 @@ namespace
         uint32_t    skItersPerWG;
         uint32_t    extraIters;
         bool        rowUniform;
+        bool        perTileExtraIters = false;
     };
 
     const SplitCase kSplitCases[] = {
@@ -1008,10 +1009,19 @@ namespace
         {"ChunkStraddlesTiles", 288, 64, 192, 1, false, 288, 96, 0, false},
         {"ChunkLongerThanTile", 300, 64, 256, 1, false, 300, 75, 0, false},
 
-        // Chunks come in two lengths, so the chunk lattice has no single
-        // period.
+        // Chunks come in two lengths under the global first-E mapping.
         {"RaggedChunks", 100, 100, 300, 1, false, 100, 33, 100, false},
         {"MultipleGridRaggedChunks", 16, 30, 64, 1, false, 16, 7, 32, false},
+
+        // AIHPBLAS-4253 spreadsheet case: T=4, I=17, g=8 = T*F with F=2 and
+        // F does not divide I. Without the capability the global mapping is
+        // non-uniform; with it, every tile gets the same (9,8) fold signature.
+        {"PerTileExtraItersSpreadsheet_NoCap", 4, 17, 8, 1, false, 4, 8, 4, false, false},
+        {"PerTileExtraItersSpreadsheet_Cap", 4, 17, 8, 1, false, 4, 8, 4, true, true},
+
+        // Same all-partial remainder shape as MultipleGridRaggedChunks, but the
+        // capability admits it.
+        {"MultipleGridRaggedChunks_Cap", 16, 30, 64, 1, false, 16, 7, 32, true, true},
 
         // TENSILE_STREAMK_FULL_TILES=0 is the only way to reach a non-empty
         // data-parallel region alongside equally cut StreamK tiles. Those two
@@ -1047,10 +1057,12 @@ namespace
         EXPECT_EQ(split.extraIters, c.extraIters)
             << "skTiles*itersPerTile - SKItersPerWG*skGrid, the leftover the kernel recomputes";
 
-        EXPECT_EQ(TensileLite::streamKStaticSplitRowUniform(split, c.tiles, c.itersPerTile),
+        EXPECT_EQ(TensileLite::streamKStaticSplitRowUniform(
+                      split, c.tiles, c.itersPerTile, c.grid, c.perTileExtraIters),
                   c.rowUniform)
             << "tiles=" << c.tiles << " itersPerTile=" << c.itersPerTile << " grid=" << c.grid
             << " skFullTiles=" << c.skFullTiles << " forceDPOnly=" << c.forceDPOnly
+            << " perTileExtraIters=" << c.perTileExtraIters
             << " -> skTiles=" << split.skTiles << " skItersPerWG=" << split.skItersPerWG
             << " extraIters=" << split.extraIters;
     }
@@ -1061,6 +1073,53 @@ namespace
                              [](const ::testing::TestParamInfo<SplitCase>& info) {
                                  return std::string(info.param.name);
                              });
+
+    // AIHPBLAS-4253 host mirror of StreamK.py skAssignItersPerTile, checked
+    // against the reporter spreadsheet ExtraItersDistribution (T=4, I=17, g=8).
+    TEST(RowUniformityPerTileExtraIters_pre_checkin, SpreadsheetStartEndMatchesFormula)
+    {
+        constexpr size_t tiles        = 4;
+        constexpr size_t itersPerTile = 17;
+        constexpr size_t skGrid       = 8;
+        // Expected WG owners for iterations 0..67 under the per-tile column.
+        const int expectedWg[68] = {
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+            3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5,
+            6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7};
+
+        for(size_t w = 0; w < skGrid; ++w)
+        {
+            const auto range = TensileLite::streamKWorkgroupIterRange(
+                w, tiles, itersPerTile, skGrid, /*perTileExtraIters=*/true);
+            for(size_t it = range.start; it < range.end; ++it)
+            {
+                ASSERT_LT(it, size_t{68});
+                EXPECT_EQ(expectedWg[it], static_cast<int>(w))
+                    << "iter " << it << " start=" << range.start << " end=" << range.end;
+            }
+        }
+
+        // Without the capability, the same shape stays on the global first-E
+        // mapping and is not row-uniform.
+        const auto split
+            = TensileLite::streamKStaticSplit(tiles, itersPerTile, skGrid, 1, false);
+        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(
+            split, tiles, itersPerTile, skGrid, /*perTileExtraIters=*/false));
+        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(
+            split, tiles, itersPerTile, skGrid, /*perTileExtraIters=*/true));
+
+        // When I % F == 0 the per-tile mapping must match the global E==0 path.
+        constexpr size_t evenI = 16;
+        for(size_t w = 0; w < skGrid; ++w)
+        {
+            const auto perTile = TensileLite::streamKWorkgroupIterRange(
+                w, tiles, evenI, skGrid, true);
+            const auto global = TensileLite::streamKWorkgroupIterRange(
+                w, tiles, evenI, skGrid, false);
+            EXPECT_EQ(perTile.start, global.start) << "w=" << w;
+            EXPECT_EQ(perTile.end, global.end) << "w=" << w;
+        }
+    }
 
     // =======================================================================
     // StreamK configurations that cannot be shown row-uniform.
@@ -1391,7 +1450,11 @@ namespace
             amdgpu != nullptr ? amdgpu->skFullTiles : 1,
             solution.sizeMapping.streamKForceDPOnly != 0);
         out.rowUniform = TensileLite::streamKStaticSplitRowUniform(
-            out.split, out.tiles, out.itersPerTile);
+            out.split,
+            out.tiles,
+            out.itersPerTile,
+            out.grid,
+            solution.internalArgsSupport.perTileExtraIters);
         out.newlyAdmitted
             = out.rowUniform && out.split.skTiles != 0 && out.tiles % out.grid != 0;
         return out;
