@@ -246,6 +246,32 @@ namespace TensileLite
         return false;
     }
 
+    bool streamKParallelReductionRowUniform(StreamKSettings const& sk,
+                                            int                    streamKAtomic,
+                                            bool                   staticTwoTilePacking,
+                                            size_t                 tiles)
+    {
+        // Parallel Stream-K under static two-tile packing maps each workgroup
+        // to TileIdx = StreamKIdx // F and PartialIdx = StreamKIdx % F, with
+        // F = grid/tiles. Every tile sees the same PartialIdx set and the same
+        // per-partial K ranges (extras go by PartialIdx), so identical A rows
+        // produce identical D rows when F >= 2 and grid is an exact multiple
+        // of tiles. Atomic fixup and non-static ABIs are out of scope.
+        if(sk.reduction != origami::reduction_t::parallel)
+            return false;
+        if(streamKAtomic != 0)
+            return false;
+        if(!staticTwoTilePacking)
+            return false;
+        if(sk.grid == 0 || tiles == 0)
+            return false;
+        if(sk.grid % tiles != 0)
+            return false;
+        if((sk.grid / tiles) < 2)
+            return false;
+        return true;
+    }
+
     StreamKWorkgroupIterRange streamKWorkgroupIterRange(
         size_t w, size_t tiles, size_t itersPerTile, size_t skGrid, bool perTileExtraIters)
     {
@@ -4213,6 +4239,17 @@ namespace TensileLite
         return 0;
     }
 
+    namespace
+    {
+        // Forward declaration: defined with the other coherence Stream-K
+        // helpers later in this file. getSKReduction consults it when deciding
+        // whether parallel remains eligible under uniform summation order.
+        std::string streamKUniformSummationOrderObstacle(
+            SizeMapping const&                      sizeMapping,
+            ContractionSolution::ProblemType const& problemType,
+            ContractionSolution::Problem const&     problem);
+    } // namespace
+
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
@@ -4281,10 +4318,12 @@ namespace TensileLite
                 static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
         }
 
-        // Coherence mode rejects parallel reduction for the static two-tile
-        // packer. Force tree so query (requiredWorkspaceSize) and launch
-        // (solve) agree, and so grid steering sees a tree-shaped natural grid.
-        // Mirror the gate's staticTwoTilePacking predicate.
+        // Under coherence + static two-tile packing, keep origami's parallel
+        // reduction when the launch is eligible (non-atomic and no static
+        // obstacles). Final grid / F checks run at the launch gate once
+        // getSKGridImpl has sized the grid. Otherwise force tree so query
+        // (requiredWorkspaceSize) and launch (solve) stay on the steered
+        // tree path. Mirror the gate's staticTwoTilePacking predicate.
         if(problem.getParams().uniformSummationOrder())
         {
             const bool effectiveDynamic
@@ -4294,7 +4333,16 @@ namespace TensileLite
                 = (sizeMapping.streamK == 3)
                   || (sizeMapping.streamK == 5 && !effectiveDynamic);
             if(staticTwoTilePacking)
-                reductionStrat = origami::reduction_t::tree;
+            {
+                const bool keepParallel
+                    = reductionStrat == origami::reduction_t::parallel
+                      && sizeMapping.streamKAtomic == 0
+                      && streamKUniformSummationOrderObstacle(
+                             sizeMapping, problemType, problem)
+                             .empty();
+                if(!keepParallel)
+                    reductionStrat = origami::reduction_t::tree;
+            }
         }
 
         return reductionStrat;
@@ -4621,12 +4669,6 @@ namespace TensileLite
             if(!obstacle.empty())
                 reject(obstacle);
 
-            // Checked before the split arithmetic below, which models the tree
-            // packing specifically: the parallel path reinterprets the same
-            // kernel arguments and splits K across workgroups instead.
-            if(sk.reduction != origami::reduction_t::tree)
-                reject("the resolved StreamK reduction is parallel, not tree");
-
             // Load-bearing rather than defensive: the grouped-GEMM callers pass
             // a default-constructed StreamKSettings, so this is what stands
             // between them and a division by zero below.
@@ -4647,69 +4689,90 @@ namespace TensileLite
             // resolution and the kernel-arg packing both use.
             const size_t tiles = problem.getNumTiles(sizeMapping, 1);
 
-            if(staticTwoTilePacking)
+            if(sk.reduction == origami::reduction_t::parallel)
             {
-                // Clamped exactly as generateSingleCall() clamps it, so K==0
-                // resolves the same way on both sides.
-                const size_t itersPerTile
-                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
-
-                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-                if(pAMDGPU == nullptr)
-                    reject("the StreamK split cannot be recomputed for this hardware");
-
-                // The same helper generateSingleCall() packs from, so the gate
-                // reasons about the split the kernel actually performs.
-                const StreamKStaticSplit split
-                    = streamKStaticSplit(tiles,
-                                         itersPerTile,
-                                         sk.grid,
-                                         pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
-                                         sizeMapping.streamKForceDPOnly != 0);
-
-                if(!streamKStaticSplitRowUniform(split,
-                                                 tiles,
-                                                 itersPerTile,
-                                                 sk.grid,
-                                                 internalArgsSupport.perTileExtraIters))
-                    reject("the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
-                           + " itersPerTile=" + std::to_string(itersPerTile)
-                           + " grid=" + std::to_string(sk.grid)
-                           + " skTiles=" + std::to_string(split.skTiles)
-                           + " skItersPerWG=" + std::to_string(split.skItersPerWG)
-                           + " extraIters=" + std::to_string(split.extraIters)
-                           + " perTileExtraIters="
-                           + (internalArgsSupport.perTileExtraIters ? "1" : "0"));
+                // Parallel packs AddressFlags == 0 and does not use the tree
+                // static-split model. Admit only when the shared helper proves
+                // the launch is row-uniform; otherwise fail closed.
+                if(!streamKParallelReductionRowUniform(
+                       sk, sizeMapping.streamKAtomic, staticTwoTilePacking, tiles))
+                    reject("the resolved StreamK parallel reduction is not row-uniform: tiles="
+                           + std::to_string(tiles) + " grid=" + std::to_string(sk.grid)
+                           + " streamKAtomic=" + std::to_string(sizeMapping.streamKAtomic)
+                           + " staticTwoTilePacking="
+                           + (staticTwoTilePacking ? "1" : "0"));
             }
-            else if(tiles % sk.grid != 0)
+            else if(sk.reduction == origami::reduction_t::tree)
             {
-                // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
-                // the derivation above does not describe. They are additionally
-                // held to SKTiles == 0 below, so the divisibility test is
-                // redundant for them, but redundant and fail-closed is the
-                // right side to err on.
-                reject("StreamK grid " + std::to_string(sk.grid)
-                       + " does not divide the tile count " + std::to_string(tiles));
+                if(staticTwoTilePacking)
+                {
+                    // Clamped exactly as generateSingleCall() clamps it, so K==0
+                    // resolves the same way on both sides.
+                    const size_t itersPerTile
+                        = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+                    if(pAMDGPU == nullptr)
+                        reject("the StreamK split cannot be recomputed for this hardware");
+
+                    // The same helper generateSingleCall() packs from, so the gate
+                    // reasons about the split the kernel actually performs.
+                    const StreamKStaticSplit split
+                        = streamKStaticSplit(tiles,
+                                             itersPerTile,
+                                             sk.grid,
+                                             pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
+                                             sizeMapping.streamKForceDPOnly != 0);
+
+                    if(!streamKStaticSplitRowUniform(split,
+                                                     tiles,
+                                                     itersPerTile,
+                                                     sk.grid,
+                                                     internalArgsSupport.perTileExtraIters))
+                        reject("the StreamK split is not row-uniform: tiles="
+                               + std::to_string(tiles)
+                               + " itersPerTile=" + std::to_string(itersPerTile)
+                               + " grid=" + std::to_string(sk.grid)
+                               + " skTiles=" + std::to_string(split.skTiles)
+                               + " skItersPerWG=" + std::to_string(split.skItersPerWG)
+                               + " extraIters=" + std::to_string(split.extraIters)
+                               + " perTileExtraIters="
+                               + (internalArgsSupport.perTileExtraIters ? "1" : "0"));
+                }
+                else if(tiles % sk.grid != 0)
+                {
+                    // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
+                    // the derivation above does not describe. They are additionally
+                    // held to SKTiles == 0 below, so the divisibility test is
+                    // redundant for them, but redundant and fail-closed is the
+                    // right side to err on.
+                    reject("StreamK grid " + std::to_string(sk.grid)
+                           + " does not divide the tile count " + std::to_string(tiles));
+                }
+
+                // Mirrors the arg-packing condition: the ws/Flags pair is only
+                // appended for these kernels, and the device reads AddressFlags == 0
+                // as a request for the parallel reduction path.
+                if(sizeMapping.streamKAtomic == 0 && sizeMapping.streamKForceDPOnly == 0
+                   && synchronizer == nullptr)
+                    reject("the StreamK Synchronizer/Flags pointer is null");
+
+                // The dynamic-queue variants are row-uniform only while every output
+                // tile stays data-parallel, i.e. the packed SKTiles is 0.
+                if(sizeMapping.streamK == 4 || effectiveDynamic)
+                {
+                    AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
+                    const int      overrideTiles = pAMDGPU != nullptr ? pAMDGPU->skTiles : -1;
+                    const uint32_t skTiles
+                        = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
+                    if(skTiles != 0)
+                        reject("the dynamic-queue StreamK path is packing SKTiles="
+                               + std::to_string(skTiles) + " rather than 0");
+                }
             }
-
-            // Mirrors the arg-packing condition: the ws/Flags pair is only
-            // appended for these kernels, and the device reads AddressFlags == 0
-            // as a request for the parallel reduction path.
-            if(sizeMapping.streamKAtomic == 0 && sizeMapping.streamKForceDPOnly == 0
-               && synchronizer == nullptr)
-                reject("the StreamK Synchronizer/Flags pointer is null");
-
-            // The dynamic-queue variants are row-uniform only while every output
-            // tile stays data-parallel, i.e. the packed SKTiles is 0.
-            if(sizeMapping.streamK == 4 || effectiveDynamic)
+            else
             {
-                AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
-                const int      overrideTiles = pAMDGPU != nullptr ? pAMDGPU->skTiles : -1;
-                const uint32_t skTiles
-                    = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
-                if(skTiles != 0)
-                    reject("the dynamic-queue StreamK path is packing SKTiles="
-                           + std::to_string(skTiles) + " rather than 0");
+                reject("the resolved StreamK reduction is neither tree nor parallel");
             }
         }
 
@@ -4925,7 +4988,12 @@ namespace TensileLite
                         size_t       FStar = 1; // always admissible (all-full)
                         for(size_t F = F0; F >= 2; --F)
                         {
-                            if(!perTileExtraIters && (I % F) != 0)
+                            // Tree all-partial without per-tile extras needs
+                            // F | I. Parallel extras are per PartialIdx and
+                            // tile-symmetric without that capability bit, so
+                            // skip the divisibility requirement for parallel.
+                            if(reductionStrat != origami::reduction_t::parallel
+                               && !perTileExtraIters && (I % F) != 0)
                                 continue;
                             if((I / F) < MinItersPerCU)
                                 continue;

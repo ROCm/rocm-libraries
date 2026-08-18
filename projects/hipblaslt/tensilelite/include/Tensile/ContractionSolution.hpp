@@ -287,6 +287,25 @@ namespace TensileLite
                                                             bool                      perTileExtraIters = false);
 
     /**
+     * Whether a resolved Stream-K launch may use parallel reduction under
+     * uniform summation order.
+     *
+     * True when reduction is parallel, streamKAtomic is 0, the ABI is static
+     * two-tile packing (StreamK=3, or StreamK=5 with dynamic sub-mode off),
+     * and the grid is an exact multiple of the tile count with split factor
+     * F = grid/tiles >= 2. Callers must already have cleared the static
+     * Stream-K obstacles (the launch gate checks those first). Does not
+     * consult StaggerU: the device clears it for F >= 2.
+     *
+     * Parallel extras are per PartialIdx and tile-symmetric, so I % F == 0 is
+     * not required (unlike the tree all-partial model without per-tile extras).
+     */
+    TENSILELITEHOST_EXPORT bool streamKParallelReductionRowUniform(StreamKSettings const& sk,
+                                                                   int  streamKAtomic,
+                                                                   bool staticTwoTilePacking,
+                                                                   size_t tiles);
+
+    /**
      * Iteration range [start, end) assigned to workgroup w under the static
      * two-tile StreamK mapping. When perTileExtraIters is true and
      * skGrid % tiles == 0, extras are distributed within each tile;

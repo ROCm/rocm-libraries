@@ -278,6 +278,10 @@ namespace
         hipDataType abType = HIP_R_32F;
         // HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET; 0 leaves the attribute unset.
         int32_t smCountTarget = 0;
+        // When true, request HIPBLASLT_EPILOGUE_BIAS with a constant f32 bias
+        // vector of length m. Needed to select the gfx942 GridBased Bias exact
+        // size that reaches the newly admitted Stream-K split (report 09).
+        bool useBias = false;
     };
 
     size_t elementSizeOf(hipDataType type)
@@ -348,6 +352,7 @@ namespace
             if(m_layoutA)
                 hipblasLtMatrixLayoutDestroy(m_layoutA);
             static_cast<void>(hipFree(m_deviceWorkspace));
+            static_cast<void>(hipFree(m_deviceBias));
             static_cast<void>(hipFree(m_deviceD));
             static_cast<void>(hipFree(m_deviceB));
             static_cast<void>(hipFree(m_deviceA));
@@ -388,6 +393,13 @@ namespace
                 return false;
             }
 
+            if(m_problem.useBias
+               && hipMalloc(&m_deviceBias, static_cast<size_t>(m) * sizeof(float)) != hipSuccess)
+            {
+                skipReason = "hipMalloc failed for bias vector of length " + std::to_string(m);
+                return false;
+            }
+
             if(!uploadOperands(skipReason))
                 return false;
 
@@ -425,6 +437,44 @@ namespace
             {
                 ADD_FAILURE() << "Setting SM_COUNT_TARGET must succeed";
                 return false;
+            }
+
+            if(m_problem.useBias)
+            {
+                // Constant bias across rows: identical A rows + identical bias
+                // keeps the row-uniformity assertion meaningful.
+                std::vector<float> bias(static_cast<size_t>(m), 0.125f);
+                if(hipMemcpy(m_deviceBias,
+                             bias.data(),
+                             bias.size() * sizeof(float),
+                             hipMemcpyHostToDevice)
+                   != hipSuccess)
+                {
+                    skipReason = "hipMemcpy of bias failed";
+                    return false;
+                }
+
+                const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
+                const hipDataType         biasType = HIP_R_32F;
+                if(hipblasLtMatmulDescSetAttribute(m_desc,
+                                                   HIPBLASLT_MATMUL_DESC_EPILOGUE,
+                                                   &epilogue,
+                                                   sizeof(epilogue))
+                       != HIPBLAS_STATUS_SUCCESS
+                   || hipblasLtMatmulDescSetAttribute(m_desc,
+                                                      HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
+                                                      &biasType,
+                                                      sizeof(biasType))
+                          != HIPBLAS_STATUS_SUCCESS
+                   || hipblasLtMatmulDescSetAttribute(m_desc,
+                                                      HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                                      &m_deviceBias,
+                                                      sizeof(m_deviceBias))
+                          != HIPBLAS_STATUS_SUCCESS)
+                {
+                    ADD_FAILURE() << "Setting bias epilogue attributes must succeed";
+                    return false;
+                }
             }
 
             return true;
@@ -714,6 +764,7 @@ namespace
         void*                   m_deviceA         = nullptr;
         void*                   m_deviceB         = nullptr;
         void*                   m_deviceD         = nullptr;
+        void*                   m_deviceBias      = nullptr;
         void*                   m_deviceWorkspace = nullptr;
         std::vector<float>      m_aVector;
         std::vector<float>      m_hostB;
@@ -1658,7 +1709,7 @@ namespace
     }
 
     // =======================================================================
-    // Coherence-mode Stream-K grid steering (tree reduction + never-upward snap)
+    // Coherence-mode Stream-K grid steering (parallel admission + never-upward snap)
     //
     // Host-only: synthesised SK3 solution + gfx950 analytical HipAMDGPU, same
     // pattern as tensilelite CuCount_test (which CI does not build).
@@ -1715,14 +1766,56 @@ namespace
         return problem;
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrder)
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, KeepParallelUnderUniformSummationOrderWhenEligible)
     {
         auto solution = coherenceSteeringSolution();
         auto device   = coherenceSteeringDevice();
         auto problem  = coherenceGemm(512, 512, 8192);
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
 
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
 
+        problem.setParams().setUniformSummationOrder(true);
+        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel)
+            << "coherence must keep parallel when SK3 static, non-atomic, and obstacles clear";
+
+        const size_t grid
+            = solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel);
+        TensileLite::StreamKSettings sk;
+        sk.reduction = origami::reduction_t::parallel;
+        sk.grid      = grid;
+        EXPECT_TRUE(TensileLite::streamKParallelReductionRowUniform(
+            sk, solution->sizeMapping.streamKAtomic, /*staticTwoTilePacking=*/true, tiles))
+            << "gate helper must admit the resolved parallel settings (grid=" << grid
+            << " tiles=" << tiles << ")";
+        // Empirical note: report 15 measured UNIFORM for this parallel-window
+        // class (512x512x8192) under mode-off; mode-on now keeps that reduction
+        // when the admission helper holds, so the bitwise row guarantee rides
+        // the same tile-symmetric PartialIdx mapping.
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderWhenIneligible)
+    {
+        auto solution = coherenceSteeringSolution();
+        solution->sizeMapping.streamKAtomic = 1;
+        auto device  = coherenceSteeringDevice();
+        auto problem = coherenceGemm(512, 512, 8192);
+
+        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
+
+        problem.setParams().setUniformSummationOrder(true);
+        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree)
+            << "coherence must force tree when parallel is ineligible (StreamKAtomic=1)";
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderCustomKernel)
+    {
+        auto solution = coherenceSteeringSolution();
+        solution->sizeMapping.customKernelName = "DummyCustomKernel";
+        auto device  = coherenceSteeringDevice();
+        auto problem = coherenceGemm(512, 512, 8192);
+
+        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree);
         problem.setParams().setUniformSummationOrder(true);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree);
     }
@@ -1781,6 +1874,30 @@ namespace
 
         solution->internalArgsSupport.perTileExtraIters = true;
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ParallelSnapSkipsFIRequirement)
+    {
+        auto solution = coherenceSteeringSolution();
+        auto device   = coherenceSteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 8;
+
+        auto         problem = coherenceGemm(256, 256, 1088);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        const size_t I
+            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        ASSERT_EQ(tiles, 4u);
+        ASSERT_EQ(I, 17u);
+        ASSERT_EQ(I % 2, 1u);
+
+        problem.setParams().setUniformSummationOrder(true);
+        solution->internalArgsSupport.perTileExtraIters = false;
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles)
+            << "Tree without perTileExtraIters must still require F | I";
+        EXPECT_EQ(
+            solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 8u)
+            << "Parallel snap must skip F | I and keep T*F when workspace fits";
     }
 
     TEST(RowUniformityCoherenceGridSteering_pre_checkin, ModeOffLeavesParallelReduction)

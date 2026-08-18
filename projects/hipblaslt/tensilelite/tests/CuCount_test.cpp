@@ -1001,7 +1001,7 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
 }
 
 // ===========================================================================
-// Coherence-mode Stream-K grid steering (tree reduction + never-upward snap)
+// Coherence-mode Stream-K grid steering (parallel admission + never-upward snap)
 // ===========================================================================
 
 namespace
@@ -1019,11 +1019,11 @@ namespace
     }
 } // namespace
 
-TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrder)
+TEST(StreamKCoherenceGridSteeringTest, KeepParallelUnderUniformSummationOrderWhenEligible)
 {
     // Same window as SmCountTargetChangesReductionAndGrid: 512x512 => 16 tiles,
     // K=8192 => I=128, C=256 => tiles <= C/4 and I >= 64 => parallel without
-    // coherence; uniformSummationOrder forces tree when the flag is on.
+    // coherence; under coherence the eligible parallel path is kept.
     StreamK5AnalyticalEnv env;
     initSk3CoherenceSolution(env.solution);
     env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
@@ -1031,13 +1031,62 @@ TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrder)
 
     auto problem = makeGemmProblem(512, 512, 8192);
     problem.setWorkspaceSize(32ull << 20);
+    const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
 
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
         << "Mode off must keep origami's parallel reduction";
 
     problem.setParams().setUniformSummationOrder(true);
+    EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
+        << "coherence must keep parallel when SK3 static, non-atomic, and obstacles clear";
+
+    const size_t grid
+        = env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::parallel);
+    TensileLite::StreamKSettings sk;
+    sk.reduction = origami::reduction_t::parallel;
+    sk.grid      = grid;
+    EXPECT_TRUE(TensileLite::streamKParallelReductionRowUniform(
+        sk, env.solution.sizeMapping.streamKAtomic, /*staticTwoTilePacking=*/true, tiles))
+        << "gate helper must admit the resolved parallel settings (grid=" << grid
+        << " tiles=" << tiles << ")";
+}
+
+TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderWhenIneligible)
+{
+    // Atomic Stream-K is a static obstacle: origami may still pick parallel,
+    // but coherence must force tree rather than keep an unaudited path.
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.solution.sizeMapping.streamKAtomic = 1;
+    env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    env.device.skFixedGrid   = 0;
+
+    auto problem = makeGemmProblem(512, 512, 8192);
+    problem.setWorkspaceSize(32ull << 20);
+
+    EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
+        << "Mode off must keep origami's parallel reduction even when atomic";
+
+    problem.setParams().setUniformSummationOrder(true);
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::tree)
-        << "coherence must force tree under uniformSummationOrder for SK3 static packing";
+        << "coherence must force tree when parallel is ineligible (StreamKAtomic=1)";
+}
+
+TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderCustomKernel)
+{
+    // Custom kernels always resolve to tree; coherence must not invent parallel.
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.solution.sizeMapping.customKernelName = "DummyCustomKernel";
+    env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    env.device.skFixedGrid   = 0;
+
+    auto problem = makeGemmProblem(512, 512, 8192);
+    problem.setWorkspaceSize(32ull << 20);
+
+    EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
+    problem.setParams().setUniformSummationOrder(true);
+    EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
 }
 
 TEST(StreamKCoherenceGridSteeringTest, NonDivisorGridBelowTilesSnapsToTiles)
@@ -1110,6 +1159,33 @@ TEST(StreamKCoherenceGridSteeringTest, AllPartialNonDivisorFRequiresCapability)
         << "With perTileExtraIters, F need not divide I; keep T*F when workspace fits";
 }
 
+TEST(StreamKCoherenceGridSteeringTest, ParallelSnapSkipsFIRequirement)
+{
+    // T=4, I=17 (K=1088, DepthU=64), g0=8=T*F with F=2 and 2 does not divide 17.
+    // Tree snaps to T without perTileExtraIters; parallel keeps T*F.
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.device.skDynamicGrid = 0;
+    env.device.skFixedGrid   = 8;
+
+    auto problem = makeGemmProblem(256, 256, 1088);
+    problem.setWorkspaceSize(32ull << 20);
+    const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+    const size_t I
+        = std::max(size_t{1}, problem.getItersPerTile(env.solution.sizeMapping));
+    ASSERT_EQ(tiles, 4u);
+    ASSERT_EQ(I, 17u);
+    ASSERT_EQ(I % 2, 1u);
+
+    problem.setParams().setUniformSummationOrder(true);
+    env.solution.internalArgsSupport.perTileExtraIters = false;
+    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree), tiles)
+        << "Tree without perTileExtraIters must still require F | I";
+    EXPECT_EQ(
+        env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::parallel), 8u)
+        << "Parallel snap must skip F | I and keep T*F when workspace fits";
+}
+
 TEST(StreamKCoherenceGridSteeringTest, ModeOffLeavesNaturalGridAndReduction)
 {
     StreamK5AnalyticalEnv env;
@@ -1130,8 +1206,7 @@ TEST(StreamKCoherenceGridSteeringTest, ModeOffLeavesNaturalGridAndReduction)
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), redOff);
     EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, redOff), gridOff);
 
-    // Coherence on changes reduction for this shape; that is the forced-tree
-    // path, not a mode-off regression. Confirm the off path above was actually
-    // parallel so the comparison is meaningful.
+    // Confirm the off path above was actually parallel so the comparison is
+    // meaningful. Coherence on keeps parallel for this eligible shape.
     EXPECT_EQ(redOff, origami::reduction_t::parallel);
 }
