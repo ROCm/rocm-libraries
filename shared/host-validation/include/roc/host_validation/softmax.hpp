@@ -9,15 +9,15 @@
 
 namespace roc::host_validation {
 struct SoftmaxProblem {
-    SoftmaxProblem(TensorView inputValues, MutableTensorView outputValues, size_t softmaxAxis,
+    SoftmaxProblem(Tensor inputValues, Tensor outputValues, size_t softmaxAxis,
                    ScalarType accumulator)
         : input(std::move(inputValues)),
           output(std::move(outputValues)),
           axis(softmaxAxis),
           accumulatorType(accumulator) {}
 
-    TensorView input;
-    MutableTensorView output;
+    Tensor input;
+    Tensor output;
     size_t axis;
     ScalarType accumulatorType;
 };

@@ -36,6 +36,7 @@
 
 #include <complex>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -72,31 +73,31 @@ namespace
         return hipblaslt::host_validation::scalarType(type);
     }
 
-    TensorView tensorView(const void* data, ScalarType type, Layout layout)
+    Tensor tensorFromStorage(const void* data, ScalarType type, Layout layout)
     {
         const size_t bytes = storageBytesForLayout(type, layout);
         if(data == nullptr && bytes != 0)
             throw std::invalid_argument("Null hipBLASLt reference input buffer.");
-        return TensorView(type,
-                          std::move(layout),
-                          {static_cast<const std::byte*>(data), bytes});
+        return Tensor(type,
+                      std::move(layout),
+                      std::span<const std::byte>(static_cast<const std::byte*>(data), bytes));
     }
 
-    MutableTensorView mutableTensorView(void* data, ScalarType type, Layout layout)
+    Tensor tensorFromMutableStorage(void* data, ScalarType type, Layout layout)
     {
         const size_t bytes = storageBytesForLayout(type, layout);
         if(data == nullptr && bytes != 0)
             throw std::invalid_argument("Null hipBLASLt reference output buffer.");
-        return MutableTensorView(
-            type, std::move(layout), {static_cast<std::byte*>(data), bytes});
+        return Tensor(
+            type, std::move(layout), std::span<std::byte>(static_cast<std::byte*>(data), bytes));
     }
 
     template <typename Tc>
-    TensorView scalarVector(const void* data, size_t elements)
+    Tensor scalarVector(const void* data, size_t elements)
     {
         const ScalarType type =
             hipblaslt::host_validation::scalarType<Tc>();
-        return tensorView(data, type, Layout::contiguous(Shape{elements}));
+        return tensorFromStorage(data, type, Layout::contiguous(Shape{elements}));
     }
 }
 
@@ -157,8 +158,8 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     const Layout layoutC(Shape{rows, columns}, {1, ldc});
     const Layout layoutD(Shape{rows, columns}, {1, ldd});
 
-    GemmOperand operandA(tensorView(A, typeA, layoutA));
-    GemmOperand operandB(tensorView(B, typeB, layoutB));
+    GemmOperand operandA(tensorFromStorage(A, typeA, layoutA));
+    GemmOperand operandB(tensorFromStorage(B, typeB, layoutB));
     operandA.conjugate = transA == HIPBLAS_OP_C;
     operandB.conjugate = transB == HIPBLAS_OP_C;
 
@@ -187,10 +188,11 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
             VectorBinding{scalarVector<Tc>(scaleBVec, isScaleBVec ? columns : 1),
                           MatrixAxis::Column});
 
+    Tensor      output = tensorFromMutableStorage(D, outputType, layoutD);
     GemmRequest request(std::move(operandA),
                         std::move(operandB),
-                        tensorView(C, typeC, layoutC),
-                        mutableTensorView(D, outputType, layoutD),
+                        tensorFromStorage(C, typeC, layoutC),
+                        output,
                         compatibilityAccumulatorType<Tc>());
     request.epilogue.alpha = runtimeScalar(alpha);
     request.epilogue.beta = runtimeScalar(beta);
@@ -219,6 +221,9 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     {
         referenceGemm(request);
     }
+    const size_t outputBytes = storageBytesForLayout(outputType, layoutD);
+    if(outputBytes != 0)
+        std::memcpy(D, output.storage().data(), outputBytes);
 
     (void)Tc_enum;
 }

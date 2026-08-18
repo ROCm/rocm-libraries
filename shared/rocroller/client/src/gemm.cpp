@@ -115,23 +115,23 @@ namespace rocRoller::Client::GEMMClient
                                : problemParams.k)
                         : 0;
 
-        std::optional<roc::host_validation::TensorView> runtimeScaleA;
-        std::optional<roc::host_validation::TensorView> runtimeScaleB;
+        std::optional<roc::host_validation::Tensor> runtimeScaleA;
+        std::optional<roc::host_validation::Tensor> runtimeScaleB;
         if(!generatedInputs.scaleA && !hostScaleA.empty())
         {
-            runtimeScaleA = hostScaleTensorView(problemParams.types.scaleTypeA,
-                                                std::span<const uint8_t>(hostScaleA),
-                                                problemParams.m,
-                                                problemParams.k,
-                                                scaleBlockSize);
+            runtimeScaleA = hostScaleTensor(problemParams.types.scaleTypeA,
+                                            std::span<const uint8_t>(hostScaleA),
+                                            problemParams.m,
+                                            problemParams.k,
+                                            scaleBlockSize);
         }
         if(!generatedInputs.scaleB && !hostScaleB.empty())
         {
-            runtimeScaleB = hostScaleTensorView(problemParams.types.scaleTypeB,
-                                                std::span<const uint8_t>(hostScaleB),
-                                                problemParams.n,
-                                                problemParams.k,
-                                                scaleBlockSize);
+            runtimeScaleB = hostScaleTensor(problemParams.types.scaleTypeB,
+                                            std::span<const uint8_t>(hostScaleB),
+                                            problemParams.n,
+                                            problemParams.k,
+                                            scaleBlockSize);
         }
 
         const HostReferenceProblem referenceProblem = makeHostReferenceProblem(generatedInputs,
@@ -141,11 +141,11 @@ namespace rocRoller::Client::GEMMClient
                                                                                problemParams.alpha,
                                                                                problemParams.beta);
         const auto                 floatReference   = computeHostReference(referenceProblem);
-        const auto                 hostReference = convertHostReference<D>(floatReference.view());
+        const auto                 hostReference    = convertHostReference<D>(floatReference);
         const auto acceptableError = acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
         const auto comparison      = compareHostReference(
-            hostOutputTensorView<D>(std::span<const D>(hostD), problemParams.m, problemParams.n),
-            hostOutputTensorView<D>(
+            hostOutputTensor<D>(std::span<const D>(hostD), problemParams.m, problemParams.n),
+            hostOutputTensor<D>(
                 std::span<const D>(hostReference), problemParams.m, problemParams.n),
             acceptableError);
 

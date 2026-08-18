@@ -16,6 +16,23 @@ set(install_dir "${PACKAGE_WORK_DIR}/install")
 set(build_dir "${PACKAGE_WORK_DIR}/build")
 file(REMOVE_RECURSE "${PACKAGE_WORK_DIR}")
 
+set(configure_arguments)
+if(TEST_CXX_COMPILER)
+    list(APPEND configure_arguments "-DCMAKE_CXX_COMPILER=${TEST_CXX_COMPILER}")
+endif()
+if(TEST_MAKE_PROGRAM)
+    list(APPEND configure_arguments "-DCMAKE_MAKE_PROGRAM=${TEST_MAKE_PROGRAM}")
+endif()
+if(DEFINED TEST_CXX_FLAGS)
+    list(APPEND configure_arguments "-DCMAKE_CXX_FLAGS=${TEST_CXX_FLAGS}")
+endif()
+if(DEFINED TEST_EXE_LINKER_FLAGS)
+    list(APPEND configure_arguments "-DCMAKE_EXE_LINKER_FLAGS=${TEST_EXE_LINKER_FLAGS}")
+endif()
+if(TEST_CONFIG)
+    list(APPEND configure_arguments "-DCMAKE_BUILD_TYPE=${TEST_CONFIG}")
+endif()
+
 set(component_build_command "${CMAKE_COMMAND}" --build "${COMPONENT_BINARY_DIR}")
 if(TEST_CONFIG)
     list(APPEND component_build_command --config "${TEST_CONFIG}")
@@ -44,6 +61,7 @@ execute_process(
         -B "${build_dir}"
         -G "${TEST_GENERATOR}"
         "-DCMAKE_PREFIX_PATH=${install_dir}"
+        ${configure_arguments}
     RESULT_VARIABLE configure_result
 )
 if(NOT configure_result EQUAL 0)

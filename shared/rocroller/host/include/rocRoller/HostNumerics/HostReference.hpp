@@ -27,20 +27,20 @@ namespace rocRoller::HostNumerics
 {
     struct HostReferenceProblem
     {
-        HostReferenceProblem(roc::host_validation::TensorView aTensor,
-                             roc::host_validation::TensorView bTensor,
-                             roc::host_validation::TensorView cTensor)
+        HostReferenceProblem(roc::host_validation::Tensor aTensor,
+                             roc::host_validation::Tensor bTensor,
+                             roc::host_validation::Tensor cTensor)
             : a(std::move(aTensor))
             , b(std::move(bTensor))
             , c(std::move(cTensor))
         {
         }
 
-        roc::host_validation::TensorView                a;
-        roc::host_validation::TensorView                b;
-        roc::host_validation::TensorView                c;
-        std::optional<roc::host_validation::TensorView> scaleA;
-        std::optional<roc::host_validation::TensorView> scaleB;
+        roc::host_validation::Tensor                    a;
+        roc::host_validation::Tensor                    b;
+        roc::host_validation::Tensor                    c;
+        std::optional<roc::host_validation::Tensor>     scaleA;
+        std::optional<roc::host_validation::Tensor>     scaleB;
         size_t                                          scaleBlockSize = 0;
         float                                           alpha          = 1.0f;
         float                                           beta           = 0.0f;
@@ -69,32 +69,31 @@ namespace rocRoller::HostNumerics
         std::string message() const;
     };
 
-    roc::host_validation::TensorView hostScaleTensorView(DataType                 type,
-                                                         std::span<const uint8_t> values,
-                                                         size_t                   freeExtent,
-                                                         size_t                   reductionExtent,
-                                                         size_t                   blockSize);
+    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
+                                                 std::span<const uint8_t> values,
+                                                 size_t                   freeExtent,
+                                                 size_t                   reductionExtent,
+                                                 size_t                   blockSize);
 
-    roc::host_validation::TensorView
-        hostScaleTensorView(DataType                 type,
-                            std::span<const uint8_t> values,
-                            TensorDescriptor const&  dataDescriptor,
-                            size_t                   blockedDimension,
-                            size_t                   blockSize);
+    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
+                                                 std::span<const uint8_t> values,
+                                                 TensorDescriptor const&  dataDescriptor,
+                                                 size_t                   blockedDimension,
+                                                 size_t                   blockSize);
 
     HostReferenceProblem
-        makeHostReferenceProblem(GeneratedGEMMInputs const&                      inputs,
-                                 std::optional<roc::host_validation::TensorView> runtimeScaleA,
-                                 std::optional<roc::host_validation::TensorView> runtimeScaleB,
-                                 size_t                                          scaleBlockSize,
-                                 float                                           alpha,
-                                 float                                           beta);
+        makeHostReferenceProblem(GeneratedGEMMInputs const&                  inputs,
+                                 std::optional<roc::host_validation::Tensor> runtimeScaleA,
+                                 std::optional<roc::host_validation::Tensor> runtimeScaleB,
+                                 size_t                                      scaleBlockSize,
+                                 float                                       alpha,
+                                 float                                       beta);
 
     roc::host_validation::Tensor computeHostReference(HostReferenceProblem const& problem);
 
-    HostComparisonResult compareHostReference(roc::host_validation::TensorView observed,
-                                              roc::host_validation::TensorView expected,
-                                              AcceptableGEMMError              acceptableError);
+    HostComparisonResult compareHostReference(roc::host_validation::Tensor observed,
+                                              roc::host_validation::Tensor expected,
+                                              AcceptableGEMMError          acceptableError);
 
     namespace HostReferenceDetail
     {
@@ -119,8 +118,8 @@ namespace rocRoller::HostNumerics
     }
 
     template <typename T>
-    roc::host_validation::TensorView
-        hostOutputTensorView(std::span<const T> values, size_t rows, size_t columns)
+    roc::host_validation::Tensor
+        hostOutputTensor(std::span<const T> values, size_t rows, size_t columns)
     {
         if(columns != 0 && rows > std::numeric_limits<size_t>::max() / columns)
             throw std::overflow_error("rocRoller output matrix element count overflow.");
@@ -129,7 +128,7 @@ namespace rocRoller::HostNumerics
         if(values.size() != rows * columns)
             throw std::invalid_argument(
                 "rocRoller output storage does not match the matrix dimensions.");
-        return roc::host_validation::TensorView(
+        return roc::host_validation::Tensor(
             HostReferenceDetail::outputScalarType<T>(),
             roc::host_validation::Layout(roc::host_validation::Shape{rows, columns},
                                          {1, static_cast<ptrdiff_t>(rows)}),
@@ -137,7 +136,7 @@ namespace rocRoller::HostNumerics
     }
 
     template <typename Output>
-    std::vector<Output> convertHostReference(roc::host_validation::TensorView floatOutput)
+    std::vector<Output> convertHostReference(roc::host_validation::Tensor floatOutput)
     {
         static_assert(std::is_same_v<Output, float> || std::is_same_v<Output, Half>
                       || std::is_same_v<Output, BFloat16>);

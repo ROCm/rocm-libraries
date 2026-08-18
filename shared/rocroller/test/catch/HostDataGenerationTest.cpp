@@ -83,22 +83,22 @@ namespace HostDataGenerationTest
             using PackedType = typename PackedTypeOf<T>::type;
             auto packed      = HostNumerics::copyTensorStorage<PackedType>(generated.data);
             auto packedView
-                = HostNumerics::hostTensorView(descriptor, packed, dataTypeInterpretation<T>());
+                = HostNumerics::hostTensor(descriptor, packed, dataTypeInterpretation<T>());
 
             for(size_t row = 0; row < dimension0; ++row)
             {
                 for(size_t column = 0; column < dimension1; ++column)
                 {
-                    auto const value = generated.data.view().template loadAs<float>({row, column});
+                    auto const value = generated.data.template loadAs<float>({row, column});
                     CHECK(packedView.template loadAs<float>({row, column}) == value);
 
                     REQUIRE(generated.reference);
                     auto const reference
-                        = generated.reference->view().template loadAs<float>({row, column});
+                        = generated.reference.template loadAs<float>({row, column});
                     if constexpr(isBlockScaledType<T>)
                     {
                         REQUIRE(generated.scales);
-                        auto const scale = generated.scales->view().template loadAs<float>(
+                        auto const scale = generated.scales.template loadAs<float>(
                             {row, column / static_cast<size_t>(blockScaling)});
                         CHECK(value * scale == reference);
                     }

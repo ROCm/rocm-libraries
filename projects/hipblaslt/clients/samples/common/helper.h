@@ -95,12 +95,12 @@ namespace hipblaslt_sample_detail
         options.real.parameter0 = -3;
         options.real.parameter1 = 3;
         options.real.stream     = stream;
-        roc::host_validation::generate(
-            hipblaslt::host_validation::mutableTensorView(
-                values,
-                elements,
-                roc::host_validation::Layout::contiguous(roc::host_validation::Shape{elements})),
-            options);
+        auto generated          = hipblaslt::host_validation::tensorFromMutableStorage(
+            values,
+            elements,
+            roc::host_validation::Layout::contiguous(roc::host_validation::Shape{elements}));
+        roc::host_validation::generate(generated, options);
+        hipblaslt::host_validation::copyTensorStorageTo(values, elements, generated);
     }
 } // namespace hipblaslt_sample_detail
 

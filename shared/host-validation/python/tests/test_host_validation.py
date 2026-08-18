@@ -431,7 +431,7 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(tensor.shape, [3, 4])
         np.testing.assert_array_equal(hv.to_numpy(tensor), values)
 
-    def test_numpy_tensor_view_positive_stride_and_gaps(self):
+    def test_numpy_tensor_preserves_positive_stride_and_gaps(self):
         storage = np.asarray(
             [
                 1.0,
@@ -448,10 +448,10 @@ class TensorAndGemmTests(unittest.TestCase):
             dtype=np.float32,
         )
         values = storage.reshape(2, 5)[:, ::2]
-        view = hv.TensorView.from_numpy(values)
+        view = hv.Tensor.from_numpy(values)
         expected = hv.from_numpy(
             np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
-        ).view()
+        )
 
         self.assertEqual(view.type, hv.ScalarType.Float32)
         self.assertEqual(view.shape, [2, 3])
@@ -468,20 +468,20 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.check_unused_tensor_storage(view, allocated_elements=storage.size).passed
         )
 
-    def test_numpy_tensor_view_negative_strides(self):
+    def test_numpy_tensor_preserves_negative_strides(self):
         values = np.arange(24, dtype=np.float32).reshape(4, 6)[::-1, ::-2]
-        view = hv.TensorView.from_numpy(values)
+        view = hv.Tensor.from_numpy(values)
 
         self.assertEqual(view.shape, [4, 3])
         self.assertEqual(view.strides, [-6, -2])
         self.assertEqual(view.offset, 22)
         self.assertEqual(len(view.storage), 23 * values.itemsize)
         np.testing.assert_array_equal(hv.to_numpy(view), values)
-        self.assertTrue(hv.compare(view, hv.from_numpy(values).view()).passed)
+        self.assertTrue(hv.compare(view, hv.from_numpy(values)).passed)
 
     def test_tensor_conversion_preserves_layout(self):
         values = np.arange(24, dtype=np.float32).reshape(4, 6)[::-1, ::-2]
-        view = hv.TensorView.from_numpy(values)
+        view = hv.Tensor.from_numpy(values)
 
         copied = view.to(hv.ScalarType.Float32)
         self.assertEqual(copied.strides, view.strides)
@@ -652,58 +652,60 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(result.run_info.slices_computed, 4)
         self.assertEqual(result.run_info.elements_computed, source.size)
 
-    def test_numpy_tensor_view_observes_mutation(self):
+    def test_numpy_tensor_owns_an_independent_copy(self):
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
-        view = hv.TensorView.from_numpy(values)
-        expected = hv.from_numpy(values.copy()).view()
+        view = hv.Tensor.from_numpy(values)
+        expected = hv.from_numpy(values.copy())
         self.assertTrue(hv.compare(view, expected).passed)
 
         values[1, 2] = -17.0
-        np.testing.assert_array_equal(hv.to_numpy(view), values)
-        self.assertFalse(hv.compare(view, expected).passed)
+        np.testing.assert_array_equal(
+            hv.to_numpy(view), np.arange(6, dtype=np.float32).reshape(2, 3)
+        )
+        self.assertTrue(hv.compare(view, expected).passed)
 
-    def test_numpy_tensor_view_retains_owner(self):
+    def test_numpy_tensor_does_not_retain_source_owner(self):
         values = np.arange(6, dtype=np.float64)
         owner = weakref.ref(values)
-        view = hv.TensorView.from_numpy(values)
+        view = hv.Tensor.from_numpy(values)
 
         del values
         gc.collect()
-        self.assertIsNotNone(owner())
+        self.assertIsNone(owner())
         np.testing.assert_array_equal(hv.to_numpy(view), np.arange(6, dtype=np.float64))
 
-        del view
-        gc.collect()
-        self.assertIsNone(owner())
-
-    def test_owning_tensor_view_retains_tensor(self):
+    def test_tensor_clone_is_independent(self):
         tensor = hv.from_numpy(np.arange(6, dtype=np.float32))
-        view = tensor.view()
+        cloned = tensor.clone()
+        options = hv.GenerationOptions()
+        options.real.pattern = hv.GenerationPattern.Constant
+        options.real.parameter0 = -17.0
+        hv.generate_at(cloned, 5, options)
+        np.testing.assert_array_equal(
+            hv.to_numpy(tensor), np.arange(6, dtype=np.float32)
+        )
+        self.assertEqual(hv.to_numpy(cloned)[5], -17.0)
 
-        del tensor
-        gc.collect()
-        np.testing.assert_array_equal(hv.to_numpy(view), np.arange(6, dtype=np.float32))
-
-    def test_numpy_tensor_view_accepts_read_only_array(self):
+    def test_numpy_tensor_accepts_read_only_array(self):
         values = np.arange(6, dtype=np.int32).reshape(2, 3)
         values.flags.writeable = False
-        view = hv.TensorView.from_numpy(values)
+        view = hv.Tensor.from_numpy(values)
 
         self.assertEqual(view.type, hv.ScalarType.Int32)
         np.testing.assert_array_equal(hv.to_numpy(view), values)
 
-    def test_numpy_tensor_view_rejects_storage_conversion(self):
+    def test_numpy_tensor_rejects_storage_conversion(self):
         with self.assertRaises(TypeError):
-            hv.TensorView.from_numpy([1.0, 2.0])
+            hv.Tensor.from_numpy([1.0, 2.0])
         with self.assertRaises(TypeError):
-            hv.TensorView.from_numpy(np.arange(4, dtype=np.dtype(">f4")))
+            hv.Tensor.from_numpy(np.arange(4, dtype=np.dtype(">f4")))
         with self.assertRaises(ValueError):
-            hv.TensorView.from_numpy(
+            hv.Tensor.from_numpy(
                 np.arange(4, dtype=np.float64),
                 hv.ScalarType.Float32,
             )
         with self.assertRaises(ValueError):
-            hv.TensorView.from_numpy(
+            hv.Tensor.from_numpy(
                 np.arange(4, dtype=np.uint8),
                 hv.ScalarType.Float8E4M3,
             )
@@ -716,7 +718,7 @@ class TensorAndGemmTests(unittest.TestCase):
             strides=(3,),
         )
         with self.assertRaises(ValueError):
-            hv.TensorView.from_numpy(byte_strided)
+            hv.Tensor.from_numpy(byte_strided)
 
     def test_affine_layout_decode(self):
         storage = np.asarray(

@@ -27,9 +27,9 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <iostream>
 #include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
 #include <hipblaslt/host_validation/Types.hpp>
+#include <iostream>
 #include <roc/host_validation/validation.hpp>
 #include <string>
 #include <vector>
@@ -81,7 +81,8 @@ int parseArgs(
             {
                 const std::string initStr{argv[++i]};
 
-                if(initStr != "rand_int" && initStr != "trig_float" && initStr != "hpl" && initStr != "special" && initStr != "zero")
+                if(initStr != "rand_int" && initStr != "trig_float" && initStr != "hpl"
+                   && initStr != "special" && initStr != "zero")
                 {
                     std::cerr << "Invalid initialization type: " << initStr << '\n';
                     return EXIT_FAILURE;
@@ -103,8 +104,7 @@ int parseArgs(
 
 void reportComparison(const char* title, const roc::host_validation::ComparisonResult& comparison)
 {
-    std::cout << "----- " << title << " result"
-              << " -----" << std::endl;
+    std::cout << "----- " << title << " result" << " -----" << std::endl;
     std::cout << "status: " << (comparison.passed() ? "PASS" : "FAIL") << std::endl;
     std::cout << "compared: " << comparison.compared << std::endl;
     std::cout << "mismatches: " << comparison.mismatches << std::endl;
@@ -167,10 +167,6 @@ int main(int argc, char** argv)
     std::vector<float> cpuGamma(affine ? n : 0, 1.f);
     std::vector<float> cpuBeta(affine ? n : 0, 0.f);
 
-    std::vector<float> refOutput(numElements, 0.f);
-    std::vector<float> refMean(m, 0.f);
-    std::vector<float> refInvvar(m, 0.f);
-
     initData(cpuInput.data(), cpuInput.size(), init);
 
     if(affine)
@@ -198,45 +194,42 @@ int main(int argc, char** argv)
 
     using namespace roc::host_validation;
     using namespace hipblaslt::host_validation;
-    const Layout            tensorLayout     = Layout::contiguous(Shape{m, n});
-    const Layout            statisticsLayout = Layout::contiguous(Shape{m});
-    const MutableTensorView referenceOutputView
-        = mutableTensorView(refOutput.data(), refOutput.size(), tensorLayout);
-    const MutableTensorView referenceMeanView
-        = mutableTensorView(refMean.data(), refMean.size(), statisticsLayout);
-    const MutableTensorView referenceInverseVarianceView
-        = mutableTensorView(refInvvar.data(), refInvvar.size(), statisticsLayout);
+    const Layout tensorLayout     = Layout::contiguous(Shape{m, n});
+    const Layout statisticsLayout = Layout::contiguous(Shape{m});
+    const Tensor referenceOutputTensor(ScalarType::Float32, tensorLayout);
+    const Tensor referenceMeanTensor(ScalarType::Float32, statisticsLayout);
+    const Tensor referenceInverseVarianceTensor(ScalarType::Float32, statisticsLayout);
 
-    LayerNormProblem problem(tensorView(cpuInput.data(), cpuInput.size(), tensorLayout),
-                             referenceOutputView,
+    LayerNormProblem problem(tensorFromStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
+                             referenceOutputTensor,
                              1,
                              ScalarType::Float32);
-    problem.mean            = referenceMeanView;
-    problem.inverseVariance = referenceInverseVarianceView;
+    problem.mean            = referenceMeanTensor;
+    problem.inverseVariance = referenceInverseVarianceTensor;
     problem.epsilon         = 1e-5;
     if(affine)
     {
         const Layout affineLayout = Layout::contiguous(Shape{n});
-        problem.gamma             = tensorView(cpuGamma.data(), cpuGamma.size(), affineLayout);
-        problem.beta              = tensorView(cpuBeta.data(), cpuBeta.size(), affineLayout);
+        problem.gamma = tensorFromStorage(cpuGamma.data(), cpuGamma.size(), affineLayout);
+        problem.beta  = tensorFromStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
     }
     referenceLayerNorm(problem);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
-    reportComparison(
-        "Output",
-        roc::host_validation::compare(tensorView(cpuOutput.data(), cpuOutput.size(), tensorLayout),
-                                      referenceOutputView.asConst(),
-                                      comparisonOptions));
-    reportComparison(
-        "Mean",
-        roc::host_validation::compare(tensorView(cpuMean.data(), cpuMean.size(), statisticsLayout),
-                                      referenceMeanView.asConst(),
-                                      comparisonOptions));
+    reportComparison("Output",
+                     roc::host_validation::compare(
+                         tensorFromStorage(cpuOutput.data(), cpuOutput.size(), tensorLayout),
+                         referenceOutputTensor,
+                         comparisonOptions));
+    reportComparison("Mean",
+                     roc::host_validation::compare(
+                         tensorFromStorage(cpuMean.data(), cpuMean.size(), statisticsLayout),
+                         referenceMeanTensor,
+                         comparisonOptions));
     reportComparison("Invvar",
                      roc::host_validation::compare(
-                         tensorView(cpuInvvar.data(), cpuInvvar.size(), statisticsLayout),
-                         referenceInverseVarianceView.asConst(),
+                         tensorFromStorage(cpuInvvar.data(), cpuInvvar.size(), statisticsLayout),
+                         referenceInverseVarianceTensor,
                          comparisonOptions));
 
     hipEvent_t beg, end;

@@ -99,12 +99,12 @@ namespace hipblaslt::host_validation
                        batchStride});
     }
 
-    inline TensorView matrixTransformView(const void* pointer,
-                                          size_t      storageBytes,
-                                          ScalarType  type,
-                                          Layout      layout)
+    inline Tensor matrixTransformTensor(const void* pointer,
+                                        size_t      storageBytes,
+                                        ScalarType  type,
+                                        Layout      layout)
     {
-        return TensorView(
+        return Tensor(
             type,
             std::move(layout),
             std::span<const std::byte>(static_cast<const std::byte*>(pointer), storageBytes));
@@ -142,26 +142,24 @@ namespace hipblaslt::host_validation
                                                           arguments.rowMajorOutput,
                                                           false);
 
-        std::optional<TensorView> a;
-        std::optional<TensorView> b;
+        std::optional<Tensor> a;
+        std::optional<Tensor> b;
         if(arguments.a)
-            a = matrixTransformView(arguments.a, arguments.aStorageBytes, type, aLayout);
+            a = matrixTransformTensor(arguments.a, arguments.aStorageBytes, type, aLayout);
         if(arguments.b)
-            b = matrixTransformView(arguments.b, arguments.bStorageBytes, type, bLayout);
+            b = matrixTransformTensor(arguments.b, arguments.bStorageBytes, type, bLayout);
 
         Tensor       expected(ScalarType::Float32, outputLayout);
-        AxpbyProblem problem(
-            std::move(a), std::move(b), expected.mutableView(), ScalarType::Float32);
+        AxpbyProblem problem(std::move(a), std::move(b), expected, ScalarType::Float32);
         problem.alpha              = arguments.alpha;
         problem.beta               = arguments.beta;
         const AxpbyRunInfo runInfo = referenceAxpby(problem);
 
         Tensor observed
-            = matrixTransformView(
+            = matrixTransformTensor(
                   arguments.observed, arguments.observedStorageBytes, type, outputLayout)
                   .to(ScalarType::Float32);
-        const ComparisonResult comparison
-            = compare(observed.view(), expected.view(), arguments.comparison);
+        const ComparisonResult comparison = compare(observed, expected, arguments.comparison);
         return {
             .runInfo    = runInfo,
             .comparison = comparison,

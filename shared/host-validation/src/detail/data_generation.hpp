@@ -482,7 +482,7 @@ inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
     return value;
 }
 
-inline void generateElement(MutableTensorView destination, const GenerationOptions& options,
+inline void generateElement(Tensor destination, const GenerationOptions& options,
                             std::span<const size_t> indices, size_t logicalIndex) {
     const bool complexOutput =
         scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;

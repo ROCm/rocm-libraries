@@ -6,6 +6,7 @@
 
 #include <complex>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -37,8 +38,14 @@ namespace hipblaslt::host_validation
         std::complex<double> scalarValue(const void* pointer, ScalarType type, const char* name)
         {
             const Layout layout = Layout::contiguous(Shape{1});
-            TensorView   value(type, layout, constStorage(pointer, type, layout, name));
+            Tensor       value(type, layout, constStorage(pointer, type, layout, name));
             return {value.loadAs<double>({0}), 0.0};
+        }
+
+        void copyBack(void* destination, const Tensor& tensor)
+        {
+            if(!tensor.storage().empty())
+                std::memcpy(destination, tensor.storage().data(), tensor.storage().size());
         }
     } // namespace
 
@@ -60,17 +67,16 @@ namespace hipblaslt::host_validation
                                       {1, static_cast<ptrdiff_t>(leadingDimension)});
 
         EpilogueProblem problem(
-            TensorView(computeType,
-                       matrixLayout,
-                       constStorage(arguments.input, computeType, matrixLayout, "input")),
-            MutableTensorView(
-                outputType,
-                matrixLayout,
-                mutableStorage(arguments.output, outputType, matrixLayout, "output")),
+            Tensor(computeType,
+                   matrixLayout,
+                   constStorage(arguments.input, computeType, matrixLayout, "input")),
+            Tensor(outputType,
+                   matrixLayout,
+                   mutableStorage(arguments.output, outputType, matrixLayout, "output")),
             computeType);
 
         if(arguments.rawOutput != nullptr)
-            problem.rawOutput = MutableTensorView(
+            problem.rawOutput = Tensor(
                 computeType,
                 matrixLayout,
                 mutableStorage(arguments.rawOutput, computeType, matrixLayout, "raw output"));
@@ -79,28 +85,26 @@ namespace hipblaslt::host_validation
         {
             const ScalarType auxiliaryType = scalarType(arguments.auxiliaryType);
             if(arguments.activationApplication == ActivationApplication::Gradient)
-                problem.auxiliaryInput = TensorView(auxiliaryType,
-                                                    matrixLayout,
-                                                    constStorage(arguments.auxiliary,
-                                                                 auxiliaryType,
-                                                                 matrixLayout,
-                                                                 "auxiliary input"));
+                problem.auxiliaryInput = Tensor(
+                    auxiliaryType,
+                    matrixLayout,
+                    constStorage(
+                        arguments.auxiliary, auxiliaryType, matrixLayout, "auxiliary input"));
             else
-                problem.auxiliaryOutput = MutableTensorView(auxiliaryType,
-                                                            matrixLayout,
-                                                            mutableStorage(arguments.auxiliary,
-                                                                           auxiliaryType,
-                                                                           matrixLayout,
-                                                                           "auxiliary output"));
+                problem.auxiliaryOutput = Tensor(
+                    auxiliaryType,
+                    matrixLayout,
+                    mutableStorage(
+                        arguments.auxiliary, auxiliaryType, matrixLayout, "auxiliary output"));
         }
 
         if(arguments.amax != nullptr)
         {
             const Layout amaxLayout = Layout::contiguous(Shape{1});
-            problem.amax = MutableTensorView(
-                computeType,
-                amaxLayout,
-                mutableStorage(arguments.amax, computeType, amaxLayout, "AMax output"));
+            problem.amax
+                = Tensor(computeType,
+                         amaxLayout,
+                         mutableStorage(arguments.amax, computeType, amaxLayout, "AMax output"));
             problem.accumulateAmax = arguments.accumulateAmax;
         }
 
@@ -109,11 +113,11 @@ namespace hipblaslt::host_validation
             const ScalarType biasType     = scalarType(arguments.biasType);
             const size_t     biasElements = arguments.biasAxis == MatrixAxis::Row ? rows : columns;
             const Layout     biasLayout   = Layout::contiguous(Shape{biasElements});
-            problem.bias                  = VectorBinding{
-                TensorView(biasType,
-                           biasLayout,
-                           constStorage(arguments.bias, biasType, biasLayout, "bias")),
-                arguments.biasAxis};
+            problem.bias
+                = VectorBinding{Tensor(biasType,
+                                       biasLayout,
+                                       constStorage(arguments.bias, biasType, biasLayout, "bias")),
+                                arguments.biasAxis};
         }
 
         if(arguments.outputScale != nullptr)
@@ -127,6 +131,15 @@ namespace hipblaslt::host_validation
         problem.activationApplication = arguments.activationApplication;
         problem.activationParameter0  = arguments.activationParameter0;
         problem.activationParameter1  = arguments.activationParameter1;
-        return roc::host_validation::referenceEpilogue(problem);
+        const EpilogueRunInfo run     = roc::host_validation::referenceEpilogue(problem);
+        copyBack(arguments.output, problem.output);
+        if(arguments.rawOutput != nullptr)
+            copyBack(arguments.rawOutput, *problem.rawOutput);
+        if(arguments.auxiliary != nullptr
+           && arguments.activationApplication != ActivationApplication::Gradient)
+            copyBack(arguments.auxiliary, *problem.auxiliaryOutput);
+        if(arguments.amax != nullptr)
+            copyBack(arguments.amax, *problem.amax);
+        return run;
     }
 } // namespace hipblaslt::host_validation

@@ -15,7 +15,7 @@ enum class ReductionOperation {
 };
 
 struct ReductionProblem {
-    ReductionProblem(TensorView inputTensor, MutableTensorView outputTensor, ScalarType accumulator,
+    ReductionProblem(Tensor inputTensor, Tensor outputTensor, ScalarType accumulator,
                      std::vector<size_t> reductionAxes,
                      ReductionOperation reductionOperation = ReductionOperation::Sum)
         : input(std::move(inputTensor)),
@@ -24,8 +24,8 @@ struct ReductionProblem {
           axes(std::move(reductionAxes)),
           operation(reductionOperation) {}
 
-    TensorView input;
-    MutableTensorView output;
+    Tensor input;
+    Tensor output;
     ScalarType accumulatorType;
     std::vector<size_t> axes;
     ReductionOperation operation;
@@ -38,6 +38,5 @@ struct ReductionRunInfo {
 
 ReductionRunInfo referenceReduce(const ReductionProblem& problem);
 ReductionRunInfo referenceSum(const ReductionProblem& problem);
-ReductionRunInfo referenceMaximumAbsolute(TensorView input, MutableTensorView output,
-                                          ScalarType accumulatorType);
+ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType);
 }  // namespace roc::host_validation

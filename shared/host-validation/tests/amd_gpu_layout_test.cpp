@@ -12,6 +12,10 @@
 #include <stdexcept>
 #include <vector>
 
+#ifdef _OPENMP
+#error "AMDGPULayout consumers must not inherit OpenMP compile flags."
+#endif
+
 using namespace roc::host_validation::amd_gpu_layout;
 using detail::computeShuffledStrides;
 using detail::computeStrides;
@@ -58,6 +62,10 @@ TEST(PreSwizzleTest, ProductWithOne) {
 TEST(PreSwizzleTest, ProductRejectsOverflow) {
     EXPECT_THROW(product(std::vector<size_t>{std::numeric_limits<size_t>::max(), 2}),
                  std::overflow_error);
+}
+
+TEST(PreSwizzleTest, CompiledThreadPolicyHandlesEmptyWork) {
+    EXPECT_EQ(detail::operationThreadCount(0), 1);
 }
 
 // ============================================================================

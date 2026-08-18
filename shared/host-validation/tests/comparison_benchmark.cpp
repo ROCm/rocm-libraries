@@ -9,7 +9,6 @@
 #include <iostream>
 #include <limits>
 #include <roc/host_validation/comparison.hpp>
-#include <roc/host_validation/typed_comparison.hpp>
 #include <span>
 #include <vector>
 
@@ -49,12 +48,8 @@ int main(int argc, char** argv) {
     }
 
     const Layout layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(leadingDimension)});
-    const TensorView expectedView =
-        TensorView::fromNative<float>(layout, std::span<const float>(expected));
-    const TensorView observedView =
-        TensorView::fromNative<float>(layout, std::span<const float>(observed));
-    const TypedTensorView<float> typedExpectedView(layout, std::span<const float>(expected));
-    const TypedTensorView<float> typedObservedView(layout, std::span<const float>(observed));
+    const Tensor expectedView = Tensor::fromNative<float>(layout, std::span<const float>(expected));
+    const Tensor observedView = Tensor::fromNative<float>(layout, std::span<const float>(observed));
     ComparisonOptions options = defaultComparisonOptions(ScalarType::Float32);
     options.computePointwiseStatistics = false;
     options.computeFrobenius = false;
@@ -66,11 +61,6 @@ int main(int argc, char** argv) {
         bestSeconds([&] { report = compare(observedView, expectedView, options); });
     if (!report.passed() || report.compared != elements) return 1;
 
-    ComparisonResult typedReport;
-    const double typedComponentSeconds =
-        bestSeconds([&] { typedReport = compare(typedObservedView, typedExpectedView, options); });
-    if (!typedReport.passed() || typedReport.compared != elements) return 1;
-
     ComparisonOptions statisticsOptions = defaultComparisonOptions(ScalarType::Float32);
     statisticsOptions.computeFrobenius = false;
     statisticsOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
@@ -79,24 +69,12 @@ int main(int argc, char** argv) {
         [&] { statisticsReport = compare(observedView, expectedView, statisticsOptions); });
     if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
 
-    ComparisonResult typedStatisticsReport;
-    const double typedStatisticsComponentSeconds = bestSeconds([&] {
-        typedStatisticsReport = compare(typedObservedView, typedExpectedView, statisticsOptions);
-    });
-    if (!typedStatisticsReport.passed() || typedStatisticsReport.compared != elements) return 1;
-
     ComparisonOptions detailedOptions = defaultComparisonOptions(ScalarType::Float32);
     detailedOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
     ComparisonResult detailedReport;
     const double detailedComponentSeconds =
         bestSeconds([&] { detailedReport = compare(observedView, expectedView, detailedOptions); });
     if (!detailedReport.passed() || detailedReport.compared != elements) return 1;
-
-    ComparisonResult typedDetailedReport;
-    const double typedDetailedComponentSeconds = bestSeconds([&] {
-        typedDetailedReport = compare(typedObservedView, typedExpectedView, detailedOptions);
-    });
-    if (!typedDetailedReport.passed() || typedDetailedReport.compared != elements) return 1;
 
     size_t baselineMismatches = 0;
     const double tolerance = defaultSymmetricRelativeTolerance(ScalarType::Float32);
@@ -122,15 +100,7 @@ int main(int argc, char** argv) {
               << " baseline_seconds=" << baselineSeconds
               << " baseline_GBps=" << bytes / baselineSeconds / 1e9
               << " component_over_baseline=" << componentSeconds / baselineSeconds
-              << " typed_component_seconds=" << typedComponentSeconds
-              << " typed_component_over_baseline=" << typedComponentSeconds / baselineSeconds
               << " statistics_component_seconds=" << statisticsComponentSeconds
-              << " typed_statistics_component_seconds=" << typedStatisticsComponentSeconds
-              << " typed_statistics_over_runtime="
-              << typedStatisticsComponentSeconds / statisticsComponentSeconds
-              << " detailed_component_seconds=" << detailedComponentSeconds
-              << " typed_detailed_component_seconds=" << typedDetailedComponentSeconds
-              << " typed_detailed_over_runtime="
-              << typedDetailedComponentSeconds / detailedComponentSeconds << std::endl;
+              << " detailed_component_seconds=" << detailedComponentSeconds << std::endl;
     return 0;
 }
