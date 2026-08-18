@@ -43,47 +43,21 @@ from kernels import (
 
 
 def _patch_resolved_arch(arch: str):
-    """Pin the resolved attention arch for a test, on every module that reads it.
+    """Pin the resolved attention arch for a test, on the module that defines it.
 
-    ``_resolve_attention_arch`` is defined in ``kernels.common.attention_unified``
-    but imported *by name* into other modules (e.g.
-    ``builders.common.attention_spec_builder``), so each holds its own binding.
-    Patching only the defining module leaves the spec builder resolving the real
-    device arch -- which silently ignores the test's requested arch on any host
-    whose GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). Patch
-    every by-name importer so the pin actually reaches the builder.
+    ``_resolve_attention_arch`` lives in ``kernels.common.attention_unified`` and
+    ``builders.common.attention_spec_builder`` reaches it through that module
+    handle, so this one patch steers the builder too. A bound import in the
+    builder would freeze the reference at import time, leaving it on the real
+    device arch and silently ignoring the test's requested arch on any host whose
+    GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). That invariant
+    is pinned by ``test_arch_binding_guard.py``; it is not re-asserted here.
     """
     from unittest import mock
 
-    import builders.common.attention_spec_builder as _asb
     import kernels.common.attention_unified as _au
 
-    targets = [_au]
-    if getattr(_asb, "_resolve_attention_arch", None) is not None:
-        targets.append(_asb)
-    return _MultiPatch(
-        [
-            mock.patch.object(m, "_resolve_attention_arch", return_value=arch)
-            for m in targets
-        ]
-    )
-
-
-class _MultiPatch:
-    """Enter/exit a list of ``mock.patch`` context managers as one."""
-
-    def __init__(self, patches):
-        self._patches = patches
-
-    def __enter__(self):
-        for p in self._patches:
-            p.start()
-        return self
-
-    def __exit__(self, *exc):
-        for p in reversed(self._patches):
-            p.stop()
-        return False
+    return mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)
 
 
 # ---------------------------------------------------------------------
@@ -1966,6 +1940,65 @@ class TestAttentionHelpers(unittest.TestCase):
                     msg=f"{arch}: D128 fp16 GQA decode should route to a "
                     f"supported 3D kernel, got: {reason}",
                 )
+
+    @staticmethod
+    def _fp8_decode_problem(fp8_fnuz=False):
+        return UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=2048,
+            dtype="bf16",
+            use_fp8=True,
+            fp8_fnuz=fp8_fnuz,
+        )
+
+    def test_gfx942_fp8_decode_rejects_ocp_requires_fnuz(self):
+        """G3: OCP fp8 K/V on the gfx9_mfma family (gfx942) decodes as
+        e4m3fnuz and silently mis-decodes -> the gate must reject it (loud
+        error, not a NaN kernel) unless the caller opts into fnuz via
+        ``fp8_fnuz=True``.
+        """
+        from kernels import (
+            supports_native_unified_attention,
+            supports_native_unified_attention_3d_tiled,
+        )
+
+        with _patch_resolved_arch("gfx942"):
+            for gate in (
+                supports_native_unified_attention_3d_tiled,
+                supports_native_unified_attention,
+            ):
+                ok, reason = gate(self._fp8_decode_problem())
+                self.assertFalse(ok, msg=f"{gate.__name__} should reject OCP fp8")
+                self.assertIn("fnuz", reason)
+            # Opt-in acknowledges fnuz bytes -> not rejected for the format.
+            ok_fnuz, _ = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertTrue(ok_fnuz)
+
+    def test_gfx950_fp8_decode_accepts_ocp_rejects_fnuz(self):
+        """gfx950 decodes OCP fp8 natively: the guard accepts OCP K/V but must
+        reject fnuz-declared K/V, which would silently mis-decode on an OCP arch.
+        """
+        from kernels import supports_native_unified_attention_3d_tiled
+
+        with _patch_resolved_arch("gfx950"):
+            ok, reason = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem()
+            )
+            self.assertTrue(ok, msg=f"gfx950 decodes OCP fp8: {reason}")
+
+            ok_fnuz, reason_fnuz = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertFalse(ok_fnuz, msg="gfx950 should reject fnuz-declared fp8")
+            self.assertIn("fnuz", reason_fnuz)
 
     def test_tiled_3d_spec_builder_constructs_per_arch(self):
         """Focused guard on the 3D spec builder that broke: a decode problem must
