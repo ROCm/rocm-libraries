@@ -1001,7 +1001,7 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
 }
 
 // ===========================================================================
-// AIHPBLAS-4254 — coherence-mode Stream-K grid steering (P3 + P0)
+// Coherence-mode Stream-K grid steering (tree reduction + never-upward snap)
 // ===========================================================================
 
 namespace
@@ -1023,7 +1023,7 @@ TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrder)
 {
     // Same window as SmCountTargetChangesReductionAndGrid: 512x512 => 16 tiles,
     // K=8192 => I=128, C=256 => tiles <= C/4 and I >= 64 => parallel without
-    // coherence; P3 forces tree when the flag is on.
+    // coherence; uniformSummationOrder forces tree when the flag is on.
     StreamK5AnalyticalEnv env;
     initSk3CoherenceSolution(env.solution);
     env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
@@ -1037,7 +1037,7 @@ TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrder)
 
     problem.setParams().setUniformSummationOrder(true);
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::tree)
-        << "P3 must force tree under coherence for SK3 static packing";
+        << "coherence must force tree under uniformSummationOrder for SK3 static packing";
 }
 
 TEST(StreamKCoherenceGridSteeringTest, NonDivisorGridBelowTilesSnapsToTiles)
@@ -1130,8 +1130,8 @@ TEST(StreamKCoherenceGridSteeringTest, ModeOffLeavesNaturalGridAndReduction)
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), redOff);
     EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, redOff), gridOff);
 
-    // Coherence on changes reduction for this shape; that is P3, not a mode-off
-    // regression. Confirm the off path above was actually parallel so the
-    // comparison is meaningful.
+    // Coherence on changes reduction for this shape; that is the forced-tree
+    // path, not a mode-off regression. Confirm the off path above was actually
+    // parallel so the comparison is meaningful.
     EXPECT_EQ(redOff, origami::reduction_t::parallel);
 }
