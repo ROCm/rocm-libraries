@@ -33,8 +33,10 @@ python3 tools/stage2_capture/capture_att_trace.py --output-dir ./att_out \
 ```
 
 Each invocation writes a fresh `capture-<trace-id>` generation below `att_out`
-and prints the exact decoded dispatch folder to open. Older generations remain
-separate and cannot satisfy a later capture that matched no dispatch.
+and prints the exact decoded dispatch folder to open. Completed, truncated, and
+nonempty unfinalized generations remain separate and cannot satisfy a later
+capture that matched no dispatch. A generation is removed automatically only
+when the current attempt published nothing and `rmdir()` proves it is empty.
 
 Pass `--kernel-regex` to skip the discovery pass. The manual steps below remain the reference for
 remote/Docker captures and for anything the wrapper does not cover.

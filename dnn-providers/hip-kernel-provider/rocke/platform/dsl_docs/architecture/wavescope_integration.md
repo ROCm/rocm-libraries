@@ -210,7 +210,10 @@ Capture does not rewrite an existing directory. Every invocation writes to a new
 `capture-<trace-id>` generation below the requested output root. A failed capture,
 a `--no-source` capture, and direct `capture_att_trace.py` use therefore share the
 same boundary, and no dispatch from an older generation can make the current run
-look successful.
+look successful. A zero-dispatch attempt removes its generation only when
+`rmdir()` proves the directory is empty. Any partial output prevents removal and
+is retained for diagnosis; completed, truncated, and older generations are never
+pruned implicitly.
 
 ## Artifact identity and failed captures
 
@@ -227,7 +230,7 @@ capture starts
   -> allocate trace id and empty capture-<trace-id> generation
   -> rocprofv3 writes trace bytes only inside that generation
   -> on success: require a current dispatch and stamp it capture=complete
-  -> on no dispatch: fail; the generation contains no finalized dispatch
+  -> on no dispatch: remove the generation if empty; otherwise retain it unfinalized; fail
   -> on rocprofv3 failure: stamp partial dispatches capture=truncated, then fail
   -> emit_inline_frames.py requires capture=complete
   -> remove only the old sidecar, write v3 atomically, preserve capture fields
@@ -244,7 +247,7 @@ always decided from the bytes on disk.
 
 | Artifact | Version | Identity fields |
 | --- | --- | --- |
-| `wavescope-trace.json` | 2 (rocke capture) / 1 (WaveScope managed runner) | `traceId`, `codeJsonHash`, optional `codeObjectHash`, `capture` (`complete` / `truncated` / `empty`) |
+| `wavescope-trace.json` | 2 (rocke capture) / 1 (WaveScope managed runner) | `traceId`, `codeJsonHash`, optional `codeObjectHash`, `capture` (`complete` / `truncated`) |
 | `inline_frames.json` | 3 | same `traceId`, `codeJsonHash`, `codeObjectHash` as the sentinel when present |
 
 Hashes are formatted `sha256:<hex>` over the exact file bytes. `codeJsonHash` is

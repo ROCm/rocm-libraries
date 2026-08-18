@@ -303,12 +303,15 @@ python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.
   builds. That means `ROCKE_DEBUG_LOC=1` on the process that *builds* the kernel
   (or `IRBuilder(capture_loc=True)`). Without it `code.json`'s Source column is
   empty and only ISA-level analysis is possible.
-- `emit_inline_frames.py <att-output-dir>` in that folder is the step to re-run on
-  its own against an already-decoded trace. rocprofv3 flattens DWARF to the
-  innermost frame only, so on a kernel assembled from helpers a single one-line
-  loader appears to own most of the stalls. The `inline_frames.json` sidecar it
-  writes restores the inlining call stack, and WaveScope's Source tab gains a
-  `+ inlined` attribution charging each call site with what was inlined into it.
+- `emit_inline_frames.py <capture-generation-dir>` in that folder is the step to
+  re-run on its own against an already-decoded trace. Pass one explicit
+  `capture-<trace-id>` generation; the output root is intentionally ambiguous
+  because it can contain several immutable captures. rocprofv3 flattens DWARF to
+  the innermost frame only, so on a kernel assembled from helpers a single
+  one-line loader appears to own most of the stalls. The `inline_frames.json`
+  sidecar it writes restores the inlining call stack, and WaveScope's Source tab
+  gains a `+ inlined` attribution charging each call site with what was inlined
+  into it.
 - Read `code.json` columns 7 and 8 as totals summed over every execution, not
   per-execution averages. Multiplying them by `Hit` counts each execution `Hit`
   times and reports stall figures exceeding the kernel's wall-clock.

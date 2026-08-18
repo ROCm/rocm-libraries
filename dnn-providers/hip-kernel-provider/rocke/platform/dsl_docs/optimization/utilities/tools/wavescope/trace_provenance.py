@@ -32,7 +32,6 @@ TRACE_SENTINEL_VERSION = 2
 
 CAPTURE_COMPLETE = "complete"
 CAPTURE_TRUNCATED = "truncated"
-CAPTURE_EMPTY = "empty"
 
 # Files owned by sidecar generation. Capture sentinels are deliberately absent:
 # only capture may change whether trace bytes are complete.

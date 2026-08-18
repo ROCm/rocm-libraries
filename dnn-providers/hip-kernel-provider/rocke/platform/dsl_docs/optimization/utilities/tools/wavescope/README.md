@@ -135,7 +135,9 @@ as tabs, and selecting an instruction shows the frames it came from, each
 clickable. `capture_wavescope_trace.py` writes the sidecar for you;
 `emit_inline_frames.py <capture-generation-dir>` regenerates it against a trace
 you already have. For a legacy trace with no capture sentinel, review the trace
-first and opt in explicitly with `--assume-complete`.
+first and opt in explicitly with `--assume-complete`. The output root is not an
+implicit alias for one of its `capture-*` children: choose one generation
+explicitly so dispatches and code objects from separate captures are never mixed.
 
 Re-running the sidecar producer over a completed generation is expected. Each
 capture itself uses a fresh `capture-<trace-id>` directory, so it never mutates

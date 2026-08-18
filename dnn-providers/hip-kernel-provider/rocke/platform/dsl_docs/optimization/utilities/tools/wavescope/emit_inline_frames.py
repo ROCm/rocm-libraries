@@ -33,9 +33,10 @@ or changed trace rather than promoting it to complete.
 Sidecar version 3 binds each file to the exact ``code.json`` bytes and code
 object whose DWARF produced the stacks, via ``wavescope-trace.json``.
 
-    python emit_inline_frames.py <att-output-dir>
-    python emit_inline_frames.py <att-output-dir> --code-object k.hsaco
-    python emit_inline_frames.py <att-output-dir> --invalidate-only
+    python emit_inline_frames.py <capture-generation-dir>
+    python emit_inline_frames.py <capture-generation-dir> --code-object k.hsaco
+    python emit_inline_frames.py <capture-generation-dir> --invalidate-only
+    python emit_inline_frames.py <direct-dispatch-dir> --code-object k.hsaco
     python emit_inline_frames.py <legacy-output-dir> --assume-complete
 """
 
@@ -388,13 +389,23 @@ def main(argv=None) -> int:
     if not root.is_dir():
         raise SystemExit(f"not a directory: {root}")
 
+    generations = sorted(p for p in root.glob("capture-*") if p.is_dir())
+    if generations:
+        available = "\n".join(f"  {path}" for path in generations)
+        raise SystemExit(
+            f"{root} is a capture output root, not one capture generation.\n"
+            f"Available capture generations:\n{available}\n"
+            "Run against exactly one generation, for example:\n"
+            f"  python {Path(__file__).name} {generations[0]}"
+        )
+
+    dirs = dispatch_dirs(root)
     dropped = invalidate_sidecars(root)
 
     if args.invalidate_only:
         print(f"  {dropped} sidecar file(s) removed under {root}")
         return 0
 
-    dirs = dispatch_dirs(root)
     if not dirs:
         raise SystemExit(f"no decoded dispatch folder under {root}")
 

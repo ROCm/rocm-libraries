@@ -413,6 +413,43 @@ class TestInvalidateOnly(TwoObjectTrace, unittest.TestCase):
                 efi.main([str(self.tmp), "--invalidate-only"])
 
 
+class TestEmitterGenerationRouting(unittest.TestCase):
+    """An output root names several captures, never one implicit trace."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.out = self.tmp / "att_out"
+        self.first = self.out / "capture-first"
+        self.second = self.out / "capture-second"
+        self.dispatch = self.first / "ui_output_kernel_dispatch_0"
+        self.dispatch.mkdir(parents=True)
+        self.second.mkdir()
+        self.sidecar = self.dispatch / efi.SIDECAR
+        self.sidecar.write_text("{}")
+
+    def test_output_root_lists_generations_instead_of_recursing(self):
+        with self.assertRaises(SystemExit) as raised:
+            efi.main([str(self.out)])
+
+        message = str(raised.exception)
+        self.assertIn("capture output root", message)
+        self.assertIn(str(self.first), message)
+        self.assertIn(str(self.second), message)
+        self.assertIn(f"python emit_inline_frames.py {self.first}", message)
+        self.assertTrue(self.sidecar.exists())
+
+    def test_output_root_does_not_auto_select_its_only_generation(self):
+        self.second.rmdir()
+        with self.assertRaisesRegex(SystemExit, "capture output root"):
+            efi.main([str(self.out)])
+        self.assertTrue(self.sidecar.exists())
+
+    def test_invalidate_only_refuses_before_crossing_generation_boundary(self):
+        with self.assertRaisesRegex(SystemExit, "capture output root"):
+            efi.main([str(self.out), "--invalidate-only"])
+        self.assertTrue(self.sidecar.exists())
+
+
 class TestCaptureGenerationIsolation(unittest.TestCase):
     """Every capture owns an empty generation, never a reused trace directory."""
 
@@ -516,7 +553,53 @@ class TestCaptureGenerationIsolation(unittest.TestCase):
     def test_no_current_dispatch_is_an_error_even_when_an_old_one_exists(self):
         with self.assertRaisesRegex(SystemExit, "no current"):
             self.run_capture(lambda *_args, **_kwargs: None)
+        self.assertFalse(self.generation.exists())
         self.assertTrue(self.old_sidecar.exists())
+
+    def test_empty_expected_failures_remove_the_current_generation(self):
+        failures = (
+            cat.CaptureError("rocprofv3 exited 1"),
+            OSError("cannot launch profiler"),
+            KeyboardInterrupt(),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                with self.assertRaises(type(failure)):
+                    self.run_capture(mock.Mock(side_effect=failure))
+                self.assertFalse(self.generation.exists())
+                self.assertTrue(self.old_generation.exists())
+
+    def test_nonempty_generation_without_dispatch_is_retained(self):
+        diagnostic = self.generation / "profiler.log"
+
+        def write_diagnostic(_command, _regex, output, *_args, **_kwargs):
+            (output / diagnostic.name).write_text("capture diagnostics")
+
+        with self.assertRaisesRegex(SystemExit, "retained"):
+            self.run_capture(write_diagnostic)
+        self.assertEqual(diagnostic.read_text(), "capture diagnostics")
+        self.assertTrue(self.old_generation.exists())
+
+    def test_partial_directory_without_code_json_is_retained(self):
+        partial = self.generation / "ui_output_kernel_dispatch_0"
+
+        def write_partial(_command, _regex, output, *_args, **_kwargs):
+            (output / partial.name).mkdir()
+
+        with self.assertRaisesRegex(SystemExit, "retained"):
+            self.run_capture(write_partial)
+        self.assertTrue(partial.is_dir())
+
+    def test_cleanup_failure_does_not_mask_the_capture_error(self):
+        original = cat.CaptureError("primary profiler failure")
+
+        def fail_without_output(*_args, **_kwargs):
+            raise original
+
+        with mock.patch.object(Path, "rmdir", side_effect=OSError("read-only")):
+            with self.assertRaisesRegex(cat.CaptureError, "primary profiler failure"):
+                self.run_capture(fail_without_output)
+        self.assertTrue(self.generation.exists())
 
     def test_same_code_json_is_still_current_in_a_new_generation(self):
         old_text = (self.old_dispatch / "code.json").read_text()

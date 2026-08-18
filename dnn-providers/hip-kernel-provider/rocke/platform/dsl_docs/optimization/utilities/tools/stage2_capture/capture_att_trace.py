@@ -25,7 +25,9 @@ Usage:
     python capture_att_trace.py --output-dir ./att_out -- python3 bench.py
 
 Each invocation creates ``capture-<trace-id>`` below the output directory.
-Older generations are retained for comparison.
+Completed, truncated, and nonempty unfinalized generations are retained for
+comparison or diagnosis. An unpublished attempt is removed only when the
+generation directory is still empty.
 
 Note on ``code.json``: columns ``Latency`` and ``Stall`` are hit-weighted
 totals over every execution, not per-execution averages. Divide by ``Hit``
@@ -101,6 +103,31 @@ def _stamp_dispatches(
         stamped.append(d)
         print(f"[identity] stamped {d.name} as {capture}")
     return stamped
+
+
+def _remove_empty_generation(out: Path) -> bool:
+    """Remove an unpublished capture attempt only when it is truly empty."""
+    try:
+        out.rmdir()
+    except OSError as exc:
+        print(
+            f"[capture] retained unfinalized generation {out}: {exc}",
+            file=sys.stderr,
+        )
+        return False
+    print(f"[capture] removed empty generation {out}")
+    return True
+
+
+def _finalize_failed_capture(out: Path, *, trace_id: str) -> None:
+    """Stamp partial dispatches, or remove an attempt that published nothing."""
+    dispatches = _stamp_dispatches(
+        out,
+        trace_id=trace_id,
+        capture=CAPTURE_TRUNCATED,
+    )
+    if not dispatches:
+        _remove_empty_generation(out)
 
 
 def _decoder_dir() -> Path | None:
@@ -365,21 +392,27 @@ def main() -> int:
             se_mask=args.se_mask,
         )
     except CaptureError:
-        _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_TRUNCATED)
+        _finalize_failed_capture(out, trace_id=trace_id)
         raise
     except OSError:
-        _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_TRUNCATED)
+        _finalize_failed_capture(out, trace_id=trace_id)
         raise
     except KeyboardInterrupt:
-        _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_TRUNCATED)
+        _finalize_failed_capture(out, trace_id=trace_id)
         raise
 
     dispatches = _stamp_dispatches(out, trace_id=trace_id, capture=CAPTURE_COMPLETE)
     if not dispatches:
+        removed = _remove_empty_generation(out)
+        disposition = (
+            "  The empty capture generation was removed."
+            if removed
+            else f"  The unfinalized generation was retained at {out}."
+        )
         raise SystemExit(
             f"no current {DISPATCH_GLOB} folder was decoded under {out}.\n"
             "  The regex most likely matched no dispatch -- re-check the kernel "
-            "name, or widen --iteration-range."
+            f"name, or widen --iteration-range.\n{disposition}"
         )
 
     print(f"[decoded] {len(dispatches)} dispatch folder(s) under {out}\n")
