@@ -1,6 +1,16 @@
-recursive-include tensilelite *.py *.h *.hpp *.cpp *.txt *.cmake *.yaml
-recursive-include rocisa *.cpp *.hpp *.txt
+recursive-include tensilelite *.py
+prune tensilelite/Tests
+prune tensilelite/bin
+prune tensilelite/Utilities/archive
+include tensilelite/Source/TensileTypes.h
+include tensilelite/Source/tensile_bfloat16.h
+include tensilelite/Source/tensile_float8_bfloat8.h
+include tensilelite/Source/KernelHeader.h
+include tensilelite/Source/ReductionTemplate.h
+include tensilelite/Source/memory_gfx.h
 recursive-include tensilelite/CustomKernels *.s
-include tensilelite/bin/Tensile tensilelite/bin/TensileCreateLibrary
-include tensilelite/Ops/gen_assembly.sh
+include tensilelite/tensilelite_logic/known_bugs.yaml
+include tensilelite/ductile/config/defaults.yaml
+include release_metadata.py
 include requirements.txt
+global-exclude __pycache__ *.py[cod] CMakeCache.txt install_manifest.txt
