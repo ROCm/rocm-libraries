@@ -22,9 +22,7 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
     environment = dict(
         os.environ,
         ROCM_PATH=str(rocm_root),
-        # PR 8 derives release identity from the selected ROCm root. A later
-        # TheRock build-input migration deliberately changes this contract.
-        TENSILELITE_ROCM_VERSION="8.0.0",
+        TENSILELITE_ROCM_VERSION="7.2.4",
     )
 
     for mode, source, pattern in (
