@@ -2367,6 +2367,14 @@ amd_global_atomic_add_impl([[maybe_unused]] const thread_buffer<T, N>& src_threa
                 src_thread_data.template get_as<ck_tile::bf16x2_t>()[i]);
         });
     }
+    else if constexpr(std::is_same<T, ck_tile::fp16_t>::value)
+    {
+        static_for<0, N / 2, 1>{}([&](auto i) {
+            __builtin_amdgcn_global_atomic_fadd_v2f16(
+                bit_cast<ck_tile::fp16x2_t*>(addr) + i,
+                src_thread_data.template get_as<ck_tile::fp16x2_t>()[i]);
+        });
+    }
     else
     {
         static_assert(false, "Not supported!");
@@ -3167,6 +3175,22 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
                                           const bool dst_thread_element_valid,
                                           const index_t dst_element_space_size)
 {
+#if defined(__gfx12__)
+    // gfx12 (RDNA) lacks a correct packed-fp16 *buffer* atomic add: the
+    // llvm.amdgcn.raw.buffer.atomic.fadd.v2f16 lowering produces wrong results
+    // (split-K C accumulation is ~38% off). The packed *global* atomic
+    // (global_atomic_pk_add_f16) is correct, so route fp16 through it -- the same
+    // strategy gfx942 uses for bf16. Even N is guaranteed by GetVectorSizeC().
+    if constexpr(std::is_same<T, fp16_t>::value && (N % 2 == 0))
+    {
+        if(dst_thread_element_valid)
+        {
+            amd_global_atomic_add_impl<T, N>(src_thread_data,
+                                             p_dst_wave + dst_thread_element_offset);
+        }
+        return;
+    }
+#endif
 #if defined(__gfx942__)
     if constexpr(std::is_same<T, bf16_t>::value)
     {
