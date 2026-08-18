@@ -86,7 +86,7 @@ DEFAULT_PROBLEMS = [
     {"M": 257, "N": 257, "K": 257},
 ]
 
-SUPPORTED_DTYPES = ("fp16", "bf16")
+SUPPORTED_DTYPES = ("fp16", "bf16", "fp8", "bf8")
 # Row-major C only: ck_tile's universal GEMM rejects column-major C at build.
 # The 4-char codes (rcrr, ...) are the multi_abd A,B,E,D layouts; TE gemm_multi_abd
 # only supports rcrr today.
