@@ -10,8 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.tensilelite_logic import known_bugs as _kb
+def _known_bugs_mod():
+    from tensilelite.tensilelite_logic import known_bugs
 
+    return known_bugs
+
+
+_kb = _known_bugs_mod()
 is_known_bug = _kb.is_known_bug
 load_bundled_known_bugs = _kb.load_bundled_known_bugs
 load_known_bugs = _kb.load_known_bugs
