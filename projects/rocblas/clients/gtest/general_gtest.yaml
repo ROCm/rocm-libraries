@@ -8,6 +8,24 @@ Half bfloat: &half_bfloat_precisions
 - *half_precision
 - *bf16_precision
 
+Half bfloat complex: &half_bfloat_complex_precisions
+- &half_precision_complex
+  { a_type: f16_c, b_type: f16_c, c_type: f16_c, d_type: f16_c, compute_type: f16_c }
+- *hpa_bf16_precision_complex
+- *single_precision_complex
+- *double_precision_complex
+
+Half bfloat single double complex real: &half_bfloat_single_double_complex_real_precisions_aux
+- *half_precision
+- *hpa_bf16_precision
+- *hpa_bf16_in_single_out_precision
+- *single_precision
+- *double_precision
+- *half_precision_complex
+- *hpa_bf16_precision_complex
+- *single_precision_complex
+- *double_precision_complex
+
 Tests:
 
 - name: half_operators
@@ -18,12 +36,12 @@ Tests:
 - name: complex_operators
   category: quick
   function: complex_operators
-  precision: *single_double_precisions_complex
+  precision: *half_bfloat_complex_precisions
 
 - name: helper_utilities
   category: quick
   function: helper_utilities
-  precision: *half_bfloat_single_double_complex_real_precisions
+  precision: *half_bfloat_single_double_complex_real_precisions_aux
 
 - name : check_numerics_vector
   category : quick
@@ -32,7 +50,7 @@ Tests:
   incx : [ 1, 0, -2 ]
   batch_count : [ 5 ]
   stride_x : [ 0 ]
-  precision : *half_bfloat_single_double_complex_real_precisions
+  precision : *half_bfloat_single_double_complex_real_precisions_aux
 
 - name : check_numerics_vector_ILP64
   category : stress
@@ -66,7 +84,7 @@ Tests:
   stride_x : [ 0 ]
   uplo: [ U, L ]
   transA: [ T, N, C ]
-  precision : *half_bfloat_single_double_complex_real_precisions
+  precision : *half_bfloat_single_double_complex_real_precisions_aux
 
 - name : check_numerics_matrix_ILP64
   category : stress
