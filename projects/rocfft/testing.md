@@ -150,6 +150,18 @@ clange-format is run to check for code format issues.
 cppcheck is run for static analysis.
 
 
+### Code coverage
+
+Since rocFFT uses a code generator and hipRTC to produce device kernels, device-side code coverage
+is nonsensical.
+
+Host-side code coverage is useful in showing testing gaps, but the effectiveness of a
+percent-coverage target is controversial.  rocFFT tests include randomization (by design), and the
+library covers single-gpu, single-proc multi-gpu, and multi-proc multigpu transforms; code coverage
+must combine results from these use cases.  There is a gap in TheRock CI in this aspect due to
+infrastructure issues.
+
+
 ### Benchmarking and Performance Validation
 
 Performance tests focus on a different parameter space than the accuracy tests.  For example, while
@@ -206,7 +218,7 @@ One should not re-run performance tests until the desired result is achieved.
 
 While every effort has been made to reduce false positives, these will still inevitably occur; the
 performance tests therefore cannot be gating.  We will trust developers to use their judgement to
-deal with these cases.
+identify false positives.
 
 Performance testing is currently not implemented in TheRock due to infrastructure issues.
 
@@ -218,9 +230,16 @@ Pre-submit tests currently cover unit tests and accuracy tests for:
 ** gfx94X, gfx950, gfx125X on Linux in a docker image
 ** gfx1151 on Windows
 
+This is small subset of the architectures supported by rocFFT, which is a gap in testing due to
+infrascturcture issues in TheRock's CI.  We should do at least smoke tests on all architectures, and
+performance tests when changes may affect performance.
+
+
 The CI tests in TheRock reduce the test probability to 1% due to performance issues in the CI
 infrastucture, which results in an uncomfortably low number of tests being run.  Previously the test
-probability was at 100%.
+probability was at 100%.  This is a gap in testing due to infrastructure issues in TheRock's CI.  We
+should increa this probability to at least 50%, which can be accomplished by increasing test
+timeouts and providing faster host hardware.
 
 Static analysis (formatting and cppcheck) is gating for PRs.
 
