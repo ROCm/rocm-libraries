@@ -279,6 +279,41 @@ benchmark time reasonable.
 
 ---
 
+## Sweep scripts
+
+The sweep scripts live in the **rocsolver root** (alongside `install.sh`). They are not
+copied into the build directory by CMake -- copy the ones you need into `build/release/`
+manually (e.g. `cp -p bench_*.sh build/release/`) before running the commands below.
+
+Each script runs a matrix-size sweep for one function and prints `n<TAB>gpu_time_us` per
+line. Each has a `_multikernel` variant that forces the multi-kernel path (via
+`export LATRD_MULTI_KERNEL=1` inside the script) so the two paths can be compared without
+setting the env var by hand.
+
+| Default (fused) | Multi-kernel variant | Function |
+|---|---|---|
+| `bench_latrd.sh` | `bench_latrd_multikernel.sh` | LATRD single panel |
+| `bench_sytrd.sh` | `bench_sytrd_multikernel.sh` | SYTRD |
+| `bench_syevd.sh` | `bench_syevd_multikernel.sh` | SYEVD |
+
+Both variants take the same arguments (`<bench-binary> [func] [prec] [device]`, plus `-k` for
+LATRD) and honor the `VERIFY=1` env var. Invoke the multi-kernel variants exactly like the
+originals -- the path env var is exported inside the script:
+
+```bash
+cd build/release
+
+# Default fused path
+LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
+    ./bench_sytrd.sh ./clients/staging/rocsolver-bench
+
+# Multi-kernel path (same sweep, same args)
+LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
+    ./bench_sytrd_multikernel.sh ./clients/staging/rocsolver-bench
+```
+
+---
+
 ## Interpreting results
 
 - **Multi-kernel vs fused:** The multi-kernel path serializes computation at kernel
