@@ -128,6 +128,18 @@ Update this table when workflow triggers, GPU families, runner assignments, path
 
 GitHub settings outside this repository decide which jobs block a merge. Do not claim that every listed workflow blocks merging unless those settings were checked.
 
+## Static Analysis
+
+`clang-tidy` checks source code for common correctness, safety, and style problems. It does not run the program, so it cannot replace tests.
+
+**Current state:**
+
+- Linux hipDNN builds enable `clang-tidy` by default; Windows builds disable it by default.
+- The Linux hipDNN superbuild CI enables `clang-tidy`; the Windows job disables it.
+- Local developers can enable it with `-DENABLE_CLANG_TIDY=ON` or run the `hipdnn-tidy` target when `run-clang-tidy` is installed.
+
+The root `.clang-tidy` file defines the checks. [Building](../Building.md#clang-tools) owns setup and commands, and [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md#151-clang-tidy-rules) explains project-specific rules.
+
 ## Sanitizers and Coverage
 
 ### Who Owns Sanitizer Failures

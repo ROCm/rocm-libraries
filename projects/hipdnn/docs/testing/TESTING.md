@@ -11,6 +11,8 @@ For detailed test design and ownership, see [Testing Strategy](./TESTING_STRATEG
 
 ## Component Overview
 
+hipDNN is a graph-based DNN execution library with Windows and Linux support. The frontend, backend, and plugin separation allows each layer to be unit tested independently, while integration tests validate cross-layer behavior.
+
 hipDNN runs on Windows and Linux. Its frontend, backend, and plugins can be tested separately, while integration tests check that these parts work together.
 
 hipDNN core includes the backend, frontend, Data SDK, FlatBuffers SDK, Plugin SDK, and Test SDK.
@@ -103,6 +105,14 @@ Complete the non-test checks in [CONTRIBUTING](../../CONTRIBUTING.md).
 If a required check fails, fix it or document an exception approved by a maintainer.
 Do not disable or skip a test only to make a check pass.
 See [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) for limits in current automation and policy.
+
+## Static Analysis
+
+hipDNN uses `clang-tidy` to find common C++ and HIP problems. Linux builds enable it by default; Windows builds disable it by default because it adds significant build time.
+
+The Linux hipDNN superbuild CI enables `clang-tidy`; the Windows job disables it. For local checks, build with `-DENABLE_CLANG_TIDY=ON` or run the `hipdnn-tidy` target when it is available. See [Building hipDNN: Clang Tools](../Building.md#clang-tools) and [Clang-Tidy Rules](../CodingStyleAndNamingGuidelines.md#151-clang-tidy-rules).
+
+Static analysis does not replace unit or integration tests.
 
 ## ASAN/TSAN/sanitizer coverage
 

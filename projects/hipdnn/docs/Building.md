@@ -269,9 +269,12 @@ cmake --build build/release --target coverage
 Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with AddressSanitizer instrumentation.
 
 > [!IMPORTANT]
-> ASAN is a manual process; there is no ASAN coverage in CI yet (planned). The ROCm build requirement differs by platform:
-> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
-> - **Windows** does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+> Standalone ASAN tests are run manually. CI automation differs:
+> - Pull-request ASAN jobs build host-ASAN binaries but do not run their tests.
+> - Manual workflow runs can run full ASAN tests when matching GPU runners are available.
+> - The nightly ASAN workflow runs automatically and executes tests where external runner settings provide a test node.
+> - **Linux** standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
+> - **Windows** standalone ASAN instruments code built in this project, not installed ROCm libraries.
 
 Configure with ASAN enabled, build, then run the tests. `standard` is the recommended tier to run as the ASAN check:
 

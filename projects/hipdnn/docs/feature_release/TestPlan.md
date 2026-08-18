@@ -171,11 +171,12 @@ ctest --test-dir build/release
 ### Test Case 1: Build and Run the Automated Tests with ASAN Enabled 🚨
 
 > [!NOTE]
-> ASAN is a manual check today (not yet in CI). The ROCm build requirement differs by platform:
-> - **Linux**: requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
-> - **Windows**: does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+> Standalone ASAN tests are run manually. Pull-request ASAN jobs build but do not test. Manual workflow runs and the scheduled nightly can run ASAN tests where matching GPU runners are available.
 >
-> See [Testing § ASAN/TSAN/sanitizer coverage](../testing/TESTING.md#asantsansanitizer-coverage) for more.
+> - **Linux**: standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
+> - **Windows**: standalone ASAN instruments code built in this project, not installed ROCm libraries.
+>
+> See [Testing § ASAN/TSAN/sanitizer coverage](../testing/TESTING.md#asantsansanitizer-coverage) and [Known Testing Gaps](../testing/KNOWN_TESTING_GAPS.md#sanitizers-and-platforms) for current automation and platform details.
 
 Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the `standard` tier (`ctest --test-dir <build> -L standard`).
 
