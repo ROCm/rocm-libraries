@@ -830,24 +830,18 @@ wheels = [
 ]
 
 [[package]]
-name = "tensile"
-version = "5.0.0"
+name = "tensilelite"
+version = "5.0.0+rocm7.2.4"
 source = { editable = "." }
 dependencies = [
-    { name = "cmake" },
-    { name = "hip-python" },
+    { name = "filelock" },
     { name = "joblib" },
     { name = "msgpack" },
-    { name = "nanobind" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "orjson" },
     { name = "packaging" },
     { name = "pyyaml" },
-    { name = "setuptools" },
-    { name = "simplejson" },
-    { name = "ujson" },
-    { name = "yappi" },
+    { name = "rocisa" },
 ]
 
 [package.dev-dependencies]
@@ -864,19 +858,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cmake" },
-    { name = "hip-python" },
+    { name = "filelock" },
     { name = "joblib", specifier = ">=1.4.0" },
     { name = "msgpack" },
-    { name = "nanobind" },
     { name = "numpy" },
-    { name = "orjson" },
     { name = "packaging" },
     { name = "pyyaml" },
-    { name = "setuptools" },
-    { name = "simplejson" },
-    { name = "ujson" },
-    { name = "yappi" },
+    { name = "rocisa" },
 ]
 
 [package.metadata.requires-dev]
