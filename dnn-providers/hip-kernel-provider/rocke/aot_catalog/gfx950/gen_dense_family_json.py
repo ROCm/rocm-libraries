@@ -43,14 +43,39 @@ BENCH_GEOMS = [
 ]
 BENCH_SEQLENS = (512, 1024, 2048, 4096, 8192)   # all multiples of BLOCK_M=256
 
+# Vision / diffusion and head_size-64 serving shapes. `causal` and `ragged` are not new
+# kernel features -- the kernel has both already; the previous table simply never asked
+# for them. `ragged` handles a seqlen that is not a multiple of BLOCK_M/block_n by
+# bounds-checking the partial tile (self-attention only, so seqlen_q == seqlen_kv), which
+# is what lets ViT's 197 and 257 compile at all.
+#
+# (batch, seqlen, num_query_heads, num_kv_heads, head_size, causal, ragged)
+TRACK_A_SHAPES = [
+    (2, 1024, 10, 10, 64, False, False),    # SDXL self-attention 32x32
+    (2, 256, 20, 20, 64, False, False),     # SDXL self-attention 16x16
+    (1, 4608, 24, 24, 128, False, False),   # Flux-MMDiT
+    (8, 257, 16, 16, 64, False, True),      # ViT-L/14   (257 -> ragged)
+    (16, 197, 12, 12, 64, False, True),     # ViT-B/16   (197 -> ragged)
+    (1, 2048, 64, 8, 64, True, False),      # d64-serving GQA8
+    (1, 4096, 64, 8, 64, True, False),
+    (1, 8192, 64, 8, 64, True, False),
+    (2, 1024, 64, 8, 64, True, False),
+    (1, 16384, 32, 8, 128, True, False),    # long-context prefill
+    (1, 32768, 32, 8, 128, True, False),
+]
+
+# (batch, seqlen, num_query_heads, num_kv_heads, head_size, causal, ragged)
 SHAPES = [
-    (1, 256, 4, 1, 128),      # parity-test shape (one BLOCK_M, GQA 4:1)
-    (2, 256, 4, 1, 128),      # batched parity-test shape
+    (1, 256, 4, 1, 128, True, False),      # parity-test shape (one BLOCK_M, GQA 4:1)
+    (2, 256, 4, 1, 128, True, False),      # batched parity-test shape
+    (1, 256, 4, 1, 64, False, False),      # parity: non-causal + packed D=64 path
+    (1, 197, 4, 1, 64, False, True),       # parity: ragged tile + non-causal key-pad mask
 ]
 # The bench sweep, batch 1 (the matrix is B=1 for every prefill case).
-SHAPES += [(1, s, hq, hkv, 128) for (hq, hkv) in BENCH_GEOMS for s in BENCH_SEQLENS]
+SHAPES += [(1, s, hq, hkv, 128, True, False) for (hq, hkv) in BENCH_GEOMS for s in BENCH_SEQLENS]
 # Batch variants, kept to the Llama-3-8B/Qwen3-8B geometry we A/B end-to-end.
-SHAPES += [(b, s, 32, 8, 128) for s in (2048, 4096) for b in (2, 4, 8)]
+SHAPES += [(b, s, 32, 8, 128, True, False) for s in (2048, 4096) for b in (2, 4, 8)]
+SHAPES += TRACK_A_SHAPES
 SHAPES = list(dict.fromkeys(SHAPES))   # order-preserving dedupe
 DTYPES = ["bf16", "fp16"]     # spec spelling
 PERSISTENT = [False, True]
@@ -79,12 +104,15 @@ def resolved_persist_decode(hq, hkv, seqlen_q, batch, num_persistent):
     return "qb_major"
 
 
-def kernel_name(b, s, hq, hkv, d, dtype, persistent):
+def kernel_name(b, s, hq, hkv, d, dtype, persistent, causal=True, ragged=False):
     parts = ["rocke_attention_dense", f"d{d}", f"hq{hq}", f"kv{hkv}", f"bn{BLOCK_N}", dtype]
     # kpad is only in the name on the packed head_size<128 path.
     if 128 // d > 1:
         parts.append("kpad8")
-    parts += [f"sq{s}", f"sk{s}", "causal", "lazyrs"]
+    parts += [f"sq{s}", f"sk{s}", "causal" if causal else "full"]
+    if ragged:
+        parts.append("ragged")
+    parts.append("lazyrs")
     if persistent:
         parts.append(f"persist{NUM_PERSISTENT}")
         if resolved_persist_decode(hq, hkv, s, b, NUM_PERSISTENT) == "hkv_major":
@@ -92,8 +120,8 @@ def kernel_name(b, s, hq, hkv, d, dtype, persistent):
     return "_".join(parts)
 
 
-def entry(b, s, hq, hkv, d, dtype, persistent):
-    sym = kernel_name(b, s, hq, hkv, d, dtype, persistent)
+def entry(b, s, hq, hkv, d, dtype, persistent, causal=True, ragged=False):
+    sym = kernel_name(b, s, hq, hkv, d, dtype, persistent, causal, ragged)
     # kernel_name() omits batch, so batch variants of one shape share a symbol and are
     # told apart only by co_file. Catalog.cpp resolves each entry's symbol inside its
     # own .co, so this is legal; the producer writes the same name.
@@ -126,9 +154,12 @@ def entry(b, s, hq, hkv, d, dtype, persistent):
             # garbage. bshd_packed is the guard.
             "bshd_packed": {"equals": True},
             # --- capability posture: every key stated, none left to default ---
-            # Omitting a key asserts the kernel handles that case; this family
-            # handles plain top-left causal prefill and nothing else.
-            "causal": {"equals": True},
+            # Omitting a key asserts the kernel handles that case, and selection
+            # skips absent keys -- so an unstated key fails OPEN. Every one is
+            # pinned. Causal is per-kernel: the family ships both top-left causal
+            # prefill and non-causal (vision/diffusion) variants, and a problem can
+            # only ever match the one whose `causal` value it published.
+            "causal": {"equals": causal},
             "causal_bottom_right": {"equals": False},
             "has_diagonal_band": {"equals": False},
             "has_mma_core_mode": {"equals": False},
@@ -156,8 +187,8 @@ def entry(b, s, hq, hkv, d, dtype, persistent):
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else "family.json"
     kernels = [
-        entry(b, s, hq, hkv, d, dt, p)
-        for (b, s, hq, hkv, d) in SHAPES
+        entry(b, s, hq, hkv, d, dt, p, causal, ragged)
+        for (b, s, hq, hkv, d, causal, ragged) in SHAPES
         for dt in DTYPES
         for p in PERSISTENT
     ]
@@ -169,7 +200,8 @@ def main():
         "dtype": ["bf16", "f16"],
         "_comment": (
             "rocKE gfx950 dense flash-attention prefill (kernels.gfx950.attention_dense), "
-            "CDNA4/MFMA, causal self-attention only. Shape is COMPILE-TIME in this kernel "
+            "CDNA4/MFMA, self-attention only (S_q == S_kv), top-left causal or "
+            "non-causal. Shape is COMPILE-TIME in this kernel "
             "-- batch/seqlen/heads/head_size are baked into each .co (the KV loop trip "
             "count is a const_i32), so every shape axis is pinned with `equals` and the "
             "kernel list IS the coverage surface; there is no multiple_of range to widen. "

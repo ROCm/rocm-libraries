@@ -90,12 +90,36 @@ _BENCH_GEOMS = [
 ]
 _BENCH_SEQLENS = (512, 1024, 2048, 4096, 8192)
 
-_SHAPES = [
-    (1, 256, 4, 1, 128),      # parity shape: one BLOCK_M, GQA 4:1, cheap CPU reference
-    (2, 256, 4, 1, 128),      # batched parity shape -- small enough for a CPU reference
+# Vision / diffusion and head_size-64 serving. Neither `causal=False` nor `ragged` is a
+# new kernel capability -- both already exist; the table simply never asked. `ragged`
+# bounds-checks a partial final tile so a seqlen that is not a multiple of
+# BLOCK_M/block_n compiles (self-attention only), which is what admits ViT's 197 and 257.
+#
+# (batch, seqlen, num_query_heads, num_kv_heads, head_size, causal, ragged)
+_TRACK_A_SHAPES = [
+    (2, 1024, 10, 10, 64, False, False),    # SDXL self-attention 32x32
+    (2, 256, 20, 20, 64, False, False),     # SDXL self-attention 16x16
+    (1, 4608, 24, 24, 128, False, False),   # Flux-MMDiT
+    (8, 257, 16, 16, 64, False, True),      # ViT-L/14   (257 -> ragged)
+    (16, 197, 12, 12, 64, False, True),     # ViT-B/16   (197 -> ragged)
+    (1, 2048, 64, 8, 64, True, False),      # d64-serving GQA8
+    (1, 4096, 64, 8, 64, True, False),
+    (1, 8192, 64, 8, 64, True, False),
+    (2, 1024, 64, 8, 64, True, False),
+    (1, 16384, 32, 8, 128, True, False),    # long-context prefill
+    (1, 32768, 32, 8, 128, True, False),
 ]
-_SHAPES += [(1, s, hq, hkv, 128) for (hq, hkv) in _BENCH_GEOMS for s in _BENCH_SEQLENS]
-_SHAPES += [(b, s, 32, 8, 128) for s in (2048, 4096) for b in (2, 4, 8)]
+
+# (batch, seqlen, num_query_heads, num_kv_heads, head_size, causal, ragged)
+_SHAPES = [
+    (1, 256, 4, 1, 128, True, False),   # parity shape: one BLOCK_M, GQA 4:1, cheap reference
+    (2, 256, 4, 1, 128, True, False),   # batched parity shape -- small enough for a reference
+    (1, 256, 4, 1, 64, False, False),   # parity: non-causal + packed D=64 path
+    (1, 197, 4, 1, 64, False, True),    # parity: ragged tile + non-causal key-pad mask
+]
+_SHAPES += [(1, s, hq, hkv, 128, True, False) for (hq, hkv) in _BENCH_GEOMS for s in _BENCH_SEQLENS]
+_SHAPES += [(b, s, 32, 8, 128, True, False) for s in (2048, 4096) for b in (2, 4, 8)]
+_SHAPES += _TRACK_A_SHAPES
 _SHAPES = list(dict.fromkeys(_SHAPES))
 
 # Spec spelling ("fp16"/"bf16") differs from the catalog dtype constraint token
@@ -112,7 +136,7 @@ _NUM_PERSISTENT = 256
 
 
 def _specs():
-    for (b, s, hq, hkv, d) in _SHAPES:
+    for (b, s, hq, hkv, d, causal, ragged) in _SHAPES:
         for dtype in _DTYPES:
             for persistent in _PERSISTENT:
                 yield AttentionDenseSpec(
@@ -122,10 +146,10 @@ def _specs():
                     num_query_heads=hq,
                     num_kv_heads=hkv,
                     head_size=d,
-                    causal=True,
+                    causal=causal,
                     dtype=dtype,
                     sliding_window=0,
-                    ragged=False,
+                    ragged=ragged,
                     varlen=False,
                     block_n=_BLOCK_N,
                     waves_per_eu=_WAVES_PER_EU,

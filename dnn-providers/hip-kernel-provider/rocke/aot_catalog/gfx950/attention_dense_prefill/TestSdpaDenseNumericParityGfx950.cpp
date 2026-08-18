@@ -67,13 +67,24 @@ constexpr const char* ARCH = "gfx950";
 // the K/V buffer extents), so it is a parameter here and each value must have its own
 // shipped .co; the batched case is the one that would silently attend over zeros if a
 // B=1 binary were ever selected for B>1.
-constexpr int64_t SEQ_Q = 256;
-constexpr int64_t SEQ_KV = 256;
-constexpr int64_t NUM_HEADS = 4;    // H
-constexpr int64_t NUM_KV_HEADS = 1; // H_kv -> gqa_ratio 4
-constexpr int64_t HEAD_DIM = 128;   // D
+// One problem geometry. Every field is compile-time in the .co, so each combination
+// below must correspond to a shipped family.json entry or the candidate lookup finds
+// nothing. Self-attention only, so seqQ == seqKv.
+struct Geom
+{
+    int64_t batch;
+    int64_t seqQ;
+    int64_t seqKv;
+    int64_t heads;    // H
+    int64_t kvHeads;  // H_kv
+    int64_t headDim;  // D
+    bool causal;
 
-constexpr int64_t GQA = NUM_HEADS / NUM_KV_HEADS;
+    int64_t gqa() const
+    {
+        return heads / kvHeads;
+    }
+};
 
 bool gpuIsArch(const std::string& arch)
 {
@@ -93,13 +104,13 @@ bool gpuIsArch(const std::string& arch)
 }
 
 // Packed BSHD index: [B, S, H, D] with D innermost.
-inline size_t bshd(int64_t b, int64_t s, int64_t h, int64_t d, int64_t heads)
+inline size_t bshd(const Geom& g, int64_t b, int64_t s, int64_t h, int64_t d)
 {
-    return static_cast<size_t>(((b * SEQ_Q + s) * heads + h) * HEAD_DIM + d);
+    return static_cast<size_t>(((b * g.seqQ + s) * g.heads + h) * g.headDim + d);
 }
-inline size_t bshdKv(int64_t b, int64_t s, int64_t h, int64_t d)
+inline size_t bshdKv(const Geom& g, int64_t b, int64_t s, int64_t h, int64_t d)
 {
-    return static_cast<size_t>(((b * SEQ_KV + s) * NUM_KV_HEADS + h) * HEAD_DIM + d);
+    return static_cast<size_t>(((b * g.seqKv + s) * g.kvHeads + h) * g.headDim + d);
 }
 
 // Inputs shaped so the reference output is a genuinely non-uniform softmax mixture
@@ -119,33 +130,43 @@ constexpr float SIGNAL_SPAN = 16.0f;
 // the ramp direction flips with b, so batch 1's answer is not a shifted copy of batch
 // 0's. A kernel that addressed the wrong batch slice -- or read past a B=1 buffer
 // extent and got zeros -- moves O materially rather than landing inside tolerance.
-float qVal(int64_t b, int64_t h, int64_t i, int64_t d)
+float qVal(const Geom& g, int64_t b, int64_t h, int64_t i, int64_t d)
 {
     if(d == 0)
     {
-        return 0.5f + 0.5f * static_cast<float>(i) / static_cast<float>(SEQ_Q - 1);
+        return 0.5f + 0.5f * static_cast<float>(i) / static_cast<float>(g.seqQ - 1);
     }
     return 0.0625f * static_cast<float>(((h + i + d + b) % 3) - 1);
 }
-float kVal(int64_t b, int64_t h, int64_t j, int64_t d)
+float kVal(const Geom& g, int64_t b, int64_t h, int64_t j, int64_t d)
 {
     if(d == 0)
     {
-        const float t = static_cast<float>(j) / static_cast<float>(SEQ_KV - 1);
+        const float t = static_cast<float>(j) / static_cast<float>(g.seqKv - 1);
         const bool rising = ((h + b) % 2 == 0);
         return SIGNAL_SPAN * (rising ? t : (1.0f - t));
     }
     return 0.0625f * static_cast<float>(((h + j + d + b) % 5) - 2);
 }
-float vVal(int64_t b, int64_t h, int64_t j, int64_t d)
+// Geom is unnamed here: V needs no sequence length, but the parameter keeps the three
+// generators call-compatible.
+float vVal(const Geom&, int64_t b, int64_t h, int64_t j, int64_t d)
 {
     return 0.25f + 0.125f * static_cast<float>((j * 3 + d + h + 2 * b) % 7);
 }
 
 } // namespace
 
-void runDenseParity(int64_t BATCH)
+void runDenseParity(const Geom& g)
 {
+    const int64_t BATCH = g.batch;
+    const int64_t SEQ_Q = g.seqQ;
+    const int64_t SEQ_KV = g.seqKv;
+    const int64_t NUM_HEADS = g.heads;
+    const int64_t NUM_KV_HEADS = g.kvHeads;
+    const int64_t HEAD_DIM = g.headDim;
+    const int64_t GQA = g.gqa();
+
     if(!gpuIsArch(ARCH))
     {
         GTEST_SKIP() << "no " << ARCH << " GPU present";
@@ -171,7 +192,7 @@ void runDenseParity(int64_t BATCH)
     problem.emplace("d_contiguous", catalog::ShapeValue{true});
     problem.emplace("batch_foldable", catalog::ShapeValue{true});
     problem.emplace("bshd_packed", catalog::ShapeValue{true});
-    problem.emplace("causal", catalog::ShapeValue{true});
+    problem.emplace("causal", catalog::ShapeValue{g.causal});
     for(const char* k : {"causal_bottom_right",
                          "has_diagonal_band",
                          "has_mma_core_mode",
@@ -191,9 +212,10 @@ void runDenseParity(int64_t BATCH)
     }
 
     const std::vector<catalog::Catalog::Candidate> candidates = cat.candidatesFor("sdpa", problem);
-    ASSERT_FALSE(candidates.empty()) << "no sdpa candidate for the f16 causal "
-                                     << "S=" << SEQ_Q << " H=" << NUM_HEADS << "/" << NUM_KV_HEADS
-                                     << " D=" << HEAD_DIM << " problem";
+    ASSERT_FALSE(candidates.empty())
+        << "no sdpa candidate for the f16 " << (g.causal ? "causal" : "non-causal")
+        << " B=" << BATCH << " S=" << SEQ_Q << " H=" << NUM_HEADS << "/" << NUM_KV_HEADS
+        << " D=" << HEAD_DIM << " problem";
     const catalog::KernelEntry& kernel = *candidates.front().kernel;
 
     std::optional<launch::HipModuleGuard> module
@@ -246,7 +268,7 @@ void runDenseParity(int64_t BATCH)
             {
                 for(int64_t d = 0; d < HEAD_DIM; ++d)
                 {
-                    hostQ[bshd(b, i, h, d, NUM_HEADS)] = static_cast<_Float16>(qVal(b, h, i, d));
+                    hostQ[bshd(g, b, i, h, d)] = static_cast<_Float16>(qVal(g, b, h, i, d));
                 }
             }
         }
@@ -256,8 +278,8 @@ void runDenseParity(int64_t BATCH)
             {
                 for(int64_t d = 0; d < HEAD_DIM; ++d)
                 {
-                    hostK[bshdKv(b, j, h, d)] = static_cast<_Float16>(kVal(b, h, j, d));
-                    hostV[bshdKv(b, j, h, d)] = static_cast<_Float16>(vVal(b, h, j, d));
+                    hostK[bshdKv(g, b, j, h, d)] = static_cast<_Float16>(kVal(g, b, h, j, d));
+                    hostV[bshdKv(g, b, j, h, d)] = static_cast<_Float16>(vVal(g, b, h, j, d));
                 }
             }
         }
@@ -271,16 +293,16 @@ void runDenseParity(int64_t BATCH)
         for(int64_t i = 0; i < SEQ_Q; ++i)
         {
             // Top-left causal: query i attends to keys j <= i (S_q == S_kv here, so
-            // top-left and bottom-right coincide).
-            const int64_t jMax = i;
+            // top-left and bottom-right coincide). Non-causal attends to every key.
+            const int64_t jMax = g.causal ? i : (SEQ_KV - 1);
             float maxScore = -std::numeric_limits<float>::infinity();
             for(int64_t j = 0; j <= jMax; ++j)
             {
                 float dot = 0.0f;
                 for(int64_t d = 0; d < HEAD_DIM; ++d)
                 {
-                    dot += static_cast<float>(hostQ[bshd(b, i, h, d, NUM_HEADS)])
-                           * static_cast<float>(hostK[bshdKv(b, j, hkv, d)]);
+                    dot += static_cast<float>(hostQ[bshd(g, b, i, h, d)])
+                           * static_cast<float>(hostK[bshdKv(g, b, j, hkv, d)]);
                 }
                 scores[static_cast<size_t>(j)] = dot * scale;
                 maxScore = std::max(maxScore, scores[static_cast<size_t>(j)]);
@@ -298,9 +320,9 @@ void runDenseParity(int64_t BATCH)
                 for(int64_t j = 0; j <= jMax; ++j)
                 {
                     acc += scores[static_cast<size_t>(j)]
-                           * static_cast<float>(hostV[bshdKv(b, j, hkv, d)]);
+                           * static_cast<float>(hostV[bshdKv(g, b, j, hkv, d)]);
                 }
-                reference[bshd(b, i, h, d, NUM_HEADS)] = acc / denom;
+                reference[bshd(g, b, i, h, d)] = acc / denom;
             }
         }
     }
@@ -353,7 +375,7 @@ void runDenseParity(int64_t BATCH)
             {
                 for(int64_t d = 0; d < HEAD_DIM && mismatches < 10; ++d)
                 {
-                    const size_t idx = bshd(b, i, h, d, NUM_HEADS);
+                    const size_t idx = bshd(g, b, i, h, d);
                     const auto got = static_cast<float>(hostO[idx]);
                     const float want = reference[idx];
                     const float tol = std::max(2e-2f, 3e-2f * std::fabs(want));
@@ -376,9 +398,15 @@ void runDenseParity(int64_t BATCH)
     (void)hipStreamDestroy(stream);
 }
 
+// batch, S_q, S_kv, H, H_kv, D, causal
+constexpr Geom CAUSAL_D128{1, 256, 256, 4, 1, 128, true};
+constexpr Geom CAUSAL_D128_B2{2, 256, 256, 4, 1, 128, true};
+constexpr Geom NONCAUSAL_D64{1, 256, 256, 4, 1, 64, false};
+constexpr Geom NONCAUSAL_D64_RAGGED{1, 197, 197, 4, 1, 64, false};
+
 TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16CausalMatchesReference)
 {
-    runDenseParity(1);
+    runDenseParity(CAUSAL_D128);
 }
 
 // The batched case needs its own .co (B is baked into the K/V buffer extents). Without
@@ -387,5 +415,22 @@ TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16CausalMatchesRef
 // loud instead of silent.
 TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16CausalBatchedMatchesReference)
 {
-    runDenseParity(2);
+    runDenseParity(CAUSAL_D128_B2);
+}
+
+// Non-causal at head_size 64 covers two paths the causal D=128 tests never touch: the
+// mask is skipped entirely (every query attends to every key), and D<128 takes the
+// packed LDS path where the async DMA writes 128/D rows per instruction.
+TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16NonCausalD64MatchesReference)
+{
+    runDenseParity(NONCAUSAL_D64);
+}
+
+// A ragged length (197 is a multiple of neither BLOCK_M=256 nor block_n=64) exercises
+// the bounds-checked partial tile AND, because it is non-causal, the key-pad mask that
+// forces scores of padded keys to -inf. Causal gets that for free (padded keys sort
+// after every real query), so only the non-causal ragged path proves the mask works.
+TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16NonCausalRaggedMatchesReference)
+{
+    runDenseParity(NONCAUSAL_D64_RAGGED);
 }
