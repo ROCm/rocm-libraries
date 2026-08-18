@@ -297,7 +297,7 @@ public:
     template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     __device__ __host__ auto& operator*=(const U& rhs)
     {
-        return (x *= rhs), (y *= T(rhs)), *this;
+        return (x *= T(rhs)), (y *= T(rhs)), *this;
     }
 
     template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>

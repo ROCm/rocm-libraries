@@ -8,7 +8,7 @@ Half bfloat: &half_bfloat_precisions
 - *half_precision
 - *bf16_precision
 
-Half bfloat complex: &half_bfloat_complex_precisions
+Half bfloat single double complex: &half_bfloat_single_double_complex_precisions
 - &half_precision_complex
   { a_type: f16_c, b_type: f16_c, c_type: f16_c, d_type: f16_c, compute_type: f16_c }
 - *hpa_bf16_precision_complex
@@ -36,7 +36,7 @@ Tests:
 - name: complex_operators
   category: quick
   function: complex_operators
-  precision: *half_bfloat_complex_precisions
+  precision: *half_bfloat_single_double_complex_precisions
 
 - name: helper_utilities
   category: quick
