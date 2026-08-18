@@ -583,10 +583,10 @@ def test_prune_library_raises_when_merge_returns_multiple(monkeypatch: pytest.Mo
 
 def _make_tensile_mocks(calls: dict):
     """Return (sys.modules patch dict, mock modules) for Tensile imports."""
-    tensile_mod = types.ModuleType("Tensile")
-    library_io_mod = types.ModuleType("Tensile.LibraryIO")
-    custom_yaml_mod = types.ModuleType("Tensile.CustomYamlLoader")
-    merge_lib_mod = types.ModuleType("Tensile.TensileMergeLibrary")
+    tensile_mod = types.ModuleType("tensilelite")
+    library_io_mod = types.ModuleType("tensilelite.LibraryIO")
+    custom_yaml_mod = types.ModuleType("tensilelite.CustomYamlLoader")
+    merge_lib_mod = types.ModuleType("tensilelite.TensileMergeLibrary")
 
     def _load_yaml_stream(path, loader):
         calls["load"] = path
@@ -609,10 +609,10 @@ def _make_tensile_mocks(calls: dict):
     tensile_mod.LibraryIO = library_io_mod
 
     patch = {
-        "Tensile": tensile_mod,
-        "Tensile.LibraryIO": library_io_mod,
-        "Tensile.CustomYamlLoader": custom_yaml_mod,
-        "Tensile.TensileMergeLibrary": merge_lib_mod,
+        "tensilelite": tensile_mod,
+        "tensilelite.LibraryIO": library_io_mod,
+        "tensilelite.CustomYamlLoader": custom_yaml_mod,
+        "tensilelite.TensileMergeLibrary": merge_lib_mod,
     }
     return patch
 
@@ -636,7 +636,7 @@ def test_normalize_raises_if_data_not_list(monkeypatch: pytest.MonkeyPatch, tmp_
     calls: dict = {}
     mocks = _make_tensile_mocks(calls)
     # Override load to return a non-list (dict format is unsupported as input)
-    mocks["Tensile.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
+    mocks["tensilelite.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
     for mod_name, mod in mocks.items():
         monkeypatch.setitem(sys.modules, mod_name, mod)
 
