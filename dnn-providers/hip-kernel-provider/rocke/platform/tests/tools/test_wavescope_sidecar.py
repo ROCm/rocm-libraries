@@ -50,7 +50,7 @@ tp = _load("trace_provenance")
 
 IDENTITY = dict(
     trace_id="trace-test",
-    code_json_hash="sha256:" + "0" * 64,
+    instruction_listing_hash_value="sha256:" + "0" * 64,
     code_object_hash=None,
 )
 
@@ -156,7 +156,10 @@ class TestBuildSidecar(unittest.TestCase):
         self.assertEqual(sidecar["version"], efi.SIDECAR_VERSION)
         self.assertEqual(sidecar["code_object_id"], "1")
         self.assertEqual(sidecar["traceId"], IDENTITY["trace_id"])
-        self.assertEqual(sidecar["codeJsonHash"], IDENTITY["code_json_hash"])
+        self.assertEqual(
+            sidecar["instructionListingHash"],
+            IDENTITY["instruction_listing_hash_value"],
+        )
 
 
 class TwoObjectTrace:
@@ -192,7 +195,7 @@ class TwoObjectTrace:
         tp.write_trace_sentinel(
             d,
             trace_id="capture-test",
-            code_json_hash=tp.sha256_file(code_json),
+            instruction_listing_hash=tp.instruction_listing_hash_file(code_json),
             capture=tp.CAPTURE_COMPLETE,
         )
         return d
@@ -236,9 +239,14 @@ class TestMainPerDispatch(TwoObjectTrace, unittest.TestCase):
             sidecar = self.sidecar_of(d)
             self.assertEqual(sidecar["functions"], [func])
             self.assertEqual(sidecar["version"], efi.SIDECAR_VERSION)
-            self.assertEqual(sidecar["codeJsonHash"], tp.sha256_file(d / "code.json"))
+            self.assertEqual(
+                sidecar["instructionListingHash"],
+                tp.instruction_listing_hash_file(d / "code.json"),
+            )
             sentinel = tp.read_trace_sentinel(d)
-            self.assertEqual(sentinel["codeJsonHash"], sidecar["codeJsonHash"])
+            self.assertEqual(
+                sentinel["instructionListingHash"], sidecar["instructionListingHash"]
+            )
             self.assertEqual(sentinel["codeObjectHash"], sidecar["codeObjectHash"])
             self.assertEqual(sentinel["traceId"], sidecar["traceId"])
 
@@ -480,7 +488,7 @@ class TestCaptureGenerationIsolation(unittest.TestCase):
             tp.write_trace_sentinel(
                 d,
                 trace_id=trace_id,
-                code_json_hash=tp.sha256_file(code),
+                instruction_listing_hash=tp.instruction_listing_hash_file(code),
                 capture=tp.CAPTURE_COMPLETE,
             )
         return d
@@ -620,6 +628,30 @@ class TestTraceProvenance(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
+    def test_instruction_listing_hash_matches_wavescope_shape(self):
+        rows = [
+            ["; kernel", 0, 0, "", 1, 4096, 0, 0, 0, 0],
+            ["v_mov_b32 v0, v1", 0, 1, "/a.py:2", 1, 4096, 1, 0, 0, 0],
+        ]
+        expected_input = (
+            f'{json.dumps(["; kernel", 1, 4096], separators=(",", ":"))}\n'
+            f'{json.dumps(["v_mov_b32 v0, v1", 1, 4096], separators=(",", ":"))}\n'
+        )
+        self.assertEqual(
+            tp.instruction_listing_hash(rows), tp.sha256_text(expected_input)
+        )
+
+    def test_instruction_listing_hash_is_stable_across_json_formatting(self):
+        rows = [["v_mov", 0, 1, "", 1, 100, 1, 0, 0, 0]]
+        compact = json.dumps({"code": rows})
+        spaced = json.dumps({"code": rows}, indent=2)
+        path = self.tmp / "code.json"
+        path.write_text(compact)
+        hash_compact = tp.instruction_listing_hash_file(path)
+        path.write_text(spaced)
+        hash_spaced = tp.instruction_listing_hash_file(path)
+        self.assertEqual(hash_compact, hash_spaced)
+
     def test_sha256_matches_exact_bytes(self):
         path = self.tmp / "code.json"
         path.write_text('{"code":[]}')
@@ -667,7 +699,9 @@ class TestMonotonicCaptureState(TwoObjectTrace, unittest.TestCase):
         after = tp.read_trace_sentinel(d)
         self.assertEqual(after["traceId"], before["traceId"])
         self.assertEqual(after["capture"], before["capture"])
-        self.assertEqual(after["codeJsonHash"], before["codeJsonHash"])
+        self.assertEqual(
+            after["instructionListingHash"], before["instructionListingHash"]
+        )
         self.assertIn("codeObjectHash", after)
 
     def test_missing_sentinel_requires_explicit_legacy_opt_in(self):

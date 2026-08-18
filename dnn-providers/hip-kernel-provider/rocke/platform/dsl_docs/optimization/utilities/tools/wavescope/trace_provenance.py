@@ -26,9 +26,12 @@ TRACE_SENTINEL_TMP_SUFFIX = ".tmp"
 # Sidecar schema version written by emit_inline_frames.py.
 SIDECAR_VERSION = 3
 
-# Trace sentinel schema version. Version 1 is the WaveScope-managed runner shape;
-# version 2 adds content hashes and a capture generation id for rocke captures.
-TRACE_SENTINEL_VERSION = 2
+# Trace sentinel schema version. Matches the WaveScope-managed runner shape.
+TRACE_SENTINEL_VERSION = 1
+
+# code.json column indices for instructionListingHash (isa, codeobj, vaddr).
+_LISTING_CODEOBJ_COL = 4
+_LISTING_VADDR_COL = 5
 
 CAPTURE_COMPLETE = "complete"
 CAPTURE_TRUNCATED = "truncated"
@@ -56,6 +59,35 @@ def sha256_file(path: Path) -> str:
 
 def sha256_text(text: str) -> str:
     return sha256_bytes(text.encode("utf-8"))
+
+
+def instruction_listing_hash(rows: list) -> str | None:
+    """Hash the semantic instruction listing, matching WaveScope ``traceShape.js``."""
+    if not isinstance(rows, list) or not rows:
+        return None
+    lines: list[str] = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) < 6:
+            return None
+        isa = row[0]
+        codeobj = row[_LISTING_CODEOBJ_COL]
+        vaddr = row[_LISTING_VADDR_COL]
+        if (
+            not isinstance(isa, str)
+            or not isinstance(codeobj, int)
+            or not isinstance(vaddr, int)
+        ):
+            return None
+        lines.append(json.dumps([isa, codeobj, vaddr], separators=(",", ":")) + "\n")
+    return sha256_text("".join(lines))
+
+
+def instruction_listing_hash_file(path: Path) -> str | None:
+    try:
+        rows = json.loads(path.read_text())["code"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return None
+    return instruction_listing_hash(rows)
 
 
 def dispatch_dirs(root: Path) -> list[Path]:
@@ -90,7 +122,7 @@ def read_trace_sentinel(dispatch: Path) -> dict | None:
 def make_trace_sentinel(
     *,
     trace_id: str,
-    code_json_hash: str,
+    instruction_listing_hash: str,
     capture: str,
     code_object_hash: str | None = None,
     kernel: str | None = None,
@@ -98,7 +130,7 @@ def make_trace_sentinel(
     return {
         "version": TRACE_SENTINEL_VERSION,
         "traceId": trace_id,
-        "codeJsonHash": code_json_hash,
+        "instructionListingHash": instruction_listing_hash,
         "codeObjectHash": code_object_hash,
         "capture": capture,
         "kernel": kernel,
@@ -109,14 +141,14 @@ def write_trace_sentinel(
     dispatch: Path,
     *,
     trace_id: str,
-    code_json_hash: str,
+    instruction_listing_hash: str,
     capture: str,
     code_object_hash: str | None = None,
     kernel: str | None = None,
 ) -> dict:
     doc = make_trace_sentinel(
         trace_id=trace_id,
-        code_json_hash=code_json_hash,
+        instruction_listing_hash=instruction_listing_hash,
         capture=capture,
         code_object_hash=code_object_hash,
         kernel=kernel,

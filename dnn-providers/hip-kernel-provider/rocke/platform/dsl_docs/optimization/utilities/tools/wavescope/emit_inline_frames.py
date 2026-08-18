@@ -30,8 +30,8 @@ than the previous run's answer. The capture sentinel is preserved: capture owns
 whether trace bytes are complete, and this producer refuses a running, truncated,
 or changed trace rather than promoting it to complete.
 
-Sidecar version 3 binds each file to the exact ``code.json`` bytes and code
-object whose DWARF produced the stacks, via ``wavescope-trace.json``.
+Sidecar version 3 binds each file to the instruction listing and code object whose
+DWARF produced the stacks, via ``wavescope-trace.json``.
 
     python emit_inline_frames.py <capture-generation-dir>
     python emit_inline_frames.py <capture-generation-dir> --code-object k.hsaco
@@ -72,6 +72,8 @@ invalidate_sidecars = _tp.invalidate_sidecars
 new_trace_id = _tp.new_trace_id
 read_trace_sentinel = _tp.read_trace_sentinel
 sha256_file = _tp.sha256_file
+instruction_listing_hash = _tp.instruction_listing_hash
+instruction_listing_hash_file = _tp.instruction_listing_hash_file
 write_trace_sentinel = _tp.write_trace_sentinel
 
 # rocprofv3 dumps each loaded code object next to the raw trace.
@@ -201,7 +203,7 @@ def build_sidecar(
     code_object_id: str | None,
     *,
     trace_id: str,
-    code_json_hash: str,
+    instruction_listing_hash_value: str,
     code_object_hash: str | None,
 ) -> dict:
     """Map each instruction to its authoring call stack, keyed by code object and address."""
@@ -247,7 +249,7 @@ def build_sidecar(
         "version": SIDECAR_VERSION,
         "schema": '"codeobj:addr" -> [[func, call_file, call_line, call_col], ...]',
         "traceId": trace_id,
-        "codeJsonHash": code_json_hash,
+        "instructionListingHash": instruction_listing_hash_value,
         "codeObjectHash": code_object_hash,
         "code_object_id": code_object_id,
         "functions": list(funcs),
@@ -328,17 +330,20 @@ def row_code_objects(rows: list) -> set[str]:
 def trace_identity_for(
     dispatch: Path,
     code_json: Path,
+    rows: list,
     *,
     assume_complete: bool,
-) -> tuple[str | None, str, str | None]:
+) -> tuple[str | None, str | None, str | None]:
     """Validate capture provenance before a dispatch receives a sidecar."""
-    code_json_hash = sha256_file(code_json)
+    listing_hash = instruction_listing_hash(rows)
+    if listing_hash is None:
+        return None, None, "code.json has no usable instruction listing"
     sentinel = read_trace_sentinel(dispatch)
     if sentinel is None:
         if not assume_complete:
             return (
                 None,
-                code_json_hash,
+                listing_hash,
                 (
                     "has no capture sentinel; pass --assume-complete only for a "
                     "known-complete legacy trace"
@@ -348,20 +353,24 @@ def trace_identity_for(
         write_trace_sentinel(
             dispatch,
             trace_id=trace_id,
-            code_json_hash=code_json_hash,
+            instruction_listing_hash=listing_hash,
             capture=CAPTURE_COMPLETE,
         )
-        return trace_id, code_json_hash, None
+        return trace_id, listing_hash, None
 
     capture = sentinel.get("capture")
     if capture != CAPTURE_COMPLETE:
-        return None, code_json_hash, f"capture is {capture!r}, not complete"
-    if sentinel.get("codeJsonHash") != code_json_hash:
-        return None, code_json_hash, "code.json no longer matches its capture sentinel"
+        return None, listing_hash, f"capture is {capture!r}, not complete"
+    if sentinel.get("instructionListingHash") != listing_hash:
+        return (
+            None,
+            listing_hash,
+            "code.json no longer matches its capture sentinel",
+        )
     trace_id = sentinel.get("traceId")
     if not isinstance(trace_id, str) or not trace_id:
-        return None, code_json_hash, "capture sentinel has no valid traceId"
-    return trace_id, code_json_hash, None
+        return None, listing_hash, "capture sentinel has no valid traceId"
+    return trace_id, listing_hash, None
 
 
 def main(argv=None) -> int:
@@ -415,15 +424,16 @@ def main(argv=None) -> int:
         code_json = d / "code.json"
         if not code_json.is_file():
             continue
-        trace_id, code_json_hash, problem = trace_identity_for(
-            d, code_json, assume_complete=args.assume_complete
+        rows = json.loads(code_json.read_text())["code"]
+        trace_id, listing_hash, problem = trace_identity_for(
+            d, code_json, rows, assume_complete=args.assume_complete
         )
         if problem is not None:
             print(f"  {d.name}: skipped: {problem}")
             skipped += 1
             continue
-        assert trace_id is not None
-        identities[d] = (trace_id, code_json_hash)
+        assert trace_id is not None and listing_hash is not None
+        identities[d] = (trace_id, listing_hash)
 
     if not identities:
         raise SystemExit(f"no sidecar written ({skipped} dispatch(es) skipped)")
@@ -439,7 +449,7 @@ def main(argv=None) -> int:
     dwarfdump = find_dwarfdump()
     parsed: dict[Path, list[dict]] = {}
     written = 0
-    for d, (trace_id, code_json_hash) in identities.items():
+    for d, (trace_id, listing_hash) in identities.items():
         code_json = d / "code.json"
         rows = json.loads(code_json.read_text())["code"]
         present = row_code_objects(rows)
@@ -475,7 +485,7 @@ def main(argv=None) -> int:
             frames,
             code_object_id,
             trace_id=trace_id,
-            code_json_hash=code_json_hash,
+            instruction_listing_hash_value=listing_hash,
             code_object_hash=code_object_hash,
         )
         total = len([r for r in rows if r and r[0] and not r[0].startswith(";")])
@@ -484,7 +494,7 @@ def main(argv=None) -> int:
         enrich_trace_sentinel(
             d,
             traceId=trace_id,
-            codeJsonHash=code_json_hash,
+            instructionListingHash=listing_hash,
             codeObjectHash=code_object_hash,
         )
         out = d / SIDECAR

@@ -62,7 +62,7 @@ capture_generation = _tp.capture_generation
 dispatch_dirs = _tp.dispatch_dirs
 kernel_name_of = _tp.kernel_name_of
 new_trace_id = _tp.new_trace_id
-sha256_file = _tp.sha256_file
+instruction_listing_hash_file = _tp.instruction_listing_hash_file
 write_trace_sentinel = _tp.write_trace_sentinel
 
 # rocprofv3 writes one of these per traced dispatch; each is a complete,
@@ -92,11 +92,13 @@ def _stamp_dispatches(
         code_json = d / "code.json"
         if not code_json.is_file():
             continue
-        digest = sha256_file(code_json)
+        listing_hash = instruction_listing_hash_file(code_json)
+        if listing_hash is None:
+            continue
         write_trace_sentinel(
             d,
             trace_id=trace_id,
-            code_json_hash=digest,
+            instruction_listing_hash=listing_hash,
             capture=capture,
             kernel=kernel_name_of(d),
         )

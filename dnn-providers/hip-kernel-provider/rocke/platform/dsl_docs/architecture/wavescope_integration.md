@@ -235,8 +235,8 @@ capture starts
   -> emit_inline_frames.py requires capture=complete
   -> remove only the old sidecar, write v3 atomically, preserve capture fields
 viewer opens folder
-  -> hash raw code.json UTF-8 bytes (never re-serialized JSON)
-  -> v3 sidecar: require matching codeJsonHash, traceId, codeObjectHash, and complete capture
+  -> hash instruction listing (isa, codeobj, vaddr) per code.json row
+  -> v3 sidecar: require matching instructionListingHash, traceId, codeObjectHash
   -> v1/v2 sidecar: load with address-coverage checks and an explicit unverified warning
 ```
 
@@ -247,12 +247,13 @@ always decided from the bytes on disk.
 
 | Artifact | Version | Identity fields |
 | --- | --- | --- |
-| `wavescope-trace.json` | 2 (rocke capture) / 1 (WaveScope managed runner) | `traceId`, `codeJsonHash`, optional `codeObjectHash`, `capture` (`complete` / `truncated`) |
-| `inline_frames.json` | 3 | same `traceId`, `codeJsonHash`, `codeObjectHash` as the sentinel when present |
+| `wavescope-trace.json` | 1 | `traceId`, `instructionListingHash`, optional `codeObjectHash`, `capture` (`complete` / `truncated`) |
+| `inline_frames.json` | 3 | same `traceId`, `instructionListingHash`, `codeObjectHash` as the sentinel when present |
 
-Hashes are formatted `sha256:<hex>` over the exact file bytes. `codeJsonHash` is
-the UTF-8 text rocprofv3 wrote. `codeObjectHash` is the object whose DWARF
-produced the stacks.
+Hashes are formatted `sha256:<hex>`. `instructionListingHash` is the semantic
+instruction listing — one `[isa, codeobj, vaddr]` tuple per `code.json` row,
+including signature rows — so it is stable across JSON formatting differences.
+`codeObjectHash` is the object whose DWARF produced the stacks.
 
 A rejected v3 sidecar does not prevent the trace from opening: the viewer drops
 the sidecar and falls back to innermost-frame attribution, with a console warning.
@@ -289,8 +290,8 @@ whole reason the feature is usable for optimization rather than just for reading
 | --- | --- | --- |
 | `Op.loc` | `file:line:col:func` frames, `;`-separated, innermost first | `core/ir.py` |
 | debug metadata | `DILocation` chain via `inlinedAt`, one `DISubprogram` per Python function | `core/lower_llvm.py`, mirrored by `cpp/core/lower_llvm/debug.cpp` |
-| `inline_frames.json` | `{version: 3, traceId, codeJsonHash, codeObjectHash, functions, files, stacks: {"codeobj:addr": [[func, call_file, call_line, call_col], ...]}}`, outermost frame first, indices into the interned tables | `emit_inline_frames.py` |
-| `wavescope-trace.json` | per-dispatch sentinel: `{version: 2, traceId, codeJsonHash, codeObjectHash?, capture}` | `capture_att_trace.py`, enriched by `emit_inline_frames.py` |
+| `inline_frames.json` | `{version: 3, traceId, instructionListingHash, codeObjectHash, functions, files, stacks: {"codeobj:addr": [[func, call_file, call_line, call_col], ...]}}`, outermost frame first, indices into the interned tables | `emit_inline_frames.py` |
+| `wavescope-trace.json` | per-dispatch sentinel: `{version: 1, traceId, instructionListingHash, codeObjectHash?, capture}` | `capture_att_trace.py`, enriched by `emit_inline_frames.py` |
 | `code.json` | per-instruction rows; `Codeobj` and `Vaddr` together are the join key | rocprofv3 |
 
 Virtual addresses are per code object, so a trace that loaded more than one has the
