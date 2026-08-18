@@ -9,7 +9,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_SOURCE_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_distribution_version_comes_from_selected_rocm_root(tmp_path, monkeypatch):
