@@ -13,7 +13,7 @@ import pytest
 
 # Load KnownBugs.py without importing TensileLogic/__init__.py (avoids rocisa in CI).
 def _known_bugs_mod():
-    kb_path = Path(__file__).resolve().parents[2] / "TensileLogic" / "KnownBugs.py"
+    kb_path = Path(__file__).resolve().parents[2] / "tensilelite_logic" / "known_bugs.py"
     spec = importlib.util.spec_from_file_location("KnownBugs_under_test", kb_path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)

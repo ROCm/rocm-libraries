@@ -586,7 +586,7 @@ def _make_tensile_mocks(calls: dict):
     tensile_mod = types.ModuleType("tensilelite")
     library_io_mod = types.ModuleType("tensilelite.LibraryIO")
     custom_yaml_mod = types.ModuleType("tensilelite.CustomYamlLoader")
-    merge_lib_mod = types.ModuleType("tensilelite.TensileMergeLibrary")
+    merge_lib_mod = types.ModuleType("tensilelite.merge_library")
 
     def _load_yaml_stream(path, loader):
         calls["load"] = path
@@ -612,7 +612,7 @@ def _make_tensile_mocks(calls: dict):
         "tensilelite": tensile_mod,
         "tensilelite.LibraryIO": library_io_mod,
         "tensilelite.CustomYamlLoader": custom_yaml_mod,
-        "tensilelite.TensileMergeLibrary": merge_lib_mod,
+        "tensilelite.merge_library": merge_lib_mod,
     }
     return patch
 

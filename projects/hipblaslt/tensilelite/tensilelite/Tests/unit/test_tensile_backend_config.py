@@ -19,7 +19,7 @@ import types
 import pytest
 import yaml
 
-from tensilelite import Tensile as TensileModule
+from tensilelite import tensilelite as TensileModule
 
 pytestmark = pytest.mark.unit
 
@@ -97,7 +97,7 @@ def test_no_backend_key_defaults_to_tensile(monkeypatch, tmp_path):
     """When no Backend key in YAML, backend_name defaults to 'tensile'."""
     captured = _stub_pipeline(monkeypatch)
     config_path = _write_config(tmp_path, _base_config(backend=None))
-    TensileModule.Tensile([config_path, str(tmp_path / "output")])
+    TensileModule.tensilelite([config_path, str(tmp_path / "output")])
     assert captured["config"]["Backend"]["Name"] == "tensile"
     assert captured["config"]["Backend"]["Config"] == {}
 
@@ -108,7 +108,7 @@ def test_backend_name_missing_from_dict_exits(monkeypatch, tmp_path):
     _make_exit(monkeypatch)
     config_path = _write_config(tmp_path, _base_config(backend={"Config": {}}))
     with pytest.raises(RuntimeError, match="'Backend' must contain key 'Name'"):
-        TensileModule.Tensile([config_path, str(tmp_path / "output")])
+        TensileModule.tensilelite([config_path, str(tmp_path / "output")])
 
 
 def test_backend_name_empty_string_exits(monkeypatch, tmp_path):
@@ -117,7 +117,7 @@ def test_backend_name_empty_string_exits(monkeypatch, tmp_path):
     _make_exit(monkeypatch)
     config_path = _write_config(tmp_path, _base_config(backend={"Name": "  "}))
     with pytest.raises(RuntimeError, match="'Backend.Name' must be a non-empty string"):
-        TensileModule.Tensile([config_path, str(tmp_path / "output")])
+        TensileModule.tensilelite([config_path, str(tmp_path / "output")])
 
 
 def test_backend_config_none_coerced_to_empty_dict(monkeypatch, tmp_path):
@@ -125,7 +125,7 @@ def test_backend_config_none_coerced_to_empty_dict(monkeypatch, tmp_path):
     captured = _stub_pipeline(monkeypatch)
     # YAML: Config: null
     config_path = _write_config(tmp_path, _base_config(backend={"Name": "tensile", "Config": None}))
-    TensileModule.Tensile([config_path, str(tmp_path / "output")])
+    TensileModule.tensilelite([config_path, str(tmp_path / "output")])
     assert captured["config"]["Backend"]["Config"] == {}
 
 
@@ -137,14 +137,14 @@ def test_backend_config_not_dict_exits(monkeypatch, tmp_path):
     config = _base_config(backend={"Name": "tensile", "Config": "invalid_string"})
     config_path = _write_config(tmp_path, config)
     with pytest.raises(RuntimeError, match="'Backend.Config' must be a dictionary"):
-        TensileModule.Tensile([config_path, str(tmp_path / "output")])
+        TensileModule.tensilelite([config_path, str(tmp_path / "output")])
 
 
 def test_backend_name_is_lowercased(monkeypatch, tmp_path):
     """Backend.Name is stripped and lowercased."""
     captured = _stub_pipeline(monkeypatch)
     config_path = _write_config(tmp_path, _base_config(backend={"Name": " TENSILE "}))
-    TensileModule.Tensile([config_path, str(tmp_path / "output")])
+    TensileModule.tensilelite([config_path, str(tmp_path / "output")])
     assert captured["config"]["Backend"]["Name"] == "tensile"
 
 
@@ -155,7 +155,7 @@ def test_backend_config_preserved_as_dict(monkeypatch, tmp_path):
         tmp_path,
         _base_config(backend={"Name": "ductile", "Config": {"n_gen": 5, "pop_size": 16}}),
     )
-    TensileModule.Tensile([config_path, str(tmp_path / "output")])
+    TensileModule.tensilelite([config_path, str(tmp_path / "output")])
     assert captured["config"]["Backend"]["Config"]["n_gen"] == 5
     assert captured["config"]["Backend"]["Config"]["pop_size"] == 16
 
@@ -213,7 +213,7 @@ def test_benchmark_problems_backend_cfg_missing_name_exits(monkeypatch, tmp_path
     # printExit is monkeypatched to collect messages but not raise, so execution
     # continues and may hit downstream AttributeError. Validate both effects.
     with pytest.raises(AttributeError):
-        TensileModule.Tensile([str(config_path), str(tmp_path / "output")])
+        TensileModule.tensilelite([str(config_path), str(tmp_path / "output")])
     assert any("Name" in e or "backend" in e.lower() for e in exited)
 
 
@@ -263,7 +263,7 @@ def test_benchmark_problems_backend_cfg_not_dict_exits(monkeypatch, tmp_path):
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     with pytest.raises(AttributeError):
-        TensileModule.Tensile([str(config_path), str(tmp_path / "output")])
+        TensileModule.tensilelite([str(config_path), str(tmp_path / "output")])
     assert len(exited) > 0
 
 
@@ -389,7 +389,7 @@ def test_alternate_format_builds_benchmark_problems(monkeypatch, tmp_path):
     base_path.write_text(yaml.safe_dump(base_cfg), encoding="utf-8")
     sizes_path.write_text(yaml.safe_dump(sizes_cfg), encoding="utf-8")
 
-    TensileModule.Tensile(
+    TensileModule.tensilelite(
         [
             str(base_path),
             str(sizes_path),
