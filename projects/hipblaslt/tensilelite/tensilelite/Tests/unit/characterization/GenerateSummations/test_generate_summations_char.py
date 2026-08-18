@@ -1,42 +1,25 @@
 ################################################################################
 # Characterization tests for tensilelite.GenerateSummations — summation model fitting.
 #
-# ADD-ONLY. GenerateSummations.py exports createLibraryForBenchmark (lines 47–63),
-# a subprocess wrapper, and GenerateSummations (lines 65–188), a high-level
-# orchestrator for logic parsing, library creation, benchmark execution, and CSV
-# analysis. This suite pins the wrapper function (createLibraryForBenchmark) and
-# exercises GenerateSummations if pandas/numpy are available. The main path
-# (lines 65–188) is uncovered (0%) due to module-level pandas import; we test
-# it via comprehensive mocking that allows control flow execution.
+# Characterization tests for the GenerateSummations benchmark-library wrapper.
 ################################################################################
 import importlib
 import os
-import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, ANY
+from unittest.mock import patch
 
 import pytest
 
 pytestmark = pytest.mark.unit
 
 
-# Attempt to import the module; if pandas is missing, we'll skip main tests
-try:
-    M = importlib.import_module("tensilelite.GenerateSummations")
-    _PANDAS_AVAILABLE = True
-except ImportError as e:
-    if "pandas" in str(e) or "numpy" in str(e):
-        M = None
-        _PANDAS_AVAILABLE = False
-    else:
-        raise
+M = importlib.import_module("tensilelite.GenerateSummations")
 
 
 # ---------------------------------------------------------------------------
 # Test: createLibraryForBenchmark package-handler invocation
 # ---------------------------------------------------------------------------
-@pytest.mark.skipif(M is None, reason="Module import failed")
 def test_create_library_for_benchmark_success():
     """
     Pin that createLibraryForBenchmark forwards the correct argument list to the
@@ -69,7 +52,6 @@ def test_create_library_for_benchmark_success():
 # ---------------------------------------------------------------------------
 # Test: createLibraryForBenchmark handler error handling
 # ---------------------------------------------------------------------------
-@pytest.mark.skipif(M is None, reason="Module import failed")
 def test_create_library_for_benchmark_error_handling():
     """
     Pin that package-handler errors are caught and handled.
@@ -85,7 +67,6 @@ def test_create_library_for_benchmark_error_handling():
             with patch.object(M, "createLibrary", side_effect=error), patch.object(M, "printExit") as mock_exit:
                 M.createLibraryForBenchmark(logic_path, lib_path, current_path)
                 mock_exit.assert_called_once()
-
 
 
 
