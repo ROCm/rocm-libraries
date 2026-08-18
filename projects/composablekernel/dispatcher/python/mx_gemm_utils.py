@@ -66,16 +66,20 @@ def _get_arch() -> str:
         arch = ""
     if not arch:
         raise RuntimeError("Could not detect GPU architecture from rocminfo; refusing to default. Pass gfx_arch explicitly.")
-    # mx_gemm is gfx950-ONLY: the C++ bridge (mx_gemm_ctypes_lib.cpp) has a
-    # static_assert(GFX_ARCH == "gfx950") because it uses the gfx950-only
-    # preShuffleScaleBuffer_gfx950 host helper. Validating a broader set here
-    # would let a gfx942/gfx90a caller past detection only to fail later at
-    # build/runtime with a less actionable error, so restrict it to gfx950.
-    _supported = ("gfx950",)
+    # mx_gemm targets CDNA gfx950 (MI350, XDL scale layout) and RDNA gfx1250
+    # (MI400, WMMA scale layout). Both have a host scale pre-shuffle helper in
+    # ck_tile (preShuffleScaleBuffer_gfx950 / preShuffleScaleBuffer_gfx1250) and
+    # both default to OCP fp8 (see fp8_ocp_is_default_for_arch). Validating this
+    # arch surface at the Python layer keeps codegen + the numpy reference open
+    # for gfx1250; the GPU .so path additionally needs the C++ ctypes lib to
+    # select preShuffleScaleBuffer_gfx1250 (its static_assert is gfx950-only
+    # today -- see the PR body / follow-up), so a gfx1250 build still fails
+    # loudly at compile until that C++ branch lands.
+    _supported = ("gfx950", "gfx1250")
     if arch not in _supported:
         raise ValueError(
-            f"mx_gemm is gfx950-only; detected {arch!r} is not supported "
-            f"(supported: {list(_supported)})"
+            f"mx_gemm supports {list(_supported)}; detected {arch!r} is not "
+            f"supported"
         )
     return arch
 
@@ -758,14 +762,18 @@ def setup_multiple_mx_gemm_dispatchers(
     # compiled for `arch` -- an arch mismatch between the header and the binary.
     # Resetting _name_cache forces the name to be recomputed for the chosen arch.
     if gfx_arch is not None:
-        # mx_gemm is gfx950-only (the C++ bridge static_asserts GFX_ARCH==gfx950);
-        # reject any other explicit arch here so a build that can never succeed
-        # fails early with a clear message instead of at compile/runtime.
-        _supported = ("gfx950",)
+        # mx_gemm targets gfx950 (XDL) and gfx1250 (WMMA); reject any other
+        # explicit arch here so a build that can never succeed fails early with a
+        # clear message instead of at compile/runtime. NOTE: gfx1250 codegen +
+        # the numpy reference are enabled, but the shipped C++ ctypes lib still
+        # static_asserts GFX_ARCH==gfx950 (it calls preShuffleScaleBuffer_gfx950);
+        # a gfx1250 .so build therefore fails at hipcc until the C++ bridge
+        # selects preShuffleScaleBuffer_gfx1250 (tracked as follow-up).
+        _supported = ("gfx950", "gfx1250")
         if gfx_arch not in _supported:
             raise ValueError(
-                f"mx_gemm is gfx950-only; requested {gfx_arch!r} is not supported "
-                f"(supported: {list(_supported)})"
+                f"mx_gemm supports {list(_supported)}; requested {gfx_arch!r} is "
+                f"not supported"
             )
         for c in configs:
             if c.gpu_target != gfx_arch:
