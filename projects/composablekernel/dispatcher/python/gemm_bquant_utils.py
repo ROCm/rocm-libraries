@@ -1223,7 +1223,7 @@ def _warp_tile_k_for(gfx_arch: str, is_flatmm: bool = False) -> int:
     variants, which get_k_warp_tile<fp8_t,16>() never returns for M_Warp_Tile=16 --
     that was wrong on BOTH arches.
     """
-    if "gfx950" in gfx_arch:
+    if "gfx950" in gfx_arch or "gfx12" in gfx_arch:
         return 128
     # gfx942 / gfx90a / other: 8-bit-float PrecType, M_Warp_Tile=16 non-WMMA path.
     return 64 if is_flatmm else 32

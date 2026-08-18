@@ -53,7 +53,7 @@ from codegen_common import make_gemm_aquant_kernel_name  # noqa: E402
 
 # NEVER default to gfx942 -- arch must be detected or explicitly supplied.
 _DEFAULT_HIPCC = "hipcc"
-_SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950")
+_SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
 # Layout tags AQuant supports, and whether preshufflequant is allowed for each.
 # Derived from run_gemm_example_prec_type in run_gemm_quant_example.inc:
@@ -776,7 +776,7 @@ def _warp_tile_k_for(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
     on the sibling tensor_quant/rowcolquant bridges).  Old-TE uses 16x16x32 on
     gfx942 for decode and is bit-exact there with warp_tile_k=32.
     """
-    if "gfx950" in gfx_arch:
+    if "gfx950" in gfx_arch or "gfx12" in gfx_arch:
         return 128
     # gfx942 / gfx90a / other: 8-bit-float PrecType, M_Warp_Tile=16 non-WMMA path.
     return 64 if preshuffle_aquant else 32
