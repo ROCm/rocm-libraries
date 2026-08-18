@@ -60,7 +60,11 @@ target_include_directories(rocisa-cpp
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-block()
+# Device generation always owns the in-tree extension. ROCISA_BUILD_PYTHON
+# retains a root-project rocisa-only configuration; the standalone project
+# remains independently buildable by Python packaging.
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS OR ROCISA_STANDALONE)
     # nanobind requires Python to be found first.
     if(ROCISA_USE_STABLE_ABI)
         find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
@@ -144,6 +148,15 @@ block()
                             ${ROCISAINST_SOURCE}
                             ${ROCISAPASS_SOURCE}
                             ${ROCISAFUNC_SOURCE})
+    if(NOT ROCISA_STANDALONE)
+        set_target_properties(_rocisa PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa")
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
+            "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
+            COPYONLY)
+    endif()
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
@@ -388,4 +401,4 @@ block()
         install(TARGETS stinkytofu-plugin-helloworld
             DESTINATION "rocisa/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
     endif()
-endblock()
+endif()
