@@ -18,7 +18,7 @@ namespace hipdnn_integration_tests
 {
 
 using InputTensorMap
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+    = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 struct FillResult
 {
