@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.ProgressBar.__init__``.
+``tensilelite.Common.Utilities.ProgressBar.__init__``.
 
 These pin the exact attribute initialization performed by the constructor so
 that survivor mutants flipping individual assignments are detected. They assert
@@ -14,7 +14,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 
