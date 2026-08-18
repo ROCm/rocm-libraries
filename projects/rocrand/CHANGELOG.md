@@ -3,6 +3,13 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.1.0 for ROCm 10.1.0
+
+### Changed
+
+* Added a sync barrier and `__restrict__` qualifiers to the device API benchmark, enabling better compiler optimization.
+* Improved host API performance for discrete distributions through optimization changes for some generators.
+
 ## rocRAND 5.0.0 for ROCm 10.0.0
 
 ### Removed
