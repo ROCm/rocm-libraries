@@ -119,22 +119,22 @@ int dispatcher_initialize()
  * Returns 0 on success, negative on error.
  */
 int dispatcher_run_gemm(const void* A,
-                                    const void* B,
-                                    const void* AQ,
-                                    const void* BQ,
-                                    void* C,
-                                    int64_t M,
-                                    int64_t N,
-                                    int64_t K,
-                                    int64_t stride_A,
-                                    int64_t stride_B,
-                                    int64_t stride_AQ,
-                                    int64_t stride_BQ,
-                                    int64_t stride_C,
-                                    int64_t QK_A,
-                                    int64_t QK_B,
-                                    int k_batch,
-                                    float* time_ms)
+                        const void* B,
+                        const void* AQ,
+                        const void* BQ,
+                        void* C,
+                        int64_t M,
+                        int64_t N,
+                        int64_t K,
+                        int64_t stride_A,
+                        int64_t stride_B,
+                        int64_t stride_AQ,
+                        int64_t stride_BQ,
+                        int64_t stride_C,
+                        int64_t QK_A,
+                        int64_t QK_B,
+                        int k_batch,
+                        float* time_ms)
 {
     // acquire: synchronise with the release fetch_add in dispatcher_initialize so
     // that all device-property checks performed there are visible here.
