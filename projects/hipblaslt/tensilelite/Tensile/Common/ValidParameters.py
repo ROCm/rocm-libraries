@@ -403,6 +403,15 @@ validParameters = { # we need to make sure this matches develop
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
+    # Reuse Across Persistent: keep the A / MXSA operand for the whole K extent
+    # resident in VGPRs across persistent-loop iterations, so tiles after the
+    # first skip A's tensor_load_to_lds and ds_load entirely. Only valid when
+    # every tile a workgroup visits shares the same A, which requires
+    # ceil(M/MacroTile0)==1 and StreamKForceDPOnly. Requires
+    # PrefetchAcrossPersistent=1, and fixes K at (PrefetchGlobalRead+1)*DepthU
+    # since the resident register block is sized for that many k-tiles; both
+    # size constraints are enforced as runtime problem predicates.
+    "ReuseAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support

@@ -79,6 +79,34 @@ class PersistentLoopOn(PersistentLoop):
     def matches(cls, writer, debug=False):
         return writer.states.kernel["StreamK"] > 0
 
+    def backEdgeTargetName(self, writer, kernel):
+        """Name of the label the persistent-loop back-edge returns to.
+
+        With ReuseAcrossPersistent the first persistent iteration is peeled (it
+        is the one that fills the resident A registers), so the back-edge
+        re-enters at the iterN copy instead of at the top.
+        """
+        if writer.isRapPeelEnabled(kernel):
+            return writer.RAP_ITERN_LABEL
+        return "PersistentLoopStart"
+
+    def emitWaveIdxReInit(self, writer, kernel):
+        """Re-init sgprWaveIdx for one persistent-loop iteration.
+
+        TDM init reads s[sgprWaveIdx] but the same sgpr is later UNDEFed and
+        reused as a temp, so on the 2nd iteration the value would be stale.
+        Factored out of openPersistentLoop so the RAP iterN entry can emit it
+        too -- iterN is a back-edge target and needs the same re-init.
+        """
+        module = Module("PersistentLoop WaveIdx re-init")
+        if kernel["enableTDMA"] or kernel["enableTDMB"]:
+            wavelen = kernel["WavefrontSize"]
+            with writer.allocTmpSgpr(1, tag="PersistentLoopOn_openPersistentLoop_tmpSgprRes") as tmpSgprRes:
+                module.add(VReadfirstlaneB32(sgpr(tmpSgprRes.idx), vgpr("Serial"), "first tId"))
+                module.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(tmpSgprRes.idx),
+                                           "re-init WaveIdx for persistent loop iteration"))
+        return module
+
     def openPersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop On openPersistentLoop")
 
@@ -87,15 +115,7 @@ class PersistentLoopOn(PersistentLoop):
         persistentLabel = Label(label="PersistentLoopStart", comment="")
         module.add(persistentLabel)
 
-        # Re-init sgprWaveIdx every persistent loop iteration: TDM init reads
-        # s[sgprWaveIdx] but the same sgpr is later UNDEFed and reused as a temp,
-        # so on the 2nd iteration the value would be stale.
-        if kernel["enableTDMA"] or kernel["enableTDMB"]:
-            wavelen = kernel["WavefrontSize"]
-            with writer.allocTmpSgpr(1, tag="PersistentLoopOn_openPersistentLoop_tmpSgprRes") as tmpSgprRes:
-                module.add(VReadfirstlaneB32(sgpr(tmpSgprRes.idx), vgpr("Serial"), "first tId"))
-                module.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(tmpSgprRes.idx),
-                                           "re-init WaveIdx for persistent loop iteration"))
+        module.add(self.emitWaveIdxReInit(writer, kernel))
 
         # TODO remove?
         # kStr += inst("s_add_u32", sgpr("PersistentLoopIter"), sgpr("PersistentLoopIter"), hex(1), "Inc PersistentLoop Iter")     # Back-up: not needed now
@@ -176,5 +196,5 @@ class PersistentLoopOn(PersistentLoop):
             module.add(sk5CloseDoneLabel)
         else:
             module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
-            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
+            module.add(writer.longBranchScc0(Label(self.backEdgeTargetName(writer, kernel), ""), posNeg=-1))
         return module

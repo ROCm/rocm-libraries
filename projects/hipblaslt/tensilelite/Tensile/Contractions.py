@@ -511,6 +511,32 @@ class ProblemPredicate(Properties.Predicate):
         if "BatchSizeEqual" in state:
             rv += [cls('BatchSizeEqual', index=0, value=state["BatchSizeEqual"])]
 
+        if state.get("ReuseAcrossPersistent", 0):
+            # M == MacroTile0 covers two separate requirements at once.
+            #
+            # First, RAP keeps one copy of A resident for every tile a workgroup
+            # visits, which is only the same A when there is a single tile along
+            # M. The tiles a workgroup walks are consecutive on the flat tile id,
+            # so with NumWorkGroups0 > 1 the M-tile index changes between them
+            # and the resident copy would be stale.
+            #
+            # Second, v0 is only tuned for the no-edge store path. A partially
+            # filled M-tile (M < MacroTile0) takes the masked store, whose
+            # per-element register cost is higher and whose batching has not been
+            # checked against the resident block.
+            rv += [cls('SizeEqual', index=0, value=state["MacroTile0"])]
+            # Same no-edge requirement along N: a partial N-tile would take the
+            # masked store path.
+            rv += [cls('SizeMultiple', index=1, value=state["MacroTile1"])]
+            # The resident register block is sized at codegen time for exactly
+            # PrefetchGlobalRead+1 k-tiles, so the kernel only computes the right
+            # answer for that one K. NoTailLoop already forces K to be a whole
+            # number of k-tiles; this pins how many. K is the first bound index,
+            # which sits at NumIndicesC in the runtime size() ordering.
+            rv += [cls('SizeEqual',
+                       index=state["ProblemType"]["NumIndicesC"],
+                       value=(state["PrefetchGlobalRead"] + 1) * state["DepthU"])]
+
         if "SynchronizerSizeCheck" in state:
             if state["SynchronizerSizeCheck"]:
                 valuepredicates = []

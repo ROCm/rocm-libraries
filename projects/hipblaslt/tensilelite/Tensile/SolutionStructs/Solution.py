@@ -1868,6 +1868,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
       state["PrefetchAcrossPersistent"] = 0
+      state["ReuseAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False
 
     if not state["BufferStore"]:
@@ -4448,6 +4449,56 @@ class Solution(collections.abc.Mapping):
     state["NoTailLoop"] = False
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
+
+    # ReuseAcrossPersistent (RAP) prerequisites.
+    # Placed here because NoTailLoop / enableTDM* are only derived by this point.
+    # Only solution-level axes can be rejected here; the problem-size
+    # prerequisites (ceil(M/MacroTile0)==1, batchCount==1, K==K_fit) are runtime
+    # predicates instead, since sizes are unknown at derivation time.
+    if state.get("ReuseAcrossPersistent", 0):
+      if not state.get("PrefetchAcrossPersistent", 0):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires PrefetchAcrossPersistent=1")
+      if state["StreamK"] != 3:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires StreamK=3")
+      if state["StreamKForceDPOnly"] != 1:
+        # K-split gives each persistent iteration a different K range, so one
+        # resident copy of A cannot serve them all.
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires StreamKForceDPOnly=1")
+      if state["GlobalSplitU"] != 0:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires GlobalSplitU=0")
+      if state["InnerUnroll"] != 1:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll=1")
+      if not state["NoTailLoop"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires NoTailLoop (AssertSummationElementMultiple % DepthU == 0)")
+      if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent not supported with DirectToVgpr on A/MXSA")
+      if state["ExpandPointerSwap"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent not supported with ExpandPointerSwap")
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent not supported with UseSubtileImpl")
+      if state["TDMSplit"]:
+        # TDMSplit issues a second A load with a recomputed descriptor; the
+        # even-wave null has not been audited against that path.
+        reject(state, printRejectionReason, "ReuseAcrossPersistent not supported with TDMSplit")
+      if not (state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1):
+        # A/MXSA loads are disabled by nulling the wave-separated TDM descriptor
+        # on even waves; that mechanism needs TDMInst=3 and more than one wave.
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires TDMInst=3 (enableTDMA and enableTDMB) and NumWaves > 1")
+      if not state["ProblemType"]["MXBlockA"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent v0 is only validated for an MX A operand (MXBlockA)")
+      # RAP needs K as a codegen-time constant: it sizes the resident register
+      # block and decides how many k-tile code regions are emitted. ItersPerTile
+      # is a kernel argument, so K cannot be read at generation time -- instead
+      # the kernel is built for one K and a SizeEqual predicate (emitted in
+      # Contractions.CompoundPredicates) keeps it off every other size.
+      #
+      # That one K is fixed by the loop structure: the unroll loop covers k-tiles
+      # [0, ItersPerTile-PGR) as a single code region while NGLL and NLL cover
+      # the last two. Each k-tile needs its own region to address its own
+      # resident buffer set, so the unroll loop has to run exactly once, which
+      # means K/DepthU == PrefetchGlobalRead+1. Supporting a larger K needs the
+      # unroll loop expanded into one region per k-tile, which is not implemented.
+      state["_RAPNumResidentKTiles"] = state["PrefetchGlobalRead"] + 1
 
     # TailloopInNll optimization check
     if state["TailloopInNll"]:

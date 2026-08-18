@@ -219,6 +219,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if state.get("LDSSegmentInterleave") == 1:
     requiredParametersTemp.add("LDSSegmentInterleave")
 
+  # Always name ReuseAcrossPersistent, so RAP0 and RAP1 are both explicit in the
+  # kernel name. RAP=1 generates different assembly from its RAP=0 twin, so
+  # without the tag a [0,1] fork dedups to a single kernel and one of the two is
+  # silently dropped.
+  requiredParametersTemp.add("ReuseAcrossPersistent")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernelName":
       continue

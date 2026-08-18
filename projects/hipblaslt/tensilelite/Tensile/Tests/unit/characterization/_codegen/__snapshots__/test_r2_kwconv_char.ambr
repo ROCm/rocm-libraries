@@ -2,7 +2,7 @@
 # name: test_kwconv_gfx942_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_B_A_S_UserArgs_MT64x1NY74UBIiLGloKBWKClGkhlFVWVo_o5QZ_ctWSeoq3Ls=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_B_A_S_UserArgs_MT64x18GemxKfXBZafK_i7r4pW-RA6qzGXRozwJ8w34ZHG0JQ=',
       'err': 0,
     }),
   ])
