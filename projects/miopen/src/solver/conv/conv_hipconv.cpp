@@ -93,9 +93,6 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
 }
 
 // Resolve the kernel handle a perf-config selected.
-//
-// The config-list index is cross-checked against the recorded kernel name, so a
-// stale/misindexed entry is rejected rather than launching the wrong kernel.
 static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
                                                const hipconv::Conv2dParams& par,
                                                const PerformanceConfigConvHipConv& config)
@@ -105,10 +102,7 @@ static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
     const auto cfgs = hipconv::get_valid_configs(arch, par, MAX_CONFIGS);
     if(config.index >= static_cast<int>(cfgs.size()))
         return nullptr;
-    auto* kernel = cfgs[config.index];
-    if(hipconv::name(kernel) != config.kernel_name)
-        return nullptr;
-    return kernel;
+    return cfgs[config.index];
 }
 
 // ===================== PerformanceConfigConvHipConv =====================
@@ -118,14 +112,8 @@ void PerformanceConfigConvHipConv::InitFromArch(const void* arch, const ProblemD
     const auto par = ToHipconvParams(problem);
     const auto cfgs =
         hipconv::get_valid_configs(static_cast<hipconv::ArchHandle>(arch), par, MAX_CONFIGS);
-    if(cfgs.empty())
-    {
-        index       = -1;
-        kernel_name = "";
-        return;
-    }
-    index       = 0;
-    kernel_name = std::string(hipconv::name(cfgs[0]));
+    config_count = static_cast<int>(cfgs.size());
+    index        = cfgs.empty() ? -1 : 0;
 }
 
 void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext& ctx,
@@ -137,18 +125,11 @@ void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext& ctx,
     InitFromArch(*arch, problem);
 }
 
-bool PerformanceConfigConvHipConv::SetNextValue(const ProblemDescription& problem)
+bool PerformanceConfigConvHipConv::SetNextValue(const ProblemDescription&)
 {
-    const auto arch = hipconv::resolve_arch(GetCurrentDeviceName());
-    if(!arch.has_value())
-        return false;
-    const auto par  = ToHipconvParams(problem);
-    const auto cfgs = hipconv::get_valid_configs(*arch, par, MAX_CONFIGS);
-
-    if(index + 1 >= static_cast<int>(cfgs.size()))
+    if(index + 1 >= config_count)
         return false;
     ++index;
-    kernel_name = std::string(hipconv::name(cfgs[index]));
     return true;
 }
 
@@ -157,29 +138,24 @@ bool PerformanceConfigConvHipConv::IsValidValue() const { return index >= 0; }
 bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext& ctx,
                                            const ProblemDescription& problem) const
 {
-    if(!IsValidValue())
-        return false;
-    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-    if(!arch.has_value())
-        return false;
-    const auto par = ToHipconvParams(problem);
-    return ResolveKernel(*arch, par, *this) != nullptr;
+    // Size the config list here, on behalf of SetNextValue.
+    //
+    // ComputedIterator (generic_search.hpp) constructs a config, calls IsValid, and only
+    // then calls SetNextValue, which has no ExecutionContext to resolve the arch with.
+    if(config_count < 0)
+    {
+        const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
+        if(!arch.has_value())
+            return false;
+        config_count = static_cast<int>(
+            hipconv::get_valid_configs(*arch, ToHipconvParams(problem), MAX_CONFIGS).size());
+    }
+    return IsValidValue() && index < config_count;
 }
 
 bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv& other) const
 {
-    return index == other.index && kernel_name == other.kernel_name;
-}
-
-std::string PerformanceConfigConvHipConv::GetCurrentDeviceName()
-{
-    int device = 0;
-    if(hipGetDevice(&device) != hipSuccess)
-        return {};
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, device) != hipSuccess)
-        return {};
-    return props.gcnArchName;
+    return index == other.index;
 }
 
 // ===================== ConvHipConv =====================
@@ -436,7 +412,6 @@ bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv
     return true;
 }
 void PerformanceConfigConvHipConv::InitFromArch(const void*, const ProblemDescription&) {}
-std::string PerformanceConfigConvHipConv::GetCurrentDeviceName() { return {}; }
 
 bool ConvHipConv::IsApplicable(const ExecutionContext&, const ProblemDescription&) const
 {
