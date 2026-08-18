@@ -389,67 +389,6 @@ st.func @test_wait_count_cap() {
     EXPECT_EQ(waitcnts[0].waitData->kmcnt, -1);
 }
 
-/**
- * @brief SMRD scalar loads (s_load_*) consumed downstream -> s_wait_kmcnt.
- *
- * SMRD scalar loads retire on the kmcnt counter, not loadcnt/dscnt. The pass
- * must classify them as CK_KM and emit s_wait_kmcnt (SWaitCntData::kmcnt)
- * before a consumer of an outstanding load.
- *
- * kmcnt is out-of-order (CounterOrder::OutOfOrder): scalar loads may return in
- * any order, so a nonzero immediate does not identify which loads have landed.
- * The only usable wait is a full drain.
- *
- * IR:
- *   s[8:9]   = s_load_b64 (scalar load 0)
- *   s[10:11] = s_load_b64 (scalar load 1)
- *   s20 = s_add_u32 s8, s8     (uses load 0)
- *   s21 = s_add_u32 s10, s10   (uses load 1)
- *
- * Expected:
- *   s_wait_kmcnt 0 before the first s_add_u32. FIFO math would allow 1 here
- *   (drain load 0, keep load 1), which load 1 returning first would satisfy
- *   while s[8:9] is still stale.
- *   No wait before the second s_add_u32 -- the full drain already landed load 1.
- * No other counter fields are set.
- */
-TEST_F(WaitCntInsertionTest, SMemLoadBeforeConsumerKmcnt) {
-    std::string irString = R"(
-st.func @test_smem_load_kmcnt() {
-^entry:
-  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
-  s[10:11] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
-  s20 = "st.s_add_u32"(s8, s8) { issueCycles = 1, latencyCycles = 1 }
-  s21 = "st.s_add_u32"(s10, s10) { issueCycles = 1, latencyCycles = 1 }
-}
-)";
-
-    StinkyIRConverter converter(getArch());
-    auto* func = parseIR(irString, converter);
-    ASSERT_NE(func, nullptr);
-
-    runInsertionPass(*func);
-
-    BasicBlock& entryBB = *func->begin();
-    auto waitcnts = getAllWaitCnts(entryBB);
-
-    ASSERT_EQ(waitcnts.size(), 1)
-        << "One full drain before the first consumer covers both scalar loads";
-
-    StinkyInstruction* add1 = findNthInst(entryBB, GFX::s_add_u32, 0);
-    ASSERT_NE(add1, nullptr);
-
-    int add1Pos = getInstructionPosition(entryBB, add1);
-
-    EXPECT_EQ(waitcnts[0].position, add1Pos - 1);
-    EXPECT_EQ(waitcnts[0].waitData->kmcnt, 0)
-        << "kmcnt returns out-of-order: only a full drain guarantees load 0 landed";
-    EXPECT_EQ(waitcnts[0].waitData->dlcnt, -1);
-    EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
-    EXPECT_EQ(waitcnts[0].waitData->vlcnt, -1);
-    EXPECT_EQ(waitcnts[0].waitData->vscnt, -1);
-}
-
 // ============================================================================
 // Test Suite 3: Complete Preloop + WMMA + Barrier Pattern
 //

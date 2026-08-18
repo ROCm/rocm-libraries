@@ -48,9 +48,10 @@ class StinkyRemoveWaitCntPassTest : public ::testing::Test {
         return builder.create(getMCIDByUOp(uop, kArch));
     }
 
-    void runPass(bool removeTensor = true) {
+    void runPass(bool removeTensor = true, bool removeKmcnt = false) {
         PassContext ctx;
-        auto pass = createStinkyRemoveWaitCntPass(removeTensor);
+        auto pass = createStinkyRemoveWaitCntPass(removeTensor, /*removeXcntWaitCnt=*/false,
+                                                  removeKmcnt);
         pass->run(*func, ctx, am);
     }
 
@@ -86,6 +87,23 @@ TEST_F(StinkyRemoveWaitCntPassTest, PreservesTensorWaitCntWhenDisabled) {
     ASSERT_EQ(countInstructions(), 1);
     runPass(/*removeTensor=*/false);
     EXPECT_EQ(countInstructions(), 1);
+}
+
+// Wait-count insertion is region-scoped, so an s_load in the kernel prologue
+// (argument preload) is invisible to it and the incoming drain must survive the
+// strip. Default is therefore preserve.
+TEST_F(StinkyRemoveWaitCntPassTest, PreservesKmcntWaitCntByDefault) {
+    addInst(GFX::s_wait_kmcnt);
+    ASSERT_EQ(countInstructions(), 1);
+    runPass();
+    EXPECT_EQ(countInstructions(), 1);
+}
+
+TEST_F(StinkyRemoveWaitCntPassTest, RemovesKmcntWaitCntWhenEnabled) {
+    addInst(GFX::s_wait_kmcnt);
+    ASSERT_EQ(countInstructions(), 1);
+    runPass(/*removeTensor=*/true, /*removeKmcnt=*/true);
+    EXPECT_EQ(countInstructions(), 0);
 }
 
 TEST_F(StinkyRemoveWaitCntPassTest, PreservesNonWaitInstructions) {

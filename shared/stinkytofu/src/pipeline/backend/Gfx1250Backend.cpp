@@ -89,8 +89,13 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     if (enableWaitCnt) {
         // TODO: remove this temporary SIA4/SIA0 split once a dedicated hazard pass
         // handles xcnt placement.
+        // kmcnt waits are preserved: insertion below is region-scoped, so an
+        // s_load in the prologue (kernel argument preload) is outside its
+        // dataflow and its in-region consumer would lose its drain. TODO: strip
+        // them once insertion runs over the whole kernel.
         pm.addPass(createStinkyRemoveWaitCntPass(/*removeTensorWaitCnt=*/true,
-                                                 /*removeXcntWaitCnt=*/optLevel == OptLevel::O3));
+                                                 /*removeXcntWaitCnt=*/optLevel == OptLevel::O3,
+                                                 /*removeKmcntWaitCnt=*/false));
         pm.addPass(createStinkyRemoveNopPass());
     }
 

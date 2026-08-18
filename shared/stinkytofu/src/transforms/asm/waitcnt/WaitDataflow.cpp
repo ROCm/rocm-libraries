@@ -99,6 +99,11 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         //     order, and one crossing two cache lines returns its halves at
         //     different times.
         // Only s_wait_kmcnt 0 has a well-defined meaning for a consumer.
+        //
+        // This pass is not the sole source of kmcnt waits: it runs region-scoped,
+        // so an s_load in the kernel prologue (argument preload) never enters
+        // this dataflow. StinkyRemoveWaitCntPass therefore preserves incoming
+        // s_wait_kmcnt until insertion covers the whole kernel.
         {[](const StinkyInstruction& i) { return isSMemLoad(i); },
          [](const StinkyInstruction&) { return true; }, CounterOrder::OutOfOrder},
         // CK_Tensor: tensor_load_to_lds; every consumer drains.
@@ -395,6 +400,111 @@ void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
             q.ops.erase(q.ops.begin(), q.ops.end() - keep);
         }
     }
+}
+
+// Wait value carried by `inst`'s SWaitCntData-family modifier for counter `c`,
+// or kUnused. Only a fallback for IR that has no literal operand; see
+// observedWaitDrains.
+int modifierWaitValue(const StinkyInstruction& inst, CounterKind c) {
+    if (c == CK_Tensor) {
+        const auto* m = inst.getModifier<SWaitTensorCntData>();
+        return m == nullptr ? WaitCountSpec::kUnused : m->tlcnt;
+    }
+    if (c == CK_Async) {
+        const auto* m = inst.getModifier<SWaitAsyncCntData>();
+        return m == nullptr ? WaitCountSpec::kUnused : m->asynccnt;
+    }
+    const auto* w = inst.getModifier<SWaitCntData>();
+    if (w == nullptr) return WaitCountSpec::kUnused;
+    switch (c) {
+        case CK_DS:
+            // The insertion pass stores the ds count in dlcnt; legalized input
+            // may use dscnt instead (or both).
+            if (w->dlcnt >= 0 && w->dscnt >= 0) return std::min(w->dlcnt, w->dscnt);
+            return w->dlcnt >= 0 ? w->dlcnt : w->dscnt;
+        case CK_Buffer:
+            return w->vlcnt;
+        case CK_KM:
+            return w->kmcnt;
+        default:
+            return WaitCountSpec::kUnused;
+    }
+}
+
+// Drains already proved by an s_wait_* present in the input stream. Returns true
+// when `inst` IS a wait instruction, so the caller stops treating it as a
+// consumer or producer, and fills counts[c] with the immediate for every counter
+// it drains (kUnused elsewhere).
+//
+// The counter comes from the OPCODE and the value from the literal operand:
+// SWaitCntData cannot be trusted to describe one instruction because
+// legalizeWaitCnt() attaches the whole pre-split spec to the last member of a
+// split group and none to the others. The modifier is consulted only as a
+// fallback, and only for the opcode's own counter. Anything undecodable credits
+// nothing, which can cost a redundant wait but can never drop a required one.
+bool observedWaitDrains(const StinkyInstruction& inst, int counts[CK_Count]) {
+    for (int c = 0; c < CK_Count; ++c) counts[c] = WaitCountSpec::kUnused;
+    if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
+
+    int literal = WaitCountSpec::kUnused;
+    bool hasLiteral = false;
+    for (const StinkyRegister& s : inst.getSrcRegs()) {
+        if (s.dataType != StinkyRegister::Type::LiteralInt) continue;
+        literal = s.getLiteralInt();
+        hasLiteral = true;
+        break;
+    }
+
+    auto single = [&](CounterKind c) {
+        counts[c] = hasLiteral ? literal : modifierWaitValue(inst, c);
+    };
+
+    switch (inst.getUnifiedOpcode()) {
+        case GFX::s_wait_dscnt:
+            single(CK_DS);
+            break;
+        case GFX::s_wait_loadcnt:
+            single(CK_Buffer);
+            break;
+        case GFX::s_wait_kmcnt:
+            single(CK_KM);
+            break;
+        case GFX::s_wait_tensorcnt:
+            single(CK_Tensor);
+            break;
+        case GFX::s_wait_asynccnt:
+            single(CK_Async);
+            break;
+        case GFX::s_wait_loadcnt_dscnt:
+            // Packed as {loadcnt << 8 | dscnt}.
+            if (hasLiteral) {
+                counts[CK_Buffer] = (literal >> 8) & 0xFF;
+                counts[CK_DS] = literal & 0xFF;
+            }
+            break;
+        case GFX::s_wait_storecnt_dscnt:
+            // storecnt is not tracked as its own counter, so only the ds half is
+            // creditable.
+            if (hasLiteral) counts[CK_DS] = literal & 0xFF;
+            break;
+        default:
+            // s_wait_storecnt, s_wait_xcnt and the legacy packed s_waitcnt drain
+            // nothing we can attribute to a tracked counter.
+            break;
+    }
+    return true;
+}
+
+// Apply a wait already present in the stream: it drains the queues exactly like
+// one we plan, and seeds the elision state so we do not emit a duplicate.
+void creditObservedWait(DataflowState& state, CounterEmitState emit[CK_Count], CounterKind c,
+                        int w) {
+    if (w < 0) return;
+    // On an out-of-order counter a nonzero immediate proves nothing about any
+    // particular op (see waitToDrain), so only a full drain is creditable.
+    if (w != 0 && completesOutOfOrder(c)) return;
+    trimQueues(state.queues[c], w);
+    emit[c].recordEmittedWait(w);
 }
 
 // Append a local in-block memop to every per-pred queue. Local ops are in
@@ -772,6 +882,16 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         if (inst == nullptr) continue;
         if (isPhi(*inst)) continue;  // PhiSummary already computed in merge
 
+        // A wait already in the stream drains for us; credit it instead of
+        // planning a duplicate.
+        int observed[CK_Count];
+        if (observedWaitDrains(*inst, observed)) {
+            for (int c = 0; c < CK_Count; ++c) {
+                creditObservedWait(state, emit, static_cast<CounterKind>(c), observed[c]);
+            }
+            continue;
+        }
+
         int required[CK_Count];
         computeRequiredWaits(inst, state, rawNeedsWait, required);
 
@@ -961,6 +1081,14 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 auto* inst = dyn_cast<StinkyInstruction>(&ir);
                 if (inst == nullptr) continue;
                 if (isPhi(*inst)) continue;
+
+                int observed[CK_Count];
+                if (observedWaitDrains(*inst, observed)) {
+                    for (int c = 0; c < CK_Count; ++c) {
+                        creditObservedWait(state, emit, static_cast<CounterKind>(c), observed[c]);
+                    }
+                    continue;
+                }
 
                 int computed[CK_Count];
                 computeRequiredWaits(inst, state, rawNeedsWait, computed);

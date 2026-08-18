@@ -9,6 +9,7 @@
 - **Per-predecessor queues** — each counter keeps separate in-flight FIFOs tagged by CFG predecessor edge, so join consumers see each path's depth instead of a collapsed union queue
 - **Tensor loop policy** — TensileLite promises tagged tensor-token deps are correct without propagating `CK_Tensor` through loop back-edges, so by default exact `CK_Tensor` queues are frozen after the first solver sweep; blocks with untagged tensor anchors keep their live tensor queues because those anchors are fences, and `loopCarriedTokenDepsEnabled` restores normal tensor fixed-point iteration when conservative propagation is needed
 - **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, untagged conservative fallbacks)
+- **Existing waits are credited** — an `s_wait_*` already in the input drains the model like one the pass plans, so no duplicate is emitted; see "Existing waits in the input"
 - **Analyze → Optimize → Finalize** — dataflow solve, then `ShallowPredPromotion`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
 - **Selective IR mutation**: `buildUseDefChain` and `WaitDataflow::solve()` run over every basic block so skipped preds still contribute in-flight state; `PassContext::shouldProcessBasicBlock` gates `emitWaits` and `removePHIs` only
 
@@ -322,12 +323,22 @@ Queues are **copied, not merged** — a join holds one queue per (predecessor, o
 
 For each non-PHI instruction in program order:
 
-1. **`computeRequiredWaits`** — determine `required[CK_Count]` (see below).
-2. **Emit decision** — for each counter with a required wait, apply redundancy elision; record `(anchor, WaitCountSpec)` in `emitPlan`.
-3. **`trimQueues`** — model the hardware drain on all per-pred queues for that counter.
-4. **Record producer** — append the instruction to its counter queue *after* the wait decision (so the wait's snapshot excludes its own consumer).
+1. **Credit existing waits** — if the instruction is itself an `s_wait_*` (see below), apply its drain and move on; it is neither a consumer nor a producer.
+2. **`computeRequiredWaits`** — determine `required[CK_Count]` (see below).
+3. **Emit decision** — for each counter with a required wait, apply redundancy elision; record `(anchor, WaitCountSpec)` in `emitPlan`.
+4. **`trimQueues`** — model the hardware drain on all per-pred queues for that counter.
+5. **Record producer** — append the instruction to its counter queue *after* the wait decision (so the wait's snapshot excludes its own consumer).
 
 Per-pred queues are **not** collapsed at block exit.
+
+### Existing waits in the input
+
+`StinkyRemoveWaitCntPass` does not hand the pass a fully clean slate: `s_wait_kmcnt` and (outside SIA4) `s_wait_xcnt` survive it, `s_wait_tensorcnt` survives when `removeTensorWaitCnt` is false, and blocks the strip pass skipped keep everything. A wait already in the stream drains the hardware exactly like one the pass plans, so `observedWaitDrains` decodes it and `creditObservedWait` applies it: `trimQueues` on that counter plus `CounterEmitState::recordEmittedWait`, which is what stops a duplicate from being planned. A credited wait that is *too weak* for a later consumer does not suppress that consumer's wait, because `needsNewWait` compares against the required value.
+
+Decoding takes the counter from the **opcode** and the value from the **literal source operand**. `SWaitCntData` is not authoritative per instruction: `legalizeWaitCnt` splits one `s_waitcnt` into several `s_wait_*` and attaches the whole pre-split spec to the last member of the group and none to the others. The modifier is a fallback for the opcode's own counter only, used for hand-written IR that carries no literal. Two deliberate gaps:
+
+- **Out-of-order counters** — a nonzero existing `s_wait_kmcnt` is *not* credited, for the same reason `waitToDrain` never produces one: it names no particular load. Only a full drain counts.
+- **Undecodable waits** — `s_wait_storecnt`, `s_wait_xcnt`, the legacy packed `s_waitcnt`, and the storecnt half of `s_wait_storecnt_dscnt` credit nothing, since no tracked counter can be attributed. The failure mode is a redundant wait, never a missing one.
 
 ---
 

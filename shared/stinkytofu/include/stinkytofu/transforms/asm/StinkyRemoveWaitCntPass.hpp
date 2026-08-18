@@ -55,8 +55,16 @@ class Pass;
  *                            a dedicated hazard pass handles xcnt placement.
  *                            Until then, non-SIA4 paths preserve hand-authored
  *                            xcnt drains.
+ * @param removeKmcntWaitCnt  When true also strip @c s_wait_kmcnt. Default
+ *                            false: the insertion pass runs region-scoped, so
+ *                            an @c s_load in the kernel prologue (e.g. kernel
+ *                            argument preload) is outside its dataflow and its
+ *                            in-region consumer would be left unguarded.
+ *                            TODO: strip these once wait-count insertion runs
+ *                            over the whole kernel.
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(
-    bool removeTensorWaitCnt = true, bool removeXcntWaitCnt = false);
+    bool removeTensorWaitCnt = true, bool removeXcntWaitCnt = false,
+    bool removeKmcntWaitCnt = false);
 
 }  // namespace stinkytofu
