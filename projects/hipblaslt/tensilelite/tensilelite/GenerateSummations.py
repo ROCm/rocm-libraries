@@ -37,9 +37,9 @@ from . import LibraryIO
 
 from . import ClientWriter
 from .TensileCreateLibrary import tensileLibraryFile
-from Tensile.Common import ensurePath, printExit
-from Tensile.Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
-from Tensile.Common.GlobalParameters import assignGlobalParameters
+from tensilelite.Common import ensurePath, printExit
+from tensilelite.Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
+from tensilelite.Common.GlobalParameters import assignGlobalParameters
 from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import ToolchainDefaults, validateToolchain
 

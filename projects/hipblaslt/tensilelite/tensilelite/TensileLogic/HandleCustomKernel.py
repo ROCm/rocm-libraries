@@ -27,10 +27,10 @@ from pprint import pformat
 from pathlib import Path
 from typing import Dict, Tuple
 
-from Tensile.Common import print1, print2, IsaVersion, IsaInfo
-from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
+from tensilelite.Common import print1, print2, IsaVersion, IsaInfo
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 
-from Tensile.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
+from tensilelite.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
 
 
 def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tuple[dict, bool]:

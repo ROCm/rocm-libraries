@@ -35,14 +35,14 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   SMovB32, SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU32
-from Tensile.Common import IsaVersion
-from Tensile.Common.Utilities import printWarning
-from Tensile.Utilities.Decorators.Shared import CallableGuard
+from tensilelite.Common import IsaVersion
+from tensilelite.Common.Utilities import printWarning
+from tensilelite.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
 from typing import Callable, Optional, Union, Tuple
 from enum import Enum, auto
-import Tensile.Components.CMSValidator as cmsv
+import tensilelite.Components.CMSValidator as cmsv
 from typing import Callable
 from itertools import product
 

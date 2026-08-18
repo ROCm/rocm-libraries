@@ -32,19 +32,19 @@ from pathlib import Path
 from enum import Enum
 from glob import glob
 
-from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
-from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
-from Tensile.Toolchain.Component import Assembler
+from tensilelite.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
+from tensilelite.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
+from tensilelite.Toolchain.Component import Assembler
 
 import rocisa
 
 from . import ROOT_PATH
 from . import LibraryIO
-from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
+from tensilelite.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
+from tensilelite.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
+from tensilelite.Common.GlobalParameters import globalParameters
+from tensilelite.Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex

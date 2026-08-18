@@ -28,12 +28,11 @@ from collections.abc import Mapping
 
 from typing import List
 
-from Tensile.Activation import ActivationType
-from Tensile.Common import fastdeepcopy as deepcopy
-from Tensile.Common.Constants import INDEX_CHARS
-from Tensile.Common.DataType import DataType
-from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
-
+from tensilelite.Activation import ActivationType
+from tensilelite.Common import fastdeepcopy as deepcopy
+from tensilelite.Common.Constants import INDEX_CHARS
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
 
 
 class ProblemSizeRange:
@@ -795,9 +794,9 @@ def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: boo
   # import direction), but the type-mismatch collector still lives in
   # Solution. Import the collector inside the function to avoid the
   # historical Naming -> Problem -> Solution -> Naming circular dep.
-  from Tensile.SolutionStructs.Solution import _typeMismatchCollector
-  from Tensile.Common.ValidParameters import _skipTypeCheck
-  from Tensile.Common.TypeValidationErrors import (
+  from tensilelite.SolutionStructs.Solution import _typeMismatchCollector
+  from tensilelite.Common.ValidParameters import _skipTypeCheck
+  from tensilelite.Common.TypeValidationErrors import (
       ConfigTypeError, formatMismatch,
   )
 

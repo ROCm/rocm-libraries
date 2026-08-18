@@ -27,13 +27,13 @@ from typing import Dict
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import internalParameters
-from Tensile.SolutionStructs import Solution as OriginalSolution
-from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
-from Tensile.Toolchain.Component import Assembler
+from tensilelite.Common import state, state_key_ordering, IsaInfo
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import internalParameters
+from tensilelite.SolutionStructs import Solution as OriginalSolution
+from tensilelite.SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
+from tensilelite.Toolchain.Component import Assembler
 from math import ceil
 
 MIN_K_FOR_GSU = 32

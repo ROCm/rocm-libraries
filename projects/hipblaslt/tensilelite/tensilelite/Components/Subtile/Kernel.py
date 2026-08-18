@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
       ReadGranularity, GRPlacementStrategy)
 

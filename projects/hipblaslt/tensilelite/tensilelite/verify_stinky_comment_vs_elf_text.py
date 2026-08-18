@@ -18,7 +18,7 @@ then ``PATH``. On Windows the probe tries ``llvm-readelf.exe`` first under those
 
 CLI (no rocisa; safe ``python -m`` entry):
 
-    python -m Tensile.verify_stinky_comment_vs_elf_text path/to/kernel.s path/to/kernel.o
+    python -m tensilelite.verify_stinky_comment_vs_elf_text path/to/kernel.s path/to/kernel.o
 """
 
 from __future__ import annotations
@@ -189,7 +189,7 @@ def verify_stinky_paths(s_path: Path, o_path: Path) -> Tuple[int, str, str]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """CLI: ``python -m Tensile.verify_stinky_comment_vs_elf_text <.s> <.o>``."""
+    """CLI: ``python -m tensilelite.verify_stinky_comment_vs_elf_text <.s> <.o>``."""
     ap = argparse.ArgumentParser(
         description="Compare STINKY_TOTAL_INST_BYTES in .s to ELF .text size in .o",
     )
