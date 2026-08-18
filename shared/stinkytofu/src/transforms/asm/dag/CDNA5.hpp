@@ -2007,17 +2007,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     setGroupThreshold(afterGroup, adjustedAfterEnd);
                     setGroupThreshold(beforeGroup, adjustedBeforeBegin);
                 }
-                if (targetTensorLoadWmmaSpace > 0) {
-                    const int deltaAfter = targetTensorLoadWmmaSpace / 2;
-                    const int deltaBefore = (targetTensorLoadWmmaSpace + 1) / 2;
-                    adjustedAfterEnd = std::clamp(adjustedAfterEnd - deltaAfter, 0, totalWmma);
-                    adjustedBeforeBegin =
-                        std::clamp(adjustedBeforeBegin + deltaBefore, 0, totalWmma);
-                    afterGroup.threshold = adjustedAfterEnd;
-                    beforeGroup.threshold = adjustedBeforeBegin;
-                    setGroupThreshold(afterGroup, adjustedAfterEnd);
-                    setGroupThreshold(beforeGroup, adjustedBeforeBegin);
-                }
 
                 PASS_DEBUG(
                     std::cerr
@@ -2026,9 +2015,34 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     << " beforeGroupAnchor=" << beforeGroup.anchor << " beforeGroupSize="
                     << beforeGroup.barriers.size() << " afterWmmaWindow=" << afterGroup.window
                     << " beforeWmmaWindow=" << beforeGroup.window << " overlap=" << overlap
-                    << "adjustedAfterEnd=" << adjustedAfterEnd
-                    << " adjustedBeforeBegin=" << adjustedBeforeBegin
-                    << " targetTensorLoadWmmaSpace=" << targetTensorLoadWmmaSpace << "\n");
+                    << " adjustedAfterEnd=" << adjustedAfterEnd
+                    << " adjustedBeforeBegin=" << adjustedBeforeBegin << "\n");
+            }
+        }
+
+        // Apply tensor-load WMMA spacing once per exclusive group (not once per
+        // after×before pair), so thresholds do not compound with group count.
+        if (targetTensorLoadWmmaSpace > 0) {
+            const int deltaAfter = targetTensorLoadWmmaSpace / 2;
+            const int deltaBefore = (targetTensorLoadWmmaSpace + 1) / 2;
+            for (auto& afterGroup : exclusiveAfterGroups) {
+                afterGroup.threshold = std::clamp(afterGroup.threshold - deltaAfter, 0, totalWmma);
+                setGroupThreshold(afterGroup, afterGroup.threshold);
+                PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion tensorLoadWmmaSpace] afterGroupAnchor="
+                                     << afterGroup.anchor << " threshold=" << afterGroup.threshold
+                                     << " deltaAfter=" << deltaAfter
+                                     << " targetTensorLoadWmmaSpace=" << targetTensorLoadWmmaSpace
+                                     << "\n");
+            }
+            for (auto& beforeGroup : exclusiveBeforeGroups) {
+                beforeGroup.threshold =
+                    std::clamp(beforeGroup.threshold + deltaBefore, 0, totalWmma);
+                setGroupThreshold(beforeGroup, beforeGroup.threshold);
+                PASS_DEBUG(std::cerr
+                           << "[CDNA5 onInitRegion tensorLoadWmmaSpace] beforeGroupAnchor="
+                           << beforeGroup.anchor << " threshold=" << beforeGroup.threshold
+                           << " deltaBefore=" << deltaBefore
+                           << " targetTensorLoadWmmaSpace=" << targetTensorLoadWmmaSpace << "\n");
             }
         }
 
