@@ -28,6 +28,15 @@ set(HIPDNN_SAMPLE_NO_RTTI_OPTIONS
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
 )
 
+set(HIPDNN_SAMPLE_WARNING_OPTIONS
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Werror>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wextra>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wpedantic>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<CXX_COMPILER_ID:MSVC>:/WX>
+)
+
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -73,7 +82,7 @@ macro(add_hipdnn_sample NAME SOURCE)
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
     # (brings in hipdnn_flatbuffers_sdk as well).
     target_link_libraries(${NAME} PRIVATE hip::host Threads::Threads hipdnn_frontend hipdnn_test_sdk)
-    target_compile_options(${NAME} PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
+    target_compile_options(${NAME} PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS} ${HIPDNN_SAMPLE_WARNING_OPTIONS})
     set_target_properties(
         ${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
@@ -88,7 +97,7 @@ endmacro()
 add_executable(hipdnn_sample_dynamic_backend_loading dynamic/DynamicBackendLoading.cpp)
 target_link_libraries(hipdnn_sample_dynamic_backend_loading
     PRIVATE Threads::Threads hipdnn_frontend_dynamic)
-target_compile_options(hipdnn_sample_dynamic_backend_loading PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
+target_compile_options(hipdnn_sample_dynamic_backend_loading PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS} ${HIPDNN_SAMPLE_WARNING_OPTIONS})
 set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
 )

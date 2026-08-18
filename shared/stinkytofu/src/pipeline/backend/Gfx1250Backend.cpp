@@ -192,7 +192,9 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // the module opts in. Must precede InsertVgprMsbPass so the new
         // branches/labels are present when MSB configuration is materialized.
         if (moduleOptions.ClusterBarrier) {
-            pm.addPass(createInsertClusterBarrierPass());
+            pm.addPass(createInsertClusterBarrierPass(
+                /*streamKMulticast=*/moduleOptions.StreamKMulticast,
+                /*pgrValue=*/moduleOptions.PrefetchGlobalRead));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can match its
@@ -229,12 +231,15 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));
 
+    if (runScheduler) {
+        mpm.addPass(createFunctionToModuleAdaptor(createInsertDelayAluPass(/*minWavesPerSimd=*/2)));
+    }
+
     {
         PassManager pm = makeEntryPM(module, debugStreams);
         pm.addPass(createMemTokenConsistencyCheckPass());
 
         if (runScheduler) {
-            pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
             pm.addPass(createLoopRegionRemarkPass());
         }
         pm.addPass(createEstimateAsmCyclesPass());

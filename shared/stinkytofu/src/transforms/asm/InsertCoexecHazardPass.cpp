@@ -179,17 +179,9 @@ class InsertCoexecHazardPass : public StinkyInstPass {
         return transOverlap(prod, *ctx.consumer);
     }
 
-    static std::vector<StinkyInstruction*> realInsts(BasicBlock& bb) {
-        std::vector<StinkyInstruction*> out;
-        for (auto& node : bb) {
-            auto* inst = dyn_cast<StinkyInstruction>(&node);
-            if (inst && !isPseudoInst(inst)) out.push_back(inst);
-        }
-        return out;
-    }
-
     // Backward scan returning the max shortfall over every matching producer across
-    // all predecessor paths; memo prunes re-entries.
+    // all predecessor paths; memo prunes re-entries. Gives up after maxSlotBudget
+    // fillers.
     int scanBack(BasicBlock& bb, const StinkyInstruction* startBefore, int accExisting,
                  const ConsumerCtx& ctx, std::unordered_map<const BasicBlock*, int>& minExisting) {
         // Memoize predecessor entries on fewest fillers; prune when this arrival can't widen the
@@ -203,18 +195,13 @@ class InsertCoexecHazardPass : public StinkyInstPass {
         int best = INT_MIN;
         int existing = accExisting;
 
-        const std::vector<StinkyInstruction*> insts = realInsts(bb);
-        int start = static_cast<int>(insts.size());
-        if (startBefore) {
-            for (int i = 0; i < static_cast<int>(insts.size()); ++i)
-                if (insts[i] == startBefore) {
-                    start = i;
-                    break;
-                }
-        }
-
-        for (int i = start - 1; i >= 0; --i) {
-            StinkyInstruction& inst = *insts[i];
+        // Start just before the consumer, or at the block's last instruction when
+        // scanning a predecessor. Skip pseudo nodes.
+        IRBase* node = startBefore ? startBefore->getPrev() : bb.getTerminator();
+        for (; node; node = node->getPrev()) {
+            auto* instPtr = dyn_cast<StinkyInstruction>(node);
+            if (!instPtr || isPseudoInst(instPtr)) continue;
+            StinkyInstruction& inst = *instPtr;
 
             // A call is a hard boundary: do not scan across it.
             if (isCall(inst)) return best;
