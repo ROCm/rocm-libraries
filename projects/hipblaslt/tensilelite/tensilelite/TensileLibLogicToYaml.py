@@ -22,12 +22,12 @@
 #
 ################################################################################
 
-from Tensile import __version__
-from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
-from Tensile.Common.Constants import HR
-from Tensile.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
-from Tensile.Common.GlobalParameters import globalParameters
+from tensilelite import __version__
+from tensilelite import LibraryIO
+from tensilelite.Common.GlobalParameters import defaultBenchmarkCommonParameters
+from tensilelite.Common.Constants import HR
+from tensilelite.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
+from tensilelite.Common.GlobalParameters import globalParameters
 
 import argparse
 import os

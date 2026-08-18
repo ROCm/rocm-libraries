@@ -46,7 +46,7 @@ DS_B128_VGPRS = 4
 
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
-    from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+    from tensilelite.Components.Subtile.Kernel import RegisterTileInfo
     # min(): full b128 tiles get 4-VGPR alignment; smaller tiles aren't padded
     # up to 4 (which would waste registers and can break occupancy).
     align = min(numRegs, DS_B128_VGPRS)
@@ -3283,7 +3283,7 @@ class LogicalScheduler:
         zeros the accumulators before the mainloop's first accumulating MFMA.
         """
         def _build_initC(emitter):
-            from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+            from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
             return initVgprTilesToZero(emitter.writer, emitter.kernel,
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
@@ -3416,12 +3416,12 @@ class LogicalScheduler:
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
         """
-        from Tensile.Components.Subtile.InstructionScheduler import (
+        from tensilelite.Components.Subtile.InstructionScheduler import (
             instructionSchedule,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
-        from Tensile.Components.Subtile.WaitAluInsertion import (
+        from tensilelite.Components.Subtile.WaitAluInsertion import (
             insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
@@ -3491,7 +3491,7 @@ class LogicalScheduler:
         # Cluster barrier: splice both halves against the final post-schedule order.
         # Signal goes right after the mainloop's existing workgroup barrier (reusing
         # that sync); the wait is appended at the end to hide its cross-CU latency.
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
         return module
 
@@ -4047,7 +4047,7 @@ class LogicalScheduler:
 
         self._kernel = kernel
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
 
         emitter = InstructionEmitter(
             writer, kernel, self.config,
@@ -4311,7 +4311,7 @@ class LogicalScheduler:
 
     def print_emit_dep_order(self, all_partitions: Optional[EmittedSchedule] = None) -> str:
         """Print emit output as dependency paths (same decomposition as _extractPathsFromBeforeDeps)."""
-        from Tensile.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
+        from tensilelite.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
         if all_partitions is None:
             all_partitions = self._emitted
         buf = io.StringIO()

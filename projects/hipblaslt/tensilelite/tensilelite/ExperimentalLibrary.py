@@ -25,7 +25,7 @@ silently half-built):
              yaml file(s)/dir(s) by parameter (e.g. ``--where StreamK=5``) to
              discover which indices to extract.
   extract    Reverse a shipped ``3_LibraryLogic`` yaml into a benchmark config
-             (wraps ``Tensile.TensileLibLogicToYaml``).
+             (wraps ``tensilelite.TensileLibLogicToYaml``).
   merge      Combine several per-solution ``extract`` configs into one
              multi-problem config so a whole family rebuilds into one library.
   augment    Validate ``--set NAME=v1[,v2]`` against the canonical
@@ -38,7 +38,7 @@ silently half-built):
              ``ProblemSizes`` left over from extracting a ``Prediction``-type
              source. Benchmarks on the target-arch GPU (fails fast if that
              arch is not present on the host).
-  build-lib  Run ``Tensile.TensileCreateLibrary --experimental`` to turn the
+  build-lib  Run ``tensilelite.TensileCreateLibrary --experimental`` to turn the
              staged logic into a loadable device library.
   patch-logic
              Override ``--set`` params on shipped ``3_LibraryLogic`` solutions
@@ -63,9 +63,9 @@ Hardware notes:
 Example (StreamKFixupTreeReduction, gfx950) -- see ``--help`` of each
 subcommand:
 
-  python -m Tensile.ExperimentalLibrary extract \\
+  python -m tensilelite.ExperimentalLibrary extract \\
       --logic <shipped>/gfx950/.../<liblogic>.yaml --indices 0 --out base.yaml
-  python -m Tensile.ExperimentalLibrary pipeline \\
+  python -m tensilelite.ExperimentalLibrary pipeline \\
       --config base.yaml --set StreamKFixupTreeReduction=1 \\
       --set StreamK=3 --feature-name streamk_treereduce \\
       --arch gfx950 --cu 256 --out work/
@@ -75,15 +75,15 @@ with a new feature toggled OFF *and* ON inside a single library, so the two can
 be contrasted by solution index (StreamKWorkStealing is illustrative; use any
 real parameter, and --skip-validation for a parameter not yet in the registry):
 
-  IDX=$(python -m Tensile.ExperimentalLibrary list-solutions \\
+  IDX=$(python -m tensilelite.ExperimentalLibrary list-solutions \\
       --logic-src <shipped>/.../<liblogic>.yaml --where StreamK=5 --indices-only)
-  python -m Tensile.ExperimentalLibrary extract \\
+  python -m tensilelite.ExperimentalLibrary extract \\
       --logic <shipped>/.../<liblogic>.yaml --indices "$IDX" --out sk5/base.yaml
-  python -m Tensile.ExperimentalLibrary merge \\
+  python -m tensilelite.ExperimentalLibrary merge \\
       --configs sk5/base*.yaml --out sk5/merged.yaml --feature-name sk5_ws
       # (``base*.yaml`` matches both ``base.yaml`` for a single index and
       #  ``base_<idx>.yaml`` for two or more.)
-  python -m Tensile.ExperimentalLibrary pipeline \\
+  python -m tensilelite.ExperimentalLibrary pipeline \\
       --config sk5/merged.yaml --set StreamKWorkStealing=0,1 \\
       --feature-name sk5_ws --arch gfx950 --cu 256 --out work/ --skip-validation
 
@@ -94,7 +94,7 @@ Origami/Prediction-logic A/B example -- toggle a parameter on every matching
 solution across several shipped files (e.g. one per transpose) and get back
 two libraries that differ only in that parameter, with no re-benchmark:
 
-  python -m Tensile.ExperimentalLibrary patch-logic \\
+  python -m tensilelite.ExperimentalLibrary patch-logic \\
       --logic-src <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bjlk_*.yaml \\
                   <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bljk_*.yaml \\
       --where StreamK=5 --set PrefetchAcrossPersistent=1 \\
@@ -122,7 +122,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # The Tensile package directory that contains this module. Used to locate the
-# bin/Tensile launcher (``python -m Tensile.Tensile`` is intentionally disabled
+# bin/Tensile launcher (``python -m tensilelite.Tensile`` is intentionally disabled
 # upstream).
 _TENSILE_PKG_DIR = Path(__file__).resolve().parent
 
@@ -147,7 +147,7 @@ def default_python() -> str:
     Prefers the repo venv under ``projects/hipblaslt/build/venv`` if present,
     otherwise falls back to the interpreter running this tool.
     """
-    # tensilelite/Tensile/ -> tensilelite -> hipblaslt
+    # tensilelite/tensilelite/ -> tensilelite -> hipblaslt
     hipblaslt_root = _TENSILE_PKG_DIR.parent.parent
     candidate = hipblaslt_root / "build" / "venv" / "bin" / "python"
     if candidate.is_file():
@@ -264,10 +264,10 @@ def validate_sets(sets: Sequence[Tuple[str, List[Any]]]) -> None:
     allowed values. A registry entry of ``-1`` means "skip value check".
     """
     try:
-        from Tensile.Common.ValidParameters import validParameters
+        from tensilelite.Common.ValidParameters import validParameters
     except Exception as e:  # ModuleNotFoundError (rocisa), RuntimeError, etc.
         raise ExperimentalLibraryError(
-            "Parameter validation needs Tensile.Common which requires a built "
+            "Parameter validation needs tensilelite.Common which requires a built "
             f"rocisa, but it could not be imported ({e}). Either build rocisa, "
             "launch this tool with the venv python via --python, or pass "
             "--skip-validation to bypass validation."
@@ -465,7 +465,7 @@ def count_solutions(logic_yaml_path: str) -> int:
     and falls back to a structural scan of the raw yaml.
     """
     try:
-        from Tensile import LibraryIO
+        from tensilelite import LibraryIO
 
         raw = LibraryIO.readYAML(logic_yaml_path)
         if not raw:
@@ -665,8 +665,8 @@ def _indexed_out_path(out: str, idx: int, single: bool) -> str:
 def _extract_snippet() -> str:
     return (
         "import sys\n"
-        "from Tensile.TensileLibLogicToYaml import TensileLibLogicToYaml\n"
-        "from Tensile.ExperimentalLibrary import _indexed_out_path\n"
+        "from tensilelite.TensileLibLogicToYaml import TensileLibLogicToYaml\n"
+        "from tensilelite.ExperimentalLibrary import _indexed_out_path\n"
         "inp, out, skip = sys.argv[1], sys.argv[2], sys.argv[3] == '1'\n"
         "ids = [int(x.strip()) for x in sys.argv[4].split(',')]\n"
         "for idx in ids:\n"
@@ -905,7 +905,7 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
     # somewhere on the host, not that the benchmarked device (config `Device`)
     # is that arch. Device pinning on mixed-arch hosts is a follow-up.
     if not args.dry_run:
-        from Tensile.Common.Architectures import detectHostGfxArchs, hostHasArch
+        from tensilelite.Common.Architectures import detectHostGfxArchs, hostHasArch
 
         if not hostHasArch(args.arch):
             detected = detectHostGfxArchs()
@@ -1009,13 +1009,13 @@ def _tensile_create_library_cmd(
     experimental: bool = True,
     jobs: Optional[int] = None,
 ) -> List[str]:
-    """Build the ``python -m Tensile.TensileCreateLibrary ...`` argv shared by
+    """Build the ``python -m tensilelite.TensileCreateLibrary ...`` argv shared by
     build-lib and patch-logic's buildability probe.
     """
     cmd = [
         python,
         "-m",
-        "Tensile.TensileCreateLibrary",
+        "tensilelite.TensileCreateLibrary",
         logic_dir,
         out_dir,
         "HIP",
@@ -1628,7 +1628,7 @@ def _add_global_flags(p: argparse.ArgumentParser, *, include_python: bool = True
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="Tensile.ExperimentalLibrary",
+        prog="tensilelite.ExperimentalLibrary",
         description="Developer tool to build experimental hipBLASLt device libraries "
         "for benchmarking new TensileLite codegen parameters.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

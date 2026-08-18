@@ -27,9 +27,9 @@ from typing import Dict
 from . import Properties
 from . import Hardware
 from . import Contractions
-from Tensile.Common import state, IsaInfo
-from Tensile.Common.Architectures import gfxToIsa, supportsChipIdPredicate
-from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from tensilelite.Common import state, IsaInfo
+from tensilelite.Common.Architectures import gfxToIsa, supportsChipIdPredicate
+from tensilelite.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 
 class SingleSolutionLibrary:
     Tag = "Single"

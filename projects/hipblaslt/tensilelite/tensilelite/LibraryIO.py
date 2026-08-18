@@ -26,18 +26,18 @@ from .CustomKernels import getCustomKernelConfig
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
-from Tensile import __version__
-from Tensile.Common import printExit, printWarning, print2, \
+from tensilelite import __version__
+from tensilelite.Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.SolutionStructs import Solution, ProblemSizes
-from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
-from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from tensilelite.Common.TimingInstrumentation import timing_context
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.SolutionStructs import Solution, ProblemSizes
+from tensilelite.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
+from tensilelite.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import IO, NamedTuple, List, Dict, Optional, Any
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
 from copy import deepcopy
 import io
 import os
@@ -114,7 +114,6 @@ try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
-
 
 
 ###################

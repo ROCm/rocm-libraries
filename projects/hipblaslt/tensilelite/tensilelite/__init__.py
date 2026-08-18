@@ -26,11 +26,11 @@
 from __future__ import print_function
 from os import path
 
-# Hardcoded tensilelite version, also in Tensile/Source/TensileConfigVersion.cmake
+# Hardcoded tensilelite version, also in tensilelite/Source/TensileConfigVersion.cmake
 __version__ = "5.0.0"
 
 # Compatibility-only filesystem-style root. Production code that reads bundled
-# resources should use Tensile.resources.
+# resources should use tensilelite.resources.
 ROOT_PATH: str = path.dirname(__file__)
 
 def PrintTensileRoot():

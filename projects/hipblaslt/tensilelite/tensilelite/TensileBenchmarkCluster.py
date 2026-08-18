@@ -31,7 +31,7 @@ import argparse
 from .BenchmarkSplitter import BenchmarkSplitter
 from .Configuration import ProjectConfig
 from .TensileBenchmarkClusterScripts import ScriptWriter
-from Tensile.Utilities.merge import mergePartialLogics
+from tensilelite.Utilities.merge import mergePartialLogics
 
 try:
     import mgzip as gzip

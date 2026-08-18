@@ -669,7 +669,7 @@ class StreamK(Component):
         When ``skipLroReset`` is True the local-read-offset reset inside
         ``skTileIndex`` is suppressed.  This is needed when PAP runs *before*
         the NLL body: the NLL still needs the current tile's read pointers."""
-        from Tensile.Components.WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
+        from tensilelite.Components.WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
 
         module = Module("StreamK prefetchAcrossPersistentSetupNextTile")
         with writer.allocTmpSgpr(4, 2, "SKPrefetchTemp") as sTmpRes:
@@ -4412,7 +4412,7 @@ class StreamKHybrid(StreamK):
     both fragments back-to-back gated by an s_cmp_eq_u32 + s_cbranch on
     that single SGPR.
 
-    Kernel-argument layout (see Tensile/Components/Signature.py SK5 branch
+    Kernel-argument layout (see tensilelite/Components/Signature.py SK5 branch
     and tensilelite/src/ContractionSolution.cpp SK5 branch):
 
         Slot   SK3 (primary, defineSgpr)   SK4 (RegSet alias)

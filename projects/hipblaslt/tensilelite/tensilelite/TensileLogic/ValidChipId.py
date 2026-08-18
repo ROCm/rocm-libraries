@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 from typing import NamedTuple, Optional, Set
 
-from Tensile.Common.Architectures import (
+from tensilelite.Common.Architectures import (
     GFX_CHIP_IDS,
     LogicFileError,
     SUPPORTED_CHIP_ID_FALLBACKS,
