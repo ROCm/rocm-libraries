@@ -49,7 +49,45 @@ if(TARGET host-validation-blas)
         PRIVATE
             roc::host-validation-blas
     )
-    add_test(NAME host-validation-blas-tests COMMAND host-validation-blas-tests)
+    add_test(
+        NAME host-validation-blas-tests-one-thread
+        COMMAND host-validation-blas-tests
+    )
+    add_test(
+        NAME host-validation-blas-tests-multi-thread
+        COMMAND host-validation-blas-tests
+    )
+    set(_host_validation_blas_one_thread_environment)
+    set(_host_validation_blas_multi_thread_environment)
+    foreach(thread_variable
+            OMP_NUM_THREADS
+            OPENBLAS_NUM_THREADS
+            GOTO_NUM_THREADS
+            BLIS_NUM_THREADS
+            MKL_NUM_THREADS
+            VECLIB_MAXIMUM_THREADS)
+        list(
+            APPEND
+            _host_validation_blas_one_thread_environment
+            "${thread_variable}=1"
+        )
+        list(
+            APPEND
+            _host_validation_blas_multi_thread_environment
+            "${thread_variable}=2"
+        )
+    endforeach()
+    set_tests_properties(
+        host-validation-blas-tests-one-thread
+        PROPERTIES
+            ENVIRONMENT "${_host_validation_blas_one_thread_environment}"
+    )
+    set_tests_properties(
+        host-validation-blas-tests-multi-thread
+        PROPERTIES
+            ENVIRONMENT "${_host_validation_blas_multi_thread_environment}"
+            PROCESSORS 2
+    )
 endif()
 
 if(TARGET host-validation-mx)

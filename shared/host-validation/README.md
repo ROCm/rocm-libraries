@@ -36,9 +36,18 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
 - `roc::host-validation-blas`
   - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
   - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
+  - Requires `cblas.h`, all four real/complex CBLAS GEMM entry points, and the
+    LP64 ABI with 32-bit dimensions. Configuration rejects ILP64 providers
+    rather than compiling against a mismatched integer interface.
+  - Does not choose BLIS, OpenBLAS, MKL, or another implementation.
+    `BLA_VENDOR`, `BLA_STATIC`, `BLA_PREFER_PKGCONFIG`,
+    `BLA_PKGCONFIG_BLAS`, `CMAKE_PREFIX_PATH`, and the surrounding build
+    environment select the provider.
   - Leaves provider-global threading to the selected BLAS implementation.
-    Reproducible runs should set `OPENBLAS_NUM_THREADS`, `BLIS_NUM_THREADS`,
-    or `OMP_NUM_THREADS` as appropriate for that provider.
+    Reproducible runs should set the provider's process-start environment,
+    such as `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `GOTO_NUM_THREADS`,
+    `BLIS_NUM_THREADS`, `MKL_NUM_THREADS`, or
+    `VECLIB_MAXIMUM_THREADS`.
 - `roc::host-validation-tiled`
   - GPU-independent tiled implementation of `GemmBackend::Tiled`.
   - Supports dense F32/F64 accumulation, runtime input/output types,
@@ -416,6 +425,20 @@ scaled, and compute-input-quantized operands into component-owned scratch,
 invokes the ordinary BLAS backend, and performs component-owned output
 scaling/conversion. This preserves accelerated large mixed-type references
 without placing conversion loops in product adapters.
+Configuration links through the semantic `CBLAS::CBLAS` target and prints the
+resolved header, link interface, requested `BLA_VENDOR`, and validated LP64
+ABI. The installed package exports
+`ROCHostValidation_BLAS_BUILD_PROVIDER` and
+`ROCHostValidation_BLAS_INTEGER_SIZE`; because the backend is a static
+archive, an installed consumer may legitimately resolve a different
+conforming provider.
+
+The BLAS conformance executable is registered in separate one-thread and
+multi-thread CTest processes. It uses only the host-validation API and common
+provider environment controls, including a moderately large exact GEMM.
+There is no standard CBLAS API for proving how many worker threads an arbitrary
+provider created, so these tests establish numerical conformance under both
+requested thread configurations rather than introspecting provider internals.
 The canonical backend computes only selected outputs. Accelerated backends may
 compute all outputs and report the actual count through `GemmRunInfo`.
 
@@ -575,8 +598,9 @@ The installed package exposes `Core`, `Operations`, `Tiled`, `BLAS`, `MX`, and
 `AMDGPULayout` components. Component dependencies are loaded transitively:
 `Tiled` and `BLAS` require `Operations`, while `Operations` and `MX` require
 `Core`. A component lookup loads only the requested closure, so `Core` does not
-search for BLAS or OpenMP. The `BLAS` component locates `BLAS::BLAS` when
-requested; consumers do not manually repeat the OpenBLAS/CBLAS link line.
+search for CBLAS or OpenMP. The `BLAS` component locates a conforming
+`CBLAS::CBLAS` target when requested; consumers do not manually repeat a
+provider-specific link line.
 
 ## Python and NumPy oracle
 

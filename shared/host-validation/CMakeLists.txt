@@ -210,7 +210,8 @@ function(roc_host_validation_enable_blas_backend)
     endif()
 
     set(_host_validation_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
-    find_package(BLAS REQUIRED)
+    list(PREPEND CMAKE_MODULE_PATH "${_host_validation_source_dir}/cmake")
+    find_package(CBLAS REQUIRED MODULE)
 
     add_library(host-validation-blas STATIC
         "${_host_validation_source_dir}/src/backends/blas.cpp"
@@ -224,12 +225,9 @@ function(roc_host_validation_enable_blas_backend)
     target_link_libraries(host-validation-blas
         PUBLIC
             roc::host-validation
+        PRIVATE
+            CBLAS::CBLAS
     )
-    if(TARGET BLAS::BLAS)
-        target_link_libraries(host-validation-blas PRIVATE BLAS::BLAS)
-    else()
-        target_link_libraries(host-validation-blas PRIVATE ${BLAS_LIBRARIES})
-    endif()
     target_sources(host-validation-blas
         PUBLIC
             FILE_SET HEADERS
@@ -241,6 +239,8 @@ function(roc_host_validation_enable_blas_backend)
         PROPERTIES
             CXX_VISIBILITY_PRESET hidden
             POSITION_INDEPENDENT_CODE ON
+            ROC_HOST_VALIDATION_CBLAS_BUILD_PROVIDER "${CBLAS_BUILD_PROVIDER}"
+            ROC_HOST_VALIDATION_CBLAS_INTEGER_SIZE "${CBLAS_INTEGER_SIZE}"
             VISIBILITY_INLINES_HIDDEN ON
     )
     roc_host_validation_install_component_target(
@@ -414,8 +414,20 @@ function(roc_host_validation_finalize_package)
     )
 
     set(HOST_VALIDATION_PACKAGE_HAS_BLAS OFF)
+    set(HOST_VALIDATION_PACKAGE_BLAS_BUILD_PROVIDER)
+    set(HOST_VALIDATION_PACKAGE_BLAS_INTEGER_SIZE)
     if(TARGET host-validation-blas)
         set(HOST_VALIDATION_PACKAGE_HAS_BLAS ON)
+        get_target_property(
+            HOST_VALIDATION_PACKAGE_BLAS_BUILD_PROVIDER
+            host-validation-blas
+            ROC_HOST_VALIDATION_CBLAS_BUILD_PROVIDER
+        )
+        get_target_property(
+            HOST_VALIDATION_PACKAGE_BLAS_INTEGER_SIZE
+            host-validation-blas
+            ROC_HOST_VALIDATION_CBLAS_INTEGER_SIZE
+        )
     endif()
     if(NOT TARGET host-validation-mx)
         message(FATAL_ERROR
@@ -492,6 +504,7 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfigVersion.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationTargets.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCBLAS.cmake"
     DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
     COMPONENT devel
 )
