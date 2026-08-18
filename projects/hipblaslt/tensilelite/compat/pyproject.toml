@@ -1,0 +1,30 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "tensilelite-tensile-compat"
+dynamic = ["version", "dependencies"]
+requires-python = ">=3.10"
+description = "Deprecated Tensile command aliases for ROCm TensileLite"
+readme = "README.md"
+license = "MIT"
+
+[project.scripts]
+Tensile = "tensilelite_tensile_compat.commands:tensile"
+TensileCreateLibrary = "tensilelite_tensile_compat.commands:create_library"
+TensileLogic = "tensilelite_tensile_compat.commands:logic"
+TensileBenchmarkCluster = "tensilelite_tensile_compat.commands:benchmark_cluster"
+TensileGenerateSummations = "tensilelite_tensile_compat.commands:generate_summations"
+TensileLibLogicToYaml = "tensilelite_tensile_compat.commands:logic_to_yaml"
+TensileMergeLibrary = "tensilelite_tensile_compat.commands:merge_library"
+TensileRetuneLibrary = "tensilelite_tensile_compat.commands:retune_library"
+TensileUpdateLibrary = "tensilelite_tensile_compat.commands:update_library"
+TensileVerifyStinkyElfText = "tensilelite_tensile_compat.commands:verify_stinky_elf"
+TensileGetPath = "tensilelite_tensile_compat.commands:get_path"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tensilelite_tensile_compat*"]
