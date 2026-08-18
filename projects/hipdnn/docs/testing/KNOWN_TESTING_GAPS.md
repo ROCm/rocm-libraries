@@ -2,14 +2,9 @@
 
 This document records current limitations in our testing.
 
-## Pre-submit scope and integration tiers
+## Integration bundle execution
 
-- Core tier names do not currently represent increasing scope: [`quick` matches every core test](../../test_categories.yaml), so `standard`, `comprehensive`, and `full` select the same core set through cascading labels. TheRock PR selection normally requests `standard`, while the separate [superbuild PR workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml) runs unfiltered CTest. There is therefore no single consistent “pre-submit subset.”
-- Bundle tests are the preferred authoring format but remain runtime opt-in; checked-in provider CMake and workflows do not enable them. The integration project's internal GPU-reference/unit `comprehensive` and `full` category blocks are disabled. MIOpen and hipBLASLt external suites still define those tiers, while HIP-kernel external suites are temporarily standard-only. MIOpen's `quick` and `standard` bundle patterns remain commented out. Track current mechanics in the [provider integration guide](../../../../dnn-providers/integration-tests/README.md), [shared categories](../../../../dnn-providers/integration-tests/test_categories.yaml), and provider category files.
-
-## Unit-test classification debt
-
-- Checked-in core and provider `unit` binaries do not yet fully match the GPU-free isolation model in [Testing Strategy](TESTING_STRATEGY.md#unit-testing-gpu-free-dependency-isolation). Backend, Data SDK, Test SDK, and provider binaries include controlled dynamic loading, HIP memory/device paths, real dependency handles, runtime compilation, or embedded kernels. No-device runs skip affected cases; those skips are missing observations, not GPU-free unit coverage.
+- Bundle tests are the preferred authoring format but remain runtime opt-in; checked-in provider CMake and workflows do not enable them. Track current mechanics in the [provider integration guide](../../../../dnn-providers/integration-tests/README.md), [shared categories](../../../../dnn-providers/integration-tests/test_categories.yaml), and provider category files.
 
 ## Sanitizers and platforms
 
@@ -26,14 +21,14 @@ This document records current limitations in our testing.
 - CI build matrices, executed test matrices, and runtime support are not interchangeable. Some configured Linux families are build-only, superbuild runner names do not prove physical GPU execution, and TheRock runner assignment comes from external mutable configuration. Current workflow evidence is in [TheRock CI](../../../../.github/workflows/therock-ci.yml), its [Linux test workflow](../../../../.github/workflows/therock-ci-linux.yml), and the [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
 - No centralized architecture-support contract is checked into this repository. Capability varies by operation, engine, build option, dependency, and runtime heuristic; external provider policy may also exist. Use [hipDNN operation support](../OperationSupport.md) and provider-owned support/configuration documents for narrow claims. Passing CI on one device must not be generalized into a support guarantee.
 
-## Provider workaround debt
+## Provider workaround tracking
 
-Provider-owned TOML and category files are canonical. This index intentionally does not copy tolerance values or test filters.
+Provider-owned TOML and category files are canonical. This index intentionally does not copy tolerance values or test filters; linked issues provide tracking for known exceptions.
 
-- **Shared integration harness:** The integration project's internal GPU-reference/unit `comprehensive` and `full` category blocks are disabled, and standard BF16 RMSNorm reference cases are excluded while [issue #10560](https://github.com/ROCm/rocm-libraries/issues/10560) is open. Provider external categories differ: MIOpen and hipBLASLt define comprehensive/full, while HIP-kernel currently exposes a temporary standard-only mapping. See [shared categories](../../../../dnn-providers/integration-tests/test_categories.yaml).
-- **MIOpen provider:** [MIOPEN_ENGINE.toml](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml) contains current batch-normalization and convolution tolerance exceptions plus architecture-specific Conv-Bias-Activation skips. The CBA skip cites open [#6979](https://github.com/ROCm/rocm-libraries/issues/6979); WRW rationale cites closed [#8029](https://github.com/ROCm/rocm-libraries/issues/8029) and [#8030](https://github.com/ROCm/rocm-libraries/issues/8030), whose mitigations remain encoded. [Integration categories](../../../../dnn-providers/miopen-provider/test_categories_integration.yaml) exclude Windows gfx110X and use elevated timeouts; linked open [#6864](https://github.com/ROCm/rocm-libraries/issues/6864) documents broader/Linux runner variance rather than that Windows-specific setting.
-- **hipBLASLt provider:** [HIPBLASLT_ENGINE.toml](../../../../dnn-providers/hipblaslt-provider/config/HIPBLASLT_ENGINE.toml) contains a BF16 fused-matmul tolerance exception and skips matching gfx12 FP16 MatmulBias fixtures for open [#8033](https://github.com/ROCm/rocm-libraries/issues/8033)'s transA=T/transB=T bias-epilogue no-algorithm case. Within the wired `*Matmul*` selection, unsupported graphs default to GTest skip; manual `--fail-on-unsupported` converts that condition to failure.
-- **HIP-kernel provider:** [HIP_MLOPS_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml) carries global test-workaround skips for pure-BF16 RMSNorm backward fixtures and large layer-normalization cases; these are not declared unsupported operations. [ASM_SDPA_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) applies backward-specific tolerance exceptions because the common resolver uses forward-tuned values. External integration currently exposes a temporary standard-only mapping of Smoke cases. Three provider-mode installed rocKE Python CTest entries remain disabled while open [#10497](https://github.com/ROCm/rocm-libraries/issues/10497) tracks re-enablement; C++ rocKE smoke tests remain enabled.
+- **Shared integration harness:** Standard BF16 RMSNorm reference cases are excluded while [issue #10560](https://github.com/ROCm/rocm-libraries/issues/10560) is open.
+- **MIOpen provider:** [MIOPEN_ENGINE.toml](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml) records current tolerance exceptions and architecture-specific skips. Related tracking includes [#6979](https://github.com/ROCm/rocm-libraries/issues/6979), [#8029](https://github.com/ROCm/rocm-libraries/issues/8029), [#8030](https://github.com/ROCm/rocm-libraries/issues/8030), and [#6864](https://github.com/ROCm/rocm-libraries/issues/6864).
+- **hipBLASLt provider:** [HIPBLASLT_ENGINE.toml](../../../../dnn-providers/hipblaslt-provider/config/HIPBLASLT_ENGINE.toml) records the BF16 fused-matmul tolerance exception and gfx12 FP16 MatmulBias skips tracked by [#8033](https://github.com/ROCm/rocm-libraries/issues/8033).
+- **HIP-kernel provider:** [HIP_MLOPS_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml) and [ASM_SDPA_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) record current skips and tolerance exceptions. Disabled provider-mode rocKE Python tests are tracked by [#10497](https://github.com/ROCm/rocm-libraries/issues/10497).
 
 ## Failures, exclusions, and retries
 

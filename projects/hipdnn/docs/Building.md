@@ -282,7 +282,7 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is simply the default check. See [Testing Strategy § CI Model and Dated Workflow Snapshot](./testing/TESTING_STRATEGY.md#ci-model-and-dated-workflow-snapshot) for what each tier covers.
+> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is the default check. See [Testing Strategy § CI Model and Dated Workflow Snapshot](./testing/TESTING_STRATEGY.md#ci-model-and-dated-workflow-snapshot) for current category semantics.
 
 **Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
@@ -357,7 +357,7 @@ The `hipdnn-`prefixed target names below work in both the standalone and superbu
 |--------|-------------|
 | \<no target\> | Build all components |
 | `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./testing/TESTING.md)) |
-| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, `full`, `unit`, `integration` |
+| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, and `full` |
 | `hipdnn-format` | Auto-format all C++ source files |
 | `hipdnn-check-format` | Check code formatting compliance |
 | `hipdnn-tidy` | Run clang-tidy on hipDNN sources |
@@ -379,10 +379,6 @@ To build a target, for example `hipdnn-check` to build and run all tests:
 cmake --build build/release --target hipdnn-check
 ```
 
-Or run it through Ninja directly from the build directory:
-```bash
-projects/hipdnn/build/release> ninja hipdnn-check
-```
 
 ## Superbuild
 
@@ -403,7 +399,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. The per-component `ninja` check targets do not require it. For test category targets and other details, see [Testing](./testing/TESTING.md#development-workflow).
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. For test category targets and other details, see [Testing](./testing/TESTING.md#development-workflow).
 
 > [!NOTE]
 > `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./testing/TESTING.md#development-workflow) for the available test paths.
@@ -523,7 +519,7 @@ Test targets (each `<component>-check` has per-category variants, and each targe
 | `hipblaslt-provider-<category>-check` | Run hipblaslt-provider tests for a category: `quick`, `standard`, `comprehensive`, `full` |
 | `hipblaslt-provider-external-integration-check` | Run the cross-provider integration tests for hipblaslt-provider |
 | `hipdnn-integration-tests-check` | Run all cross-provider integration tests |
-| `hipdnn-integration-tests-<category>-check` | Run integration tests for a category: `unit`, `integration` |
+| `hipdnn-integration-tests-<category>-check` | Run integration tests for a configured category |
 
 hip-kernel-provider does not register `-check` targets; its tests are staged through its install bucket rather than the shared test-target machinery.
 

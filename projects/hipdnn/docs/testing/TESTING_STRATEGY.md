@@ -37,16 +37,6 @@ Statements labeled **Current state** describe repository behavior verified on th
 
 In this target model, GPU hardware is not required to complete a unit suite. Logic that only becomes meaningful with a real HIP runtime, loaded production plugin, dependency handle, runtime compiler, or dispatched kernel belongs in integration testing.
 
-### Current Classification Debt
-
-**Current state:** Checked-in `unit` binaries do not yet fully conform to the target model:
-
-- backend unit tests load controlled shared test plugins and include HIP device paths;
-- Data SDK and Test SDK unit binaries include device-memory cases guarded by `SKIP_IF_NO_DEVICES()`;
-- provider unit binaries mix isolated adapter tests with real MIOpen or hipBLASLt handles, runtime compilation, embedded kernels, and device-gated cases.
-
-Those tests can complete on no-device runners by skipping affected cases, but each skip is a missing observation. Their current classification does not make device-dependent behavior part of the target unit-test model. This migration debt is tracked in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
-
 ### Target Unit-Test Ownership
 
 | Layer | Primary contract | Outward dependencies replaced |
@@ -112,9 +102,9 @@ The strategy deliberately does not synthesize those fragmented sources into one 
 
 ### Interpretation
 
-CTest semantic labels (`unit` and `integration`) describe test boundaries. Tier labels describe selection breadth. Core hipDNN and provider integration projects maintain separate category definitions; provider tier behavior belongs to the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md).
+The public test categories are `quick`, `standard`, `comprehensive`, and `full`. Provider category mechanics belong to the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md).
 
-**Current state:** In core hipDNN, the wildcard membership starts in `quick` and cascades through all higher labels. Therefore `quick`, `standard`, `comprehensive`, and `full` currently select the same core hipDNN tests. No broader core coverage may be claimed for `standard` or higher labels until [the category definition](../../test_categories.yaml) changes.
+In core hipDNN, `quick` matches every core test and the higher categories inherit the same set. This is intentional behavior, not a coverage gap or a request to differentiate the categories.
 
 ### Snapshot Verified 2026-08-17
 

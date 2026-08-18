@@ -22,7 +22,7 @@ See [Plugin Development](../PluginDevelopment.md) for the plugin boundary and th
 
 ## Development Workflow
 
-Use the path matching your change. For local pre-push validation, run the applicable component's `standard` label, then widen coverage when risk requires it. Core `standard` currently selects the same tests as the other core tiers; provider label contents differ.
+Use the path matching your change. For local pre-push validation, run the applicable component's `standard` label, then widen coverage when risk requires it.
 Build setup, supported presets, target names, and platform prerequisites are owned by [Building hipDNN](../Building.md).
 
 ### Core-only standalone path
@@ -54,7 +54,7 @@ Root CTest registration requires `ROCM_LIBS_ENABLE_ROOT_CTEST=ON` at configure t
 Provider-specific presets and other superbuild choices are listed in [Building hipDNN](../Building.md#superbuild).
 
 `ctest` only runs binaries already present in the build tree; it does not compile changed sources or refresh stale test binaries.
-Always build first after a source change. Generated hipDNN/provider category-check targets and provider external-integration check targets are also safe because they build their declared test dependencies before running their fixed scope.
+Always build first after a source change.
 
 Follow [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md) and complete the non-test contribution checks in [CONTRIBUTING](../../CONTRIBUTING.md) before pushing.
 
@@ -94,7 +94,7 @@ Keep GPU graph-event timing separate from host-submission timing; a graph may di
 
 ## Pre-submit / CI gates
 
-Use the applicable component's `standard` label as the local pre-push convention, noting that core tiers currently collapse to one set and superbuild CI runs unfiltered CTest. Local checks do not replace CI.
+Use the applicable component's `standard` label as the local pre-push convention. Local checks do not replace CI.
 Choose scope from the two paths above, record the exact commands and outcomes in the pull request, and never mark skipped or unrun checks as passed.
 
 Checked-in workflows are the source of truth for requested operating systems, runner labels, build options, static-analysis settings, and test commands. Actual runner assignment, external TheRock configuration, and required GitHub checks must be confirmed from the current workflow run and repository settings.
