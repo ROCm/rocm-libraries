@@ -3,9 +3,8 @@
 #
 # ADD-ONLY: pins the argv -> arguments-dict mapping of parseArguments.
 #
-# Pinned quirk: parseArguments(input) IGNORES its `input` parameter and calls
-# argparse .parse_args() with no list, i.e. it parses sys.argv. Tests set
-# sys.argv accordingly.
+# parseArguments accepts explicit arguments for package handlers while retaining
+# the no-argument command-line behavior.
 ################################################################################
 import importlib
 import os
@@ -24,7 +23,7 @@ BASE = ["prog", "/logic", "/out", "HSA"]
 def _run(monkeypatch, extra=None):
     argv = list(BASE) + (extra or [])
     monkeypatch.setattr(sys, "argv", argv)
-    return PA.parseArguments(["this", "is", "ignored"])
+    return PA.parseArguments(argv[1:])
 
 
 # ---------------------------------------------------------------------------
@@ -54,10 +53,16 @@ def test_defaults(monkeypatch):
     assert a["GenSolTable"] is True
 
 
-def test_quirk_input_param_ignored(monkeypatch):
-    # Even with a fully-formed `input` list, sys.argv is what gets parsed.
+def test_explicit_input_takes_precedence(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
-    a = PA.parseArguments(["prog", "/fake", "/fakeout", "OCL"])
+    a = PA.parseArguments(["/fake", "/fakeout", "OCL"])
+    assert a["RuntimeLanguage"] == "OCL"
+    assert a["LogicPath"] == "/fake"
+
+
+def test_no_argument_uses_sys_argv(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
+    a = PA.parseArguments()
     assert a["RuntimeLanguage"] == "HIP"
     assert a["LogicPath"] == "/real"
 

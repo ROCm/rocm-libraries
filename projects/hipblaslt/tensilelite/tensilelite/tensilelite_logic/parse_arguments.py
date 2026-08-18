@@ -24,13 +24,14 @@
 
 from argparse import ArgumentParser
 from pathlib import Path
+from typing import Optional, Sequence
 
 from tensilelite.Toolchain.Validators import ToolchainDefaults
 
 BUNDLED_KNOWN_BUGS = object()
 
 
-def parseArguments():
+def parseArguments(argv: Optional[Sequence[str]] = None):
     """
     Returns:
         A dictionary containing the keys representing options and their values.
@@ -123,6 +124,6 @@ def parseArguments():
         help="exit non-zero when a known-bugs entry no longer fails validation "
         "(a landed fix); use in CI to force removal of stale entries",
     )
-    args = argParser.parse_args()
+    args = argParser.parse_args(argv)
 
     return args

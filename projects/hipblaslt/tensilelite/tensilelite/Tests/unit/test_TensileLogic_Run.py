@@ -95,6 +95,29 @@ class TestSetup:
                 assert "logic1.yaml" in yaml_names
                 assert "logic2.yaml" in yaml_names
 
+    def test_setup_forwards_explicit_argv(self):
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain', return_value='/usr/bin/g++'), \
+             patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap', return_value={}), \
+             patch('tensilelite.tensilelite_logic.run.assignGlobalParameters'), \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity'), \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                logic_file = Path(tmpdir) / 'logic.yaml'
+                logic_file.write_text('dummy')
+                mock_parse_args.return_value = Mock(
+                    Verbose=1,
+                    Jobs=1,
+                    CxxCompiler='/usr/bin/g++',
+                    CheckAll=True,
+                    CheckOnlyCustomKernels=False,
+                    Architecture='all',
+                    LogicPath=str(logic_file),
+                )
+
+                _setup(['--check-all', str(logic_file)])
+
+            mock_parse_args.assert_called_once_with(['--check-all', str(logic_file)])
+
     def test_setup_exits_with_no_checks(self):
         """_setup should exit if no checks specified"""
         with patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args, \
@@ -409,6 +432,24 @@ class TestMain:
                 mock_setup.assert_called_once()
                 mock_load_bugs.assert_called_once()
                 mock_parallel_map.assert_called_once()
+
+    def test_main_forwards_explicit_argv_and_returns_zero(self):
+        from tensilelite.tensilelite_logic.run import main
+
+        argv = ["logic", "--check-all"]
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2', return_value=[(1, 1, 0, 0, 0)]), \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs', return_value=frozenset()), \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures'), \
+             patch('warnings.filterwarnings'):
+            mock_args = Mock(Verbose=2, KnownBugs=None)
+            mock_setup.return_value = (
+                1, {}, Path('.'), [Path('logic.yaml')],
+                Check(OnlyCustomKernels=False, All=True), mock_args,
+            )
+
+            assert main(argv) == 0
+            mock_setup.assert_called_once_with(argv)
 
     def test_main_with_rejects(self):
         """main should exit with code 1 when solutions are rejected"""
