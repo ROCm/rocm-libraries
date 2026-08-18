@@ -3313,16 +3313,104 @@ class LogicalScheduler:
                 return i
         return len(em_list)
 
+    @staticmethod
+    def _initC_inst_kind(inst) -> str:
+        """Classify one initC instruction for dependency-aware splitting."""
+        from rocisa.code import TextBlock
+        if isinstance(inst, TextBlock):
+            return 'comment'
+        name = type(inst).__name__
+        if name in ('VAccvgprWrite', 'VMovB32'):
+            return 'scalar'
+        if name == 'MFMAInstruction':
+            return 'mfma'
+        if name in ('SNop', 'SWaitAlu'):
+            return 'barrier'
+        return 'other'
+
+    @classmethod
+    def _split_initC_instructions(cls, instructions: list) -> list:
+        """Split populated initC into [after_GR_A, after_GR_B] instruction chunks.
+
+        Phase order: comments -> zero-src scalars -> barrier -> MFMAs -> remainder scalars.
+        The zero-src + barrier chunk must precede any MFMA; MFMAs are halved across slots.
+        """
+        if not instructions:
+            return [[], []]
+
+        preamble, zerosrc, barrier, mfmas, remainder = [], [], [], [], []
+        phase = 'preamble'
+        for inst in instructions:
+            kind = cls._initC_inst_kind(inst)
+            if phase == 'preamble':
+                if kind == 'comment':
+                    preamble.append(inst)
+                    continue
+                phase = 'zerosrc'
+            if phase == 'zerosrc':
+                if kind == 'mfma':
+                    mfmas.append(inst)
+                    phase = 'mfma'
+                elif kind == 'barrier':
+                    barrier.append(inst)
+                    phase = 'post_barrier'
+                elif kind == 'scalar':
+                    zerosrc.append(inst)
+                else:
+                    zerosrc.append(inst)
+            elif phase == 'post_barrier':
+                if kind == 'mfma':
+                    mfmas.append(inst)
+                    phase = 'mfma'
+                else:
+                    barrier.append(inst)
+            elif phase == 'mfma':
+                if kind == 'mfma':
+                    mfmas.append(inst)
+                else:
+                    remainder.append(inst)
+                    phase = 'remainder'
+            else:
+                remainder.append(inst)
+
+        if not mfmas:
+            mid = max(1, (len(zerosrc) + 1) // 2)
+            return [preamble + zerosrc[:mid] + barrier,
+                    zerosrc[mid:] + remainder]
+
+        mid = len(mfmas) // 2
+        chunk0 = preamble + zerosrc + barrier + mfmas[:mid]
+        chunk1 = mfmas[mid:] + remainder
+        return [chunk0, chunk1]
+
+    @staticmethod
+    def _make_initC_chunk_modules(chunks, init_source, start_id: int) -> list:
+        """Wrap initC instruction chunks as EmittedModules (first non-empty keeps initC_overlap)."""
+        modules = []
+        mid = start_id
+        first = True
+        for chunk in chunks:
+            if not chunk:
+                continue
+            modules.append(EmittedModule(
+                moduleId=mid,
+                instructions=list(chunk),
+                before=None,
+                source=init_source if first else None))
+            first = False
+            mid += 1
+        return modules
+
     def _injectPreloopFineCover(self, em_list, cover_modules) -> bool:
         """Path 4 fine: GR shadow fill with initC + cover interleaved between MT0 loads.
 
         Reorders MT0 prefetch to:
-          GR(A) -> initC -> GR(B) -> cover(LRA,…) -> GR(SA,SB) -> GRInc -> wait
+          GR(A) -> initC[0] -> GR(B) -> initC[1] -> cover(LRA,…) -> GR(SA,SB) -> GRInc -> wait
 
-        Both initC and the cover now run while the A/B buffer_loads are in flight,
-        where before they sat after the whole prefetch batch. SkipPreloopGR still
-        lands on the initC module (initC_overlap label), so the K<DepthU tail path
-        enters at initC and branches out before reaching GR(B).
+        initC instructions (v_accvgpr_write / v_mfma_i32 / v_mov) split across the A/B
+        issue gap when populated; otherwise the whole initC block follows GR(A). Cover
+        and initC run while A/B buffer_loads are in flight. SkipPreloopGR stays on the
+        first initC chunk (initC_overlap label).
         """
         init_idx = next((i for i, em in enumerate(em_list)
                          if em.opType == 'inline'
@@ -3357,12 +3445,29 @@ class LogicalScheduler:
             em_list[:] = head + tail
             return False
 
+        chunks = self._split_initC_instructions(init_em.instructions)
+
         new_id = max((em.moduleId for em in em_list), default=-1) + 1
 
         new_head = list(prefix)
         new_head.append(mt0_gr['A'])
-        new_head.append(init_em)
+        init_chunk_mods = (self._make_initC_chunk_modules(chunks, init_em.source, new_id)
+                           if init_em.instructions and any(chunks) else [])
+        if len(init_chunk_mods) > 1:
+            new_id += len(init_chunk_mods)
+            new_head.append(init_chunk_mods[0])
+            rest_init = init_chunk_mods[1:]
+            # The tail-only path branches over the prefetch loads, so it would run
+            # only the first chunk. Hand emitMainAndExitLoops the whole initC so it
+            # can emit a contiguous copy on that path (accumulators must be fully
+            # zeroed before the tail loop accumulates into them).
+            self._preloopSplitInitCInstructions = list(init_em.instructions)
+        else:
+            new_head.append(init_chunk_mods[0] if init_chunk_mods else init_em)
+            rest_init = []
+            self._preloopSplitInitCInstructions = None
         new_head.append(mt0_gr['B'])
+        new_head.extend(rest_init)
         new_head.append(EmittedModule(moduleId=new_id,
                                       instructions=list(cover_modules),
                                       before=None,
@@ -4368,29 +4473,51 @@ class LogicalScheduler:
                              if getattr(em.source, 'label', None) == 'initC_overlap'), None)
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
-            # After initC, jump to the tail loop when K < DepthU. Under PLSIN the
-            # FUSED NLL bodies sit between here and SkipToEnd and push it past the
-            # +-simm16 short-branch range, so this arm needs the 32-bit form.
-            if plsin:
-                tailJump = writer.longBranchScc1(
-                    endLabel, posNeg=1,
-                    comment="K < DepthU: jump to tail loop (long)")
-            else:
-                tailJump = SCBranchSCC1(labelName=endLabel.getLabelName(),
+            splitInitC = getattr(self, "_preloopSplitInitCInstructions", None)
+
+            def makeTailGuard():
+                # After initC, jump to the tail loop when K < DepthU. Under PLSIN the
+                # FUSED NLL bodies sit between here and SkipToEnd and push it past the
+                # +-simm16 short-branch range, so this arm needs the 32-bit form.
+                if plsin:
+                    jump = writer.longBranchScc1(
+                        endLabel, posNeg=1,
+                        comment="K < DepthU: jump to tail loop (long)")
+                else:
+                    jump = SCBranchSCC1(labelName=endLabel.getLabelName(),
                                         comment="K < DepthU: jump to tail loop")
-            em_list.insert(init_idx + 1, EmittedModule(
-                moduleId=next_id,
-                instructions=[
-                    SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                comment="K < DepthU? initC done, run tail only"),
-                    tailJump,
-                ]))
-            next_id += 1
-            if skipGRForTail:
-                # Land the skip-GR guard right before initC.
-                em_list.insert(init_idx, EmittedModule(
+                return [SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                  comment="K < DepthU? initC done, run tail only"),
+                        jump]
+
+            if splitInitC and skipGRForTail:
+                # initC chunks straddle the prefetch loads the guard branches over,
+                # so give that path a private contiguous copy after the MT0 region
+                # and branch the fast path around it.
+                doneLabel = Label("PreloopInitCDone", "")
+                wait_idx = next((i for i, em in enumerate(em_list)
+                                 if em.opType == 'wait_gr'), len(em_list))
+                for offset, instructions in enumerate((
+                        [SBranch(labelName=doneLabel.getLabelName(),
+                                 comment="K >= DepthU: initC already done inline")],
+                        [skipGRLabel]
+                        + [copy.deepcopy(inst) for inst in splitInitC]
+                        + makeTailGuard(),
+                        [doneLabel])):
+                    em_list.insert(wait_idx + offset,
+                                   EmittedModule(moduleId=next_id + offset,
+                                                 instructions=instructions))
+                next_id += 3
+            else:
+                em_list.insert(init_idx + 1, EmittedModule(
                     moduleId=next_id,
-                    instructions=[skipGRLabel]))
+                    instructions=makeTailGuard()))
+                next_id += 1
+                if skipGRForTail:
+                    # Land the skip-GR guard right before initC.
+                    em_list.insert(init_idx, EmittedModule(
+                        moduleId=next_id,
+                        instructions=[skipGRLabel]))
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   preloop_emitted, schedule=False))
 
