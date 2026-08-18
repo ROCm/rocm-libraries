@@ -17,9 +17,21 @@
 //
 // This header is intentionally NOT installed.
 //
-// HAND-MAINTAINED. Add a `#define miopenNewFn miopenNewFn_impl` line here
-// whenever a new MIOPEN_EXPORT function is added to include/miopen/miopen.h,
-// and a matching forwarding stub to src/private/wrapper.cpp.
+// HAND-MAINTAINED. Whenever a MIOPEN_EXPORT function is added to, removed
+// from, or has its signature changed in include/miopen/miopen.h, four
+// artifacts must be updated in lockstep:
+//
+//   1. include/miopen/miopen.h            the public declaration
+//   2. src/private/miopen_private_rename.h  this file: the #define
+//   3. src/private/miopen_impl.h          the _impl declaration the wrapper
+//                                         (and, later, the hipDNN provider)
+//                                         compiles against
+//   4. src/private/wrapper.cpp            the forwarding stub
+//
+// The name half of this invariant is enforced by script/check_public_abi.py in
+// CI: an added or dropped public symbol turns the baseline gate red. The
+// signature half is NOT enforced anywhere -- these are extern "C" declarations,
+// so a drifted signature links cleanly and misbehaves at run time.
 #ifndef MIOPEN_PRIVATE_RENAME_H
 #define MIOPEN_PRIVATE_RENAME_H
 
