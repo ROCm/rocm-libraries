@@ -443,8 +443,8 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
-    # AIHPBLAS-4253: kernel distributes Stream-K extra iters within each tile
-    # when skGrid % skTiles == 0. Default False so older/custom kernels do not
+    # Kernel distributes Stream-K extra iters within each tile when
+    # skGrid % skTiles == 0. Default False so older/custom kernels do not
     # claim the capability; newly generated StreamK 3 / SK5 set it True.
     "SupportStreamKPerTileExtraIters": False,
     # Use GG as G's backend

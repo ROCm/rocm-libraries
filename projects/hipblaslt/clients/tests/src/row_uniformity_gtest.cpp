@@ -1013,11 +1013,11 @@ namespace
         {"RaggedChunks", 100, 100, 300, 1, false, 100, 33, 100, false},
         {"MultipleGridRaggedChunks", 16, 30, 64, 1, false, 16, 7, 32, false},
 
-        // AIHPBLAS-4253 spreadsheet case: T=4, I=17, g=8 = T*F with F=2 and
-        // F does not divide I. Without the capability the global mapping is
-        // non-uniform; with it, every tile gets the same (9,8) fold signature.
-        {"PerTileExtraItersSpreadsheet_NoCap", 4, 17, 8, 1, false, 4, 8, 4, false, false},
-        {"PerTileExtraItersSpreadsheet_Cap", 4, 17, 8, 1, false, 4, 8, 4, true, true},
+        // T=4, I=17, g=8 = T*F with F=2 and F does not divide I. Without the
+        // capability the global mapping is non-uniform; with it, every tile
+        // gets the same (9,8) fold signature.
+        {"PerTileExtraIters_T4I17G8_NoCap", 4, 17, 8, 1, false, 4, 8, 4, false, false},
+        {"PerTileExtraIters_T4I17G8_Cap", 4, 17, 8, 1, false, 4, 8, 4, true, true},
 
         // Same all-partial remainder shape as MultipleGridRaggedChunks, but the
         // capability admits it.
@@ -1074,9 +1074,9 @@ namespace
                                  return std::string(info.param.name);
                              });
 
-    // AIHPBLAS-4253 host mirror of StreamK.py skAssignItersPerTile, checked
-    // against the reporter spreadsheet ExtraItersDistribution (T=4, I=17, g=8).
-    TEST(RowUniformityPerTileExtraIters_pre_checkin, SpreadsheetStartEndMatchesFormula)
+    // Host mirror of StreamK.py skAssignItersPerTile for T=4, I=17, g=8
+    // (F=2 does not divide I; each tile gets a (9,8) fold).
+    TEST(RowUniformityPerTileExtraIters_pre_checkin, PerTileStartEndMatchesFormula)
     {
         constexpr size_t tiles        = 4;
         constexpr size_t itersPerTile = 17;

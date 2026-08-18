@@ -234,7 +234,7 @@ namespace TensileLite
      * SKItersPerWG*skGrid under the historical global first-E mapping;
      * kernels with InternalArgsSupport::perTileExtraIters may redistribute
      * those extras within each tile when skGrid % skTiles == 0
-     * (AIHPBLAS-4253 / StreamK.py skAssignIters).
+     * (StreamK.py skAssignIters).
      */
     struct StreamKStaticSplit
     {
@@ -276,8 +276,8 @@ namespace TensileLite
      * @param tiles             The same batch-inclusive tile count fed to it.
      * @param itersPerTile      The same clamped iterations per tile fed to it.
      * @param skGrid            The resolved StreamK grid packed into the split.
-     * @param perTileExtraIters True when the selected kernel implements
-     *                          AIHPBLAS-4253 per-tile extra-iters distribution
+     * @param perTileExtraIters True when the selected kernel redistributes
+     *                          Stream-K extras within each tile
      *                          (InternalArgsSupport::perTileExtraIters).
      */
     TENSILELITEHOST_EXPORT bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
@@ -289,8 +289,8 @@ namespace TensileLite
     /**
      * Iteration range [start, end) assigned to workgroup w under the static
      * two-tile StreamK mapping. When perTileExtraIters is true and
-     * skGrid % tiles == 0, extras are distributed within each tile
-     * (AIHPBLAS-4253); otherwise the historical global first-E mapping is used.
+     * skGrid % tiles == 0, extras are distributed within each tile;
+     * otherwise the historical global first-E mapping is used.
      */
     struct StreamKWorkgroupIterRange
     {
@@ -701,10 +701,10 @@ namespace TensileLite
             bool gsu                = true;
             bool wgm                = true;
             bool staggerU           = true;
-            // AIHPBLAS-4253: kernel distributes Stream-K extra iters within each
-            // tile when skGrid % skTiles == 0. Older/custom kernels leave this
-            // false; newly generated StreamK 3 / SK5 set it true. 4254 grid
-            // steering will consult the same bit.
+            // Kernel distributes Stream-K extra iters within each tile when
+            // skGrid % skTiles == 0. Older/custom kernels leave this false;
+            // newly generated StreamK 3 / SK5 set it true. Coherence-mode
+            // grid steering consults the same bit.
             bool perTileExtraIters  = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;

@@ -780,7 +780,7 @@ class StreamK(Component):
                                comment="Set end iter"))
 
     def skAssignItersPerTile(self, writer, kernel, module, sIdx, sIpw, sIter, skConstsInVgprs):
-        """Per-tile extra-iters (AIHPBLAS-4253) when skGrid % skTiles == 0.
+        """Per-tile extra-iters when skGrid % skTiles == 0.
 
         F = skGrid/skTiles, q = w/F, s = w%F, I = ItersPerTile, W = SKItersPerWG:
           start = q*I + s*W + min(s, I%F)
@@ -834,7 +834,7 @@ class StreamK(Component):
                            comment="end = start + W + (s < remI)"))
 
     def skAssignIters(self, writer, kernel, module, sIdx, sIpw, sSkExtraIters, sIter, skConstsInVgprs):
-        """Choose per-tile or global extra-iters mapping (AIHPBLAS-4253).
+        """Choose per-tile or global extra-iters mapping.
 
         When skTiles != 0 and skGrid % skTiles == 0, distribute extras within
         each tile; otherwise keep the historical global first-E mapping.
@@ -1224,9 +1224,9 @@ class StreamK(Component):
             # Start Tree Fixup
             module.add(skFixupTreeLabel)
 
-            # partialIdx / coop-group start. AIHPBLAS-4253: when skGrid % skTiles
-            # == 0 the WGs of each tile are contiguous, so partialIdx = StreamKIdx % F
-            # and coopEnd = StreamKIdx - partialIdx + F. Otherwise reverse-engineer
+            # partialIdx / coop-group start. When skGrid % skTiles == 0 the WGs
+            # of each tile are contiguous, so partialIdx = StreamKIdx % F and
+            # coopEnd = StreamKIdx - partialIdx + F. Otherwise reverse-engineer
             # under the historical global first-E mapping.
             sCoopEnd = writer.sgprPool.checkOut(1, "SK_CoopEnd")
             module.add(SMovB32(dst=sgpr(sCoopEnd), src=0, comment="0 => use global past-tile check"))
@@ -3351,8 +3351,8 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SCBranchSCC1(labelName=skInitDone.getLabelName(), comment="Done init"))
 
         # If there are no DP tiles to do, regular SK init.
-        # AIHPBLAS-4253: when skGrid % skTiles == 0, extras are distributed
-        # within each tile; otherwise the historical global first-E mapping.
+        # When skGrid % skTiles == 0, extras are distributed within each tile;
+        # otherwise the historical global first-E mapping.
         with writer.allocTmpSgpr(1, tag="extraIters") as extraItersRes, \
              writer.allocTmpSgpr(2, alignment=1, tag="SKIter") as skIterRes:
             sSkExtraIters = extraItersRes.idx
@@ -3475,7 +3475,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SCmpLeU32(src0=sgpr(sTmp+3), src1=sgpr("StreamKIter"), comment="Check if continuing in SK section"))
         module.add(SCBranchSCC1(labelName=skUpdateDone.getLabelName(), comment="Done update"))
         # if sTmp+1 > sTmp+3 and StreamKIter < sTmp+3, switch from DP to SK (add dpShift)
-        # AIHPBLAS-4253: per-tile extras when skGrid % skTiles == 0
+        # Per-tile extras when skGrid % skTiles == 0.
         with writer.allocTmpSgpr(1, tag="extraIters") as extraItersRes, \
              writer.allocTmpSgpr(2, alignment=1, tag="SKIter") as skIterRes:
             sSkExtraIters = extraItersRes.idx
@@ -4213,7 +4213,7 @@ class StreamKHybrid(StreamK):
             mod.add(SCBranchSCC1(labelName=sk3InitDone.getLabelName(),
                                  comment="Done init"))
 
-            # No DP tiles to do, regular SK init (AIHPBLAS-4253 per-tile when applicable)
+            # No DP tiles to do, regular SK init (per-tile extras when applicable)
             sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
             sIter = writer.sgprPool.checkOut(2, "SKIter")
             mod.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIter))
@@ -4542,7 +4542,7 @@ class StreamKHybrid(StreamK):
             mod.add(SCBranchSCC1(labelName=skUpdateDone.getLabelName(),
                                     comment="Done update"))
 
-            # Switch from DP to SK (AIHPBLAS-4253 per-tile when applicable)
+            # Switch from DP to SK (per-tile extras when applicable)
             sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
             sIter = writer.sgprPool.checkOut(2, "SKIter")
             mod.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIter))
