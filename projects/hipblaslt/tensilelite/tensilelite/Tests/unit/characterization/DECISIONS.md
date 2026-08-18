@@ -169,26 +169,26 @@ characterization assertion can distinguish mutant from original:
 
 **M2 — accepted `# pragma: no mutate` (expanded mutation run).** These
 equivalent source forms are fenced so mutmut does not keep reporting them:
-- `Tensile.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
+- `tensilelite.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
   `range(0, maxOrderID + 1)` membership check carries `# pragma: no mutate`
   because `range(0, n)` and `range(n)` produce the same values; the explicit
   lower bound documents the valid OrderID interval.
-- `Tensile.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
+- `tensilelite.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
   `range(0, 256)` membership check carries `# pragma: no mutate` because
   `range(0, n)` and `range(n)` produce the same values; the explicit lower bound
   documents the half-open GridDim interval `[0, 256)`.
 
 **M3 — accepted equivalent mutants (expanded mutation run).** These survivors
 are behaviorally equivalent on the specific public surface under test:
-- `Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
+- `tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
   changing `cu` to `CU` inside the regex literal is equivalent because the search
   uses `re.IGNORECASE`.
 
 Two former survivors are intentionally no longer accepted equivalents:
-`Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+`tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
 is avoided by making the missing-key / `-1` sentinel branch explicit before
 reading the fixed `WorkGroupMappingXCC` value, and
-`Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
+`tensilelite.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
 `SpinnyThing.increment` now uses its `value` parameter to advance by caller
 selected steps.
 
@@ -197,10 +197,10 @@ extended past the original five files to add `Common/DataType.py`,
 `Common/Types.py`, `Common/ValidParameters.py`, `SolutionStructs/Naming.py`, and
 `SolutionStructs/Utilities.py`, with matching characterization directories added
 to `pytest_add_cli_args_test_selection`. Source-path mapping for the widened slice:
-DataType → `Tensile/Common/DataType.py`; CommonTypes → `Tensile/Common/Types.py`;
-ValidParameters → `Tensile/Common/ValidParameters.py`; Naming →
-`Tensile/SolutionStructs/Naming.py`; SolutionStructsUtils →
-`Tensile/SolutionStructs/Utilities.py`.
+DataType → `tensilelite/Common/DataType.py`; CommonTypes → `tensilelite/Common/Types.py`;
+ValidParameters → `tensilelite/Common/ValidParameters.py`; Naming →
+`tensilelite/SolutionStructs/Naming.py`; SolutionStructsUtils →
+`tensilelite/SolutionStructs/Utilities.py`.
 
 **M5 — SolutionStructs Naming/Utilities mutation outcome.** `Naming.py`: 455
 generated, 453 killed, 2 accepted equivalents, 0 no-test mutants → 100% covered
@@ -212,7 +212,7 @@ explicit no-test entries and accepted equivalents.
 
 **Pinned equivalent (Naming).**
 **ADR:** [`adr/0003-pin-split-gsu-naming-crash.md`](adr/0003-pin-split-gsu-naming-crash.md).
-`Tensile.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
+`tensilelite.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
 `state["GlobalSplitU"] = "M"` expression at `Naming.py:172`; every string form
 reaches the same pinned string-versus-integer `TypeError` before it can affect a
 name. [`AIHPBLAS-4297`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4297)
