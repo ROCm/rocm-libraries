@@ -266,10 +266,12 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
         // SwInstructionPrefetchRelStaticPass handles multiple functions directly.
         pm.addPass(createFlattenCalleesPass(module.getFunctions()));
-        // gfx1250 hardware-entrypoint prologue:
-        // `global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT` + `v_nop`.
+        // gfx1250 hardware-entrypoint prologue: `s_mov_b64 s[64:65], 0` + `v_nop` +
+        // `global_prefetch_b8 v0, [s64, s65] scope:SCOPE_SE th:TH_LOAD_RT`.
         // global_prefetch_b8 makes the first VMEM instruction non-clause-bound (it
-        // is a VMEM op that ignores EXEC); v_nop is a safe first VALU instruction.
+        // is a VMEM op that ignores EXEC); s[64:65] is never HW-initialized so zeroing
+        // it is free, and v_nop is a safe first VALU instruction that also covers the
+        // write-to-use delay before the prefetch reads the pair.
         // Runs after flatten (so the entry's first instruction is the kernel's
         // first) and before SW-prefetch insertion so the prefetch pass anchors
         // its byte layout on the final entry (prologue included) and its
