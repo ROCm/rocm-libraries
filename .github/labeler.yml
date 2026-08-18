@@ -184,7 +184,10 @@ github actions:
     - .github/*.json
     - .github/*.yml
 
-# These labels help distinguish which subteams are responsible for reviews for changes made in CK
+# These labels help distinguish which subteams are responsible for reviews for changes made in CK.
+
+# Legacy (pre-ck_tile) convolution: the grouped/forward/backward conv device ops and their gridwise
+# kernels, the instance library, plus the im2col/col2im tensor rearrange around them.
 "ck: convolution-legacy":
 - changed-files:
   - any-glob-to-any-file:
@@ -197,6 +200,8 @@ github actions:
     - 'projects/composablekernel/{example,test,client_example}/*/*{conv_,conv.,convnd,conv1d,conv2d,conv3d,convolution,convscale,convinvscale}*'
     - 'projects/composablekernel/{example,test,client_example}/*/*{im2col,img2col,col2im,image_to_column,column_to_image}*'
 
+# Attention and mixture-of-experts, in both legacy CK and ck_tile: fmha forward/backward, the legacy
+# softmax-gemm path, MoE gemm and sorting, and the top-k softmax gating they route through.
 "ck: attention-moe":
 - changed-files:
   - any-glob-to-any-file:
