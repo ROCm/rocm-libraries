@@ -149,6 +149,21 @@ namespace TensileLite
                              "non-work-stealing solution will be used instead.\n";
             });
         }
+
+        // One-shot notice when coherence-mode grid steering displaces a developer
+        // override (skFixedGrid) or production CU knobs (skMaxCUs / skGridMultiplier).
+        void warnStreamKCoherenceGridSnapOnce(size_t g0, size_t gStar)
+        {
+            static std::once_flag warnedFlag;
+            std::call_once(warnedFlag, [g0, gStar]() {
+                std::cerr << "hipBLASLt Warning: uniformSummationOrder steered the Stream-K grid "
+                             "from "
+                          << g0 << " to " << gStar
+                          << " (never upward) so the launch stays row-uniform; "
+                             "skFixedGrid / skMaxCUs / skGridMultiplier act as hints under "
+                             "coherence mode.\n";
+            });
+        }
     }
 
     StreamKStaticSplit streamKStaticSplit(
@@ -4041,7 +4056,16 @@ namespace TensileLite
                 const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
-                auto   reductionStrat = getSKReduction(problem, hardware);
+                // Mirror solve()'s SK4 / SK5-dynamic tree forcing so the grid
+                // and workspace reported here match the launch reduction.
+                origami::reduction_t reductionStrat;
+                if(sizeMapping.streamK == 4)
+                    reductionStrat = origami::reduction_t::tree;
+                else if(sizeMapping.streamK == 5)
+                    reductionStrat = effectiveDynamic ? origami::reduction_t::tree
+                                                      : getSKReduction(problem, hardware);
+                else
+                    reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGridImpl(*this,
                                               problem,
                                               hardware,
@@ -4255,6 +4279,22 @@ namespace TensileLite
                 *(hipAMDGPU->analyticalHardware),
                 origami_config,
                 static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
+        }
+
+        // AIHPBLAS-4254 P3: coherence mode rejects parallel reduction for the
+        // static two-tile packer. Force tree so query (requiredWorkspaceSize)
+        // and launch (solve) agree, and so grid steering sees a tree-shaped
+        // natural grid. Mirror the gate's staticTwoTilePacking predicate.
+        if(problem.getParams().uniformSummationOrder())
+        {
+            const bool effectiveDynamic
+                = (sizeMapping.streamK == 5) ? streamK5EffectiveDynamic(problem, hardware)
+                                             : false;
+            const bool staticTwoTilePacking
+                = (sizeMapping.streamK == 3)
+                  || (sizeMapping.streamK == 5 && !effectiveDynamic);
+            if(staticTwoTilePacking)
+                reductionStrat = origami::reduction_t::tree;
         }
 
         return reductionStrat;
@@ -4852,6 +4892,63 @@ namespace TensileLite
             else
             {
                 skGrid = cuCount;
+            }
+
+            // AIHPBLAS-4254 P0: under coherence + static two-tile packing, snap
+            // the chain output g0 onto an admissible uniform grid, never upward.
+            // Must run before the magic-division guard below so that guard still
+            // validates the final grid (a snap after it can emit out-of-range
+            // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
+            if(problem.getParams().uniformSummationOrder() && tiles > 0 && skGrid > 0)
+            {
+                const bool effectiveDynamic
+                    = (self.sizeMapping.streamK == 5)
+                      && (sk5EffectiveDynamic != nullptr
+                              ? *sk5EffectiveDynamic
+                              : self.streamK5EffectiveDynamic(problem, hardware));
+                const bool staticTwoTilePacking
+                    = (self.sizeMapping.streamK == 3)
+                      || (self.sizeMapping.streamK == 5 && !effectiveDynamic);
+                if(staticTwoTilePacking)
+                {
+                    const size_t g0 = skGrid;
+                    // Same clamp as the packer / gate: K==0 yields I==0 otherwise.
+                    const size_t I
+                        = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
+                    // Matches origami::streamk MinItersPerCU (streamk.cpp).
+                    constexpr size_t MinItersPerCU = 8;
+                    const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters;
+
+                    if(g0 > tiles)
+                    {
+                        const size_t F0    = g0 / tiles;
+                        size_t       FStar = 1; // always admissible (all-full)
+                        for(size_t F = F0; F >= 2; --F)
+                        {
+                            if(!perTileExtraIters && (I % F) != 0)
+                                continue;
+                            if((I / F) < MinItersPerCU)
+                                continue;
+                            // F==1 needs no partials; for F>=2 require workspace fit.
+                            if(self.partialTileSize(tiles * F) > problem.workspaceSize())
+                                continue;
+                            FStar = F;
+                            break;
+                        }
+                        skGrid = tiles * FStar;
+                    }
+                    else if((tiles % g0) != 0)
+                    {
+                        skGrid = tiles;
+                    }
+
+                    if(skGrid != g0
+                       && (pAMDGPU->skFixedGrid > 0 || pAMDGPU->skMaxCUs > 0
+                           || pAMDGPU->skGridMultiplier > 1))
+                    {
+                        warnStreamKCoherenceGridSnapOnce(g0, skGrid);
+                    }
+                }
             }
 
             // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
