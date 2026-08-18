@@ -1313,10 +1313,12 @@ namespace TensileLite
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
-                        .size  = {sizes[0], sizes[1], sizes[3]},
-                        .batch = sizes[2],
+                        .size    = {sizes[0], sizes[1], sizes[3]},
+                        .batch   = sizes[2],
                         // CU budget hint; 0 = use all CUs.
                         .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1961,6 +1963,7 @@ namespace TensileLite
                 = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
             if(T_Debug)
             {
+                std::cout << "OCCUPANCY: " << sizeMapping.CUOccupancy << std::endl;
                 std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
                           << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK
                           << ", WGMXCCSPLITK: " << autoWGMXCCSPLITK << std::endl;

@@ -965,7 +965,9 @@ namespace
                         // Skip experimental libraries
                         if(codeObjectFile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(codeObjectFile.c_str()));
+                        THROW_IF_HIP_ERROR_MESSAGE(
+                            adapter.loadCodeObjectFile(codeObjectFile.c_str()),
+                            "loading code object: " + codeObjectFile);
                     } while(FindNextFileA(hfine, &finddata));
                 }
                 else
@@ -985,7 +987,8 @@ namespace
                             continue;
                         if(cofile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(cofile));
+                        THROW_IF_HIP_ERROR_MESSAGE(adapter.loadCodeObjectFile(cofile),
+                                                   "loading code object: " + cofile);
                     }
                 }
                 else if(g == GLOB_NOMATCH)
@@ -1149,6 +1152,12 @@ namespace
     {
         rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
                      << e.what() << std::endl;
+        rocblas_abort();
+    }
+    catch(const rocblas_status& status)
+    {
+        rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
+                     << rocblas_status_to_string(status) << std::endl;
         rocblas_abort();
     }
     catch(...)

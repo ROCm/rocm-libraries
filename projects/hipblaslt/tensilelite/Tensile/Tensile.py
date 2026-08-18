@@ -36,14 +36,16 @@ import json
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
-from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
-from Tensile.Common.Capabilities import makeIsaInfoMap
+from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, architectureMap, \
+                                         baseArchName, detectGlobalCurrentISA, \
+                                         gfxToIsa, isaToGfx
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
 from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
@@ -82,6 +84,7 @@ def executeStepsInConfig(
         probSolDict: dict,
         buildOnly: bool = False,
         solutionPoolFiles: list = None,
+        archNames: Optional[List[str]] = None,
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -101,6 +104,10 @@ def executeStepsInConfig(
         cCompiler (str): The C compiler to use.
         buildOnly (bool): If True, generate and build kernels but skip benchmarking.
         solutionPoolFiles (list): Resolved paths to library logic YAMLs to use as solution pools.
+        archNames (list): The gfx names this build was asked for, when the caller knows
+            them. Only the LibraryClient step needs them: it re-spawns
+            TensileCreateLibrary in a fresh process, and the ISA alone cannot say which
+            gfx1250 stepping to rebuild for.
     """
 
     buildTmpPath = outputPath / "build_tmp"
@@ -182,6 +189,7 @@ def executeStepsInConfig(
                 outputPath,
                 deviceId,
                 gfxName,
+                archNames=archNames,
             )
         flush_timing_buffer()
         print1("")
@@ -671,29 +679,66 @@ def Tensile(userArgs):
         offloadBundler,
     )
 
+    # Requested gfx names, kept alongside the ISAs so architectures that share a
+    # compiler target (gfx1250's steppings) can still be told apart. The ISA and
+    # auto-detect paths identify hardware by ISA alone, which resolves to the
+    # shipping stepping; a config can name a stepping explicitly, see below.
+    archNames = []
     if args.gpuTargets:
-        from Tensile.Common.Architectures import gfxToIsa
         isaList = []
         for arch in args.gpuTargets.split(";"):
             arch = arch.strip()
             if not arch:
                 raise ValueError(f"Invalid GPU target: '{arch}'")
             isa = gfxToIsa(arch)
-            if isa is None:
+            # The ISA alone is too weak a check: it comes from a regex that stops at
+            # the first non-hex character, so a name that merely looks like a stepping
+            # (gfx1250v1, gfx1250v) still resolves to (12,5,0) and would silently
+            # build the shipping stepping. Check the base name, so target IDs and
+            # predicates (gfx942:xnack-, gfx950[cu=64]) keep working as before.
+            if isa is None or baseArchName(arch) not in architectureMap:
                 raise ValueError(f"Unrecognized GPU target: '{arch}'")
             isaList.append(isa)
+            archNames.append(arch)
     elif "ISA" in config["GlobalParameters"]:
         isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in config["GlobalParameters"]["ISA"]]
 
     else:
         isaList = [detectGlobalCurrentISA(device_id, enumerator)]
 
+    # `Architecture:` predates the stepping split and was silently ignored here, so
+    # it is read for the one thing the ISA cannot express -- which stepping -- and
+    # deliberately not for ISA selection, which stays with `ISA:` and auto-detect.
+    # A name for an ISA this build does not cover is therefore ignored as before,
+    # rather than applying an unrelated architecture's capabilities; a stepping is
+    # the one name where ignoring it silently builds the other stepping instead.
+    if not archNames:
+        for arch in str(config["GlobalParameters"].get("Architecture", "")).split(";"):
+            arch = arch.strip()
+            if not arch:
+                continue
+            isa = gfxToIsa(arch)
+            if isa is None or baseArchName(arch) not in architectureMap:
+                raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
+            if isa in isaList:
+                archNames.append(arch)
+            elif baseArchName(arch) in ARCH_COMPILER_TARGET:
+                raise ValueError(
+                    f"Architecture '{arch}' in config requests a stepping of ISA "
+                    f"{tuple(isa)}, which this build does not cover ({isaList}); "
+                    "align the config's ISA with it or drop the stepping."
+                )
+
     if IsaVersion(9, 5, 0) in isaList or IsaVersion(12, 5, 0) in isaList:
         printWarning("HardwareMonitor currently disabled for gfx950 and gfx1250")
         globalParameters["HardwareMonitor"] = False
 
     isaInfoMap = makeIsaInfoMap(isaList, cxxCompiler)
+    applyArchCapOverrides(isaInfoMap, archNames)
     assignGlobalParameters(config.get("GlobalParameters", {}), isaInfoMap)
+
+    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
+    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archNames) else ""
 
     overrideParameters = argUpdatedGlobalParameters(args)
 
@@ -706,7 +751,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles, archNames=archNames)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

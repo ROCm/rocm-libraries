@@ -8,6 +8,7 @@ rocBLAS documentation is available at
 ### Added
 
 * `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`): emits a `rocblas-bench`-replayable line per internal GEMM sub-problem, annotated with the selected kernel name (Tensile backend only) and the source backend (`hipblaslt` or `tensile`). Useful for decomposing higher-level BLAS3 calls (`trsm`, `trmm`, `syrk`, ...) into individually benchmarkable kernels. Lines also carry `fallback_from=` and `parent_api=` for context.
+* Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
 
 ## rocBLAS 5.6.0
 

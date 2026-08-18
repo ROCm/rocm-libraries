@@ -348,6 +348,12 @@ bool serializeVisit(const SWaitTensorCntData& mod, std::ostream& os) {
     return true;
 }
 
+// SWaitAsyncCntData
+bool serializeVisit(const SWaitAsyncCntData& mod, std::ostream& os) {
+    os << ", mod.swaitasynccnt = { asynccnt = " << static_cast<int>(mod.asynccnt) << " }";
+    return true;
+}
+
 // SWaitStoreCntData
 bool serializeVisit(const SWaitStoreCntData& mod, std::ostream& os) {
     os << ", mod.swaitstorecnt = { storecnt = " << static_cast<int>(mod.storecnt) << " }";
@@ -491,11 +497,12 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 }  // namespace
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
-    return serializeVisit<
-        DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers, CacheScopeModifiers,
-        SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers, True16Modifiers,
-        EXEC, VCC, SWaitCntData, SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
-        MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData, CallTargetData>(mod, os);
+    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
+                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
+                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
+                          SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
+                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
+                          CallTargetData>(mod, os);
 }
 
 /*
@@ -553,6 +560,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                        static_cast<int8_t>(getInt(fields, "kmcnt", -1))));
     } else if (attrKey == "mod.swaittensorcnt") {
         inst->addModifier(SWaitTensorCntData(static_cast<int8_t>(getInt(fields, "tlcnt", -1))));
+    } else if (attrKey == "mod.swaitasynccnt") {
+        inst->addModifier(SWaitAsyncCntData(static_cast<int8_t>(getInt(fields, "asynccnt", -1))));
     } else if (attrKey == "mod.swaitstorecnt") {
         inst->addModifier(SWaitStoreCntData(static_cast<int8_t>(getInt(fields, "storecnt", -1))));
     } else if (attrKey == "mod.mfma") {
