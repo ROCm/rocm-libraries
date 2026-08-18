@@ -30,6 +30,27 @@ function(hipblaslt_resolve_build_rocm_root output)
     set(${output} "${_root}" PARENT_SCOPE)
 endfunction()
 
+function(hipblaslt_resolve_build_rocm_version output)
+    if(HIPBLASLT_ENABLE_THEROCK)
+        if(THEROCK_PACKAGE_VERSION AND NOT THEROCK_PACKAGE_VERSION STREQUAL "git")
+            set(_version "${THEROCK_PACKAGE_VERSION}")
+        elseif(THEROCK_ROCM_VERSION)
+            set(_version "${THEROCK_ROCM_VERSION}")
+        else()
+            # Temporary until TheRock forwards the ROCm version to hipBLASLt.
+            set(_version "0.0.0")
+            # message(FATAL_ERROR
+            #     "HIPBLASLT_ENABLE_THEROCK requires THEROCK_PACKAGE_VERSION or THEROCK_ROCM_VERSION")
+        endif()
+    else()
+        hipblaslt_resolve_build_rocm_root(_root)
+        set(_version_file "${_root}/.info/version")
+        file(READ "${_version_file}" _version)
+        string(STRIP "${_version}" _version)
+    endif()
+    set(${output} "${_version}" PARENT_SCOPE)
+endfunction()
+
 # Sets the HIPBLASLT_PYTHON_COMMAND variable in the parent scope such that it
 # can invoke the Python interpreter valid for the build parameters. Because
 # this may involve a multi token list, it must be used without quotes in

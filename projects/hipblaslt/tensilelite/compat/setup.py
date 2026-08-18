@@ -16,11 +16,21 @@ from setuptools.command.sdist import sdist
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _build_rocm_version() -> str:
+    value = os.environ.get("TENSILELITE_ROCM_VERSION")
+    if not value:
+        raise RuntimeError(
+            "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
+            "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
+        )
+    return value
+
+
 def _distribution_version() -> str:
     metadata_path = _PROJECT_ROOT / "release_metadata.py"
     if metadata_path.is_file():
         metadata = runpy.run_path(str(metadata_path))
-        return metadata["distribution_version"](os.environ.get("ROCM_PATH", "/opt/rocm"))
+        return metadata["distribution_version"](_build_rocm_version())
 
     package_info = Path(__file__).with_name("PKG-INFO")
     if package_info.is_file():
