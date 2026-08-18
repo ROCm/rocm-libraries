@@ -235,16 +235,16 @@ TEST(TestKernelIngestorStateManager, AdmitsTwoKernelsOfOnePackSharingATupleUnder
 
 /// Narrowing does not buy an escape from uniqueness: two kernels a gfx942 device would
 /// both see still name one catalog key, whether they narrowed to reach it or inherited
-/// the pack. The suffix is not a distinct target -- a device satisfies both spellings.
+/// the pack. Overlapping is enough -- the two lists need not be equal.
 TEST(TestKernelIngestorStateManager, RejectsTwoKernelsOfOnePackNarrowedToOverlappingArch)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx942", "gfx950"});
     auto broad = makeKernel(testId(0x90), "broad", 64, "FLOAT");
-    broad.arch = {"gfx942"};
+    broad.arch = {"gfx942", "gfx950"};
     auto narrow = makeKernel(testId(0x92), "narrow", 64, "FLOAT");
-    narrow.arch = {"gfx942:sramecc+"};
+    narrow.arch = {"gfx942"};
     pack.kernels = {broad, narrow};
 
     EXPECT_THROW(StateManager(makeSchema(),
@@ -884,18 +884,17 @@ INSTANTIATE_TEST_SUITE_P(
                     std::vector<KernelDescriptorPack>{pack},
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
             }},
-        // A feature suffix still names the same base target, so one device satisfies both
-        // lists and the tuple really is ambiguous. Plain string equality would let this
-        // construct.
+        // Overlapping lists need not be equal: a gfx942 device satisfies both, so the
+        // tuple really is ambiguous. Plain string equality would let this construct.
         StateManagerConstructionThrowCase{
             "RejectsTwoPacksSharingATupleUnderOverlappingArch",
             "duplicates the metadata tuple",
             [] {
                 auto first = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
-                first.kernels = {makeKernel(testId(0x93), "kernel_bare", 64, "FLOAT")};
-                auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942:sramecc+"});
+                first.kernels = {makeKernel(testId(0x93), "kernel_narrow", 64, "FLOAT")};
+                auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942", "gfx950"});
                 second.id = testId(0x94);
-                second.kernels = {makeKernel(testId(0x95), "kernel_suffixed", 64, "FLOAT")};
+                second.kernels = {makeKernel(testId(0x95), "kernel_broad", 64, "FLOAT")};
                 return std::make_unique<StateManager>(
                     makeSchema(),
                     makeTestMatchers(),

@@ -78,9 +78,11 @@
  *  - RFC 0020 §10.2.1 makes the id the unit of collision; packs and standalone kernels
  *    are keyed by (id, arch), because a per-arch shard ships one id per arch with content
  *    built against that arch. The other five types stay keyed by id alone.
- *  - RFC 0017 §5 calls arch a pack property; a standalone UKD carries `arch` too, for the
- *    same reason -- a shard ships one kernel id many times and the id alone cannot
- *    distinguish them.
+ *  - RFC 0017 §5 calls arch a pack property; a standalone UKD carries `arch` too, and an
+ *    inline kernel may narrow within its pack's list, for the same reason -- a shard ships
+ *    one kernel id many times and the id alone cannot distinguish them. Every entry is a
+ *    bare base id: a device reports feature suffixes and matching stops at ':', so a
+ *    partial target id (`gfx942:xnack-`) would match nothing while reading as deliberate.
  *  - RFC 0020 §10.1 and §11 make any unknown field a hard rejection
  *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus the packager's
  *    `provenance` block, is warned about and ignored instead, so a descriptor may carry
@@ -608,48 +610,23 @@ inline void requireNoDuplicates(const std::vector<std::string>& values,
     }
 }
 
-/// A gfx target id in the shape archSupports (DeviceProperties.hpp) will compare: "gfx",
-/// a base id, then any number of `:feature` groups. Deliberately no stricter than
-/// archMatches in PREFIX mode, which terminates the candidate on ':' or end-of-string --
-/// so `gfx942:sramecc+` legitimately matches a device reporting `gfx942:sramecc+:xnack-`,
-/// and LLVM generic targets like `gfx9-4-generic` are real gcnArchName values. The check
-/// catches an authoring typo, which would otherwise disable the pack on every device with
-/// nothing louder than an INFO decline; it is not an existence check, so an unheard-of but
-/// well-formed id still parses.
+/// A gfx base target id: "gfx" then a lowercase base id, and nothing else. A device
+/// reports features too (`gfx942:sramecc+:xnack-`) and archMatches stops the candidate
+/// at ':', so a bare id matches such a device -- but an authored entry may not carry
+/// features. Matching compares target-id text, so a partial id like `gfx942:xnack-`
+/// reads as reasonable and matches nothing. LLVM generic targets (`gfx9-4-generic`) stay
+/// legal: the '-' is part of the base id. Catches an authoring typo, which would
+/// otherwise disable the pack everywhere with nothing louder than an INFO decline; not
+/// an existence check, so an unheard-of but well-formed id still parses.
 inline bool isPlausibleArchBaseId(std::string_view value)
 {
     constexpr std::string_view PREFIX = "gfx";
-    if(value.size() <= PREFIX.size() || value.compare(0, PREFIX.size(), PREFIX) != 0)
-    {
-        return false;
-    }
-
-    // The base id, then one group per ':'. Lowercase only: a device reports its arch
-    // lowercased and the compare is case-sensitive, so `gfx942:SRAMECC+` is a typo.
-    for(std::size_t start = PREFIX.size();;)
-    {
-        const auto colon = value.find(':', start);
-        const auto end = colon == std::string_view::npos ? value.size() : colon;
-        auto group = value.substr(start, end - start);
-
-        // A feature carries a trailing '+' or '-' (sramecc+, xnack-); a base id does not.
-        if(start > PREFIX.size() && !group.empty() && (group.back() == '+' || group.back() == '-'))
-        {
-            group.remove_suffix(1);
-        }
-        if(group.empty() || !std::all_of(group.begin(), group.end(), [](unsigned char c) {
-               return (c >= 'a' && c <= 'z') || std::isdigit(c) != 0 || c == '-' || c == '_';
-           }))
-        {
-            return false;
-        }
-
-        if(colon == std::string_view::npos)
-        {
-            return true;
-        }
-        start = colon + 1;
-    }
+    // Lowercase only: a device reports its arch lowercased and the compare is
+    // case-sensitive. ':' is absent from the set, which is what rejects a suffix.
+    return value.size() > PREFIX.size() && value.compare(0, PREFIX.size(), PREFIX) == 0
+           && std::all_of(value.begin() + PREFIX.size(), value.end(), [](unsigned char c) {
+                  return (c >= 'a' && c <= 'z') || std::isdigit(c) != 0 || c == '-' || c == '_';
+              });
 }
 
 /// An arch list as a diagnostic reads it: `[gfx942, gfx950]`, or `any arch` when empty,
@@ -693,7 +670,10 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
             message += where;
             message += " has '";
             message += value;
-            message += "', which is not a bare gfx target id (e.g. 'gfx942')";
+            message += value.find(':') == std::string::npos
+                           ? "', which is not a bare gfx target id (e.g. 'gfx942')"
+                           : "', which carries a feature suffix; name the base target "
+                             "(e.g. 'gfx942')";
             fail(message);
         }
     }

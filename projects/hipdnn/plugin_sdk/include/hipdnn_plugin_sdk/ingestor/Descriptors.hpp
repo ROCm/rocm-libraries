@@ -210,16 +210,16 @@ struct KernelDescriptor
     /// Omitted fields take the KMD default; completed tuple is the catalog key.
     MetadataValues metadata;
     int64_t priority = 0; ///< Tie-break when the heuristic is not decisive.
-    /// GFX targets this kernel was built for, and half its catalog key. Set only when
-    /// parsed from a standalone `.ukd.json`; it is never populated for an inline kernel
-    /// and never inherited from the pack, because an inline kernel is not keyed at all --
-    /// it lives inside a pack document the (id, arch) key already separates per shard.
+    /// GFX base targets this kernel runs on; empty inherits the pack's list. A kernel may
+    /// narrow to part of what its pack claims, never reach outside it, and the resolved
+    /// list reaches dispatch as KernelDefinition::arch. Authored on either form: inline in
+    /// a KDP, or in a standalone `.ukd.json`.
     ///
-    /// Identity, not a device filter. A per-arch shard ships the same kernel id in every
-    /// shard, differing only in which code object it names, so the id alone cannot say
-    /// which copy a pack means. Applicability stays a pack property: KernelDefinition
-    /// carries no arch, and archSupports() reads the pack's list, so a kernel resolved
-    /// into a pack is offered wherever that pack is.
+    /// For a standalone kernel it is also half the catalog key. A per-arch shard ships the
+    /// same kernel id in every shard, differing only in which code object it names, so the
+    /// id alone cannot say which copy a pack means. An inline kernel is not keyed at all --
+    /// it lives inside a pack document that the pack's own (id, arch) key already separates
+    /// per shard -- so there the field is applicability only.
     std::vector<std::string> arch;
 };
 

@@ -28,8 +28,9 @@ struct DeviceProperties
 };
 
 /// Does @p arch (a KDP's supported-target list; empty admits everything) admit
-/// @p deviceArch? PREFIX match on the base identifier, not SUBSTRING, so `gfx942`
-/// never silently admits `gfx950`.
+/// @p deviceArch? Entries are base ids and the device carries its features, so this is
+/// the PREFIX match, not SUBSTRING or equality: `gfx942` admits a device reporting
+/// `gfx942:sramecc+:xnack-` and never admits `gfx950`.
 inline bool archSupports(const std::vector<std::string>& arch, std::string_view deviceArch)
 {
     return arch.empty()
@@ -39,9 +40,7 @@ inline bool archSupports(const std::vector<std::string>& arch, std::string_view 
 }
 
 /// Can one device satisfy both @p a and @p b? Empty means "every arch", so it overlaps
-/// everything. Entries may carry feature suffixes (`gfx942:sramecc+`), so this is the
-/// symmetric PREFIX test, not string equality: `gfx942` and `gfx942:sramecc+` are both
-/// satisfied by a device reporting `gfx942:sramecc+:xnack-`.
+/// everything. Both sides are authored base ids, so an entry matches only its twin.
 inline bool archOverlaps(const std::vector<std::string>& a, const std::vector<std::string>& b)
 {
     if(a.empty() || b.empty())
@@ -59,9 +58,8 @@ inline bool archOverlaps(const std::vector<std::string>& a, const std::vector<st
 /// Is every device @p inner admits also admitted by @p outer? The asymmetric counterpart
 /// to archOverlaps, for asking whether a kernel stays within the pack that binds it.
 /// Empty @p outer admits every device, so it covers anything; empty @p inner declares no
-/// restriction of its own and is covered by anything. Suffixes fall out of the PREFIX
-/// direction: `gfx942:sramecc+` is covered by `gfx942`, and `gfx942` is NOT covered by
-/// `gfx942:sramecc+`, since it also admits `gfx942:xnack-`.
+/// restriction of its own and is covered by anything. Otherwise every @p inner entry
+/// must appear in @p outer: `[gfx942]` is covered by `[gfx942, gfx950]`, not the reverse.
 inline bool archCovers(const std::vector<std::string>& outer, const std::vector<std::string>& inner)
 {
     if(outer.empty())

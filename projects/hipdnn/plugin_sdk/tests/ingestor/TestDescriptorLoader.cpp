@@ -647,43 +647,59 @@ TEST(TestDescriptorLoader, RejectsAnInlineKernelReachingPastItsPacksArch)
         HIPDNN_SEV_ERROR, "declares arch [gfx90a], which reaches past the pack's [gfx942]"));
 }
 
-/// Coverage is asymmetric, and a feature suffix is the only place that shows: `gfx942`
-/// admits every gfx942 device, `gfx942:sramecc+` only the ones with it, so the suffixed
-/// list is the narrower one. Bare ids compare equal in both directions and cannot tell
-/// the two apart, which is what makes this the test that pins the direction.
-TEST(TestDescriptorLoader, TreatsAFeatureSuffixAsNarrowerThanItsBaseTarget)
+/// Coverage is asymmetric: a kernel may claim fewer arches than the pack that binds it,
+/// never more. Spelled with bare ids, since that is all an authored list may carry.
+TEST(TestDescriptorLoader, TreatsAShorterArchListAsNarrowerThanTheOneContainingIt)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     {
-        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("suffix_narrows"));
-        auto documents = makeSetDocuments('1', "test:suffix_narrows");
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_narrows"));
+        auto documents = makeSetDocuments('1', "test:arch_narrows");
         auto& pack = documentOfType(documents, ".kdp.json");
-        pack["arch"] = nlohmann::json::array({"gfx942"});
-        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942:sramecc+"});
+        pack["arch"] = nlohmann::json::array({"gfx942", "gfx950"});
+        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942"});
         writeDocuments(dir.path(), documents);
 
         const auto sets = loadFrom(dir.path());
 
-        ASSERT_EQ(sets.size(), 1u) << "a suffixed kernel is within its bare-target pack";
+        ASSERT_EQ(sets.size(), 1u) << "a kernel serving one of the pack's two targets is within it";
         ASSERT_EQ(sets.front().packs.size(), 1u);
         EXPECT_EQ(sets.front().packs.front().kernels.front().arch,
-                  std::vector<std::string>{"gfx942:sramecc+"});
+                  std::vector<std::string>{"gfx942"});
     }
     {
-        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("suffix_widens"));
-        auto documents = makeSetDocuments('2', "test:suffix_widens");
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_widens"));
+        auto documents = makeSetDocuments('2', "test:arch_widens");
         auto& pack = documentOfType(documents, ".kdp.json");
-        pack["arch"] = nlohmann::json::array({"gfx942:sramecc+"});
-        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942"});
+        pack["arch"] = nlohmann::json::array({"gfx942"});
+        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942", "gfx950"});
         writeDocuments(dir.path(), documents);
 
         EXPECT_TRUE(loadFrom(dir.path()).empty())
-            << "a bare-target kernel also admits gfx942:xnack-, which the pack never claims";
+            << "the kernel claims a target the pack never advertises";
         EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
-                                              "declares arch [gfx942], which reaches past the "
-                                              "pack's [gfx942:sramecc+]"));
+                                              "declares arch [gfx942, gfx950], which reaches past "
+                                              "the pack's [gfx942]"));
     }
+}
+
+/// A partial target id is the one malformed arch that reads as deliberate: ROCm's own
+/// supported-target lists spell `gfx942:xnack-`, and matching here is text, so it would
+/// match no device while looking correct. The message has to name the fix.
+TEST(TestDescriptorLoader, RejectsAnArchCarryingAFeatureSuffix)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_suffix"));
+    auto documents = makeSetDocuments('1', "test:arch_suffix");
+    documentOfType(documents, ".kdp.json")["arch"]
+        = nlohmann::json::array({"gfx942:sramecc+:xnack-"});
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "carries a feature suffix; name the base target (e.g. 'gfx942')"));
 }
 
 /// A shard's pack names a kernel that exists -- just not under any arch it claims, which
@@ -1060,6 +1076,13 @@ INSTANTIATE_TEST_SUITE_P(
                       [](Documents& documents) {
                           documentOfType(documents, ".kdp.json")["arch"]
                               = nlohmann::json::array({"x86_64"});
+                      }},
+        // A partial target id is what ROCm's supported-target lists spell, and matching
+        // here is text: it would match no device at all.
+        ViolationCase{"arch_holds_a_feature_suffix",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({"gfx942:xnack-"});
                       }},
         // Only 'embedded_source' has an implementation the dispatch handler can call; any
         // other kind would pass validation and only throw inside getKernelSrc("") at
@@ -1890,27 +1913,24 @@ TEST(TestDescriptorLoader, CarriesAPacksDeclaredArchitectures)
     EXPECT_EQ(sets.front().packs.front().arch, (std::vector<std::string>{"gfx90a", "gfx942"}));
 }
 
-/// The validator must admit exactly what archMatches admits. PREFIX mode terminates the
-/// candidate on ':' or end-of-string, so a candidate carrying its own feature suffix
-/// matches a device reporting more of them, and LLVM generic targets are real gcnArchName
-/// values. A stricter shape check would make both unauthorable while the matcher still
-/// handled them.
-TEST(TestDescriptorLoader, AcceptsArchIdsCarryingFeaturesAndGenericTargets)
+/// The validator must admit exactly what archMatches admits of an authored entry: a bare
+/// base id. LLVM generic targets are real gcnArchName values whose base id carries a '-',
+/// so a shape check keyed on that character would make them unauthorable.
+TEST(TestDescriptorLoader, AcceptsGenericTargetIds)
 {
     const ScopedSymbols symbols;
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_arch_suffix"));
-    auto documents = makeSetDocuments('1', "test:arch_suffix");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_arch_generic"));
+    auto documents = makeSetDocuments('1', "test:arch_generic");
     documentOfType(documents, ".kdp.json")["arch"]
-        = nlohmann::json::array({"gfx942:sramecc+", "gfx90a:sramecc+:xnack-", "gfx9-4-generic"});
+        = nlohmann::json::array({"gfx942", "gfx9-4-generic"});
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.size(), 1u);
-    EXPECT_EQ(
-        sets.front().packs.front().arch,
-        (std::vector<std::string>{"gfx942:sramecc+", "gfx90a:sramecc+:xnack-", "gfx9-4-generic"}));
+    EXPECT_EQ(sets.front().packs.front().arch,
+              (std::vector<std::string>{"gfx942", "gfx9-4-generic"}));
 }
 
 /// The default: a pack naming no architecture applies everywhere, so absence must parse
