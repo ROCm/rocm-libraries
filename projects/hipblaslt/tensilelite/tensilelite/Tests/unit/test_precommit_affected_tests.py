@@ -30,9 +30,9 @@ P = pathlib.Path
 
 def test_module_dotted_paths():
     assert hook.module_dotted(P("tensilelite/Common/Utilities.py")) == "tensilelite.Common.Utilities"
-    assert hook.module_dotted(P("tensilelite/__init__.py")) == "Tensile"
+    assert hook.module_dotted(P("tensilelite/__init__.py")) == "tensilelite"
     assert hook.module_dotted(P("tensilelite/Common/__init__.py")) == "tensilelite.Common"
-    assert hook.module_dotted(P("Tensile/data.yaml")) is None
+    assert hook.module_dotted(P("tensilelite/data.yaml")) is None
 
 
 def test_referenced_modules_collects_imports_and_strings(tmp_path):
@@ -73,12 +73,12 @@ def test_classify_staged_buckets():
         TL / "pyproject.toml",
         TL / "scripts" / "helper.py",
         TL / "rocisa" / "src.cpp",
-        TL / "Tensile" / "Tests" / "unit" / "conftest.py",
-        TL / "Tensile" / "Tests" / "unit" / "__snapshots__" / "x.ambr",
-        TL / "Tensile" / "Tests" / "unit" / "test_x.py",
-        TL / "Tensile" / "Tests" / "common" / "test_y.py",
-        TL / "Tensile" / "Common" / "Utilities.py",
-        TL / "Tensile" / "Common" / "data.yaml",
+        TL / "tensilelite" / "Tests" / "unit" / "conftest.py",
+        TL / "tensilelite" / "Tests" / "unit" / "__snapshots__" / "x.ambr",
+        TL / "tensilelite" / "Tests" / "unit" / "test_x.py",
+        TL / "tensilelite" / "Tests" / "common" / "test_y.py",
+        TL / "tensilelite" / "Common" / "Utilities.py",
+        TL / "tensilelite" / "Common" / "data.yaml",
     ]
     broad, tests, sources, ignored = hook.classify_staged(staged)
     broad_str = set(broad)
@@ -95,8 +95,8 @@ def test_classify_staged_buckets():
 
 def test_classify_staged_test_support_triggers_full_suite():
     staged = [
-        TL / "Tensile" / "Tests" / "unit" / "streamk5_test_helpers.py",
-        TL / "Tensile" / "Tests" / "unit" / "characterization" / "_codegen" / "data" / "gfx908" / "BBS.yaml",
+        TL / "tensilelite" / "Tests" / "unit" / "streamk5_test_helpers.py",
+        TL / "tensilelite" / "Tests" / "unit" / "characterization" / "_codegen" / "data" / "gfx908" / "BBS.yaml",
     ]
     broad, tests, sources, ignored = hook.classify_staged(staged)
     assert tests == set()
@@ -112,7 +112,7 @@ def test_select_tests_threshold_and_escalation():
     index.update({P(f"test_s{i}.py"): {"tensilelite.Small"} for i in range(3)})
     index.update({P(f"test_o{i}.py"): {"tensilelite.Other"} for i in range(2)})
     # total = 10; threshold = 0.40 * 10 = 4.0
-    sources = [P("Tensile/Big.py"), P("Tensile/Small.py"), P("Tensile/Ghost.py")]
+    sources = [P("tensilelite/Big.py"), P("tensilelite/Small.py"), P("tensilelite/Ghost.py")]
     selected, escalations = hook.select_tests(sources, index)
     assert selected == {P(f"test_s{i}.py") for i in range(3)}  # 3 hits -> selected
     joined = " ".join(escalations)
@@ -121,7 +121,7 @@ def test_select_tests_threshold_and_escalation():
 
 
 def test_select_tests_unmappable_path():
-    selected, escalations = hook.select_tests([P("Tensile/weird")], index={P("t.py"): set()})
+    selected, escalations = hook.select_tests([P("tensilelite/weird")], index={P("t.py"): set()})
     assert selected == set()
     assert any("unmappable path" in e for e in escalations)
 

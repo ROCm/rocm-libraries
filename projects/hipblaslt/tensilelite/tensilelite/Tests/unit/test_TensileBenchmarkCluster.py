@@ -598,8 +598,8 @@ class TestBenchmarkParametersSecurity:
 
     @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path",
                         "--benchmark-parameters", "Foo=5", "Bar='baz'"])
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_benchmark_parameters_parse_literals(self, mock_project_config, mock_init):
         """Literal key=value overrides are parsed and applied to the config."""
         mock_config_instance = MagicMock()
@@ -612,8 +612,8 @@ class TestBenchmarkParametersSecurity:
         mock_config_instance.__setitem__.assert_any_call("Foo", 5)
         mock_config_instance.__setitem__.assert_any_call("Bar", "baz")
 
-    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
-    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_benchmark_parameters_reject_code_execution(self, mock_project_config, mock_init, tmp_path):
         """An expression that would execute code on eval() is rejected by the parser and
         never runs. Under the old eval() this payload created the marker file and parsing

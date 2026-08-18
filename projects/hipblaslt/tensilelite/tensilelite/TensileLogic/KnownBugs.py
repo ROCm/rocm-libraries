@@ -41,7 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, FrozenSet, Optional, Tuple
 
-from Tensile.resources import known_bugs_text
+from tensilelite.resources import known_bugs_text
 
 try:
     import yaml
