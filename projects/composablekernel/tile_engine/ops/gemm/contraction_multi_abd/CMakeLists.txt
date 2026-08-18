@@ -24,7 +24,7 @@ set(CONTRACTION_MULTI_ABD_NUM_DIM_N "2" CACHE STRING "Number of N dimensions")
 set(CONTRACTION_MULTI_ABD_NUM_DIM_K "1" CACHE STRING "Number of K dimensions")
 set(CONTRACTION_MULTI_ABD_A_ELEMENTWISE "PassThrough" CACHE STRING "A elementwise function")
 set(CONTRACTION_MULTI_ABD_B_ELEMENTWISE "PassThrough" CACHE STRING "B elementwise function")
-set(CONTRACTION_MULTI_ABD_CDE_ELEMENTWISE "AddDs" CACHE STRING "CDE elementwise function")
+set(CONTRACTION_MULTI_ABD_CDE_ELEMENTWISE "MultiDAdd" CACHE STRING "CDE elementwise function")
 set(CONTRACTION_MULTI_ABD_MAX_INSTANCES "" CACHE STRING
     "Max kernel instances (empty = no cap)")
 

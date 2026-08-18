@@ -43,9 +43,9 @@ struct BatchedContractionMultiABDProblem
     using DsDataType = remove_cvref_t<DsDataType_>;
     using EDataType  = remove_cvref_t<EDataType_>;
 
-    static constexpr index_t NumATensor = tuple_size_v<AsDataType>;
-    static constexpr index_t NumBTensor = tuple_size_v<BsDataType>;
-    static constexpr index_t NumDTensor = tuple_size_v<DsDataType>;
+    static constexpr index_t NumATensor = std::tuple_size_v<AsDataType>;
+    static constexpr index_t NumBTensor = std::tuple_size_v<BsDataType>;
+    static constexpr index_t NumDTensor = std::tuple_size_v<DsDataType>;
 
     static constexpr index_t NumDimG = NumDimG_;
     static constexpr index_t NumDimM = NumDimM_;

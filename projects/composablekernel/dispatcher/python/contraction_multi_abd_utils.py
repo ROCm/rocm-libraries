@@ -117,7 +117,7 @@ class ContractionMultiABDKernelConfig:
 
     a_elementwise: str = "PassThrough"
     b_elementwise: str = "PassThrough"
-    cde_elementwise: str = "AddDs"
+    cde_elementwise: str = "MultiDAdd"
 
     gfx_arch: str = _DEFAULT_GFX_ARCH
 

@@ -117,7 +117,7 @@ def make_contraction_multi_abd_kernel_name(
     num_dim_k: int,
     a_elementwise: str = "PassThrough",
     b_elementwise: str = "PassThrough",
-    cde_elementwise: str = "AddDs",
+    cde_elementwise: str = "MultiDAdd",
 ) -> str:
     """
     Construct the canonical kernel name.
@@ -188,7 +188,7 @@ class ContractionMultiABDKernelSpec:
 
     a_elementwise: str = "PassThrough"
     b_elementwise: str = "PassThrough"
-    cde_elementwise: str = "AddDs"
+    cde_elementwise: str = "MultiDAdd"
 
     @property
     def name(self) -> str:
@@ -469,19 +469,12 @@ struct SelectedKernel
             NumATensor, NumBTensor, NumDTensor>& args,
         const ck_tile::stream_config& stream)
     {{
-        auto kargs = Kernel::MakeKernelArgs(args);
-
-        if(!Kernel::IsSupportedArguments(kargs))
-        {{
-            return -1.0f;
-        }}
-
-        const dim3 grids  = Kernel::GridSize(kargs);
-        const dim3 blocks = Kernel::GetBlockSize();
-
-        constexpr int kBlockPerCu = 1;
-        return ck_tile::launch_kernel(
-            stream, ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+        // Delegate to the kernel wrapper's own launch(): it iterates the
+        // NumATensor x NumBTensor tensors and dispatches the InnerKernel
+        // (BatchedContractionMultiABDKernel is a host-side wrapper and does
+        // not provide a device operator(), so it cannot be passed to
+        // make_kernel directly).
+        return Kernel::launch(args, stream);
     }}
 }};
 
@@ -608,7 +601,7 @@ def build_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
 
     a_elementwise  = config.get("a_elementwise",  "PassThrough")
     b_elementwise  = config.get("b_elementwise",  "PassThrough")
-    cde_elementwise = config.get("cde_elementwise", "AddDs")
+    cde_elementwise = config.get("cde_elementwise", "MultiDAdd")
 
     specs = []
     for (dtype, layout, pipeline, epilogue, scheduler,
@@ -726,7 +719,7 @@ _DEFAULT_CONFIG: dict = {
     ],
     "a_elementwise":   "PassThrough",
     "b_elementwise":   "PassThrough",
-    "cde_elementwise": "AddDs",
+    "cde_elementwise": "MultiDAdd",
 }
 
 

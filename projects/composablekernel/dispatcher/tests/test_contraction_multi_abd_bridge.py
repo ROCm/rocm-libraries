@@ -75,7 +75,7 @@ def _base_config(**overrides) -> ContractionMultiABDKernelConfig:
         num_dim_g=1, num_dim_m=2, num_dim_n=2, num_dim_k=1,
         a_elementwise="PassThrough",
         b_elementwise="PassThrough",
-        cde_elementwise="AddDs",
+        cde_elementwise="MultiDAdd",
     )
     kw.update(overrides)
     return ContractionMultiABDKernelConfig(**kw)
@@ -544,7 +544,7 @@ class TestExpandNestedConfig(unittest.TestCase):
             "dim_combos": [{"num_dim_g": 1, "num_dim_m": 2, "num_dim_n": 2, "num_dim_k": 1}],
             "a_elementwise": "PassThrough",
             "b_elementwise": "PassThrough",
-            "cde_elementwise": "AddDs",
+            "cde_elementwise": "MultiDAdd",
         })
         specs = build_specs(expanded)
         self.assertGreater(len(specs), 0, "smoke config must produce at least one spec")
