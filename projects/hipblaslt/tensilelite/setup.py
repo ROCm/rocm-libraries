@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
+import os
 import runpy
 import shutil
 
@@ -26,7 +27,7 @@ class CleanBuildPy(build_py):
 
 
 setup(
-    version=_metadata["distribution_version"](),
+    version=_metadata["distribution_version"](_build_rocm_version()),
     install_requires=[
         "packaging",
         "pyyaml",
@@ -37,3 +38,12 @@ setup(
     ],
     cmdclass={"build_py": CleanBuildPy},
 )
+
+def _build_rocm_version() -> str:
+    value = os.environ.get("TENSILELITE_ROCM_VERSION")
+    if not value:
+        raise RuntimeError(
+            "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
+            "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
+        )
+    return value
