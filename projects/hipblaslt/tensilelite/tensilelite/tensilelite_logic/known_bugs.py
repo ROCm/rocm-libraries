@@ -50,7 +50,7 @@ except ImportError:  # pragma: no cover
 
 # A known-bug lookup key: (normalized relative path, solution_name).
 KnownBugKey = Tuple[str, str]
-_BUNDLED_SOURCE = "bundled TensileLogic/known_bugs.yaml"
+_BUNDLED_SOURCE = "bundled tensilelite_logic/known_bugs.yaml"
 
 
 def normalize_logic_relative_path(path: Path) -> str:
