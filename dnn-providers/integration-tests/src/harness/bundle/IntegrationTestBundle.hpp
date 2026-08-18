@@ -31,7 +31,7 @@ namespace hipdnn_integration_tests::bundle
 // Loaded tensors keyed by tensor UID. Inputs carry their data. Outputs carry
 // expected golden values only when output blobs are present; otherwise the
 // harness verifies outputs against a reference executor.
-using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+using TensorMap = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 // One test's worth of bundle data loaded from disk.
 //

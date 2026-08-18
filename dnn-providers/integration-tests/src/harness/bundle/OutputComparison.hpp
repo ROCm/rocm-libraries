@@ -19,7 +19,7 @@ namespace hipdnn_integration_tests::bundle
 {
 
 using OutputTensors
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+    = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 /// One output tensor that did not match, with the diff already formatted.
 ///
