@@ -25,7 +25,7 @@ from unittest import mock
 import pytest
 
 from tensilelite import GpuRevisionTarget as gpu_rev
-from tensilelite.TensileLogic.ValidCorpusConsistency import find_gfx1250v0_overlay_violations
+from tensilelite.tensilelite_logic.ValidCorpusConsistency import find_gfx1250v0_overlay_violations
 
 pytestmark = pytest.mark.unit
 
@@ -323,7 +323,7 @@ class TestBuildTaskCommandLine:
 # invariant is checked against the tree that actually ships.
 #
 # The enforcement point is ``TensileLogic --check-all``, via
-# ``tensilelite.TensileLogic.ValidCorpusConsistency.find_gfx1250v0_overlay_violations``,
+# ``tensilelite.tensilelite_logic.ValidCorpusConsistency.find_gfx1250v0_overlay_violations``,
 # which runs whenever ``--architecture`` includes ``gfx1250v0`` or ``all``
 # (hipBLASLt's dedicated gfx1250v0 build always passes the former -- see
 # ``device-library/CMakeLists.txt``), regardless of whether the real
