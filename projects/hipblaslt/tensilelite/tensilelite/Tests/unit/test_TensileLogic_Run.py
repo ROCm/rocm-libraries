@@ -92,6 +92,7 @@ class TestSetup:
             mock_args.CheckAll = True
             mock_args.CheckOnlyCustomKernels = False
             mock_args.Architecture = "all"
+            mock_args.LogicFilter = "**/*.yaml"
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 logic_dir = Path(tmpdir)
@@ -172,6 +173,7 @@ class TestSetup:
             mock_args.CheckAll = True
             mock_args.CheckOnlyCustomKernels = False
             mock_args.Architecture = "all"
+            mock_args.LogicFilter = "**/*.yaml"
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 empty_dir = Path(tmpdir)
@@ -314,6 +316,7 @@ class TestSetup:
             mock_args.CheckAll = True
             mock_args.CheckOnlyCustomKernels = False
             mock_args.Architecture = architecture
+            mock_args.LogicFilter = "**/*.yaml"
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 logic_dir = Path(tmpdir)
