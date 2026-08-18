@@ -33,15 +33,18 @@ def isCustomKernelConfig(config):
     return "CustomKernelName" in config and config["CustomKernelName"]
 
 def supportsUserSgprKernargPreload(rocmVersion):
-    """Report whether the toolchain accepts .amdhsa_user_sgpr_kernarg_preload.
+    """Return whether a ROCm version passes TensileLite's preload gate.
 
-    The directive is supported from ROCm 6 build 32650 onwards, and by every
-    later major release regardless of its build number.
+    AMD's ROCm 6.0 compiler branch added descriptor and codegen support in
+    September 2023 for feature-enabled targets. HIP recorded 6.0.32650 on
+    September 29, and hipBLASLt adopted it as its 6.x floor on October 6.
+    That floor is historical compatibility policy, not a complete capability
+    test: target ISA, assembler, and firmware also matter.
 
-    The 6.x arm still keys off the build number, so a locally built ROCm 6.x
-    toolchain reporting a low build (for example, 6.4.0) is treated as
-    unsupported. From the version alone, that is indistinguishable from a
-    genuine pre-32650 toolchain.
+    HIP's patch field is a build number, not globally monotonic. Official
+    ROCm 7 releases can report a patch below 32650, so later major releases
+    remain eligible. A locally built ROCm 6.x toolchain reporting a low build
+    (for example, 6.4.0) remains ambiguous and is treated as unsupported.
     """
     return rocmVersion.major > 6 or (
         rocmVersion.major == 6 and rocmVersion.patch >= 32650
