@@ -39,8 +39,8 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   // Effective usable CU count. Decided once here and consumed across the model
   // (launch params, occupancy, cache/epilogue/reduction estimates). A non-zero
   // problem.num_cus caps the count; 0 falls back to the full hardware count.
-  n_cu                 = resolve_num_cus(problem.num_cus, hardware.N_CU);
-  const size_t N_CU    = n_cu;
+  n_cu              = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  const size_t N_CU = n_cu;
 
   const size_t M     = problem.size.m;
   const size_t N     = problem.size.n;
@@ -101,7 +101,8 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     const auto a_bits = datatype_to_bits(problem.a_dtype);
     const auto b_bits = datatype_to_bits(problem.b_dtype);
 
-    OLOG_DEBUG("======== Origami Debug Info ========"); // This signature indicates the start of the debug information.
+    OLOG_DEBUG("======== Origami Debug Info ========");  // This signature indicates the start of
+                                                         // the debug information.
     OLOG_DEBUG("M: " << int(M));
     OLOG_DEBUG("N: " << int(N));
     OLOG_DEBUG("Batch: " << int(batch));
@@ -116,6 +117,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("ElementSizeB (bits): " << int(b_bits));
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));
     OLOG_DEBUG("CacheHintsB: " << int(config.cache_hints_b));
+    OLOG_DEBUG("StreamK: " << int(config.stream_k));
 
     OLOG_DEBUG("Grid: " << int(grid_m) << "x" << int(grid_n));
     OLOG_DEBUG("NumOutputTiles: " << int(num_output_tiles));
@@ -364,15 +366,18 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
     const hardware_t& hardware,
     const config_t& config,
     grid_selection_t grid_selection) {
-  const reduction_t reduction_strategy =
-      streamk::select_reduction(problem, hardware, config, grid_selection);
-  auto config_with_reduction               = config;
-  config_with_reduction.reduction_strategy = reduction_strategy;
-  const size_t num_wgs =
-      streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
-
   const size_t num_mts = streamk::compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  size_t num_wgs                 = num_mts;
+  reduction_t reduction_strategy = reduction_t::none;
+
+  if (config.stream_k > 0) {
+    reduction_strategy = streamk::select_reduction(problem, hardware, config, grid_selection);
+    auto config_with_reduction               = config;
+    config_with_reduction.reduction_strategy = reduction_strategy;
+    num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
+  }
+
   // There are cases in which StreamK combines multiple output MTs and assigns to 1 WG.
   // That means, we artifically observe one full timesteps, but that is not what actually happens
   // under the hood. From a theoretical point of view, these distributions change all of the
@@ -1267,8 +1272,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   bool enable_batched_amp = (problem.batch > 1);
   if (enable_batched_amp && concurrent_load < l2_cap) {
     const double amp_ceiling = heuristic.l2_amp_ceiling_batched;
-    const double headroom  = 1.0 - concurrent_load / l2_cap;
-    const double amp_boost = headroom * headroom;
+    const double headroom    = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost   = headroom * headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
     l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
@@ -1280,8 +1285,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   bool enable_split_k_amp = (l2_tiles.k > 1 && l2_tiles.m * l2_tiles.n < 5);
   if (enable_split_k_amp && concurrent_load < l2_cap) {
     const double amp_ceiling = heuristic.l2_amp_ceiling_k_split;
-    const double headroom  = 1.0 - concurrent_load / l2_cap;
-    const double amp_boost = headroom;
+    const double headroom    = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost   = headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
     l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
@@ -1944,7 +1949,8 @@ double compute_total_latency(const problem_t& problem,
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);
-    OLOG_DEBUG("================================="); // This signature indicates the end of the debug information.
+    OLOG_DEBUG("=================================");  // This signature indicates the end of the
+                                                      // debug information.
   }
 
   return total_latency;
