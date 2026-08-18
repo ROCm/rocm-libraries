@@ -25,8 +25,6 @@ function(hipblaslt_create_device_library)
         message(FATAL_ERROR "hipblaslt_create_device_library: HIPBLASLT_PYTHON_COMMAND is not set")
     endif()
 
-    get_filename_component(_codegen_dir "${CMAKE_CURRENT_LIST_DIR}/../tensilelite" ABSOLUTE)
-
     if(NOT _cdl_TARGET)
         set(_cdl_TARGET "tensilelite-device-libraries")
     endif()
@@ -83,28 +81,29 @@ function(hipblaslt_create_device_library)
 
     # Keep the resource as an explicit dependency so quarantine edits invalidate
     # the validation stamp; TensileLogic itself resolves the resource at runtime.
-    set(_known_bugs_resource "${_codegen_dir}/tensilelite/tensilelite_logic/known_bugs.yaml")
-    set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
-    set(_tensile_logic_opts_list
-        "${_cdl_LOGIC_PATH}"
-        --architecture
-        "${_arches_semi}"
-        --use-bundled-known-bugs
-        --check-all
-    )
+    set(_known_bugs_resource
+        "${hipblaslt_SOURCE_DIR}/tensilelite/tensilelite/tensilelite_logic/known_bugs.yaml")
+    set(_logic_opts --use-bundled-known-bugs --check-all)
+    if(_cdl_LOGIC_FILTER)
+        list(APPEND _logic_opts "--logic-filter=**/${_cdl_LOGIC_FILTER}.yaml")
+    endif()
     # Explicit, caller-owned opt-in: requesting architecture gfx1250v0 alone
     # does not mean this corpus owns a gfx1250/gfx1250v0 split (a shared
     # invocation can request that architecture against a corpus, e.g.
     # hipSPARSELt's, that never did the split and has no overlay directory).
     if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
-        list(APPEND _tensile_logic_opts_list --require-gfx1250v0-overlay)
+        list(APPEND _logic_opts --require-gfx1250v0-overlay)
     endif()
+    set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
         COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
         COMMAND ${HIPBLASLT_PYTHON_COMMAND}
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
-            ${_tensile_logic_opts_list}
+            -m tensilelite logic
+            "${_cdl_LOGIC_PATH}"
+            --architecture
+            "${_arches_semi}"
+            ${_logic_opts}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
         DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${_known_bugs_resource}"
         VERBATIM
@@ -113,7 +112,7 @@ function(hipblaslt_create_device_library)
 
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite.tensilelite_create_library
+        ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite create-library
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"
