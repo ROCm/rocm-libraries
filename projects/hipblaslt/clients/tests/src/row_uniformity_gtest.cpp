@@ -33,6 +33,8 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
+#include <origami/streamk.hpp>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -1653,6 +1655,142 @@ namespace
     TEST_F(RowUniformityClauseTwo_pre_checkin, SplitRegime_4096x32x10240_AllCUs)
     {
         checkNewlyAdmittedSplit({4096, 32, 10240, HIP_R_16BF, 0});
+    }
+
+    // =======================================================================
+    // AIHPBLAS-4254 — coherence-mode Stream-K grid steering (P3 + P0)
+    //
+    // Host-only: synthesised SK3 solution + gfx950 analytical HipAMDGPU, same
+    // pattern as tensilelite CuCount_test (which CI does not build).
+    // =======================================================================
+
+    TensileLite::hip::HipAMDGPU coherenceSteeringDevice()
+    {
+        using arch_t = origami::hardware_t::architecture_t;
+        auto hw      = std::make_shared<origami::hardware_t>(
+            arch_t::gfx950,
+            /*N_CU=*/256,
+            /*L2=*/163840,
+            /*rf_capacity=*/262144,
+            /*NUM_XCD=*/8,
+            1.0,
+            1.0,
+            1.0,
+            4000000,
+            1.2,
+            1,
+            std::make_tuple(0.0, 0.008, 0.0));
+
+        TensileLite::hip::HipAMDGPU device;
+        device.processor          = TensileLite::AMDGPU::Processor::gfx950;
+        device.computeUnitCount   = 256;
+        device.deviceName         = "row_uniformity_coherence_steering";
+        device.analyticalHardware = hw;
+        device.skDynamicGrid
+            = static_cast<int>(origami::grid_selection_t::k_split_aware);
+        device.skFixedGrid      = 0;
+        device.skMaxCUs         = 0;
+        device.skGridMultiplier = 1;
+        return device;
+    }
+
+    std::shared_ptr<TensileLite::ContractionSolution> coherenceSteeringSolution()
+    {
+        auto solution = probeSolution();
+        solution->sizeMapping.depthU                = 64;
+        solution->sizeMapping.matrixInstruction     = {16, 16, 32, 1};
+        solution->sizeMapping.CUOccupancy           = 1;
+        solution->sizeMapping.workspaceSizePerElemC = 4;
+        solution->internalArgsSupport.perTileExtraIters = false;
+        return solution;
+    }
+
+    TensileLite::ContractionProblemGemm coherenceGemm(size_t m, size_t n, size_t k)
+    {
+        auto problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, m, n, k, m, n, m, 1.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setWorkspaceSize(32ull << 20);
+        return problem;
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrder)
+    {
+        auto solution = coherenceSteeringSolution();
+        auto device   = coherenceSteeringDevice();
+        auto problem  = coherenceGemm(512, 512, 8192);
+
+        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
+
+        problem.setParams().setUniformSummationOrder(true);
+        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree);
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, NonDivisorGridBelowTilesSnapsToTiles)
+    {
+        auto solution = coherenceSteeringSolution();
+        auto device   = coherenceSteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 10;
+
+        auto         problem = coherenceGemm(512, 512, 1024);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 16u);
+
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 10u);
+
+        problem.setParams().setUniformSummationOrder(true);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles);
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, DivisorGridBelowTilesIsKept)
+    {
+        auto solution = coherenceSteeringSolution();
+        auto device   = coherenceSteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 8;
+
+        auto         problem = coherenceGemm(512, 512, 1024);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 16u);
+
+        problem.setParams().setUniformSummationOrder(true);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, AllPartialNonDivisorFRequiresCapability)
+    {
+        auto solution = coherenceSteeringSolution();
+        auto device   = coherenceSteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 8;
+
+        auto         problem = coherenceGemm(256, 256, 1088);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        const size_t I
+            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        ASSERT_EQ(tiles, 4u);
+        ASSERT_EQ(I, 17u);
+
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
+
+        problem.setParams().setUniformSummationOrder(true);
+        solution->internalArgsSupport.perTileExtraIters = false;
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles);
+
+        solution->internalArgsSupport.perTileExtraIters = true;
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
+    }
+
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ModeOffLeavesParallelReduction)
+    {
+        auto solution = coherenceSteeringSolution();
+        auto device   = coherenceSteeringDevice();
+        auto problem  = coherenceGemm(512, 512, 8192);
+
+        EXPECT_FALSE(problem.getParams().uniformSummationOrder());
+        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
     }
 
 } // namespace
