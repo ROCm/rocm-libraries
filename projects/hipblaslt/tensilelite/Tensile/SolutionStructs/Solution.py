@@ -3125,6 +3125,15 @@ class Solution(collections.abc.Mapping):
               return
             state["_TDMIterateModeB"] = True
 
+        # The walk steps along the tile dimension, which is what dim1 carries only when
+        # the tensor is unroll-major in global memory. TransposeLDS 2 sets
+        # UnrollMajorLDS without that being true, so check TLU as well.
+        for tc in ["A", "B"]:
+          if state.get("_TDMIterateMode%s" % tc, False) and state["ProblemType"]["TLU%s" % tc]:
+            reject(state, printRejectionReason,
+                   "TDMIterateMode %s requires TLU%s to be False" % (tc, tc))
+            return
+
         # Stage 2: for non-iterate tensors, halve auto-derived VW until LBSPP
         # fits the pad_interval 1024 B limit.
         multiple = 256
