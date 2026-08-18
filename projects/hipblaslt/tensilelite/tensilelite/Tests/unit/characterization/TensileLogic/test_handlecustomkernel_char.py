@@ -44,8 +44,8 @@ import copy
 
 import pytest
 
-import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
-from tensilelite.TensileLogic.HandleCustomKernel import (
+import tensilelite.logic.handle_custom_kernel as hck_mod
+from tensilelite.logic.handle_custom_kernel import (
     handleCustomKernel,
     hasCustomKernel,
     prepareCustomKernelConfig,
