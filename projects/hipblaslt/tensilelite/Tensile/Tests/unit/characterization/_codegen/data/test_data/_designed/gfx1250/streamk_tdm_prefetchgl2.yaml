@@ -1,0 +1,109 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Designed StreamK + wave-separated TDM + PrefetchGL2 config for gfx1250
+# SGPR-budget regression coverage.
+#
+# This fork sweep reaches the gfx1250 SGPR ceiling (106, hardware_caps.hpp) on the
+# wave-separated TDM stagger path. The PrefetchGL2 x StreamKForceDPOnly product
+# spans the budget: PGL1/SKFDPO0 is the tightest variant (105 of 106) and is the one
+# that overflows if sgprWaveIdx is held across the unroll loop.
+#
+# PrefetchGlobalRead and ScheduleIterAlg are forked as well. Measured, they do not
+# move the pool size -- that tracks PrefetchGL2 x StreamKForceDPOnly alone -- but
+# they reshape the main loop and the prefetch schedule, so they are what exercises
+# the WaveIdx liveness invariant (no s[sgprWaveIdx] past the undefine, prologue
+# keeps its direct read) against more than one loop shape.
+#
+# Mirrors the fork block of the GPU test that regressed
+# (Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_pap_prefetchgl2.yaml),
+# reduced to a single MatrixInstruction so the emit stays cheap -- the SGPR count
+# is invariant across that config's three MatrixInstructions. StaggerU=0 still
+# selects the stagger code path (states.staggerUCode is not gated on the StaggerU
+# value).
+#
+# The fork product below is 2*2*2*2 = 16 solutions and is pinned by
+# _EXPECTED_VARIANTS in test_r3_streamk_tdm_sgpr_budget_gfx1250_char.py. Keep the
+# two in sync: the emit harness truncates permutations to that count, so a wider
+# list here without a matching test update would silently drop variants.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # MX-FP8 (F8 in, float32 out) TN, Batched, StreamK=3 + TDM + PAP
+  ########################################
+  -
+    - # ProblemType: MX-F8 TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGL2: [0, 1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [0, 4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [False]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2048, 2048, 1, 2048]

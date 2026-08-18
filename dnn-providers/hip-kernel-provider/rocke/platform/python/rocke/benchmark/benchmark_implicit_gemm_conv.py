@@ -1472,13 +1472,18 @@ def _run_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
+    # Weight is per-group: its channel extent is cpg = C / groups (== C when
+    # groups == 1), matching make_b_descriptor (KYXC/KZYXC with C = cpg), the
+    # grouped NumPy oracle, and torch's F.conv2d weight shape
+    # [K, C/groups, Y, X]. Allocating full C here silently mismatched the kernel
+    # and broke the grouped --verify reference.
     if p.is_3d:
         _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.C)
+        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
         D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
         _A_f32 = _make(p.N, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Y, p.X, p.C)
+        _B_f32 = _make(p.K, p.Y, p.X, p.cpg)
         D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     A_t = _A_f32.to(_torch_dtype)
     B_t = _B_f32.to(_torch_dtype)

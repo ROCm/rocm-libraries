@@ -91,34 +91,60 @@ void rocke_conv_apply_accumulator_epilogue(rocke_ir_builder_t* b,
 /* ===================================================================== *
  * D-descriptor address closure shared by the direct + cshuffle stores.
  *
- * Python:
+ * Python (grouped conv path, PR #10064):
+ *   k_out_group_base = b.mul(b.block_id_z(), b.const_i32(p.kpg)) if p.groups>1 else None
  *   def d_addr(b_, m_val, n_val):
- *       return D_desc.offset(b_, m=m_val, k_out=n_val)
+ *       k_out = n_val if k_out_group_base is None else b_.add(k_out_group_base, n_val)
+ *       return D_desc.offset(b_, m=m_val, k_out=k_out)
  *
- * The rocke_epilogue_addr_fn contract returns off_elements directly and writes
- * the optional i1 validity through *out_valid. `user` carries the bound
- * D descriptor. */
+ * `user` carries a rocke_conv_d_addr_ctx_t holding the D descriptor and the
+ * pre-computed k_out_group_base (NULL for groups==1). */
+typedef struct rocke_conv_d_addr_ctx
+{
+    const rocke_tensor_descriptor_t* D_desc;
+    rocke_value_t* k_out_group_base; /* NULL => groups==1 */
+} rocke_conv_d_addr_ctx_t;
+
 static rocke_value_t* rocke_conv_d_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* m_global,
                                         rocke_value_t* n_global,
                                         rocke_value_t** out_valid,
                                         void* user)
 {
-    const rocke_tensor_descriptor_t* D_desc = (const rocke_tensor_descriptor_t*)user;
+    const rocke_conv_d_addr_ctx_t* dctx = (const rocke_conv_d_addr_ctx_t*)user;
     const char* names[2];
     rocke_value_t* values[2];
+    rocke_value_t* k_out;
     rocke_value_t* off = NULL;
     rocke_value_t* valid = NULL;
+
+    /* k_out = k_out_group_base + n_val (grouped) or n_val (ungrouped) */
+    k_out = (dctx->k_out_group_base != NULL) ? rocke_b_add(b, dctx->k_out_group_base, n_global)
+                                             : n_global;
 
     names[0] = "m";
     names[1] = "k_out";
     values[0] = m_global;
-    values[1] = n_global;
+    values[1] = k_out;
 
-    rocke_transforms_descriptor_offset(b, D_desc, names, values, 2, &off, &valid);
+    rocke_transforms_descriptor_offset(b, dctx->D_desc, names, values, 2, &off, &valid);
     if(out_valid != NULL)
         *out_valid = valid;
     return off;
+}
+
+/* Build k_out_group_base = b.mul(b.block_id_z(), b.const_i32(kpg)) when groups>1.
+ * Returns NULL for groups==1 (byte-identical ungrouped path).
+ * Python evaluates b.block_id_z() (left arg) BEFORE b.const_i32(kpg) (right arg).
+ * Bind each subexpression to a temp to force left-to-right SSA emission. */
+static rocke_value_t* rocke_conv_make_k_out_group_base(rocke_ir_builder_t* b,
+                                                       const rocke_conv_problem_t* p)
+{
+    if(p->groups <= 1)
+        return NULL;
+    rocke_value_t* bid_z = rocke_b_block_id_z(b);
+    rocke_value_t* c_kpg = rocke_b_const_i32(b, rocke_conv_problem_kpg(p));
+    return rocke_b_mul(b, bid_z, c_kpg);
 }
 
 /* Pointwise D-address closure: flat offset = m * kpg + n, always valid.
@@ -185,6 +211,9 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
     {
         /* D_desc = make_d_descriptor(p) */
         rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
+        rocke_conv_d_addr_ctx_t dctx;
+        dctx.D_desc = D_desc;
+        dctx.k_out_group_base = rocke_conv_make_k_out_group_base(b, p);
         /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
         rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
         rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
@@ -193,7 +222,7 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                     accs,
                                     num_accs,
                                     rocke_conv_d_addr,
-                                    (void*)D_desc,
+                                    (void*)&dctx,
                                     d_rsrc,
                                     bound_m,
                                     bound_n,
@@ -253,6 +282,9 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     (void)ir_c_K_pw; /* prologue value not used in wmma path */
     /* D_desc = make_d_descriptor(p) (NULL when pointwise) */
     rocke_tensor_descriptor_t* D_desc = _is_pointwise ? NULL : rocke_conv_make_d_descriptor(b, p);
+    /* Grouped conv: k_out_group_base = b.mul(b.block_id_z(), b.const_i32(p.kpg))
+     * if p.groups > 1 else None  (Python PR #10064 _emit_direct_epilogue_wmma). */
+    rocke_value_t* k_out_group_base = _is_pointwise ? NULL : rocke_conv_make_k_out_group_base(b, p);
     /* c_map = op.c_layout() */
     const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
 
@@ -318,21 +350,25 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 /* v_f32 = b.vec_extract(acc, i) */
                 v_f32 = rocke_b_vec_extract(b, acc, i);
 
-                /* d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
-                 * Pointwise fast path: flat offset = m * kpg + n */
+                /* d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=k_out)
+                 * Pointwise fast path: flat offset = m * kpg + n.
+                 * Grouped conv: k_out = k_out_group_base + n_val (else n_val). */
                 if(_is_pointwise)
                 {
                     d_off_elems = rocke_b_add(b, rocke_b_mul(b, m_val, c_K_wmma), n_val);
                 }
                 else
                 {
+                    rocke_value_t* k_out = (k_out_group_base != NULL)
+                                               ? rocke_b_add(b, k_out_group_base, n_val)
+                                               : n_val;
                     const char* names[2];
                     rocke_value_t* values[2];
                     rocke_value_t* valid = NULL;
                     names[0] = "m";
                     names[1] = "k_out";
                     values[0] = m_val;
-                    values[1] = n_val;
+                    values[1] = k_out;
                     rocke_transforms_descriptor_offset(
                         b, D_desc, names, values, 2, &d_off_elems, &valid);
                 }
@@ -414,11 +450,14 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     {
         /* D_desc = make_d_descriptor(p) */
         rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
+        rocke_conv_d_addr_ctx_t dctx;
+        dctx.D_desc = D_desc;
+        dctx.k_out_group_base = rocke_conv_make_k_out_group_base(b, p);
         /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
         rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
         rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
         rocke_cshuffle_epilogue_store(
-            b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)D_desc, d_rsrc, bound_m, bound_n);
+            b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)&dctx, d_rsrc, bound_m, bound_n);
     }
 }
 
