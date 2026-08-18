@@ -24,6 +24,7 @@ Covers:
 
 from __future__ import annotations
 
+import ast
 import itertools
 import ntpath
 import os
@@ -33,6 +34,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from rocke.core import ir as ir_mod
@@ -243,8 +245,13 @@ class TestEmittedDebugMetadata(unittest.TestCase):
             self.assertEqual(line.count("!dbg"), 1, f"duplicate !dbg: {line.strip()}")
 
     def test_locations_point_at_this_test_file(self):
-        self.assertIn(f'!DIFile(filename: "{os.path.basename(THIS_FILE)}"', self.ll)
-        self.assertIn(f'directory: "{os.path.dirname(THIS_FILE)}"', self.ll)
+        di_file = re.search(
+            rf'!DIFile\(filename: "{re.escape(os.path.basename(THIS_FILE))}", '
+            r'directory: (".*")\)',
+            self.ll,
+        )
+        self.assertIsNotNone(di_file)
+        self.assertEqual(Path(ast.literal_eval(di_file.group(1))), Path(THIS_FILE).parent)
         for line in re.findall(r"!DILocation\(line: (\d+)", self.ll):
             self.assertGreater(int(line), 0)
 
@@ -340,6 +347,7 @@ class TestInstalledLayout(unittest.TestCase):
 
     def roles_under(self, root):
         """Roles of the same modules with the package rooted at ``root``."""
+        root = os.path.abspath(root)
         saved = (ir_mod._CORE_PREFIX, ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE)
         ir_mod._CORE_PREFIX = os.path.join(root, "core") + os.sep
         ir_mod._ROCKE_PREFIX = root + os.sep

@@ -32,14 +32,12 @@ TRACE_SENTINEL_VERSION = 2
 
 CAPTURE_COMPLETE = "complete"
 CAPTURE_TRUNCATED = "truncated"
-CAPTURE_EMPTY = "empty"
 
-# Files removed before a capture or sidecar run invalidates a reused directory.
-PROVENANCE_FILES = (
+# Files owned by sidecar generation. Capture sentinels are deliberately absent:
+# only capture may change whether trace bytes are complete.
+SIDECAR_FILES = (
     SIDECAR,
     f"{SIDECAR}{SIDECAR_TMP_SUFFIX}",
-    TRACE_SENTINEL,
-    f"{TRACE_SENTINEL}{TRACE_SENTINEL_TMP_SUFFIX}",
 )
 
 
@@ -137,11 +135,20 @@ def enrich_trace_sentinel(dispatch: Path, **fields) -> dict | None:
     return doc
 
 
-def invalidate_provenance(root: Path) -> int:
-    """Remove sidecars and sentinels under ``root`` before a run decides anything."""
+def capture_generation(root: Path, trace_id: str) -> Path:
+    """Return the private output directory for one capture attempt."""
+    if not trace_id or any(
+        not (char.isascii() and (char.isalnum() or char in "._-")) for char in trace_id
+    ):
+        raise ValueError(f"invalid capture id: {trace_id!r}")
+    return root / f"capture-{trace_id}"
+
+
+def invalidate_sidecars(root: Path) -> int:
+    """Remove sidecar-owned files without changing capture provenance."""
     dropped = 0
     for d in (root, *sorted(root.glob(DISPATCH_GLOB))):
-        for name in PROVENANCE_FILES:
+        for name in SIDECAR_FILES:
             path = d / name
             if not path.exists():
                 continue
@@ -150,11 +157,8 @@ def invalidate_provenance(root: Path) -> int:
             except OSError as exc:
                 raise SystemExit(
                     f"cannot remove {path}: {exc}\n"
-                    "  It is provenance from an earlier capture into this "
-                    "directory, and the viewer cannot tell it from a current "
-                    "one.\n"
-                    "  Remove it by hand, or capture into a different "
-                    "--output-dir."
+                    "  It is source attribution from an earlier sidecar run. "
+                    "Remove it by hand before regenerating the sidecar."
                 ) from exc
             print(f"  {d.name}: removed {path.name} from an earlier run")
             dropped += 1
