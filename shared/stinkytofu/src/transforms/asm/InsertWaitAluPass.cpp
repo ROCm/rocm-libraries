@@ -53,9 +53,12 @@ using namespace stinkytofu;
 bool g_enableESM2TrackValuVsrc = false;
 
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
-// hazard of GLOBAL-family memory ops — the "valu writes VGPR, global op reads
-// it" case. Only the global op's src RAW va_vdst is dropped; its dst WAW
-// va_vdst, the vm_vsrc WAR, and every non-GLOBAL consumer are untouched.
+// hazard of GLOBAL-family memory ops and global_prefetch — the "valu writes VGPR,
+// global op / prefetch reads it" case. global_prefetch does not carry IF_GLOBALLoad,
+// so it is classified separately via isGlobalPrefetch(). Only the op's src RAW
+// va_vdst is dropped (prefetch has no dst); the vm_vsrc WAR and every non-GLOBAL
+// consumer are untouched. Safe because the DAG already spaces the vaddr producer
+// >=32 cycles ahead (CDNA5 isVmemAddrHazardConsumer covers buffer loads and prefetch).
 constexpr bool g_enableESM2SuppressValuToGlobalVaVdst = true;
 
 // ---------------------------------------------------------------------------
@@ -393,9 +396,12 @@ class WaitcntBrackets {
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        // TEMP HACK: optionally drop the src RAW va_vdst for valu->global.
-        const bool suppressSrcVaVdst =
-            g_enableESM2SuppressValuToGlobalVaVdst && isGLOBALOrAtomic(inst);
+        // TEMP HACK: drop the src RAW va_vdst for valu->global and valu->global_prefetch
+        // (prefetch lacks IF_GLOBALLoad, so classify it separately). Safe: the DAG already
+        // spaces the vaddr producer >=32 cycles (CDNA5 isVmemAddrHazardConsumer covers it).
+        const bool suppressSrcVaVdst = g_enableESM2SuppressValuToGlobalVaVdst &&
+                                       (isGLOBALOrAtomic(inst) || isGlobalPrefetch(inst));
+
         if (!suppressSrcVaVdst) {
             forEachVGPR(
                 inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },

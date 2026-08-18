@@ -70,6 +70,27 @@ if(ENABLE_HIP_MLOPS_ENGINE)
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
     )
 endif()
+
+if(ENABLE_HIP_FLASH2_ENGINE)
+    if(NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "ENABLE_HIP_FLASH2_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable Flash2 integration tests.")
+    else()
+        add_subdirectory(hip_flash2_engine)
+    endif()
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
+    )
+    # This target links only the SDKs, not hip_kernel_provider_private, so it does not
+    # inherit the provider's gate and needs the definition set directly.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
+    )
+endif()
+
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
 # ENVIRONMENT is forwarded to add_integration_test_target() rather than set

@@ -46,6 +46,31 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
+if(ENABLE_HIP_FLASH2_ENGINE)
+    # Precompiled-kernel engine: compile the host-side engine/plan sources into the
+    # provider object library. HipFlash2FwdPlan.hip is intentionally excluded (it is
+    # the offline source for the shipped .co files and needs rocWMMA headers).
+    target_sources(hip_kernel_provider_impl PRIVATE
+        engines/hip_flash2_engine/HipFlash2Engine.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlan.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.cpp)
+    target_compile_definitions(hip_kernel_provider_impl PRIVATE
+        HIPDNN_ENGINE_HIP_FLASH2
+        HIP_FLASH2_KERNEL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels")
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_FLASH2=1)
+    # Defect E fix: copy .co files to build tree so build-tree test runs work without
+    # manual HIP_FLASH2_KERNEL_DIR export (mirrors asm_sdpa_engine pattern)
+    file(COPY
+        ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels)
+    # Override HIP_FLASH2_KERNEL_DIR at test time to point to build tree
+    set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"
+        CACHE STRING "Build-tree path for Flash2 .co kernels (for test runs)")
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+endif()
+
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
@@ -233,20 +258,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
-    # For standalone builds we need to install the ctest files.
-    # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
-    # to bin/hip_kernel_provider/ so TheRock CI's test_runner.py can drive `ctest -L quick`
-    # (etc.) from the artifact's install tree. Otherwise, fall back to the project's
-    # own install_provider_ctest_files() which emits an unlabeled CTestTestfile.cmake.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
-            install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-                    DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
-                    RENAME "CTestTestfile.cmake"
-            )
-        else()
-            install_provider_ctest_files("hip_kernel_provider")
-        endif()
+    # Install the ctest files. When YAML-based categorization is active, install the
+    # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
+    # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
+    # Otherwise, fall back to the project's own install_provider_ctest_files() which
+    # emits an unlabeled CTestTestfile.cmake.
+    if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
+        install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
+                RENAME "CTestTestfile.cmake"
+        )
+    else()
+        install_provider_ctest_files("hip_kernel_provider")
     endif()
 endif()
 
