@@ -13,8 +13,6 @@ For detailed test design and ownership, see [Testing Strategy](./TESTING_STRATEG
 
 hipDNN is a graph-based DNN execution library with Windows and Linux support. The frontend, backend, and plugin separation allows each layer to be unit tested independently, while integration tests validate cross-layer behavior.
 
-hipDNN runs on Windows and Linux. Its frontend, backend, and plugins can be tested separately, while integration tests check that these parts work together.
-
 hipDNN core includes the backend, frontend, Data SDK, FlatBuffers SDK, Plugin SDK, and Test SDK.
 Core unit and API tests use test plugins from this repository. You can test core-only changes without building a production provider.
 
@@ -67,7 +65,7 @@ For a bug fix, add a test that fails before the fix and passes after it.
 
 Put new tests beside the existing tests for that component.
 Follow the GoogleTest patterns already used there.
-Tests that need a GPU must skip cleanly when no device is available.
+If a unit test needs a GPU, call `SKIP_IF_NO_DEVICES()` so it skips cleanly on CPU-only machines.
 
 Use [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md) for test names. Use [Testing Strategy](./TESTING_STRATEGY.md) to choose the right test layer.
 

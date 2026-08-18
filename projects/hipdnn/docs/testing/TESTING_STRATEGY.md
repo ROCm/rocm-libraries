@@ -18,35 +18,35 @@ Other documents own the detailed instructions:
 
 1. **Test the smallest useful part.** Put a test at the lowest layer that can check the behavior without copying production logic.
 2. **Classify tests by what they depend on.** Unit tests replace outside dependencies. Integration tests use real components, plugins, runtimes, or devices.
-3. **Keep unit tests GPU-free.** Tests that need a GPU, runtime compilation, or kernel execution belong in integration or performance testing.
+3. **Avoid GPU use in unit tests when practical.** A unit test may use a GPU when the behavior cannot be tested otherwise, but it must skip with `SKIP_IF_NO_DEVICES()` on machines without a device.
 4. **Separate routing from numerical results.** hipDNN owns graph handling and plugin calls. Providers own whether an engine produces correct results on a device.
 5. **A skip is not a pass.** A skipped test gives no result for that configuration.
 6. **CI does not define product support.** A green job proves only that its selected tests passed in that environment.
 7. **Make failures easy to trace.** Name the layer and engine, use repeatable inputs, and avoid duplicate tests that report the same failure.
 
-## Unit Tests Should Not Need a GPU
+## Unit Tests Should Avoid GPU Use
 
 ### Target Design
 
-**Strategy:** A unit test checks one production unit and replaces dependencies outside that unit with fakes, stubs, or mocks:
+**Strategy:** A unit test checks one production unit.
 
-- backend unit tests replace production providers and GPU work;
-- frontend unit tests replace the backend C API;
-- SDK unit tests do not run providers or kernels;
-- provider adapter unit tests replace library calls, runtime compilation, and GPU execution.
+- Replace outside dependencies with fakes, stubs, or mocks when practical.
+- Prefer CPU-only tests because they are faster and run on more machines.
+- A focused unit test may use a GPU when GPU access is part of the behavior under test.
+- Every GPU-dependent unit test must call `SKIP_IF_NO_DEVICES()` so it skips cleanly on CPU-only machines.
 
-Unit tests should not need a GPU. Behavior that needs a real HIP runtime, production plugin, library handle, runtime compiler, or kernel belongs in integration testing.
+GPU use alone does not make a test an integration test. A test becomes an integration test when it checks a real boundary between components, plugins, runtimes, libraries, or devices.
 
 ### Who Tests What
 
 | Layer | What it checks | What the test replaces |
 |---|---|---|
-| Backend | State, descriptors, lifetime, errors, plugin coordination | Production providers and GPU work |
+| Backend | State, descriptors, lifetime, errors, plugin coordination | Production providers and unrelated GPU work |
 | Frontend | Graph building and backend API calls | Backend implementation |
-| Data and FlatBuffers SDKs | Data models, serialization, logging, utilities | Consumers, providers, and GPU work |
+| Data and FlatBuffers SDKs | Data models, serialization, logging, utilities | Consumers and providers |
 | Plugin SDK | Provider helpers and base behavior | Real provider engines |
-| Test SDK | Reference results, comparisons, shared test tools | Production plugins and GPU work |
-| Provider adapter | Graph translation, support checks, configuration, errors | Library or kernel execution and GPU |
+| Test SDK | Reference results, comparisons, shared test tools | Production plugins |
+| Provider adapter | Graph translation, support checks, configuration, errors | Lower-level library or kernel work not being tested |
 
 Public backend and frontend tests are integration tests because they cross the public API boundary, even when they use controlled test plugins.
 
