@@ -153,7 +153,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # One spelling of the arch_content layout, shared by the staging rule, the install
     # DESTINATION and the path compiled into the provider. A typo in a second copy would
     # yield a provider that finds no descriptors, with no build error to say so.
-    set(HIPDNN_DESCRIPTOR_SUBDIR "arch_content/hip-kernel-provider/descriptors")
+    #
+    # The provider's own directory is the root the loader walks; what sits under it is
+    # organizational. Today that is one folder per engine, and per-arch shards land as
+    # arch_content/hip-kernel-provider/<arch>/ once the packager emits them -- which needs
+    # no change here, since folder names mean nothing to the walk.
+    set(HIPDNN_DESCRIPTOR_SUBDIR "arch_content/hip-kernel-provider")
     set(HIPDNN_DESCRIPTOR_BUILD_DIR
         "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
