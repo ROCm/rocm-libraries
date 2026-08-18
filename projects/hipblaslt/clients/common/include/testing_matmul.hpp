@@ -438,6 +438,7 @@ void check(hipStream_t                   stream,
            std::vector<HipHostBuffer>&   hBias,
            std::vector<HipDeviceBuffer>& dBias,
            std::vector<double>&          tol,
+           const std::vector<double>&    symmetricRelativeTol,
            double&                       hipblaslt_error,
            double&                       hipblaslt_atol,
            double&                       hipblaslt_rtol,
@@ -506,13 +507,22 @@ void check(hipStream_t                   stream,
             request.requireSpecialValueConsistency = requireSpecialValueConsistency;
             if(comparePointwise)
             {
-                request.pointwise         = tol[gemmIdx] != 0 ? HostPointwiseComparison::Near
-                                                              : HostPointwiseComparison::Unit;
-                request.absoluteTolerance = tol[gemmIdx];
+                if(symmetricRelativeTol[gemmIdx] != 0)
+                {
+                    request.pointwise                  = HostPointwiseComparison::SymmetricRelative;
+                    request.symmetricRelativeTolerance = symmetricRelativeTol[gemmIdx];
+                }
+                else
+                {
+                    request.pointwise         = tol[gemmIdx] != 0 ? HostPointwiseComparison::Near
+                                                                  : HostPointwiseComparison::Unit;
+                    request.absoluteTolerance = tol[gemmIdx];
+                }
             }
 #else
             (void)requireSpecialValueConsistency;
             (void)comparePointwise;
+            (void)symmetricRelativeTol;
 #endif
             request.computeRelativeFrobeniusError = computeRelativeFrobeniusError;
             request.findAllCloseTolerance         = findAllCloseTolerance;
@@ -585,12 +595,17 @@ void check(hipStream_t                   stream,
         }
 #ifdef GOOGLE_TEST
         const auto assertPointwiseComparison = [&](const auto& report) {
-            if(tol[gemmIdx] != 0)
+            if(tol[gemmIdx] != 0 || symmetricRelativeTol[gemmIdx] != 0)
             {
                 ASSERT_TRUE(report.passed())
-                    << "near comparison found " << report.mismatches << " mismatches in "
+                    << "tolerant comparison found " << report.mismatches << " mismatches in "
                     << report.compared << " values; max absolute difference "
-                    << report.maxAbsoluteDifference << ", tolerance " << tol[gemmIdx];
+                    << report.maxAbsoluteDifference << ", "
+                    << (symmetricRelativeTol[gemmIdx] != 0
+                            ? "symmetric relative tolerance coefficient "
+                            : "absolute tolerance ")
+                    << (symmetricRelativeTol[gemmIdx] != 0 ? symmetricRelativeTol[gemmIdx]
+                                                          : tol[gemmIdx]);
             }
             else
             {
@@ -4710,32 +4725,41 @@ void testing_matmul_with_bias(const Arguments& arg,
             double              hipblaslt_max_ulp = 0.0;
             double              hipblaslt_avg_ulp = 0.0;
             std::vector<double> tol(gemm_count);
+            std::vector<double> symmetricRelativeTol(gemm_count);
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
             {
-                // GFX11's 16-bit-input unit-check path historically requires a
-                // near comparison. Type-specific relaxed tolerances are no
-                // longer used; bound ordinary accumulation error by K * epsilon.
+                // GFX11's low-precision matrix instructions use a reduction tree that can differ
+                // from the sequential host reference. Use the documented scale-aware tolerance
+                // instead of the former very broad FP16/BF16 constants.
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
                 {
-                    tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_compute_type(Tc);
+                    symmetricRelativeTol[gemmIdx]
+                        = gfx11_low_precision_accumulation_tolerance_coefficient(Tc, K[gemmIdx]);
                 }
             }
             if(arg.initialization == hipblaslt_initialization::integer_exact)
             {
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 0;
+                {
+                    tol[gemmIdx]                  = 0;
+                    symmetricRelativeTol[gemmIdx] = 0;
+                }
             }
             else if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
             {
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                {
+                    tol[gemmIdx]                  = 1e-2;
+                    symmetricRelativeTol[gemmIdx] = 0;
+                }
             }
             else if(arg.initialization == hipblaslt_initialization::norm_dist_one_special)
             {
                 // Gaussian-filled inputs + batched GEMM: use near_check like fp16_accumulator_probe
                 // (CPU ref vs GPU are not always bit-identical for f32/f16 accumulations).
                 std::fill(tol.begin(), tol.end(), 1e-2);
+                std::fill(symmetricRelativeTol.begin(), symmetricRelativeTol.end(), 0.0);
             }
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
@@ -4772,6 +4796,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       hBias,
                       dBias,
                       tol,
+                      symmetricRelativeTol,
                       hipblaslt_error,
                       hipblaslt_atol,
                       hipblaslt_rtol,
@@ -5328,29 +5353,37 @@ void testing_matmul_with_bias(const Arguments& arg,
             double              hipblaslt_max_ulp = 0.0;
             double              hipblaslt_avg_ulp = 0.0;
             std::vector<double> tol(gemm_count);
+            std::vector<double> symmetricRelativeTol(gemm_count);
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
             {
-                // See the matching grouped-GEMM path above.
+                // See the matching GEMM path above.
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
                 {
-                    hipblaslt_cout << "k = " << K[gemmIdx] << "\n";
-                    tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_compute_type(Tc);
+                    symmetricRelativeTol[gemmIdx]
+                        = gfx11_low_precision_accumulation_tolerance_coefficient(Tc, K[gemmIdx]);
                 }
             }
             if(arg.initialization == hipblaslt_initialization::integer_exact)
             {
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 0;
+                {
+                    tol[gemmIdx]                  = 0;
+                    symmetricRelativeTol[gemmIdx] = 0;
+                }
             }
             else if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
             {
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                {
+                    tol[gemmIdx]                  = 1e-2;
+                    symmetricRelativeTol[gemmIdx] = 0;
+                }
             }
             else if(arg.initialization == hipblaslt_initialization::norm_dist_one_special)
             {
                 std::fill(tol.begin(), tol.end(), 1e-2);
+                std::fill(symmetricRelativeTol.begin(), symmetricRelativeTol.end(), 0.0);
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
@@ -5398,6 +5431,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       hBias,
                       dBias,
                       tol,
+                      symmetricRelativeTol,
                       hipblaslt_error,
                       hipblaslt_atol,
                       hipblaslt_rtol,
