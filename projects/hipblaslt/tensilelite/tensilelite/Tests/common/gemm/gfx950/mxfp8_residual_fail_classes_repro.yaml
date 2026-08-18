@@ -42,9 +42,9 @@
 # Run (validated on HEAD c96e3fb0519; run 2-3x due to the race):
 #   cd projects/hipblaslt/tensilelite && \
 #   PYTHONPATH=../build/release/tensilelite/rocisa HIP_VISIBLE_DEVICES=<gpu 1/3/5/7> \
-#   python3.12 Tensile/bin/Tensile --prebuilt-client \
+#   python3.12 tensilelite/bin/Tensile --prebuilt-client \
 #     build_tmp/tensilelite/client/tensilelite-client \
-#     Tensile/Tests/common/gemm/gfx950/mxfp8_residual_fail_classes_repro.yaml /tmp/out_classes
+#     tensilelite/Tests/common/gemm/gfx950/mxfp8_residual_fail_classes_repro.yaml /tmp/out_classes
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 

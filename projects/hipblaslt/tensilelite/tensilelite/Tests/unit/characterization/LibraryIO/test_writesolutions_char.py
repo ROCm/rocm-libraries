@@ -41,8 +41,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile import __version__
-import Tensile.LibraryIO as L
+from tensilelite import __version__
+import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
 

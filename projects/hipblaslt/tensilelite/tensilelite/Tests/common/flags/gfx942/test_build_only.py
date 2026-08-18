@@ -24,14 +24,14 @@ import os
 import pytest
 from pathlib import Path
 
-from Tensile import Tensile
-from Tensile.Tests.gpu_detection import has_arch
+from tensilelite import tensilelite
+from tensilelite.Tests.gpu_detection import has_arch
 
 # The yaml config is defined inline (rather than as a separate .yaml file) to
 # prevent test_config.py's findConfigs() from picking it up as a standalone
 # parametrized test.  This config is only meant to be used by the tests below.
 #
-# Trimmed from Tensile/Tests/common/gemm/fp16_tn.yaml to a single solution
+# Trimmed from tensilelite/Tests/common/gemm/fp16_tn.yaml to a single solution
 # (one MatrixInstruction) and a single benchmark problem size.
 _CONFIG = """\
 GlobalParameters:
@@ -98,7 +98,7 @@ def test_compile(tensile_args: list[str], tmp_path: Path) -> None:
     config_path = str(tmp_path / "config.yaml")
     _write_config(config_path)
     output_dir = str(tmp_path / "output")
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args])
+    tensilelite.Tensile([config_path, output_dir, "--build-only", *tensile_args])
 
 
 @pytest.mark.skipif(not _HAS_GFX942, reason="gfx942 GPU not available")
@@ -111,7 +111,7 @@ def test_use_cache(tensile_args: list[str], tmp_path: Path) -> None:
     output_dir = str(tmp_path / "output")
 
     # First run: compile only
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args])
+    tensilelite.Tensile([config_path, output_dir, "--build-only", *tensile_args])
 
     # Second run: use cache
-    Tensile.Tensile([config_path, output_dir, "--use-cache", *tensile_args])
+    tensilelite.Tensile([config_path, output_dir, "--use-cache", *tensile_args])

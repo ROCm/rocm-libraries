@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.versionIsCompatible``.
+``tensilelite.Common.Utilities.versionIsCompatible``.
 
 The function compares a query version string ``"major.minor.step"`` against the
 package ``__version__`` (currently ``5.0.0``):
@@ -20,7 +20,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 versionIsCompatible = U.versionIsCompatible
 
 pytestmark = pytest.mark.unit

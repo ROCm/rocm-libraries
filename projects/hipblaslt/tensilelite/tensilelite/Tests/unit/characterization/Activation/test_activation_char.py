@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.Activation
+# Characterization tests for tensilelite.Activation
 #
 # ADD-ONLY. Activation.py is ~1040 statements, the large majority of which is
 # rocisa **assembly codegen** (the getXModule emitters, CombineInstructions /
@@ -18,8 +18,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-A = importlib.import_module("Tensile.Activation")
-DataType = importlib.import_module("Tensile.Common.DataType").DataType
+A = importlib.import_module("tensilelite.Activation")
+DataType = importlib.import_module("tensilelite.Common.DataType").DataType
 AT = A.ActivationType
 
 

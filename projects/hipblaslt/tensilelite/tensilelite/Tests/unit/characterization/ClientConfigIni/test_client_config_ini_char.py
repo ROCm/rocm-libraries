@@ -45,11 +45,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import Tensile.ClientWriter as CW
-from Tensile.Contractions import ProblemType as ContractionsProblemType, FreeIndex, BatchIndex
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy
-from Tensile.SolutionStructs import FactorDimArgs
+import tensilelite.ClientWriter as CW
+from tensilelite.Contractions import ProblemType as ContractionsProblemType, FreeIndex, BatchIndex
+from tensilelite.Common.GlobalParameters import globalParameters
+from tensilelite.SolutionStructs.Problem import ProblemSizesMockDummy
+from tensilelite.SolutionStructs import FactorDimArgs
 
 pytestmark = pytest.mark.unit
 
@@ -918,7 +918,7 @@ class TestProblemSizeParamsUseE:
     def test_e_strides_added_when_use_e(self):
         """Lines 491-492: useE=True adds 'e-strides' equal to dstrides."""
         pt = _make_problem_type(_USE_E_PT_DICT)
-        from Tensile.SolutionStructs.Problem import Problem
+        from tensilelite.SolutionStructs.Problem import Problem
 
         # sizes=[M, N, batch, K] = 4 indices matching TotalIndices
         problem = Problem([128, 64, 1, 512])
@@ -928,7 +928,7 @@ class TestProblemSizeParamsUseE:
     def test_no_e_strides_without_use_e(self):
         """No e-strides when useE is False."""
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
-        from Tensile.SolutionStructs.Problem import Problem
+        from tensilelite.SolutionStructs.Problem import Problem
 
         problem = Problem([128, 64, 1, 512])
         result = dict(CW.problemSizeParams(pt, problem, [0]))

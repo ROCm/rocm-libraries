@@ -1,12 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tests for the pure logic of Tensile.ExperimentalLibrary.
+"""Tests for the pure logic of tensilelite.ExperimentalLibrary.
 
 Lives under ``Tests/extras`` (not ``Tests/unit``) on purpose: the ``unit``
 conftest imports ``streamk5_test_helpers`` -> ``rocisa.code``, so collecting any
 test there requires a built rocisa. The pure-logic tests below
 (``coerce_value``, ``parse_set_arg``, ``augment_config`` round-trip) need no
-toolchain because ``Tensile.ExperimentalLibrary`` keeps its rocisa-dependent
+toolchain because ``tensilelite.ExperimentalLibrary`` keeps its rocisa-dependent
 imports lazy. The ``validate_sets`` tests genuinely need ``validParameters``
 (which pulls in rocisa) and are guarded so they skip gracefully without a build.
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from Tensile.ExperimentalLibrary import (
+from tensilelite.ExperimentalLibrary import (
     ExperimentalLibraryError,
     augment_config,
     coerce_value,
@@ -46,9 +46,9 @@ def _require_validparameters():
     """Skip cleanly when the rocisa-backed validParameters registry is absent."""
     pytest.importorskip("rocisa")
     try:
-        from Tensile.Common.ValidParameters import validParameters  # noqa: F401
+        from tensilelite.Common.ValidParameters import validParameters  # noqa: F401
     except Exception as e:  # pragma: no cover - environment dependent
-        pytest.skip(f"Tensile.Common.ValidParameters unavailable: {e}")
+        pytest.skip(f"tensilelite.Common.ValidParameters unavailable: {e}")
 
 
 def test_coerce_value():
@@ -303,7 +303,7 @@ def test_merge_configs_allows_multiple_problem_types():
 # ---------------------------------------------------------------------------
 # gen-logic host-arch guard (benchmark-by-default; hard-fail on arch mismatch)
 #
-# These need rocisa because they import Tensile.Common.Architectures (which
+# These need rocisa because they import tensilelite.Common.Architectures (which
 # imports rocisa at module load); they skip cleanly without a build.
 # ---------------------------------------------------------------------------
 
@@ -326,14 +326,14 @@ def _gen_logic_ns(tmp_path, arch, dry_run=False, config=None):
 def test_detect_host_gfx_archs_normalizes_and_filters(monkeypatch):
     """detectHostGfxArchs de-dups, drops CPU gfx000, and normalizes :xnack± variants."""
     pytest.importorskip("rocisa")
-    import Tensile.Common.Architectures as Arch
+    import tensilelite.Common.Architectures as Arch
 
     class _Proc:
         returncode = 0
         stdout = b"gfx950\ngfx950:xnack-\ngfx000\n"
 
     monkeypatch.setattr(
-        "Tensile.Toolchain.Validators.validateToolchain", lambda tool: "/fake/enum"
+        "tensilelite.Toolchain.Validators.validateToolchain", lambda tool: "/fake/enum"
     )
     monkeypatch.setattr(Arch, "run", lambda *a, **k: _Proc())
 
@@ -346,8 +346,8 @@ def test_detect_host_gfx_archs_normalizes_and_filters(monkeypatch):
 def test_gen_logic_rejects_arch_absent_on_host(monkeypatch, tmp_path):
     """Target arch not present -> ExperimentalLibraryError naming the arch and detected set."""
     pytest.importorskip("rocisa")
-    import Tensile.Common.Architectures as Arch
-    from Tensile.ExperimentalLibrary import cmd_gen_logic
+    import tensilelite.Common.Architectures as Arch
+    from tensilelite.ExperimentalLibrary import cmd_gen_logic
 
     monkeypatch.setattr(Arch, "hostHasArch", lambda a: False)
     monkeypatch.setattr(Arch, "detectHostGfxArchs", lambda: ["gfx950"])
@@ -366,8 +366,8 @@ def test_gen_logic_rejects_arch_absent_on_host(monkeypatch, tmp_path):
 def test_gen_logic_arch_mismatch_maps_to_nonzero_exit(monkeypatch, tmp_path):
     """main() maps the guard's ExperimentalLibraryError to a non-zero exit code."""
     pytest.importorskip("rocisa")
-    import Tensile.Common.Architectures as Arch
-    from Tensile.ExperimentalLibrary import main
+    import tensilelite.Common.Architectures as Arch
+    from tensilelite.ExperimentalLibrary import main
 
     monkeypatch.setattr(Arch, "hostHasArch", lambda a: False)
     monkeypatch.setattr(Arch, "detectHostGfxArchs", lambda: ["gfx950"])
@@ -390,8 +390,8 @@ def test_gen_logic_arch_mismatch_maps_to_nonzero_exit(monkeypatch, tmp_path):
 def test_gen_logic_matching_arch_passes_guard_and_omits_cpu_only(monkeypatch, tmp_path):
     """Matching arch clears the guard; the constructed Tensile cmd has no --cpu-only."""
     pytest.importorskip("rocisa")
-    import Tensile.Common.Architectures as Arch
-    import Tensile.ExperimentalLibrary as E
+    import tensilelite.Common.Architectures as Arch
+    import tensilelite.ExperimentalLibrary as E
 
     monkeypatch.setattr(Arch, "hostHasArch", lambda a: True)
 
@@ -421,8 +421,8 @@ def test_gen_logic_matching_arch_passes_guard_and_omits_cpu_only(monkeypatch, tm
 def test_gen_logic_dry_run_bypasses_guard(monkeypatch, tmp_path):
     """--dry-run must stay hardware-independent: the guard is never consulted."""
     pytest.importorskip("rocisa")
-    import Tensile.Common.Architectures as Arch
-    import Tensile.ExperimentalLibrary as E
+    import tensilelite.Common.Architectures as Arch
+    import tensilelite.ExperimentalLibrary as E
 
     def _boom(*a, **k):
         raise AssertionError("host-arch detection called under --dry-run")
@@ -437,7 +437,7 @@ def test_gen_logic_dry_run_bypasses_guard(monkeypatch, tmp_path):
 def test_gen_logic_rejects_placeholder_problem_sizes(tmp_path):
     """A config still carrying extract's Prediction-source placeholder must be
     rejected before benchmarking is attempted."""
-    from Tensile.ExperimentalLibrary import cmd_gen_logic
+    from tensilelite.ExperimentalLibrary import cmd_gen_logic
 
     cfg = tmp_path / "c.yaml"
     cfg.write_text(yaml.safe_dump(_config_with_problem_sizes([{"Exact": [1, 1, 1, 1]}])))
@@ -449,7 +449,7 @@ def test_gen_logic_rejects_placeholder_problem_sizes(tmp_path):
 def test_gen_logic_placeholder_guard_checked_even_under_dry_run(tmp_path):
     """Unlike the arch guard, the placeholder check runs whenever the config
     file exists, dry-run or not."""
-    from Tensile.ExperimentalLibrary import cmd_gen_logic
+    from tensilelite.ExperimentalLibrary import cmd_gen_logic
 
     cfg = tmp_path / "c.yaml"
     cfg.write_text(yaml.safe_dump(_config_with_problem_sizes([{"Exact": [1, 1, 1, 1]}])))
@@ -464,7 +464,7 @@ def test_gen_logic_placeholder_guard_checked_even_under_dry_run(tmp_path):
 
 
 def test_build_lib_forwards_jobs_to_tensile_create_library(monkeypatch, tmp_path):
-    import Tensile.ExperimentalLibrary as E
+    import tensilelite.ExperimentalLibrary as E
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -760,7 +760,7 @@ def test_patch_logic_dry_run_writes_nothing_but_prints_exports(tmp_path, capsys)
 
 
 def test_patch_logic_skip_unbuildable_dry_run_never_probes(tmp_path, monkeypatch):
-    import Tensile.ExperimentalLibrary as E
+    import tensilelite.ExperimentalLibrary as E
 
     f = tmp_path / "logic.yaml"
     _write_logic_yaml(f, _logic_states())
@@ -778,7 +778,7 @@ def test_patch_logic_skip_unbuildable_dry_run_never_probes(tmp_path, monkeypatch
 def test_patch_logic_applies_override_and_writes_manifest(tmp_path, monkeypatch):
     """End-to-end pass 1-3 + manifest, with the actual TensileCreateLibrary
     build stubbed out (that part is exercised by build-lib's own tests)."""
-    import Tensile.ExperimentalLibrary as E
+    import tensilelite.ExperimentalLibrary as E
 
     f = tmp_path / "logic.yaml"
     _write_logic_yaml(f, _logic_states(), library_type="Equality")
@@ -812,7 +812,7 @@ def test_patch_logic_applies_override_and_writes_manifest(tmp_path, monkeypatch)
 def test_patch_logic_skip_unbuildable_keeps_failed_solution_as_baseline(
     tmp_path, monkeypatch
 ):
-    import Tensile.ExperimentalLibrary as E
+    import tensilelite.ExperimentalLibrary as E
 
     f = tmp_path / "logic.yaml"
     _write_logic_yaml(f, _logic_states(), library_type="Equality")

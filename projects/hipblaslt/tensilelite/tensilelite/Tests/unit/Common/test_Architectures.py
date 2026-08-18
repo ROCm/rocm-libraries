@@ -25,8 +25,8 @@
 import pytest
 from unittest.mock import mock_open, patch
 from pathlib import Path
-from Tensile.Common.Utilities import isRhel8
-from Tensile.Common.Architectures import (
+from tensilelite.Common.Utilities import isRhel8
+from tensilelite.Common.Architectures import (
     SUPPORTED_BUILD_CHIP_IDS,
     SUPPORTED_BUILD_CU_COUNTS,
     SUPPORTED_CHIP_ID_FALLBACKS,
@@ -193,7 +193,7 @@ def test_filterLogicFilesByPredicates_fallback_id_match(mock_logic_file):
         }
     }
     
-    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
+    with patch("tensilelite.Common.Architectures._extractArchInfo") as mock_extract:
         mock_extract.return_value = ArchInfo("test", "gfx950", {"id=75a0"}, None)
         result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 2
@@ -210,7 +210,7 @@ def test_filterLogicFilesByPredicates_cu_match(mock_logic_file):
         }
     }
     
-    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
+    with patch("tensilelite.Common.Architectures._extractArchInfo") as mock_extract:
         mock_extract.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, "cu=80")
         result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 1
@@ -225,7 +225,7 @@ def test_filterLogicFilesByPredicates_cu_fallback(mock_logic_file):
         }
     }
     
-    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
+    with patch("tensilelite.Common.Architectures._extractArchInfo") as mock_extract:
         mock_extract.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, None)
         result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 1
@@ -240,9 +240,9 @@ def test_filterLogicFilesByPredicates_mixed_match_fallback(mock_logic_file):
         }
     }
     
-    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract1:
+    with patch("tensilelite.Common.Architectures._extractArchInfo") as mock_extract1:
         mock_extract1.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, None)
-        with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract2:
+        with patch("tensilelite.Common.Architectures._extractArchInfo") as mock_extract2:
             mock_extract2.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, "cu=96")
             result = filterLogicFilesByPredicates(logicFiles, predicateMap)
             assert len(result) == 2
@@ -258,7 +258,7 @@ def test_filterLogicFilesByPredicates_no_match(mock_logic_file):
         }
     }
     
-    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
+    with patch("tensilelite.Common.Architectures._extractArchInfo") as mock_extract:
         mock_extract.return_value = ArchInfo("test", "gfx950", {"id=75a3"}, None)
         result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 0
@@ -328,4 +328,3 @@ def test_verifyPredicate_invalid_predicate():
     with pytest.raises(ValueError) as exc_info:
         _verifyPredicate("invalid=value", "gfx950")
     assert "only device ID and CU count-based predicates" in str(exc_info.value)
-

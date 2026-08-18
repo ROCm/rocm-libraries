@@ -64,12 +64,12 @@
 # Reproduce:
 #   cd projects/hipblaslt/tensilelite
 #   PYTHONPATH=../build/release/tensilelite/rocisa HIP_VISIBLE_DEVICES=<free_gpu> \
-#     python3.12 Tensile/bin/Tensile \
+#     python3.12 tensilelite/bin/Tensile \
 #       --prebuilt-client build_tmp/tensilelite/client/tensilelite-client \
-#       Tensile/Tests/common/gemm/gfx950/mxfp8_verify_fail_repro.yaml /tmp/out
+#       tensilelite/Tests/common/gemm/gfx950/mxfp8_verify_fail_repro.yaml /tmp/out
 #   # (build the client once with:  invoke build-client --build-dir build_tmp)
 # Or via pytest:
-#   python3 -m pytest Tensile/Tests/common/gemm/gfx950/mxfp8_verify_fail_repro.yaml \
+#   python3 -m pytest tensilelite/Tests/common/gemm/gfx950/mxfp8_verify_fail_repro.yaml \
 #       --prebuilt-client build_tmp/tensilelite/client/tensilelite-client -v
 ########################################
 

@@ -65,7 +65,7 @@ def test_enable_matrix_instruction_declared_as_two_valued_bool():
     the domain is caught here, which would make one branch of
     KernelWriterAssembly.py:1839 structurally dead.
     """
-    from Tensile.Common.ValidParameters import newMIValidParameters  # noqa: PLC0415
+    from tensilelite.Common.ValidParameters import newMIValidParameters  # noqa: PLC0415
 
     domain = newMIValidParameters["EnableMatrixInstruction"]
     assert False in domain, (
