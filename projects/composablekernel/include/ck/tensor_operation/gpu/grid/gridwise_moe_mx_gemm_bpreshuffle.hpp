@@ -41,9 +41,9 @@ template <>
 struct moe_mx_bpreshuffle_activation_support<false>
 {
     [[deprecated("gridwise_moe_mx_gemm_bpreshuffle: requested activation is not implemented; "
-                 "stage-1 output is left unwritten and results will be wrong")]] __host__ __device__
-    static constexpr void
-    check()
+                 "stage-1 output is left unwritten and results will be wrong")]] __host__
+        __device__ static constexpr void
+        check()
     {
     }
 };
