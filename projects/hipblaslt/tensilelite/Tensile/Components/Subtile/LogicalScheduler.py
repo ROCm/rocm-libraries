@@ -3304,6 +3304,20 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
+    def _splicePreloopCoverModules(self, em_list, cover_modules) -> bool:
+        """Insert deferred cover modules (LRA trio + extensions) into preloop."""
+        if not cover_modules:
+            return False
+        drain_idx = next((i for i, em in enumerate(em_list)
+                          if em.opType == 'wait_gr'), len(em_list))
+        new_id = max((em.moduleId for em in em_list), default=-1) + 1
+        em_list.insert(drain_idx,
+                       EmittedModule(moduleId=new_id,
+                                     instructions=list(cover_modules),
+                                     before=None,
+                                     source=None))
+        return True
+
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
@@ -4186,7 +4200,7 @@ class LogicalScheduler:
             module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
                                     comment="K < DepthU: skip prefetch GR, still run initC"))
 
-        # ── Pre-loop scheduling (Change A): defer LDS read-address setup ──
+        # ── Pre-loop cover / Change A: defer LDS read-address setup ──
         # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
         # its DTL swap-vgpr init, lraTileAssignmentScaleSwizzled) on the writer instead of
         # emitting them in the prologue. Splice them into the preloop right before the
@@ -4195,22 +4209,26 @@ class LogicalScheduler:
         # main-loop LR swaps -- come after this point). Inserted BEFORE the guard fold so
         # the address math is front-loaded into the shadow. The preloop is emitted
         # unscheduled (schedule=False), so the sequential list splice lands them in order.
+        # TENSILE_PRELOOP_COVER_INTERLEAVE widens this from PLSIN1-only (Change A) to
+        # every subtile PGR>=1 kernel; see _preloopCoverInterleaveEligible.
+        from Tensile.Common.Utilities import preloopCoverInterleaveEnabled
+        _coverFlag = preloopCoverInterleaveEnabled()
         _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
+        _coverDeferred = getattr(writer, "_deferredPreloopCoverModules", None)
+        _coverModules = None
+        if _coverFlag and _coverDeferred:
+            _coverModules = _coverDeferred
+        elif _lraDeferred:
+            _coverModules = _lraDeferred
         if (self.config.pgr >= 1
-                and _lraDeferred
-                and not getattr(self, "_lraDeferredIntoPreloop", False)
+                and _coverModules
+                and not getattr(self, "_coverDeferredIntoPreloop", False)
                 and self._preloop_emitted
                 and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
             em_list = self._preloop_emitted[0][0]
-            drain_idx = next((i for i, em in enumerate(em_list)
-                              if em.opType == 'wait_gr'), len(em_list))
-            new_id = max((em.moduleId for em in em_list), default=-1) + 1
-            em_list.insert(drain_idx,
-                           EmittedModule(moduleId=new_id,
-                                         instructions=list(_lraDeferred),
-                                         before=None,
-                                         source=None))
-            self._lraDeferredIntoPreloop = True
+            if self._splicePreloopCoverModules(em_list, _coverModules):
+                self._coverDeferredIntoPreloop = True
+                self._lraDeferredIntoPreloop = True
 
         # ── PLSIN guard-hoist: fold into the preloop global-read shadow ──
         # computePostLoopFusedStore is pure loop-invariant SALU/VALU that writes the

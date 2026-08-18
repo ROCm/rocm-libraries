@@ -16014,6 +16014,19 @@ class KernelWriterAssembly(KernelWriter):
     the always-correct applyAlpha=True path."""
     return bool(kernel["PostLoopStoreInNll"]) and kernel["ProblemType"]["ComputeDataType"].isSingle()
 
+  def _preloopCoverInterleaveEligible(self, kernel):
+    """Subtile preloop cover-interleave prototype (TENSILE_PRELOOP_COVER_INTERLEAVE).
+
+    Extends Change A-style LRA deferral to PLSIN0 and other subtile PGR>=1 kernels
+    that do not pass _plsinAlphaSkipEligible. TDM paths are excluded (same as Change A).
+    """
+    from Tensile.Common.Utilities import preloopCoverInterleaveEnabled
+    hasTDM = kernel["enableTDMA"] and kernel["enableTDMB"]
+    return (preloopCoverInterleaveEnabled()
+            and kernel.get("UseSubtileImpl")
+            and kernel["PrefetchGlobalRead"] >= 1
+            and not hasTDM)
+
   def _plsinCanBypassEndSummation(self, kernel):
     """PostLoopStoreInNll Phase 3: may a fused full-tile owner branch its NLL exit
     STRAIGHT past endSummation + the post-loop dedup guard (to the post-loop store's

@@ -5184,10 +5184,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # (K<DepthU -> SkipToEnd) also skips every one of these consumers and routes to the
     # tail loop's independent flat-tile layout, so producer and consumers stay on the
     # same side of that branch. TDM / PGR==0 / non-eligible kernels emit inline as before.
+    # TENSILE_PRELOOP_COVER_INTERLEAVE=1 extends deferral to PLSIN0 (see
+    # _preloopCoverInterleaveEligible) so LRA setup sinks into the MT0 GR shadow.
+    _coverInterleave = self._preloopCoverInterleaveEligible(kernel)
+    self._deferredPreloopCoverModules = None
     _deferLra = (kernel.get("UseSubtileImpl")
                  and kernel["PrefetchGlobalRead"] >= 1
                  and not hasTDM
-                 and self._plsinAlphaSkipEligible(kernel))
+                 and (self._plsinAlphaSkipEligible(kernel) or _coverInterleave))
     self._deferredPreloopLraModules = None
     _lraModule     = lraTileAssignment(self, kernel)
     _lraSwapModule = localReadDTLInitCommonSwapVgpr(self, kernel)
@@ -5200,6 +5204,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _lraScaleModule = lraTileAssignmentScaleSwizzled(self, kernel)
     if _deferLra:
       self._deferredPreloopLraModules = [_lraModule, _lraSwapModule, _lraScaleModule]
+      if _coverInterleave:
+        self._deferredPreloopCoverModules = list(self._deferredPreloopLraModules)
     else:
       module.add(_lraScaleModule)
 

@@ -101,6 +101,16 @@ def plsinDebugEnv(name: str, default=None):
     """
     return _parsePlsinDebugEnv().get(name, default)
 
+
+def preloopCoverInterleaveEnabled() -> bool:
+    """True when the preloop cover-interleave prototype is active.
+
+    Gate for SubtilePreloopCoverInterleave Stage 2b: defer loop-invariant pre-GR
+    setup (LRA address math today; more modules later) into the MT0 global-read
+    shadow. Unset or ``0`` preserves stock emission byte-for-byte.
+    """
+    return os.environ.get("TENSILE_PRELOOP_COVER_INTERLEAVE", "0") != "0"
+
 # Global
 _global_ti = rocIsa.getInstance()
 
