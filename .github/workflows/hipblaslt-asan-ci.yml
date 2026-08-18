@@ -147,7 +147,10 @@ jobs:
 
       - name: Install python deps
         run: |
-          pip install -r requirements.txt
+          # TheRock is checked out at the workspace root and rocm-libraries under
+          # rocm-libraries/. hipBLASLt's build makes the tensilelite wheel, which
+          # needs TensileLite's requirements in the build Python.
+          pip install -r requirements.txt -r rocm-libraries/projects/hipblaslt/tensilelite/requirements.txt
 
       - name: Adjust git config
         run: |
