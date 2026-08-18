@@ -61,6 +61,17 @@ std::vector<int64_t> contiguousStrides(const std::vector<int64_t>& dims, int64_t
     return strides;
 }
 
+// Packed-BSHD strides for a tensor whose DIMS are stated BHSD [B, H, S, D] but
+// whose memory is physically [B, S, H, D] -- what a model that projects to
+// [B, S, H, D] and calls .transpose(1, 2) actually hands to SDPA.
+std::vector<int64_t> bshdPackedStrides(const std::vector<int64_t>& dims)
+{
+    const int64_t h = dims[1];
+    const int64_t s = dims[2];
+    const int64_t d = dims[3];
+    return {s * h * d, d, h * d, 1};
+}
+
 // Declarative description of a single-node SDPA graph. Defaults describe the
 // legacy gfx1151 problem (f16, B=1, MHA H=32, D=64, contiguous, non-causal,
 // unmasked) so a test tweaks only the field it cares about.
@@ -76,6 +87,7 @@ struct SdpaSpec
     int64_t d = 64;
     int qRank = 4; // set to 3 to force a non-rank-4 decline
     int64_t innerMult = 1; // 2 -> non-contiguous D
+    bool bshdPacked = false; // physical [B, S, H, D] instead of contiguous BHSD
     bool causal = false;
     bool causalBottomRight = false;
     bool alibi = false;
@@ -123,10 +135,16 @@ BuiltGraph buildSdpaGraph(const SdpaSpec& spec)
     const std::vector<int64_t> vDims = {spec.b, spec.hkv, spec.skv, spec.d};
     const std::vector<int64_t> oDims = {spec.b, spec.h, spec.sq, spec.d};
 
-    const std::vector<int64_t> qStrides = contiguousStrides(qDims, spec.innerMult);
-    const std::vector<int64_t> kStrides = contiguousStrides(kDims, spec.innerMult);
-    const std::vector<int64_t> vStrides = contiguousStrides(vDims, spec.innerMult);
-    const std::vector<int64_t> oStrides = contiguousStrides(oDims, spec.innerMult);
+    // bshdPacked only applies to rank-4 Q; the rank-3 gate case keeps contiguous.
+    const bool packed = spec.bshdPacked && spec.qRank == 4;
+    const std::vector<int64_t> qStrides
+        = packed ? bshdPackedStrides(qDims) : contiguousStrides(qDims, spec.innerMult);
+    const std::vector<int64_t> kStrides
+        = packed ? bshdPackedStrides(kDims) : contiguousStrides(kDims, spec.innerMult);
+    const std::vector<int64_t> vStrides
+        = packed ? bshdPackedStrides(vDims) : contiguousStrides(vDims, spec.innerMult);
+    const std::vector<int64_t> oStrides
+        = packed ? bshdPackedStrides(oDims) : contiguousStrides(oDims, spec.innerMult);
 
     const int64_t qUid = 1;
     const int64_t kUid = 2;
@@ -465,6 +483,46 @@ TEST(TestAotCatalogSdpaDecode, NonContiguousDDecodes)
     const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
     ASSERT_TRUE(shape.has_value()) << "non-contiguous-D graph should decode, not decline";
     EXPECT_FALSE(boolFact(*shape, "d_contiguous"));
+}
+
+// The case bshd_packed exists for: a canonical contiguous BHSD tensor at B==1
+// satisfies BOTH d_contiguous and batch_foldable, so a kernel with no stride
+// arguments that bakes packed BSHD would be selected on those two facts alone and
+// read the wrong elements with no error. bshd_packed is what declines it.
+TEST(TestAotCatalogSdpaDecode, ContiguousBhsdIsNotBshdPacked)
+{
+    SdpaSpec spec; // default: contiguous BHSD, B=1
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
+    ASSERT_TRUE(shape.has_value());
+    EXPECT_TRUE(boolFact(*shape, "d_contiguous"));
+    EXPECT_TRUE(boolFact(*shape, "batch_foldable")) << "trivially true at B==1";
+    EXPECT_FALSE(boolFact(*shape, "bshd_packed"))
+        << "contiguous BHSD must not be reported as packed BSHD";
+}
+
+TEST(TestAotCatalogSdpaDecode, PackedBshdGraphPublishesBshdPacked)
+{
+    SdpaSpec spec;
+    spec.bshdPacked = true; // physical [B, S, H, D], i.e. .transpose(1, 2) of a
+                            // [B, S, H, D] projection -- what a real model hands us
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
+    ASSERT_TRUE(shape.has_value()) << "packed BSHD graph should decode, not decline";
+    EXPECT_TRUE(boolFact(*shape, "bshd_packed"));
+    EXPECT_TRUE(boolFact(*shape, "d_contiguous")) << "D is still innermost";
+}
+
+// B>1 packed BSHD. Note the implication runs one way: packed BSHD satisfies
+// batch_foldable (batch stride is exactly S*H*D), but batch_foldable does not
+// imply packed BSHD -- which is the whole reason this fact was added.
+TEST(TestAotCatalogSdpaDecode, PackedBshdDecodesAtBatchGreaterThanOne)
+{
+    SdpaSpec spec;
+    spec.bshdPacked = true;
+    spec.b = 4;
+    const auto shape = ADAPTER.decode(buildSdpaGraph(spec).graph());
+    ASSERT_TRUE(shape.has_value());
+    EXPECT_EQ(intFact(*shape, "B"), 4);
+    EXPECT_TRUE(boolFact(*shape, "bshd_packed"));
 }
 
 TEST(TestAotCatalogSdpaDecode, Bf16ShapeDecodesWithBf16Token)
