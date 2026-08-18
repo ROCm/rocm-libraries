@@ -210,11 +210,16 @@ struct KernelDescriptor
     /// Omitted fields take the KMD default; completed tuple is the catalog key.
     MetadataValues metadata;
     int64_t priority = 0; ///< Tie-break when the heuristic is not decisive.
-    /// GFX targets this kernel was built for; empty means arch-independent. Only a
-    /// standalone `.ukd.json` carries it -- an inline kernel takes its pack's arch, since
-    /// it ships inside that pack. Part of the catalog identity, not a match-time filter:
-    /// per-arch shards ship one kernel id many times, each built against its own shard's
-    /// code object.
+    /// GFX targets this kernel was built for, and half its catalog key. Set only when
+    /// parsed from a standalone `.ukd.json`; it is never populated for an inline kernel
+    /// and never inherited from the pack, because an inline kernel is not keyed at all --
+    /// it lives inside a pack document the (id, arch) key already separates per shard.
+    ///
+    /// Identity, not a device filter. A per-arch shard ships the same kernel id in every
+    /// shard, differing only in which code object it names, so the id alone cannot say
+    /// which copy a pack means. Applicability stays a pack property: KernelDefinition
+    /// carries no arch, and archSupports() reads the pack's list, so a kernel resolved
+    /// into a pack is offered wherever that pack is.
     std::vector<std::string> arch;
 };
 
