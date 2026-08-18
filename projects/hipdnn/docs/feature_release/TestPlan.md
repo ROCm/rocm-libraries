@@ -1,6 +1,6 @@
-# hipDNN Feature Release Plan
+# hipDNN Feature Release Test Plan
 
-This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../TESTING.md) and its [Development Workflow](../TESTING.md#development-workflow).
+This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../testing/TESTING.md) and its [Development Workflow](../testing/TESTING.md#development-workflow).
 
 > [!IMPORTANT]
 > ⚠️ **All prerequisites and tests in this document must pass for a successful release.**
@@ -31,14 +31,14 @@ Capture the run in a [Feature Release Run Template](./TestRunTemplate.md) docume
 
 ### Test Case 1: CI Is Green 🟩
 
-Confirm that the required checks reported for the release candidate commit are green. Workflow YAML defines the executable triggers and jobs; do not assume every check runs on every pull request or every push to `develop`.
+Existing checks run automatically on all PRs pre-merge and on the `develop` branch post-merge.
 
 | CI Check | Description |
 |----------|-------------|
-| hipDNN Superbuild CI | Builds hipDNN and providers through the superbuild on its configured pull-request paths |
-| TheRock multi-arch CI | Builds and tests configured component shards across available GPU families |
-| pre-commit | Runs configured formatting and linting checks |
-| codecov | Reports coverage when configured; the 80% goal and required-status enforcement limitations are tracked in [Known Gaps](../KNOWN_GAPS.md) |
+| hipDNN Superbuild CI | Builds hipDNN and the providers via the superbuild on Linux and Windows (includes clang-tidy) |
+| TheRock multi-arch CI | Builds and tests across GPU families (e.g. gfx94X, gfx950, gfx1151), with per-component test shards for `hipdnn`, `hipdnn-integration-tests`, `hipdnn-samples`, `hipdnn_install`, and each provider |
+| pre-commit | Runs formatting and linting checks on changed files |
+| codecov | Checks code coverage requirements |
 
 ### Test Case 2: Documentation is Current 🕒
 
@@ -171,12 +171,16 @@ ctest --test-dir build/release
 ### Test Case 1: Build and Run the Automated Tests with ASAN Enabled 🚨
 
 > [!NOTE]
-> Sanitizer CI coverage is partial: pull-request sanitizer workflows build host-ASAN artifacts but do not currently run hipDNN sanitizer tests, and scheduled device-ASAN test execution depends on suitable runner availability. See [Known Gaps](../KNOWN_GAPS.md) for current automation and platform limitations.
+> ASAN is a manual check today (not yet in CI). The ROCm build requirement differs by platform:
+> - **Linux**: requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
+> - **Windows**: does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+>
+> See [Testing § ASAN/TSAN/sanitizer coverage](../testing/TESTING.md#asantsansanitizer-coverage) for more.
 
-For release verification, build and run the sanitizer suite directly using the canonical [Address Sanitizer Build](../Building.md#address-sanitizer-build) procedure. Use the `standard` tier specified there.
+Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the `standard` tier (`ctest --test-dir <build> -L standard`).
 
 #### Expected Results
 
 - **Test Status**: All tests either pass or are explicitly skipped (architectures that do not support ASAN are skipped via `SKIP_IF_ASAN()` or a disabled ctest registration).
 - **Memory Safety**: No memory leaks or violations should be detected.
-- **Platform**: Record the tested platform and any skips; consult [Known Gaps](../KNOWN_GAPS.md) for current automation and platform limitations.
+- **Platform**: On Linux the suite is expected to complete cleanly. On Windows a fully clean ASAN run is not yet available (known issues being resolved); do not treat the remaining Windows failures as a release blocker until that work lands.

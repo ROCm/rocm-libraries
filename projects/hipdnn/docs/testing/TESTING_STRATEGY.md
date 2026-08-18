@@ -11,13 +11,13 @@ This document defines the validation model and responsibility boundaries for hip
 
 It does not own build commands, test naming rules, provider integration mechanics, or GitHub merge policy:
 - [Testing](./TESTING.md) is the concise contributor action guide.
-- [Building](./Building.md) owns build, coverage, sanitizer, and test-target commands.
-- [Coding Style and Naming Guidelines](./CodingStyleAndNamingGuidelines.md#11-test-naming-guidelines) owns test naming.
-- The [provider integration test guide](../../../dnn-providers/integration-tests/README.md) owns bundle authoring, provider configuration, and tier mechanics.
-- Checked-in workflow files and [CODEOWNERS](../../../.github/CODEOWNERS) are the executable sources for CI and review routing.
-- [Known Gaps](./KNOWN_GAPS.md) records missing automation, incomplete rollout, and unresolved policy. A gap is not a current requirement or a claim of existing enforcement.
+- [Building](../Building.md) owns build, coverage, sanitizer, and test-target commands.
+- [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md#11-test-naming-guidelines) owns test naming.
+- The [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) owns bundle authoring, provider configuration, and tier mechanics.
+- Checked-in workflow files and [CODEOWNERS](../../../../.github/CODEOWNERS) are the executable sources for CI and review routing.
+- [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) records missing automation, incomplete rollout, and unresolved policy. A gap is not a current requirement or a claim of existing enforcement.
 
-Statements labeled **Current state** describe repository behavior verified on the last-updated date. **Strategy** statements define the intended responsibility model. Future policy belongs in [Known Gaps](./KNOWN_GAPS.md) until implementation and enforcement exist.
+Statements labeled **Current state** describe repository behavior verified on the last-updated date. **Strategy** statements define the intended responsibility model. Future policy belongs in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) until implementation and enforcement exist.
 
 ## Principles
 
@@ -50,7 +50,7 @@ In this target model, GPU hardware is not required to complete a unit suite. Log
 - Data SDK and Test SDK unit binaries include device-memory cases guarded by `SKIP_IF_NO_DEVICES()`;
 - provider unit binaries mix isolated adapter tests with real MIOpen or hipBLASLt handles, runtime compilation, embedded kernels, and device-gated cases.
 
-Those tests can complete on no-device runners by skipping affected cases, but each skip is a missing observation. Their current classification does not make device-dependent behavior part of the target unit-test model. This migration debt is tracked in [Known Gaps](./KNOWN_GAPS.md).
+Those tests can complete on no-device runners by skipping affected cases, but each skip is a missing observation. Their current classification does not make device-dependent behavior part of the target unit-test model. This migration debt is tracked in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
 
 ### Target Unit-Test Ownership
 
@@ -77,9 +77,9 @@ Public backend and frontend contracts are not unit contracts merely because a co
 | Shared provider integration | `hipdnn_integration_tests`, a selected plugin/engine, and reference execution | End-to-end graph execution and numerical comparison for the observed engine/device/problem | Complete operation or architecture support |
 | Dependency-library tests | MIOpen, hipBLASLt, rocKE, or other kernel-library boundary | Library/kernel behavior owned below the provider adapter | hipDNN graph routing unless exercised through hipDNN |
 
-The shared suite is the default home for “execute this graph on this engine and compare its outputs” coverage. Provider-local C++ tests remain appropriate for adapter-specific failure paths, feature switches, determinism, compilation, engine selection, and other behavior that cannot be represented as a graph-output bundle. The [provider integration test guide](../../../dnn-providers/integration-tests/README.md) owns that authoring decision and all bundle/tier mechanics.
+The shared suite is the default home for “execute this graph on this engine and compare its outputs” coverage. Provider-local C++ tests remain appropriate for adapter-specific failure paths, feature switches, determinism, compilation, engine selection, and other behavior that cannot be represented as a graph-output bundle. The [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) owns that authoring decision and all bundle/tier mechanics.
 
-Reference execution provides an expected numerical result; it does not establish provider applicability. A provider must first declare the graph applicable, select an engine, and execute it. Tests must preserve that sequence so a reference implementation cannot mask selection or translation failures. See the [CPU Graph Executor design](./rfcs/0001_CpuGraphExecutorDesign.md) for the host reference architecture.
+Reference execution provides an expected numerical result; it does not establish provider applicability. A provider must first declare the graph applicable, select an engine, and execute it. Tests must preserve that sequence so a reference implementation cannot mask selection or translation failures. See the [CPU Graph Executor design](../rfcs/0001_CpuGraphExecutorDesign.md) for the host reference architecture.
 
 ### Responsibility Boundaries
 
@@ -90,7 +90,7 @@ Reference execution provides an expected numerical result; it does not establish
 | Provider graph translation, applicability, engine binding, provider-specific skips/tolerances, and adapter failures | Provider adapter tests and configuration |
 | Kernel selection and numerical behavior below the adapter | Underlying dependency and kernel-library tests, plus end-to-end provider observations |
 | Architecture-specific applicability | Provider/engine capability contract and runtime checks |
-| Review routing for changes | Checked-in [CODEOWNERS](../../../.github/CODEOWNERS) |
+| Review routing for changes | Checked-in [CODEOWNERS](../../../../.github/CODEOWNERS) |
 
 CODEOWNERS establishes review routing, not product support, on-call duty, or a performance-regression service-level agreement. A failure crossing layers should retain provider and engine identity, then be reduced to the lowest failing boundary before ownership is assigned.
 
@@ -105,9 +105,9 @@ Neither record substitutes for the other. A green lane does not prove every engi
 
 Provider capability sources:
 
-- [MIOpen provider operation support](../../../dnn-providers/miopen-provider/docs/OperationSupport.md)
-- [hipBLASLt provider operation support](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)
-- [HIP-kernel provider engine architecture and build flags](../../../dnn-providers/hip-kernel-provider/README.md#architecture)
+- [MIOpen provider operation support](../../../../dnn-providers/miopen-provider/docs/OperationSupport.md)
+- [hipBLASLt provider operation support](../../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)
+- [HIP-kernel provider engine architecture and build flags](../../../../dnn-providers/hip-kernel-provider/README.md#architecture)
 
 The strategy deliberately does not synthesize those fragmented sources into one support matrix. Provider build flags, dependency heuristics, direction-specific engine checks, and runtime exclusions require source-specific qualification and versioning.
 
@@ -117,9 +117,9 @@ The strategy deliberately does not synthesize those fragmented sources into one 
 
 ### Interpretation
 
-CTest semantic labels (`unit` and `integration`) describe test boundaries. Tier labels describe selection breadth. Core hipDNN and provider integration projects maintain separate category definitions; provider tier behavior belongs to the [provider integration test guide](../../../dnn-providers/integration-tests/README.md).
+CTest semantic labels (`unit` and `integration`) describe test boundaries. Tier labels describe selection breadth. Core hipDNN and provider integration projects maintain separate category definitions; provider tier behavior belongs to the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md).
 
-**Current state:** In core hipDNN, the wildcard membership starts in `quick` and cascades through all higher labels. Therefore `quick`, `standard`, `comprehensive`, and `full` currently select the same core hipDNN tests. No broader core coverage may be claimed for `standard` or higher labels until [the category definition](../test_categories.yaml) changes.
+**Current state:** In core hipDNN, the wildcard membership starts in `quick` and cascades through all higher labels. Therefore `quick`, `standard`, `comprehensive`, and `full` currently select the same core hipDNN tests. No broader core coverage may be claimed for `standard` or higher labels until [the category definition](../../test_categories.yaml) changes.
 
 ### Snapshot Verified 2026-08-17
 
@@ -127,11 +127,11 @@ This table records checked-in workflow configuration, not a support matrix. “T
 
 | Workflow | Trigger and selection | Configured build families/device | Observed test stage |
 |---|---|---|---|
-| [TheRock CI](../../../.github/workflows/therock-ci.yml) | Active on PRs, selected pushes, and manual dispatch; PR default is `standard`, with path selection and labels able to skip or override it | Wrapper requests Linux `gfx94X`, `gfx950`, `gfx125X`; Windows `gfx1151` | Checked Linux logic suppresses package tests for `gfx950` and `gfx125X`. `gfx94X` and Windows `gfx1151` test execution still depends on mutable runner assignment. |
-| [hipDNN Superbuild CI](../../../.github/workflows/hipdnn-superbuild-ci.yml) | Path-filtered PR workflow; unfiltered root CTest | Linux target family `gfx94X-dcgpu` with configured device `gfx942`; Windows `gfx1151` | Root CTest and frontend-wheel tests run on generic scale-runner labels. Device selection and runner naming do not prove that every GPU case executes rather than skips. |
-| [Legacy TheRock Nightly](../../../.github/workflows/therock-ci-nightly.yml) | Scheduled daily and manually dispatchable; scheduled runs select `comprehensive` | Linux `gfx94X`, `gfx950`; Windows `gfx1151` | Checked Linux logic makes `gfx950` build-only. `gfx94X` and Windows `gfx1151` test jobs depend on mutable runner assignment. |
-| [Release Multi-Arch Nightly](../../../.github/workflows/therock-multi-arch-ci-nightly.yml) | Scheduled daily and manually dispatchable; delegates setup and runner selection to TheRock | Linux `gfx94X`, `gfx950`; Windows `gfx1151` | Exact functional runner assignment is externally configured and must be checked in the workflow result. |
-| [Release Multi-Arch CI](../../../.github/workflows/therock-multi-arch-ci.yml) | Manual dispatch only; its PR trigger is commented out | Empty inputs fall back to Linux `gfx94X`, `gfx950` and Windows `gfx110X` | It is not a current automatic presubmit lane. |
+| [TheRock CI](../../../../.github/workflows/therock-ci.yml) | Active on PRs, selected pushes, and manual dispatch; PR default is `standard`, with path selection and labels able to skip or override it | Wrapper requests Linux `gfx94X`, `gfx950`, `gfx125X`; Windows `gfx1151` | Checked Linux logic suppresses package tests for `gfx950` and `gfx125X`. `gfx94X` and Windows `gfx1151` test execution still depends on mutable runner assignment. |
+| [hipDNN Superbuild CI](../../../../.github/workflows/hipdnn-superbuild-ci.yml) | Path-filtered PR workflow; unfiltered root CTest | Linux target family `gfx94X-dcgpu` with configured device `gfx942`; Windows `gfx1151` | Root CTest and frontend-wheel tests run on generic scale-runner labels. Device selection and runner naming do not prove that every GPU case executes rather than skips. |
+| [Legacy TheRock Nightly](../../../../.github/workflows/therock-ci-nightly.yml) | Scheduled daily and manually dispatchable; scheduled runs select `comprehensive` | Linux `gfx94X`, `gfx950`; Windows `gfx1151` | Checked Linux logic makes `gfx950` build-only. `gfx94X` and Windows `gfx1151` test jobs depend on mutable runner assignment. |
+| [Release Multi-Arch Nightly](../../../../.github/workflows/therock-multi-arch-ci-nightly.yml) | Scheduled daily and manually dispatchable; delegates setup and runner selection to TheRock | Linux `gfx94X`, `gfx950`; Windows `gfx1151` | Exact functional runner assignment is externally configured and must be checked in the workflow result. |
+| [Release Multi-Arch CI](../../../../.github/workflows/therock-multi-arch-ci.yml) | Manual dispatch only; its PR trigger is commented out | Empty inputs fall back to Linux `gfx94X`, `gfx950` and Windows `gfx110X` | It is not a current automatic presubmit lane. |
 
 The workflow snapshot must be refreshed when workflow triggers, architecture families, runner assignments, path selection, or category definitions change. Workflow YAML remains authoritative over this dated explanation.
 
@@ -147,20 +147,20 @@ Workflow failure behavior does not establish GitHub merge policy. Required check
 
 Sanitizers validate memory and concurrency behavior at the layer they instrument. hipDNN core owns sanitizer-clean core code; provider adapters own adapter findings; dependency findings must be reduced and routed to the dependency owner. A provider integration pass without sanitizer instrumentation is not memory-safety evidence.
 
-[Building: Address Sanitizer Build](./Building.md#address-sanitizer-build) owns supported local configuration and execution commands.
+[Building: Address Sanitizer Build](../Building.md#address-sanitizer-build) owns supported local configuration and execution commands.
 
 **Current state:**
 
 - Standalone ASAN configuration supports Linux and Windows. Repository-static configuration does not establish that every platform/test combination is currently clean.
 - Standalone TSAN support is implemented for Linux, is mutually exclusive with ASAN, and has no verified hipDNN CI workflow.
-- The [opt-in ASAN workflow](../../../.github/workflows/therock-multi-arch-ci-asan.yml) provides sanitizer builds for label-enabled PRs and manual dispatches. PR-triggered sanitizer runs are build-only. Manual dispatch uses full ASAN and may run tests where sandbox mapping exists.
-- The [ASAN nightly workflow](../../../.github/workflows/therock-multi-arch-ci-asan-nightly.yml) configures Linux device-side ASAN. In the external runner configuration verified on 2026-08-17, `gfx94X` has a sandbox test assignment, `gfx950` is build-only, and `gfx125X` lacks a supported ASAN build variant. This mapping is mutable; workflow results remain authoritative.
+- The [opt-in ASAN workflow](../../../../.github/workflows/therock-multi-arch-ci-asan.yml) provides sanitizer builds for label-enabled PRs and manual dispatches. PR-triggered sanitizer runs are build-only. Manual dispatch uses full ASAN and may run tests where sandbox mapping exists.
+- The [ASAN nightly workflow](../../../../.github/workflows/therock-multi-arch-ci-asan-nightly.yml) configures Linux device-side ASAN. In the external runner configuration verified on 2026-08-17, `gfx94X` has a sandbox test assignment, `gfx950` is build-only, and `gfx125X` lacks a supported ASAN build variant. This mapping is mutable; workflow results remain authoritative.
 
-These facts do not justify a blanket claim that ASAN tests every PR, every provider, or every configured architecture. Missing sanitizer automation and platform cleanliness remain in [Known Gaps](./KNOWN_GAPS.md).
+These facts do not justify a blanket claim that ASAN tests every PR, every provider, or every configured architecture. Missing sanitizer automation and platform cleanliness remain in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
 
 ### Coverage Responsibility
 
-LLVM source-based coverage targets exist and are run manually; [Building](./Building.md) owns their commands and report locations. The project has an aspirational 80% code-coverage target. No checked-in hipDNN workflow currently enforces an 80% repository or per-component floor, so coverage must not be described as a PR acceptance gate.
+LLVM source-based coverage targets exist and are run manually; [Building](../Building.md) owns their commands and report locations. The project has an aspirational 80% code-coverage target. No checked-in hipDNN workflow currently enforces an 80% repository or per-component floor, so coverage must not be described as a PR acceptance gate.
 
 Line coverage measures execution, not behavioral completeness, provider capability, device breadth, or numerical quality. Maintainers should use uncovered branches to guide focused tests, while judging integration completeness through explicit graph, engine, and environment observations.
 

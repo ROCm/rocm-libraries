@@ -15,7 +15,7 @@ Before contributing, please review these essential documents to understand the p
 - **[Design](./docs/Design.md)** - Understand hipDNN's architecture and component design
 - **[Building](./docs/Building.md)** - Learn how to build hipDNN on your system
 - **[How-To](./docs/HowTo.md)** - Using hipDNN components and common approaches for extending functionality
-- **[Testing Strategy](./docs/TESTING_STRATEGY.md)** - Understand our testing approach and requirements
+- **[Testing Strategy](./docs/testing/TESTING_STRATEGY.md)** - Understand our testing approach and requirements
 - **[Roadmap](./docs/Roadmap.md)** - Check planned features and find contribution opportunities
 - **[Coding Style and Naming Guidelines](./docs/CodingStyleAndNamingGuidelines.md)** - Follow our coding conventions for consistency
 
@@ -59,7 +59,7 @@ All contributions must meet the following requirements before they can be merged
   - New code should not decrease existing coverage
   - Each component should maintain >80% coverage individually
 
-See [Testing](./docs/TESTING.md) for further details.
+See [Testing](./docs/testing/TESTING.md) for further details.
 
 ### Documentation Requirements
 

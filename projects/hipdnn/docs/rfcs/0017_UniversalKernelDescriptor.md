@@ -1656,8 +1656,8 @@ Multi-kernel launch and composition are separate follow-ups, outside this plan.
 
 ### 14.1 Testing and Performance
 
-The descriptor-backed kernel reuses hipDNN's existing testing strategy (`docs/TESTING.md`,
-`docs/TESTING_STRATEGY.md`) and slots into the established tiers. A descriptor-backed kernel
+The descriptor-backed kernel reuses hipDNN's existing testing strategy (`docs/testing/TESTING.md`,
+`docs/testing/TESTING_STRATEGY.md`) and slots into the established tiers. A descriptor-backed kernel
 runs through the generic engine as an ordinary engine, producing the same `graph.fbs` graphs
 everything else consumes, so the existing correctness path applies unchanged: the plugin-agnostic
 integration harness ([RFC 0006](0006_PluginAgnosticIntegrationTests.md)) validates the generic
