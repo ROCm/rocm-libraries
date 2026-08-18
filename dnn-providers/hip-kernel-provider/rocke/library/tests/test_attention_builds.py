@@ -1566,6 +1566,134 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
             self.assertIs(ok.exception, sentinel)
 
+    def test_gfx950_dense_sinks_required_when_enabled(self):
+        """spec.use_sinks=True requires sinks parameter (not None)."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        qshape = (1, 256, 32, 64)
+        kvshape = (1, 256, 8, 64)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                sinks=None,
+            )
+        self.assertEqual(
+            str(ctx.exception), "spec.use_sinks=True requires sinks that are not None"
+        )
+
+    def test_gfx950_dense_sinks_rejected_when_disabled(self):
+        """spec.use_sinks=False rejects sinks parameter if provided."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=False,
+        )
+        qshape = (1, 256, 32, 64)
+        kvshape = (1, 256, 8, 64)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        sinks = [0.0] * spec.num_query_heads
+
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                sinks=sinks,
+            )
+        self.assertEqual(
+            str(ctx.exception), "sinks provided but spec.use_sinks is False"
+        )
+
+    def test_gfx950_dense_sinks_passes_validation(self):
+        """spec.use_sinks=True with sinks provided passes validation and reaches compile."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        qshape = (1, 256, 32, 64)
+        kvshape = (1, 256, 8, 64)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        sinks = [0.0] * spec.num_query_heads
+        sentinel = RuntimeError("reached-compile")
+
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    sinks=sinks,
+                )
+            self.assertIs(ok.exception, sentinel)
+
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
             total_q=3,

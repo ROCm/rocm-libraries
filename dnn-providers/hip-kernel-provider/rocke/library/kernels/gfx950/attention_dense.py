@@ -1930,6 +1930,7 @@ def run_attention_dense_torch(
     cu_seqlens_kv=None,
     block_tables=None,
     kv_lens=None,
+    sinks=None,
     validate_paged: bool = True,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
@@ -1964,7 +1965,13 @@ def run_attention_dense_torch(
     tiles, so a shorter ``kv_len`` reads page 0 for the uncovered tiles ->
     wrong output). Pass False on the hot / graph-captured path to skip the sync
     (block ids then rely on the bounds-checked cache SRD reading 0, and the
-    ``kv_lens == seqlen_kv`` contract becomes the caller's responsibility)."""
+    ``kv_lens == seqlen_kv`` contract becomes the caller's responsibility).
+
+    Sinks (``spec.use_sinks``): Attention sinks -- learned scalar
+    logits that participate in the softmax denominator but have no value vector.
+    Pass ``sinks`` (``spec.dtype`` ``[num_query_heads]``); a ``ValueError`` is
+    raised if ``sinks`` is ``None`` when ``spec.use_sinks`` is True, or if
+    ``sinks`` is provided when ``spec.use_sinks`` is False."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -2040,6 +2047,10 @@ def run_attention_dense_torch(
                             "malformed entry reads 0 via the bounds-checked cache "
                             "SRD -> silently wrong output"
                         )
+    if not spec.use_sinks and sinks is not None:
+        raise ValueError("sinks provided but spec.use_sinks is False")
+    if spec.use_sinks and sinks is None:
+        raise ValueError("spec.use_sinks=True requires sinks that are not None")
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -2073,6 +2084,8 @@ def run_attention_dense_torch(
         vals["block_tables"] = block_tables
         vals["kv_lens"] = kv_lens
         vals["block_table_stride"] = int(block_tables.stride(0))
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
     launcher(
         vals,
         config=LaunchConfig(
