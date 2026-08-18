@@ -1456,9 +1456,21 @@ Two `seqlen_k` values suffice on the length axis — the flash loop is linear in
 and the pre-step is invariant, so two points fix the line; but see §4 on the
 `B = 32, kv_len = 8192` KV working set exceeding MALL.
 
-Prefill sweep: `seqlen_q = seqlen_k ∈ {512, 1024, 2048, 4096, 8192}`. All four files use
-`block_size: 16` (the repo default for paged KV); the `Bk` values in §5 are kernel
-tile sizes covering 1–2 blocks each, not block sizes (see the note in §5.2).
+Prefill sweep: `seqlen_q = seqlen_k ∈ {512, 1024, 2048, 4096, 8192}` at `batch = 1`,
+plus `batch = 4` at the two short lengths. **The prefill batch axis is narrower than
+decode's on purpose, and it measures something else.** Decode needs batch because the
+pre-step is batch-invariant while the flash loop is not, so the crossovers above only
+appear across `B`. Prefill has no such crossover: its pre-kernel amortizes over
+`total_q = batch × seqlen_q` (§3), so batch and `seqlen_q` are interchangeable for it and
+a uniform-length batch sweep re-measures points the length sweep already covers, at
+multiplied cost. What batch buys at prefill is coverage of the **packed-varlen path** —
+`cu_seqlens_q` / `cu_seqlens_k` prefix sums and the per-sequence causal mask (§3) —
+which `B = 1` exercises only trivially. Hence `B = 4` where that coverage is cheapest.
+The case that most needs covering is *mixed* sequence lengths within a batch, which the
+shape-file schema cannot express; that belongs with the runner work (§9).
+
+All four files use `block_size: 16` (the repo default for paged KV); the `Bk` values in
+§5 are kernel tile sizes covering 1–2 blocks each, not block sizes (see the note in §5.2).
 
 **Dtype coverage and harness limits.** The two gfx942 files are **bf16 only** —
 Phase 1 (§6). The two gfx950 files additionally carry `dtype: "fp8_e4m3"` entries for
