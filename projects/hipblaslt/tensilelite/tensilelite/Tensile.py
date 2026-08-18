@@ -23,7 +23,7 @@
 ################################################################################
 
 if __name__ == "__main__":
-    print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
+    print("This file can no longer be run as a script.  Run 'tensilelite/bin/Tensile' instead.")
     exit(1)
 
 import ast
