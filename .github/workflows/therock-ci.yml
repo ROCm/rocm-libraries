@@ -134,7 +134,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125X' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -160,7 +160,9 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
     uses: ./.github/workflows/therock-ci-linux.yml
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       docker_image: ${{ needs.setup.outputs.docker_image }}
@@ -168,6 +170,7 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
+      run_rocjitsu_race_check: ${{ matrix.projects.run_rocjitsu_race_check }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
@@ -185,7 +188,9 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
     uses: ./.github/workflows/therock-ci-windows.yml
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}

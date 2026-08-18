@@ -240,7 +240,7 @@ selector so CK DSL and Triton make the same algorithmic choice. The rule, in
 spirit:
 
 - **2D** when the q-block × kv-head grid already saturates the device
-  (`target = num_sms · 4`), or for short context ($S_k \le 512$), or under a
+  (`target = num_cus · 4`), or for short context ($S_k \le 512$), or under a
   sliding window — the split-KV segments would only add launch overhead.
 - **3D split-KV** otherwise — long, full-context sequences where the 2D grid is
   too small to fill the device.
@@ -471,5 +471,6 @@ dense default-vs-persistent grid.
   kernels are `kernels/gfx950/attention_tiled_2d.py`,
   `kernels/gfx950/attention_tiled_3d.py`, and `kernels/common/attention_unified.py`
   (the dispatcher and shared spec); the dense prefill kernel (§8) is
-  `kernels/gfx950/attention_dense.py`, gated by
-  `tests/test_attention_dense_golden.py` (IR-SHA + C++/Python byte-identity).
+  `kernels/gfx950/attention_dense.py`, gated by the `attention_dense` family of
+  the platform parity harness (IR-SHA, in CI via `rocke_golden_static`) plus
+  `tests/test_attention_ir_cpp_parity.py` (C++/Python byte-identity).

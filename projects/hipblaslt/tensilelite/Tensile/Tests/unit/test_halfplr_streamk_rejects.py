@@ -193,16 +193,105 @@ def test_halfplr_streamk_sk3_sia4_is_accepted(_gp_gfx1250, gfx1250_iim, assemble
 
 
 # ---------------------------------------------------------------------------
-# Guard 1: HalfPLR + PrefetchAcrossPersistent=1 -> rejected.
+# Positive: every HalfPLR tensor mask and PGR depth is accepted.
 # ---------------------------------------------------------------------------
-def test_halfplr_rejects_prefetch_across_persistent(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys
+@pytest.mark.parametrize("half_plr", [1, 2, 3])
+@pytest.mark.parametrize("pgr", [1, 2])
+def test_halfplr_supports_prefetch_across_persistent(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, pgr
 ):
     sol, out = _derive(
-        gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=half_plr,
+        PrefetchGlobalRead=pgr,
+        PrefetchAcrossPersistent=1,
+        StreamKForceDPOnly=1,
+        AssertSummationElementMultiple=256,
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol.get("HalfPLRA") is bool(half_plr & 1)
+    assert sol.get("HalfPLRB") is bool(half_plr & 2)
+
+
+@pytest.mark.parametrize("half_plr", [1, 2, 3])
+@pytest.mark.parametrize("pgr", [1, 2])
+def test_halfplr_pap_supports_tail_capable_solution(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, pgr
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=half_plr,
+        PrefetchGlobalRead=pgr,
+        PrefetchAcrossPersistent=1,
+        StreamKForceDPOnly=1,
+        AssertSummationElementMultiple=32,
+    )
+    assert sol.get("Valid") is True, f"expected tail-capable accept, rejected with: {out!r}"
+
+
+# ---------------------------------------------------------------------------
+# Guard 1: HalfPLR + PrefetchAcrossPersistent outside the narrowly validated
+# StreamK=3 + StreamKForceDPOnly=1 path -> rejected.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("half_plr", [1, 2, 3])
+def test_halfplr_pap_rejects_without_force_dp_only(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr
+):
+    # Same knobs as the accept test above with StreamKForceDPOnly flipped to 0:
+    # only the DP-only handoff has been validated for the out-of-line PAP block.
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=half_plr,
+        PrefetchAcrossPersistent=1,
+        StreamKForceDPOnly=0,
+        AssertSummationElementMultiple=256,
     )
     assert sol.get("Valid") is False
-    assert "HalfPLR is incompatible with PrefetchAcrossPersistent" in out
+    assert ("HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 "
+            "and StreamKForceDPOnly = 1") in out
+
+
+def test_halfplr_pap_rejects_on_other_streamk_modes(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    # The StreamK term of the HalfPLR guard is a backstop: on any other non-zero
+    # StreamK mode the generic PAP guard rejects first and returns before the
+    # HalfPLR block runs. (StreamK=0 rejects nothing at all -- it silently clears
+    # PrefetchAcrossPersistent along with the rest of the StreamK settings.)
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        PrefetchAcrossPersistent=1,
+        StreamK=2,
+        AssertSummationElementMultiple=256,
+    )
+    assert sol.get("Valid") is False
+    assert "PrefetchAcrossPersistent is currently supported only with StreamK=3" in out
+
+
+def test_halfplr_pap_is_cleared_without_streamk(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    # StreamK=0 drops PrefetchAcrossPersistent with the other StreamK settings, so
+    # HalfPLR stays valid and no PAP code is generated.
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        PrefetchAcrossPersistent=1,
+        StreamK=0,
+        GlobalSplitU=1,
+        AssertSummationElementMultiple=256,
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol.get("PrefetchAcrossPersistent") == 0
 
 
 # ---------------------------------------------------------------------------

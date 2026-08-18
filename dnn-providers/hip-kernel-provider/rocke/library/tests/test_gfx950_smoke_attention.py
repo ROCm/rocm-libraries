@@ -3,10 +3,11 @@
 """gfx950 GPU smoke test for the library unified-attention decode path.
 
 Moved out of platform/tests/instances/test_rocke_gfx950_smoke.py: this lane
-invokes the library module ``builders.gfx950.attention.parity_unified_attention``,
-so it belongs in the library test tree (platform must never reference the moved
-library). It shares the committed gfx950 perf baseline, located via the
-sanctioned ``rocke.assets`` accessor.
+invokes the library module
+``builders.gfx950.attention.prefill.parity_unified_attention``, so it belongs in
+the library test tree (platform must never reference the moved library). It
+shares the committed gfx950 perf baseline, located via the sanctioned
+``rocke.assets`` accessor.
 
 Run on a gfx950 ROCm runner:
   HIP_VISIBLE_DEVICES=0 PYTHONPATH=rocke/platform/python:rocke/library \
@@ -15,6 +16,7 @@ Run on a gfx950 ROCm runner:
 
 from __future__ import annotations
 
+import importlib.resources
 import importlib.util
 import json
 import os
@@ -30,7 +32,7 @@ from rocke.runtime.hip_module import get_device_arch, get_device_name
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
 _PY_ROOT = platform_root() / "python"
 _DEFAULT_BASELINE = (
-    platform_root() / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
+    importlib.resources.files("rocke.golden") / "rocke_gfx950_smoke_perf.json"
 )
 
 
@@ -108,7 +110,7 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
             report = Path(tmp) / "attention.json"
             out = self._run(
                 "-m",
-                "builders.gfx950.attention.parity_unified_attention",
+                "builders.gfx950.attention.prefill.parity_unified_attention",
                 "--scenario",
                 scenario,
                 "--attempts",
@@ -130,7 +132,7 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
             report = Path(tmp) / "attention.json"
             out = self._run(
                 "-m",
-                "builders.gfx950.attention.parity_unified_attention",
+                "builders.gfx950.attention.prefill.parity_unified_attention",
                 "--scenario",
                 "decode_d128_b16",
                 "--attempts",

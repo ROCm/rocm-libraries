@@ -532,6 +532,12 @@ class ORIGAMI_EXPORT hardware_t {
              // SGEMM: V_WMMA_F32_16X16X4_F32, 16x4 F32 x 4x16 F32 = 16x16 F32
              {matrix_instruction(16, 16, 4, data_type_t::Float), 16},
 
+             // CGEMM: same tile shape as SGEMM, 4x real latency
+             {matrix_instruction(16, 16, 4, data_type_t::ComplexFloat), 64},
+
+             // ZGEMM: same tile shape as DGEMM, 4x real latency
+             {matrix_instruction(16, 16, 4, data_type_t::ComplexDouble), 64},
+
              // F16
              // HHS: V_WMMA_F16_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F16
              // HSS: V_WMMA_F32_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F32
@@ -598,8 +604,6 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 8 * 3},
 
              // TODO:
-             // ComplexFloat
-             // ComplexDouble
              // BF6
              // DOT2
          }}};

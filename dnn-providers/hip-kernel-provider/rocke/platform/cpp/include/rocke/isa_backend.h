@@ -59,7 +59,8 @@ typedef enum rocke_isa_kind
     ROCKE_ISA_GFX9_MFMA = 0, /* gfx908 / gfx90a / gfx942 (CDNA MFMA)             */
     ROCKE_ISA_GFX950, /* gfx950 (CDNA4); historical byte-identical default */
     ROCKE_ISA_GFX11_RDNA, /* gfx11 / gfx1151 / gfx11-generic (RDNA3/3.5 WMMA)  */
-    ROCKE_ISA_GFX12_RDNA /* gfx12 / gfx1201 (RDNA4 WMMA, 8-wide fragments)    */
+    ROCKE_ISA_GFX12_RDNA, /* gfx12 / gfx1201 (RDNA4 WMMA, 8-wide fragments)    */
+    ROCKE_ISA_GFX1250 /* gfx1250 (GFX12 model, K=32 f16/bf16 + K=64 fp8)   */
 } rocke_isa_kind_t;
 
 /* The s_waitcnt field layout family. Mirrors the two encoder functions in
@@ -95,7 +96,7 @@ typedef struct rocke_isa_backend
  * On an unknown gfx, returns a backend with .valid == false and leaves *err (if
  * non-NULL) pointing at a static "no ISA backend registered for ..." message;
  * callers should check .valid. Known gfx: gfx908, gfx90a, gfx942, gfx950,
- * gfx1151, gfx1201, gfx11-generic. */
+ * gfx1151, gfx1201, gfx11-generic, gfx1250. */
 rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err);
 
 /* True if `gfx` has a registered backend. */
@@ -140,11 +141,27 @@ int rocke_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 
 /* --------------------------------------------------------------- WMMA tables */
 
-/* One row of the RDNA WMMA spec tables (_RDNA_WMMA / _RDNA_GFX12_WMMA): the
- * float-path mapping op.name -> (decl key, mangled intrinsic, SSA operand
- * element type, call-site operand element type). When call_elt != ssa_elt the
- * emitter bitcasts each operand vector before the call (bf16). `frag_width` is
- * the per-lane A/B operand vector width (16 for RDNA3/3.5, 8 for RDNA4). */
+/* The call signature a float WMMA intrinsic takes. RDNA3/3.5 and RDNA4 share
+ * the plain 3-operand form; the gfx1250 atoms do not, so the shape travels with
+ * the spec instead of being inferred from the fragment width. */
+typedef enum rocke_wmma_shape
+{
+    /* (<W x elt> A, <W x elt> B, <8 x float> C) -- gfx11 / gfx12 */
+    ROCKE_WMMA_SHAPE_AB_C = 0,
+    /* (i1 negA, <16 x elt> A, i1 negB, <16 x elt> B, i16 fmt, <8 x float> C,
+     * i1 reuseA, i1 reuseB) -- gfx1250 K=32 f16/bf16 */
+    ROCKE_WMMA_SHAPE_GFX1250,
+    /* (<8 x i32> A, <8 x i32> B, i16 fmt, <8 x float> C, i1, i1) -- gfx1250
+     * K=64 fp8/bf8, where a lane's fragment is 32 packed bytes */
+    ROCKE_WMMA_SHAPE_GFX1250_FP8
+} rocke_wmma_shape_t;
+
+/* One row of the RDNA WMMA spec tables (_RDNA_WMMA / _RDNA_GFX12_WMMA /
+ * _GFX1250_WMMA*): the float-path mapping op.name -> (decl key, mangled
+ * intrinsic, SSA operand element type, call-site operand element type). When
+ * call_elt != ssa_elt the emitter bitcasts each operand vector before the call
+ * (bf16 on gfx11/gfx12; gfx1250 takes <16 x bfloat> directly, so there the two
+ * are equal). `frag_width` is the per-lane A/B operand vector width. */
 typedef struct rocke_wmma_spec
 {
     const char* op_name; /* "tile.wmma_f32_16x16x16_f16"                   */
@@ -153,6 +170,7 @@ typedef struct rocke_wmma_spec
     const char* ssa_elt; /* SSA operand element type ("half"/"bfloat")     */
     const char* call_elt; /* call-site operand element type ("half"/"i16")  */
     int frag_width; /* A/B operand vector width (16 or 8)             */
+    rocke_wmma_shape_t shape; /* which intrinsic signature to emit              */
 } rocke_wmma_spec_t;
 
 /* One row of the integer WMMA table (_RDNA_WMMA_INT): op.name ->
@@ -173,10 +191,14 @@ const rocke_wmma_spec_t* rocke_isa_wmma_lookup(const char* op_name);
 const rocke_wmma_int_spec_t* rocke_isa_wmma_int_lookup(const char* op_name);
 /* Look up the RDNA4 (gfx12) float WMMA spec (_RDNA_GFX12_WMMA). NULL if absent. */
 const rocke_wmma_spec_t* rocke_isa_wmma_gfx12_lookup(const char* op_name);
+/* Look up the gfx1250 float WMMA spec (_GFX1250_WMMA + _GFX1250_WMMA_FP8).
+ * NULL if absent. */
+const rocke_wmma_spec_t* rocke_isa_wmma_gfx1250_lookup(const char* op_name);
 
 /* Resolve the float WMMA spec the way `backend.emit_wmma` would for this
- * backend's kind: RDNA4 consults _RDNA_GFX12_WMMA; RDNA3/3.5 consults
- * _RDNA_WMMA. Returns NULL for CDNA kinds or unknown op names. */
+ * backend's kind: gfx1250 consults the gfx1250 tables; RDNA4 consults
+ * _RDNA_GFX12_WMMA; RDNA3/3.5 consults _RDNA_WMMA. Returns NULL for CDNA kinds
+ * or unknown op names. */
 const rocke_wmma_spec_t* rocke_isa_resolve_wmma(const rocke_isa_backend_t* be, const char* op_name);
 
 /* ------------------------------------------------------- WMMA call emission */

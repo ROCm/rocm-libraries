@@ -579,6 +579,16 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
         ROCKE_CSPEC_REJECT("spec is NULL");
     }
 
+    /* spec.groups vs problem.groups consistency (Python PR #10064):
+     *   if spec.groups != 1 and spec.groups != problem.groups: raise ValueError(...) */
+    if(s->groups != 1 && s->groups != s->problem.groups)
+    {
+        ROCKE_CSPEC_REJECT("spec.groups=%d contradicts problem.groups=%d; "
+                           "set them consistently (problem.groups is authoritative)",
+                           s->groups,
+                           s->problem.groups);
+    }
+
     /* if tile_m % (warp_m * warp_tile_m) != 0: raise ValueError(...) */
     if((s->warp_m * s->warp_tile_m) == 0 || (s->tile_m % (s->warp_m * s->warp_tile_m)) != 0)
     {
@@ -722,16 +732,22 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             "spec wave_size %d != %s wave_size %d", s->wave_size, arch, target->wave_size);
     }
 
-    /* MMA atom must be in the target's catalog (f16 in/out fp32 acc). */
-    mma = rocke_archtarget_mma(target);
-    if(!rocke_mma_catalog_has_shape(
-           mma, family, "f16", "f16", "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
+    /* MMA atom must be in the target's catalog for the requested dtype. */
     {
-        ROCKE_CONVVS_REJECT("unsupported f16 warp_tile (%d, %d, %d) on %s",
-                            s->warp_tile_m,
-                            s->warp_tile_n,
-                            s->warp_tile_k,
-                            arch);
+        char a_scratch[32], b_scratch[32];
+        const char* a_norm = rocke_normalize_dtype(s->dtype_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(s->dtype_b, b_scratch, sizeof(b_scratch));
+        mma = rocke_archtarget_mma(target);
+        if(!rocke_mma_catalog_has_shape(
+               mma, family, a_norm, b_norm, "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
+        {
+            ROCKE_CONVVS_REJECT("unsupported %s warp_tile (%d, %d, %d) on %s",
+                                s->dtype_a ? s->dtype_a : "f16",
+                                s->warp_tile_m,
+                                s->warp_tile_n,
+                                s->warp_tile_k,
+                                arch);
+        }
     }
 
     /* LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
@@ -794,14 +810,18 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     /* WMMA (RDNA wave32) narrow-subset gates. */
     if(strcmp(family, "wmma") == 0)
     {
+        /* gfx11/gfx12 use 16x16x16; gfx1250 uses 16x16x32 (fp16/bf16) or 16x16x4 (fp32) */
+        int is_16x16x4 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 4);
         int is_16x16x16 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 16);
-        if(!is_16x16x16)
+        int is_16x16x32 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 32);
+        if(!is_16x16x4 && !is_16x16x16 && !is_16x16x32)
         {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only 16x16x16 (got (%d, %d, %d)) on %s",
-                                s->warp_tile_m,
-                                s->warp_tile_n,
-                                s->warp_tile_k,
-                                arch);
+            ROCKE_CONVVS_REJECT(
+                "WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got (%d, %d, %d)) on %s",
+                s->warp_tile_m,
+                s->warp_tile_n,
+                s->warp_tile_k,
+                arch);
         }
         if(!(s->pipeline && strcmp(s->pipeline, "mem") == 0))
         {
@@ -809,11 +829,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                                 s->pipeline ? s->pipeline : "",
                                 arch);
         }
-        if(!(s->epilogue && strcmp(s->epilogue, "default") == 0))
+        if(!(s->epilogue
+             && (strcmp(s->epilogue, "default") == 0 || strcmp(s->epilogue, "cshuffle") == 0)))
         {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only the 'default' epilogue (got '%s') on %s",
-                                s->epilogue ? s->epilogue : "",
-                                arch);
+            ROCKE_CONVVS_REJECT(
+                "WMMA conv supports only 'default' or 'cshuffle' epilogue (got '%s') on %s",
+                s->epilogue ? s->epilogue : "",
+                arch);
         }
         if(s->async_dma)
         {
@@ -827,10 +849,8 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         {
             ROCKE_CONVVS_REJECT("WMMA conv does not support chiplet_swizzle on %s", arch);
         }
-        if(s->groups != 1)
-        {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only groups=1 (got %d)", s->groups);
-        }
+        /* grouped conv IS supported on WMMA: the grid-per-group index +
+         * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
     if(reason != NULL && reason_cap > 0)
@@ -898,16 +918,21 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
     }
 
     /* op = target.mma.op_for_shape(family=_conv_mma_family(arch),
-     *                              a/b="f16", c="fp32",
+     *                              a=spec.data.dtype_a, b=spec.data.dtype_b, c="fp32",
      *                              m=warp_tile_m, n=warp_tile_n, k=warp_tile_k) */
-    op = rocke_archtarget_op_for_shape(target,
-                                       rocke_conv_mma_family(arch),
-                                       "f16",
-                                       "f16",
-                                       "fp32",
-                                       spec->warp_tile_m,
-                                       spec->warp_tile_n,
-                                       spec->warp_tile_k);
+    {
+        char a_scratch[32], b_scratch[32];
+        const char* a_norm = rocke_normalize_dtype(spec->dtype_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(spec->dtype_b, b_scratch, sizeof(b_scratch));
+        op = rocke_archtarget_op_for_shape(target,
+                                           rocke_conv_mma_family(arch),
+                                           a_norm,
+                                           b_norm,
+                                           "fp32",
+                                           spec->warp_tile_m,
+                                           spec->warp_tile_n,
+                                           spec->warp_tile_k);
+    }
     if(op == NULL)
     {
         /* raise ValueError(f"no MMA atom for conv warp_tile (...) on {arch}") */
@@ -935,17 +960,23 @@ struct rocke_tensor_descriptor* rocke_conv_make_a_descriptor(rocke_ir_builder_t*
                                                              const rocke_conv_problem_t* p,
                                                              bool decompose_m)
 {
-    /* 2-D DAG (#8355 r->y, s->x):
+    /* 2-D DAG (groups == 1):
      *   if decompose_m: unmerge_magic('m'->[n,ho,wo],[N,Ho,Wo])
      *   embed(['ho','y']->'hi'), embed(['wo','x']->'wi'),
      *   unmerge_magic('k'->[y,x,c],[Y,X,C]), pad('y'), pad('x')
-     *   naive('A_nhwc', [N,Hi,Wi,C], coords=['n','hi','wi','c'])
-     * 3-D DAG (#8355 conv-3d):
-     *   if decompose_m: unmerge_magic('m'->[n,do,ho,wo],[N,Do,Ho,Wo])
-     *   embed(['do','z']->'di'), embed(['ho','y']->'hi'), embed(['wo','x']->'wi'),
-     *   unmerge_magic('k'->[z,y,x,c],[Z,Y,X,C]), pad('z'),pad('y'),pad('x')
-     *   naive('A_ndhwc', [N,Di,Hi,Wi,C], coords=['n','di','hi','wi','c']) */
+     *   naive('A_nhwc', [N,Hi,Wi,C])
+     *
+     * 2-D DAG (groups > 1): _a_channel_decode adds embed(['group','c_in_group']->'c')
+     *   unmerge_magic('k'->[y,x,c_in_group],[Y,X,cpg]),
+     *   embed(['group','c_in_group']->'c', strides=[cpg,1], lo=0, hi=C)
+     *
+     * 3-D: same with the extra depth unmerge/embed prepended and pad('z') added.
+     *
+     * Matches Python _a_channel_decode() + make_a_descriptor() exactly. The max
+     * transform count is 9 (3-D grouped: unmerge_m + embed_do + embed_ho + embed_wo
+     * + unmerge_k + embed_c + pad_z + pad_y + pad_x). */
     int Ho, Wo, Do;
+    int cpg;
     int lengths[5];
     const char* coords[5];
     const char* into_m[4];
@@ -953,15 +984,18 @@ struct rocke_tensor_descriptor* rocke_conv_make_a_descriptor(rocke_ir_builder_t*
     const char* up_ho[2];
     const char* up_wo[2];
     const char* into_k[4];
+    const char* up_grp[2];
     int dims_m[4];
     int strides_do[2];
     int strides_ho[2];
     int strides_wo[2];
     int dims_k[4];
-    const rocke_transform_t* xforms[8];
+    int strides_grp[2];
+    const rocke_transform_t* xforms[9];
     int n_x = 0;
     rocke_tensor_descriptor_t* desc;
     bool is3d;
+    bool grouped;
 
     if(b == NULL || !rocke_ir_builder_ok(b) || p == NULL)
     {
@@ -969,6 +1003,8 @@ struct rocke_tensor_descriptor* rocke_conv_make_a_descriptor(rocke_ir_builder_t*
     }
 
     is3d = p->is_3d;
+    grouped = (p->groups > 1);
+    cpg = rocke_conv_problem_cpg(p);
     Ho = rocke_conv_problem_ho(p);
     Wo = rocke_conv_problem_wo(p);
     Do = rocke_conv_problem_do(p);
@@ -1044,27 +1080,28 @@ struct rocke_tensor_descriptor* rocke_conv_make_a_descriptor(rocke_ir_builder_t*
     }
     n_x++;
 
-    /* unmerge_magic('k' -> [z,]y,x,c, dims=[Z,]Y,X,C) */
+    /* _a_channel_decode: unmerge_magic('k' -> [z,]y,x,[c_in_group|c], dims=[Z,]Y,X,[cpg|C])
+     * For grouped conv the last dim is cpg; for groups==1 it is C (byte-identical). */
     if(is3d)
     {
         into_k[0] = "z";
         into_k[1] = "y";
         into_k[2] = "x";
-        into_k[3] = "c";
+        into_k[3] = grouped ? "c_in_group" : "c";
         dims_k[0] = p->Z;
         dims_k[1] = p->Y;
         dims_k[2] = p->X;
-        dims_k[3] = p->C;
+        dims_k[3] = cpg;
         xforms[n_x] = rocke_unmerge_magic(b, "k", into_k, 4, dims_k);
     }
     else
     {
         into_k[0] = "y";
         into_k[1] = "x";
-        into_k[2] = "c";
+        into_k[2] = grouped ? "c_in_group" : "c";
         dims_k[0] = p->Y;
         dims_k[1] = p->X;
-        dims_k[2] = p->C;
+        dims_k[2] = cpg;
         xforms[n_x] = rocke_unmerge_magic(b, "k", into_k, 3, dims_k);
     }
     if(xforms[n_x] == NULL)
@@ -1072,6 +1109,22 @@ struct rocke_tensor_descriptor* rocke_conv_make_a_descriptor(rocke_ir_builder_t*
         return NULL;
     }
     n_x++;
+
+    /* _a_channel_decode grouped path: embed(['group','c_in_group']->'c',
+     * strides=[cpg,1], offset=0, lo=0, hi=C). Absent for groups==1. */
+    if(grouped)
+    {
+        up_grp[0] = "group";
+        up_grp[1] = "c_in_group";
+        strides_grp[0] = cpg;
+        strides_grp[1] = 1;
+        xforms[n_x] = rocke_embed_bounded(b, up_grp, 2, "c", strides_grp, 0, 0, p->C);
+        if(xforms[n_x] == NULL)
+        {
+            return NULL;
+        }
+        n_x++;
+    }
 
     if(is3d)
     {
@@ -1136,10 +1189,15 @@ struct rocke_tensor_descriptor* rocke_conv_make_a_descriptor(rocke_ir_builder_t*
 struct rocke_tensor_descriptor* rocke_conv_make_b_descriptor(rocke_ir_builder_t* b,
                                                              const rocke_conv_problem_t* p)
 {
-    /* 2-D: naive('B_kyxc', [K,Y,X,C], coords=['k_out','y','x','c']).transform(
-     *        unmerge_magic('k_gemm'->[y,x,c],[Y,X,C]), pad('y'), pad('x'))
-     * 3-D: naive('B_kzyxc', [K,Z,Y,X,C], coords=['k_out','z','y','x','c']).transform(
-     *        unmerge_magic('k_gemm'->[z,y,x,c],[Z,Y,X,C]), pad('z'),pad('y'),pad('x')) */
+    /* 2-D: naive('B_kyxc', [K,Y,X,cpg], coords=['k_out','y','x','c']).transform(
+     *        unmerge_magic('k_gemm'->[y,x,c],[Y,X,cpg]), pad('y'), pad('x'))
+     * 3-D: naive('B_kzyxc', [K,Z,Y,X,cpg], ...).transform(
+     *        unmerge_magic('k_gemm'->[z,y,x,c],[Z,Y,X,cpg]), pad('z'),pad('y'),pad('x'))
+     *
+     * Weight is stored per-group: the channel extent is cpg = C/groups (== C when
+     * groups==1 -> byte-identical). The absolute output filter k_out = g*kpg + n
+     * is threaded in by the caller (b_descriptor folds the group base). */
+    int cpg = rocke_conv_problem_cpg(p);
     int lengths[5];
     const char* coords[5];
     const char* into_k[4];
@@ -1162,7 +1220,7 @@ struct rocke_tensor_descriptor* rocke_conv_make_b_descriptor(rocke_ir_builder_t*
         dims_k[0] = p->Z;
         dims_k[1] = p->Y;
         dims_k[2] = p->X;
-        dims_k[3] = p->C;
+        dims_k[3] = cpg;
         xforms[n_x] = rocke_unmerge_magic(b, "k_gemm", into_k, 4, dims_k);
         if(xforms[n_x] == NULL)
         {
@@ -1183,7 +1241,7 @@ struct rocke_tensor_descriptor* rocke_conv_make_b_descriptor(rocke_ir_builder_t*
         into_k[2] = "c";
         dims_k[0] = p->Y;
         dims_k[1] = p->X;
-        dims_k[2] = p->C;
+        dims_k[2] = cpg;
         xforms[n_x] = rocke_unmerge_magic(b, "k_gemm", into_k, 3, dims_k);
         if(xforms[n_x] == NULL)
         {
@@ -1210,7 +1268,7 @@ struct rocke_tensor_descriptor* rocke_conv_make_b_descriptor(rocke_ir_builder_t*
         lengths[1] = p->Z;
         lengths[2] = p->Y;
         lengths[3] = p->X;
-        lengths[4] = p->C;
+        lengths[4] = cpg;
         coords[0] = "k_out";
         coords[1] = "z";
         coords[2] = "y";
@@ -1223,7 +1281,7 @@ struct rocke_tensor_descriptor* rocke_conv_make_b_descriptor(rocke_ir_builder_t*
         lengths[0] = p->K;
         lengths[1] = p->Y;
         lengths[2] = p->X;
-        lengths[3] = p->C;
+        lengths[3] = cpg;
         coords[0] = "k_out";
         coords[1] = "y";
         coords[2] = "x";

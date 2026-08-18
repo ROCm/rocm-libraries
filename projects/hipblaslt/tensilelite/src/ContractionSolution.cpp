@@ -665,7 +665,8 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
-        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, hardware, sk.grid);
+        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+            = calculateAutoWGM(problem, hardware, sk.grid);
         auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
             = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
@@ -745,7 +746,16 @@ namespace TensileLite
 
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
-        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
+        //
+        // StreamKForceDPOnly (SK3 DP-first, gfx1250) always reduces via the tree path
+        // (getSKReduction returns tree, Flags == Synchronizer, never parallel) and never
+        // touches the workspace partials/fixup path, so AddressWS/AddressFlags are dead.
+        // The device kernel drops them from the SGPR define and .kd metadata, so we must
+        // not append ws/Flags here or the positional kernarg layout would corrupt the
+        // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
+        // streamK>0 && atomic==0 kernel (layout unchanged).
+        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+           && sizeMapping.streamKForceDPOnly == 0)
         {
             // Assert hardware is not null
             // For now grouped gemm is not supported and passes nullptr
@@ -1081,6 +1091,7 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
+                                          autoWGMXCCSPLITK,
                                           autoStaggerUMapping,
                                           autoStaggerU,
                                           autoStaggerUStrideShift,
@@ -1145,6 +1156,27 @@ namespace TensileLite
             }
         }
 
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+
         if(problemType.useScaleAlphaVec == 3 || problemType.useBias == 3)
         {
             args.template append<uint32_t>("factorDim",
@@ -1206,27 +1238,6 @@ namespace TensileLite
                                               (uint8_t*)inputs.ws + workspaceOffsetInByte);
             args.template append<const void*>("AmaxSync", inputs.Synchronizer);
         }
-
-        if(problemType.useGateResidual)
-        {
-            if(problemType.stridedBatched)
-                args.template append<void const*>("gateResidual", inputs.gateResidual);
-            else
-                args.template append<void const* const*>("batchGateResidual",
-                                                         inputs.batchGateResidual);
-            bool hasGate = problem.useGateResidual();
-            args.template append<uint32_t>(
-                "gate_type",
-                static_cast<uint32_t>(
-                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
-                            : problemType.gateResidualDataTypeWhiteList.at(0)));
-
-            TensorDescriptor const& gate
-                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
-            for(size_t i = startStrideCD; i < d.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
-                                               hasGate ? gate.strides()[i] : 0);
-        }
     }
 
     inline uint32_t getNumWorkGroups(const KernelInvocation& rv)
@@ -1276,7 +1287,7 @@ namespace TensileLite
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
 
-    std::tuple<int32_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
+    std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
         // Hardware
@@ -1284,27 +1295,30 @@ namespace TensileLite
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
         // Default WGM
-        int32_t  defaultWGM         = 1;
-        uint32_t defaultWGMXCC      = 1;
-        uint32_t defaultWGMXCCCHUNK = 0;
+        int32_t  defaultWGM          = 1;
+        uint32_t defaultWGMXCC       = 1;
+        uint32_t defaultWGMXCCCHUNK  = 0;
+        uint32_t defaultWGMXCCSPLITK = 0;
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
            && sizeMapping.workGroupMappingXCC == -1)
         {
             auto sizes = problem.problemSizes();
-            // Try to find cached WGM and WGMXCC and WGMXCCCHUNK
+            // Try to find cached WGM, WGMXCC, WGMXCCCHUNK, WGMXCCSPLITK
             auto cachedWGMParams = wgmParamsCache.find(problem);
 
-            if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX))
+            if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX))
             {
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
-                        .size  = {sizes[0], sizes[1], sizes[3]},
-                        .batch = sizes[2],
+                        .size    = {sizes[0], sizes[1], sizes[3]},
+                        .batch   = sizes[2],
                         // CU budget hint; 0 = use all CUs.
                         .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1320,22 +1334,26 @@ namespace TensileLite
                                                             origami_config,
                                                             skgrid);
 
-                    defaultWGM         = prediction_results.wgm;
-                    defaultWGMXCC      = prediction_results.wgmxcc;
-                    defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
+                    defaultWGM          = prediction_results.wgm;
+                    defaultWGMXCC       = prediction_results.wgmxcc;
+                    defaultWGMXCCCHUNK  = prediction_results.wgmxccchunk;
+                    defaultWGMXCCSPLITK = prediction_results.wgmxccsplitk;
 
                     // Add to cache only if dynamically calculated.
                     wgmParamsCache.add(
-                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
+                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK),
+                        problem);
                     if(Debug::Instance().printPropertyEvaluation())
                         std::cout << "AutoWGM - WGM: " << defaultWGM
                                   << ", WGMXCC: " << defaultWGMXCC
-                                  << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK << std::endl;
+                                  << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK
+                                  << ", WGMXCCSPLITK: " << defaultWGMXCCSPLITK << std::endl;
                 }
             }
             else
             {
-                std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK) = cachedWGMParams;
+                std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK)
+                    = cachedWGMParams;
             }
         }
         else
@@ -1358,7 +1376,10 @@ namespace TensileLite
                 defaultWGMXCC = sizeMapping.workGroupMappingXCC;
 
             // Default WGMXCCCHUNK
-            defaultWGMXCCCHUNK = 0;
+            defaultWGMXCCCHUNK  = 0;
+
+            // Default WGMXCCSPLITK
+            defaultWGMXCCSPLITK = 0;
         }
 
         // If values are explicitly specified at runtime, they override predictions and default values
@@ -1368,21 +1389,32 @@ namespace TensileLite
             defaultWGMXCC = pAMDGPU->fixedWGMXCC;
         if(pAMDGPU->fixedWGMXCCCHUNK != std::numeric_limits<size_t>::max())
             defaultWGMXCCCHUNK = pAMDGPU->fixedWGMXCCCHUNK;
+        if(pAMDGPU->fixedWGMXCCSPLITK != std::numeric_limits<size_t>::max())
+            defaultWGMXCCSPLITK = pAMDGPU->fixedWGMXCCSPLITK;
 
         // These range assertions only apply when SpaceFillingCurve (SFC) is not used.
         // When SFC is enabled, workGroupMapping contains a packed 32-bit encoding of
         // grid dimensions (SFCWGM) which can exceed the normal WGM range.
         if(!internalArgsSupport.useSFC)
         {
-            // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
-            assert(std::fabs(defaultWGM) < 1024);
-            // WGMXCC should be in this range: [0, 1, 2, 3, ..., 63]
-            assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
-            // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
-            assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
+            if(sizeMapping.workGroupMappingXCC == -1)
+            {
+                // New bit layout: 10 K + 8 chunk + 4 XCC + 10 WGM
+                assert(std::fabs(defaultWGM) < 512);   // 10-bit signed
+                assert(defaultWGMXCC < 16);             // 4 bits
+                assert(defaultWGMXCCCHUNK < 256);       // 8 bits
+                assert(defaultWGMXCCSPLITK < 1024);     // 10 bits
+            }
+            else
+            {
+                // Old bit layout (used when WorkGroupMappingXCC != -1)
+                assert(std::fabs(defaultWGM) < 1024);
+                assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
+                assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
+            }
         }
 
-        return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
+        return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK);
     }
 
     std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
@@ -1659,6 +1691,7 @@ namespace TensileLite
                                          int32_t                             autoWGM,
                                          size_t                              autoWGMXCC,
                                          size_t                              autoWGMXCCCHUNK,
+                                         size_t                              autoWGMXCCSPLITK,
                                          size_t                              autoStaggerUMapping,
                                          size_t                              autoStaggerU,
                                          size_t       autoStaggerUStrideShift,
@@ -1679,6 +1712,7 @@ namespace TensileLite
         int32_t        wgm                 = param.wgm() != 0 ? param.wgm() : autoWGM;
         size_t         wgmxcc              = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
         size_t         wgmxccchunk         = autoWGMXCCCHUNK;
+        size_t         wgmxccsplitk        = autoWGMXCCSPLITK;
         int32_t        wgmxccg             = -1; // initialized -1
         size_t         staggerUMapping     = autoStaggerUMapping;
         size_t         staggerU            = autoStaggerU;
@@ -1745,9 +1779,18 @@ namespace TensileLite
                 // if using WGMXCCn1, wgmxccg is not used. Repurpose it for wgmxccchunk
                 if(sizeMapping.workGroupMappingXCC == -1)
                 {
-                    wgmxccg = wgmxccchunk;
+                    // New bit layout: K(31:22) | chunk(21:14) | xcc(13:10) | wgm(9:0)
+                    internalArg1 = internalArg1
+                                   | ((wgmxccsplitk & 0x3FF) << 22)
+                                   | ((wgmxccchunk & 0xFF) << 14)
+                                   | ((wgmxcc & 0xF) << 10)
+                                   | (wgm & 0x3FF);
                 }
-                internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
+                else
+                {
+                    // Old bit layout: wgmxccg(31:22) | wgmxcc(21:16) | wgm(15:0)
+                    internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
+                }
             }
             else if(internalArgsSupport.version >= 2 && internalArgsSupport.useSFC)
             {
@@ -1895,6 +1938,17 @@ namespace TensileLite
 
         rv.clusterDim = sizeMapping.clusterDim;
 
+        // The HIP driver rejects a cluster launch whose grid is not divisible by
+        // clusterDim, so round up. The extra padded WGs early-exit in the kernel
+        // prologue; their WAVEDONE decrements the barrier's live member count.
+        // Stream-K has its own cluster-aware 1-D grid (sk.grid) and WG-id decode,
+        // so leave it untouched.
+        if(enableCluster && sizeMapping.streamK == 0)
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+        }
+
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
@@ -1903,14 +1957,16 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
                 = calculateAutoWGM(problem, &hardware, sk.grid);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
                 = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
             if(T_Debug)
             {
+                std::cout << "OCCUPANCY: " << sizeMapping.CUOccupancy << std::endl;
                 std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
-                          << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
+                          << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK
+                          << ", WGMXCCSPLITK: " << autoWGMXCCSPLITK << std::endl;
                 std::cout << "StaggerUMapping: " << autoStaggerUMapping
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
@@ -1927,6 +1983,7 @@ namespace TensileLite
                                             autoWGM,
                                             autoWGMXCC,
                                             autoWGMXCCCHUNK,
+                                            autoWGMXCCSPLITK,
                                             autoStaggerUMapping,
                                             autoStaggerU,
                                             autoStaggerUStrideShift,
@@ -1944,6 +2001,7 @@ namespace TensileLite
                                             autoWGM,
                                             autoWGMXCC,
                                             autoWGMXCCCHUNK,
+                                            autoWGMXCCSPLITK,
                                             autoStaggerUMapping,
                                             autoStaggerU,
                                             autoStaggerUStrideShift,
@@ -1959,10 +2017,21 @@ namespace TensileLite
             rv.args.append<void const*>("dstD", inputs.d);
             // MBSK: synchronizer address, MB: null address
             rv.args.append<void const*>("Synchronizer",
-                                        gsuSettings.globalAccumulation == 3 
-                                        ? inputs.Synchronizer 
+                                        gsuSettings.globalAccumulation == 3
+                                        ? inputs.Synchronizer
                                         : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
+        }
+
+        // Batch offset support for General Batched GEMM (SupportUserArgs kernels).
+        // Appended at the tail, after the dstD/Synchronizer block, to match the
+        // kernel signature order (see Signature.py).
+        if(!problemType.groupedGemm && sizeMapping.customKernelName.empty())
+        {
+            rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+            rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
+            rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
 
         if(problemType.stochasticRounding)
@@ -2121,7 +2190,7 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
                 = calculateAutoWGM(problems[0], &hardware, 0);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
                 = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
@@ -2143,6 +2212,7 @@ namespace TensileLite
                                            autoWGM,
                                            autoWGMXCC,
                                            autoWGMXCCCHUNK,
+                                           autoWGMXCCSPLITK,
                                            autoStaggerUMapping,
                                            autoStaggerU,
                                            autoStaggerUStrideShift,
@@ -2176,6 +2246,7 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
+                                          autoWGMXCCSPLITK,
                                           autoStaggerUMapping,
                                           autoStaggerU,
                                           autoStaggerUStrideShift,
@@ -2410,7 +2481,7 @@ namespace TensileLite
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
                                                        uint32_t               autoGsuVal,
-                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const                                                       
+                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -2598,11 +2669,20 @@ namespace TensileLite
         }
         // Adding the batchmode kernel argument for post GSU kernel to determine 
         // how to index the batch dimension in Strided Batch versus General Batched.
-        if(problemType.groupedGemm == false)
+        if(problemType.groupedGemm == false && sizeMapping.customKernelName.empty())
         {
             ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
             args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
-            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
+            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);
+
+            // The HIP-compiled conversion kernel lays out these int64_t params on
+            // 8-byte-aligned kernarg slots. Match that alignment on the host so the
+            // bytes line up; a bare append() leaves them 4-byte-shifted when the
+            // preceding args don't end on an 8-byte boundary (e.g. the non-HAS
+            // variant), causing the kernel to read the neighboring offset into the
+            // high dword of the address and fault.
+            args.template appendAligned<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            args.template appendAligned<int64_t>("batchOffsetC", inputs.batchOffsetC);
         }
 
     }

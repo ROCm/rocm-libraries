@@ -24,7 +24,7 @@
 #include "rocsparse_clients_routine_trace.hpp"
 #include "utility.hpp"
 
-#include <rocsparse/rocsparse-version.h>
+#include <rocsparse/rocsparse-config.h>
 
 #include <limits>
 
@@ -1269,8 +1269,9 @@ void host_bsrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1288,9 +1289,8 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_usolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1308,6 +1308,7 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose)
@@ -1330,8 +1331,9 @@ void host_bsrsv(rocsparse_operation  trans,
                         base,
                         base);
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1349,9 +1351,8 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_lsolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1369,6 +1370,7 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -2192,8 +2194,9 @@ void host_csrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
                             csr_row_ptr,
@@ -2206,9 +2209,8 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_usolve(M,
                             alpha,
                             csr_row_ptr,
@@ -2221,6 +2223,7 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose
@@ -2251,8 +2254,9 @@ void host_csrsv(rocsparse_operation  trans,
             }
         }
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -2265,9 +2269,8 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_lsolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -2280,6 +2283,7 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -3901,8 +3905,9 @@ void host_csrsm(J                    M,
 
         if(transA == rocsparse_operation_none)
         {
-            if(fill_mode == rocsparse_fill_mode_lower)
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
                 host_lssolve(M,
                              nrhs,
                              transB,
@@ -3917,9 +3922,8 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
-            }
-            else
-            {
+                break;
+            case rocsparse_fill_mode_upper:
                 host_ussolve(M,
                              nrhs,
                              transB,
@@ -3934,6 +3938,7 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
+                break;
             }
         }
         else if(transA == rocsparse_operation_transpose
@@ -3964,8 +3969,9 @@ void host_csrsm(J                    M,
                 }
             }
 
-            if(fill_mode == rocsparse_fill_mode_lower)
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
                 host_ussolve(M,
                              nrhs,
                              transB,
@@ -3980,9 +3986,8 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
-            }
-            else
-            {
+                break;
+            case rocsparse_fill_mode_upper:
                 host_lssolve(M,
                              nrhs,
                              transB,
@@ -3997,6 +4002,7 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
+                break;
             }
         }
 
@@ -4178,8 +4184,9 @@ void host_bsrsm(rocsparse_int       mb,
 
     if(transA == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             transX,
                             mb,
@@ -4197,9 +4204,8 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_usolve(dir,
                             transX,
                             mb,
@@ -4217,6 +4223,7 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(transA == rocsparse_operation_transpose)
@@ -4239,8 +4246,9 @@ void host_bsrsm(rocsparse_int       mb,
                         base,
                         base);
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             transX,
                             mb,
@@ -4258,9 +4266,8 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_lsolve(dir,
                             transX,
                             mb,
@@ -4278,6 +4285,7 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -7503,8 +7511,8 @@ rocsparse_status host_nnz(rocsparse_direction dirA,
 }
 
 template <typename T>
-void host_prune_dense2csr(rocsparse_int               m,
-                          rocsparse_int               n,
+void host_prune_dense2csr(int64_t                     m,
+                          int64_t                     n,
                           const std::vector<T>&       A,
                           int64_t                     lda,
                           rocsparse_index_base        base,
@@ -7522,9 +7530,9 @@ void host_prune_dense2csr(rocsparse_int               m,
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-    for(rocsparse_int i = 0; i < m; i++)
+    for(int64_t i = 0; i < m; i++)
     {
-        for(rocsparse_int j = 0; j < n; j++)
+        for(int64_t j = 0; j < n; j++)
         {
             if(std::abs(A[lda * j + i]) > threshold)
             {
@@ -7533,7 +7541,7 @@ void host_prune_dense2csr(rocsparse_int               m,
         }
     }
 
-    for(rocsparse_int i = 1; i <= m; i++)
+    for(int64_t i = 1; i <= m; i++)
     {
         csr_row_ptr[i] += csr_row_ptr[i - 1];
     }
@@ -7543,10 +7551,10 @@ void host_prune_dense2csr(rocsparse_int               m,
     csr_col_ind.resize(nnz);
     csr_val.resize(nnz);
 
-    rocsparse_int index = 0;
-    for(rocsparse_int i = 0; i < m; i++)
+    int64_t index = 0;
+    for(int64_t i = 0; i < m; i++)
     {
-        for(rocsparse_int j = 0; j < n; j++)
+        for(int64_t j = 0; j < n; j++)
         {
             if(std::abs(A[lda * j + i]) > threshold)
             {
@@ -7560,8 +7568,8 @@ void host_prune_dense2csr(rocsparse_int               m,
 }
 
 template <typename T>
-void host_prune_dense2csr_by_percentage(rocsparse_int               m,
-                                        rocsparse_int               n,
+void host_prune_dense2csr_by_percentage(int64_t                     m,
+                                        int64_t                     n,
                                         const std::vector<T>&       A,
                                         int64_t                     lda,
                                         rocsparse_index_base        base,
@@ -7573,15 +7581,15 @@ void host_prune_dense2csr_by_percentage(rocsparse_int               m,
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-    rocsparse_int nnz_A = m * n;
-    rocsparse_int pos   = std::ceil(nnz_A * (percentage / 100)) - 1;
-    pos                 = std::min(pos, nnz_A - 1);
-    pos                 = std::max(pos, static_cast<rocsparse_int>(0));
+    int64_t nnz_A = m * n;
+    int64_t pos   = std::ceil(nnz_A * (percentage / 100)) - 1;
+    pos           = std::min(pos, nnz_A - 1);
+    pos           = std::max(pos, static_cast<int64_t>(0));
 
     std::vector<T> sorted_A(m * n);
-    for(rocsparse_int i = 0; i < n; i++)
+    for(int64_t i = 0; i < n; i++)
     {
-        for(rocsparse_int j = 0; j < m; j++)
+        for(int64_t j = 0; j < m; j++)
         {
             sorted_A[m * i + j] = std::abs(A[lda * i + j]);
         }
@@ -9890,8 +9898,8 @@ template struct rocsparse_host<rocsparse_double_complex,
         rocsparse_index_base              csr_base_A,                                          \
         rocsparse_index_base              csr_base_C,                                          \
         TYPE                              percentage);                                                                      \
-    template void host_prune_dense2csr<TYPE>(rocsparse_int               m,                    \
-                                             rocsparse_int               n,                    \
+    template void host_prune_dense2csr<TYPE>(int64_t                     m,                    \
+                                             int64_t                     n,                    \
                                              const std::vector<TYPE>&    A,                    \
                                              int64_t                     lda,                  \
                                              rocsparse_index_base        base,                 \
@@ -9901,8 +9909,8 @@ template struct rocsparse_host<rocsparse_double_complex,
                                              std::vector<rocsparse_int>& csr_row_ptr,          \
                                              std::vector<rocsparse_int>& csr_col_ind);         \
     template void host_prune_dense2csr_by_percentage<TYPE>(                                    \
-        rocsparse_int               m,                                                         \
-        rocsparse_int               n,                                                         \
+        int64_t                     m,                                                         \
+        int64_t                     n,                                                         \
         const std::vector<TYPE>&    A,                                                         \
         int64_t                     lda,                                                       \
         rocsparse_index_base        base,                                                      \

@@ -175,6 +175,12 @@ namespace TensileLite
         void setSmCountTarget(int smCountTarget)
         {
             m_smCountTarget = smCountTarget;
+            const bool preciseSMTarget = Debug::Instance().usePreciseSMTarget();
+            // Round down to multiple of 32 if not precise SM target
+            if(!preciseSMTarget)
+            {
+                m_smCountTarget = (m_smCountTarget / 32) * 32;
+            }
         }
 
         int smCountTarget() const
@@ -1636,6 +1642,11 @@ namespace TensileLite
 
         unsigned char const* metadata   = nullptr;
         void const*          compressed = nullptr;
+
+        int64_t batchOffsetA = 0;
+        int64_t batchOffsetB = 0;
+        int64_t batchOffsetC = 0;
+        int64_t batchOffsetD = 0;
 
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);

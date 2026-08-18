@@ -98,6 +98,7 @@ BenchmarkProblems:
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 128]
           - Exact: [128, 128, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -169,6 +170,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -242,6 +244,7 @@ BenchmarkProblems:
           # - Exact: [64, 64, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -319,7 +322,7 @@ BenchmarkProblems:
           # - Exact: [128, 128, 1, 64] 
           - Exact: [128, 128, 1, 256]
           # - Exact: [256, 256, 1, 256] 
-          # - Exact: [1024, 1024, 1, 1024] 
+          - Exact: [1024, 1024, 1, 1024] 
         - ActivationArgs:
           - [Enum: none]
 
@@ -391,6 +394,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -464,6 +468,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 ########################################################
@@ -536,6 +541,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -608,6 +614,7 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -680,5 +687,6 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]

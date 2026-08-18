@@ -98,6 +98,9 @@ typedef struct rocke_conv_problem
     int sD;
     int pD;
     int dD;
+    /* Grouped convolution (Python ConvProblem.groups, default 1).
+     * C and K are always the total counts across all groups. */
+    int groups; /* default 1 */
 } rocke_conv_problem_t;
 
 /* ConvProblem(N, Hi, Wi, C, K, Y, X, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1):
@@ -163,20 +166,46 @@ int rocke_conv_problem_wo(const rocke_conv_problem_t* p);
 /* ConvProblem.M property:  N * Ho * Wo  (* Do for 3-D) */
 int rocke_conv_problem_m(const rocke_conv_problem_t* p);
 
-/* ConvProblem.N_gemm property:  K */
+/* ConvProblem.N_gemm property:  K / groups  (= kpg; per-group output channels) */
 int rocke_conv_problem_n_gemm(const rocke_conv_problem_t* p);
 
-/* ConvProblem.K_gemm property:  Y * X * C  (Z * Y * X * C for 3-D) */
+/* ConvProblem.K_gemm property:  Y * X * (C / groups)  (Z * Y * X * cpg for 3-D) */
 int rocke_conv_problem_k_gemm(const rocke_conv_problem_t* p);
 
-/* ConvProblem.flops property:  2 * M * N_gemm * K_gemm
+/* ConvProblem.flops property:  2 * M * N_gemm * K_gemm * groups
  * Computed in 64-bit to avoid the int32 overflow Python's arbitrary-precision
  * int never hits. */
 long long rocke_conv_problem_flops(const rocke_conv_problem_t* p);
 
+/* ConvProblem.is_pointwise property:
+ *   Y == 1 and X == 1 and sH == 1 and sW == 1 and pH == 0 and pW == 0
+ *   and (not is_3d or (Z == 1 and sD == 1 and pD == 0))
+ * For pointwise convolutions A, B, D are flat 2-D matrices and the
+ * coordinate-transform DAG reduces to multiply+add. */
+static inline bool rocke_conv_problem_is_pointwise(const rocke_conv_problem_t* p)
+{
+    if(p->Y != 1 || p->X != 1 || p->sH != 1 || p->sW != 1 || p->pH != 0 || p->pW != 0)
+        return false;
+    if(p->is_3d && (p->Z != 1 || p->sD != 1 || p->pD != 0))
+        return false;
+    return true;
+}
+
+/* ConvProblem.cpg property: C / groups (channels per group). */
+static inline int rocke_conv_problem_cpg(const rocke_conv_problem_t* p)
+{
+    return p->groups > 1 ? p->C / p->groups : p->C;
+}
+
+/* ConvProblem.kpg property: K / groups (output channels per group). */
+static inline int rocke_conv_problem_kpg(const rocke_conv_problem_t* p)
+{
+    return p->groups > 1 ? p->K / p->groups : p->K;
+}
+
 /* ConvProblem.short() ->
- *   2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}"
- *   3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}"
+ *   2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}{g}"  where g="G{groups}" if groups>1 else ""
+ *   3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}{g}"
  * Writes the NUL-terminated string into `out` (capacity out_cap). On success
  * returns ROCKE_OK and, if out_len != NULL, sets *out_len to the byte length
  * (excluding the NUL). Returns ROCKE_ERR_VALUE on NULL args or a too-small
