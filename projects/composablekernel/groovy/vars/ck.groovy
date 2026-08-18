@@ -1053,10 +1053,11 @@ def buildAndTest(Map conf=[:]){
                             }
                             sh """#!/bin/bash
                                 cd projects/hiptensor && mkdir -p build &&
-                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install -DCMAKE_INSTALL_PREFIX=../install" &&
+                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install -DCMAKE_INSTALL_PREFIX=./install" &&
                                 cmake --build build -- -j &&
                                 cd build &&
                                 make install &&
+                                cd ../install &&
                                 ctest
                             """
                         }
