@@ -55,7 +55,7 @@ from tensilelite.tensilelite_logic.valid_corpus_consistency import (
 
 
 _LOGIC_ROOT = (
-    Path(__file__).resolve().parents[4]
+    Path(__file__).resolve().parents[5]
     / "library" / "src" / "amd_detail" / "rocblaslt" / "src"
     / "Tensile" / "Logic" / "asm_full"
 )
