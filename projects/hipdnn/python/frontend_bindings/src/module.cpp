@@ -17,6 +17,7 @@ NB_MODULE(hipdnn_frontend_python, m) // NOLINT(modernize-avoid-c-arrays)
 
     // Initialize bindings from other files
     typesBindings(m); // Types and enums first
+    autotuneBindings(m); // Autotune and knob types (Graph defaults reference them)
     handleBindings(m); // Handle management
     memoryBindings(m); // Memory management
     hipBindings(m); // Direct HIP runtime wrappers used by benchmarking
