@@ -22,11 +22,18 @@
 #
 ################################################################################
 
+import importlib
 import sys
 import types
 from pathlib import Path
 
 import pytest
+
+
+# Load ValidChipId.py via importlib to bypass tensilelite/tensilelite_logic/__init__.py,
+# which transitively imports joblib / heavy build deps via Run.py.
+def _load_validchipid_mod():
+    return importlib.import_module("tensilelite.tensilelite_logic.valid_chip_id")
 
 
 def _install_rocisa_stub(monkeypatch):
@@ -51,9 +58,7 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def validchipid_mod(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    from tensilelite.tensilelite_logic import valid_chip_id
-
-    return valid_chip_id
+    return _load_validchipid_mod()
 
 
 @pytest.fixture
@@ -64,6 +69,7 @@ def validate_chip_id(validchipid_mod):
 @pytest.fixture
 def fallback_family(validchipid_mod):
     return validchipid_mod._fallbackFamily
+
 
 
 @pytest.fixture
