@@ -1,16 +1,18 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Embed the kernel sources this engine's packs compile at plan-build time.
+# Embed the kernel sources this engine's packs compile at plan-build time. The list is
+# shared with the test binary, which embeds its own copy of the same set.
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/KernelEmbedding.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/IngestorKernels.cmake")
+
+foreach(kernel IN LISTS HIPDNN_INGESTOR_PACK_KERNELS)
+    list(APPEND _ingestor_pack_kernel_sources "${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp")
+endforeach()
 
 add_kernels_for_embedding(
     TARGET hip_kernel_provider_impl
-    FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseAdd.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseMul.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseSub.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvFwd.cpp
+    FILES ${_ingestor_pack_kernel_sources}
 )
 
 target_sources(hip_kernel_provider_impl PRIVATE

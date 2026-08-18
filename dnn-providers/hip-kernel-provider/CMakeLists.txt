@@ -157,10 +157,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPDNN_DESCRIPTOR_BUILD_DIR
         "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
-    # Handed to the test targets' ctest ENVIRONMENT: the provider itself only knows the
-    # install path, so this is what makes a build-tree run read the staged copy.
-    set(HIP_KERNEL_PROVIDER_DESCRIPTOR_ENV
-        "HIPDNN_DESCRIPTOR_DIR=${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+    # No HIPDNN_DESCRIPTOR_DIR is published for the suites: the integration binary loads
+    # the plugin and resolves the tree from that module, and the unit binary compiles this
+    # path in and applies it from main(). A CTest ENVIRONMENT entry would reach the
+    # install-time file too, naming a build directory that the installed tests cannot see.
     message(STATUS "Kernel ingestor enabled: descriptors staged in ${HIPDNN_DESCRIPTOR_BUILD_DIR}")
 endif()
 
@@ -320,32 +320,84 @@ if(ENABLE_ASM_SDPA_ENGINE)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # Re-staged on every build, not once at configure time. file(COPY) does not re-copy
-    # an edited descriptor, does not see a new one until someone reconfigures, and never
-    # removes one deleted from the source tree -- so the build copy would keep serving an
-    # engine the sources no longer define. Cleared and re-copied whole, so a deletion
-    # propagates as reliably as an addition.
-    add_custom_target(
-        hip_kernel_provider_descriptors ALL
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors"
-                "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
-        COMMENT "Staging hip-kernel-provider descriptors"
-        VERBATIM
+    set(HIPDNN_DESCRIPTOR_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
+
+    # Listed explicitly for the same reason the kernel sources beside them are: CMake's own
+    # docs discourage GLOB for build inputs, and CONFIGURE_DEPENDS does not re-run on
+    # removal under every generator. One list feeds staging, install, and the dependency
+    # edge below, so the three cannot disagree about what a descriptor tree contains.
+    set(HIPDNN_DESCRIPTOR_FILES
+        conv_fwd/conv_fwd.kdp.json
+        conv_fwd/conv_fwd.kmd.json
+        conv_fwd/conv_fwd.udd.json
+        conv_fwd/conv_fwd.ued.json
+        conv_fwd/conv_fwd.uhd.json
+        conv_fwd/conv_fwd_f16_block64.ukd.json
+        conv_fwd/kernel_dtype_matches_graph.umd.json
+        conv_fwd/single_node_conv_fwd.umd.json
+        pointwise/kernel_dtype_matches_graph.umd.json
+        pointwise/operation_is_add.umd.json
+        pointwise/operation_is_mul.umd.json
+        pointwise/operation_is_sub.umd.json
+        pointwise/pointwise.kmd.json
+        pointwise/pointwise.udd.json
+        pointwise/pointwise.ued.json
+        pointwise/pointwise.uhd.json
+        pointwise/pointwise_add.kdp.json
+        pointwise/pointwise_mul.kdp.json
+        pointwise/pointwise_sub.kdp.json
+        pointwise/single_node_binary.umd.json
     )
 
-    # Both suites read HIPDNN_DESCRIPTOR_DIR, which points into the staged tree, but the
-    # target above is reachable only through ALL. Building a test target by name on a fresh
-    # tree -- `ninja hip_kernel_provider_tests && ctest`, which is what `ninja check` does
-    # -- would otherwise run against a directory that does not exist yet and quietly find
-    # no descriptors. CI escapes this only because it builds the default target.
+    # Wiped once per configure, not once per build. copy_if_different below makes an
+    # unchanged build a no-op, but it cannot retract a descriptor deleted from the source
+    # tree: dropping a file from the list orphans its staged copy rather than removing it,
+    # and the loader would keep reading a descriptor the sources no longer define. Editing
+    # the list is what re-runs CMake, so clearing here is exactly as reliable as the old
+    # per-build rm -rf, without leaving the directory empty while a test reads it.
+    file(REMOVE_RECURSE "${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+
+    set(_staged_descriptors)
+    foreach(_descriptor IN LISTS HIPDNN_DESCRIPTOR_FILES)
+        add_custom_command(
+            OUTPUT "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${HIPDNN_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+                    "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}"
+            DEPENDS "${HIPDNN_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            COMMENT "Staging descriptor ${_descriptor}"
+            VERBATIM
+        )
+        list(APPEND _staged_descriptors "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}")
+    endforeach()
+
+    add_custom_target(
+        hip_kernel_provider_descriptors ALL
+        DEPENDS ${_staged_descriptors}
+        COMMENT "Staging hip-kernel-provider descriptors"
+    )
+
+    # Both suites read the staged tree, but the target above is reachable only through ALL.
+    # Building a test target by name on a fresh tree -- `ninja hip_kernel_provider_tests &&
+    # ctest`, which is what `ninja check` does -- would otherwise run against a directory
+    # that does not exist yet and quietly find no descriptors. CI escapes this only because
+    # it builds the default target.
     foreach(_descriptor_consumer hip_kernel_provider_tests hip_kernel_provider_integration_tests)
         if(TARGET ${_descriptor_consumer})
             add_dependencies(${_descriptor_consumer} hip_kernel_provider_descriptors)
         endif()
     endforeach()
 
-    install(DIRECTORY src/engines/kernel_ingestor_engine/descriptors/
-            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}
-            FILES_MATCHING PATTERN "*.json")
+    # The same list again rather than a directory pattern, so the installed tree is the
+    # staged tree by construction -- a file the build serves and the install omits would
+    # otherwise be a difference nothing checks.
+    foreach(_descriptor IN LISTS HIPDNN_DESCRIPTOR_FILES)
+        get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
+        install(
+            FILES "${HIPDNN_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            DESTINATION
+                "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/${_descriptor_subdir}"
+        )
+    endforeach()
 endif()

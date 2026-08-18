@@ -56,9 +56,12 @@
  * | `<name>.ukd.json` | KernelDescriptor     |
  *
  * Directories under the root are organizational only -- the walk is recursive and a
- * file's folder means nothing here. A `.json`/`.jsonc` matching no suffix is a WARN and
- * skip, not an error. Every file carries a required `version`, gated per type (FILE_TYPES
- * below) by RFC 0017 §4: accept iff the major matches and the minor is no newer.
+ * file's folder means nothing here. The seven suffixes above are the only loadable
+ * spellings: a file whose name misses all of them is a WARN and skip, not an error. That
+ * includes every `.jsonc`, which no suffix can match and which is therefore diagnosed
+ * rather than read -- the loader has no comment-stripping parser. Every file carries a
+ * required `version`, gated per type (FILE_TYPES below) by RFC 0017 §4: accept iff the
+ * major matches and the minor is no newer.
  *
  * A KDP names its kernels either inline or by id: an entry of `kernelDescriptors` is an
  * object (the kernel itself) or a bare UUID string naming a `.ukd.json`. The two are
