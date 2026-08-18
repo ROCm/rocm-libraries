@@ -77,16 +77,13 @@ license = "MIT"
 [project.scripts]
 tensilelite = "tensilelite.cli:main"
 tensilelite-configure-client = "tensilelite_configure_client:main"
-Tensile = "tensilelite.tensilelite:main"
-TensileCreateLibrary = "tensilelite.tensilelite_create_library:run"
-TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
-TensileGetPath = "tensilelite:PrintTensileRoot"
-TensileBenchmarkCluster = "tensilelite.benchmark_cluster:main"
-TensileRetuneLibrary = "tensilelite.retune_library:main"
 
 [project.optional-dependencies]
 profile = ["yappi"]
 hip-query = ["hip-python"]
+orjson = ["orjson"]
+ujson = ["ujson"]
+simplejson = ["simplejson"]
 [dependency-groups]
 dev = [
     "rocisa",
