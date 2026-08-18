@@ -92,6 +92,8 @@ namespace TensileLite
         // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
         int streamK5ForceMode() const;
 
+        bool usePreciseSMTarget() const;
+
         int useExperimentalSelection() const;
 
         std::string getMetric() const;
@@ -167,6 +169,7 @@ namespace TensileLite
         bool        m_disableStaggerU     = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
+        bool        m_usePreciseSMTarget  = false;
         StringSet   m_excludedFromGetAll;
 
         Debug();
