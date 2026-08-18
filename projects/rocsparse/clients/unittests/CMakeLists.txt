@@ -47,6 +47,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_enum_traits.cpp
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
+  unit_test_csrmv_adaptive_analysis.cpp
 )
 
 # Host-pure library translation units under test. These are compiled directly
@@ -159,6 +160,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level3_sddmm.cpp
   unit_test_internal_level3_bsrmm.cpp
   unit_test_internal_level2_extras.cpp
+  # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
+  # Distinct anchor (end of the level-2 group) so this leaf does not conflict
+  # with sibling unit-test branches that append after rocsparse_unit_test_main.
+  # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
+  unit_test_host_level2.cpp
 )
 
 # Host building-block library translation units under test by the
