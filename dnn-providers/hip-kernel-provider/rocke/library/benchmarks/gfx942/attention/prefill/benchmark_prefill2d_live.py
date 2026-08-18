@@ -59,6 +59,13 @@ from typing import Any
 
 from rocke.assets import shape_utils_dir
 
+from benchmarks.common.attention_sweep import (
+    all_variant_keys,
+    expand_variant_keys,
+    record_sweep_entries,
+    run_sweep,
+)
+
 DEFAULT_SHAPE_UTILS = shape_utils_dir()
 
 ARCH = "gfx942"
@@ -899,30 +906,28 @@ def main() -> int:
                     # this problem (one entry per launched path). Emitted as
                     # "sweep:<path>" sub-records so each is comparable to the
                     # single-kernel variants above.
-                    sweep_entries = _run_sweep(
+                    sweep_entries = run_sweep(
                         shape,
                         data,
                         sw,
                         is_fp8,
                         bench,
+                        arch=ARCH,
+                        stream_handle=_bench_stream_handle(),
                         warmup=args.warmup,
                         iters=args.iterations,
                     )
-                    for path, ent in sweep_entries.items():
-                        s_err = _compare(ent["out"], tri_out)
-                        s_ok = s_err <= args.tol
-                        s_ms = ent["ms"]
-                        s_spd = tri_ms / s_ms if s_ms > 0 else 0.0
-                        vname = f"sweep:{path}"
-                        rec["variants"][vname] = {
-                            "ms": s_ms,
-                            "speedup": s_spd,
-                            "max_abs": s_err,
-                            "ok": s_ok,
-                            "engines": ent["engines"],
-                        }
-                        if s_ok and (best is None or s_spd > best[1]):
-                            best = (vname, s_spd)
+                    if not sweep_entries:
+                        print(f"  [sweep] no eligible engines for {tag} sw={sw}")
+                    best = record_sweep_entries(
+                        rec,
+                        sweep_entries,
+                        tri_out=tri_out,
+                        tri_ms=tri_ms,
+                        tol=args.tol,
+                        compare=_compare,
+                        best=best,
+                    )
                     continue
                 if v in ("prod", "ck3d"):
                     ck_out, ck_ms, kname = _run_prod(
@@ -995,7 +1000,10 @@ def main() -> int:
 
         tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
-        vs = "  ".join(_fmt_variant(v) for v in args.variants)
+        vs = "  ".join(
+            _fmt_variant(v)
+            for v in expand_variant_keys(args.variants, rec["variants"])
+        )
         best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
         tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""
         fly_str = ""
@@ -1058,7 +1066,7 @@ def main() -> int:
             f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
-    for v in args.variants:
+    for v in all_variant_keys(args.variants, results):
         sp = [
             r["variants"][v]["speedup"]
             for r in results
@@ -1216,81 +1224,6 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
     synchronize_and_release(hip_stream)
     return out, ms, instance_name
-
-
-def _run_sweep(shape, data, sw, is_fp8, bench, *, warmup, iters):
-    """Enumerate every engine the dispatcher registry offers for this problem.
-
-    Drives the multi-engine benchmarking path: builds one
-    :class:`~dispatch.attention.AttentionRequest` and calls
-    :func:`~dispatch.attention.attention_sweep_space`, which returns the deduped
-    spec of every *supported* candidate (2d-tiled and/or 3d split-KV). Each
-    distinct launched path is timed via ``run_unified_attention_torch``.
-
-    NOTE (framework phase): the registry decides the kernel *path* + candidate,
-    not the CTA geometry (that is still owned by ``_tiled_spec_from_problem`` at
-    launch time -- see the dispatcher module docstring). So distinct candidates
-    that route to the same launched path collapse to one timed entry; the entry
-    records which engine ``spec.name``s mapped to it. Making per-engine geometry
-    distinct here is the deferred production-wiring phase.
-    """
-    import torch
-    from dispatch.attention import AttentionRequest, attention_sweep_space
-    from kernels import run_unified_attention_torch
-    from rocke.runtime import synchronize_and_release, time_launches
-
-    dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
-    req = AttentionRequest(
-        batch=shape.num_seqs,
-        nhead_q=shape.num_query_heads,
-        nhead_k=shape.num_kv_heads,
-        seqlen_q=shape.max_seqlen_q,
-        seqlen_k=shape.max_seqlen_k,
-        hdim_q=shape.head_size,
-        hdim_v=shape.head_size,
-        arch=ARCH,
-        dtype=dtype_str,
-        sliding_window=sw,
-        kv_block_size=shape.block_size,
-        num_sms=bench.num_sms,
-    )
-
-    specs = attention_sweep_space(req)
-    problem = bench._problem(shape, sw, is_fp8)
-    hip_stream = _bench_stream_handle()
-
-    # Group the offered engines by the launched path they resolve to.
-    engines_by_path = {}
-    for spec in specs:
-        engines_by_path.setdefault(spec.path, []).append(spec.name)
-
-    entries = {}
-    for path, engine_names in engines_by_path.items():
-        run_backend = "tiled" if path == "2d" else path
-        out = torch.empty_like(data["query"])
-
-        def call_once(_backend=run_backend, _out=out):
-            run_unified_attention_torch(
-                problem=problem,
-                q=data["query"],
-                k=data["key_cache"],
-                v=data["value_cache"],
-                out=_out,
-                cu_seqlens_q=data["cu_seqlens_q"],
-                seqused_k=data["kv_lens"],
-                softmax_scale=data["scale"],
-                block_table=data["block_tables"],
-                softcap=float(shape.softcap),
-                sinks=data["sinks"],
-                alibi_slopes=data["alibi_slopes"],
-                backend=_backend,
-                stream=hip_stream,
-            )
-
-        ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
-        synchronize_and_release(hip_stream)
-        entries[path] = {"ms": ms, "engines": engine_names, "out": out}
-    return entries
 
 
 if __name__ == "__main__":
