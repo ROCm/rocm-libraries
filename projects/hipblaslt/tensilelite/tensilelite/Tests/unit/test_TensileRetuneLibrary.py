@@ -18,7 +18,7 @@ class TestWorkingPathFunctions:
 
     def test_ensurepath_creates_directory(self):
         """ensurePath should create directory if it doesn't exist"""
-        from tensilelite.TensileRetuneLibrary import ensurePath
+        from tensilelite.retune_library import ensurePath
 
         with tempfile.TemporaryDirectory() as tmpdir:
             new_path = os.path.join(tmpdir, "newdir", "nested")
@@ -31,7 +31,7 @@ class TestWorkingPathFunctions:
 
     def test_ensurepath_handles_existing_directory(self):
         """ensurePath should handle existing directory without error"""
-        from tensilelite.TensileRetuneLibrary import ensurePath
+        from tensilelite.retune_library import ensurePath
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Call twice to test idempotency
@@ -42,10 +42,10 @@ class TestWorkingPathFunctions:
             assert result2 == tmpdir
             assert os.path.exists(tmpdir)
 
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/base/path"})
+    @patch('tensilelite.retune_library.globalParameters', {"WorkingPath": "/base/path"})
     def test_push_working_path(self):
         """pushWorkingPath should append folder and create directory"""
-        from tensilelite.TensileRetuneLibrary import pushWorkingPath, globalParameters
+        from tensilelite.retune_library import pushWorkingPath, globalParameters
 
         with tempfile.TemporaryDirectory() as tmpdir:
             globalParameters["WorkingPath"] = tmpdir
@@ -58,32 +58,32 @@ class TestWorkingPathFunctions:
             assert os.path.exists(expected_path)
             assert result == expected_path
 
-    @patch('tensilelite.TensileRetuneLibrary.workingDirectoryStack', [])
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/base/path/subfolder"})
+    @patch('tensilelite.retune_library.workingDirectoryStack', [])
+    @patch('tensilelite.retune_library.globalParameters', {"WorkingPath": "/base/path/subfolder"})
     def test_pop_working_path_empty_stack(self):
         """popWorkingPath should go up one level when stack is empty"""
-        from tensilelite.TensileRetuneLibrary import popWorkingPath, globalParameters
+        from tensilelite.retune_library import popWorkingPath, globalParameters
 
         popWorkingPath()
 
         assert globalParameters["WorkingPath"] == "/base/path"
 
-    @patch('tensilelite.TensileRetuneLibrary.workingDirectoryStack', ["/saved/path"])
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/current/path"})
+    @patch('tensilelite.retune_library.workingDirectoryStack', ["/saved/path"])
+    @patch('tensilelite.retune_library.globalParameters', {"WorkingPath": "/current/path"})
     def test_pop_working_path_with_stack(self):
         """popWorkingPath should restore from stack when available"""
-        from tensilelite.TensileRetuneLibrary import popWorkingPath, globalParameters, workingDirectoryStack
+        from tensilelite.retune_library import popWorkingPath, globalParameters, workingDirectoryStack
 
         popWorkingPath()
 
         assert globalParameters["WorkingPath"] == "/saved/path"
         assert len(workingDirectoryStack) == 0
 
-    @patch('tensilelite.TensileRetuneLibrary.workingDirectoryStack', [])
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/initial/path"})
+    @patch('tensilelite.retune_library.workingDirectoryStack', [])
+    @patch('tensilelite.retune_library.globalParameters', {"WorkingPath": "/initial/path"})
     def test_set_working_path(self):
         """setWorkingPath should save current path and set new one"""
-        from tensilelite.TensileRetuneLibrary import setWorkingPath, globalParameters, workingDirectoryStack
+        from tensilelite.retune_library import setWorkingPath, globalParameters, workingDirectoryStack
 
         with tempfile.TemporaryDirectory() as tmpdir:
             old_path = os.path.join(tmpdir, "old")
@@ -105,12 +105,12 @@ class TestWorkingPathFunctions:
 class TestParseCurrentLibrary:
     """Test parseCurrentLibrary function"""
 
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {})
-    @patch('tensilelite.TensileRetuneLibrary.ProblemSizes')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.retune_library.globalParameters', {})
+    @patch('tensilelite.retune_library.ProblemSizes')
+    @patch('tensilelite.retune_library.LibraryIO.parseLibraryLogicData')
     def test_parses_library_without_size_file(self, mock_parse, mock_problem_sizes):
         """parseCurrentLibrary should parse library and create sizes from exactLogic"""
-        from tensilelite.TensileRetuneLibrary import parseCurrentLibrary, globalParameters
+        from tensilelite.retune_library import parseCurrentLibrary, globalParameters
 
         mock_problem_type = Mock()
         mock_solution1 = MagicMock()
@@ -145,12 +145,12 @@ class TestParseCurrentLibrary:
             assert sizes_arg[0] == {"Exact": [64, 64, 1, 64]}
             assert sizes_arg[1] == {"Exact": [128, 128, 1, 128]}
 
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {})
-    @patch('tensilelite.TensileRetuneLibrary.ProblemSizes')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.retune_library.globalParameters', {})
+    @patch('tensilelite.retune_library.ProblemSizes')
+    @patch('tensilelite.retune_library.LibraryIO.parseLibraryLogicData')
     def test_parses_dict_library_sets_perf_metric(self, mock_parse, mock_problem_sizes):
         """parseCurrentLibrary should read PerfMetric from dict-format logic."""
-        from tensilelite.TensileRetuneLibrary import parseCurrentLibrary, globalParameters
+        from tensilelite.retune_library import parseCurrentLibrary, globalParameters
 
         mock_problem_type = Mock()
         mock_solution1 = MagicMock()
@@ -172,11 +172,11 @@ class TestParseCurrentLibrary:
             assert len(result) == 3
             assert globalParameters["PerformanceMetric"] == "DeviceEfficiency"
 
-    @patch('tensilelite.TensileRetuneLibrary.ProblemSizes')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.retune_library.ProblemSizes')
+    @patch('tensilelite.retune_library.LibraryIO.parseLibraryLogicData')
     def test_parses_library_with_size_file(self, mock_parse, mock_problem_sizes):
         """parseCurrentLibrary should use sizes from file when provided"""
-        from tensilelite.TensileRetuneLibrary import parseCurrentLibrary
+        from tensilelite.retune_library import parseCurrentLibrary
 
         mock_problem_type = Mock()
         mock_solution = MagicMock()
@@ -205,11 +205,11 @@ class TestParseCurrentLibrary:
             sizes_arg = call_args[0][1]
             assert sizes_arg == size_data
 
-    @patch('tensilelite.TensileRetuneLibrary.ProblemSizes')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.retune_library.ProblemSizes')
+    @patch('tensilelite.retune_library.LibraryIO.parseLibraryLogicData')
     def test_removes_duplicate_solutions(self, mock_parse, mock_problem_sizes):
         """parseCurrentLibrary should remove duplicate solutions and reindex"""
-        from tensilelite.TensileRetuneLibrary import parseCurrentLibrary
+        from tensilelite.retune_library import parseCurrentLibrary
 
         mock_problem_type = Mock()
 
@@ -252,21 +252,21 @@ class TestParseCurrentLibrary:
 class TestRunBenchmarking:
     """Test runBenchmarking function"""
 
-    @patch('tensilelite.TensileRetuneLibrary.shutil.copy')
-    @patch('tensilelite.TensileRetuneLibrary.ensurePath')
-    @patch('tensilelite.TensileRetuneLibrary.ClientWriter.runClient')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.writeSolutions')
-    @patch('tensilelite.TensileRetuneLibrary.BenchmarkProblems.writeBenchmarkFiles')
-    @patch('tensilelite.TensileRetuneLibrary.ClientWriter.getClientExecutablePath')
-    @patch('tensilelite.TensileRetuneLibrary.popWorkingPath')
-    @patch('tensilelite.TensileRetuneLibrary.pushWorkingPath')
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/work"})
+    @patch('tensilelite.retune_library.shutil.copy')
+    @patch('tensilelite.retune_library.ensurePath')
+    @patch('tensilelite.retune_library.ClientWriter.runClient')
+    @patch('tensilelite.retune_library.LibraryIO.writeSolutions')
+    @patch('tensilelite.retune_library.BenchmarkProblems.writeBenchmarkFiles')
+    @patch('tensilelite.retune_library.ClientWriter.getClientExecutablePath')
+    @patch('tensilelite.retune_library.popWorkingPath')
+    @patch('tensilelite.retune_library.pushWorkingPath')
+    @patch('tensilelite.retune_library.globalParameters', {"WorkingPath": "/work"})
     def test_runs_benchmarking_creates_correct_structure(
         self, mock_push, mock_pop, mock_get_client,
         mock_write_bench, mock_write_sol, mock_run_client, mock_ensure, mock_copy
     ):
         """runBenchmarking should create directory structure and run benchmarks"""
-        from tensilelite.TensileRetuneLibrary import runBenchmarking
+        from tensilelite.retune_library import runBenchmarking
 
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_ensure.return_value = tmpdir
@@ -289,21 +289,21 @@ class TestRunBenchmarking:
             assert mock_push.call_count == 2
             assert mock_pop.call_count == 2
 
-    @patch('tensilelite.TensileRetuneLibrary.ClientWriter.runClient')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.writeSolutions')
-    @patch('tensilelite.TensileRetuneLibrary.BenchmarkProblems.writeBenchmarkFiles')
-    @patch('tensilelite.TensileRetuneLibrary.ClientWriter.getClientExecutablePath')
-    @patch('tensilelite.TensileRetuneLibrary.shutil.copy')
-    @patch('tensilelite.TensileRetuneLibrary.ensurePath')
-    @patch('tensilelite.TensileRetuneLibrary.popWorkingPath')
-    @patch('tensilelite.TensileRetuneLibrary.pushWorkingPath')
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/work"})
+    @patch('tensilelite.retune_library.ClientWriter.runClient')
+    @patch('tensilelite.retune_library.LibraryIO.writeSolutions')
+    @patch('tensilelite.retune_library.BenchmarkProblems.writeBenchmarkFiles')
+    @patch('tensilelite.retune_library.ClientWriter.getClientExecutablePath')
+    @patch('tensilelite.retune_library.shutil.copy')
+    @patch('tensilelite.retune_library.ensurePath')
+    @patch('tensilelite.retune_library.popWorkingPath')
+    @patch('tensilelite.retune_library.pushWorkingPath')
+    @patch('tensilelite.retune_library.globalParameters', {"WorkingPath": "/work"})
     def test_sets_update_file_when_update_true(
         self, mock_push, mock_pop, mock_get_client,
         mock_write_bench, mock_write_sol, mock_run_client, mock_ensure, mock_copy
     ):
         """runBenchmarking should set LibraryUpdateFile when update=True"""
-        from tensilelite.TensileRetuneLibrary import runBenchmarking, globalParameters
+        from tensilelite.retune_library import runBenchmarking, globalParameters
 
         mock_solutions = [{"ISA": (9, 0, 6)}]
         mock_problem_sizes = Mock()
@@ -318,21 +318,21 @@ class TestRunBenchmarking:
             assert globalParameters["LibraryUpdateFile"] is not None
             assert "update.yaml" in globalParameters["LibraryUpdateFile"]
 
-    @patch('tensilelite.TensileRetuneLibrary.shutil.copy')
-    @patch('tensilelite.TensileRetuneLibrary.ensurePath')
-    @patch('tensilelite.TensileRetuneLibrary.ClientWriter.runClient')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.writeSolutions')
-    @patch('tensilelite.TensileRetuneLibrary.BenchmarkProblems.writeBenchmarkFiles')
-    @patch('tensilelite.TensileRetuneLibrary.ClientWriter.getClientExecutablePath')
-    @patch('tensilelite.TensileRetuneLibrary.popWorkingPath')
-    @patch('tensilelite.TensileRetuneLibrary.pushWorkingPath')
-    @patch('tensilelite.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/work"})
+    @patch('tensilelite.retune_library.shutil.copy')
+    @patch('tensilelite.retune_library.ensurePath')
+    @patch('tensilelite.retune_library.ClientWriter.runClient')
+    @patch('tensilelite.retune_library.LibraryIO.writeSolutions')
+    @patch('tensilelite.retune_library.BenchmarkProblems.writeBenchmarkFiles')
+    @patch('tensilelite.retune_library.ClientWriter.getClientExecutablePath')
+    @patch('tensilelite.retune_library.popWorkingPath')
+    @patch('tensilelite.retune_library.pushWorkingPath')
+    @patch('tensilelite.retune_library.globalParameters', {"WorkingPath": "/work"})
     def test_converts_isa_to_list(
         self, mock_push, mock_pop, mock_get_client,
         mock_write_bench, mock_write_sol, mock_run_client, mock_ensure, mock_copy
     ):
         """runBenchmarking should convert ISA tuples to lists"""
-        from tensilelite.TensileRetuneLibrary import runBenchmarking
+        from tensilelite.retune_library import runBenchmarking
 
         mock_solutions = [
             {"ISA": (9, 0, 6), "Name": "Sol1"},
@@ -360,23 +360,23 @@ class TestRunBenchmarking:
 class TestTensileRetuneLibrary:
     """Test TensileRetuneLibrary main function"""
 
-    @patch('tensilelite.TensileRetuneLibrary.LibraryLogic.main')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.writeYAML')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.read')
-    @patch('tensilelite.TensileRetuneLibrary.runBenchmarking')
-    @patch('tensilelite.TensileRetuneLibrary.parseCurrentLibrary')
-    @patch('tensilelite.TensileRetuneLibrary.validateToolchain')
-    @patch('tensilelite.TensileRetuneLibrary.assignGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.restoreDefaultGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.argUpdatedGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.print1')
+    @patch('tensilelite.retune_library.LibraryLogic.main')
+    @patch('tensilelite.retune_library.LibraryIO.writeYAML')
+    @patch('tensilelite.retune_library.LibraryIO.read')
+    @patch('tensilelite.retune_library.runBenchmarking')
+    @patch('tensilelite.retune_library.parseCurrentLibrary')
+    @patch('tensilelite.retune_library.validateToolchain')
+    @patch('tensilelite.retune_library.assignGlobalParameters')
+    @patch('tensilelite.retune_library.restoreDefaultGlobalParameters')
+    @patch('tensilelite.retune_library.argUpdatedGlobalParameters')
+    @patch('tensilelite.retune_library.print1')
     def test_retune_library_remake_mode(
         self, mock_print, mock_arg_updated, mock_restore,
         mock_assign, mock_validate, mock_parse, mock_bench, mock_read,
         mock_write, mock_logic_main
     ):
         """TensileRetuneLibrary should run benchmarking and rebuild logic in remake mode"""
-        from tensilelite.TensileRetuneLibrary import TensileRetuneLibrary
+        from tensilelite.retune_library import TensileRetuneLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logic_file = os.path.join(tmpdir, "logic.yaml")
@@ -405,21 +405,21 @@ class TestTensileRetuneLibrary:
             # Verify output directory was created
             assert os.path.exists(output_path)
 
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.writeYAML')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.read')
-    @patch('tensilelite.TensileRetuneLibrary.runBenchmarking')
-    @patch('tensilelite.TensileRetuneLibrary.parseCurrentLibrary')
-    @patch('tensilelite.TensileRetuneLibrary.validateToolchain')
-    @patch('tensilelite.TensileRetuneLibrary.assignGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.restoreDefaultGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.argUpdatedGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.print1')
+    @patch('tensilelite.retune_library.LibraryIO.writeYAML')
+    @patch('tensilelite.retune_library.LibraryIO.read')
+    @patch('tensilelite.retune_library.runBenchmarking')
+    @patch('tensilelite.retune_library.parseCurrentLibrary')
+    @patch('tensilelite.retune_library.validateToolchain')
+    @patch('tensilelite.retune_library.assignGlobalParameters')
+    @patch('tensilelite.retune_library.restoreDefaultGlobalParameters')
+    @patch('tensilelite.retune_library.argUpdatedGlobalParameters')
+    @patch('tensilelite.retune_library.print1')
     def test_retune_library_update_mode_writes_update_logic(
         self, mock_print, mock_arg_updated, mock_restore,
         mock_assign, mock_validate, mock_parse, mock_bench, mock_read, mock_write
     ):
         """TensileRetuneLibrary should update logic from file in update mode"""
-        from tensilelite.TensileRetuneLibrary import TensileRetuneLibrary
+        from tensilelite.retune_library import TensileRetuneLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logic_file = os.path.join(tmpdir, "logic.yaml")
@@ -447,23 +447,23 @@ class TestTensileRetuneLibrary:
             written_data = write_args[1]
             assert written_data[7] == update_logic
 
-    @patch('tensilelite.TensileRetuneLibrary.LibraryLogic.main')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.writeYAML')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.read')
-    @patch('tensilelite.TensileRetuneLibrary.runBenchmarking')
-    @patch('tensilelite.TensileRetuneLibrary.parseCurrentLibrary')
-    @patch('tensilelite.TensileRetuneLibrary.validateToolchain')
-    @patch('tensilelite.TensileRetuneLibrary.assignGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.restoreDefaultGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.argUpdatedGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.print1')
+    @patch('tensilelite.retune_library.LibraryLogic.main')
+    @patch('tensilelite.retune_library.LibraryIO.writeYAML')
+    @patch('tensilelite.retune_library.LibraryIO.read')
+    @patch('tensilelite.retune_library.runBenchmarking')
+    @patch('tensilelite.retune_library.parseCurrentLibrary')
+    @patch('tensilelite.retune_library.validateToolchain')
+    @patch('tensilelite.retune_library.assignGlobalParameters')
+    @patch('tensilelite.retune_library.restoreDefaultGlobalParameters')
+    @patch('tensilelite.retune_library.argUpdatedGlobalParameters')
+    @patch('tensilelite.retune_library.print1')
     def test_retune_library_remake_mode_with_dict_header(
         self, mock_print, mock_arg_updated, mock_restore,
         mock_assign, mock_validate, mock_parse, mock_bench, mock_read,
         mock_write, mock_logic_main
     ):
         """TensileRetuneLibrary should pass dict header fields to LibraryLogic.main in remake mode."""
-        from tensilelite.TensileRetuneLibrary import TensileRetuneLibrary
+        from tensilelite.retune_library import TensileRetuneLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logic_file = os.path.join(tmpdir, "logic.yaml")
@@ -492,21 +492,21 @@ class TestTensileRetuneLibrary:
             assert header_arg["ArchitectureName"] == "gfx950"
             assert header_arg["DeviceNames"] == ["Device 0049"]
 
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.writeYAML')
-    @patch('tensilelite.TensileRetuneLibrary.LibraryIO.read')
-    @patch('tensilelite.TensileRetuneLibrary.runBenchmarking')
-    @patch('tensilelite.TensileRetuneLibrary.parseCurrentLibrary')
-    @patch('tensilelite.TensileRetuneLibrary.validateToolchain')
-    @patch('tensilelite.TensileRetuneLibrary.assignGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.restoreDefaultGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.argUpdatedGlobalParameters')
-    @patch('tensilelite.TensileRetuneLibrary.print1')
+    @patch('tensilelite.retune_library.LibraryIO.writeYAML')
+    @patch('tensilelite.retune_library.LibraryIO.read')
+    @patch('tensilelite.retune_library.runBenchmarking')
+    @patch('tensilelite.retune_library.parseCurrentLibrary')
+    @patch('tensilelite.retune_library.validateToolchain')
+    @patch('tensilelite.retune_library.assignGlobalParameters')
+    @patch('tensilelite.retune_library.restoreDefaultGlobalParameters')
+    @patch('tensilelite.retune_library.argUpdatedGlobalParameters')
+    @patch('tensilelite.retune_library.print1')
     def test_retune_library_update_mode_writes_update_logic_dict(
         self, mock_print, mock_arg_updated, mock_restore,
         mock_assign, mock_validate, mock_parse, mock_bench, mock_read, mock_write
     ):
         """TensileRetuneLibrary should write update logic into ExactLogic for dict-format logic."""
-        from tensilelite.TensileRetuneLibrary import TensileRetuneLibrary
+        from tensilelite.retune_library import TensileRetuneLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logic_file = os.path.join(tmpdir, "logic.yaml")
@@ -541,11 +541,11 @@ class TestTensileRetuneLibrary:
 class TestMain:
     """Test main entry point"""
 
-    @patch('tensilelite.TensileRetuneLibrary.TensileRetuneLibrary')
+    @patch('tensilelite.retune_library.TensileRetuneLibrary')
     @patch('sys.argv', ['prog', 'logic.yaml', 'output/'])
     def test_main_passes_arguments_correctly(self, mock_func):
         """main should pass command line arguments to TensileRetuneLibrary"""
-        from tensilelite.TensileRetuneLibrary import main
+        from tensilelite.retune_library import main
 
         main()
 
