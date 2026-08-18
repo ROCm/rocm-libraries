@@ -194,7 +194,6 @@ and use it as the compiler launcher. No additional configuration is needed.
 
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
-* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts (e.g. `Tensile.sh`) for the cmake build tree. **Deprecated** — run `tensilelite/bin/Tensile` directly instead (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
@@ -208,28 +207,11 @@ Assumptions:
 
 - Each problem directory contains a library directory with one co file corresponding to one architecture
 
-**Edit**(2025/3/31) ``rocisa`` use the CMake build system instead of the ``virtualenv``. The behavior of the TensileLite changed a bit with only one extra line.
-
-Example:
-
-```cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S <path-to-tensilelite-root> -B <tensile-out>```
-
-The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script under the ``tensile-out`` folder as usual:
-
-> **Deprecated:** `Tensile.sh` / `Tensile.bat` will be removed in a future release.
-> Run `tensilelite/bin/Tensile` directly instead.
+Install rocisa with `invoke rocisa`, then run the source entry point directly:
 
 ```
-Tensile.sh <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
+tensilelite/bin/Tensile <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
 ```
-
-or
-
-```
-Tensile.bat <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
-```
-
-**You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**
 
 To build asm only:
 
