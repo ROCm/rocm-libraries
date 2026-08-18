@@ -28,8 +28,11 @@ constexpr int32_t
 
 /// Packed column-major strides `[K*N, 1, K]` for a `[experts, K, N]` DWeight — the
 /// layout MoeGroupedMatmulBwdNode::infer_properties_node() assigns when the caller
-/// leaves DWeight strides unset. Host buffers backing a DWeight tensor must use this
-/// layout, otherwise they disagree with the strides the graph hands the executor.
+/// leaves DWeight strides unset. DWeight itself accepts any strides: a caller that
+/// sets them on the graph tensor keeps its own layout, and this reference honors
+/// whatever layout the tensor carries. Use this helper only to match the inferred
+/// default, since a host buffer must always agree with the strides the graph hands
+/// the executor.
 inline std::vector<int64_t>
     moeGroupedMatmulBwdDweightStrides(const std::vector<int64_t>& dweightDims)
 {

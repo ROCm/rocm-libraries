@@ -124,6 +124,29 @@ TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, EmptyGroupYieldsZeroRow)
     expectTensorValues(dweight, {0.0F, 300.0F});
 }
 
+// The mirror of EmptyGroupYieldsZeroRow, with the empty range at the top of the
+// token array instead of the bottom: start == end == tokenRows, so a row walk
+// that mishandled the bound would run off the end of token/doutput rather than
+// before their beginning.
+TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, FinalExpertEmptyAtTokenRows)
+{
+    auto doutput = createTensor<float>({1, 4, 1});
+    setValues(doutput, {1.0F, 2.0F, 3.0F, 4.0F});
+    auto token = createTensor<float>({1, 4, 1});
+    setValues(token, {10.0F, 20.0F, 30.0F, 40.0F});
+    auto offsets = createTensor<int32_t>({2, 1, 1});
+    setValues(offsets, {0, 4});
+    auto dweight = createTensor<float>({2, 1, 1});
+    dweight.fillWithSentinelValue();
+
+    CpuFpReferenceMoeGroupedMatmulBwd::backward<float, float, float, float>(
+        doutput, token, offsets, dweight);
+
+    // expert 0 owns rows 0-3: 1*10 + 2*20 + 3*30 + 4*40 = 300
+    // expert 1 starts one past the last row -> owns none, must be zero-filled.
+    expectTensorValues(dweight, {300.0F, 0.0F});
+}
+
 // K=2, N=2, asymmetric DWeight: row-major {K*N, N, 1} and column-major {K*N,
 // 1, K} have genuinely different flat contents ({31,42,23,34} vs {31,23,42,34}
 // for the same logical [[31,42],[23,34]] matrix), so this only holds if the
@@ -150,6 +173,44 @@ TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, ColumnMajorDweightMatchesRowMajor)
     // flattens as [k+n*K] -> {1,2,10,20}.
     expectTensorValues(rowMajorDweight, {1.0F, 10.0F, 2.0F, 20.0F});
     expectTensorValues(columnMajorDweight, {1.0F, 2.0F, 10.0F, 20.0F});
+}
+
+// Token and DOutput are read through hoisted raw pointers rather than
+// getHostValue, so their stride[1]/stride[2] split is only exercised by a layout
+// where stride[2] != 1. Both inputs here carry the column-major {rows*W, 1,
+// rows}, the transpose of the row-major layout every other test in this file
+// builds. DWeight stays row-major in both runs so only the input strides vary.
+TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, ColumnMajorTokenAndDoutputMatchRowMajor)
+{
+    auto offsets = createTensor<int32_t>({1, 1, 1});
+    setValues(offsets, {0});
+
+    // Token rows [[1,2],[3,4]] and DOutput rows [[5,6],[7,8]].
+    auto rowMajorToken = createTensor<float>({1, 2, 2});
+    setValues(rowMajorToken, {1.0F, 2.0F, 3.0F, 4.0F});
+    auto rowMajorDoutput = createTensor<float>({1, 2, 2});
+    setValues(rowMajorDoutput, {5.0F, 6.0F, 7.0F, 8.0F});
+
+    // The same logical values under column-major {4, 1, 2}, where element (r, c)
+    // lands at flat index r + 2c instead of 2r + c.
+    auto columnMajorToken = Tensor<float>({1, 2, 2}, {4, 1, 2});
+    setValues(columnMajorToken, {1.0F, 3.0F, 2.0F, 4.0F});
+    auto columnMajorDoutput = Tensor<float>({1, 2, 2}, {4, 1, 2});
+    setValues(columnMajorDoutput, {5.0F, 7.0F, 6.0F, 8.0F});
+
+    auto dweightFromRowMajor = createTensor<float>({1, 2, 2});
+    CpuFpReferenceMoeGroupedMatmulBwd::backward<float, float, float, float>(
+        rowMajorDoutput, rowMajorToken, offsets, dweightFromRowMajor);
+
+    auto dweightFromColumnMajor = createTensor<float>({1, 2, 2});
+    CpuFpReferenceMoeGroupedMatmulBwd::backward<float, float, float, float>(
+        columnMajorDoutput, columnMajorToken, offsets, dweightFromColumnMajor);
+
+    // DWeight[k,n] = sum_r Token[r,k] * DOutput[r,n]:
+    // [0,0] = 1*5 + 3*7 = 26, [0,1] = 1*6 + 3*8 = 30,
+    // [1,0] = 2*5 + 4*7 = 38, [1,1] = 2*6 + 4*8 = 44.
+    expectTensorValues(dweightFromRowMajor, {26.0F, 30.0F, 38.0F, 44.0F});
+    expectTensorValues(dweightFromColumnMajor, {26.0F, 30.0F, 38.0F, 44.0F});
 }
 
 /* ============================= Rejection tests ============================= */

@@ -281,7 +281,8 @@ constexpr float getMxTolerance()
 namespace moe
 {
 
-// MoE grouped matmul backward is a per-expert GEMM over K; reuse the matmul error model.
+// MoE grouped matmul backward is a per-expert GEMM reducing over that expert's token
+// rows; reuse the matmul error model.
 template <typename T>
 constexpr float getToleranceBwd()
 {

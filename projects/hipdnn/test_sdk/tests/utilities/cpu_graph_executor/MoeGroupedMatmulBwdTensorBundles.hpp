@@ -23,6 +23,11 @@ namespace hipdnn_sdk_test_utils
 /// `dweightTensor` carries its own `DweightType`, independent of the `InputType`
 /// shared by doutput and token, so the mixed-dtype plan-builder registrations
 /// (half/bfloat16 inputs with a float dweight, and the reverse) are reachable.
+///
+/// `dweightStrides` selects the DWeight layout; leaving it empty picks the packed
+/// column-major layout the node infers for an unset DWeight. Any strides are legal —
+/// buildMoeGroupedMatmulBwdGraph() copies whatever this bundle allocated onto the
+/// graph tensor, so the two always describe the same memory.
 template <typename InputType, typename DweightType = InputType>
 struct MoeGroupedMatmulBwdTensorBundle
 {
@@ -31,19 +36,16 @@ struct MoeGroupedMatmulBwdTensorBundle
                                     int64_t outputN,
                                     int64_t tokenRowsIn,
                                     unsigned int seed
-                                    = hipdnn_test_sdk::utilities::getGlobalTestSeed())
+                                    = hipdnn_test_sdk::utilities::getGlobalTestSeed(),
+                                    const std::vector<int64_t>& dweightStrides = {})
         : doutputTensor({1, tokenRowsIn, outputN},
                         hipdnn_data_sdk::utilities::generateStrides({1, tokenRowsIn, outputN}))
         , tokenTensor({1, tokenRowsIn, hiddenK},
                       hipdnn_data_sdk::utilities::generateStrides({1, tokenRowsIn, hiddenK}))
         , firstTokenOffsetTensor({experts, 1, 1},
                                  hipdnn_data_sdk::utilities::generateStrides({experts, 1, 1}))
-        // Column-major, matching the strides the node infers for dweight. The executor
-        // path wraps this buffer with the strides carried in the serialized graph, so a
-        // row-major buffer here would disagree with the layout it is written through.
         , dweightTensor({experts, hiddenK, outputN},
-                        hipdnn_test_sdk::utilities::moeGroupedMatmulBwdDweightStrides(
-                            {experts, hiddenK, outputN}))
+                        resolveDweightStrides({experts, hiddenK, outputN}, dweightStrides))
     {
         doutputTensor.fillWithRandomValues(
             static_cast<InputType>(-1.0F), static_cast<InputType>(1.0F), seed);
@@ -67,6 +69,18 @@ struct MoeGroupedMatmulBwdTensorBundle
                     e, tokenRows, experts),
                 {e, 0, 0});
         }
+    }
+
+    /// Falls back to the packed column-major layout the node infers when a caller
+    /// leaves DWeight strides unset.
+    static std::vector<int64_t> resolveDweightStrides(const std::vector<int64_t>& dweightDims,
+                                                      const std::vector<int64_t>& requestedStrides)
+    {
+        if(requestedStrides.empty())
+        {
+            return hipdnn_test_sdk::utilities::moeGroupedMatmulBwdDweightStrides(dweightDims);
+        }
+        return requestedStrides;
     }
 
     std::unordered_map<int64_t, void*>

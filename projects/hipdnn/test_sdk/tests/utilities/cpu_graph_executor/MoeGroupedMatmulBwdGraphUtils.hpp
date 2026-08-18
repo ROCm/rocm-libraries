@@ -13,9 +13,10 @@
 namespace hipdnn_sdk_test_utils
 {
 
-// dweight's dims and strides are left unset so the node infers them --
-// [firstTokenOffset.dim[0], token.dim[2], doutput.dim[2]] with column-major strides.
-// Only the data type is assigned here, because it can differ from the graph's io type.
+// dweight's dims are left unset so the node infers them --
+// [firstTokenOffset.dim[0], token.dim[2], doutput.dim[2]]. Its strides and data type are
+// assigned here: the data type can differ from the graph's io type, and the layout is the
+// caller's choice rather than a property of the operation.
 template <typename InputType, typename DweightType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
@@ -64,6 +65,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     // in -- this is what makes the mixed-dtype registrations reachable.
     dweightAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(
         hipdnn_test_sdk::utilities::nativeTypeToDataType<DweightType>()));
+    // Replicate the layout the bundle actually allocated instead of relying on the node's
+    // column-major fallback -- that fallback only applies to an unset stride vector, and
+    // the graph has to describe the memory the variant pack wires in.
+    dweightAttr->set_stride(bundle.dweightTensor.strides());
 
     auto variantPack
         = bundle.createVariantPack(*doutputAttr, *tokenAttr, *firstTokenOffsetAttr, *dweightAttr);

@@ -12,14 +12,8 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmulBwd.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
-#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-
-#include <iostream>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -41,9 +35,9 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
     constexpr int64_t K_EXPERTS = 2;
 
     const std::vector<int64_t> dweightDims = {K_EXPERTS, K_DIM_K, K_DIM_N};
-    // dweight is column-major, matching the strides the node infers for it.
-    const std::vector<int64_t> dweightStrides
-        = hipdnn_test_sdk::utilities::moeGroupedMatmulBwdDweightStrides(dweightDims);
+    // Packed column-major [K*N, 1, K] -- spelled out rather than derived, so the
+    // assertions below pin the layout the node is expected to infer for dweight.
+    const std::vector<int64_t> dweightStrides = {K_DIM_K * K_DIM_N, 1, K_DIM_K};
 
     Tensor<float> doutputTensor({K_BATCH, K_TOKENS, K_DIM_N});
     Tensor<float> tokenTensor({K_BATCH, K_TOKENS, K_DIM_K});
@@ -105,31 +99,11 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
         {firstTokenOffset->get_uid(), firstTokenOffsetTensor.memory().deviceData()},
         {dweight->get_uid(), dweightTensor.memory().deviceData()},
     };
+    // Only the dispatch path is asserted here: no provider implements a MoE backward
+    // kernel yet, so dweightTensor holds nothing worth comparing. Numerical coverage
+    // lives with the CPU reference in hipdnn_test_sdk_tests.
     result = graph->execute(_handle, variantPack, workspace.get());
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // No provider implements a MoE backward kernel yet (ALMIOPEN-2252 is CPU-reference-only
-    // plumbing), so the default IntegrationTestFixture plugin dispatches the graph without
-    // computing real values into dweightTensor. Once a real provider kernel lands, drop the
-    // logging-only validateAndReport() call below in favor of an EXPECT_TRUE on its result.
-    dweightTensor.memory().markDeviceModified();
-
-    Tensor<float> referenceDweightTensor(dweightDims, dweightStrides);
-    referenceDweightTensor.fillWithValue(0.0F);
-    hipdnn_test_sdk::utilities::CpuFpReferenceMoeGroupedMatmulBwd::
-        backward<float, float, float, float>(
-            doutputTensor, tokenTensor, firstTokenOffsetTensor, referenceDweightTensor);
-
-    const float tolerance = hipdnn_test_sdk::utilities::moe::getToleranceBwd<float>();
-    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validator(tolerance,
-                                                                                tolerance);
-    hipdnn_test_sdk::utilities::validateAndReport<float>(std::cout,
-                                                         "dweight",
-                                                         validator,
-                                                         referenceDweightTensor,
-                                                         dweightTensor,
-                                                         tolerance,
-                                                         tolerance);
 }
 
 } // namespace
