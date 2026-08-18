@@ -4,7 +4,7 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 outputs:
   therock-ref:
     description: "TheRock commit hash to use"
-    value: "36efe51900cce43a0361c8ae51892ef37ea1d9d7" # 2026-08-05
+    value: "48ec94d7e3b52731c228f31457087f73b136c9b4" # 2026-08-17
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
