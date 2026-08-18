@@ -26,8 +26,11 @@ concurrency:
 env:
   # Match nested CPU-library worker pools to the explicit two-way build budget.
   BLIS_NUM_THREADS: "2"
+  GOTO_NUM_THREADS: "2"
+  MKL_NUM_THREADS: "2"
   OMP_NUM_THREADS: "2"
   OPENBLAS_NUM_THREADS: "2"
+  VECLIB_MAXIMUM_THREADS: "2"
 
 jobs:
   standalone:

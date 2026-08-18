@@ -4,16 +4,6 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(rocm-libraries LANGUAGES C CXX ASM)
 
-include(CheckLanguage)
-check_language(Fortran)
-if(CMAKE_Fortran_COMPILER)
-    enable_language(Fortran)
-    set(ROCM_LIBS_HAVE_FORTRAN TRUE)
-else()
-    set(ROCM_LIBS_HAVE_FORTRAN FALSE)
-    message(STATUS "Fortran compiler not found - Fortran support disabled")
-endif()
-
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
 endif()

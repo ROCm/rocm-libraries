@@ -38,12 +38,18 @@ if(NOT COMMAND roc_host_validation_enable_blas_backend)
         "roc_host_validation_enable_blas_backend is not available."
     )
 endif()
-find_package(BLAS QUIET)
-if(BLAS_FOUND)
+list(PREPEND CMAKE_MODULE_PATH "${ROCHostValidation_SOURCE_DIR}/cmake")
+find_package(CBLAS QUIET MODULE)
+if(CBLAS_FOUND)
     roc_host_validation_enable_blas_backend()
     if(NOT TARGET roc::host-validation-blas)
         message(FATAL_ERROR
             "roc_host_validation_enable_blas_backend did not define its target."
+        )
+    endif()
+    if(NOT TARGET CBLAS::CBLAS)
+        message(FATAL_ERROR
+            "The source-build BLAS backend did not define CBLAS::CBLAS."
         )
     endif()
 endif()

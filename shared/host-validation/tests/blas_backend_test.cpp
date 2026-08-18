@@ -9,6 +9,7 @@
 #include <span>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace {
 void require(bool condition, const char* message) {
@@ -137,6 +138,33 @@ void testPartialOutputSelection() {
                 d.loadAs<float>({0, 1}) == -99 && d.loadAs<float>({1, 1}) == 154,
             "Canonical BLAS fallback did not preserve unselected outputs.");
 }
+
+void testModeratelyLargeExactGemm() {
+    using namespace roc::host_validation;
+
+    constexpr size_t dimension = 256;
+    const Layout layout(Shape{dimension, dimension},
+                        {1, static_cast<ptrdiff_t>(dimension)});
+    const std::vector<float> ones(dimension * dimension, 1.0f);
+    Tensor output(ScalarType::Float32, layout);
+
+    GemmRequest problem(
+        GemmOperand(Tensor::fromNative<float>(layout, std::span<const float>(ones))),
+        GemmOperand(Tensor::fromNative<float>(layout, std::span<const float>(ones))),
+        output, output, ScalarType::Float32);
+    BlasGemmBackend backend;
+    referenceGemm(problem,
+                  {
+                      .backend = GemmBackend::Blas,
+                      .requireRequestedBackend = true,
+                  },
+                  &backend);
+
+    for (size_t row = 0; row < dimension; ++row)
+        for (size_t column = 0; column < dimension; ++column)
+            require(output.loadAs<float>({row, column}) == static_cast<float>(dimension),
+                    "Moderately large BLAS GEMM result mismatch.");
+}
 }  // namespace
 
 int main() {
@@ -195,6 +223,7 @@ int main() {
     problem.epilogue.activation = Activation::None;
 
     testPartialOutputSelection();
+    testModeratelyLargeExactGemm();
 
     const std::array<std::complex<float>, 1> complexA{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexB{std::complex<float>(3, 4)};
