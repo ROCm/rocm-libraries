@@ -161,8 +161,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // K-Coherent reorders WGs into K-last order then chunks them across XCDs so
   // (m,n) tiles at the same k-level land on the same XCD.  Requires:
   //   - split_factor > 1 (StreamK actually splits K)
-  //   - MT_K * elem_bytes >= 128: each DU chunk covers at least one full cache
-  //     line, so split boundaries are cache-line aligned even when extraIters > 0.
+  //   - MT_K * elem_bytes >= kCoherentMinBytesPerKIter.  This is a performance
+  //     floor, not an alignment requirement: the reorder is a bijection on
+  //     workgroup IDs, so every tile is computed and written exactly once
+  //     whatever the DU chunk size.  What it buys is L2 locality between the
+  //     k-levels of one (m,n) tile, and that stops paying once a K-iteration
+  //     covers too little of a cache line to keep the grouped XCD reads dense.
   //   - skGrid <= numCUs: the reorder only groups k-levels within a single wave
   //     of workgroups, so beyond one wave there is nothing to gain.  numCUs is
   //     the resolved budget, so a CU cap tightens this too.  It also keeps the
@@ -173,13 +177,13 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // longer require skGrid % numMTs == 0 here.
   size_t out_wgmxccsplitk = defaultWGMXCCSPLITK;
   {
-    constexpr size_t cacheLineBytes = 128;
+    constexpr size_t kCoherentMinBytesPerKIter = 64;
     double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
                                 data_type_to_bytes(problem.b_dtype));
     size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
 
-    if (split_factor > 1 && bytesPerKIter >= cacheLineBytes && !sk_has_partial_tiles
-        && skGrid <= numCUs) {
+    if (split_factor > 1 && bytesPerKIter >= kCoherentMinBytesPerKIter
+        && !sk_has_partial_tiles && skGrid <= numCUs) {
       // Use floor division: K * MN <= skGrid.  Tail WGs are identity-mapped.
       out_wgmxccsplitk = numMTs > 0 ? skGrid / numMTs : 0;
     }
@@ -198,13 +202,14 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // For small MN (MN <= maxChunk): chunk = MN * num_k_per_chunk.
     // For large MN: chunk is a partial set of MN tiles at one k-level.
     constexpr size_t cacheLineBytes = 128;
+    constexpr size_t kCoherentMinBytesPerKIter = 64;
     double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
                                 data_type_to_bytes(problem.b_dtype));
     size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
     size_t maxChunk      = numXCD > 0 ? skGrid / numXCD : 0;
 
     if (numMTs > 0 && numMTs <= maxChunk) {
-      size_t minKPerChunk = (bytesPerKIter >= cacheLineBytes)
+      size_t minKPerChunk = (bytesPerKIter >= kCoherentMinBytesPerKIter)
           ? 1
           : math::safe_ceil_div(cacheLineBytes, bytesPerKIter);
       size_t maxKPerChunk = maxChunk / numMTs;
@@ -293,16 +298,18 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // Loop through all WGM values and find the best one
     int bestWGM = 1;
     int bestL2  = std::numeric_limits<int>::max();
-    constexpr size_t cacheLineBytes = 128;
+    constexpr size_t kCoherentMinBytesPerKIter = 64;
     double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
                                 data_type_to_bytes(problem.b_dtype));
     size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
 
-    // L2 ties are order-sensitive. Wider WGM can improve reuse order, but when
-    // each K-step already spans more than a cache line, a wrong reuse direction
-    // is expensive; prefer the smaller tied WGM in that regime. This policy is
-    // deliberately cheap and applies to both splitK and non-splitK ties.
-    bool preferLargerWGMTie = bytesPerKIter <= cacheLineBytes;
+    // L2 ties are order-sensitive. Wider WGM can improve reuse order, but a
+    // wrong reuse direction is expensive, so prefer the smaller tied WGM
+    // wherever K-Coherent is in play: at 64 B per K-iteration the larger tied
+    // WGM measured up to 9% slower on the shapes that run the chunked
+    // dispatch, because the L2 estimate below models chunked and non-chunked
+    // ranges differently and a tie under one is not a tie under the other.
+    bool preferLargerWGMTie = bytesPerKIter < kCoherentMinBytesPerKIter;
 
     for (auto wgm : wgmList) {
       auto wgmL2Estimate = 0;
