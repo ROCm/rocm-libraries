@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Common.Architectures import (
+from tensilelite.Common.Architectures import (
     _REPORTED_ARCH_RE,
     ARCH_BUILD_ALIASES,
     SUPPORTED_GFX,
@@ -52,13 +52,13 @@ from Tensile.Common.Architectures import (
     steppingArchOf,
     tuningArchOf,
 )
-from Tensile import GpuArch
-from Tensile.CustomYamlLoader import archMatch
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.Types import IsaInfo, IsaVersion
-from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite import GpuArch
+from tensilelite.CustomYamlLoader import archMatch
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.Types import IsaInfo, IsaVersion
+from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 
@@ -161,7 +161,7 @@ def test_only_steppings_of_covered_architectures_are_supported():
     """``architectureMap`` is the source of stepping names, and it carries
     entries that are not steppings at all -- ``all`` among them. Reading it
     without that filter would put the keyword into the expansion of itself."""
-    from Tensile.Common.Architectures import supportedSteppings
+    from tensilelite.Common.Architectures import supportedSteppings
 
     steppings = supportedSteppings()
     assert steppings == [GFX1250_STRICT]
@@ -291,7 +291,7 @@ def test_requested_stepping_missing_from_the_capability_map_is_an_error():
 @pytest.fixture(scope="module")
 def gfx1250_cxx():
     """The compiler the capability probe assembles with, or a clean skip."""
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     try:
         return validateToolchain("amdclang++")
@@ -360,8 +360,8 @@ def test_wmma_arb_stall_bit_offset_is_declared_per_arch(gfx1250_cxx, gfx1250_iim
 
 @pytest.fixture(scope="module")
 def assembler(gfx1250_cxx):
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
     return makeAssemblyToolchain(gfx1250_cxx, bundler, "default").assembler
@@ -369,8 +369,8 @@ def assembler(gfx1250_cxx):
 
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
-    from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import assignGlobalParameters, globalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -407,7 +407,7 @@ def _problem_type():
 
 
 def _make_params(iim, mi, **overrides):
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -610,7 +610,7 @@ def test_sk_multicast_loads_forced_off_on_gfx1250_strict(
     _gp_gfx1250, gfx1250_strict_iim, assembler, capsys
 ):
     """SK3 ForceDPOnly cluster stays Valid on the stepping; multicast is off."""
-    from Tensile.Common import streamKCluster, streamKMulticast
+    from tensilelite.Common import streamKCluster, streamKMulticast
 
     sol, out = _derive(
         gfx1250_strict_iim, assembler, capsys, MULTICAST_MI,
@@ -663,10 +663,10 @@ def _stableLabels(src):
 
 
 def _emit(archName, stinkyArchName=""):
-    from Tensile.Common.GlobalParameters import globalParameters
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -763,11 +763,11 @@ def _emit_streamk_srcs(stepping):
         sys.path.insert(0, _CODEGEN_DIR)
     import codegen_harness as ch
     import config_harness as cfgh
-    from Tensile.Common.GlobalParameters import globalParameters
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -823,8 +823,8 @@ def test_gfx1250_strict_streamk_keeps_the_xcnt_drain(gfx1250_cxx):
 def test_multicast_rederived_from_build_caps_after_yaml_roundtrip(
     _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, assembler, capsys, tmp_path
 ):
-    from Tensile import LibraryIO
-    from Tensile.SolutionStructs import ProblemSizes
+    from tensilelite import LibraryIO
+    from tensilelite.SolutionStructs import ProblemSizes
 
     sol, out = _derive(gfx1250_strict_iim, assembler, capsys, MULTICAST_MI, ClusterDim=[2, 1])
     assert sol.get("Valid") is True, f"base solution rejected: {out!r}"
@@ -889,7 +889,7 @@ def _stub_iim():
 
 @pytest.fixture
 def restore_global_parameters():
-    from Tensile.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
 
     saved = copy.deepcopy(dict(globalParameters))
     yield globalParameters
@@ -921,7 +921,7 @@ def _stub_tensile_pipeline(monkeypatch, captured):
     pipeline is handed. Mirrors the stub set in test_tensile_backend_config.py."""
     import types
 
-    from Tensile import Tensile as TensileModule
+    from tensilelite import Tensile as TensileModule
 
     monkeypatch.setattr(
         TensileModule, "validateToolchain", lambda *a: ("cxx", "cc", "bundler")
@@ -1125,7 +1125,7 @@ def test_the_summation_step_selects_exactly_one_steppings_logic_files(
     Every logic filename is ``<codename>_...``, so the separator separates them."""
     import glob
 
-    from Tensile.Common.Architectures import gfxToSwCodename
+    from tensilelite.Common.Architectures import gfxToSwCodename
 
     for name in (
         "gfx1250_Cijk_A.yaml",
@@ -1368,7 +1368,7 @@ def _detectionReturning(monkeypatch, stdout, returncode=0):
     so a machine that happens to set one would otherwise change what these tests
     are measuring. Tests about the pins set them back.
     """
-    import Tensile.Common.Architectures as Arch
+    import tensilelite.Common.Architectures as Arch
 
     class _Proc:
         pass
@@ -1642,7 +1642,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
     """
     from unittest.mock import MagicMock
 
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1940,7 +1940,7 @@ def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
     and the re-spawn."""
     import types
 
-    from Tensile import Tensile as TensileModule
+    from tensilelite import Tensile as TensileModule
 
     captured = {}
     monkeypatch.setattr(
@@ -1982,7 +1982,7 @@ def _restore_type_mismatch_collector():
     mismatch collector and replaces it with its own aggregate. Sibling suites reset
     it in setup rather than teardown, so today nothing breaks -- restore it anyway
     rather than depend on that."""
-    from Tensile.SolutionStructs.Solution import (
+    from tensilelite.SolutionStructs.Solution import (
         getTypeMismatchCollector,
         mergeTypeMismatchCollector,
         resetTypeMismatchCollector,
@@ -2003,8 +2003,8 @@ def _generateLogicData(monkeypatch, *architectureNames):
     """
     from unittest.mock import MagicMock
 
-    import Tensile.LibraryIO as LibraryIO
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.LibraryIO as LibraryIO
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     libraries = {}
     parsed = []
@@ -2094,7 +2094,7 @@ def test_fallback_logic_is_still_merged_and_popped(
 def _hardwareRowFor(arch):
     from unittest.mock import MagicMock
 
-    from Tensile.SolutionLibrary import MasterSolutionLibrary
+    from tensilelite.SolutionLibrary import MasterSolutionLibrary
 
     return MasterSolutionLibrary.hardware(
         {"ArchitectureName": arch, "CUCount": None},
@@ -2142,7 +2142,7 @@ def test_arch_names_by_isa_is_identity_for_ordinary_archs():
     """An ordinary build maps every ISA back to the name it was asked for, so
     threading the map through the writers cannot move or rename a single
     non-stepping artifact."""
-    from Tensile.Common.Architectures import SUPPORTED_ISA, archNamesByIsa
+    from tensilelite.Common.Architectures import SUPPORTED_ISA, archNamesByIsa
 
     for isa in SUPPORTED_ISA:
         if isa == ISA_GFX1250:
@@ -2154,7 +2154,7 @@ def test_arch_names_by_isa_is_identity_for_ordinary_archs():
 def test_arch_names_by_isa_names_the_stepping_not_its_base():
     """The whole point: 12.5.0 resolves to whichever of the two architectures was
     requested, so a strict build never falls back onto gfx1250's name."""
-    from Tensile.Common.Architectures import archNamesByIsa
+    from tensilelite.Common.Architectures import archNamesByIsa
 
     assert archNamesByIsa([GFX1250_STRICT]) == {ISA_GFX1250: GFX1250_STRICT}
     assert archNamesByIsa([GFX1250]) == {ISA_GFX1250: GFX1250}
@@ -2164,7 +2164,7 @@ def test_arch_names_by_isa_drops_qualifiers_and_predicates():
     """Qualifiers name an architecture the ISA already describes; forwarding
     gfx942:xnack+ to --offload-arch would pin the code object to one xnack setting
     instead of leaving it xnack-agnostic. Predicates are resolved elsewhere."""
-    from Tensile.Common.Architectures import archNamesByIsa
+    from tensilelite.Common.Architectures import archNamesByIsa
 
     assert archNamesByIsa(["gfx942:xnack+", "gfx942:xnack-"]) == {
         gfxToIsa("gfx942"): "gfx942"
@@ -2197,7 +2197,7 @@ def test_arch_names_by_isa_rejects_two_architectures_sharing_one_isa():
     assembler target, the code object filename and its subtree all resolved
     through this one key, so one architecture would ship a library whose kernels
     were assembled for, and written under, the other."""
-    from Tensile.Common.Architectures import archNamesByIsa
+    from tensilelite.Common.Architectures import archNamesByIsa
 
     with pytest.raises(ValueError, match="share ISA"):
         archNamesByIsa([GFX1250, GFX1250_STRICT])
@@ -2215,7 +2215,7 @@ def test_arch_names_by_isa_rejects_two_architectures_sharing_one_isa():
 def test_two_steppings_get_different_scratch_directories():
     """The collision this exists to prevent: same output directory, same kernel
     basenames, different machine code."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", [GFX1250]) != buildTmpDir(
         "/out/Tensile", [GFX1250_STRICT]
@@ -2226,7 +2226,7 @@ def test_scratch_directory_ignores_order_and_qualifiers():
     """One run's scratch has to resolve to one directory however its
     architectures were spelled, or the cleanup would not find what the writer
     made."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", ["gfx942", GFX1250]) == buildTmpDir(
         "/out/Tensile", [GFX1250, "gfx942"]
@@ -2239,7 +2239,7 @@ def test_scratch_directory_ignores_order_and_qualifiers():
 def test_scratch_stays_under_the_output_directory():
     """It is removed with rmtree, so the tag must not be able to steer that
     anywhere but inside build_tmp."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
 
     path = buildTmpDir("/out/Tensile", [GFX1250_STRICT])
 
@@ -2251,7 +2251,7 @@ def test_scratch_keeps_its_old_name_when_no_stepping_was_asked_for():
     """Every architecture set that could be built before steppings existed has to
     land where it always did, or upgrading orphans the scratch of every build in
     flight and every tool that reaches into it by path."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
 
     for archs in ([], ["gfx942"], ["gfx942", "gfx950", "gfx1200"], ["gfx942:xnack+"]):
         assert buildTmpDir("/out/Tensile", archs) == Path("/out/Tensile/build_tmp/TENSILE")
@@ -2261,7 +2261,7 @@ def test_only_the_stepping_side_of_a_shared_isa_is_renamed():
     """The two runs covering a shared ISA never occupy one group, so naming only
     the stepping's group apart is enough to separate them -- and it leaves the
     other run on the path it had."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", [GFX1250]) == Path("/out/Tensile/build_tmp/TENSILE")
     assert buildTmpDir("/out/Tensile", [GFX1250_STRICT]) == (
@@ -2272,7 +2272,7 @@ def test_only_the_stepping_side_of_a_shared_isa_is_renamed():
 def test_scratch_name_survives_an_output_path_with_no_stem():
     """Path("/").stem is empty, and "<root>" / "" is "<root>" -- the run would
     take the shared parent as its own scratch and rmtree a sibling's work."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
 
     for outputPath in ("/", ""):
         path = buildTmpDir(outputPath, [GFX1250_STRICT])
@@ -2283,7 +2283,7 @@ def test_scratch_name_ignores_architectures_the_table_does_not_know():
     """An architecture spec is free text and gfxToIsa reads only the leading gfx
     digits, so "gfx1250/.." parses as a stepping. The name reaches rmtree, so
     only names the table vouches for may reach the name."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
 
     for hostile in ("gfx1250/..", "gfx1250-../..", "gfx1250 ", "../gfx1250-x"):
         path = buildTmpDir("/out/Tensile", [hostile])
@@ -2295,7 +2295,7 @@ def test_gfx_names_that_spell_no_version_are_not_an_error():
     """buildTmpDir asks whether a spec is a stepping, so gfxToIsa has to answer
     for anything a user can type. The hex digits its pattern accepts are not all
     parseable as a version, and the promise it makes for those is None."""
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Architectures import gfxToIsa
 
     assert gfxToIsa("gfx1250") == (12, 5, 0)
     assert gfxToIsa("gfx90a") == (9, 0, 10)
@@ -2307,7 +2307,7 @@ def _scratch_tree(tmp_path, archs):
     """An output directory holding this run's scratch and a sibling's, both
     populated, so a cleanup that takes too much is visible as the sibling's
     file disappearing."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir, buildTmpRoot
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir, buildTmpRoot
 
     mine = buildTmpDir(tmp_path / "Tensile", archs)
     sibling = buildTmpRoot(tmp_path / "Tensile") / "SIBLING"
@@ -2320,7 +2320,7 @@ def _scratch_tree(tmp_path, archs):
 def test_a_solo_run_reclaims_the_whole_scratch_tree(tmp_path):
     """Nothing else is writing here, so the tree goes whole -- which is also what
     reclaims scratch an earlier build left under a name this run never uses."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpRoot, removeScratch
+    from tensilelite.TensileCreateLibrary.Run import buildTmpRoot, removeScratch
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
 
@@ -2333,7 +2333,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
     """The whole reason the children are marked: a sibling group is assembling
     into the same parent right now, and kernel basenames come from the ISA, so
     taking the parent would delete files a live build is still writing."""
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     monkeypatch.setenv(Run._GROUP_BUILD_ENV, "1")
@@ -2348,7 +2348,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
 def test_the_last_child_out_takes_the_shared_parent(monkeypatch, tmp_path):
     """Left behind by every child that is not last, the parent would otherwise
     survive every fan-out as an empty directory in the output tree."""
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     shutil.rmtree(sibling)
@@ -2361,7 +2361,7 @@ def test_the_last_child_out_takes_the_shared_parent(monkeypatch, tmp_path):
 def test_a_run_that_wrote_no_scratch_says_so_rather_than_removing_something(tmp_path):
     """The caller reports the absence, so it has to be distinguishable from a
     successful removal rather than inferred from the directory being gone."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpDir, removeScratch
+    from tensilelite.TensileCreateLibrary.Run import buildTmpDir, removeScratch
 
     assert removeScratch(
         tmp_path / "Tensile", buildTmpDir(tmp_path / "Tensile", [GFX1250_STRICT])
@@ -2380,7 +2380,7 @@ _DIRECTIVE = '.amdgcn_target "amdgcn-amd-amdhsa--{}"'
 def test_the_target_id_is_rewritten_to_the_stepping(tmp_path):
     """Without this the assembler refuses the file outright: the base target id
     names a processor that is not valid for the stepping's subarch."""
-    from Tensile.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n  s_endpgm\n")
@@ -2397,7 +2397,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
     """Every architecture but a stepping already agrees with the ISA-derived
     name, so this must be provably inert for them -- it runs on every .s the
     build emits."""
-    from Tensile.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
 
     isa = gfxToIsa("gfx942")
     asm = tmp_path / "k0.s"
@@ -2416,7 +2416,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
 def test_assembly_with_no_target_directive_is_left_alone(tmp_path):
     """The directive is rocisa's to emit, and a helper kernel that carries none
     must not acquire one -- nor make the rewrite an error."""
-    from Tensile.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "helper.s"
     asm.write_text("  s_endpgm\n")
@@ -2430,7 +2430,7 @@ def test_only_the_first_target_directive_is_rewritten(tmp_path):
     """One .s is one code object with one target. A second directive means the
     file is not what this rewrite assumes, and silently retargeting all of them
     would turn that into a code object claiming a target it was not built for."""
-    from Tensile.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n{_DIRECTIVE.format(GFX1250)}\n")
@@ -2447,7 +2447,7 @@ def test_the_assembler_retarget_leaves_a_stepping_directive_alone(tmp_path):
     module already rewrote. Matching only the leading hex of the processor made
     it keep `-strict` as a tail and add the target again -- `gfx1250-strict-strict`,
     which the assembler rejects as a malformed target id."""
-    from Tensile.Toolchain.Component import Assembler
+    from tensilelite.Toolchain.Component import Assembler
 
     asm = tmp_path / "k0.s"
     original = (
@@ -2467,8 +2467,8 @@ def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
     """The build runs both on each stepping kernel: this module's directive
     rewrite while writing it, then the assembler's before assembling it. Either
     alone is covered above; this is the order they actually run in."""
-    from Tensile.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
-    from Tensile.Toolchain.Component import Assembler
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.Toolchain.Component import Assembler
 
     asm = tmp_path / "k0.s"
     asm.write_text(
@@ -2488,7 +2488,7 @@ def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
 def test_the_assembler_retarget_keeps_features_after_a_stepping(tmp_path):
     """A stepping name and a feature suffix are separate axes: the hyphen belongs
     to the processor, the colon starts what the retarget carries over."""
-    from Tensile.Toolchain.Component import Assembler
+    from tensilelite.Toolchain.Component import Assembler
 
     asm = tmp_path / "k0.s"
     asm.write_text(_DIRECTIVE.format(f"{GFX1250_STRICT}:xnack+") + "\n")
@@ -2507,7 +2507,7 @@ def test_ordinary_architectures_all_fit_in_one_group():
     """Nothing collides among them, so the partitioning has to stay invisible:
     one group means one run, which is what every build did before steppings
     existed."""
-    from Tensile.Common.Architectures import isaCollisionFreeGroups
+    from tensilelite.Common.Architectures import isaCollisionFreeGroups
 
     assert isaCollisionFreeGroups(["gfx942", "gfx950", "gfx1200"]) == [
         ["gfx942", "gfx950", "gfx1200"]
@@ -2517,7 +2517,7 @@ def test_ordinary_architectures_all_fit_in_one_group():
 
 def test_a_stepping_and_its_base_land_in_different_groups():
     """The pairing archNamesByIsa rejects is exactly the one that must split."""
-    from Tensile.Common.Architectures import isaCollisionFreeGroups
+    from tensilelite.Common.Architectures import isaCollisionFreeGroups
 
     assert isaCollisionFreeGroups([GFX1250, GFX1250_STRICT]) == [
         [GFX1250],
@@ -2533,7 +2533,7 @@ def test_a_stepping_and_its_base_land_in_different_groups():
 def test_qualified_specs_of_one_architecture_are_not_split():
     """They share an ISA *and* a name, so one run covers both. Splitting them
     would double a build that has no collision in it at all."""
-    from Tensile.Common.Architectures import isaCollisionFreeGroups
+    from tensilelite.Common.Architectures import isaCollisionFreeGroups
 
     assert isaCollisionFreeGroups(["gfx942:xnack+", "gfx942:xnack-"]) == [
         ["gfx942:xnack+", "gfx942:xnack-"]
@@ -2544,7 +2544,7 @@ def test_specs_come_back_out_of_a_group_unchanged():
     """Groups are handed to a build as-is, so a spec has to survive whole. A
     predicate carries commas of its own, which is what makes the separator
     between specs a matter of correctness rather than taste."""
-    from Tensile.Common.Architectures import isaCollisionFreeGroups
+    from tensilelite.Common.Architectures import isaCollisionFreeGroups
 
     spec = "gfx942[id=74a0,cu=80]"
     assert isaCollisionFreeGroups([spec, "gfx950"]) == [[spec, "gfx950"]]
@@ -2558,7 +2558,7 @@ def test_specs_come_back_out_of_a_group_unchanged():
 def test_every_group_is_one_archNamesByIsa_accepts():
     """The partitioning is only useful if each group can actually be built, which
     is what archNamesByIsa raising on a group would deny."""
-    from Tensile.Common.Architectures import archNamesByIsa, isaCollisionFreeGroups
+    from tensilelite.Common.Architectures import archNamesByIsa, isaCollisionFreeGroups
 
     for group in isaCollisionFreeGroups(["all", GFX1250_STRICT]):
         archNamesByIsa(group)
@@ -2568,7 +2568,7 @@ def test_all_is_expanded_before_partitioning():
     """``all`` cannot name a stepping, so a request for both arrives as the
     keyword beside a name it does not cover; the stepping has to survive into its
     own group rather than be absorbed or dropped."""
-    from Tensile.Common.Architectures import isaCollisionFreeGroups
+    from tensilelite.Common.Architectures import isaCollisionFreeGroups
 
     groups = isaCollisionFreeGroups(["all", GFX1250_STRICT])
 
@@ -2600,7 +2600,7 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
     ``requestedJobs`` is the parsed ``CpuThreads``; -1 is its default, meaning
     "every CPU".
     """
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     spawned = []
 
@@ -2706,7 +2706,7 @@ def test_children_can_import_tensile(monkeypatch):
     import Tensile
 
     spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
-    packageRoot = str(Path(Tensile.__file__).resolve().parent.parent)
+    packageRoot = str(Path(tensilelite.__file__).resolve().parent.parent)
 
     for _, env in spawned:
         assert packageRoot in env["PYTHONPATH"].split(os.pathsep)
@@ -2717,7 +2717,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
     child may take only its own subdirectory, because a sibling is writing into
     the same parent. Every other run reclaims the whole tree, so the children
     have to be marked or a fan-out would delete a live sibling's scratch."""
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
 
@@ -2728,7 +2728,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
 def test_a_failed_group_is_not_swallowed(monkeypatch):
     """A group that fails while the other succeeds has to fail the run: a zero
     exit here lets the build be stamped with one stepping's library missing."""
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     class _Proc:
         def __init__(self, rc):
@@ -2778,7 +2778,7 @@ def test_windows_caps_the_thread_count_it_shares_out(monkeypatch):
     """The count is split among the groups, so it has to start from what this
     process could actually wait on. The Windows scheduler bounds that at 61
     handles, which CPUThreadCount already respects."""
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     monkeypatch.setattr(Run.os, "name", "nt")
     monkeypatch.setattr(Run.os, "cpu_count", lambda: 128)
@@ -2790,7 +2790,7 @@ def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
     """A spawn can fail for reasons that have nothing to do with the build (fork
     under memory pressure). The groups already started would otherwise keep
     writing into the output directory after the parent has given up."""
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     terminated = []
 
@@ -2855,7 +2855,7 @@ def _run_createlibrary_to_writes(
     """
     from unittest.mock import MagicMock
 
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir(exist_ok=True)
@@ -3001,7 +3001,7 @@ def test_strict_build_hands_its_own_name_to_the_code_object_builders(
     command line verbatim and reads it back off the bundler's targets."""
     from unittest.mock import MagicMock
 
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     seen = {}
     srcSignature = inspect.signature(RunModule.buildSourceCodeObjectFiles)
@@ -3077,7 +3077,7 @@ def test_a_solo_build_clears_the_scratch_it_filled(
     through buildTmpDir, but the writer runs before the architecture list is
     narrowed to the supported subset -- narrowing drops the stepping, which would
     rename the directory and leave the real one behind."""
-    from Tensile.TensileCreateLibrary.Run import buildTmpRoot
+    from tensilelite.TensileCreateLibrary.Run import buildTmpRoot
 
     captured = _run_createlibrary_to_writes(
         monkeypatch,
@@ -3110,7 +3110,7 @@ def test_a_fanned_out_build_clears_only_its_own_scratch(
     """End to end, through run() rather than the cleanup alone: this is the case
     where a sibling process is writing into the same parent, and a build that
     reclaimed the parent would delete the other stepping's kernels mid-build."""
-    from Tensile.TensileCreateLibrary import Run
+    from tensilelite.TensileCreateLibrary import Run
 
     sibling = Run.buildTmpRoot(tmp_path / "out") / "OUT"
     sibling.mkdir(parents=True)
@@ -3163,7 +3163,7 @@ def test_assembly_co_carries_the_stepping_in_both_subtree_and_filename(tmp_path)
     would write TensileLibrary_gfx1250.co for a build no gfx1250 agent can use."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
     coFiles = buildAssemblyCodeObjectFiles(
         MagicMock(),
@@ -3189,7 +3189,7 @@ def test_assembly_shard_keeps_its_recorded_name_in_the_stepping_subtree(tmp_path
     to choose."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
     shard = "TensileLibrary_lazy_" + GFX1250_STRICT + "_0"
     coFiles = buildAssemblyCodeObjectFiles(
@@ -3209,7 +3209,7 @@ def test_assembly_shard_keeps_its_recorded_name_in_the_stepping_subtree(tmp_path
 def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
     kernel = {
         "ISA": gfxToIsa("gfx942"),
@@ -3230,7 +3230,7 @@ def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
 # requested name is carried down to -mcpu and to the bundle entry instead.
 # =========================================================================== #
 def test_strict_is_assembled_for_its_own_target(monkeypatch):
-    from Tensile.Toolchain import Component as ComponentMod
+    from tensilelite.Toolchain import Component as ComponentMod
 
     captured = []
     monkeypatch.setattr(ComponentMod, "_getVersion", lambda *a, **k: None)
@@ -3249,7 +3249,7 @@ def test_strict_is_assembled_for_its_own_target(monkeypatch):
 def _compressTargetOf(tmp_path, isa, archNames=None):
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
     bundler = MagicMock()
     kernel = {"ISA": isa, "BaseName": "k0", "codeObjectFile": "TensileLibrary_lazy_x"}
@@ -3263,7 +3263,7 @@ def _compressTargetOf(tmp_path, isa, archNames=None):
 def test_assembly_bundle_is_tagged_with_the_target_it_was_built_for(tmp_path):
     """The runtime unbundles only the entry matching the agent it is loading onto,
     so a strict bundle tagged gfx1250 yields no code object at all."""
-    from Tensile.Common.Architectures import archNamesByIsa
+    from tensilelite.Common.Architectures import archNamesByIsa
 
     assert _compressTargetOf(
         tmp_path, ISA_GFX1250, archNames=archNamesByIsa([GFX1250_STRICT])
@@ -3274,7 +3274,7 @@ def test_assembly_bundle_is_tagged_with_the_target_it_was_built_for(tmp_path):
 def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs):
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import Source as SourceMod
+    from tensilelite.Toolchain import Source as SourceMod
 
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")
     monkeypatch.setattr(SourceMod.shutil, "move", lambda s, d: None)
@@ -3331,7 +3331,7 @@ def test_the_two_steppings_do_not_share_a_cache_entry(tmp_path, monkeypatch):
     for gfx1250-strict, whose ELF machine code no gfx1250 agent will load."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     monkeypatch.setattr(HKC, "_STATIC_HEADER_FILES", ())
     (tmp_path / "Kernels.cpp").write_text("")
@@ -3354,7 +3354,7 @@ def _cacheAfterAStrictStore(tmp_path, monkeypatch):
     root."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
     cacheRoot = tmp_path / "cache"
@@ -3397,7 +3397,7 @@ def test_a_strict_builds_cache_entry_restores_into_the_stepping_subtree(
     hits the cache and must get its helper kernel back in library/gfx1250-strict/."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     _cacheAfterAStrictStore(tmp_path, monkeypatch)
 
@@ -3421,7 +3421,7 @@ def test_helper_cache_store_is_unchanged_for_ordinary_archs(tmp_path, monkeypatc
     before."""
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain import HelperKernelCache as HKC
+    from tensilelite.Toolchain import HelperKernelCache as HKC
 
     monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
     cacheRoot = tmp_path / "cache"
@@ -3645,7 +3645,7 @@ GFX1250V0 = "gfx1250v0"
 
 
 def test_alias_lookups_and_its_isa_partitioning():
-    from Tensile.Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
+    from tensilelite.Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
 
     assert compilerTargetOf(GFX1250V0) == GFX1250
     assert tuningArchOf(GFX1250V0) == GFX1250_STRICT
@@ -3701,7 +3701,7 @@ def test_an_alias_named_in_architecture_is_rejected_before_codegen(
 def test_gfx1250v0_child_selects_strict_logic_under_strict_caps(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    from Tensile.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
 
     monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
     captured = _run_createlibrary(
@@ -3746,9 +3746,9 @@ def test_gfx1250v0_parses_strict_logic_under_the_gfx1250_name(
 ):
     from unittest.mock import MagicMock
 
-    import Tensile.TensileCreateLibrary.Run as RunModule
-    from Tensile import LibraryIO
-    from Tensile.SolutionStructs.Problem import ProblemType
+    import tensilelite.TensileCreateLibrary.Run as RunModule
+    from tensilelite import LibraryIO
+    from tensilelite.SolutionStructs.Problem import ProblemType
 
     seen = {}
 
@@ -3807,7 +3807,7 @@ def test_gfx1250v0_writes_gfx1250_names_into_its_own_subtree(
 def test_gfx1250v0_code_objects_are_gfx1250_named_in_its_own_subtree(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 
-    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
     bundler = MagicMock()
     coFiles = buildAssemblyCodeObjectFiles(
@@ -3822,7 +3822,7 @@ def test_gfx1250v0_code_objects_are_gfx1250_named_in_its_own_subtree(tmp_path, m
 
 
 def test_gfx1250v0_assembles_and_compiles_for_gfx1250_with_strict_features(monkeypatch):
-    from Tensile.Toolchain import Component as ComponentMod
+    from tensilelite.Toolchain import Component as ComponentMod
 
     captured = []
     monkeypatch.setattr(ComponentMod, "_getVersion", lambda *a, **k: None)
