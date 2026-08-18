@@ -74,7 +74,7 @@ jobs:
 
       - name: Install python deps
         run: |
-          pip install -r TheRock/requirements.txt
+          pip install -r TheRock/requirements.txt -r projects/hipblaslt/tensilelite/requirements.txt
 
       - name: Patch rocm-libraries
         run: |
