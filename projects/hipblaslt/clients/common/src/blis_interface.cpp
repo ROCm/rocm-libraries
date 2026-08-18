@@ -29,19 +29,9 @@
 #include <algorithm>
 #include <cstdlib>
 #include <thread>
-#ifdef __linux__
-#include <sched.h>
-#endif
 
-// Processors this process may actually run on, which under an affinity mask is
-// narrower than the machine's core count.
 static int available_processor_count()
 {
-#ifdef __linux__
-    cpu_set_t set;
-    if(sched_getaffinity(0, sizeof(set), &set) == 0)
-        return CPU_COUNT(&set);
-#endif
     const unsigned hardware = std::thread::hardware_concurrency();
     return hardware ? static_cast<int>(hardware) : 1;
 }
