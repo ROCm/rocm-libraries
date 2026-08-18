@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: the ``if os.name == "nt"``
-guard predicate in ``Tensile/Toolchain/Validators.py`` at line 195, inside
+guard predicate in ``tensilelite/Toolchain/Validators.py`` at line 195, inside
 ``supportedDeviceEnumerator``.
 
 Branch ffb27402fcf84b1a7fc60ace96f00b277b0d29b7.  The predicate tests the

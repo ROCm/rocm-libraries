@@ -25,7 +25,7 @@
 """Characterization tests for tensilelite.py L526 (if) and L529 (elif) config-file guards.
 
 Branch ID: 01e8ac7f371264a85285039d91ea87c8514acc62
-Source:    Tensile/tensilelite.py:529 (elif)
+Source:    tensilelite/Tensile.py:529 (elif)
 Predicate: not altFormat and len(configPaths) != 1
 
 Inputs:
