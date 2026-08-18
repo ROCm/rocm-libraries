@@ -30,29 +30,18 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/magnitude_ref.hpp"
 
 using namespace rpptest;
 
 namespace {
 
-double magnitude_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-            return 1.0;
-        // I8 kept sub-LSB to surface a real kernel bug: the HIP I8 kernel truncates instead of
-        // rounding (HOST rounds correctly).
-        case DType::I8:
-            return 0.5;
-        case DType::F32:
-            return 2e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-}
+// I8 kept sub-LSB to surface a real kernel bug: the HIP I8 kernel truncates instead of
+// rounding (HOST rounds correctly).
+constexpr Tolerance kMagnitudeTolerance = tolerance(1.0, 2e-3, 5e-3).with_i8(0.5);
 
 template <typename T>
 void run_magnitude(const TestConfig& cfg) {
@@ -89,7 +78,7 @@ void run_magnitude(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               magnitude_tolerance(cfg.dtype)));
+                               kMagnitudeTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -99,22 +88,9 @@ class MagnitudeTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(MagnitudeTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_magnitude<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_magnitude<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_magnitude<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_magnitude<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for magnitude";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_magnitude<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(Image_Arithmetic, MagnitudeTest,

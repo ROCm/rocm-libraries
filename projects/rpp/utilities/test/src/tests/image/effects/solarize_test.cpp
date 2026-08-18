@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/solarize_ref.hpp"
 
 using namespace rpptest;
@@ -43,19 +45,8 @@ struct SolarizeParams {
     std::string name() const { return "t" + num_token(threshold); }
 };
 
-double solarize_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-        case DType::I8:
-            return 0.0;  // integer inversion is exact
-        case DType::F32:
-            return 1e-4;
-        case DType::F16:
-            return 2e-3;
-        default:
-            return 0.0;
-    }
-}
+// Integer inversion is exact; only the float paths carry rounding error.
+constexpr Tolerance kSolarizeTolerance = tolerance(0.0, 1e-4, 2e-3);
 
 template <typename T>
 void run_solarize(const TestConfig& cfg, const SolarizeParams& op) {
@@ -93,7 +84,7 @@ void run_solarize(const TestConfig& cfg, const SolarizeParams& op) {
     dst.read(actual.data(), bytes);
 
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               solarize_tolerance(cfg.dtype)));
+                               kSolarizeTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -103,22 +94,9 @@ class SolarizeTest : public ::testing::TestWithParam<WithParams<SolarizeParams>>
 
 TEST_P(SolarizeTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_solarize<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_solarize<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_solarize<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_solarize<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for solarize";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_solarize<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

@@ -29,6 +29,7 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/bitwise_tensor_ref.hpp"
@@ -99,16 +100,9 @@ class TensorAndTensorTest : public ::testing::TestWithParam<NdWithParams<Broadca
 TEST_P(TensorAndTensorTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const Broadcast broadcast = GetParam().op.mode;
-    switch (cfg.dtypeIn) {
-        case DType::U8:
-            run_tensor_and_tensor<Rpp8u>(cfg, broadcast);
-            break;
-        case DType::I8:
-            run_tensor_and_tensor<Rpp8s>(cfg, broadcast);
-            break;
-        default:
-            FAIL() << "unsupported dtype for tensor_and_tensor";
-    }
+    dispatch_dtype<DType::U8, DType::I8>(cfg.dtypeIn, [&](auto tag) {
+        run_tensor_and_tensor<Element<decltype(tag)>>(cfg, broadcast);
+    });
 }
 
 // Restricted to the integer dtypes (U8/I8): the op also accepts the 16/32-bit integer types, but

@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/brightness_ref.hpp"
 
 using namespace rpptest;
@@ -44,21 +46,6 @@ struct BrightnessParams {
         return "a" + num_token(alpha) + "_b" + num_token(beta);
     }
 };
-
-double brightness_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-            return 1.0;
-        case DType::I8:
-            return 1.0;
-        case DType::F32:
-            return 2e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-}
 
 template <typename T>
 void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
@@ -103,7 +90,7 @@ void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               brightness_tolerance(cfg.dtype)));
+                               kRoundingTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -114,22 +101,9 @@ class BrightnessTest : public ::testing::TestWithParam<WithParams<BrightnessPara
 
 TEST_P(BrightnessTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_brightness<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_brightness<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_brightness<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_brightness<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for brightness";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_brightness<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(Image_Color, BrightnessTest,

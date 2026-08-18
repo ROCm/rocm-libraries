@@ -32,7 +32,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/channel_dropout_ref.hpp"
 
 using namespace rpptest;
@@ -53,7 +55,6 @@ struct ChannelDropoutParams {
 
 // Channel dropout is a pure keep/erase: kept channels are copied bit-exact, dropped channels
 // are set to an exact constant. No arithmetic, so every dtype is bit-exact.
-double channel_dropout_tolerance(DType) { return 0.0; }
 
 template <typename T>
 void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) {
@@ -96,7 +97,7 @@ void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) 
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               channel_dropout_tolerance(cfg.dtype)));
+                               kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -107,22 +108,9 @@ class ChannelDropoutTest : public ::testing::TestWithParam<WithParams<ChannelDro
 
 TEST_P(ChannelDropoutTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_channel_dropout<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_channel_dropout<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_channel_dropout<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_channel_dropout<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for channel_dropout";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_channel_dropout<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

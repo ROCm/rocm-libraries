@@ -29,8 +29,10 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/arithmetic_tensor_ref.hpp"
 
 using namespace rpptest;
@@ -40,21 +42,9 @@ namespace {
 // Tolerances model legitimate floating-point error only. Integer addition is exact -- the only
 // per-element effect is the golden's saturation -- so U8/I8 compare bit-exactly. F16 is loosest
 // because the golden accumulates in double and stores half.
-double abs_tolerance(DType dt) {
-    switch (dt) {
-        case DType::F16: return 2e-3;
-        case DType::F32: return 1e-5;
-        default:         return 0.0;
-    }
-}
+constexpr Tolerance kAbsTolerance = tolerance(0.0, 1e-5, 2e-3);
 
-double rel_tolerance(DType dt) {
-    switch (dt) {
-        case DType::F16: return 2e-3;
-        case DType::F32: return 1e-6;
-        default:         return 0.0;
-    }
-}
+constexpr Tolerance kRelTolerance = tolerance(0.0, 1e-6, 2e-3);
 
 template <typename T>
 void run_tensor_add_tensor(const NdConfig& cfg, Broadcast broadcast) {
@@ -106,8 +96,8 @@ void run_tensor_add_tensor(const NdConfig& cfg, Broadcast broadcast) {
     dst.read(actual.data(), bytesOut);
 
     // (4) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, abs_tolerance(cfg.dtypeIn),
-                              rel_tolerance(cfg.dtypeIn)));
+    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, kAbsTolerance(cfg.dtypeIn),
+                              kRelTolerance(cfg.dtypeIn)));
 }
 
 }  // namespace
@@ -118,22 +108,9 @@ class TensorAddTensorTest : public ::testing::TestWithParam<NdWithParams<Broadca
 TEST_P(TensorAddTensorTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const Broadcast broadcast = GetParam().op.mode;
-    switch (cfg.dtypeIn) {
-        case DType::U8:
-            run_tensor_add_tensor<Rpp8u>(cfg, broadcast);
-            break;
-        case DType::I8:
-            run_tensor_add_tensor<Rpp8s>(cfg, broadcast);
-            break;
-        case DType::F16:
-            run_tensor_add_tensor<Rpp16f>(cfg, broadcast);
-            break;
-        case DType::F32:
-            run_tensor_add_tensor<Rpp32f>(cfg, broadcast);
-            break;
-        default:
-            FAIL() << "unsupported dtype for tensor_add_tensor";
-    }
+    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(cfg.dtypeIn, [&](auto tag) {
+        run_tensor_add_tensor<Element<decltype(tag)>>(cfg, broadcast);
+    });
 }
 
 // Scoped to U8/I8/F16/F32: the op also accepts the 16/32-bit integer types, which the framework's

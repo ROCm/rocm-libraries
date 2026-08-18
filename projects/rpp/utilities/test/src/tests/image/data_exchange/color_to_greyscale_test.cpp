@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/color_to_greyscale_ref.hpp"
 
 using namespace rpptest;
@@ -47,15 +49,7 @@ struct ColorToGreyscaleParams {
 // A single 3-term dot product, so the only legitimate error is float-vs-double accumulation.
 // Note this leaves the systemic integer round-vs-truncate difference (the kernels truncate where
 // the goldens round) unsurfaced at <= 1 LSB; the integer tolerances are not loosened past 1 LSB.
-double color_to_greyscale_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 2e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
-}
+constexpr Tolerance kColorToGreyscaleTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams& op) {
@@ -101,7 +95,7 @@ void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams&
     // (4) Compare over the single-channel destination frame.
     const std::vector<RpptROI> dstRoi = make_roi(dstDesc, Roi::Full);
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, dstRoi.data(), XYWH,
-                               color_to_greyscale_tolerance(cfg.dtype)));
+                               kColorToGreyscaleTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -111,22 +105,9 @@ class ColorToGreyscaleTest : public ::testing::TestWithParam<WithParams<ColorToG
 
 TEST_P(ColorToGreyscaleTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_color_to_greyscale<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_color_to_greyscale<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_color_to_greyscale<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_color_to_greyscale<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for color_to_greyscale";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_color_to_greyscale<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // The source must be 3-channel (no PLN1) and the op takes no ROI argument (Roi::Full only).

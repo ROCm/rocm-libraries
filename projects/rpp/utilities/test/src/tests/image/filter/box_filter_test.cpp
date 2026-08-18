@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/box_filter_ref.hpp"
 
 using namespace rpptest;
@@ -45,20 +47,7 @@ struct BoxFilterParams {
 
 // Tolerances reflect legitimate numeric error only (weighted-sum rounding); U8/I8 allow one LSB
 // for round-to-nearest quantization, floats allow accumulation slack.
-double box_filter_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-            return 1.0;
-        case DType::I8:
-            return 1.0;
-        case DType::F32:
-            return 1e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-}
+constexpr Tolerance kBoxFilterTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
@@ -114,7 +103,7 @@ void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
     // PartialRoi k5 bleeds neighbors from outside the ROI -- a real kernel defect (golden clamps
     // to the ROI edge).
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               box_filter_tolerance(cfg.dtype)));
+                               kBoxFilterTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -124,22 +113,9 @@ class BoxFilterTest : public ::testing::TestWithParam<WithParams<BoxFilterParams
 
 TEST_P(BoxFilterTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_box_filter<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_box_filter<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_box_filter<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_box_filter<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for box_filter";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_box_filter<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

@@ -54,25 +54,35 @@ struct Size {
 
 inline std::string dtype_name(DType d) {
     switch (d) {
-        case DType::U8: return "U8";
-        case DType::F16: return "F16";
-        case DType::F32: return "F32";
-        case DType::I8: return "I8";
-        case DType::I16: return "I16";
+        case DType::U8:
+            return "U8";
+        case DType::F16:
+            return "F16";
+        case DType::F32:
+            return "F32";
+        case DType::I8:
+            return "I8";
+        case DType::I16:
+            return "I16";
     }
     return "UNK";
 }
 
 inline std::string layout_name(Layout l) {
     switch (l) {
-        case Layout::PKD3: return "PKD3";
-        case Layout::PLN3: return "PLN3";
-        case Layout::PLN1: return "PLN1";
+        case Layout::PKD3:
+            return "PKD3";
+        case Layout::PLN3:
+            return "PLN3";
+        case Layout::PLN1:
+            return "PLN1";
     }
     return "UNK";
 }
 
-inline std::string roi_name(Roi r) { return r == Roi::Full ? "FullRoi" : "PartialRoi"; }
+inline std::string roi_name(Roi r) {
+    return r == Roi::Full ? "FullRoi" : "PartialRoi";
+}
 
 inline std::string size_name(Size s) {
     return std::to_string(s.n) + "x" + std::to_string(s.h) + "x" + std::to_string(s.w);
@@ -90,9 +100,12 @@ struct TestConfig {
 
 // Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48".
 inline std::string config_name(const TestConfig& c) {
-    return backend_name(c.backend) + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) +
-           "_" + layout_name(c.layout) + "_" + roi_name(c.roi) + "_" + size_name(c.size);
+    return backend_name(c.backend) + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" +
+           layout_name(c.layout) + "_" + roi_name(c.roi) + "_" + size_name(c.size);
 }
+
+// The default shape for images.
+inline constexpr Size kDefaultSize{2, 36, 48};
 
 // Cartesian product of the requested axes with every available backend. Pass the
 // dtype/layout/roi/size sets an op supports; HIP is only present when the suite was built
@@ -100,14 +113,13 @@ inline std::string config_name(const TestConfig& c) {
 inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
                                             const std::vector<Layout>& layouts,
                                             const std::vector<Roi>& rois,
-                                            const std::vector<Size>& sizes = {{2, 36, 48}}) {
+                                            const std::vector<Size>& sizes = {kDefaultSize}) {
     std::vector<TestConfig> configs;
     for (RppBackend backend : available_backends())
         for (DType dtype : dtypes)
             for (Layout layout : layouts)
                 for (Roi roi : rois)
-                    for (Size size : sizes)
-                        configs.push_back({backend, dtype, layout, roi, size});
+                    for (Size size : sizes) configs.push_back({backend, dtype, layout, roi, size});
     return configs;
 }
 
@@ -158,8 +170,10 @@ inline std::string num_token(float v) {
         if (!s.empty() && s.back() == '.') s.pop_back();
     }
     for (char& ch : s) {
-        if (ch == '.') ch = 'p';
-        else if (ch == '-') ch = 'n';
+        if (ch == '.')
+            ch = 'p';
+        else if (ch == '-')
+            ch = 'n';
     }
     return s;
 }
@@ -173,16 +187,21 @@ inline std::string num_token(float v) {
 // Extents including the leading batch axis, matching RpptGenericDesc::dims.
 using NdDims = std::vector<Rpp32u>;
 
-inline Rpp32u nd_rank(const NdDims& dims) { return static_cast<Rpp32u>(dims.size()) - 1; }
+inline Rpp32u nd_rank(const NdDims& dims) {
+    return static_cast<Rpp32u>(dims.size()) - 1;
+}
 
 // Which operand, if any, is broadcast: its trailing axis is collapsed to extent 1.
 enum class Broadcast { None, Src1, Src2 };
 
 inline std::string broadcast_name(Broadcast b) {
     switch (b) {
-        case Broadcast::None: return "NoBroadcast";
-        case Broadcast::Src1: return "BroadcastSrc1";
-        case Broadcast::Src2: return "BroadcastSrc2";
+        case Broadcast::None:
+            return "NoBroadcast";
+        case Broadcast::Src1:
+            return "BroadcastSrc1";
+        case Broadcast::Src2:
+            return "BroadcastSrc2";
     }
     return "UNK";
 }
@@ -204,9 +223,12 @@ struct NdConfig {
 // Every axis has a distinct extent, so an axis mix-up cannot pass by coincidence.
 inline NdDims nd_extents(Rpp32u nDim) {
     switch (nDim) {
-        case 3:  return {2, 5, 12, 16};
-        case 4:  return {2, 2, 4, 10, 12};
-        default: return {2, 24, 32};
+        case 3:
+            return {2, 5, 12, 16};
+        case 4:
+            return {2, 2, 4, 10, 12};
+        default:
+            return {2, 24, 32};
     }
 }
 
@@ -250,7 +272,9 @@ inline std::string nd_label(const NdConfig& c, const std::string& opToken) {
            "_" + std::to_string(c.nDim) + "D_" + (opToken.empty() ? "" : opToken + "_") + shape;
 }
 
-inline std::string nd_config_name(const NdConfig& c) { return nd_label(c, ""); }
+inline std::string nd_config_name(const NdConfig& c) {
+    return nd_label(c, "");
+}
 
 inline std::string nd_config_param_name(const ::testing::TestParamInfo<NdConfig>& info) {
     return nd_config_name(info.param);
@@ -285,7 +309,9 @@ inline std::string nd_op_config_name(const ::testing::TestParamInfo<NdWithParams
 
 struct BroadcastParams {
     Broadcast mode;
-    std::string name() const { return broadcast_name(mode); }
+    std::string name() const {
+        return broadcast_name(mode);
+    }
 };
 
 // ---- Voxel (3D) grid axes ---------------------------------------------------
@@ -306,14 +332,19 @@ struct VoxelSize {
 
 inline std::string voxel_layout_name(VoxelLayout l) {
     switch (l) {
-        case VoxelLayout::NCDHW1: return "NCDHW1";
-        case VoxelLayout::NCDHW3: return "NCDHW3";
-        case VoxelLayout::NDHWC3: return "NDHWC3";
+        case VoxelLayout::NCDHW1:
+            return "NCDHW1";
+        case VoxelLayout::NCDHW3:
+            return "NCDHW3";
+        case VoxelLayout::NDHWC3:
+            return "NDHWC3";
     }
     return "UNK";
 }
 
-inline std::string roi3d_name(Roi3D t) { return t == Roi3D::XYZWHD ? "XYZWHD" : "LTFRBB"; }
+inline std::string roi3d_name(Roi3D t) {
+    return t == Roi3D::XYZWHD ? "XYZWHD" : "LTFRBB";
+}
 
 inline std::string voxel_size_name(VoxelSize s) {
     return std::to_string(s.n) + "x" + std::to_string(s.d) + "x" + std::to_string(s.h) + "x" +
@@ -335,12 +366,10 @@ inline std::string voxel_config_name(const VoxelConfig& c) {
            voxel_size_name(c.size);
 }
 
-inline std::vector<VoxelConfig> make_voxel_configs(const std::vector<DType>& dtypes,
-                                                   const std::vector<VoxelLayout>& layouts,
-                                                   const std::vector<Roi>& rois,
-                                                   const std::vector<Roi3D>& roiTypes,
-                                                   const std::vector<VoxelSize>& sizes = {
-                                                       {2, 4, 12, 16}}) {
+inline std::vector<VoxelConfig> make_voxel_configs(
+    const std::vector<DType>& dtypes, const std::vector<VoxelLayout>& layouts,
+    const std::vector<Roi>& rois, const std::vector<Roi3D>& roiTypes,
+    const std::vector<VoxelSize>& sizes = {{2, 4, 12, 16}}) {
     std::vector<VoxelConfig> configs;
     for (RppBackend backend : available_backends())
         for (DType dtype : dtypes)
@@ -376,8 +405,7 @@ inline std::vector<VoxelWithParams<P>> voxel_with_params(const std::vector<Voxel
 }
 
 template <typename P>
-inline std::string voxel_op_config_name(
-    const ::testing::TestParamInfo<VoxelWithParams<P>>& info) {
+inline std::string voxel_op_config_name(const ::testing::TestParamInfo<VoxelWithParams<P>>& info) {
     const std::string suffix = info.param.op.name();
     return voxel_config_name(info.param.cfg) + (suffix.empty() ? "" : "_" + suffix);
 }

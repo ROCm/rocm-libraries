@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/grid_dropout_ref.hpp"
 
 using namespace rpptest;
@@ -46,7 +48,6 @@ constexpr Rpp32u kBoxesInEachImage = kGridW * kGridH;  // 9
 
 // Grid dropout is a pure copy/erase: kept pixels are copied bit-exact, holes are set to an
 // exact constant (black). No arithmetic, so every dtype is bit-exact.
-double grid_dropout_tolerance(DType) { return 0.0; }
 
 template <typename T>
 void run_grid_dropout(const TestConfig& cfg) {
@@ -113,7 +114,7 @@ void run_grid_dropout(const TestConfig& cfg) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               grid_dropout_tolerance(cfg.dtype)));
+                               kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -123,22 +124,9 @@ class GridDropoutTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(GridDropoutTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_grid_dropout<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_grid_dropout<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_grid_dropout<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_grid_dropout<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for grid_dropout";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_grid_dropout<Element<decltype(tag)>>(cfg);
+    });
 }
 
 // FullRoi passes the full grid on both backends (validates the hole-erase + I8 black semantics).

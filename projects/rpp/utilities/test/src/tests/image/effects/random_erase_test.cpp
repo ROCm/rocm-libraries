@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/random_erase_ref.hpp"
 
 using namespace rpptest;
@@ -39,7 +41,6 @@ namespace {
 
 // random_erase fills its single erase-region with a direct noiseBuffer lookup: a tiled store, no
 // arithmetic, so every dtype is bit-exact.
-double random_erase_tolerance(DType) { return 0.0; }
 
 template <typename T>
 void run_random_erase(const TestConfig& cfg) {
@@ -99,7 +100,7 @@ void run_random_erase(const TestConfig& cfg) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               random_erase_tolerance(cfg.dtype)));
+                               kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -113,22 +114,9 @@ class RandomEraseTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(RandomEraseTest, Correctness) {
     const auto& cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_random_erase<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_random_erase<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_random_erase<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_random_erase<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for random_erase";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_random_erase<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

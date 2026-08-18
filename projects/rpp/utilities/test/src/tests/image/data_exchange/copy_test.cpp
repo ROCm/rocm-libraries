@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/copy_ref.hpp"
 
@@ -83,22 +84,9 @@ class CopyTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(CopyTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_copy<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_copy<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_copy<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_copy<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for copy";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_copy<Element<decltype(tag)>>(cfg);
+    });
 }
 
 // copy has no ROI argument (it copies the whole buffer), so only Roi::Full is instantiated.

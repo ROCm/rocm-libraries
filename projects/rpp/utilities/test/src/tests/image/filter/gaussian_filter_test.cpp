@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/gaussian_filter_ref.hpp"
 
 using namespace rpptest;
@@ -47,20 +49,7 @@ struct GaussianFilterParams {
 
 // Tolerances reflect legitimate numeric error only (weighted-sum rounding); U8/I8 allow one LSB for
 // round-to-nearest quantization, floats allow accumulation slack.
-double gaussian_filter_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-            return 1.0;
-        case DType::I8:
-            return 1.0;
-        case DType::F32:
-            return 1e-3;
-        case DType::F16:
-            return 1e-2;
-        default:
-            return 0.0;
-    }
-}
+constexpr Tolerance kGaussianFilterTolerance = tolerance(1.0, 1e-3, 1e-2);
 
 template <typename T>
 void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) {
@@ -121,7 +110,7 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     // is correct; known HOST-only reds kept red by design: PKD3 k3 diverges at the row edge, and
     // PLN PartialRoi k5 bleeds out-of-ROI neighbors. Both are real kernel defects.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               gaussian_filter_tolerance(cfg.dtype)));
+                               kGaussianFilterTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -131,22 +120,9 @@ class GaussianFilterTest : public ::testing::TestWithParam<WithParams<GaussianFi
 
 TEST_P(GaussianFilterTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_gaussian_filter<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_gaussian_filter<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_gaussian_filter<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_gaussian_filter<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for gaussian_filter";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_gaussian_filter<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

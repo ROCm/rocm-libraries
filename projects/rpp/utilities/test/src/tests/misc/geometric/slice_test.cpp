@@ -31,6 +31,7 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/slice_ref.hpp"
@@ -227,16 +228,9 @@ TEST_P(SliceTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const SliceParams p = GetParam().op;
     if (p.layout == SliceLayout::Planar) GTEST_SKIP() << kPlanarSkip;
-    switch (cfg.dtypeIn) {
-        case DType::U8:
-            run_slice<Rpp8u>(cfg, p);
-            break;
-        case DType::F32:
-            run_slice<Rpp32f>(cfg, p);
-            break;
-        default:
-            FAIL() << "unsupported dtype for slice";
-    }
+    dispatch_dtype<DType::U8, DType::F32>(cfg.dtypeIn, [&](auto tag) {
+        run_slice<Element<decltype(tag)>>(cfg, p);
+    });
 }
 
 // Scoped to U8 and F32: the header documents exactly "Support added for f32 -> f32 and u8 -> u8

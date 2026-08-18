@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/snow_ref.hpp"
 
 using namespace rpptest;
@@ -50,22 +52,10 @@ struct SnowParams {
     }
 };
 
-double snow_tolerance(DType dt) {
-    switch (dt) {
-        // U8/I8: the full-ROI SIMD store may round where the scalar path (which the reference
-        // mirrors) truncates, so allow 1 LSB. This is legitimate SIMD-vs-scalar float error in a
-        // regression golden, not a masked defect.
-        case DType::U8:
-        case DType::I8:
-            return 1.0;
-        case DType::F32:
-            return 1e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-}
+// U8/I8: the full-ROI SIMD store may round where the scalar path (which the reference
+// mirrors) truncates, so allow 1 LSB. This is legitimate SIMD-vs-scalar float error in a
+// regression golden, not a masked defect.
+constexpr Tolerance kSnowTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_snow(const TestConfig& cfg, const SnowParams& op) {
@@ -106,7 +96,7 @@ void run_snow(const TestConfig& cfg, const SnowParams& op) {
     dst.read(actual.data(), bytes);
 
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               snow_tolerance(cfg.dtype)));
+                               kSnowTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -116,22 +106,9 @@ class SnowTest : public ::testing::TestWithParam<WithParams<SnowParams>> {};
 
 TEST_P(SnowTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_snow<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_snow<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_snow<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_snow<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for snow";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_snow<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

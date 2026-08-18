@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/lut_ref.hpp"
 
@@ -99,16 +100,9 @@ class LutTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(LutTest, Correctness) {
     const auto& cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_lut<Rpp8u>(cfg);
-            break;
-        case DType::I8:
-            run_lut<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for lut";
-    }
+    dispatch_dtype<DType::U8, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_lut<Element<decltype(tag)>>(cfg);
+    });
 }
 
 // Restricted to the integer dtypes (U8/I8): the 256-entry intensity index is unambiguous

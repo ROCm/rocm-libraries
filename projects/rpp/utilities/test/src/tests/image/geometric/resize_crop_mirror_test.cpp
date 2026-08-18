@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/resize_crop_mirror_ref.hpp"
 
 using namespace rpptest;
@@ -61,13 +63,7 @@ struct ResizeCropMirrorParams {
 // bilinear last-column/row-short kernel defect surfaces here too.
 double resize_crop_mirror_tolerance(DType dt, RpptInterpolationType interp) {
     if (interp == NEAREST_NEIGHBOR) return 0.0;
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 2e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
+    return kRoundingTolerance(dt);
 }
 
 template <typename T>
@@ -135,22 +131,9 @@ class ResizeCropMirrorTest : public ::testing::TestWithParam<WithParams<ResizeCr
 
 TEST_P(ResizeCropMirrorTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_resize_crop_mirror<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_resize_crop_mirror<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_resize_crop_mirror<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_resize_crop_mirror<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for resize_crop_mirror";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_resize_crop_mirror<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Cover the {mirror on/off} x {NN/bilinear} x {up/down} axes: up-NN-nomirror, up-bilinear-mirror,

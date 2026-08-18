@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/reduction.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/tensor_sum_ref.hpp"
 
 using namespace rpptest;
@@ -40,19 +41,7 @@ namespace {
 // Integer sums are exact (64-bit accumulator); float sums accumulate roiW*roiH terms, so a
 // small tolerance covers accumulation-order differences between the double golden and the F32
 // kernel accumulator.
-double tensor_sum_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-        case DType::I8:
-            return 0.0;
-        case DType::F32:
-            return 1e-1;
-        case DType::F16:
-            return 1e-1;
-        default:
-            return 0.0;
-    }
-}
+constexpr Tolerance kTensorSumTolerance = tolerance(0.0, 1e-1, 1e-1);
 
 // Tin is the source element type; Tout is the op's output element type (U8->Rpp64u, I8->Rpp64s,
 // F16/F32->Rpp32f, per the API's overflow-safe sum contract).
@@ -90,7 +79,7 @@ void run_tensor_sum(const TestConfig& cfg) {
     handle.sync();
 
     // (4) Compare within tolerance.
-    EXPECT_TRUE(compare_reduction<Tout>(out.data(), golden, tensor_sum_tolerance(cfg.dtype)));
+    EXPECT_TRUE(compare_reduction<Tout>(out.data(), golden, kTensorSumTolerance(cfg.dtype)));
 }
 
 }  // namespace

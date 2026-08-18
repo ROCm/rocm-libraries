@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/rotate_ref.hpp"
 
 using namespace rpptest;
@@ -64,13 +66,7 @@ double rotate_tolerance(DType dt, RpptInterpolationType interp) {
     if (interp == NEAREST_NEIGHBOR) return 0.0;
     // Bilinear: cos/sin of 90/270 deg are not exactly 0 in float, leaving a sub-LSB blend; allow
     // only that genuine rounding error. Integer types round to nearest.
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 2e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
+    return kRoundingTolerance(dt);
 }
 
 template <typename T>
@@ -124,22 +120,9 @@ class RotateTest : public ::testing::TestWithParam<WithParams<RotateParams>> {};
 
 TEST_P(RotateTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_rotate<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_rotate<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_rotate<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_rotate<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for rotate";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_rotate<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Cardinal angles: 0 (identity), 90/270 (both rotation directions), 180. All map to integer source

@@ -29,8 +29,10 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/reduction.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/tensor_mean_ref.hpp"
 #include "reference/tensor_stddev_ref.hpp"
 
@@ -41,19 +43,7 @@ namespace {
 // stddev is sqrt(mean of squared deviations) in float; the tolerance covers accumulation, the
 // division, and the sqrt. Integer-space stddevs (U8/I8) carry a larger magnitude than the [0,1]
 // float stddevs, hence the wider absolute tolerance.
-double tensor_stddev_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-        case DType::I8:
-            return 1e-1;
-        case DType::F32:
-            return 1e-3;
-        case DType::F16:
-            return 1e-2;
-        default:
-            return 0.0;
-    }
-}
+constexpr Tolerance kTensorStddevTolerance = tolerance(1e-1, 1e-3, 1e-2);
 
 // stddev always outputs Rpp32f, and takes a meanTensor of size n*4 in [MeanR,MeanG,MeanB,MeanImage]
 // order per image (per the API). Tin is the source element type.
@@ -114,7 +104,7 @@ void run_tensor_stddev(const TestConfig& cfg) {
     handle.sync();
 
     // (4) Compare within tolerance.
-    EXPECT_TRUE(compare_reduction<Rpp32f>(out.data(), golden, tensor_stddev_tolerance(cfg.dtype)));
+    EXPECT_TRUE(compare_reduction<Rpp32f>(out.data(), golden, kTensorStddevTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -125,22 +115,9 @@ class TensorStddevTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(TensorStddevTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_tensor_stddev<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_tensor_stddev<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_tensor_stddev<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_tensor_stddev<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for tensor_stddev";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_tensor_stddev<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

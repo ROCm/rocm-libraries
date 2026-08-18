@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/color_cast_ref.hpp"
 
 using namespace rpptest;
@@ -49,22 +51,9 @@ struct ColorCastParams {
     }
 };
 
-double color_cast_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-            return 1.0;
-        // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (RPP truncates the
-        // I8 result instead of rounding).
-        case DType::I8:
-            return 0.5;
-        case DType::F32:
-            return 2e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-}
+// I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (RPP truncates the
+// I8 result instead of rounding).
+constexpr Tolerance kColorCastTolerance = tolerance(1.0, 2e-3, 5e-3).with_i8(0.5);
 
 template <typename T>
 void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
@@ -111,7 +100,7 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               color_cast_tolerance(cfg.dtype)));
+                               kColorCastTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -122,22 +111,9 @@ class ColorCastTest : public ::testing::TestWithParam<WithParams<ColorCastParams
 
 TEST_P(ColorCastTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_color_cast<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_color_cast<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_color_cast<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_color_cast<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for color_cast";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_color_cast<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Restricted to the 3-channel layouts: color_cast applies distinct R/G/B constants, and the

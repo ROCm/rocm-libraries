@@ -40,14 +40,8 @@ namespace {
 // Tolerances reflect legitimate floating-point error only: the golden evaluates log1p in
 // double while the kernel works in float. Kept as helpers for consistency with the other ND
 // tests, even though log1p documents a single output dtype.
-double abs_tolerance(DType out) {
-    (void)out;
-    return 1e-5;
-}
-double rel_tolerance(DType out) {
-    (void)out;
-    return 1e-6;
-}
+double abs_tolerance(DType) { return 1e-5; }
+double rel_tolerance(DType) { return 1e-6; }
 
 template <typename Tin, typename Tout>
 void run_log1p(const NdConfig& cfg) {

@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/crop_ref.hpp"
 
@@ -83,22 +84,9 @@ class CropTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(CropTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_crop<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_crop<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_crop<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_crop<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for crop";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_crop<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

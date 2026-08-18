@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/erase_ref.hpp"
 
 using namespace rpptest;
@@ -40,7 +42,6 @@ namespace {
 
 // erase overwrites rectangular boxes with caller-supplied solid colors: a direct store, no
 // arithmetic, so every dtype is bit-exact.
-double erase_tolerance(DType) { return 0.0; }
 
 // Per-image box stride and count. Every image uses the same count == the stride so the anchor/color
 // packing is unambiguous regardless of any ragged-packing convention.
@@ -123,7 +124,7 @@ void run_erase(const TestConfig& cfg) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               erase_tolerance(cfg.dtype)));
+                               kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -138,22 +139,9 @@ class EraseTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(EraseTest, Correctness) {
     const auto& cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_erase<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_erase<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_erase<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_erase<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for erase";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_erase<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

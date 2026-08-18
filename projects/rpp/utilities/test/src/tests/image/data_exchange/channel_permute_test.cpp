@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/channel_permute_ref.hpp"
 
@@ -106,22 +107,9 @@ class ChannelPermuteTest : public ::testing::TestWithParam<WithParams<ChannelPer
 
 TEST_P(ChannelPermuteTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_channel_permute<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_channel_permute<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_channel_permute<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_channel_permute<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for channel_permute";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_channel_permute<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // channel_permute is 3-channel only (c = 3) and takes no ROI, so PLN1 and Partial are not

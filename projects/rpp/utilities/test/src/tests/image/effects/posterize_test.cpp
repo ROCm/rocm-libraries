@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/posterize_ref.hpp"
 
 using namespace rpptest;
@@ -44,19 +46,8 @@ struct PosterizeParams {
     std::string name() const { return "b" + num_token(static_cast<float>(levelBits)); }
 };
 
-double posterize_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-        case DType::I8:
-            return 0.0;  // integer bit-mask is exact
-        case DType::F32:
-            return 1e-3;
-        case DType::F16:
-            return 4e-3;
-        default:
-            return 0.0;
-    }
-}
+// The integer bit-mask is exact; only the float paths carry rounding error.
+constexpr Tolerance kPosterizeTolerance = tolerance(0.0, 1e-3, 4e-3);
 
 template <typename T>
 void run_posterize(const TestConfig& cfg, const PosterizeParams& op) {
@@ -94,7 +85,7 @@ void run_posterize(const TestConfig& cfg, const PosterizeParams& op) {
     dst.read(actual.data(), bytes);
 
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               posterize_tolerance(cfg.dtype)));
+                               kPosterizeTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -104,22 +95,9 @@ class PosterizeTest : public ::testing::TestWithParam<WithParams<PosterizeParams
 
 TEST_P(PosterizeTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_posterize<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_posterize<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_posterize<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_posterize<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for posterize";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_posterize<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

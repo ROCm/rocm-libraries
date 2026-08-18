@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/resize_mirror_normalize_ref.hpp"
 
 using namespace rpptest;
@@ -64,13 +66,7 @@ double rmn_tolerance(DType dt, const TestConfig& cfg, const RmnParams& op) {
                        op.stdDev == 1.0 && cfg.roi == Roi::Partial;
     if (exact) return 0.0;
     // Otherwise the only legitimate error is fp rounding of the bilinear blend and the divide.
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 2e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
+    return kRoundingTolerance(dt);
 }
 
 template <typename T>
@@ -144,22 +140,9 @@ class ResizeMirrorNormalizeTest : public ::testing::TestWithParam<WithParams<Rmn
 
 TEST_P(ResizeMirrorNormalizeTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_resize_mirror_normalize<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_resize_mirror_normalize<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_resize_mirror_normalize<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_resize_mirror_normalize<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for resize_mirror_normalize";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_resize_mirror_normalize<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Four sets, each isolating one more stage: the plain resize, the mirror, the mean subtraction, and

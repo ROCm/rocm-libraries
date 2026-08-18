@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/glitch_ref.hpp"
 
@@ -119,20 +120,9 @@ TEST_P(GlitchTest, Correctness) {
         p.cfg.layout == Layout::PLN3 && p.cfg.roi == Roi::Partial)
         GTEST_SKIP() << "HOST U8 planar glitch segfaults on a ROI narrower than its vector stride";
 
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_glitch<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_glitch<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_glitch<Rpp32f>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for glitch";
-            break;
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32>(p.cfg.dtype, [&](auto tag) {
+        run_glitch<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Three channels only: the op takes an R/G/B offset triple and PLN1 is not part of its contract.

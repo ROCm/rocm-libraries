@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/dilate_ref.hpp"
 
@@ -119,23 +120,9 @@ class DilateTest : public ::testing::TestWithParam<WithParams<DilateParams>> {};
 
 TEST_P(DilateTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_dilate<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_dilate<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_dilate<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_dilate<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "Unsupported dtype for dilate";
-            break;
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_dilate<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(Image_Morphological, DilateTest,

@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/coarse_dropout_ref.hpp"
 
 using namespace rpptest;
@@ -40,7 +42,6 @@ namespace {
 
 // coarse_dropout is a pure passthrough with select rectangular regions erased to an exact
 // constant (black). No arithmetic, so every dtype is bit-exact.
-double coarse_dropout_tolerance(DType) { return 0.0; }
 
 template <typename T>
 void run_coarse_dropout(const TestConfig& cfg) {
@@ -121,7 +122,7 @@ void run_coarse_dropout(const TestConfig& cfg) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               coarse_dropout_tolerance(cfg.dtype)));
+                               kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -132,22 +133,9 @@ class CoarseDropoutTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(CoarseDropoutTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_coarse_dropout<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_coarse_dropout<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_coarse_dropout<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_coarse_dropout<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for coarse_dropout";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_coarse_dropout<Element<decltype(tag)>>(cfg);
+    });
 }
 
 // FullRoi (both backends) and HOST PartialRoi pass the full grid -- this end-to-end validates the

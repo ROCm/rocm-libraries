@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/crop_and_patch_ref.hpp"
 
@@ -112,22 +113,9 @@ class CropAndPatchTest : public ::testing::TestWithParam<WithParams<CropAndPatch
 
 TEST_P(CropAndPatchTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_crop_and_patch<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_crop_and_patch<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_crop_and_patch<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_crop_and_patch<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for crop_and_patch";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_crop_and_patch<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Only {Roi::Full} on the roi axis: crop_and_patch has no standard source ROI (its regions are the

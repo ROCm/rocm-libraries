@@ -30,28 +30,14 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/phase_ref.hpp"
 
 using namespace rpptest;
 
 namespace {
-
-double phase_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-            return 1.0;
-        case DType::I8:
-            return 1.0;
-        case DType::F32:
-            return 2e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-    return 0.0;
-}
 
 template <typename T>
 void run_phase(const TestConfig& cfg) {
@@ -88,7 +74,7 @@ void run_phase(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               phase_tolerance(cfg.dtype)));
+                               kRoundingTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -98,23 +84,9 @@ class PhaseTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(PhaseTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_phase<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_phase<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_phase<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_phase<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "Unsupported dtype for phase";
-            break;
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_phase<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

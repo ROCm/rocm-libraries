@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/jpeg_compression_distortion_ref.hpp"
 
 using namespace rpptest;
@@ -60,15 +62,7 @@ struct JpegParams {
 // and at q50 the whole pipeline agrees with the kernel inside them. They are deliberately NOT
 // loosened to cover q10/q90: the quantize step is a hard threshold, so a wrong quantizer moves
 // output pixels by tens of levels, and no honest tolerance hides that.
-double jpeg_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 2e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
-}
+constexpr Tolerance kJpegTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op) {
@@ -122,7 +116,7 @@ void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op
 
     // (3) Compare the ROI-sized region written at the destination origin.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               jpeg_tolerance(cfg.dtype)));
+                               kJpegTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -134,22 +128,9 @@ class JpegCompressionDistortionTest : public ::testing::TestWithParam<WithParams
 
 TEST_P(JpegCompressionDistortionTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_jpeg_compression_distortion<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_jpeg_compression_distortion<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_jpeg_compression_distortion<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_jpeg_compression_distortion<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for jpeg_compression_distortion";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_jpeg_compression_distortion<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

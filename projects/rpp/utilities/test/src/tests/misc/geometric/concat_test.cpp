@@ -30,6 +30,7 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/concat_ref.hpp"
@@ -145,22 +146,9 @@ class ConcatTest : public ::testing::TestWithParam<NdWithParams<ConcatParams>> {
 TEST_P(ConcatTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const AxisKind kind = GetParam().op.kind;
-    switch (cfg.dtypeIn) {
-        case DType::U8:
-            run_concat<Rpp8u>(cfg, kind);
-            break;
-        case DType::I8:
-            run_concat<Rpp8s>(cfg, kind);
-            break;
-        case DType::F16:
-            run_concat<Rpp16f>(cfg, kind);
-            break;
-        case DType::F32:
-            run_concat<Rpp32f>(cfg, kind);
-            break;
-        default:
-            FAIL() << "unsupported dtype for concat";
-    }
+    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(cfg.dtypeIn, [&](auto tag) {
+        run_concat<Element<decltype(tag)>>(cfg, kind);
+    });
 }
 
 // 72 cases: U8/F16/F32/I8 (what the op accepts) x ranks 2/3/4 x 3 axis kinds x HOST/HIP.

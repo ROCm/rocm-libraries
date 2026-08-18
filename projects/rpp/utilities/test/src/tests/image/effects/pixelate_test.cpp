@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/pixelate_ref.hpp"
 
 using namespace rpptest;
@@ -52,15 +54,7 @@ struct PixelateParams {
 // bilinear tolerances. They are NOT loosened to cover the two defects this test surfaces -- the
 // resize-family trailing-edge short read, and the intermediate downscale ignoring the ROI offset --
 // so those cases stay red.
-double pixelate_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 2e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
-}
+constexpr Tolerance kPixelateTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
@@ -108,7 +102,7 @@ void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
 
     // (3) Compare the ROI-sized region written at the destination origin.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               pixelate_tolerance(cfg.dtype)));
+                               kPixelateTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -119,22 +113,9 @@ class PixelateTest : public ::testing::TestWithParam<WithParams<PixelateParams>>
 
 TEST_P(PixelateTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_pixelate<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_pixelate<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_pixelate<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_pixelate<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for pixelate";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_pixelate<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

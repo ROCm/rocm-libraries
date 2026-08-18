@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/color_twist_ref.hpp"
 
 using namespace rpptest;
@@ -47,23 +49,10 @@ struct ColorTwistParams {
     }
 };
 
-double color_twist_tolerance(DType dt) {
-    switch (dt) {
-        // The fused pipeline routes 3-channel pixels through two RGB->HSV->RGB round trips, so the
-        // integer result carries that float round trip's rounding on top of the final quantization;
-        // 1.0 covers that legitimate <=1 LSB difference (both reference and kernel round to nearest).
-        case DType::U8:
-            return 1.0;
-        case DType::I8:
-            return 1.0;
-        case DType::F32:
-            return 3e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-}
+// The fused pipeline routes 3-channel pixels through two RGB->HSV->RGB round trips, so the
+// integer result carries that float round trip's rounding on top of the final quantization;
+// 1.0 covers that legitimate <=1 LSB difference (both reference and kernel round to nearest).
+constexpr Tolerance kColorTwistTolerance = tolerance(1.0, 3e-3, 5e-3);
 
 template <typename T>
 void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
@@ -113,7 +102,7 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               color_twist_tolerance(cfg.dtype)));
+                               kColorTwistTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -124,22 +113,9 @@ class ColorTwistTest : public ::testing::TestWithParam<WithParams<ColorTwistPara
 
 TEST_P(ColorTwistTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_color_twist<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_color_twist<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_color_twist<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_color_twist<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for color_twist";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_color_twist<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Restricted to the 3-channel layouts. The API doc claims c = 1/3, but rppt_color_twist rejects

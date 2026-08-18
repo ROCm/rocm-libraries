@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/median_filter_ref.hpp"
 
@@ -106,22 +107,9 @@ class MedianFilterTest : public ::testing::TestWithParam<WithParams<MedianFilter
 
 TEST_P(MedianFilterTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_median_filter<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_median_filter<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_median_filter<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_median_filter<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for median_filter";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_median_filter<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

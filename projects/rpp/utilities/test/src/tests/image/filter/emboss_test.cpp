@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/emboss_ref.hpp"
 
 using namespace rpptest;
@@ -54,15 +56,7 @@ struct EmbossParams {
 // accumulation -- the same tolerances box_filter uses. Not loosened to cover the shared
 // spatial-filter defect where a partial ROI reads neighbours from outside the ROI rectangle
 // instead of treating its edge as the border, which stays red.
-double emboss_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 1e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
-}
+constexpr Tolerance kEmbossTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
@@ -118,7 +112,7 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     // test's own ROI copy, not the tensor handed to the op: HIP rewrites the caller's XYWH tensor
     // to LTRB in place, so reusing it here would walk the wrong rectangle.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
-                               emboss_tolerance(cfg.dtype)));
+                               kEmbossTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -129,22 +123,9 @@ class EmbossTest : public ::testing::TestWithParam<WithParams<EmbossParams>> {};
 
 TEST_P(EmbossTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_emboss<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_emboss<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_emboss<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_emboss<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for emboss";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_emboss<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

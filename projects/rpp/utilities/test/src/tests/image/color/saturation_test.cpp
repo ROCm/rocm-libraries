@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/saturation_ref.hpp"
 
 using namespace rpptest;
@@ -44,22 +46,6 @@ struct SaturationParams {
         return "s" + num_token(saturation);
     }
 };
-
-double saturation_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-            return 1.0;
-        case DType::I8:
-            return 1.0;
-        case DType::F32:
-            return 2e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-    return 0.0;
-}
 
 template <typename T>
 void run_saturation(const TestConfig& cfg, const SaturationParams& op) {
@@ -102,7 +88,7 @@ void run_saturation(const TestConfig& cfg, const SaturationParams& op) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               saturation_tolerance(cfg.dtype)));
+                               kRoundingTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -113,22 +99,9 @@ class SaturationTest : public ::testing::TestWithParam<WithParams<SaturationPara
 
 TEST_P(SaturationTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_saturation<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_saturation<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_saturation<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_saturation<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "Unsupported dtype for saturation";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_saturation<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // Restricted to the 3-channel layouts: saturation is an RGB (c = 3) op.

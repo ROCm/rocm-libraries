@@ -29,8 +29,10 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/reduction.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/tensor_min_ref.hpp"
 
 using namespace rpptest;
@@ -38,9 +40,6 @@ using namespace rpptest;
 namespace {
 
 // min selects an existing element -- no arithmetic -- so the result is bit-exact for every dtype.
-double tensor_min_tolerance(DType) {
-    return 0.0;
-}
 
 // Tin is the source element type; Tout is the op's output element type (min preserves the input
 // dtype for integers, and returns F32 for the float dtypes, per the API contract).
@@ -78,7 +77,7 @@ void run_tensor_min(const TestConfig& cfg) {
     handle.sync();
 
     // (4) Compare (bit-exact).
-    EXPECT_TRUE(compare_reduction<Tout>(out.data(), golden, tensor_min_tolerance(cfg.dtype)));
+    EXPECT_TRUE(compare_reduction<Tout>(out.data(), golden, kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -89,22 +88,9 @@ class TensorMinTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(TensorMinTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_tensor_min<Rpp8u, Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_tensor_min<Rpp16f, Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_tensor_min<Rpp32f, Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_tensor_min<Rpp8s, Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for tensor_min";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_tensor_min<Element<decltype(tag)>, Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

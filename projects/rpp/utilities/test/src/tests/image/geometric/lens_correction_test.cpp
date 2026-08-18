@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/lens_correction_ref.hpp"
 
 using namespace rpptest;
@@ -88,15 +90,7 @@ void fill_distortion(Rpp32f* d, LensKind kind) {
 // The map is resolved with bilinear sampling, so only genuine fp rounding is allowed. These are the
 // suite's shared warp/remap bilinear tolerances; they are NOT loosened to cover the resize-family
 // trailing-edge bilinear defect or any partial-ROI placement divergence, which stay red.
-double lens_correction_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 2e-3;
-        case DType::F16: return 5e-3;
-        default: return 0.0;
-    }
-}
+constexpr Tolerance kLensCorrectionTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
@@ -168,7 +162,7 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     // XYWH to LTRB in place (roiWidth/roiHeight come back as rb.x/rb.y), which would otherwise make
     // the comparison walk a different region than the golden wrote.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
-                               lens_correction_tolerance(cfg.dtype)));
+                               kLensCorrectionTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -179,22 +173,9 @@ class LensCorrectionTest : public ::testing::TestWithParam<WithParams<LensParams
 
 TEST_P(LensCorrectionTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_lens_correction<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_lens_correction<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_lens_correction<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_lens_correction<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for lens_correction";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_lens_correction<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

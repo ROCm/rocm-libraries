@@ -33,6 +33,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/spatter_ref.hpp"
 
 using namespace rpptest;
@@ -62,27 +63,16 @@ struct SpatterParams {
 constexpr RpptRGB kGreyColor{160, 160, 160};
 constexpr RpptRGB kAsymmetricColor{200, 90, 20};
 
-double spatter_tolerance(DType dt) {
-    switch (dt) {
-        // The blend is one multiply-add per element, so the integer dtypes are bit-exact: a
-        // deviation is a rounding or clamping defect, not accumulated error.
-        case DType::U8:
-        case DType::I8:
-            return 0.0;
-        case DType::F32:
-            return 1e-6;
-        case DType::F16:
-            return 1e-3;  // one half-precision ulp near 1.0
-        default:
-            return 0.0;
-    }
-}
+// The blend is one multiply-add per element, so the integer dtypes are bit-exact: a
+// deviation is a rounding or clamping defect, not accumulated error. F16 is allowed one
+// half-precision ulp near 1.0.
+constexpr Tolerance kSpatterTolerance = tolerance(0.0, 1e-6, 1e-3);
 
 // How far outside the src/colour band the store quantization alone can legitimately put a value:
 // half an LSB for the integer dtypes, which round to nearest; nothing beyond the compare tolerance
 // for the float dtypes, whose stored unit is the intensity itself.
 double spatter_band_eps(DType dt) {
-    return (dt == DType::U8 || dt == DType::I8) ? 0.5 : spatter_tolerance(dt);
+    return (dt == DType::U8 || dt == DType::I8) ? 0.5 : kSpatterTolerance(dt);
 }
 
 RpptDesc descriptor_for(const TestConfig& cfg) {
@@ -125,7 +115,7 @@ void run_spatter_identity(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               spatter_tolerance(cfg.dtype)));
+                               kSpatterTolerance(cfg.dtype)));
 }
 
 // ---- ChannelBand: the output is a convex combination of the source and the colour -------------

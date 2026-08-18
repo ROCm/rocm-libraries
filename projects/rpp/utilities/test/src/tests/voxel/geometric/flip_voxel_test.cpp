@@ -30,6 +30,7 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/voxel_tensor_setup.hpp"
 #include "reference/flip_voxel_ref.hpp"
@@ -117,16 +118,9 @@ TEST_P(FlipVoxelTest, Correctness) {
         GTEST_SKIP() << "HOST U8 flip_voxel reads past the start of the buffer and segfaults on a "
                         "horizontal flip with a partial ROI";
 
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_flip_voxel<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_flip_voxel<Rpp32f>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "flip_voxel supports only U8 and F32";
-    }
+    dispatch_dtype<DType::U8, DType::F32>(p.cfg.dtype, [&](auto tag) {
+        run_flip_voxel<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // u8 -> u8 and f32 -> f32 are the op's only documented conversions.

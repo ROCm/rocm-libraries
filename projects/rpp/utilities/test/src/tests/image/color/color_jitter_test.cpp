@@ -32,7 +32,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/color_jitter_ref.hpp"
 
 using namespace rpptest;
@@ -56,19 +58,8 @@ struct ColorJitterParams {
 // store itself costs, the golden computing in double and narrowing once where the kernel computes
 // in float. A 1 LSB integer allowance would swallow the rounding defects this suite exists to
 // catch, so the reds below are left to the goldens rather than absorbed here.
-double color_jitter_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-        case DType::I8:
-            return 0.0;
-        case DType::F32:
-            return 1e-6;
-        case DType::F16:
-            return 5e-4;  // one half-precision ulp near 1.0
-        default:
-            return 0.0;
-    }
-}
+// F16 is allowed one half-precision ulp near 1.0.
+constexpr Tolerance kColorJitterTolerance = tolerance(0.0, 1e-6, 5e-4);
 
 template <typename T>
 void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
@@ -122,7 +113,7 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               color_jitter_tolerance(cfg.dtype)));
+                               kColorJitterTolerance(cfg.dtype)));
 }
 
 // rppt_color_jitter is documented as a HOST-backend op -- the header brief says so and every
@@ -144,22 +135,9 @@ class ColorJitterTest : public ::testing::TestWithParam<WithParams<ColorJitterPa
 
 TEST_P(ColorJitterTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_color_jitter<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_color_jitter<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_color_jitter<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_color_jitter<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for color_jitter";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_color_jitter<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // One parameter set per axis rather than a combined one, so a failure names the axis that broke

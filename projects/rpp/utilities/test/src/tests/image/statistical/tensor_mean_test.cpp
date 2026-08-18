@@ -29,8 +29,10 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/reduction.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/tensor_mean_ref.hpp"
 
 using namespace rpptest;
@@ -40,19 +42,7 @@ namespace {
 // mean is sum/N in float; the tolerance covers accumulation/division rounding. Integer-space
 // means (U8 [0,255], I8 [-128,127]) carry a larger magnitude than the [0,1] float means, hence
 // the wider absolute tolerance.
-double tensor_mean_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-        case DType::I8:
-            return 1e-2;
-        case DType::F32:
-            return 1e-4;
-        case DType::F16:
-            return 1e-3;
-        default:
-            return 0.0;
-    }
-}
+constexpr Tolerance kTensorMeanTolerance = tolerance(1e-2, 1e-4, 1e-3);
 
 // mean always outputs Rpp32f regardless of the source dtype (per the API contract).
 template <typename Tin>
@@ -89,7 +79,7 @@ void run_tensor_mean(const TestConfig& cfg) {
     handle.sync();
 
     // (4) Compare within tolerance.
-    EXPECT_TRUE(compare_reduction<Rpp32f>(out.data(), golden, tensor_mean_tolerance(cfg.dtype)));
+    EXPECT_TRUE(compare_reduction<Rpp32f>(out.data(), golden, kTensorMeanTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -100,22 +90,9 @@ class TensorMeanTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(TensorMeanTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_tensor_mean<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_tensor_mean<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_tensor_mean<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_tensor_mean<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for tensor_mean";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_tensor_mean<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

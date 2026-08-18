@@ -30,6 +30,7 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/transpose_ref.hpp"
@@ -119,22 +120,9 @@ class TransposeTest : public ::testing::TestWithParam<NdWithParams<TransposePara
 TEST_P(TransposeTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const TransposeParams p = GetParam().op;
-    switch (cfg.dtypeIn) {
-        case DType::U8:
-            run_transpose<Rpp8u>(cfg, p);
-            break;
-        case DType::I8:
-            run_transpose<Rpp8s>(cfg, p);
-            break;
-        case DType::F16:
-            run_transpose<Rpp16f>(cfg, p);
-            break;
-        case DType::F32:
-            run_transpose<Rpp32f>(cfg, p);
-            break;
-        default:
-            FAIL() << "unsupported dtype for transpose";
-    }
+    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(cfg.dtypeIn, [&](auto tag) {
+        run_transpose<Element<decltype(tag)>>(cfg, p);
+    });
 }
 
 // Every case is bit-exact (tolerance 0 on both terms, every dtype): transpose performs no

@@ -30,7 +30,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/color_temperature_ref.hpp"
 
 using namespace rpptest;
@@ -43,21 +45,9 @@ struct ColorTemperatureParams {
     std::string name() const { return "adj" + num_token(static_cast<float>(adjustment)); }
 };
 
-double color_temperature_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8:
-        // Pure integer additive offset: no rounding, so I8 is bit-exact too (the systemic
-        // I8 round-vs-truncate defect does not apply to an integer add).
-        case DType::I8:
-            return 0.0;
-        case DType::F32:
-            return 2e-3;
-        case DType::F16:
-            return 5e-3;
-        default:
-            return 0.0;
-    }
-}
+// Pure integer additive offset: no rounding, so I8 is bit-exact too (the systemic
+// I8 round-vs-truncate defect does not apply to an integer add).
+constexpr Tolerance kColorTemperatureTolerance = tolerance(0.0, 2e-3, 5e-3);
 
 template <typename T>
 void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& op) {
@@ -100,7 +90,7 @@ void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& 
 
     // (4) Compare within tolerance over the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               color_temperature_tolerance(cfg.dtype)));
+                               kColorTemperatureTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -111,22 +101,9 @@ class ColorTemperatureTest : public ::testing::TestWithParam<WithParams<ColorTem
 
 TEST_P(ColorTemperatureTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_color_temperature<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_color_temperature<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_color_temperature<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_color_temperature<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for color_temperature";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_color_temperature<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

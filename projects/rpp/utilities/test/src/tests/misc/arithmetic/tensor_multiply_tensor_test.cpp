@@ -30,8 +30,10 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/arithmetic_tensor_ref.hpp"
 
 using namespace rpptest;
@@ -133,22 +135,9 @@ class TensorMultiplyTensorTest : public ::testing::TestWithParam<NdWithParams<Br
 TEST_P(TensorMultiplyTensorTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const Broadcast broadcast = GetParam().op.mode;
-    switch (cfg.dtypeIn) {
-        case DType::U8:
-            run_tensor_multiply_tensor<Rpp8u>(cfg, broadcast);
-            break;
-        case DType::I8:
-            run_tensor_multiply_tensor<Rpp8s>(cfg, broadcast);
-            break;
-        case DType::F16:
-            run_tensor_multiply_tensor<Rpp16f>(cfg, broadcast);
-            break;
-        case DType::F32:
-            run_tensor_multiply_tensor<Rpp32f>(cfg, broadcast);
-            break;
-        default:
-            FAIL() << "unsupported dtype for tensor_multiply_tensor";
-    }
+    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(cfg.dtypeIn, [&](auto tag) {
+        run_tensor_multiply_tensor<Element<decltype(tag)>>(cfg, broadcast);
+    });
 }
 
 // The integer operands are folded to a small magnitude before the op runs (U8 -> [0,18],

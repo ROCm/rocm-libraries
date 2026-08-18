@@ -30,8 +30,10 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/arithmetic_tensor_ref.hpp"
 
 using namespace rpptest;
@@ -41,21 +43,9 @@ namespace {
 // Tolerances model legitimate floating-point error only. Division is the one arithmetic op here
 // with a fractional intermediate, and the golden rounds it to nearest before storing, so U8/I8 are
 // still compared bit-exactly -- a truncating kernel must show up as a failure, not be absorbed.
-double abs_tolerance(DType dt) {
-    switch (dt) {
-        case DType::F16: return 2e-3;
-        case DType::F32: return 1e-5;
-        default:         return 0.0;
-    }
-}
+constexpr Tolerance kAbsTolerance = tolerance(0.0, 1e-5, 2e-3);
 
-double rel_tolerance(DType dt) {
-    switch (dt) {
-        case DType::F16: return 2e-3;
-        case DType::F32: return 1e-6;
-        default:         return 0.0;
-    }
-}
+constexpr Tolerance kRelTolerance = tolerance(0.0, 1e-6, 2e-3);
 
 // The golden does not model division by zero (undefined), so every divisor is forced away from
 // zero: the integer fills contain 0 and the [0,1] float fills contain exactly 0.0. The replacement
@@ -123,8 +113,8 @@ void run_tensor_divide_tensor(const NdConfig& cfg, Broadcast broadcast) {
     dst.read(actual.data(), bytesOut);
 
     // (4) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, abs_tolerance(cfg.dtypeIn),
-                              rel_tolerance(cfg.dtypeIn)));
+    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, kAbsTolerance(cfg.dtypeIn),
+                              kRelTolerance(cfg.dtypeIn)));
 }
 
 }  // namespace
@@ -136,22 +126,9 @@ class TensorDivideTensorTest : public ::testing::TestWithParam<NdWithParams<Broa
 TEST_P(TensorDivideTensorTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const Broadcast broadcast = GetParam().op.mode;
-    switch (cfg.dtypeIn) {
-        case DType::U8:
-            run_tensor_divide_tensor<Rpp8u>(cfg, broadcast);
-            break;
-        case DType::I8:
-            run_tensor_divide_tensor<Rpp8s>(cfg, broadcast);
-            break;
-        case DType::F16:
-            run_tensor_divide_tensor<Rpp16f>(cfg, broadcast);
-            break;
-        case DType::F32:
-            run_tensor_divide_tensor<Rpp32f>(cfg, broadcast);
-            break;
-        default:
-            FAIL() << "unsupported dtype for tensor_divide_tensor";
-    }
+    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(cfg.dtypeIn, [&](auto tag) {
+        run_tensor_divide_tensor<Element<decltype(tag)>>(cfg, broadcast);
+    });
 }
 
 // Dtypes are scoped to U8/I8/F16/F32: the op also accepts U16/I16/U32/I32, which the framework's

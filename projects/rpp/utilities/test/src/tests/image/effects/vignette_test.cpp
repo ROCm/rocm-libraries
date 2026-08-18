@@ -31,7 +31,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/vignette_ref.hpp"
 
 using namespace rpptest;
@@ -44,15 +46,7 @@ namespace {
 // F16 (4.9e-4), on both backends. These tolerances are sized from that measurement, not from the
 // header's blanket 5% -- which would be 13 grey levels and could hide a real defect in the falloff.
 // U8 is given 1 rather than 0 only to absorb a rounding tie, not observed error.
-double vignette_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F16: return 1e-3;
-        case DType::F32: return 1e-6;
-        default: return 0.0;
-    }
-}
+constexpr Tolerance kVignetteTolerance = tolerance(1.0, 1e-6, 1e-3);
 
 // 6 is the intensity the legacy harness uses: on a 48-wide ROI it puts sigma at 8 px, so the corners
 // are driven essentially to black while the centre is untouched. 1 is the opposite end -- sigma is
@@ -102,7 +96,7 @@ void run_vignette(const TestConfig& cfg, const VignetteParams& op) {
     // Compared against the caller's own ROI copy, not the tensor handed to the op, in case the
     // backend rewrites it from XYWH to LTRB in place.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
-                               vignette_tolerance(cfg.dtype)));
+                               kVignetteTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -112,20 +106,9 @@ class VignetteTest : public ::testing::TestWithParam<WithParams<VignetteParams>>
 
 TEST_P(VignetteTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_vignette<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_vignette<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_vignette<Rpp32f>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for vignette";
-            break;
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32>(p.cfg.dtype, [&](auto tag) {
+        run_vignette<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 // I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.

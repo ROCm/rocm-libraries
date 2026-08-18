@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/fisheye_ref.hpp"
 
@@ -88,23 +89,9 @@ class FisheyeTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(FisheyeTest, Correctness) {
     const TestConfig cfg = GetParam();
-    switch (cfg.dtype) {
-        case DType::U8:
-            run_fisheye<Rpp8u>(cfg);
-            break;
-        case DType::F16:
-            run_fisheye<Rpp16f>(cfg);
-            break;
-        case DType::F32:
-            run_fisheye<Rpp32f>(cfg);
-            break;
-        case DType::I8:
-            run_fisheye<Rpp8s>(cfg);
-            break;
-        default:
-            FAIL() << "unsupported dtype for fisheye";
-            break;
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_fisheye<Element<decltype(tag)>>(cfg);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(

@@ -35,7 +35,9 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype_dispatch.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
 #include "reference/sobel_filter_ref.hpp"
 
 using namespace rpptest;
@@ -53,15 +55,7 @@ struct SobelFilterParams {
 
 // Legitimate numeric error only (sqrt rounding for the XY case); not loosened to hide
 // clamp/offset/truncation defects.
-double sobel_filter_tolerance(DType dt) {
-    switch (dt) {
-        case DType::U8: return 1.0;
-        case DType::I8: return 1.0;
-        case DType::F32: return 1e-3;
-        case DType::F16: return 1e-2;
-        default: return 0.0;
-    }
-}
+constexpr Tolerance kSobelFilterTolerance = tolerance(1.0, 1e-3, 1e-2);
 
 template <typename T>
 void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
@@ -117,7 +111,7 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
     // magnitude on both backends; I8 gradX/gradY (both backends) and HIP F16 gradX/gradY are not
     // clamped/quantized to the dtype range. All are real kernel defects.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               sobel_filter_tolerance(cfg.dtype)));
+                               kSobelFilterTolerance(cfg.dtype)));
 }
 
 }  // namespace
@@ -127,22 +121,9 @@ class SobelFilterTest : public ::testing::TestWithParam<WithParams<SobelFilterPa
 
 TEST_P(SobelFilterTest, Correctness) {
     const auto& p = GetParam();
-    switch (p.cfg.dtype) {
-        case DType::U8:
-            run_sobel_filter<Rpp8u>(p.cfg, p.op);
-            break;
-        case DType::F16:
-            run_sobel_filter<Rpp16f>(p.cfg, p.op);
-            break;
-        case DType::F32:
-            run_sobel_filter<Rpp32f>(p.cfg, p.op);
-            break;
-        case DType::I8:
-            run_sobel_filter<Rpp8s>(p.cfg, p.op);
-            break;
-        default:
-            FAIL() << "unsupported dtype for sobel_filter";
-    }
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
+        run_sobel_filter<Element<decltype(tag)>>(p.cfg, p.op);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(
