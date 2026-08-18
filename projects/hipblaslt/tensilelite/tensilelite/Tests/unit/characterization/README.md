@@ -48,7 +48,7 @@ pytest -m unit -n4 --cov=Tensile --cov-config=pyproject.toml \
   --cov-report=term-missing tensilelite/Tests/unit
 ```
 
-A dotted `--cov` target (e.g. `--cov=Tensile.Common.DataType`) re-imports `rocisa` and SIGABRTs on duplicate nanobind registration. To read a single module's row, grep the term-missing output (the single-file path prefix does not filter the report):
+A dotted `--cov` target (e.g. `--cov=tensilelite.Common.DataType`) re-imports `rocisa` and SIGABRTs on duplicate nanobind registration. To read a single module's row, grep the term-missing output (the single-file path prefix does not filter the report):
 
 ```bash
 pytest -m unit --cov=Tensile --cov-config=pyproject.toml \

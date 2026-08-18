@@ -22,10 +22,10 @@
 #
 ################################################################################
 
-"""Characterization tests for Tensile.py L526 (if) and L529 (elif) config-file guards.
+"""Characterization tests for tensilelite.py L526 (if) and L529 (elif) config-file guards.
 
 Branch ID: 01e8ac7f371264a85285039d91ea87c8514acc62
-Source:    Tensile/Tensile.py:529 (elif)
+Source:    Tensile/tensilelite.py:529 (elif)
 Predicate: not altFormat and len(configPaths) != 1
 
 Inputs:
@@ -119,7 +119,7 @@ class TestAltFormatRejectedHelper:
 
 
 # ---------------------------------------------------------------------------
-# (2) Real-entry pin tests — call Tensile.Tensile(userArgs) and pin actual behavior
+# (2) Real-entry pin tests — call tensilelite.Tensile(userArgs) and pin actual behavior
 # ---------------------------------------------------------------------------
 
 class TestTensileArgparseGuards:
@@ -142,7 +142,7 @@ class TestTensileArgparseGuards:
 
     def test_l529_default_format_two_configs_exits(self, tmp_path):
         """L529 TRUE (False,2): altFormat=False, n=2 → SystemExit(-1) from printExit."""
-        import Tensile.Tensile as TM
+        import tensilelite.Tensile as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
@@ -155,7 +155,7 @@ class TestTensileArgparseGuards:
 
     def test_l529_default_format_three_configs_exits(self, tmp_path):
         """L529 TRUE (False,3): altFormat=False, n=3 → SystemExit(-1) from printExit."""
-        import Tensile.Tensile as TM
+        import tensilelite.Tensile as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
@@ -169,7 +169,7 @@ class TestTensileArgparseGuards:
 
     def test_l526_alt_format_three_configs_exits(self, tmp_path):
         """L526 TRUE (True,3): altFormat=True, n=3 → SystemExit(-1) from printExit (sibling if)."""
-        import Tensile.Tensile as TM
+        import tensilelite.Tensile as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
@@ -191,7 +191,7 @@ class TestTensileArgparseGuards:
         (e.g. FileNotFoundError on the config YAML).  We assert exit code is
         NOT -1 (the guard exit code).
         """
-        import Tensile.Tensile as TM
+        import tensilelite.Tensile as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
@@ -216,7 +216,7 @@ class TestTensileArgparseGuards:
         Execution proceeds past L526/L529 and hits a deeper parsing error.
         We assert exit code is NOT -1.
         """
-        import Tensile.Tensile as TM
+        import tensilelite.Tensile as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         userArgs = self._userArgs([cfg1], str(tmp_path / "out"))
