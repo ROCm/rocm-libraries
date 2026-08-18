@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.Toolchain.Component
+# Characterization tests for tensilelite.Toolchain.Component
 #
 # ADD-ONLY: pins current behavior of the ROCm toolchain wrapper classes
 # (Component / Assembler / Compiler / Bundler / Linker) and the module helpers
@@ -17,8 +17,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-C = importlib.import_module("Tensile.Toolchain.Component")
-SemanticVersion = importlib.import_module("Tensile.Common").SemanticVersion
+C = importlib.import_module("tensilelite.Toolchain.Component")
+SemanticVersion = importlib.import_module("tensilelite.Common").SemanticVersion
 
 
 @pytest.fixture

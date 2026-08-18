@@ -4,16 +4,16 @@
 ################################################################################
 
 """PublicInputSurface characterization: the not versionIsCompatible(...)
-predicate at Tensile/Common/GlobalParameters.py:660.
+predicate at tensilelite/Common/GlobalParameters.py:660.
 
 Branch 4914224d6e015f0cc6a041a74683fe38f6eae196.  The branch fires (True) when
 the YAML-supplied MinimumRequiredVersion is INCOMPATIBLE with the baked-in
-__version__ = "5.0.0" (Tensile/__init__.py:30).
+__version__ = "5.0.0" (tensilelite/__init__.py:30).
 
 Reachability gate (line 659): if "MinimumRequiredVersion" in config must be
 True before this predicate is evaluated.
 
-versionIsCompatible (Tensile/Common/Utilities.py:148) returns False when:
+versionIsCompatible (tensilelite/Common/Utilities.py:148) returns False when:
   * qMajor != tMajor, OR
   * int(qMinor) > tMinor, OR
   * qMinor == tMinor AND int(qStep) > tStep
@@ -26,7 +26,7 @@ These tests pin ACTUAL observed behavior; they do not assert anything aspiration
 
 import pytest
 
-from Tensile.Common.Utilities import versionIsCompatible
+from tensilelite.Common.Utilities import versionIsCompatible
 
 pytestmark = pytest.mark.unit
 

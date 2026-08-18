@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.SolutionSelectionLibrary
+# Characterization tests for tensilelite.SolutionSelectionLibrary
 #
 # ADD-ONLY: pins the pure selection-analysis helpers. The two Naming imports
 # (getSolutionNameMin/getKernelNameMin) used by updateValidSolutions are stubbed
@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.SolutionSelectionLibrary")
+M = importlib.import_module("tensilelite.SolutionSelectionLibrary")
 
 
 class Sol:

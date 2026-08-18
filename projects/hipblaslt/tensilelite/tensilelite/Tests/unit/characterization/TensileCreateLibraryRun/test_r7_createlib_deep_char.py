@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Characterization tests for Tensile.TensileCreateLibrary.Run — deep coverage pass.
+"""Characterization tests for tensilelite.TensileCreateLibrary.Run — deep coverage pass.
 
 Target miss ranges (methodology-A):
   336-348  : writeAssembly (assembly-file writer)
@@ -47,17 +47,17 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from Tensile.Common import IsaInfo, IsaVersion
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Toolchain.Component import Assembler
+from tensilelite.Common import IsaInfo, IsaVersion
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Toolchain.Component import Assembler
 
 pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Module under test
 # ---------------------------------------------------------------------------
-M = importlib.import_module("Tensile.TensileCreateLibrary.Run")
-SL = importlib.import_module("Tensile.SolutionLibrary")
+M = importlib.import_module("tensilelite.TensileCreateLibrary.Run")
+SL = importlib.import_module("tensilelite.SolutionLibrary")
 
 _DATA_DIR = Path(__file__).parent / "data"
 _LOGIC_YAML = _DATA_DIR / "logic_gfx942_HSS_BH_tiny.yaml"
@@ -68,8 +68,8 @@ _LOGIC_YAML = _DATA_DIR / "logic_gfx942_HSS_BH_tiny.yaml"
 # ---------------------------------------------------------------------------
 
 def _make_isa_info_map(arch: str = "gfx942"):
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Common.Architectures import gfxToIsa
 
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     isa = gfxToIsa(arch)
@@ -79,7 +79,7 @@ def _make_isa_info_map(arch: str = "gfx942"):
 
 
 def _make_assembler():
-    from Tensile.Toolchain.Component import Assembler
+    from tensilelite.Toolchain.Component import Assembler
 
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     return Assembler(Path(clang), "4")
@@ -385,7 +385,7 @@ class TestWriteSolutionsAndKernelsTCL:
 
     def test_duplicate_kernels_excluded_from_unique(self, tmp_path):
         """Lines 553: uniqueAsmKernels excludes duplicates; return count reflects unique."""
-        from Tensile.Common.GlobalParameters import assignGlobalParameters
+        from tensilelite.Common.GlobalParameters import assignGlobalParameters
 
         # Create two fake assembly kernels with the same base name => one duplicate
         k1 = MagicMock()
@@ -502,7 +502,7 @@ class TestGenerateLogicDataAndSolutionsExtra:
         parseLibraryLogicFile receives 7 positional args (filename, assembler, splitGSU,
         printSolutionRejectionReason, printIndexAssignmentInfo, isaInfoMap, lazyLibraryLoading).
         """
-        from Tensile.SolutionLibrary import MasterSolutionLibrary as MSL
+        from tensilelite.SolutionLibrary import MasterSolutionLibrary as MSL
 
         def _fake_parse(filename, assembler, splitGSU, psr, piai, isaInfoMap, lazy):
             lib = MSL({}, None)
@@ -519,7 +519,7 @@ class TestGenerateLogicDataAndSolutionsExtra:
         base_isa_map: dict[IsaVersion, IsaInfo],
     ) -> None:
         """Aggregate type mismatches from parsed logic files raise after merging."""
-        from Tensile.SolutionLibrary import MasterSolutionLibrary as MSL
+        from tensilelite.SolutionLibrary import MasterSolutionLibrary as MSL
 
         mismatch = {
             ("UseBeta", "int", "bool"): {
@@ -545,7 +545,7 @@ class TestGenerateLogicDataAndSolutionsExtra:
         the exact library objects returned and avoid triggering MasterSolutionLibrary.merge
         with an incomplete structure (which requires a non-None library tree node).
         """
-        from Tensile.SolutionLibrary import MasterSolutionLibrary
+        from tensilelite.SolutionLibrary import MasterSolutionLibrary
 
         # Build minimal real MSL objects (empty solutions, no lazy libs).
         # renameFallbacksPerArch requires a deep-copyable object so we use real MSL.

@@ -87,7 +87,7 @@ def test_rocm_path_minimal_non_empty_is_true():
 def _import_posix_search_paths():
     """Import the private _posixSearchPaths function."""
     import importlib
-    M = importlib.import_module("Tensile.Toolchain.Validators")
+    M = importlib.import_module("tensilelite.Toolchain.Validators")
     return M._posixSearchPaths
 
 

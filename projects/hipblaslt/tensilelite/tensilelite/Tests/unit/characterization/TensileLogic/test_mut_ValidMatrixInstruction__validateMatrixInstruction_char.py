@@ -40,7 +40,7 @@ the base suite and asserts the actual diagnostic text, killing the mutant.
 
 import pytest
 
-from Tensile.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
+from tensilelite.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
 
 pytestmark = pytest.mark.unit
 

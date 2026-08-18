@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.TimingInstrumentation.timing_context``
+"""Characterization tests for ``tensilelite.Common.TimingInstrumentation.timing_context``
 — the timing on/off branches gated by the process-global
 ``globalParameters["TimingInstrumentation"]``."""
 
@@ -11,8 +11,8 @@ import contextlib
 
 import pytest
 
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.TimingInstrumentation import flush_timing_buffer, timing_context
+from tensilelite.Common.GlobalParameters import globalParameters
+from tensilelite.Common.TimingInstrumentation import flush_timing_buffer, timing_context
 
 pytestmark = pytest.mark.unit
 
