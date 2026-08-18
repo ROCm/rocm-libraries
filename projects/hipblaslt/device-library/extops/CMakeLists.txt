@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-set(ops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
 string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
@@ -52,17 +51,17 @@ foreach(arch IN LISTS archs)
             "${CMAKE_CURRENT_BINARY_DIR}/A_H_H_256_4_${arch}.s"
             "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s"
             "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s"
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/LayerNormGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_1_${arch}.s" -w 256 -c 4 --sweep-once 1 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/LayerNormGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_0_${arch}.s" -w 256 -c 4 --sweep-once 0 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/SoftmaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/S_8_32_${arch}.s" -m 8 -n 32 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/SoftmaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/S_16_16_${arch}.s" -m 16 -n 16 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/SoftmaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/S_4_64_${arch}.s" -m 4 -n 64 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/SoftmaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/S_2_128_${arch}.s" -m 2 -n 128 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/SoftmaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/S_1_256_${arch}.s" -m 1 -n 256 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_256_4_${arch}.s" -t S -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_H_256_4_${arch}.s" -t H -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s" -t H -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.LayerNormGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_1_${arch}.s" -w 256 -c 4 --sweep-once 1 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.LayerNormGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_0_${arch}.s" -w 256 -c 4 --sweep-once 0 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.SoftmaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/S_8_32_${arch}.s" -m 8 -n 32 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.SoftmaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/S_16_16_${arch}.s" -m 16 -n 16 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.SoftmaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/S_4_64_${arch}.s" -m 4 -n 64 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.SoftmaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/S_2_128_${arch}.s" -m 2 -n 128 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.SoftmaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/S_1_256_${arch}.s" -m 1 -n 256 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.AMaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_256_4_${arch}.s" -t S -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.AMaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_H_256_4_${arch}.s" -t H -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.AMaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s" -t H -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.AMaxGenerator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
         COMMENT "Creating Layer Norm, Softmax and Amax Assembly for ${arch}"
         DEPENDS ${HIPBLASLT_PYTHON_DEPS}
     )
@@ -81,7 +80,7 @@ foreach(arch IN LISTS archs)
             "${output_code_object_file}"
             ${HIPBLASLT_PYTHON_DEPS}
             ${previous_target}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
+        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.ExtOpCreateLibrary --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
         COMMAND ${CMAKE_COMMAND} -E rm -f "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat"
         COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat.zlib" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat.zlib"
