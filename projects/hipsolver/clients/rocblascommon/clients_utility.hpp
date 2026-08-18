@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #pragma once
@@ -9,6 +9,8 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+
+#include "hipsolver.h"
 
 /*!\file
  * \brief provide common utilities
@@ -67,6 +69,10 @@ int query_device_property();
 
 /*  set current device to device_id */
 void set_device(int device_id);
+
+/*  process-global floating-point emulation math mode applied to each handle on creation */
+void                set_math_mode(hipsolverMathMode_t mode);
+hipsolverMathMode_t get_math_mode();
 
 // /* ============================================================================================
 //  */

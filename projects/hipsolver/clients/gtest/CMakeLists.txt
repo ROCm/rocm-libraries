@@ -88,6 +88,7 @@ set(hipsolverRf_test_source
 
 set(others_test_source
   determinism_gtest.cpp
+  emulation_gtest.cpp
   params_gtest.cpp
 )
 

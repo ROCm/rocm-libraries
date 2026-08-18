@@ -26,6 +26,7 @@
 #include "hipsolver.h"
 
 #ifdef __cplusplus
+#include "../rocblascommon/clients_utility.hpp"
 #include "complex.hpp"
 #include "hipsolver_datatype2string.hpp"
 #include <cassert>
@@ -124,6 +125,21 @@ public:
     {
         if(hipsolverCreate(&m_handle) != HIPSOLVER_STATUS_SUCCESS)
             throw std::runtime_error("ERROR: Could not create hipsolverHandle_t");
+
+        // Apply the process-global emulation math mode, if a non-default one was requested.
+        // A failed set is non-fatal and mirrors cuSOLVER's own behavior: the backend leaves the
+        // mode unchanged and the handle keeps running at default math. rocSOLVER returns
+        // NOT_SUPPORTED; a cuSOLVER that lacks the requested mode returns INVALID_VALUE (e.g. the
+        // FP64 emulation modes on CUDA versions/GPUs that do not offer them). Warn and continue.
+        hipsolverMathMode_t mode = get_math_mode();
+        if(mode != HIPSOLVER_DEFAULT_MATH)
+        {
+            hipsolverStatus_t status = hipsolverSetMathMode(m_handle, mode);
+            if(status != HIPSOLVER_STATUS_SUCCESS)
+                fprintf(stderr,
+                        "WARNING: could not set requested hipsolver math mode; "
+                        "continuing with default math\n");
+        }
     }
     ~hipsolver_local_handle()
     {

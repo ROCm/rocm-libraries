@@ -692,6 +692,190 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** FLOATING-POINT EMULATION ********************/
+// rocSOLVER has no floating-point emulation configuration; these are unsupported.
+hipsolverStatus_t hipsolverSetMathMode(hipsolverHandle_t handle, hipsolverMathMode_t mode)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetMathMode(hipsolverHandle_t handle, hipsolverMathMode_t* mode)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mode)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSetEmulationStrategy(hipsolverHandle_t            handle,
+                                                hipsolverEmulationStrategy_t strategy)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetEmulationStrategy(hipsolverHandle_t             handle,
+                                                hipsolverEmulationStrategy_t* strategy)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!strategy)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t
+    hipsolverSetFixedPointEmulationMantissaControl(hipsolverHandle_t                   handle,
+                                                   hipsolverEmulationMantissaControl_t control)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t
+    hipsolverGetFixedPointEmulationMantissaControl(hipsolverHandle_t                    handle,
+                                                   hipsolverEmulationMantissaControl_t* control)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!control)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSetFixedPointEmulationMaxMantissaBitCount(hipsolverHandle_t handle,
+                                                                     int mantissaBitCount)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetFixedPointEmulationMaxMantissaBitCount(hipsolverHandle_t handle,
+                                                                     int* mantissaBitCount)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mantissaBitCount)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSetFixedPointEmulationMantissaBitOffset(hipsolverHandle_t handle,
+                                                                   int mantissaBitOffset)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetFixedPointEmulationMantissaBitOffset(hipsolverHandle_t handle,
+                                                                   int* mantissaBitOffset)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mantissaBitOffset)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t
+    hipsolverSetEmulationSpecialValuesSupport(hipsolverHandle_t                        handle,
+                                              hipsolverEmulationSpecialValuesSupport_t mask)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t
+    hipsolverGetEmulationSpecialValuesSupport(hipsolverHandle_t                         handle,
+                                              hipsolverEmulationSpecialValuesSupport_t* mask)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mask)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 /******************** GESVDJ PARAMS ********************/
 struct hipsolverGesvdjInfo
 {

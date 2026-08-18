@@ -251,6 +251,143 @@ hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t 
 }
 #endif
 
+#if(CUDART_VERSION >= 13000)
+cusolverMathMode_t hip2cuda_mathmode(hipsolverMathMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPSOLVER_DEFAULT_MATH:
+        return CUSOLVER_DEFAULT_MATH;
+    case HIPSOLVER_FP32_EMULATED_BF16X9_MATH:
+        return CUSOLVER_FP32_EMULATED_BF16X9_MATH;
+        // The FP64 emulation modes were declared in CUDA 13.0 but never functional (cuSOLVER returned
+        // INVALID_VALUE) and were removed from cusolverMathMode_t in CUDA 13.1. Map them only where the
+        // backend enum still exists; otherwise reject as an unsupported enum.
+#if(CUDART_VERSION < 13010)
+    case HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH:
+        return CUSOLVER_FP64_EMULATED_FIXEDPOINT_MATH;
+    case HIPSOLVER_FP32_FP64_EMULATED_MATH:
+        return CUSOLVER_FP32_FP64_EMULATED_MATH;
+#endif
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverMathMode_t cuda2hip_mathmode(cusolverMathMode_t mode)
+{
+    switch(mode)
+    {
+    case CUSOLVER_DEFAULT_MATH:
+        return HIPSOLVER_DEFAULT_MATH;
+    case CUSOLVER_FP32_EMULATED_BF16X9_MATH:
+        return HIPSOLVER_FP32_EMULATED_BF16X9_MATH;
+#if(CUDART_VERSION < 13010)
+    case CUSOLVER_FP64_EMULATED_FIXEDPOINT_MATH:
+        return HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH;
+    case CUSOLVER_FP32_FP64_EMULATED_MATH:
+        return HIPSOLVER_FP32_FP64_EMULATED_MATH;
+#endif
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+cudaEmulationStrategy_t hip2cuda_emulation_strategy(hipsolverEmulationStrategy_t strategy)
+{
+    switch(strategy)
+    {
+    case HIPSOLVER_EMULATION_STRATEGY_DEFAULT:
+        return CUDA_EMULATION_STRATEGY_DEFAULT;
+    case HIPSOLVER_EMULATION_STRATEGY_PERFORMANT:
+        return CUDA_EMULATION_STRATEGY_PERFORMANT;
+    case HIPSOLVER_EMULATION_STRATEGY_EAGER:
+        return CUDA_EMULATION_STRATEGY_EAGER;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverEmulationStrategy_t cuda2hip_emulation_strategy(cudaEmulationStrategy_t strategy)
+{
+    switch(strategy)
+    {
+    case CUDA_EMULATION_STRATEGY_DEFAULT:
+        return HIPSOLVER_EMULATION_STRATEGY_DEFAULT;
+    case CUDA_EMULATION_STRATEGY_PERFORMANT:
+        return HIPSOLVER_EMULATION_STRATEGY_PERFORMANT;
+    case CUDA_EMULATION_STRATEGY_EAGER:
+        return HIPSOLVER_EMULATION_STRATEGY_EAGER;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+cudaEmulationMantissaControl_t
+    hip2cuda_mantissa_control(hipsolverEmulationMantissaControl_t control)
+{
+    switch(control)
+    {
+    case HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC:
+        return CUDA_EMULATION_MANTISSA_CONTROL_DYNAMIC;
+    case HIPSOLVER_EMULATION_MANTISSA_CONTROL_FIXED:
+        return CUDA_EMULATION_MANTISSA_CONTROL_FIXED;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverEmulationMantissaControl_t
+    cuda2hip_mantissa_control(cudaEmulationMantissaControl_t control)
+{
+    switch(control)
+    {
+    case CUDA_EMULATION_MANTISSA_CONTROL_DYNAMIC:
+        return HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC;
+    case CUDA_EMULATION_MANTISSA_CONTROL_FIXED:
+        return HIPSOLVER_EMULATION_MANTISSA_CONTROL_FIXED;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+cudaEmulationSpecialValuesSupport_t
+    hip2cuda_special_values(hipsolverEmulationSpecialValuesSupport_t mask)
+{
+    switch(mask)
+    {
+    case HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT:
+        return CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;
+    case HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:
+        return CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
+    case HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY:
+        return CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY;
+    case HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:
+        return CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverEmulationSpecialValuesSupport_t
+    cuda2hip_special_values(cudaEmulationSpecialValuesSupport_t mask)
+{
+    switch(mask)
+    {
+    case CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT:
+        return HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;
+    case CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:
+        return HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
+    case CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY:
+        return HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY;
+    case CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:
+        return HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+#endif
+
 hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus)
 {
     switch(cuStatus)

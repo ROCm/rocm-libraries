@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,28 @@ hipsolverAlgMode_t cuda2hip_algmode(cusolverAlgMode_t mode);
 cusolverDeterministicMode_t hip2cuda_deterministic(hipsolverDeterministicMode_t mode);
 
 hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t mode);
+#endif
+
+#if(CUDART_VERSION >= 13000)
+cusolverMathMode_t hip2cuda_mathmode(hipsolverMathMode_t mode);
+
+hipsolverMathMode_t cuda2hip_mathmode(cusolverMathMode_t mode);
+
+cudaEmulationStrategy_t hip2cuda_emulation_strategy(hipsolverEmulationStrategy_t strategy);
+
+hipsolverEmulationStrategy_t cuda2hip_emulation_strategy(cudaEmulationStrategy_t strategy);
+
+cudaEmulationMantissaControl_t
+    hip2cuda_mantissa_control(hipsolverEmulationMantissaControl_t control);
+
+hipsolverEmulationMantissaControl_t
+    cuda2hip_mantissa_control(cudaEmulationMantissaControl_t control);
+
+cudaEmulationSpecialValuesSupport_t
+    hip2cuda_special_values(hipsolverEmulationSpecialValuesSupport_t mask);
+
+hipsolverEmulationSpecialValuesSupport_t
+    cuda2hip_special_values(cudaEmulationSpecialValuesSupport_t mask);
 #endif
 
 hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus);

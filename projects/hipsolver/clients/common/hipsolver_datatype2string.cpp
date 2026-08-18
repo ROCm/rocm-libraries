@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -220,5 +220,31 @@ hipsolverEigRange_t char2hipsolver_erange(char value)
         return HIPSOLVER_EIG_RANGE_I;
     default:
         throw std::invalid_argument("Invalid character");
+    }
+}
+
+hipsolverMathMode_t string2hipsolver_math_mode(const std::string& value)
+{
+    return value == "default_math"      ? HIPSOLVER_DEFAULT_MATH
+           : value == "fp32_bf16x9"     ? HIPSOLVER_FP32_EMULATED_BF16X9_MATH
+           : value == "fp64_fixedpoint" ? HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH
+           : value == "fp32_fp64"       ? HIPSOLVER_FP32_FP64_EMULATED_MATH
+                                        : static_cast<hipsolverMathMode_t>(-1);
+}
+
+std::string hipsolver_math_mode2string(hipsolverMathMode_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_DEFAULT_MATH:
+        return "default_math";
+    case HIPSOLVER_FP32_EMULATED_BF16X9_MATH:
+        return "fp32_bf16x9";
+    case HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH:
+        return "fp64_fixedpoint";
+    case HIPSOLVER_FP32_FP64_EMULATED_MATH:
+        return "fp32_fp64";
+    default:
+        throw std::invalid_argument("Invalid enum");
     }
 }

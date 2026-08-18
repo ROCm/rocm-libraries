@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 /*! \file
@@ -32,6 +32,43 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetDeterministicMode(hipsolverHandle
 
 HIPSOLVER_EXPORT hipsolverStatus_t
     hipsolverGetDeterministicMode(hipsolverHandle_t handle, hipsolverDeterministicMode_t* mode);
+
+// floating-point emulation
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetMathMode(hipsolverHandle_t   handle,
+                                                        hipsolverMathMode_t mode);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetMathMode(hipsolverHandle_t    handle,
+                                                        hipsolverMathMode_t* mode);
+
+HIPSOLVER_EXPORT hipsolverStatus_t
+    hipsolverSetEmulationStrategy(hipsolverHandle_t handle, hipsolverEmulationStrategy_t strategy);
+
+HIPSOLVER_EXPORT hipsolverStatus_t
+    hipsolverGetEmulationStrategy(hipsolverHandle_t handle, hipsolverEmulationStrategy_t* strategy);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetFixedPointEmulationMantissaControl(
+    hipsolverHandle_t handle, hipsolverEmulationMantissaControl_t control);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetFixedPointEmulationMantissaControl(
+    hipsolverHandle_t handle, hipsolverEmulationMantissaControl_t* control);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetFixedPointEmulationMaxMantissaBitCount(
+    hipsolverHandle_t handle, int mantissaBitCount);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetFixedPointEmulationMaxMantissaBitCount(
+    hipsolverHandle_t handle, int* mantissaBitCount);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetFixedPointEmulationMantissaBitOffset(
+    hipsolverHandle_t handle, int mantissaBitOffset);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetFixedPointEmulationMantissaBitOffset(
+    hipsolverHandle_t handle, int* mantissaBitOffset);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetEmulationSpecialValuesSupport(
+    hipsolverHandle_t handle, hipsolverEmulationSpecialValuesSupport_t mask);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetEmulationSpecialValuesSupport(
+    hipsolverHandle_t handle, hipsolverEmulationSpecialValuesSupport_t* mask);
 
 // gesvdj params
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCreateGesvdjInfo(hipsolverGesvdjInfo_t* info);

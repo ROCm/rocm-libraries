@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #include <cstdlib>
@@ -124,4 +124,16 @@ void set_device(int device_id)
         printf("Set device error: cannot set device ID %d, there may not be such device ID\n",
                (int)device_id);
     }
+}
+
+static hipsolverMathMode_t g_math_mode = HIPSOLVER_DEFAULT_MATH;
+
+void set_math_mode(hipsolverMathMode_t mode)
+{
+    g_math_mode = mode;
+}
+
+hipsolverMathMode_t get_math_mode()
+{
+    return g_math_mode;
 }

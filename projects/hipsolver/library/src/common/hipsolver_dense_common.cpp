@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,81 @@ hipsolverStatus_t hipsolverDnGetDeterministicMode(hipsolverHandle_t             
                                                   hipsolverDeterministicMode_t* mode)
 {
     return hipsolverGetDeterministicMode(handle, mode);
+}
+
+// floating-point emulation
+hipsolverStatus_t hipsolverDnSetMathMode(hipsolverHandle_t handle, hipsolverMathMode_t mode)
+{
+    return hipsolverSetMathMode(handle, mode);
+}
+
+hipsolverStatus_t hipsolverDnGetMathMode(hipsolverHandle_t handle, hipsolverMathMode_t* mode)
+{
+    return hipsolverGetMathMode(handle, mode);
+}
+
+hipsolverStatus_t hipsolverDnSetEmulationStrategy(hipsolverHandle_t            handle,
+                                                  hipsolverEmulationStrategy_t strategy)
+{
+    return hipsolverSetEmulationStrategy(handle, strategy);
+}
+
+hipsolverStatus_t hipsolverDnGetEmulationStrategy(hipsolverHandle_t             handle,
+                                                  hipsolverEmulationStrategy_t* strategy)
+{
+    return hipsolverGetEmulationStrategy(handle, strategy);
+}
+
+hipsolverStatus_t
+    hipsolverDnSetFixedPointEmulationMantissaControl(hipsolverHandle_t                   handle,
+                                                     hipsolverEmulationMantissaControl_t control)
+{
+    return hipsolverSetFixedPointEmulationMantissaControl(handle, control);
+}
+
+hipsolverStatus_t
+    hipsolverDnGetFixedPointEmulationMantissaControl(hipsolverHandle_t                    handle,
+                                                     hipsolverEmulationMantissaControl_t* control)
+{
+    return hipsolverGetFixedPointEmulationMantissaControl(handle, control);
+}
+
+hipsolverStatus_t hipsolverDnSetFixedPointEmulationMaxMantissaBitCount(hipsolverHandle_t handle,
+                                                                       int mantissaBitCount)
+{
+    return hipsolverSetFixedPointEmulationMaxMantissaBitCount(handle, mantissaBitCount);
+}
+
+hipsolverStatus_t hipsolverDnGetFixedPointEmulationMaxMantissaBitCount(hipsolverHandle_t handle,
+                                                                       int* mantissaBitCount)
+{
+    return hipsolverGetFixedPointEmulationMaxMantissaBitCount(handle, mantissaBitCount);
+}
+
+hipsolverStatus_t hipsolverDnSetFixedPointEmulationMantissaBitOffset(hipsolverHandle_t handle,
+                                                                     int mantissaBitOffset)
+{
+    return hipsolverSetFixedPointEmulationMantissaBitOffset(handle, mantissaBitOffset);
+}
+
+hipsolverStatus_t hipsolverDnGetFixedPointEmulationMantissaBitOffset(hipsolverHandle_t handle,
+                                                                     int* mantissaBitOffset)
+{
+    return hipsolverGetFixedPointEmulationMantissaBitOffset(handle, mantissaBitOffset);
+}
+
+hipsolverStatus_t
+    hipsolverDnSetEmulationSpecialValuesSupport(hipsolverHandle_t                        handle,
+                                                hipsolverEmulationSpecialValuesSupport_t mask)
+{
+    return hipsolverSetEmulationSpecialValuesSupport(handle, mask);
+}
+
+hipsolverStatus_t
+    hipsolverDnGetEmulationSpecialValuesSupport(hipsolverHandle_t                         handle,
+                                                hipsolverEmulationSpecialValuesSupport_t* mask)
+{
+    return hipsolverGetEmulationSpecialValuesSupport(handle, mask);
 }
 
 // gesvdj params

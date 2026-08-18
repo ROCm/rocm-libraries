@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 /*! \file
@@ -131,6 +131,36 @@ typedef enum
     HIPSOLVER_DETERMINISTIC_RESULTS           = 241,
     HIPSOLVER_ALLOW_NON_DETERMINISTIC_RESULTS = 242,
 } hipsolverDeterministicMode_t;
+
+typedef enum
+{
+    HIPSOLVER_DEFAULT_MATH                  = 251,
+    HIPSOLVER_FP32_EMULATED_BF16X9_MATH     = 252,
+    HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH = 253,
+    HIPSOLVER_FP32_FP64_EMULATED_MATH       = 254,
+} hipsolverMathMode_t;
+
+typedef enum
+{
+    HIPSOLVER_EMULATION_STRATEGY_DEFAULT    = 261,
+    HIPSOLVER_EMULATION_STRATEGY_PERFORMANT = 262,
+    HIPSOLVER_EMULATION_STRATEGY_EAGER      = 263,
+} hipsolverEmulationStrategy_t;
+
+typedef enum
+{
+    HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC = 271,
+    HIPSOLVER_EMULATION_MANTISSA_CONTROL_FIXED   = 272,
+} hipsolverEmulationMantissaControl_t;
+
+// Bit-mask semantics; values mirror the cuSOLVER backend so masks compose.
+typedef enum
+{
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT  = 0xFFFF,
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NONE     = 0,
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY = 1,
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NAN      = 2,
+} hipsolverEmulationSpecialValuesSupport_t;
 
 // Aliases for hipBLAS enums
 

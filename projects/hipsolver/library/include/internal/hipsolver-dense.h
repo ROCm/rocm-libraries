@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 /*! \file
@@ -50,6 +50,66 @@ HIPSOLVER_EXPORT hipsolverStatus_t
  ********************************************************************************/
 HIPSOLVER_EXPORT hipsolverStatus_t
     hipsolverDnGetDeterministicMode(hipsolverHandle_t handle, hipsolverDeterministicMode_t* mode);
+
+/*! \brief An alias for #hipsolverSetMathMode.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnSetMathMode(hipsolverHandle_t   handle,
+                                                          hipsolverMathMode_t mode);
+
+/*! \brief An alias for #hipsolverGetMathMode.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnGetMathMode(hipsolverHandle_t    handle,
+                                                          hipsolverMathMode_t* mode);
+
+/*! \brief An alias for #hipsolverSetEmulationStrategy.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnSetEmulationStrategy(
+    hipsolverHandle_t handle, hipsolverEmulationStrategy_t strategy);
+
+/*! \brief An alias for #hipsolverGetEmulationStrategy.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnGetEmulationStrategy(
+    hipsolverHandle_t handle, hipsolverEmulationStrategy_t* strategy);
+
+/*! \brief An alias for #hipsolverSetFixedPointEmulationMantissaControl.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnSetFixedPointEmulationMantissaControl(
+    hipsolverHandle_t handle, hipsolverEmulationMantissaControl_t control);
+
+/*! \brief An alias for #hipsolverGetFixedPointEmulationMantissaControl.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnGetFixedPointEmulationMantissaControl(
+    hipsolverHandle_t handle, hipsolverEmulationMantissaControl_t* control);
+
+/*! \brief An alias for #hipsolverSetFixedPointEmulationMaxMantissaBitCount.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnSetFixedPointEmulationMaxMantissaBitCount(
+    hipsolverHandle_t handle, int mantissaBitCount);
+
+/*! \brief An alias for #hipsolverGetFixedPointEmulationMaxMantissaBitCount.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnGetFixedPointEmulationMaxMantissaBitCount(
+    hipsolverHandle_t handle, int* mantissaBitCount);
+
+/*! \brief An alias for #hipsolverSetFixedPointEmulationMantissaBitOffset.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnSetFixedPointEmulationMantissaBitOffset(
+    hipsolverHandle_t handle, int mantissaBitOffset);
+
+/*! \brief An alias for #hipsolverGetFixedPointEmulationMantissaBitOffset.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnGetFixedPointEmulationMantissaBitOffset(
+    hipsolverHandle_t handle, int* mantissaBitOffset);
+
+/*! \brief An alias for #hipsolverSetEmulationSpecialValuesSupport.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnSetEmulationSpecialValuesSupport(
+    hipsolverHandle_t handle, hipsolverEmulationSpecialValuesSupport_t mask);
+
+/*! \brief An alias for #hipsolverGetEmulationSpecialValuesSupport.
+ ********************************************************************************/
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnGetEmulationSpecialValuesSupport(
+    hipsolverHandle_t handle, hipsolverEmulationSpecialValuesSupport_t* mask);
 
 // gesvdj params
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnCreateGesvdjInfo(hipsolverGesvdjInfo_t* info);

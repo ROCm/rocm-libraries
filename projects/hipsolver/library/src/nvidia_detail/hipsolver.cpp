@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -121,6 +121,269 @@ try
     cusolverDeterministicMode_t dmode;
     CHECK_CUSOLVER_ERROR(cusolverDnGetDeterministicMode((cusolverDnHandle_t)handle, &dmode));
     *mode = hipsolver::cuda2hip_deterministic(dmode);
+
+    return HIPSOLVER_STATUS_SUCCESS;
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+/******************** FLOATING-POINT EMULATION ********************/
+hipsolverStatus_t hipsolverSetMathMode(hipsolverHandle_t handle, hipsolverMathMode_t mode)
+try
+{
+#if(CUDART_VERSION >= 13000)
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(
+        cusolverDnSetMathMode((cusolverDnHandle_t)handle, hipsolver::hip2cuda_mathmode(mode)));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetMathMode(hipsolverHandle_t handle, hipsolverMathMode_t* mode)
+try
+{
+#if(CUDART_VERSION >= 13000)
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mode)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    cusolverMathMode_t cmode;
+    CHECK_CUSOLVER_ERROR(cusolverDnGetMathMode((cusolverDnHandle_t)handle, &cmode));
+    *mode = hipsolver::cuda2hip_mathmode(cmode);
+
+    return HIPSOLVER_STATUS_SUCCESS;
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSetEmulationStrategy(hipsolverHandle_t            handle,
+                                                hipsolverEmulationStrategy_t strategy)
+try
+{
+#if(CUDART_VERSION >= 13000)
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(cusolverDnSetEmulationStrategy(
+        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_emulation_strategy(strategy)));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetEmulationStrategy(hipsolverHandle_t             handle,
+                                                hipsolverEmulationStrategy_t* strategy)
+try
+{
+#if(CUDART_VERSION >= 13000)
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!strategy)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    cudaEmulationStrategy_t cstrategy;
+    CHECK_CUSOLVER_ERROR(cusolverDnGetEmulationStrategy((cusolverDnHandle_t)handle, &cstrategy));
+    *strategy = hipsolver::cuda2hip_emulation_strategy(cstrategy);
+
+    return HIPSOLVER_STATUS_SUCCESS;
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+// The fixed-point mantissa and special-values emulation API was introduced in CUDA 13.0 but was
+// non-functional (the FP64 fixed-point path never worked) and NVIDIA removed the entire surface in
+// CUDA 13.1. These forward to cuSOLVER only on 13.0.x; on 13.1+ (and pre-13.0) they return
+// NOT_SUPPORTED. MathMode and EmulationStrategy above survive in 13.1 and keep the >= 13000 gate.
+#define HIPSOLVER_HAS_FIXEDPOINT_EMULATION (CUDART_VERSION >= 13000 && CUDART_VERSION < 13010)
+
+hipsolverStatus_t
+    hipsolverSetFixedPointEmulationMantissaControl(hipsolverHandle_t                   handle,
+                                                   hipsolverEmulationMantissaControl_t control)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(cusolverDnSetFixedPointEmulationMantissaControl(
+        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_mantissa_control(control)));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t
+    hipsolverGetFixedPointEmulationMantissaControl(hipsolverHandle_t                    handle,
+                                                   hipsolverEmulationMantissaControl_t* control)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!control)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    cudaEmulationMantissaControl_t ccontrol;
+    CHECK_CUSOLVER_ERROR(
+        cusolverDnGetFixedPointEmulationMantissaControl((cusolverDnHandle_t)handle, &ccontrol));
+    *control = hipsolver::cuda2hip_mantissa_control(ccontrol);
+
+    return HIPSOLVER_STATUS_SUCCESS;
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSetFixedPointEmulationMaxMantissaBitCount(hipsolverHandle_t handle,
+                                                                     int mantissaBitCount)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(cusolverDnSetFixedPointEmulationMaxMantissaBitCount(
+        (cusolverDnHandle_t)handle, mantissaBitCount));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetFixedPointEmulationMaxMantissaBitCount(hipsolverHandle_t handle,
+                                                                     int* mantissaBitCount)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mantissaBitCount)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(cusolverDnGetFixedPointEmulationMaxMantissaBitCount(
+        (cusolverDnHandle_t)handle, mantissaBitCount));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSetFixedPointEmulationMantissaBitOffset(hipsolverHandle_t handle,
+                                                                   int mantissaBitOffset)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(cusolverDnSetFixedPointEmulationMantissaBitOffset(
+        (cusolverDnHandle_t)handle, mantissaBitOffset));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverGetFixedPointEmulationMantissaBitOffset(hipsolverHandle_t handle,
+                                                                   int* mantissaBitOffset)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mantissaBitOffset)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(cusolverDnGetFixedPointEmulationMantissaBitOffset(
+        (cusolverDnHandle_t)handle, mantissaBitOffset));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t
+    hipsolverSetEmulationSpecialValuesSupport(hipsolverHandle_t                        handle,
+                                              hipsolverEmulationSpecialValuesSupport_t mask)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(cusolverDnSetEmulationSpecialValuesSupport(
+        (cusolverDnHandle_t)handle, hipsolver::hip2cuda_special_values(mask)));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t
+    hipsolverGetEmulationSpecialValuesSupport(hipsolverHandle_t                         handle,
+                                              hipsolverEmulationSpecialValuesSupport_t* mask)
+try
+{
+#if HIPSOLVER_HAS_FIXEDPOINT_EMULATION
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!mask)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    cudaEmulationSpecialValuesSupport_t cmask;
+    CHECK_CUSOLVER_ERROR(
+        cusolverDnGetEmulationSpecialValuesSupport((cusolverDnHandle_t)handle, &cmask));
+    *mask = hipsolver::cuda2hip_special_values(cmask);
 
     return HIPSOLVER_STATUS_SUCCESS;
 #else

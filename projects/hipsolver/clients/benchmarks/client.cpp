@@ -66,6 +66,7 @@ try
     std::string function;
     char        precision;
     rocblas_int device_id;
+    std::string math_mode;
 
     // take arguments and set default values
     // clang-format off
@@ -113,6 +114,13 @@ try
          value<char>(&precision)->default_value('s'),
             "Precision to be used in the tests.\n"
             "                           Options are: s, d, c, z.\n"
+            "                           ")
+
+        ("math_mode",
+         value<std::string>(&math_mode)->default_value("default_math"),
+            "Floating-point emulation math mode applied to the handle.\n"
+            "                           Options are: default_math, fp32_bf16x9, fp64_fixedpoint, fp32_fp64.\n"
+            "                           Emulation modes require CUDA 13 + cuSOLVER; ignored (NOT_SUPPORTED) on rocSOLVER.\n"
             "                           ")
 
         // ("singular",
@@ -498,6 +506,12 @@ try
             throw std::invalid_argument("Invalid Device ID");
     }
     set_device(device_id);
+
+    // set floating-point emulation math mode
+    hipsolverMathMode_t mode = string2hipsolver_math_mode(math_mode);
+    if(mode == static_cast<hipsolverMathMode_t>(-1))
+        throw std::invalid_argument("Invalid value for --math_mode");
+    set_math_mode(mode);
 
     // catch invalid arguments
     argus.validate_precision("precision");
