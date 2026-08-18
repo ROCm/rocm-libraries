@@ -22,10 +22,8 @@
 #
 ################################################################################
 
-import inspect
 import os
 import subprocess
-import shlex
 import shutil
 
 from pathlib import Path
@@ -36,16 +34,13 @@ from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizes
 from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from .Toolchain.Component import Assembler
 
-import rocisa
-
-from . import ROOT_PATH
 from . import LibraryIO
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from .Common.Architectures import archNamesByIsa, isaToGfx
 from .Common.GlobalParameters import globalParameters
 from .Common.TimingInstrumentation import timing_context
-from .tensilelite_create_library import copyStaticFiles, libraryDir
+from .tensilelite_create_library import copyStaticFiles, libraryDir, run as createLibrary
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -131,26 +126,20 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   functions = []
   functionNames = []
 
-  # Get rocIsa path, remove this when subprocess is removed
-  module_path = os.path.dirname(inspect.getfile(rocisa))
-  env = os.environ.copy()
-  if 'PYTHONPATH' in env:
-    if not module_path in env['PYTHONPATH']:
-        env["PYTHONPATH"] = module_path + ":" + env["PYTHONPATH"]
-  else:
-    env["PYTHONPATH"] = module_path
-
-  # The rebuild is a fresh process whose only statement of what to build is
-  # `--architecture=`, so it must carry any distinction the ISA cannot express.
-  # `gfxName` already is that name -- the caller resolved it for this same ISA --
-  # and resolving it a second time here would be a second place to keep right.
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), gfxName)
-  subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
-  # The re-spawned build wrote its code objects into the subtree named for the
+  # The rebuild's only statement of what to build is `--architecture=`, so it
+  # must carry any distinction the ISA cannot express. `gfxName` already is that
+  # name -- the caller resolved it for this same ISA -- and resolving it a second
+  # time here would be a second place to keep right.
+  createLibrary(
+      getBuildClientLibraryArguments(
+          clientLibraryPath, libraryLogicPath, str(assembler.path), gfxName
+      )
+  )
+  # The rebuild wrote its code objects into the subtree named for the
   # architecture it was asked for -- the same name just passed to it -- so they
-  # have to be read back under that name. An ISA-derived name would
-  # look in library/gfx1250/ for a build that filled library/gfx1250-strict/ and
-  # come back with nothing, leaving the client with no code objects at all.
+  # have to be read back under that name. An ISA-derived name would look in
+  # library/gfx1250/ for a build that filled library/gfx1250-strict/ and come
+  # back with nothing, leaving the client with no code objects at all.
   buildArchNames = archNamesByIsa(archNames or [])
   archs = [buildArchNames.get(isa) or isaToGfx(isa) for isa in isaInfoMap.keys()]
   coList, libraryList = clientLibraryFiles(clientLibraryPath, archs)
@@ -305,39 +294,31 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
 
   return process.returncode
 
-
-def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
-  import io
-  runScriptFile = io.StringIO()
-
-  callCreateLibraryCmd = ROOT_PATH + "/bin/TensileCreateLibrary"
+def getBuildClientLibraryArguments(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
+  args = []
 
   if not globalParameters["LazyLibraryLoading"]:
-    callCreateLibraryCmd += " --no-lazy-library-loading"
+    args.append("--no-lazy-library-loading")
 
   if globalParameters.get("AsmDebug", False):
-    callCreateLibraryCmd += " --asm-debug"
+    args.append("--asm-debug")
 
   if globalParameters["KeepBuildTmp"]:
-    callCreateLibraryCmd += " --keep-build-tmp"
+    args.append("--keep-build-tmp")
 
   if globalParameters["DisableAsmComments"]:
-    callCreateLibraryCmd += " --disable-asm-comments"
+    args.append("--disable-asm-comments")
 
-  callCreateLibraryCmd += " --architecture=" + targetGfx
-  callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
-  callCreateLibraryCmd += " --cxx-compiler=" + cxxCompiler
-  callCreateLibraryCmd += " --library-format=" + globalParameters["LibraryFormat"]
-
-  callCreateLibraryCmd += " %s" % libraryLogicPath
-  callCreateLibraryCmd += " %s" % buildPath #" ../source"
-  callCreateLibraryCmd += " %s\n" % globalParameters["RuntimeLanguage"]
-
-  runScriptFile.write(callCreateLibraryCmd)
-
-  return runScriptFile.getvalue()
-
-
+  args.extend([
+      "--architecture=" + targetGfx,
+      "--code-object-version=" + globalParameters["CodeObjectVersion"],
+      "--cxx-compiler=" + cxxCompiler,
+      "--library-format=" + globalParameters["LibraryFormat"],
+      os.path.abspath(os.fspath(libraryLogicPath)),
+      os.path.abspath(os.fspath(buildPath)),
+      globalParameters["RuntimeLanguage"],
+  ])
+  return args
 def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, buildDir, configPaths=None):
   if configPaths is None:
     configPaths = []
