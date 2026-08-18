@@ -13,11 +13,5 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-24.04
     steps:
-    - name: TEMP debug - which workflow file is running
-      run: echo "workflow from users/jialuo/ck/add_ck_labeller; GITHUB_SHA=$GITHUB_SHA"
-
     - id: label-the-PR
       uses: actions/labeler@f27b608878404679385c85cfa523b85ccb86e213 # v6.1.0
-      env:
-        # TEMP: force the config to be read from the branch under test
-        GITHUB_SHA: users/jialuo/ck/add_ck_labeller
