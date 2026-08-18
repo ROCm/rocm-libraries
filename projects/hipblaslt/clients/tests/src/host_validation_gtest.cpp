@@ -270,6 +270,14 @@ TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
     request.absoluteTolerance = 1e-6;
     EXPECT_TRUE(hipblaslt::host_validation::compareHost(request).comparison.passed());
 
+    expected[0]       = 0.0f;
+    observed[0]       = 2.0f * std::numeric_limits<float>::epsilon();
+    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::SymmetricRelative;
+    request.symmetricRelativeTolerance = 3.0f * std::numeric_limits<float>::epsilon();
+    EXPECT_TRUE(hipblaslt::host_validation::compareHost(request).comparison.passed());
+    request.symmetricRelativeTolerance = std::numeric_limits<float>::epsilon();
+    EXPECT_FALSE(hipblaslt::host_validation::compareHost(request).comparison.passed());
+
     request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Disabled;
     request.requireSpecialValueConsistency = true;
     EXPECT_EQ(hipblaslt::host_validation::compareHost(request).comparison.nonFiniteMismatches, 0);
@@ -346,12 +354,14 @@ TEST(HostValidationComparisonBridge, EmptyPointwiseRequestsStillValidateTheProdu
     EXPECT_NO_THROW(compareHost(request));
 }
 
-TEST(HostValidationTolerancePolicy, Gfx11UsesComputeTypeEpsilon)
+TEST(HostValidationTolerancePolicy, Gfx11ScalesComputeTypeEpsilon)
 {
     EXPECT_DOUBLE_EQ(sum_error_tolerance_for_compute_type(HIP_R_32F),
                      std::numeric_limits<float>::epsilon());
     EXPECT_DOUBLE_EQ(sum_error_tolerance_for_compute_type(HIP_R_16F),
                      std::numeric_limits<hipblasLtHalf>::epsilon());
+    EXPECT_DOUBLE_EQ(gfx11_low_precision_accumulation_tolerance_coefficient(HIP_R_32F, 8),
+                     64.0 * std::numeric_limits<float>::epsilon());
 }
 
 TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
