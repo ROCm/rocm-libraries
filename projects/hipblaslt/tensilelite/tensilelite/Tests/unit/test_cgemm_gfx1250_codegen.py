@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 
 from pathlib import Path
 
-from tensilelite import Tensile
+from tensilelite.tensilelite import tensilelite
 
 # Reuse the common CGEMM gfx1250 config (small enough to double as codegen input).
 _CONFIG = (Path(__file__).parent / ".." / "common" / "gemm" / "gfx12"
@@ -52,7 +52,7 @@ def test_cgemm_gfx1250_codegen(tensile_args: list[str], tmp_path: Path) -> None:
         *tensile_args,
         "--gpu-targets", "gfx1250",
     ]
-    Tensile.Tensile(args)
+    tensilelite(args)
 
     asm_files = list(output_dir.rglob("*C_B*.s"))
     assert asm_files, "no CGEMM assembly generated"

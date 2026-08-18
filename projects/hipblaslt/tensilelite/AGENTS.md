@@ -121,7 +121,7 @@ Entry point: `tensilelite/bin/Tensile` â†’ `tensilelite/Tensile.py:Tensile()` â†
 | `tensilelite/LibraryIO.py` | YAML/MsgPack serialization |
 | `tensilelite/Common/` | Global parameters, architecture tables, utilities |
 | `tensilelite/Components/` | Modular kernel building blocks (MAC variants, local/global read/write, scheduling) |
-| `tensilelite/TensileCreateLibrary.py` | Standalone library-creation utility (no benchmarking) |
+| `tensilelite/tensilelite_create_library/` | Standalone library-creation implementation (no benchmarking) |
 
 ### rocisa
 
