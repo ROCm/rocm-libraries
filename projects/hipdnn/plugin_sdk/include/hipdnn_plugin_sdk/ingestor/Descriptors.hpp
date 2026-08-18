@@ -210,6 +210,12 @@ struct KernelDescriptor
     /// Omitted fields take the KMD default; completed tuple is the catalog key.
     MetadataValues metadata;
     int64_t priority = 0; ///< Tie-break when the heuristic is not decisive.
+    /// GFX targets this kernel was built for; empty means arch-independent. Only a
+    /// standalone `.ukd.json` carries it -- an inline kernel takes its pack's arch, since
+    /// it ships inside that pack. Part of the catalog identity, not a match-time filter:
+    /// per-arch shards ship one kernel id many times, each built against its own shard's
+    /// code object.
+    std::vector<std::string> arch;
 };
 
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
@@ -222,10 +228,12 @@ struct KernelDescriptorPack
     DescriptorId engineId;
     DescriptorId dispatchId;
     /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent, matched
-    /// exactly against the device's base target id. Enforced at catalog build, not load
-    /// time, so an excluded pack still builds and simply declines per call -- an expected
-    /// decline like a matcher returning false, not a malformed load, so it must not be
-    /// reported as one.
+    /// exactly against the device's base target id. Part of the pack's catalog identity
+    /// -- packs are keyed by (id, arch), so per-arch shards may ship one pack id many
+    /// times -- as well as a match-time filter. The filter itself is enforced at catalog
+    /// build, not load time, so an excluded pack still builds and simply declines per
+    /// call -- an expected decline like a matcher returning false, not a malformed load,
+    /// so it must not be reported as one.
     std::vector<std::string> arch;
     /// Every kernel this pack binds, whether authored inline or referenced by id.
     std::vector<KernelDescriptor> kernels;

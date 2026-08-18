@@ -390,6 +390,138 @@ TEST(TestDescriptorLoader, CollapsesIdenticalDuplicatesAcrossArchDirectories)
     EXPECT_EQ(sets.front().engine.name, "test:duplicated");
 }
 
+/// The headline per-arch case: a real two-shard install ships one KDP id per arch, each
+/// stamped with its own arch and built against its own shard's kernels. Keyed by id alone
+/// these collide on content and both drop, taking the engine with them.
+TEST(TestDescriptorLoader, KeepsPerArchPacksSharingOneIdAcrossArchDirectories)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_packs"));
+    for(const std::string arch : {"gfx90a", "gfx942"})
+    {
+        auto documents = makeSetDocuments('1', "test:sharded");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({arch});
+        pack.at("kernelDescriptors")[0]["kernel_source"]["source_file"] = "Kernel_" + arch + ".cpp";
+        writeDocuments(dir.path() / arch, documents);
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& packs = sets.front().packs;
+    ASSERT_EQ(packs.size(), 2u);
+    EXPECT_EQ(packs[0].arch, std::vector<std::string>{"gfx90a"});
+    EXPECT_EQ(packs[1].arch, std::vector<std::string>{"gfx942"});
+    EXPECT_EQ(packs[0].kernels.front().source.sourceFile, "Kernel_gfx90a.cpp");
+    EXPECT_EQ(packs[1].kernels.front().source.sourceFile, "Kernel_gfx942.cpp");
+}
+
+/// Same shape one file down: each shard's `.ukd.json` carries that shard's arch, so a
+/// pack resolves the copy built for its own arch rather than whichever file loaded first.
+TEST(TestDescriptorLoader, KeepsPerArchStandaloneKernelsSharingOneId)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_kernels"));
+    for(const std::string arch : {"gfx90a", "gfx942"})
+    {
+        auto documents = makeSetDocuments('1', "test:sharded_kernel");
+        referenceLastKernel(documents);
+        documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({arch});
+        auto& kernel = documentOfType(documents, ".ukd.json");
+        kernel["arch"] = nlohmann::json::array({arch});
+        kernel["kernel_source"]["source_file"] = "Kernel_" + arch + ".cpp";
+        writeDocuments(dir.path() / arch, documents);
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& packs = sets.front().packs;
+    ASSERT_EQ(packs.size(), 2u);
+    // Referenced kernels are appended after the inline ones, so the shard's own UKD is
+    // last in each pack.
+    ASSERT_EQ(packs[0].kernels.size(), 3u);
+    ASSERT_EQ(packs[1].kernels.size(), 3u);
+    EXPECT_EQ(packs[0].kernels.back().source.sourceFile, "Kernel_gfx90a.cpp");
+    EXPECT_EQ(packs[1].kernels.back().source.sourceFile, "Kernel_gfx942.cpp");
+}
+
+/// The empty-arch fallback: a UKD declaring no arch is the shared definition every pack
+/// reaches, which is how one kernel file serves packs of several engines.
+TEST(TestDescriptorLoader, ResolvesAnArchIndependentKernelFromAnArchSpecificPack)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("shared_arch_kernel"));
+    auto documents = makeSetDocuments('1', "test:shared_kernel");
+    referenceLastKernel(documents);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+/// Arch widens the key; it does not weaken the collision rule. Two files claiming one id
+/// *and* one arch with different contents still poison each other.
+TEST(TestDescriptorLoader, DropsBothWhenOneIdAndArchIsDefinedTwiceWithDifferentContents)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_conflict"));
+    auto documents = makeSetDocuments('1', "test:arch_conflict");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    auto second = documentOfType(documents, ".kdp.json");
+    second["name"] = "a different pack with the same id and arch";
+    std::ofstream(dir.path() / "second-claim.kdp.json", std::ios::binary) << second.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "both define"));
+}
+
+/// The key sorts arch, so two spellings of one target list are one identity -- and then
+/// collide on content like any other repeated key. Unsorted, these would be two packs.
+TEST(TestDescriptorLoader, TreatsArchOrderAsOneKey)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_order"));
+    auto documents = makeSetDocuments('1', "test:arch_order");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942", "gfx950"});
+    writeDocuments(dir.path(), documents);
+
+    auto reordered = documentOfType(documents, ".kdp.json");
+    reordered["arch"] = nlohmann::json::array({"gfx950", "gfx942"});
+    reordered["name"] = "the same pack, targets listed the other way";
+    std::ofstream(dir.path() / "reordered.kdp.json", std::ios::binary) << reordered.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// A pack missing its shard's arch stamp names a kernel that exists -- just not under any
+/// arch it claims. Reporting that as "no descriptor defines it" sends the reader hunting
+/// for a missing file.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelIsDefinedOnlyForAnotherArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("kernel_other_arch"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".ukd.json")["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "names kernel " + testUuid('2', 'a')
+                                              + ", which is defined only for another arch"));
+}
+
 /// The whole point of the multi-root change: a set's seven files split across two roots
 /// still resolve as cross-root id references into one catalog.
 TEST(TestDescriptorLoader, ResolvesADescriptorSetSplitAcrossTwoRootsIntoOneEngine)
@@ -585,21 +717,6 @@ INSTANTIATE_TEST_SUITE_P(
     Format,
     TestDescriptorLoaderViolation,
     ::testing::Values(
-        // RFC 0017 §4 names fields Descriptors.hpp does not model yet, so an authored
-        // one is either a typo or a field arriving before its parsed form -- both are
-        // load errors rather than something to ignore.
-        ViolationCase{"unknown_key",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["features_signature"]
-                              = nlohmann::json::array({"tensor_core"});
-                      }},
-        // A file's type comes from its filename alone. A `schema` member would be a second
-        // spelling of that fact, so one is rejected outright rather than tolerated: two
-        // sources of truth have no correct reading when they disagree.
-        ViolationCase{"schema_key_is_not_a_member",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["schema"] = "hipdnn.ued/v1";
-                      }},
         // `metadata`, not `heuristic`: a UED may now omit its UHD and rank by declared
         // order, so erasing that one no longer violates anything. Every engine still
         // names a KMD, because a pack's kernels are checked against its field list.
@@ -1805,29 +1922,67 @@ TEST(TestDescriptorLoader, RejectsAStandaloneKernelWithNoVersion)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:valid");
-    EXPECT_TRUE(
-        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "missing required key 'version' in .ukd.json"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "missing required key 'version'"));
 }
 
 /// Pins the asymmetry the contract draws: `version` is a file-level key, so the field
-/// required standalone is rejected on the inline spelling of the very same kernel.
-TEST(TestDescriptorLoader, RejectsAnInlineKernelCarryingAVersion)
+/// required standalone is warned about, not enforced, on the inline spelling of the very
+/// same kernel -- an unknown key no longer costs the file.
+TEST(TestDescriptorLoader, WarnsOnAnInlineKernelCarryingAVersion)
 {
     auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_with_version"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
-    auto broken = makeSetDocuments('2', "test:broken");
-    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.0";
-    writeDocuments(dir.path(), broken);
+    auto tolerated = makeSetDocuments('2', "test:broken");
+    documentOfType(tolerated, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.0";
+    writeDocuments(dir.path(), tolerated);
+
+    const auto sets = loadFrom(dir.path());
+
+    EXPECT_EQ(sets.size(), 2u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "unknown key 'version' in a 'kernelDescriptors' entry"));
+}
+
+/// A leftover `schema` key was a hard error when the field was dropped in favour of the
+/// filename suffix. It is an unknown key like any other now, so it warns and the engine
+/// still loads.
+TEST(TestDescriptorLoader, WarnsOnALeftoverSchemaKey)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("leftover_schema"));
+    auto documents = makeSetDocuments('1', "test:leftover_schema");
+    documentOfType(documents, ".ued.json")["schema"] = "hipdnn.ued/v1";
+    writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:valid");
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
-                                          "unknown key 'version' in a 'kernelDescriptors' entry"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "unknown key 'schema'"));
+}
+
+/// The point of the policy: a descriptor may carry provenance or tracking fields the
+/// loader has no reader for -- exactly what the build-time packager stamps onto its
+/// output -- and still load.
+TEST(TestDescriptorLoader, LoadsADescriptorCarryingTrackingFields)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("tracking_fields"));
+    auto documents = makeSetDocuments('1', "test:tracked");
+    auto& engine = documentOfType(documents, ".ued.json");
+    engine["provenance"] = {{"origin_kind", "hip"}};
+    engine["x-build-id"] = "abc123";
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:tracked");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "unknown key 'provenance'"));
 }
 
 /// Follows AnUnsupportedVersionDropsBeforeItCanCollideByName's shape: an unreadable file

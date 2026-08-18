@@ -38,6 +38,24 @@ inline bool archSupports(const std::vector<std::string>& arch, std::string_view 
               });
 }
 
+/// Can one device satisfy both @p a and @p b? Empty means "every arch", so it overlaps
+/// everything. Entries may carry feature suffixes (`gfx942:sramecc+`), so this is the
+/// symmetric PREFIX test, not string equality: `gfx942` and `gfx942:sramecc+` are both
+/// satisfied by a device reporting `gfx942:sramecc+:xnack-`.
+inline bool archOverlaps(const std::vector<std::string>& a, const std::vector<std::string>& b)
+{
+    if(a.empty() || b.empty())
+    {
+        return true;
+    }
+    return std::any_of(a.begin(), a.end(), [&b](const std::string& lhs) {
+        return std::any_of(b.begin(), b.end(), [&lhs](const std::string& rhs) {
+            return archMatches(lhs, rhs, ArchMatchMode::PREFIX)
+                   || archMatches(rhs, lhs, ArchMatchMode::PREFIX);
+        });
+    });
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

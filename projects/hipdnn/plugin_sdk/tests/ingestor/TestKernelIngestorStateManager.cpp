@@ -155,6 +155,31 @@ TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackLi
     EXPECT_EQ(counters().kernelCalls, 0);
 }
 
+/// Per-arch shards ship the same logical kernel built for different targets, so their
+/// completed tuples are identical by construction. Tuple uniqueness is per
+/// overlapping-arch group, not per engine: no device sees both, so neither is ambiguous.
+TEST(TestKernelIngestorStateManager, AdmitsTwoPacksSharingATupleUnderDisjointArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    auto first = makePack({GRAPH_MATCHER_ID}, {"gfx90a"});
+    first.kernels = {makeKernel(testId(0x90), "kernel_gfx90a", 64, "FLOAT")};
+    auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    second.id = testId(0x91);
+    second.kernels = {makeKernel(testId(0x92), "kernel_gfx942", 64, "FLOAT")};
+
+    const auto construct = [&] {
+        return std::make_unique<StateManager>(
+            makeSchema(),
+            makeTestMatchers(),
+            makeTestDispatches(),
+            std::vector<KernelDescriptorPack>{first, second},
+            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+    };
+
+    EXPECT_NO_THROW(construct());
+}
+
 TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingPackKernels)
 {
     // Pruned pack's matcher binds a token before a second fails and prunes it; the
@@ -730,6 +755,25 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+            }},
+        // A feature suffix still names the same base target, so one device satisfies both
+        // lists and the tuple really is ambiguous. Plain string equality would let this
+        // construct.
+        StateManagerConstructionThrowCase{
+            "RejectsTwoPacksSharingATupleUnderOverlappingArch",
+            "duplicates the metadata tuple",
+            [] {
+                auto first = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+                first.kernels = {makeKernel(testId(0x93), "kernel_bare", 64, "FLOAT")};
+                auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942:sramecc+"});
+                second.id = testId(0x94);
+                second.kernels = {makeKernel(testId(0x95), "kernel_suffixed", 64, "FLOAT")};
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{first, second},
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
             }},
         StateManagerConstructionThrowCase{

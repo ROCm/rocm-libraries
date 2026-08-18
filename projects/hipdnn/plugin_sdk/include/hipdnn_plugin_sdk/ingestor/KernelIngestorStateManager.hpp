@@ -7,10 +7,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -20,6 +20,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -218,9 +219,12 @@ private:
     /// than completing each kernel's metadata again on every graph.
     void validateAndIndexPacks()
     {
-        // set, not a scanned vector: the check is quadratic otherwise, and the tuple is
-        // an ordered map, so it already orders.
-        std::set<MetadataValues> seenKeys;
+        // Two kernels may share a tuple when no single device can see both -- that is
+        // exactly the per-arch shard layout. Uniqueness is therefore per overlapping-arch
+        // group, not per engine: the tuple is the catalog key, and a catalog is built for
+        // one device. Keyed by the tuple (an ordered map, so it already orders) rather
+        // than scanned, which would be quadratic.
+        std::map<MetadataValues, std::vector<std::vector<std::string>>> archesClaimingTuple;
 
         _definitions.reserve(_packs.size());
         for(const auto& pack : _packs)
@@ -254,13 +258,23 @@ private:
                 }
 
                 auto key = completeMetadata(kernel);
-                if(!seenKeys.insert(key).second)
+                // try_emplace, not operator[], only because misc-const-correctness
+                // misreads the operator[] form here and demands a const map.
+                std::vector<std::vector<std::string>>& claimants
+                    = archesClaimingTuple.try_emplace(key).first->second;
+                for(const auto& claimed : claimants)
                 {
-                    throw std::invalid_argument(
-                        "kernel '" + toString(kernel.id)
-                        + "' duplicates the metadata tuple of another kernel under schema '"
-                        + _schema.name + "'; the tuple is the catalog key and must be unique");
+                    if(archOverlaps(claimed, pack.arch))
+                    {
+                        throw std::invalid_argument(
+                            "kernel '" + toString(kernel.id)
+                            + "' duplicates the metadata tuple of another kernel under schema '"
+                            + _schema.name
+                            + "' on an arch both packs claim; the tuple is the catalog key "
+                            + "and must be unique per device");
+                    }
                 }
+                claimants.push_back(pack.arch);
 
                 packDefinitions.push_back(KernelDefinition{kernel.id,
                                                            pack.id,

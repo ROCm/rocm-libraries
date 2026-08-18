@@ -69,16 +69,29 @@
  * completed metadata tuples collide on the catalog key.
  *
  * The UED follows RFC 0020 (source of truth); the other six follow RFC 0017 §4 until
- * their own follow-ups land. Two deliberate divergences from RFC 0020 §4.2, pending an
- * amendment: no `schema` member -- the filename already carries that fact, and a file
- * whose name and body disagree has no correct reading; and `version` required on every
- * type, not just the UED -- a type with no version can't be gated by §11.1 at all.
+ * their own follow-ups land. Five deliberate divergences, pending an amendment:
+ *
+ *  - RFC 0020 §4.2: no `schema` member -- the filename already carries that fact, and a
+ *    file whose name and body disagree has no correct reading.
+ *  - RFC 0020 §4.2: `version` required on every type, not just the UED -- a type with no
+ *    version can't be gated by §11.1 at all.
+ *  - RFC 0020 §10.2.1 makes the id the unit of collision; packs and standalone kernels
+ *    are keyed by (id, arch), because a per-arch shard ships one id per arch with content
+ *    built against that arch. The other five types stay keyed by id alone.
+ *  - RFC 0017 §5 calls arch a pack property; a standalone UKD carries `arch` too, for the
+ *    same reason -- a shard ships one kernel id many times and the id alone cannot
+ *    distinguish them.
+ *  - RFC 0020 §10.1 and §11 make any unknown field a hard rejection
+ *    (`additionalProperties: false`); this warns and ignores instead, so a descriptor may
+ *    carry provenance or tracking fields. A leftover `schema` key -- deliberately a hard
+ *    error when the field was removed above -- is therefore only a warning too.
+ *
  * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
  * parseEngineDescriptor().
  *
  * Apart from the UED and KDP, whose keys the RFCs fix, every JSON key is the snake_case
- * spelling of its C++ field, and an unrecognized key is a parse error, not a silent
- * no-op -- so a typo is reported rather than ignored. The KDP's `kernelDescriptors` key
+ * spelling of its C++ field, and an unrecognized key is a WARN naming the file, then
+ * ignored -- only a *missing required* key is fatal. The KDP's `kernelDescriptors` key
  * is camelCase, the RFCs' own inconsistency, kept as-is rather than silently "fixed".
  *
  * Only fields Descriptors.hpp models are parsed; the RFCs describe more (declarative
@@ -104,12 +117,22 @@ struct CatalogEntry
     bool conflicted = false; ///< two files disagreed; treat as absent
 };
 
+/// Identity for the two types a per-arch shard ships more than once. Arch is sorted so two
+/// files listing the same targets in a different order are one descriptor (and so collide
+/// on content) rather than two.
+using ArchKey = std::pair<DescriptorId, std::vector<std::string>>;
+
 template <typename T>
 using DescriptorMap = std::unordered_map<DescriptorId, CatalogEntry<T>, DescriptorIdHash>;
+/// Ordered, unlike the five id-keyed maps: iteration order is the order packs enter a set,
+/// and (id, arch) is the only total order available once ids repeat.
+using PackMap = std::map<ArchKey, CatalogEntry<KernelDescriptorPack>>;
+using KernelMap = std::map<ArchKey, CatalogEntry<KernelDescriptor>>;
 
-/// Every descriptor found under a root, keyed by id, one map per type. Identity is
-/// (type, id): the same GUID naming a UED in one file and a KMD in another is legal
-/// and invisible here.
+/// Every descriptor found under a root, one map per type. Identity is (type, id) for the
+/// five id-keyed types: the same GUID naming a UED in one file and a KMD in another is
+/// legal and invisible here. Packs and standalone kernels are (type, id, arch), because a
+/// per-arch shard ships one id per arch with content built against that arch.
 struct DescriptorCatalog
 {
     DescriptorMap<MetadataSchema> schemas;
@@ -117,8 +140,8 @@ struct DescriptorCatalog
     DescriptorMap<EngineDescriptor> engines;
     DescriptorMap<MatchDescriptor> matchers;
     DescriptorMap<DispatchDescriptor> dispatches;
-    DescriptorMap<KernelDescriptorPack> packs;
-    DescriptorMap<KernelDescriptor> kernels;
+    PackMap packs;
+    KernelMap kernels;
 };
 
 namespace detail
@@ -163,17 +186,23 @@ inline void requireObject(const nlohmann::json& value, const std::string& where)
     }
 }
 
-/// Rejects any key the struct does not spell, so an authoring typo is reported rather
-/// than dropped on the floor.
-inline void requireOnlyKeys(const nlohmann::json& object,
-                            std::initializer_list<std::string_view> allowed,
-                            const std::string& where)
+/// Warns on any key the struct does not spell, then carries on: a descriptor may carry
+/// provenance or tracking fields the loader has no use for, and rejecting the file over
+/// one is worse than ignoring it. Only a MISSING required key is fatal (requireKey).
+/// The cost is real and accepted: a typo in an OPTIONAL key -- UED `heuristic`, `knobs`,
+/// `behavior_notes`, `numerical_notes`, `sdk_version`; KDP `arch`; UKD `priority`,
+/// `metadata`, `arch`; a KMD field's `default_value` -- now silently does nothing, and
+/// the default log level is `off`, so nothing says so.
+inline void warnOnUnknownKeys(const nlohmann::json& object,
+                              std::initializer_list<std::string_view> allowed,
+                              const std::string& where)
 {
     for(const auto& item : object.items())
     {
         if(std::find(allowed.begin(), allowed.end(), item.key()) == allowed.end())
         {
-            fail("unknown key '" + item.key() + "' in " + where);
+            HIPDNN_PLUGIN_LOG_WARN("descriptor loader: unknown key '" << item.key() << "' in "
+                                                                      << where << "; ignoring it");
         }
     }
 }
@@ -485,12 +514,11 @@ inline bool coerceToDeclaredType(MetadataValue& value, MetadataType declared)
 }
 
 /// Deviates from RFC 0017 §4: the RFC's example field also carries `optional` and spells
-/// the default `default`, but MetadataField has neither, so a conforming field is
-/// rejected as an unknown key until the struct grows one.
-inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
+/// the default `default`, but MetadataField has neither, so a conforming field is warned
+/// about and ignored until the struct grows one.
+inline MetadataSchema parseMetadataSchema(const nlohmann::json& root, const std::string& where)
 {
-    const std::string where{SUFFIX_KMD};
-    requireOnlyKeys(root, {"version", "id", "name", "fields"}, where);
+    warnOnUnknownKeys(root, {"version", "id", "name", "fields"}, where);
 
     MetadataSchema schema;
     schema.id = requireId(root, "id", where);
@@ -504,7 +532,7 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
     for(const auto& fieldJson : fields)
     {
         requireObject(fieldJson, "a 'fields' entry");
-        requireOnlyKeys(fieldJson, {"name", "type", "default_value"}, "a 'fields' entry");
+        warnOnUnknownKeys(fieldJson, {"name", "type", "default_value"}, "a 'fields' entry");
 
         MetadataField field;
         field.name = requireString(fieldJson, "name", "a 'fields' entry");
@@ -526,10 +554,10 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
     return schema;
 }
 
-inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root)
+inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
+                                                    const std::string& where)
 {
-    const std::string where{SUFFIX_UHD};
-    requireOnlyKeys(root, {"version", "id", "name", "kind", "payload"}, where);
+    warnOnUnknownKeys(root, {"version", "id", "name", "kind", "payload"}, where);
 
     HeuristicDescriptor heuristic;
     heuristic.id = requireId(root, "id", where);
@@ -628,24 +656,23 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
     return values;
 }
 
-inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
+inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    const std::string where{SUFFIX_UED};
     // `sdk_version` deviates from RFC 0020 §4.2, whose field table and schema don't list
     // it: RFC 0017 §4 puts the graph schema version on the UMD, but every descriptor
     // under an engine reads tokens that engine's binding produced, so it belongs on the
     // engine instead. Accepted here pending the RFC amendment that moves the field.
-    requireOnlyKeys(root,
-                    {"version",
-                     "id",
-                     "name",
-                     "sdk_version",
-                     "heuristic",
-                     "metadata",
-                     "knobs",
-                     "behavior_notes",
-                     "numerical_notes"},
-                    where);
+    warnOnUnknownKeys(root,
+                      {"version",
+                       "id",
+                       "name",
+                       "sdk_version",
+                       "heuristic",
+                       "metadata",
+                       "knobs",
+                       "behavior_notes",
+                       "numerical_notes"},
+                      where);
 
     EngineDescriptor engine;
     engine.id = requireId(root, "id", where);
@@ -695,10 +722,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
     return engine;
 }
 
-inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
+inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    const std::string where{SUFFIX_UMD};
-    requireOnlyKeys(root, {"version", "id", "name", "scope", "match_symbol"}, where);
+    warnOnUnknownKeys(root, {"version", "id", "name", "scope", "match_symbol"}, where);
 
     MatchDescriptor matcher;
     matcher.id = requireId(root, "id", where);
@@ -708,10 +734,10 @@ inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
     return matcher;
 }
 
-inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root)
+inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
+                                                  const std::string& where)
 {
-    const std::string where{SUFFIX_UDD};
-    requireOnlyKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
+    warnOnUnknownKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
 
     DispatchDescriptor dispatch;
     dispatch.id = requireId(root, "id", where);
@@ -723,7 +749,7 @@ inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root)
 inline KernelSource parseKernelSource(const nlohmann::json& root, const std::string& where)
 {
     requireObject(root, where);
-    requireOnlyKeys(root, {"kind", "source_file", "entry_point"}, where);
+    warnOnUnknownKeys(root, {"kind", "source_file", "entry_point"}, where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
@@ -794,19 +820,22 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
 {
     const std::string where = "a 'kernelDescriptors' entry";
     requireObject(root, where);
-    requireOnlyKeys(root, {"id", "name", "kernel_source", "metadata", "priority"}, where);
+    warnOnUnknownKeys(root, {"id", "name", "kernel_source", "metadata", "priority"}, where);
     return parseKernelDescriptorBody(root, where);
 }
 
 /// UKD: a kernel shipped in its own file, named from a pack by bare id. Identical to an
-/// inline one once loaded; the file exists so a kernel can ship separately from the pack
-/// that binds it, or be shared by packs of different engines.
-inline KernelDescriptor parseStandaloneKernelDescriptor(const nlohmann::json& root)
+/// inline one once loaded apart from `arch`, which only this form carries -- an inline
+/// kernel takes its pack's arch. The file exists so a kernel can ship separately from the
+/// pack that binds it, or be shared by packs of different engines.
+inline KernelDescriptor parseStandaloneKernelDescriptor(const nlohmann::json& root,
+                                                        const std::string& where)
 {
-    const std::string where{SUFFIX_UKD};
-    requireOnlyKeys(
-        root, {"version", "id", "name", "kernel_source", "metadata", "priority"}, where);
-    return parseKernelDescriptorBody(root, where);
+    warnOnUnknownKeys(
+        root, {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"}, where);
+    auto kernel = parseKernelDescriptorBody(root, where);
+    kernel.arch = requireArchList(root, where);
+    return kernel;
 }
 
 /// A UUID string from an array-valued key, with the key named in any failure. Shared by
@@ -829,10 +858,10 @@ inline DescriptorId
     }
 }
 
-inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root)
+inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root,
+                                                      const std::string& where)
 {
-    const std::string where{SUFFIX_KDP};
-    requireOnlyKeys(
+    warnOnUnknownKeys(
         root,
         {"version", "id", "name", "arch", "matchers", "engine", "dispatch", "kernelDescriptors"},
         where);
@@ -876,23 +905,65 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
     return pack;
 }
 
-/// Inserts a freshly parsed descriptor, resolving a repeated id against what is already
+/// The catalog identity of a freshly parsed descriptor: the id alone for the five types a
+/// shard ships once, (id, sorted arch) for the two it ships per arch. The sort is on a
+/// copy -- the descriptor's own `arch` stays as authored, like `kernelIds` does, and
+/// nothing reads its order.
+template <typename T>
+inline DescriptorId catalogKey(const T& descriptor)
+{
+    return descriptor.id;
+}
+
+inline ArchKey catalogKey(const KernelDescriptorPack& descriptor)
+{
+    auto arch = descriptor.arch;
+    std::sort(arch.begin(), arch.end());
+    return ArchKey{descriptor.id, std::move(arch)};
+}
+
+inline ArchKey catalogKey(const KernelDescriptor& descriptor)
+{
+    auto arch = descriptor.arch;
+    std::sort(arch.begin(), arch.end());
+    return ArchKey{descriptor.id, std::move(arch)};
+}
+
+/// How a key reads in the log. Two entries sharing an id must be distinguishable, or a
+/// per-arch conflict names the same thing twice.
+inline std::string keyDescription(const DescriptorId& id)
+{
+    return "id=" + toString(id);
+}
+
+inline std::string keyDescription(const ArchKey& key)
+{
+    std::string text = "id=" + toString(key.first) + " arch=[";
+    for(size_t i = 0; i < key.second.size(); ++i)
+    {
+        text += (i == 0 ? "" : ",") + key.second[i];
+    }
+    return text + "]";
+}
+
+/// Inserts a freshly parsed descriptor, resolving a repeated key against what is already
 /// held: identical content is a duplicate shard and is dropped, differing content
 /// poisons the entry so neither definition is used.
-template <typename T>
-inline void insertCatalogEntry(DescriptorMap<T>& map,
+template <typename Map, typename T>
+inline void insertCatalogEntry(Map& map,
                                T descriptor,
                                const nlohmann::json& source,
                                const std::filesystem::path& path)
 {
-    const DescriptorId id = descriptor.id;
+    auto key = catalogKey(descriptor);
+    const auto description = keyDescription(key);
     const std::string name = descriptor.name;
 
-    auto [it, inserted]
-        = map.try_emplace(id, CatalogEntry<T>{std::move(descriptor), source, path, false});
+    auto [it, inserted] = map.try_emplace(
+        std::move(key), CatalogEntry<T>{std::move(descriptor), source, path, false});
     if(inserted)
     {
-        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " id=" << toString(id)
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " " << description
                                                             << " name='" << name << "'");
         return;
     }
@@ -905,14 +976,13 @@ inline void insertCatalogEntry(DescriptorMap<T>& map,
     if(it->second.source == source)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: duplicate identical descriptor "
-                               << path << " id=" << toString(id) << " name='" << name
+                               << path << " " << description << " name='" << name
                                << "', already loaded from " << it->second.path << "; skipping");
         return;
     }
-    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: " << path << " and " << it->second.path
-                                                  << " both define id=" << toString(id) << " name='"
-                                                  << name
-                                                  << "' with different contents; ignoring both");
+    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                            << path << " and " << it->second.path << " both define " << description
+                            << " name='" << name << "' with different contents; ignoring both");
     // Never cleared by a later file: once two files disagree about what an id means,
     // no third file can decide which of them was right.
     it->second.conflicted = true;
@@ -928,6 +998,29 @@ inline const T* findDescriptor(const DescriptorMap<T>& map, const DescriptorId& 
         return nullptr;
     }
     return &it->second.descriptor;
+}
+
+/// The kernel @p id names, as seen by a pack targeting @p packArch. A shard's kernels are
+/// keyed by that shard's arch, so a pack resolves its own first; an arch-independent
+/// kernel (empty arch) is the shared fallback, which is how one `.ukd.json` serves packs
+/// of several engines. A conflicted exact match returns nullptr rather than falling
+/// through -- substituting the shared kernel would hide the collision the conflict
+/// recorded.
+inline const KernelDescriptor* findKernelForPack(const KernelMap& kernels,
+                                                 const DescriptorId& id,
+                                                 const std::vector<std::string>& packArch)
+{
+    auto arch = packArch;
+    std::sort(arch.begin(), arch.end());
+    if(const auto exact = kernels.find(ArchKey{id, arch}); exact != kernels.end())
+    {
+        return exact->second.conflicted ? nullptr : &exact->second.descriptor;
+    }
+    if(const auto shared = kernels.find(ArchKey{id, {}}); shared != kernels.end())
+    {
+        return shared->second.conflicted ? nullptr : &shared->second.descriptor;
+    }
+    return nullptr;
 }
 
 /// Checks and completes one kernel's metadata against its engine's KMD, mirroring the
@@ -1039,43 +1132,44 @@ inline constexpr std::array FILE_TYPES{
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.schemas, parseMetadataSchema(d), d, p);
+                 insertCatalogEntry(c.schemas, parseMetadataSchema(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UHD,
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d), d, p);
+                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UED,
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.engines, parseEngineDescriptor(d), d, p);
+                 insertCatalogEntry(c.engines, parseEngineDescriptor(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UMD,
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.matchers, parseMatchDescriptor(d), d, p);
+                 insertCatalogEntry(c.matchers, parseMatchDescriptor(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UDD,
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.dispatches, parseDispatchDescriptor(d), d, p);
+                 insertCatalogEntry(c.dispatches, parseDispatchDescriptor(d, p.string()), d, p);
              }},
     FileType{SUFFIX_KDP,
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.packs, parseKernelDescriptorPack(d), d, p);
+                 insertCatalogEntry(c.packs, parseKernelDescriptorPack(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UKD,
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.kernels, parseStandaloneKernelDescriptor(d), d, p);
+                 insertCatalogEntry(
+                     c.kernels, parseStandaloneKernelDescriptor(d, p.string()), d, p);
              }},
 };
 static_assert(FILE_TYPES.size() == 7, "one row per descriptor file type");
@@ -1121,8 +1215,9 @@ inline void
     }
 
     // `arch` prunes at match time only, not here -- the calling device is unknown at
-    // load, and folders are purely organizational (the walk is recursive; a file's
-    // directory means nothing to the loader). skip_permission_denied keeps one
+    // load. It is still read at load, as part of a pack's and a standalone kernel's
+    // catalog key; what stays irrelevant is the file's folder (the walk is recursive; a
+    // file's directory means nothing to the loader). skip_permission_denied keeps one
     // unreadable subdirectory from turning the whole iterator into end() and silently
     // losing every engine after it; iterated with error_code overloads throughout since
     // this loader promises never to throw.
@@ -1411,16 +1506,13 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         }
 
         std::vector<const KernelDescriptorPack*> packEntries;
-        for(const auto& [id, entry] : catalog.packs)
+        for(const auto& [key, entry] : catalog.packs)
         {
             if(!entry.conflicted && entry.descriptor.engineId == engine.id)
             {
                 packEntries.push_back(&entry.descriptor);
             }
         }
-        std::sort(packEntries.begin(), packEntries.end(), [](const auto* lhs, const auto* rhs) {
-            return lhs->id < rhs->id;
-        });
 
         DescriptorSet set;
         set.engine = engine;
@@ -1439,8 +1531,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         {
             // Failure granularity is the pack: a pack whose cross-references dangle or
             // whose kernels contradict the KMD is dropped while the engine keeps its other
-            // packs. A duplicate kernel metadata tuple is the exception -- the state
-            // manager's constructor throws on it, taking the whole engine. RFC 0017 §10
+            // packs. A duplicate kernel metadata tuple is the exception, for packs whose
+            // arch lists overlap -- the state manager's constructor throws on it, taking
+            // the whole engine. RFC 0017 §10
             // wants only the colliding kernel dropped; the upgrade is making that
             // constructor log and drop rather than throw, in one place, so hand-built packs
             // get the same behavior.
@@ -1478,11 +1571,32 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             {
                 for(const auto& kernelId : pack.kernelIds)
                 {
-                    const auto* kernel = detail::findDescriptor(catalog.kernels, kernelId);
+                    const auto* kernel
+                        = detail::findKernelForPack(catalog.kernels, kernelId, pack.arch);
                     if(kernel == nullptr)
                     {
-                        reason = "names kernel " + toString(kernelId)
-                                 + ", which no descriptor defines";
+                        // A kernel defined only under an arch this pack does not claim is
+                        // a different failure from one nothing defines, and "no descriptor
+                        // defines it" is actively misleading there -- that is what a pack
+                        // missing its shard's arch stamp looks like. A conflicted entry
+                        // under one of this pack's own keys keeps the original wording:
+                        // the two definitions poisoned each other, so nothing usably
+                        // defines the id. Entries sharing an id are contiguous from the
+                        // empty-arch key, which sorts first.
+                        auto packArch = pack.arch;
+                        std::sort(packArch.begin(), packArch.end());
+                        const auto first = catalog.kernels.lower_bound(ArchKey{kernelId, {}});
+                        const bool existsUnderAnotherArch
+                            = first != catalog.kernels.end() && first->first.first == kernelId
+                              && catalog.kernels.find(ArchKey{kernelId, packArch})
+                                     == catalog.kernels.end()
+                              && catalog.kernels.find(ArchKey{kernelId, {}})
+                                     == catalog.kernels.end();
+                        reason = existsUnderAnotherArch
+                                     ? "names kernel " + toString(kernelId)
+                                           + ", which is defined only for another arch"
+                                     : "names kernel " + toString(kernelId)
+                                           + ", which no descriptor defines";
                         break;
                     }
                     pack.kernels.push_back(*kernel);
@@ -1565,7 +1679,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
     // failure in a loader where every other rejection is logged. Diagnostics only; never
     // changes what gets loaded.
     std::vector<const CatalogEntry<KernelDescriptorPack>*> orphans;
-    for(const auto& [id, entry] : catalog.packs)
+    for(const auto& [key, entry] : catalog.packs)
     {
         if(!entry.conflicted
            && catalog.engines.find(entry.descriptor.engineId) == catalog.engines.end())
@@ -1573,9 +1687,6 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             orphans.push_back(&entry);
         }
     }
-    std::sort(orphans.begin(), orphans.end(), [](const auto* lhs, const auto* rhs) {
-        return lhs->descriptor.id < rhs->descriptor.id;
-    });
     for(const auto* entry : orphans)
     {
         HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: pack '"
@@ -1596,13 +1707,19 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         {
             continue;
         }
-        const DescriptorId& kernelId = kernelEntry.first;
-        const bool named = std::any_of(
-            catalog.packs.begin(), catalog.packs.end(), [&kernelId](const auto& packEntry) {
-                const auto& ids = packEntry.second.descriptor.kernelIds;
-                return !packEntry.second.conflicted
-                       && std::find(ids.begin(), ids.end(), kernelId) != ids.end();
-            });
+        const DescriptorId& kernelId = kernelEntry.first.first;
+        // Naming the id is not enough: a gfx942 pack naming this id resolves to the gfx942
+        // kernel, which says nothing about the gfx950 entry under the same id. The pack
+        // must actually resolve to *this* entry.
+        const bool named
+            = std::any_of(catalog.packs.begin(), catalog.packs.end(), [&](const auto& packEntry) {
+                  const auto& pack = packEntry.second.descriptor;
+                  const auto& ids = pack.kernelIds;
+                  return !packEntry.second.conflicted
+                         && std::find(ids.begin(), ids.end(), kernelId) != ids.end()
+                         && detail::findKernelForPack(catalog.kernels, kernelId, pack.arch)
+                                == &kernelEntry.second.descriptor;
+              });
         if(!named)
         {
             unreferenced.push_back(&kernelEntry.second);
