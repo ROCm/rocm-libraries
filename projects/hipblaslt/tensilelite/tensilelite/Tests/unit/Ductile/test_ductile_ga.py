@@ -18,9 +18,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from Tensile.ductile.algorithm import GeneticAlgorithm
-from Tensile.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
-from Tensile.ductile.core.mating import MatingExhaustedError
+from tensilelite.ductile.algorithm import GeneticAlgorithm
+from tensilelite.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
+from tensilelite.ductile.core.mating import MatingExhaustedError
 
 pytestmark = pytest.mark.unit
 
@@ -292,7 +292,7 @@ class TestGAOptimize:
 
     def test_max_iterations_reached_fallback(self, monkeypatch):
         """When initial sampling raises MaxIterationsReached, GA retries with half pop."""
-        from Tensile.ductile.core.space import MaxIterationsReached
+        from tensilelite.ductile.core.space import MaxIterationsReached
 
         call_count = [0]
         original_sample = SearchSpace.sample
@@ -363,7 +363,7 @@ class TestGASaveLoad:
 
         ckpt = tmp_path / "ckpt.pkl"
         # Manually build a valid checkpoint dict
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         import random as _random
         pop = Population([Individual({"DepthU": 0, "SourceSwap": 0}, F=1.0)])
         state = {
@@ -470,7 +470,7 @@ class TestGAUpdate:
     def test_update_with_none_best_initializes_best(self):
         ga = _make_ga(n_gen=1, pop_size=8)
         space = ga.space
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         pop = Population([
             Individual({"DepthU": 0, "SourceSwap": 0}, F=0.0),
             Individual({"DepthU": 1, "SourceSwap": 1}, F=0.0),
@@ -484,7 +484,7 @@ class TestGAUpdate:
 
     def test_update_replaces_best_on_improvement(self):
         ga = _make_ga(n_gen=1, pop_size=8)
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         pop = Population([
             Individual({"DepthU": 0, "SourceSwap": 0}, F=1.0),
             Individual({"DepthU": 1, "SourceSwap": 1}, F=2.0),
@@ -499,7 +499,7 @@ class TestGAUpdate:
 
     def test_negative_scores_clipped_to_minus_one(self):
         ga = _make_ga(n_gen=1, pop_size=8)
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         pop = Population([Individual({"DepthU": 0, "SourceSwap": 0})])
         scores = np.array([[-5.0]], dtype=np.float32)
         best, _ = ga.update(None, pop, Population(), scores)

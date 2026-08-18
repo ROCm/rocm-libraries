@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.printExit``.
+``tensilelite.Common.Utilities.printExit``.
 
 ``printExit`` prints a ``Tensile::FATAL: <message>`` line, flushes stdout, and
 terminates the process via ``sys.exit(-1)``. These tests pin the exact message
@@ -13,7 +13,7 @@ prefix and the exact exit code so that mutations of either are caught.
 
 import pytest
 
-from Tensile.Common.Utilities import printExit
+from tensilelite.Common.Utilities import printExit
 
 pytestmark = pytest.mark.unit
 

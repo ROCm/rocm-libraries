@@ -77,7 +77,7 @@ def _call_helper_in_subprocess(
 
     Each phase runs in a clean interpreter so Tensile's global state from the
     build phase cannot bleed into the run phase (uninstalled checkout case).
-    PYTHONPATH is forwarded from sys.path so the child can import Tensile.
+    PYTHONPATH is forwarded from sys.path so the child can import tensilelite.
     """
     script = (
         f"import sys; sys.path.insert(0, {repr(_COMMON_DIR)}); "

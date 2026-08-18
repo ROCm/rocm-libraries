@@ -34,7 +34,7 @@ import re
 import pytest
 import yaml
 
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
@@ -125,7 +125,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     # A Tensile config is a mapping (GlobalParameters/BenchmarkProblems/...).
     # Top-level sequences are library logic YAMLs (e.g. characterization data
-    # files), which are not standalone Tensile.py configs. Signal the caller to
+    # files), which are not standalone tensilelite.py configs. Signal the caller to
     # skip them rather than crashing on doc["BenchmarkProblems"].
     if not isinstance(doc, dict):
         return None
@@ -216,17 +216,17 @@ def findAvailableArchs(gpu_targets=None):
     if gpu_targets:
         return [t.strip() for t in gpu_targets.split(";") if t.strip()]
 
-    from Tensile.Tests.gpu_detection import get_available_archs
+    from tensilelite.Tests.gpu_detection import get_available_archs
     return get_available_archs()
 
 
 def findConfigs(rootDir=None, availableArchs=None):
     """
-    Walks rootDir (defaults to trying to find Tensile/Tests) and returns a
+    Walks rootDir (defaults to trying to find tensilelite/Tests) and returns a
     list of test parameters, one for each YAML file.
 
     Args:
-        rootDir: Directory to walk for YAML configs. Defaults to Tensile/Tests.
+        rootDir: Directory to walk for YAML configs. Defaults to tensilelite/Tests.
         availableArchs: Pre-resolved list of GPU architectures.
             When None, calls findAvailableArchs() to auto-detect.
     """
@@ -254,7 +254,7 @@ def findConfigs(rootDir=None, availableArchs=None):
             # Skip build client script
             if filename == "build_client.yaml":
                 continue
-            # filter out yamls in logic_yaml since they are not meant for Tensile.py
+            # filter out yamls in logic_yaml since they are not meant for tensilelite.py
             elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:

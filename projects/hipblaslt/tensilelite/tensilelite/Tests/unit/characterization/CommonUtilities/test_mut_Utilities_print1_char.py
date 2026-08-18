@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Mutation-targeted characterization tests for ``Tensile.Common.Utilities.print1``.
+"""Mutation-targeted characterization tests for ``tensilelite.Common.Utilities.print1``.
 
 print1 prints the message (and flushes) iff ``getVerbosity() >= 1``. These tests
 pin the verbosity boundary at exactly 1 and the exact message that is printed.
@@ -14,7 +14,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 

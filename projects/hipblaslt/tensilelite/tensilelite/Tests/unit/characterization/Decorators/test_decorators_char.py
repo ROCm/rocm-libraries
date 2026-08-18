@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Utilities.Decorators``: ``envVariableIsSet``
+"""Characterization tests for ``tensilelite.Utilities.Decorators``: ``envVariableIsSet``
 + ``CallableGuard`` (Shared), the ``@timing`` decorator (Timing), and the
 ``@profile`` decorator + ``initProfileArtifacts`` (Profile)."""
 
 import pytest
 
-from Tensile.Utilities.Decorators.Shared import envVariableIsSet, CallableGuard
-from Tensile.Utilities.Decorators.Timing import timing, TIMING_ENV_VAR
-from Tensile.Utilities.Decorators.Profile import profile, initProfileArtifacts, PROFILE_ENV_VAR
+from tensilelite.Utilities.Decorators.Shared import envVariableIsSet, CallableGuard
+from tensilelite.Utilities.Decorators.Timing import timing, TIMING_ENV_VAR
+from tensilelite.Utilities.Decorators.Profile import profile, initProfileArtifacts, PROFILE_ENV_VAR
 
 pytestmark = pytest.mark.unit
 

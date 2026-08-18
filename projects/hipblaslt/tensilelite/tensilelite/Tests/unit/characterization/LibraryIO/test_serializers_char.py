@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the pure serialisation primitives in
-``Tensile.LibraryIO``: the hand-rolled fast YAML emitter
+``tensilelite.LibraryIO``: the hand-rolled fast YAML emitter
 (``_fast_yaml_scalar`` / ``_fast_yaml_str`` / ``_fast_yaml_flow_list`` /
 ``fast_yaml_dump``), the dtype mappers (``getRealDataTypeA`` /
 ``getRealDataTypeB``), and the ``LibraryLogic`` NamedTuple. All Tier A: pure
@@ -36,7 +36,7 @@ import io
 import pytest
 from rocisa.enum import DataTypeEnum
 
-import Tensile.LibraryIO as L
+import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
 

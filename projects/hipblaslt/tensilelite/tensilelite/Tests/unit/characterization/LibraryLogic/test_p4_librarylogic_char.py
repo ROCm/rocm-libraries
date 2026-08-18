@@ -181,7 +181,7 @@ def _build_la_with_injected_data(tmp_path, analysis_params,
     LogicAnalyzer.__init__ leaves unifiedProblemSizes empty (dead code path).
     We inject index tables + data array so the analysis methods work.
     """
-    from Tensile.LibraryLogic import LogicAnalyzer
+    from tensilelite.LibraryLogic import LogicAnalyzer
 
     problem_type = _MockProblemType()
     mock_ps = _MockProblemSizes(exact_sizes=exact_sizes)
@@ -193,9 +193,9 @@ def _build_la_with_injected_data(tmp_path, analysis_params,
     _write_exact_csv(csv_path, exact_sizes, num_solutions=n_solutions,
                      gflops_data=exact_gflops)
 
-    with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-         patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-         patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+    with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+         patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+         patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
         la = LogicAnalyzer(
             problem_type, [mock_ps], solutions_list,
             [csv_path], analysis_params, splitGSU=False,
@@ -255,7 +255,7 @@ def _build_la_with_injected_data(tmp_path, analysis_params,
 
 @pytest.fixture
 def analysis_params():
-    from Tensile.Common.GlobalParameters import defaultAnalysisParameters
+    from tensilelite.Common.GlobalParameters import defaultAnalysisParameters
     params = {}
     for k, v in defaultAnalysisParameters.items():
         params[k] = v
@@ -271,7 +271,7 @@ class TestAddFromCSVExactPath:
 
     def test_exact_winners_populated(self, tmp_path, analysis_params):
         """Exact winners recorded from CSV (lines 472-520)."""
-        from Tensile.LibraryLogic import LogicAnalyzer
+        from tensilelite.LibraryLogic import LogicAnalyzer
 
         pt = _MockProblemType()
         exact_sizes = [(128, 128, 1, 512), (256, 256, 1, 512)]
@@ -283,9 +283,9 @@ class TestAddFromCSVExactPath:
         _write_exact_csv(csv_path, exact_sizes, num_solutions=2,
                          gflops_data=[[20.0, 15.0], [10.0, 18.0]])
 
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
             la = LogicAnalyzer(pt, [mock_ps], [[sol_a, sol_b]],
                                [csv_path], analysis_params, splitGSU=False)
 
@@ -298,7 +298,7 @@ class TestAddFromCSVExactPath:
 
     def test_gflopspercu_header(self, tmp_path, analysis_params):
         """GFlopsPerCU header -> CUEfficiency (lines 441-443)."""
-        from Tensile.LibraryLogic import LogicAnalyzer
+        from tensilelite.LibraryLogic import LogicAnalyzer
 
         pt = _MockProblemType()
         exact_sizes = [(128, 128, 1, 512)]
@@ -308,9 +308,9 @@ class TestAddFromCSVExactPath:
         csv_path = str(tmp_path / "bench_cu.csv")
         _write_exact_csv(csv_path, exact_sizes, 1, [[5.0]], "GFlopsPerCU")
 
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
             la = LogicAnalyzer(pt, [mock_ps], [[sol_a]],
                                [csv_path], analysis_params, splitGSU=False)
 
@@ -318,7 +318,7 @@ class TestAddFromCSVExactPath:
 
     def test_unknown_perf_unit_defaults(self, tmp_path, analysis_params):
         """Unknown perf unit warning -> defaults to DeviceEfficiency (line 445)."""
-        from Tensile.LibraryLogic import LogicAnalyzer
+        from tensilelite.LibraryLogic import LogicAnalyzer
 
         pt = _MockProblemType()
         exact_sizes = [(128, 128, 1, 512)]
@@ -328,9 +328,9 @@ class TestAddFromCSVExactPath:
         csv_path = str(tmp_path / "bench_unk.csv")
         _write_exact_csv(csv_path, exact_sizes, 1, [[5.0]], "UnknownUnit")
 
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
             la = LogicAnalyzer(pt, [mock_ps], [[sol_a]],
                                [csv_path], analysis_params, splitGSU=False)
 
@@ -338,7 +338,7 @@ class TestAddFromCSVExactPath:
 
     def test_exact_winner_update_across_csvs(self, tmp_path, analysis_params):
         """Higher gflops in second CSV updates exact winner (line 516-518)."""
-        from Tensile.LibraryLogic import LogicAnalyzer
+        from tensilelite.LibraryLogic import LogicAnalyzer
 
         pt = _MockProblemType()
         exact_sizes = [(128, 128, 1, 512)]
@@ -351,9 +351,9 @@ class TestAddFromCSVExactPath:
         csv2 = str(tmp_path / "bench2.csv")
         _write_exact_csv(csv2, exact_sizes, 2, [[10.0, 15.0]])
 
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
             la = LogicAnalyzer(pt, [mock_ps, mock_ps],
                                [[sol_a, sol_b], [sol_a, sol_b]],
                                [csv1, csv2], analysis_params, splitGSU=False)
@@ -363,7 +363,7 @@ class TestAddFromCSVExactPath:
 
     def test_range_sizes_as_exacts(self, tmp_path, analysis_params):
         """Range sizes via ranges.problemSizes -> exactProblemSizes (lines 319-322)."""
-        from Tensile.LibraryLogic import LogicAnalyzer
+        from tensilelite.LibraryLogic import LogicAnalyzer
 
         pt = _MockProblemType()
         range_sizes = [(64, 64, 1, 256), (64, 128, 1, 256),
@@ -376,9 +376,9 @@ class TestAddFromCSVExactPath:
         _write_exact_csv(csv_path, range_sizes, 2,
                          [[12.0, 9.0], [11.0, 10.0], [10.0, 13.0], [9.0, 14.0]])
 
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
             la = LogicAnalyzer(pt, [mock_ps], [[sol_a, sol_b]],
                                [csv_path], analysis_params, splitGSU=False)
 
@@ -399,8 +399,8 @@ class TestRemoveInvalidSolutions:
                           (128, 64): [8.0, 0.0], (128, 128): [7.0, 0.0]},
         )
         orig_n = la.numSolutions
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name):
             la.removeInvalidSolutions()
         assert la.numSolutions == orig_n - 1
 
@@ -411,8 +411,8 @@ class TestRemoveInvalidSolutions:
             exact_sizes=[(512, 512, 1, 512)], exact_gflops=[[20.0, 18.0]],
         )
         orig_n = la.numSolutions
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name):
             la.removeInvalidSolutions()
         assert la.numSolutions == orig_n
 
@@ -429,8 +429,8 @@ class TestRemoveLeastImportantSolutions:
                           (128, 64): [11.0, 8.0], (128, 128): [12.0, 9.0]},
         )
         orig_n = la.numSolutions
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name):
             la.removeLeastImportantSolutions()
         assert la.numSolutions < orig_n
 
@@ -444,8 +444,8 @@ class TestRemoveLeastImportantSolutions:
                           (128, 64):  [7.0, 15.0],
                           (128, 128): [6.0, 16.0]},
         )
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name):
             la.removeLeastImportantSolutions()
         assert la.numSolutions == 2
 
@@ -464,8 +464,8 @@ class TestKeepWinnerSolutions:
                           (128, 64):  [7.0, 15.0, 4.0],
                           (128, 128): [6.0, 16.0, 4.0]},
         )
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name):
             la.keepWinnerSolutions()
         assert la.numSolutions == 2
 
@@ -522,7 +522,7 @@ class TestLeastImportantSolution:
                           (128, 64):  [11.0, 9.0],
                           (128, 128): [12.0, 9.0]},
         )
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name):
             lis = la.leastImportantSolution()
         if lis is not None:
             assert len(lis) == 4
@@ -537,7 +537,7 @@ class TestLeastImportantSolution:
             range_gflops={(64, 64): [10.0], (64, 128): [9.0],
                           (128, 64): [11.0], (128, 128): [12.0]},
         )
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name):
             lis = la.leastImportantSolution()
         assert lis is None
 
@@ -552,8 +552,8 @@ class TestRemoveSolutionAndPrune:
             exact_sizes=[(512, 512, 1, 512)], exact_gflops=[[20.0, 15.0]],
         )
         orig_n = la.numSolutions
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name):
             la.removeSolution(1)
         assert la.numSolutions == orig_n - 1
         assert la.totalSize == la.totalProblems * la.numSolutions
@@ -567,8 +567,8 @@ class TestRemoveSolutionAndPrune:
             range_gflops={(64, 64): [10.0, 8.0, 4.0], (64, 128): [9.0, 7.0, 3.0],
                           (128, 64): [11.0, 9.0, 4.0], (128, 128): [12.0, 9.0, 4.0]},
         )
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name):
             la.pruneSolutions({0})
         assert la.numSolutions == 1
 
@@ -718,7 +718,7 @@ class TestAnalyzeProblemType:
 
     def test_returns_nine_tuple(self, tmp_path, analysis_params):
         """Full pipeline produces a 9-tuple with correct structure."""
-        from Tensile.LibraryLogic import analyzeProblemType
+        from tensilelite.LibraryLogic import analyzeProblemType
 
         pt = _MockProblemType()
         exact_sizes = [(64, 64, 1, 256), (128, 128, 1, 256)]
@@ -734,9 +734,9 @@ class TestAnalyzeProblemType:
         os.makedirs(lib_path, exist_ok=True)
         psg = [(mock_ps, csv_path, "d.yaml", "d.gsp", [sol_a, sol_b])]
 
-        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-             patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
             result = analyzeProblemType(pt, psg, analysis_params, lib_path,
                                         splitGSU=False)
 
@@ -754,8 +754,8 @@ class TestAnalyzeProblemType:
 
     def test_solutionselectionalgalg1(self, tmp_path, analysis_params):
         """SolutionSelectionAlg=1 path (keepWinnerSolutions)."""
-        from Tensile.LibraryLogic import analyzeProblemType
-        from Tensile.Common.GlobalParameters import globalParameters
+        from tensilelite.LibraryLogic import analyzeProblemType
+        from tensilelite.Common.GlobalParameters import globalParameters
 
         pt = _MockProblemType()
         exact_sizes = [(128, 128, 1, 256)]
@@ -773,9 +773,9 @@ class TestAnalyzeProblemType:
         orig = globalParameters["SolutionSelectionAlg"]
         globalParameters["SolutionSelectionAlg"] = 1
         try:
-            with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
-                 patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
-                 patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+            with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+                 patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+                 patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full):
                 result = analyzeProblemType(pt, psg, analysis_params, lib_path,
                                             splitGSU=False)
         finally:

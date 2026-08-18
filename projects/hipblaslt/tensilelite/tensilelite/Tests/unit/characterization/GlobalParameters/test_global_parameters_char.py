@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.GlobalParameters``:
+"""Characterization tests for ``tensilelite.Common.GlobalParameters``:
 ``restoreDefaultGlobalParameters``, ``printCapabilitiesTable``,
 ``assignGlobalParameters`` (config merge + env + version + hipcc-probe branches),
 and ``setupRestoreClocks``. The process-global dict is isolated per test."""
 
 import pytest
 
-import Tensile.Common.GlobalParameters as GP
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
+import tensilelite.Common.GlobalParameters as GP
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
 
 pytestmark = pytest.mark.unit
 
@@ -96,7 +96,7 @@ def test_assign_global_parameters_locateexe_oserror_nonfatal(isolate_globals, is
 def test_assign_global_parameters_min_version_compatible(isolate_globals, isa_info_map, monkeypatch):
     # A *present, compatible* MinimumRequiredVersion -> the 644->651 false arm.
     _stub_hipcc(monkeypatch)
-    from Tensile import __version__
+    from tensilelite import __version__
     GP.assignGlobalParameters({"MinimumRequiredVersion": __version__}, isa_info_map)
     assert "ROCmPath" in GP.globalParameters
 
