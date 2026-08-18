@@ -11,16 +11,16 @@
 
 namespace roc::host_validation {
 struct AxpbyProblem {
-    AxpbyProblem(std::optional<TensorView> xValues, std::optional<TensorView> yValues,
-                 MutableTensorView outputValues, ScalarType accumulator)
+    AxpbyProblem(std::optional<Tensor> xValues, std::optional<Tensor> yValues, Tensor outputValues,
+                 ScalarType accumulator)
         : x(std::move(xValues)),
           y(std::move(yValues)),
           output(std::move(outputValues)),
           accumulatorType(accumulator) {}
 
-    std::optional<TensorView> x;
-    std::optional<TensorView> y;
-    MutableTensorView output;
+    std::optional<Tensor> x;
+    std::optional<Tensor> y;
+    Tensor output;
     ScalarType accumulatorType;
     std::complex<double> alpha{1.0, 0.0};
     std::complex<double> beta{1.0, 0.0};

@@ -940,25 +940,25 @@ namespace GEMMTests
                                                      ? static_cast<size_t>(gemm.scaleBlockSize)
                                                      : static_cast<size_t>(K);
             HostNumerics::HostReferenceProblem referenceProblem(
-                HostNumerics::hostTensorView(descA,
-                                             hostA,
-                                             gemm.scaleAMode == Operations::ScaleMode::Separate
-                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
-                HostNumerics::hostTensorView(descB,
-                                             hostB,
-                                             gemm.scaleBMode == Operations::ScaleMode::Separate
-                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
-                HostNumerics::hostTensorView(descC, hostC));
+                HostNumerics::hostTensor(descA,
+                                         hostA,
+                                         gemm.scaleAMode == Operations::ScaleMode::Separate
+                                             ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                             : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensor(descB,
+                                         hostB,
+                                         gemm.scaleBMode == Operations::ScaleMode::Separate
+                                             ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                             : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensor(descC, hostC));
             if(gemm.scaleAMode != Operations::ScaleMode::None)
             {
-                referenceProblem.scaleA = HostNumerics::hostScaleTensorView(
+                referenceProblem.scaleA = HostNumerics::hostScaleTensor(
                     gemm.scaleTypeA, hostScaleA, descA, 1, referenceScaleBlockSize);
             }
             if(gemm.scaleBMode != Operations::ScaleMode::None)
             {
-                referenceProblem.scaleB = HostNumerics::hostScaleTensorView(
+                referenceProblem.scaleB = HostNumerics::hostScaleTensor(
                     gemm.scaleTypeB, hostScaleB, descB, 0, referenceScaleBlockSize);
             }
             referenceProblem.scaleBlockSize = referenceScaleBlockSize;
@@ -969,11 +969,11 @@ namespace GEMMTests
             std::vector<TD> h_result;
             if constexpr(std::is_same_v<TC, TD>)
             {
-                h_result = HostNumerics::convertHostReference<TD>(floatReference.view());
+                h_result = HostNumerics::convertHostReference<TD>(floatReference);
             }
             else
             {
-                auto hostD = HostNumerics::convertHostReference<TC>(floatReference.view());
+                auto hostD = HostNumerics::convertHostReference<TC>(floatReference);
                 ASSERT_EQ(hostD.size(), static_cast<size_t>(M) * static_cast<size_t>(N));
                 h_result.resize(hostD.size());
                 bool const isSRConversion = srCvtSeed.has_value();

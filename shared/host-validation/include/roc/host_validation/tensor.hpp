@@ -11,8 +11,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -32,6 +34,11 @@ enum class ScalarCategory : uint8_t {
     Scale,
 };
 
+// ScalarType is the component's dense table-index enum. Count is its one-past-last,
+// non-concrete sentinel: it sizes metadata and dispatch tables and remains the compatibility
+// "unspecified type" value for existing callers. APIs requiring a concrete type reject it.
+// Other component enums intentionally omit Count; optional semantic state should be represented
+// separately instead of extending this sentinel pattern.
 enum class ScalarType : uint16_t {
     Boolean,
     UInt8,
@@ -56,6 +63,9 @@ enum class ScalarType : uint16_t {
     Float6E3M2,
     Float4E2M1,
     Int4,
+    // Int12 is intentionally not tied to a current hardware type. It proves that scalar storage,
+    // packing, and conversion remain general for elements that cross byte boundaries and are not
+    // power-of-two widths. Keep its scalar and tensor codec coverage.
     Int12,
     E8M0,
     E5M3,
@@ -87,13 +97,22 @@ template <typename Target, typename Source>
 Target convertScalar(Source source, const ScalarConversionOptions& options = {});
 
 struct ScalarTypeInfo {
+    // Short human-readable spelling used in diagnostics and bindings.
     std::string_view name;
+    // Broad conversion and comparison behavior of the scalar.
     ScalarCategory category;
+    // Encoded bits occupied by one logical scalar, including both complex components and any
+    // packed or reserved payload bits.
     uint16_t storageBits;
+    // Encoded exponent bits per real component; zero for non-floating categories.
     uint8_t exponentBits;
+    // Explicitly stored fraction bits per real component, excluding any implicit leading bit.
     uint8_t mantissaBits;
+    // Bias subtracted from an encoded exponent; zero when exponentBits is zero.
     int16_t exponentBias;
+    // Whether the encoding has at least one representation for NaN.
     bool supportsNaN;
+    // Whether the encoding has representations for positive and negative infinity.
     bool supportsInfinity;
 
     bool isPacked() const {
@@ -101,41 +120,47 @@ struct ScalarTypeInfo {
     }
 };
 
-inline constexpr std::array<ScalarTypeInfo, static_cast<size_t>(ScalarType::Count)> scalarTypeInfos{
-    {
-        {"bool", ScalarCategory::Boolean, 8, 0, 0, 0, false, false},
-        {"u8", ScalarCategory::UnsignedInteger, 8, 0, 0, 0, false, false},
-        {"i8", ScalarCategory::SignedInteger, 8, 0, 0, 0, false, false},
-        {"u16", ScalarCategory::UnsignedInteger, 16, 0, 0, 0, false, false},
-        {"i16", ScalarCategory::SignedInteger, 16, 0, 0, 0, false, false},
-        {"u32", ScalarCategory::UnsignedInteger, 32, 0, 0, 0, false, false},
-        {"i32", ScalarCategory::SignedInteger, 32, 0, 0, 0, false, false},
-        {"u64", ScalarCategory::UnsignedInteger, 64, 0, 0, 0, false, false},
-        {"i64", ScalarCategory::SignedInteger, 64, 0, 0, 0, false, false},
-        {"f16", ScalarCategory::FloatingPoint, 16, 5, 10, 15, true, true},
-        {"bf16", ScalarCategory::FloatingPoint, 16, 8, 7, 127, true, true},
-        {"f32", ScalarCategory::FloatingPoint, 32, 8, 23, 127, true, true},
-        {"f64", ScalarCategory::FloatingPoint, 64, 11, 52, 1023, true, true},
-        {"c64", ScalarCategory::Complex, 64, 8, 23, 127, true, true},
-        {"c128", ScalarCategory::Complex, 128, 11, 52, 1023, true, true},
-        {"f8e4m3", ScalarCategory::FloatingPoint, 8, 4, 3, 7, true, false},
-        {"f8e5m2", ScalarCategory::FloatingPoint, 8, 5, 2, 15, true, true},
-        {"f8e4m3fnuz", ScalarCategory::FloatingPoint, 8, 4, 3, 8, true, false},
-        {"f8e5m2fnuz", ScalarCategory::FloatingPoint, 8, 5, 2, 16, true, false},
-        {"f6e2m3", ScalarCategory::FloatingPoint, 6, 2, 3, 1, false, false},
-        {"f6e3m2", ScalarCategory::FloatingPoint, 6, 3, 2, 3, false, false},
-        {"f4e2m1", ScalarCategory::FloatingPoint, 4, 2, 1, 1, false, false},
-        {"i4", ScalarCategory::SignedInteger, 4, 0, 0, 0, false, false},
-        {"i12", ScalarCategory::SignedInteger, 12, 0, 0, 0, false, false},
-        {"e8m0", ScalarCategory::Scale, 8, 8, 0, 127, true, false},
-        {"e5m3", ScalarCategory::Scale, 8, 5, 3, 15, true, false},
-        {"e4m3", ScalarCategory::Scale, 8, 4, 3, 7, true, false},
-    }};
+inline constexpr size_t scalarTypeCount = static_cast<size_t>(ScalarType::Count);
+
+inline constexpr bool isConcreteScalarType(ScalarType type) {
+    return static_cast<size_t>(type) < scalarTypeCount;
+}
+
+// Columns follow ScalarTypeInfo's fields: name, category, storage bits, exponent bits,
+// mantissa bits, exponent bias, NaN support, and infinity support.
+inline constexpr std::array<ScalarTypeInfo, scalarTypeCount> scalarTypeInfos{{
+    {"bool", ScalarCategory::Boolean, 8, 0, 0, 0, false, false},
+    {"u8", ScalarCategory::UnsignedInteger, 8, 0, 0, 0, false, false},
+    {"i8", ScalarCategory::SignedInteger, 8, 0, 0, 0, false, false},
+    {"u16", ScalarCategory::UnsignedInteger, 16, 0, 0, 0, false, false},
+    {"i16", ScalarCategory::SignedInteger, 16, 0, 0, 0, false, false},
+    {"u32", ScalarCategory::UnsignedInteger, 32, 0, 0, 0, false, false},
+    {"i32", ScalarCategory::SignedInteger, 32, 0, 0, 0, false, false},
+    {"u64", ScalarCategory::UnsignedInteger, 64, 0, 0, 0, false, false},
+    {"i64", ScalarCategory::SignedInteger, 64, 0, 0, 0, false, false},
+    {"f16", ScalarCategory::FloatingPoint, 16, 5, 10, 15, true, true},
+    {"bf16", ScalarCategory::FloatingPoint, 16, 8, 7, 127, true, true},
+    {"f32", ScalarCategory::FloatingPoint, 32, 8, 23, 127, true, true},
+    {"f64", ScalarCategory::FloatingPoint, 64, 11, 52, 1023, true, true},
+    {"c64", ScalarCategory::Complex, 64, 8, 23, 127, true, true},
+    {"c128", ScalarCategory::Complex, 128, 11, 52, 1023, true, true},
+    {"f8e4m3", ScalarCategory::FloatingPoint, 8, 4, 3, 7, true, false},
+    {"f8e5m2", ScalarCategory::FloatingPoint, 8, 5, 2, 15, true, true},
+    {"f8e4m3fnuz", ScalarCategory::FloatingPoint, 8, 4, 3, 8, true, false},
+    {"f8e5m2fnuz", ScalarCategory::FloatingPoint, 8, 5, 2, 16, true, false},
+    {"f6e2m3", ScalarCategory::FloatingPoint, 6, 2, 3, 1, false, false},
+    {"f6e3m2", ScalarCategory::FloatingPoint, 6, 3, 2, 3, false, false},
+    {"f4e2m1", ScalarCategory::FloatingPoint, 4, 2, 1, 1, false, false},
+    {"i4", ScalarCategory::SignedInteger, 4, 0, 0, 0, false, false},
+    {"i12", ScalarCategory::SignedInteger, 12, 0, 0, 0, false, false},
+    {"e8m0", ScalarCategory::Scale, 8, 8, 0, 127, true, false},
+    {"e5m3", ScalarCategory::Scale, 8, 5, 3, 15, true, false},
+    {"e4m3", ScalarCategory::Scale, 8, 4, 3, 7, true, false},
+}};
 
 inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
-    const size_t index = static_cast<size_t>(type);
-    if (index >= scalarTypeInfos.size()) throw std::invalid_argument("Invalid ScalarType.");
-    return scalarTypeInfos[index];
+    if (!isConcreteScalarType(type)) throw std::invalid_argument("Invalid ScalarType.");
+    return scalarTypeInfos[static_cast<size_t>(type)];
 }
 
 inline constexpr std::string_view scalarTypeName(ScalarType type) {
@@ -353,6 +378,10 @@ class Shape {
     }
 
     size_t operator[](size_t dimension) const {
+        return extent(dimension);
+    }
+
+    size_t extent(size_t dimension) const {
         return m_dimensions.at(dimension);
     }
 
@@ -361,12 +390,27 @@ class Shape {
     }
 
     size_t elementCount() const {
+        return elementCount(0, rank());
+    }
+
+    size_t elementCount(size_t firstDimension, size_t onePastLastDimension) const {
+        if (firstDimension > onePastLastDimension || onePastLastDimension > rank())
+            throw std::out_of_range("Tensor shape dimension range is invalid.");
+
         size_t count = 1;
-        for (const size_t dimension : m_dimensions) {
-            if (dimension == 0) return 0;
-            if (count > std::numeric_limits<size_t>::max() / dimension)
-                throw std::overflow_error("Tensor shape element count overflow.");
-            count *= dimension;
+        for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension)
+            count = checkedElementProduct(count, extent(dimension));
+        return count;
+    }
+
+    size_t elementCountExcluding(size_t excludedDimension) const {
+        if (excludedDimension >= rank())
+            throw std::out_of_range("Excluded tensor shape dimension is invalid.");
+
+        size_t count = 1;
+        for (size_t dimension = 0; dimension < rank(); ++dimension) {
+            if (dimension != excludedDimension)
+                count = checkedElementProduct(count, extent(dimension));
         }
         return count;
     }
@@ -374,6 +418,13 @@ class Shape {
     friend bool operator==(const Shape&, const Shape&) = default;
 
    private:
+    static size_t checkedElementProduct(size_t count, size_t extent) {
+        if (extent == 0) return 0;
+        if (count > std::numeric_limits<size_t>::max() / extent)
+            throw std::overflow_error("Tensor shape element count overflow.");
+        return count * extent;
+    }
+
     std::vector<size_t> m_dimensions;
 };
 
@@ -389,23 +440,34 @@ class Layout {
 
     Layout(Shape shape, std::vector<ptrdiff_t> strides, ptrdiff_t offset = 0)
         : m_shape(std::move(shape)), m_strides(std::move(strides)), m_offset(offset) {
-        if (m_shape.rank() != m_strides.size())
+        if (rank() != m_strides.size())
             throw std::invalid_argument("Tensor layout rank and stride count differ.");
     }
 
+    // Compatibility spelling for contiguousLastDimensionFastest(). For a matrix this is
+    // row-major/C-order: the last dimension has unit stride.
     static Layout contiguous(const Shape& shape) {
+        return contiguousLastDimensionFastest(shape);
+    }
+
+    static Layout contiguousLastDimensionFastest(const Shape& shape) {
         std::vector<ptrdiff_t> strides(shape.rank(), 1);
         ptrdiff_t stride = 1;
         for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
             const size_t index = dimension - 1;
             strides[index] = stride;
-            const size_t extent = shape[index];
-            if (extent > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
-                throw std::overflow_error("Tensor extent exceeds ptrdiff_t.");
-            const ptrdiff_t signedExtent = static_cast<ptrdiff_t>(extent);
-            if (signedExtent != 0 && stride > std::numeric_limits<ptrdiff_t>::max() / signedExtent)
-                throw std::overflow_error("Tensor contiguous stride overflow.");
-            stride *= signedExtent;
+            stride = checkedContiguousStride(stride, shape.extent(index));
+        }
+        return Layout(shape, std::move(strides));
+    }
+
+    // For a matrix this is column-major/Fortran-order: the first dimension has unit stride.
+    static Layout contiguousFirstDimensionFastest(const Shape& shape) {
+        std::vector<ptrdiff_t> strides(shape.rank(), 1);
+        ptrdiff_t stride = 1;
+        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+            strides[dimension] = stride;
+            stride = checkedContiguousStride(stride, shape.extent(dimension));
         }
         return Layout(shape, std::move(strides));
     }
@@ -414,8 +476,36 @@ class Layout {
         return m_shape;
     }
 
+    size_t rank() const {
+        return m_shape.rank();
+    }
+
+    size_t extent(size_t dimension) const {
+        return m_shape.extent(dimension);
+    }
+
+    std::span<const size_t> dimensions() const {
+        return m_shape.dimensions();
+    }
+
+    size_t elementCount() const {
+        return m_shape.elementCount();
+    }
+
+    size_t elementCount(size_t firstDimension, size_t onePastLastDimension) const {
+        return m_shape.elementCount(firstDimension, onePastLastDimension);
+    }
+
+    size_t elementCountExcluding(size_t excludedDimension) const {
+        return m_shape.elementCountExcluding(excludedDimension);
+    }
+
     std::span<const ptrdiff_t> strides() const {
         return m_strides;
+    }
+
+    ptrdiff_t stride(size_t dimension) const {
+        return m_strides.at(dimension);
     }
 
     ptrdiff_t offset() const {
@@ -423,14 +513,14 @@ class Layout {
     }
 
     ptrdiff_t elementOffset(std::span<const size_t> indices) const {
-        if (indices.size() != m_shape.rank())
+        if (indices.size() != rank())
             throw std::invalid_argument("Tensor index rank does not match layout rank.");
 
         ptrdiff_t result = m_offset;
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
-            if (indices[dimension] >= m_shape[dimension])
+            if (indices[dimension] >= extent(dimension))
                 throw std::out_of_range("Tensor index exceeds shape.");
-            const ptrdiff_t delta = checkedMultiply(indices[dimension], m_strides[dimension]);
+            const ptrdiff_t delta = checkedMultiply(indices[dimension], stride(dimension));
             result = checkedAdd(result, delta);
         }
         return result;
@@ -439,6 +529,15 @@ class Layout {
     friend bool operator==(const Layout&, const Layout&) = default;
 
    private:
+    static ptrdiff_t checkedContiguousStride(ptrdiff_t stride, size_t extent) {
+        if (extent > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
+            throw std::overflow_error("Tensor extent exceeds ptrdiff_t.");
+        const ptrdiff_t signedExtent = static_cast<ptrdiff_t>(extent);
+        if (signedExtent != 0 && stride > std::numeric_limits<ptrdiff_t>::max() / signedExtent)
+            throw std::overflow_error("Tensor contiguous stride overflow.");
+        return stride * signedExtent;
+    }
+
     static ptrdiff_t checkedMultiply(size_t value, ptrdiff_t factor) {
         if (value == 0 || factor == 0) return 0;
 
@@ -465,14 +564,14 @@ class Layout {
     }
 
     std::pair<ptrdiff_t, ptrdiff_t> checkedElementBounds() const {
-        for (size_t dimension = 0; dimension < m_shape.rank(); ++dimension) {
-            if (m_shape[dimension] == 0) return {0, -1};
+        for (size_t dimension = 0; dimension < rank(); ++dimension) {
+            if (extent(dimension) == 0) return {0, -1};
         }
 
         ptrdiff_t lower = m_offset;
         ptrdiff_t upper = m_offset;
-        for (size_t dimension = 0; dimension < m_shape.rank(); ++dimension) {
-            const ptrdiff_t delta = checkedMultiply(m_shape[dimension] - 1, m_strides[dimension]);
+        for (size_t dimension = 0; dimension < rank(); ++dimension) {
+            const ptrdiff_t delta = checkedMultiply(extent(dimension) - 1, stride(dimension));
             if (delta < 0)
                 lower = checkedAdd(lower, delta);
             else
@@ -734,7 +833,7 @@ void forEachIndex(const Shape& shape, Function&& function) {
         function(std::span<const size_t>(indices), linearIndex);
         for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
             const size_t index = dimension - 1;
-            if (++indices[index] < shape[index]) break;
+            if (++indices[index] < shape.extent(index)) break;
             indices[index] = 0;
         }
     }
@@ -890,52 +989,77 @@ struct BinaryFloatFormat {
     uint32_t canonicalNaNRaw;
 };
 
+template <ScalarType Type>
+inline constexpr bool IsBinaryFloatTypeV =
+    Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
+    Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
+    Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
+    Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 || Type == ScalarType::E4M3;
+
+template <ScalarType Type>
+inline constexpr BinaryFloatFormat binaryFloatFormatKnown() {
+    static_assert(IsBinaryFloatTypeV<Type>);
+    if constexpr (Type == ScalarType::Float4E2M1)
+        return {2, 1, 1, 4, true, true, false, 0x7, 0, 0};
+    else if constexpr (Type == ScalarType::Float6E2M3)
+        return {2, 3, 1, 6, true, true, false, 0x1f, 0, 0};
+    else if constexpr (Type == ScalarType::Float6E3M2)
+        return {3, 2, 3, 6, true, true, false, 0x1f, 0, 0};
+    else if constexpr (Type == ScalarType::Float8E4M3)
+        return {4, 3, 7, 8, true, true, false, 0x7e, 0, 0x7f};
+    else if constexpr (Type == ScalarType::Float8E5M2)
+        return {5, 2, 15, 8, true, true, true, 0x7b, 0x7c, 0x7f};
+    else if constexpr (Type == ScalarType::Float8E4M3Fnuz)
+        return {4, 3, 8, 8, true, false, false, 0x7f, 0, 0x80};
+    else if constexpr (Type == ScalarType::Float8E5M2Fnuz)
+        return {5, 2, 16, 8, true, false, false, 0x7f, 0, 0x80};
+    else if constexpr (Type == ScalarType::E5M3)
+        return {5, 3, 15, 8, false, false, false, 0xfe, 0, 0xff};
+    else
+        return {4, 3, 7, 7, false, false, false, 0x7e, 0, 0x7f};
+}
+
 inline BinaryFloatFormat binaryFloatFormat(ScalarType type) {
-    switch (type) {
-        case ScalarType::Float4E2M1:
-            return {2, 1, 1, 4, true, true, false, 0x7, 0, 0};
-        case ScalarType::Float6E2M3:
-            return {2, 3, 1, 6, true, true, false, 0x1f, 0, 0};
-        case ScalarType::Float6E3M2:
-            return {3, 2, 3, 6, true, true, false, 0x1f, 0, 0};
-        case ScalarType::Float8E4M3:
-            return {4, 3, 7, 8, true, true, false, 0x7e, 0, 0x7f};
-        case ScalarType::Float8E5M2:
-            return {5, 2, 15, 8, true, true, true, 0x7b, 0x7c, 0x7f};
-        case ScalarType::Float8E4M3Fnuz:
-            return {4, 3, 8, 8, true, false, false, 0x7f, 0, 0x80};
-        case ScalarType::Float8E5M2Fnuz:
-            return {5, 2, 16, 8, true, false, false, 0x7f, 0, 0x80};
-        case ScalarType::E5M3:
-            return {5, 3, 15, 8, false, false, false, 0xfe, 0, 0xff};
-        case ScalarType::E4M3:
-            return {4, 3, 7, 7, false, false, false, 0x7e, 0, 0x7f};
-        default:
+    return visitScalarType(type, []<typename Tag>() -> BinaryFloatFormat {
+        if constexpr (IsBinaryFloatTypeV<Tag::type>)
+            return binaryFloatFormatKnown<Tag::type>();
+        else
             throw std::invalid_argument(
                 "ScalarType is not a supported binary floating-point format.");
-    }
+    });
+}
+
+template <ScalarType Type>
+inline constexpr bool isBinaryFloatNaNKnown(uint32_t raw) {
+    static_assert(IsBinaryFloatTypeV<Type>);
+    if constexpr (Type == ScalarType::Float8E4M3 || Type == ScalarType::E4M3)
+        return (raw & 0x7fU) == 0x7fU;
+    else if constexpr (Type == ScalarType::Float8E5M2)
+        return (raw & 0x7fU) > 0x7cU;
+    else if constexpr (Type == ScalarType::Float8E4M3Fnuz || Type == ScalarType::Float8E5M2Fnuz)
+        return raw == 0x80U;
+    else if constexpr (Type == ScalarType::E5M3)
+        return raw == 0xffU;
+    else
+        return false;
 }
 
 inline bool isBinaryFloatNaN(ScalarType type, uint32_t raw) {
-    switch (type) {
-        case ScalarType::Float8E4M3:
-            return (raw & 0x7fU) == 0x7fU;
-        case ScalarType::Float8E5M2:
-            return (raw & 0x7fU) > 0x7cU;
-        case ScalarType::Float8E4M3Fnuz:
-        case ScalarType::Float8E5M2Fnuz:
-            return raw == 0x80U;
-        case ScalarType::E5M3:
-            return raw == 0xffU;
-        case ScalarType::E4M3:
-            return (raw & 0x7fU) == 0x7fU;
-        default:
+    return visitScalarType(type, [raw]<typename Tag>() {
+        if constexpr (IsBinaryFloatTypeV<Tag::type>)
+            return isBinaryFloatNaNKnown<Tag::type>(raw);
+        else
             return false;
-    }
+    });
 }
 
 inline bool isBinaryFloatInfinity(ScalarType type, uint32_t raw) {
-    return type == ScalarType::Float8E5M2 && (raw & 0x7fU) == 0x7cU;
+    const BinaryFloatFormat format = binaryFloatFormat(type);
+    if (!format.hasInfinity) return false;
+    const uint32_t signMask = format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
+    const uint32_t payloadMask = (1U << format.totalBits) - 1U;
+    const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
+    return magnitude == format.positiveInfinityRaw;
 }
 
 inline float decodeFiniteBinaryFloatMagnitude(uint32_t raw, const BinaryFloatFormat& format) {
@@ -951,8 +1075,9 @@ inline float decodeFiniteBinaryFloatMagnitude(uint32_t raw, const BinaryFloatFor
                       static_cast<int>(exponent) - format.exponentBias);
 }
 
-inline std::vector<float> makePositiveFiniteBinaryFloatValues(ScalarType type) {
-    const BinaryFloatFormat format = binaryFloatFormat(type);
+template <ScalarType Type>
+std::vector<float> makePositiveFiniteBinaryFloatValues() {
+    constexpr BinaryFloatFormat format = binaryFloatFormatKnown<Type>();
     std::vector<float> values(format.maximumPositiveFiniteRaw + 1U);
     for (uint32_t raw = 0; raw <= format.maximumPositiveFiniteRaw; ++raw)
         values[raw] = decodeFiniteBinaryFloatMagnitude(raw, format);
@@ -960,49 +1085,15 @@ inline std::vector<float> makePositiveFiniteBinaryFloatValues(ScalarType type) {
 }
 
 inline const std::vector<float>& positiveFiniteBinaryFloatValues(ScalarType type) {
-    switch (type) {
-        case ScalarType::Float4E2M1: {
-            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float4E2M1);
+    return visitScalarType(type, []<typename Tag>() -> const std::vector<float>& {
+        if constexpr (IsBinaryFloatTypeV<Tag::type>) {
+            static const auto values = makePositiveFiniteBinaryFloatValues<Tag::type>();
             return values;
-        }
-        case ScalarType::Float6E2M3: {
-            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float6E2M3);
-            return values;
-        }
-        case ScalarType::Float6E3M2: {
-            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float6E3M2);
-            return values;
-        }
-        case ScalarType::Float8E4M3: {
-            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float8E4M3);
-            return values;
-        }
-        case ScalarType::Float8E5M2: {
-            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::Float8E5M2);
-            return values;
-        }
-        case ScalarType::Float8E4M3Fnuz: {
-            static const auto values =
-                makePositiveFiniteBinaryFloatValues(ScalarType::Float8E4M3Fnuz);
-            return values;
-        }
-        case ScalarType::Float8E5M2Fnuz: {
-            static const auto values =
-                makePositiveFiniteBinaryFloatValues(ScalarType::Float8E5M2Fnuz);
-            return values;
-        }
-        case ScalarType::E5M3: {
-            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::E5M3);
-            return values;
-        }
-        case ScalarType::E4M3: {
-            static const auto values = makePositiveFiniteBinaryFloatValues(ScalarType::E4M3);
-            return values;
-        }
-        default:
+        } else {
             throw std::invalid_argument(
                 "ScalarType is not a supported binary floating-point format.");
-    }
+        }
+    });
 }
 
 inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
@@ -1114,6 +1205,28 @@ inline uint64_t bitOffset(ScalarType type, ptrdiff_t logicalOffset) {
     return offset * bits;
 }
 
+inline void copyBitRange(std::span<const std::byte> source, uint64_t sourceBitOffset,
+                         std::span<std::byte> destination, uint64_t destinationBitOffset,
+                         uint16_t bitCount) {
+    if (bitCount > 128) throw std::invalid_argument("Tensor scalar storage exceeds 128 bits.");
+    std::array<bool, 128> bits{};
+    for (uint16_t bit = 0; bit < bitCount; ++bit) {
+        const uint64_t sourcePosition = sourceBitOffset + bit;
+        const uint8_t sourceByte =
+            std::to_integer<uint8_t>(source[static_cast<size_t>(sourcePosition / 8)]);
+        bits[bit] = ((sourceByte >> (sourcePosition % 8)) & 1U) != 0;
+    }
+    for (uint16_t bit = 0; bit < bitCount; ++bit) {
+        const uint64_t destinationPosition = destinationBitOffset + bit;
+        std::byte& destinationByte = destination[static_cast<size_t>(destinationPosition / 8)];
+        const uint8_t mask = static_cast<uint8_t>(1U << (destinationPosition % 8));
+        uint8_t value = std::to_integer<uint8_t>(destinationByte);
+        value = bits[bit] ? static_cast<uint8_t>(value | mask)
+                          : static_cast<uint8_t>(value & static_cast<uint8_t>(~mask));
+        destinationByte = static_cast<std::byte>(value);
+    }
+}
+
 inline int64_t signExtend(uint32_t value, uint32_t bits) {
     const uint32_t sign = 1U << (bits - 1U);
     return static_cast<int32_t>((value ^ sign) - sign);
@@ -1122,7 +1235,7 @@ inline int64_t signExtend(uint32_t value, uint32_t bits) {
 template <ScalarType Type, typename Target>
 Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset,
                          const ScalarConversionOptions& options) {
-    static_assert(Type != ScalarType::Count);
+    static_assert(isConcreteScalarType(Type));
     const uint64_t offsetBits = bitOffset(Type, logicalOffset);
     const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
 
@@ -1203,7 +1316,7 @@ Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff
 template <ScalarType Type, typename Source>
 void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, Source source,
                        const ScalarConversionOptions& options) {
-    static_assert(Type != ScalarType::Count);
+    static_assert(isConcreteScalarType(Type));
     const uint64_t offsetBits = bitOffset(Type, logicalOffset);
     const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
 
@@ -1360,7 +1473,7 @@ class Scalar {
 
    private:
     explicit Scalar(ScalarType type) : m_type(type) {
-        if (type == ScalarType::Count)
+        if (!isConcreteScalarType(type))
             throw std::invalid_argument("Scalar requires a concrete scalar type.");
         if (storageSize() > maximumStorageBytes)
             throw std::invalid_argument("Scalar type exceeds inline scalar storage.");
@@ -1375,126 +1488,127 @@ class Scalar {
     std::array<std::byte, maximumStorageBytes> m_storage{};
 };
 
-class Tensor;
-
-template <typename T>
-class TypedTensorView {
+class TensorStorage {
    public:
-    static_assert(!std::is_const_v<T>, "TypedTensorView element type must not be const-qualified.");
+    TensorStorage() = default;
 
-    explicit TypedTensorView(std::span<const T> storage)
-        : TypedTensorView(Layout::contiguous(Shape{storage.size()}), storage) {}
-
-    TypedTensorView(Layout layout, std::span<const T> storage)
-        : m_layout(std::move(layout)), m_storage(storage) {
-        const auto [lower, upper] = detail::elementBounds(m_layout);
-        if (lower < 0 || (upper >= 0 && static_cast<size_t>(upper) >= m_storage.size()))
-            throw std::invalid_argument("TypedTensorView storage is too small for its layout.");
+    TensorStorage(std::shared_ptr<void> owner, std::span<std::byte> bytes)
+        : m_owner(std::move(owner)), m_bytes(bytes) {
+        if (!m_owner && !m_bytes.empty())
+            throw std::invalid_argument("Nonempty TensorStorage requires an owner.");
     }
 
-    const Shape& shape() const {
-        return m_layout.shape();
+    static TensorStorage allocate(size_t bytes) {
+        auto owner = std::make_shared<std::vector<std::byte>>(bytes);
+        return TensorStorage(owner, std::span<std::byte>(*owner));
     }
 
-    const Layout& layout() const {
-        return m_layout;
+    std::span<const std::byte> bytes() const {
+        return m_bytes;
     }
 
-    std::span<const T> storage() const {
-        return m_storage;
+    std::span<std::byte> mutableBytes() const {
+        return m_bytes;
     }
 
-    const T& at(std::span<const size_t> indices) const {
-        return m_storage[static_cast<size_t>(m_layout.elementOffset(indices))];
-    }
-
-    const T& at(std::initializer_list<size_t> indices) const {
-        return at(std::span<const size_t>(indices.begin(), indices.size()));
+    size_t size() const {
+        return m_bytes.size();
     }
 
    private:
-    Layout m_layout;
-    std::span<const T> m_storage;
+    std::shared_ptr<void> m_owner;
+    std::span<std::byte> m_bytes;
 };
 
-class TensorView {
+using TensorStorageAllocator = std::function<TensorStorage(size_t)>;
+
+class Tensor {
    public:
-    TensorView(ScalarType type, Layout layout, std::span<const std::byte> storage)
-        : m_type(type), m_layout(std::move(layout)), m_storage(storage) {
-        if (m_storage.size() < storageBytesForLayout(m_type, m_layout))
-            throw std::invalid_argument("TensorView storage is too small for its layout.");
+    Tensor(ScalarType type, Shape shape) : Tensor(type, Layout::contiguous(shape)) {}
+
+    Tensor(ScalarType type, Layout layout)
+        : Tensor(type, std::move(layout), TensorStorage::allocate) {}
+
+    Tensor(ScalarType type, Shape shape, const TensorStorageAllocator& allocator)
+        : Tensor(type, Layout::contiguous(shape), allocator) {}
+
+    Tensor(ScalarType type, Layout layout, const TensorStorageAllocator& allocator)
+        : m_type(type), m_layout(std::move(layout)) {
+        if (!allocator) throw std::invalid_argument("Tensor storage allocator is empty.");
+        m_storage = allocator(::roc::host_validation::storageBytesForLayout(m_type, m_layout));
+        validateStorage();
     }
 
-    template <typename T>
-    static TensorView fromNative(Layout layout, std::span<const T> values) {
-        return TensorView(nativeScalarType<T>, std::move(layout), std::as_bytes(values));
+    Tensor(ScalarType type, Layout layout, std::vector<std::byte> storage)
+        : Tensor(type, std::move(layout), storageFromVector(std::move(storage))) {}
+
+    Tensor(ScalarType type, Layout layout, std::span<const std::byte> storage)
+        : Tensor(type, std::move(layout), std::vector<std::byte>(storage.begin(), storage.end())) {}
+
+    Tensor(ScalarType type, Layout layout, std::span<std::byte> storage)
+        : Tensor(type, std::move(layout), std::span<const std::byte>(storage)) {}
+
+    static Tensor fromStorage(ScalarType type, Layout layout, TensorStorage storage) {
+        return Tensor(type, std::move(layout), std::move(storage));
     }
 
-    template <typename T>
-    static TensorView fromNative(std::span<const T> values) {
+    static Tensor fromStorage(ScalarType type, Layout layout, std::vector<std::byte> storage) {
+        return Tensor(type, std::move(layout), std::move(storage));
+    }
+
+    template <typename Source>
+    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values) {
+        if (values.size() != shape.elementCount())
+            throw std::invalid_argument("Tensor value count does not match shape.");
+        Tensor result(type, shape);
+        for (size_t index = 0; index < values.size(); ++index)
+            detail::encodeScalar(type, result.storage(), static_cast<ptrdiff_t>(index),
+                                 values[index]);
+        return result;
+    }
+
+    template <typename Source>
+    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values,
+                             const ScalarConversionOptions& options) {
+        if (values.size() != shape.elementCount())
+            throw std::invalid_argument("Tensor value count does not match shape.");
+        Tensor result(type, shape);
+        for (size_t index = 0; index < values.size(); ++index)
+            detail::encodeScalar(type, result.storage(), static_cast<ptrdiff_t>(index),
+                                 values[index], options);
+        return result;
+    }
+
+    template <typename Source>
+    static Tensor fromNativeValues(Shape shape, std::span<const Source> values) {
+        return fromValues(nativeScalarType<Source>, std::move(shape), values);
+    }
+
+    template <typename Source>
+    static Tensor fromNative(Layout layout, std::span<const Source> values) {
+        constexpr ScalarType type = nativeScalarType<Source>;
+        static_assert(scalarTypeInfo(type).storageBits == sizeof(Source) * 8,
+                      "Native Tensor storage requires one scalar per C++ object.");
+        const std::span<const std::byte> bytes = std::as_bytes(values);
+        const size_t required = ::roc::host_validation::storageBytesForLayout(type, layout);
+        if (bytes.size() < required)
+            throw std::invalid_argument("Native Tensor storage is too small for its layout.");
+        return Tensor(type, std::move(layout), bytes.first(required));
+    }
+
+    template <typename Source>
+    static Tensor fromNative(Layout layout, std::span<Source> values) {
+        return fromNative(std::move(layout), std::span<const Source>(values));
+    }
+
+    template <typename Source>
+    static Tensor fromNative(std::span<const Source> values) {
         return fromNative(Layout::contiguous(Shape{values.size()}), values);
     }
 
-    ScalarType type() const {
-        return m_type;
-    }
-
-    const Shape& shape() const {
-        return m_layout.shape();
-    }
-
-    const Layout& layout() const {
-        return m_layout;
-    }
-
-    std::span<const std::byte> storage() const {
-        return m_storage;
-    }
-
-    template <typename Target>
-    Target loadAs(std::span<const size_t> indices) const {
-        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices));
-    }
-
-    template <typename Target>
-    Target loadAs(std::span<const size_t> indices, const ScalarConversionOptions& options) const {
-        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices),
-                                            options);
-    }
-
-    template <typename Target>
-    Target loadAs(std::initializer_list<size_t> indices) const {
-        return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()));
-    }
-
-    template <typename Target>
-    Target loadAs(std::initializer_list<size_t> indices,
-                  const ScalarConversionOptions& options) const {
-        return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()), options);
-    }
-
-    Tensor to(ScalarType type) const;
-
-    Tensor to(ScalarType type, const ScalarConversionOptions& options) const;
-
-   private:
-    ScalarType m_type;
-    Layout m_layout;
-    std::span<const std::byte> m_storage;
-};
-
-class MutableTensorView {
-   public:
-    MutableTensorView(ScalarType type, Layout layout, std::span<std::byte> storage)
-        : m_type(type), m_layout(std::move(layout)), m_storage(storage) {
-        if (m_storage.size() < storageBytesForLayout(m_type, m_layout))
-            throw std::invalid_argument("MutableTensorView storage is too small for its layout.");
-    }
-
-    template <typename T>
-    static MutableTensorView fromNative(Layout layout, std::span<T> values) {
-        return MutableTensorView(nativeScalarType<T>, std::move(layout),
-                                 std::as_writable_bytes(values));
+    template <typename Source>
+    static Tensor fromNative(std::span<Source> values) {
+        return fromNative(std::span<const Source>(values));
     }
 
     ScalarType type() const {
@@ -1507,20 +1621,24 @@ class MutableTensorView {
 
     const Layout& layout() const {
         return m_layout;
+    }
+
+    size_t size() const {
+        return m_layout.elementCount();
     }
 
     std::span<std::byte> storage() const {
-        return m_storage;
+        return m_storage.mutableBytes();
     }
 
     template <typename Target>
     Target loadAs(std::span<const size_t> indices) const {
-        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices));
+        return detail::decodeScalar<Target>(m_type, storage(), m_layout.elementOffset(indices));
     }
 
     template <typename Target>
     Target loadAs(std::span<const size_t> indices, const ScalarConversionOptions& options) const {
-        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices),
+        return detail::decodeScalar<Target>(m_type, storage(), m_layout.elementOffset(indices),
                                             options);
     }
 
@@ -1537,13 +1655,13 @@ class MutableTensorView {
 
     template <typename Source>
     void storeFrom(std::span<const size_t> indices, Source value) const {
-        detail::encodeScalar(m_type, m_storage, m_layout.elementOffset(indices), value);
+        detail::encodeScalar(m_type, storage(), m_layout.elementOffset(indices), value);
     }
 
     template <typename Source>
     void storeFrom(std::span<const size_t> indices, Source value,
                    const ScalarConversionOptions& options) const {
-        detail::encodeScalar(m_type, m_storage, m_layout.elementOffset(indices), std::move(value),
+        detail::encodeScalar(m_type, storage(), m_layout.elementOffset(indices), std::move(value),
                              options);
     }
 
@@ -1559,93 +1677,57 @@ class MutableTensorView {
                   options);
     }
 
-    TensorView asConst() const {
-        return TensorView(m_type, m_layout, m_storage);
+    Tensor alias(Layout layout) const {
+        return Tensor(m_type, std::move(layout), m_storage);
     }
 
-   private:
-    ScalarType m_type;
-    Layout m_layout;
-    std::span<std::byte> m_storage;
-};
-
-class Tensor {
-   public:
-    Tensor(ScalarType type, Shape shape) : Tensor(type, Layout::contiguous(shape)) {}
-
-    Tensor(ScalarType type, Layout layout)
-        : m_type(type),
-          m_layout(std::move(layout)),
-          m_storage(storageBytesForLayout(m_type, m_layout)) {}
-
-    Tensor(ScalarType type, Layout layout, std::vector<std::byte> storage)
-        : m_type(type), m_layout(std::move(layout)), m_storage(std::move(storage)) {
-        if (m_storage.size() < storageBytesForLayout(m_type, m_layout))
-            throw std::invalid_argument("Tensor storage is too small for its layout.");
+    Tensor clone() const {
+        return clone(TensorStorage::allocate);
     }
 
-    static Tensor fromStorage(ScalarType type, Layout layout, std::vector<std::byte> storage) {
-        return Tensor(type, std::move(layout), std::move(storage));
-    }
-
-    template <typename Source>
-    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values) {
-        if (values.size() != shape.elementCount())
-            throw std::invalid_argument("Tensor value count does not match shape.");
-        Tensor result(type, shape);
-        for (size_t index = 0; index < values.size(); ++index)
-            detail::encodeScalar(type, result.m_storage, static_cast<ptrdiff_t>(index),
-                                 values[index]);
+    Tensor clone(const TensorStorageAllocator& allocator) const {
+        Tensor result(m_type, m_layout, allocator);
+        const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
+        std::ranges::copy(storage().first(required), result.storage().begin());
         return result;
     }
 
-    template <typename Source>
-    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values,
-                             const ScalarConversionOptions& options) {
-        if (values.size() != shape.elementCount())
-            throw std::invalid_argument("Tensor value count does not match shape.");
-        Tensor result(type, shape);
-        for (size_t index = 0; index < values.size(); ++index)
-            detail::encodeScalar(type, result.m_storage, static_cast<ptrdiff_t>(index),
-                                 values[index], options);
-        return result;
+    void copyFrom(const Tensor& source) const {
+        if (m_type != source.m_type)
+            throw std::invalid_argument("Tensor copy requires matching scalar types.");
+        if (shape() != source.shape())
+            throw std::invalid_argument("Tensor copy requires matching shapes.");
+        const uint16_t bits = scalarTypeInfo(m_type).storageBits;
+        detail::forEachIndex(shape(), [&](std::span<const size_t> indices, size_t) {
+            detail::copyBitRange(
+                source.storage(), detail::bitOffset(m_type, source.layout().elementOffset(indices)),
+                storage(), detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
+        });
     }
 
-    template <typename Source>
-    static Tensor fromNativeValues(Shape shape, std::span<const Source> values) {
-        return fromValues(nativeScalarType<Source>, std::move(shape), values);
-    }
+    void copyFrom(const Tensor& source, std::span<const size_t> linearIndices) const {
+        if (m_type != source.m_type)
+            throw std::invalid_argument("Tensor copy requires matching scalar types.");
+        if (shape() != source.shape())
+            throw std::invalid_argument("Tensor copy requires matching shapes.");
 
-    ScalarType type() const {
-        return m_type;
-    }
+        const size_t count = size();
+        const uint16_t bits = scalarTypeInfo(m_type).storageBits;
+        std::vector<size_t> indices(shape().rank(), 0);
+        for (const size_t linearIndex : linearIndices) {
+            if (linearIndex >= count)
+                throw std::out_of_range("Tensor copy index exceeds the logical element count.");
 
-    const Shape& shape() const {
-        return m_layout.shape();
-    }
-
-    const Layout& layout() const {
-        return m_layout;
-    }
-
-    size_t size() const {
-        return shape().elementCount();
-    }
-
-    std::span<const std::byte> storage() const {
-        return m_storage;
-    }
-
-    std::span<std::byte> mutableStorage() {
-        return m_storage;
-    }
-
-    TensorView view() const {
-        return TensorView(m_type, m_layout, m_storage);
-    }
-
-    MutableTensorView mutableView() {
-        return MutableTensorView(m_type, m_layout, m_storage);
+            size_t remaining = linearIndex;
+            for (size_t dimension = shape().rank(); dimension > 0; --dimension) {
+                const size_t index = dimension - 1;
+                indices[index] = remaining % shape().extent(index);
+                remaining /= shape().extent(index);
+            }
+            detail::copyBitRange(
+                source.storage(), detail::bitOffset(m_type, source.layout().elementOffset(indices)),
+                storage(), detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
+        }
     }
 
     Tensor to(ScalarType type) const;
@@ -1653,50 +1735,70 @@ class Tensor {
     Tensor to(ScalarType type, const ScalarConversionOptions& options) const;
 
    private:
+    Tensor(ScalarType type, Layout layout, TensorStorage storage)
+        : m_type(type), m_layout(std::move(layout)), m_storage(std::move(storage)) {
+        validateStorage();
+    }
+
+    static TensorStorage storageFromVector(std::vector<std::byte> storage) {
+        auto owner = std::make_shared<std::vector<std::byte>>(std::move(storage));
+        return TensorStorage(owner, std::span<std::byte>(*owner));
+    }
+
+    void validateStorage() const {
+        if (m_storage.size() < ::roc::host_validation::storageBytesForLayout(m_type, m_layout))
+            throw std::invalid_argument("Tensor storage is too small for its layout.");
+    }
+
     ScalarType m_type;
     Layout m_layout;
-    std::vector<std::byte> m_storage;
+    TensorStorage m_storage;
 };
 
-inline Tensor TensorView::to(ScalarType type) const {
-    return to(type, detail::legacyScalarConversionOptions(type));
+inline Tensor Tensor::to(ScalarType destinationType) const {
+    return to(destinationType, detail::legacyScalarConversionOptions(destinationType));
 }
 
-inline Tensor TensorView::to(ScalarType type, const ScalarConversionOptions& options) const {
-    const size_t requiredStorage = storageBytesForLayout(m_type, m_layout);
-    if (type == m_type)
+inline Tensor Tensor::to(ScalarType destinationType, const ScalarConversionOptions& options) const {
+    const ScalarType sourceType = type();
+    const Layout& sourceLayout = layout();
+    const std::span<const std::byte> sourceStorage = storage();
+    const size_t requiredStorage =
+        ::roc::host_validation::storageBytesForLayout(sourceType, sourceLayout);
+    if (destinationType == sourceType)
         return Tensor::fromStorage(
-            type, m_layout,
-            std::vector<std::byte>(m_storage.begin(), m_storage.begin() + requiredStorage));
+            destinationType, sourceLayout,
+            std::vector<std::byte>(sourceStorage.begin(), sourceStorage.begin() + requiredStorage));
 
-    Tensor result(type, m_layout);
-    const MutableTensorView destination = result.mutableView();
-    visitScalarType(m_type, [&]<typename SourceTag>() {
-        visitScalarType(type, [&]<typename DestinationTag>() {
-            detail::forEachIndex(m_layout.shape(), [&](std::span<const size_t> indices, size_t) {
-                const ptrdiff_t sourceOffset = m_layout.elementOffset(indices);
+    Tensor result(destinationType, sourceLayout);
+    const Tensor destination = result;
+    visitScalarType(sourceType, [&]<typename SourceTag>() {
+        visitScalarType(destinationType, [&]<typename DestinationTag>() {
+            detail::forEachIndex(sourceLayout.shape(), [&](std::span<const size_t> indices,
+                                                           size_t) {
+                const ptrdiff_t sourceOffset = sourceLayout.elementOffset(indices);
                 const ptrdiff_t destinationOffset = destination.layout().elementOffset(indices);
                 constexpr ScalarCategory sourceCategory = scalarTypeInfo(SourceTag::type).category;
                 if constexpr (sourceCategory == ScalarCategory::Boolean ||
                               sourceCategory == ScalarCategory::UnsignedInteger) {
                     const uint64_t value = detail::decodeScalarKnown<SourceTag::type, uint64_t>(
-                        m_storage, sourceOffset);
+                        sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
                         destination.storage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::SignedInteger) {
                     const int64_t value = detail::decodeScalarKnown<SourceTag::type, int64_t>(
-                        m_storage, sourceOffset);
+                        sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
                         destination.storage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::Complex) {
                     const std::complex<double> value =
                         detail::decodeScalarKnown<SourceTag::type, std::complex<double>>(
-                            m_storage, sourceOffset);
+                            sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
                         destination.storage(), destinationOffset, value, options);
                 } else {
-                    const double value =
-                        detail::decodeScalarKnown<SourceTag::type, double>(m_storage, sourceOffset);
+                    const double value = detail::decodeScalarKnown<SourceTag::type, double>(
+                        sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
                         destination.storage(), destinationOffset, value, options);
                 }
@@ -1704,13 +1806,5 @@ inline Tensor TensorView::to(ScalarType type, const ScalarConversionOptions& opt
         });
     });
     return result;
-}
-
-inline Tensor Tensor::to(ScalarType type) const {
-    return view().to(type);
-}
-
-inline Tensor Tensor::to(ScalarType type, const ScalarConversionOptions& options) const {
-    return view().to(type, options);
 }
 }  // namespace roc::host_validation

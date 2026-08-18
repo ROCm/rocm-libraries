@@ -155,7 +155,7 @@ inline void validateRuntimeGemmProblem(const GemmProblem& problem) {
         throw std::invalid_argument(
             "Reference GEMM saturating output conversion currently requires Int8 output.");
 
-    auto validateEpilogueVector = [&](const TensorView& values, size_t expected, const char* name) {
+    auto validateEpilogueVector = [&](const Tensor& values, size_t expected, const char* name) {
         validateRuntimeVector(values, expected, "Reference GEMM", name);
         if (!complexAccumulator && isComplexScalarType(values.type()))
             throw std::invalid_argument(

@@ -263,7 +263,7 @@ namespace rocRoller::HostNumerics
             auto const layout = hostTensorLayout(descriptor);
             Tensor     source(ScalarType::Float32, layout);
             roc::host_validation::generate(
-                source.mutableView(),
+                source,
                 generationOptions(descriptor, initialization, type, minimum, maximum, seed));
 
             auto const sourceStorage = source.storage();
@@ -301,17 +301,16 @@ namespace rocRoller::HostNumerics
                     = generateUnscaledF8(descriptor, initialization, type, minimum, maximum, seed);
                 std::optional<Tensor> reference;
                 if(includeReference)
-                    reference = data.view().to(ScalarType::Float32);
+                    reference = data.to(ScalarType::Float32);
                 return {std::move(data), std::nullopt, std::move(reference)};
             }
 
             Tensor data(type, hostTensorLayout(descriptor));
             roc::host_validation::generate(
-                data.mutableView(),
-                generationOptions(descriptor, initialization, type, minimum, maximum, seed));
+                data, generationOptions(descriptor, initialization, type, minimum, maximum, seed));
             std::optional<Tensor> reference;
             if(includeReference)
-                reference = data.view().to(ScalarType::Float32);
+                reference = data.to(ScalarType::Float32);
             return {std::move(data), std::nullopt, std::move(reference)};
         }
 

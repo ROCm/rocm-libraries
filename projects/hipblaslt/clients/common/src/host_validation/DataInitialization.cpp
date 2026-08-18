@@ -65,8 +65,9 @@ namespace hipblaslt::host_validation
         }
 
         GenerationOptions matrixGenerationOptions(const MatrixStorageInitialization& initialization,
-                                                  ScalarType                         type)
+                                                  const Tensor&                      destination)
         {
+            const ScalarType type          = destination.type();
             const bool complexOutput = scalarTypeInfo(type).category == ScalarCategory::Complex;
             if(initialization.forceNaN)
             {
@@ -117,12 +118,12 @@ namespace hipblaslt::host_validation
                 if(initialization.role == MatrixRole::A)
                 {
                     options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = 65280.0;
+                    options.real.parameter0 = specialInitializationAValue;
                 }
                 else if(initialization.role == MatrixRole::B)
                 {
                     options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = 0.0000607967376708984375;
+                    options.real.parameter0 = specialInitializationBValue;
                 }
                 else
                 {
@@ -137,7 +138,7 @@ namespace hipblaslt::host_validation
             case hipblaslt_initialization::norm_dist:
             {
                 GenerationOptions options;
-                options.seed         = 69069;
+                options.seed         = defaultInitializationSeed;
                 options.real.pattern = GenerationPattern::Normal;
                 return options;
             }
@@ -147,14 +148,14 @@ namespace hipblaslt::host_validation
                     throw std::invalid_argument("hipBLASLt one-special normal initialization "
                                                 "requires an ordinary floating type.");
                 GenerationOptions options;
-                options.seed         = 12345;
+                options.seed         = oneSpecialInitializationSeed;
                 options.real.pattern = GenerationPattern::Normal;
                 return options;
             }
             case hipblaslt_initialization::uniform_01:
             {
                 GenerationOptions options;
-                options.seed         = 69069;
+                options.seed            = defaultInitializationSeed;
                 options.real.pattern = type == ScalarType::Int8 ? GenerationPattern::UniformInteger
                                                                 : GenerationPattern::UniformReal;
                 options.real.parameter0 = 0;
@@ -164,11 +165,12 @@ namespace hipblaslt::host_validation
             case hipblaslt_initialization::integer_exact:
             {
                 GenerationOptions options;
-                options.seed            = 69069;
+                options.seed            = defaultInitializationSeed;
                 options.real.pattern    = GenerationPattern::UniformInteger;
                 options.real.parameter0 = 0;
                 options.real.parameter1 = 2;
-                options.real.stream     = initialization.role == MatrixRole::B ? 1000003 : 0;
+                options.real.stream
+                    = initialization.role == MatrixRole::B ? integerExactBStream : 0;
                 if(initialization.role == MatrixRole::B)
                     options.real.alternatingDimensions = {0, 1};
                 return options;
@@ -181,7 +183,7 @@ namespace hipblaslt::host_validation
                 if(initialization.role == MatrixRole::A)
                 {
                     options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = 65504.0 - 4.0;
+                    options.real.parameter0 = maximumFiniteFloat16Value - 4.0;
                 }
                 else if(initialization.role == MatrixRole::B)
                 {
@@ -216,18 +218,24 @@ namespace hipblaslt::host_validation
             throw std::invalid_argument("Unsupported hipBLASLt host matrix initialization mode.");
         }
 
-        void injectOneSpecial(MutableTensorView view, int requestedSpecialType)
+        void injectOneSpecial(Tensor view, int requestedSpecialType)
         {
             const size_t logicalElements = view.shape().elementCount();
             if(logicalElements == 0)
                 return;
 
-            uint32_t     state              = 12345u * 1103515245u + 12345u;
+            constexpr uint32_t multiplier       = 1103515245u;
+            constexpr uint32_t increment        = 12345u;
+            constexpr int      specialTypeCount = 3;
+
+            uint32_t state
+                = static_cast<uint32_t>(oneSpecialInitializationSeed) * multiplier + increment;
             const size_t specialLinearIndex = size_t(state) % logicalElements;
-            state                           = state * 1103515245u + 12345u;
-            const int specialType           = requestedSpecialType >= 0 && requestedSpecialType <= 2
-                                                  ? requestedSpecialType
-                                                  : int(state >> 16) % 3;
+            state                           = state * multiplier + increment;
+            const int specialType
+                = requestedSpecialType >= 0 && requestedSpecialType < specialTypeCount
+                      ? requestedSpecialType
+                      : int(state >> 16) % specialTypeCount;
 
             GenerationOptions special;
             special.real.pattern = specialType == 0   ? GenerationPattern::TypeInfinity
@@ -248,8 +256,8 @@ namespace hipblaslt::host_validation
         const ScalarType       type        = scalarType(initialization.type);
         const size_t           batchStride = effectiveBatchStride(initialization);
         const size_t           elements    = storageElements(initialization, batchStride);
-        const uint16_t         storageBits = scalarTypeInfo(type).storageBits;
-        std::vector<std::byte> storage((elements * static_cast<size_t>(storageBits) + 7) / 8);
+        std::vector<std::byte> storage(
+            storageBytesForLayout(type, Layout::contiguous(Shape{elements})));
         if(initialization.rows == 0 || initialization.columns == 0
            || initialization.batchCount == 0)
             return storage;
@@ -260,11 +268,11 @@ namespace hipblaslt::host_validation
                       {1,
                        static_cast<ptrdiff_t>(initialization.leadingDimension),
                        static_cast<ptrdiff_t>(batchStride)});
-        MutableTensorView view(type, layout, storage);
-        generate(view, matrixGenerationOptions(initialization, type));
+        Tensor view(type, layout, storage);
+        generate(view, matrixGenerationOptions(initialization, view));
 
         if(initialization.initialization == hipblaslt_initialization::norm_dist_one_special)
             injectOneSpecial(view, initialization.specialValueType);
-        return storage;
+        return std::vector<std::byte>(view.storage().begin(), view.storage().end());
     }
 } // namespace hipblaslt::host_validation

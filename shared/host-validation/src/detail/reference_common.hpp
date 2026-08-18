@@ -181,7 +181,7 @@ RuntimeStoreFunction<Accumulator> runtimeStoreFunction(ScalarType type) {
 template <typename Accumulator>
 class RuntimeMatrixReader {
    public:
-    explicit RuntimeMatrixReader(TensorView view)
+    explicit RuntimeMatrixReader(Tensor view)
         : m_storage(view.storage()),
           m_offset(view.layout().offset()),
           m_rowStride(view.layout().strides()[0]),
@@ -204,7 +204,7 @@ class RuntimeMatrixReader {
 template <typename Accumulator>
 class RuntimeMatrixWriter {
    public:
-    explicit RuntimeMatrixWriter(MutableTensorView view)
+    explicit RuntimeMatrixWriter(Tensor view)
         : m_storage(view.storage()),
           m_offset(view.layout().offset()),
           m_rowStride(view.layout().strides()[0]),
@@ -271,7 +271,7 @@ class RuntimeOutputConverter {
 template <typename Accumulator>
 class RuntimeMatrixOutputWriter {
    public:
-    RuntimeMatrixOutputWriter(MutableTensorView output, OutputConversion conversion)
+    RuntimeMatrixOutputWriter(Tensor output, OutputConversion conversion)
         : m_defaultWriter(output),
           m_converter(output.type(), conversion),
           m_conversion(conversion) {}
@@ -292,7 +292,7 @@ class RuntimeMatrixOutputWriter {
 template <typename Accumulator>
 class RuntimeVectorReader {
    public:
-    explicit RuntimeVectorReader(TensorView view)
+    explicit RuntimeVectorReader(Tensor view)
         : m_storage(view.storage()),
           m_offset(view.layout().offset()),
           m_stride(view.layout().strides()[0]),
@@ -312,7 +312,7 @@ class RuntimeVectorReader {
 template <typename Accumulator>
 class RuntimeTensorReader {
    public:
-    explicit RuntimeTensorReader(TensorView view)
+    explicit RuntimeTensorReader(Tensor view)
         : m_storage(view.storage()),
           m_layout(view.layout()),
           m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
@@ -330,7 +330,7 @@ class RuntimeTensorReader {
 template <typename Accumulator>
 class RuntimeTensorWriter {
    public:
-    explicit RuntimeTensorWriter(MutableTensorView view)
+    explicit RuntimeTensorWriter(Tensor view)
         : m_storage(view.storage()),
           m_layout(view.layout()),
           m_store(runtimeStoreFunction<Accumulator>(view.type())) {}
@@ -464,8 +464,8 @@ inline void requireRank(const Shape& shape, size_t rank, std::string_view operat
                                     std::to_string(rank) + ".");
 }
 
-inline void validateRuntimeVector(const TensorView& view, size_t expected,
-                                  std::string_view operation, const char* name) {
+inline void validateRuntimeVector(const Tensor& view, size_t expected, std::string_view operation,
+                                  const char* name) {
     requireRank(view.shape(), 1, operation, name);
     if (view.shape()[0] != expected)
         throw std::invalid_argument(std::string(operation) + " " + name + " length mismatch.");

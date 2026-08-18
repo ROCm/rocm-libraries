@@ -26,14 +26,14 @@ enum class AccumulationRounding {
 };
 
 struct BlockScaleBinding {
-    TensorView values;
+    Tensor values;
     size_t blockSize;
 };
 
 struct GemmOperand {
-    explicit GemmOperand(TensorView tensor) : values(std::move(tensor)) {}
+    explicit GemmOperand(Tensor tensor) : values(std::move(tensor)) {}
 
-    TensorView values;
+    Tensor values;
     std::optional<ScalarType> computeType;
     std::vector<VectorBinding> preQuantizationScales;
     std::optional<BlockScaleBinding> blockScale;
@@ -52,8 +52,8 @@ struct GemmEpilogue {
     Scalar beta;
     std::optional<VectorBinding> bias;
     std::optional<VectorBinding> scaleAlpha;
-    std::optional<TensorView> scaleA;
-    std::optional<TensorView> scaleB;
+    std::optional<Tensor> scaleA;
+    std::optional<Tensor> scaleB;
     Scalar outputScale;
     OutputConversion outputConversion = OutputConversion::Default;
     Activation activation = Activation::None;
@@ -62,7 +62,7 @@ struct GemmEpilogue {
 };
 
 struct GemmProblem {
-    GemmProblem(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor, ScalarType output,
+    GemmProblem(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, ScalarType output,
                 ScalarType accumulator)
         : a(std::move(aOperand)),
           b(std::move(bOperand)),
@@ -73,7 +73,7 @@ struct GemmProblem {
 
     GemmOperand a;
     GemmOperand b;
-    TensorView c;
+    Tensor c;
     ScalarType outputType;
     ScalarType accumulatorType;
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
@@ -82,13 +82,13 @@ struct GemmProblem {
 };
 
 struct GemmRequest : GemmProblem {
-    GemmRequest(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor,
-                MutableTensorView dTensor, ScalarType accumulator)
+    GemmRequest(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, Tensor dTensor,
+                ScalarType accumulator)
         : GemmProblem(std::move(aOperand), std::move(bOperand), std::move(cTensor), dTensor.type(),
                       accumulator),
           d(std::move(dTensor)) {}
 
-    MutableTensorView d;
+    Tensor d;
     OutputSelection outputSelection = OutputSelection::all();
 };
 
@@ -113,7 +113,7 @@ struct GemmExecution {
 };
 
 struct GemmResult {
-    TensorView output;
+    Tensor output;
     GemmRunInfo runInfo;
 };
 

@@ -28,15 +28,14 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt_datatype2string.hpp>
 #include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
 #include <hipblaslt/host_validation/Types.hpp>
-#include <roc/host_validation/comparison.hpp>
-#include <roc/host_validation/typed_comparison.hpp>
-#include <roc/host_validation/validation.hpp>
+#include <hipblaslt_datatype2string.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <roc/host_validation/comparison.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -132,9 +131,17 @@ void dumpBuffer(const char* title, Dtype* data, int N)
 template <typename T>
 void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
 {
-    const auto report = roc::host_validation::compare(
-        roc::host_validation::TypedTensorView<T>(std::span<const T>(cpuOutput)),
-        roc::host_validation::TypedTensorView<T>(std::span<const T>(refOutput)));
+    const auto report
+        = roc::host_validation::compare(hipblaslt::host_validation::tensorFromStorage(
+                                            cpuOutput.data(),
+                                            cpuOutput.size(),
+                                            roc::host_validation::Layout::contiguous(
+                                                roc::host_validation::Shape{cpuOutput.size()})),
+                                        hipblaslt::host_validation::tensorFromStorage(
+                                            refOutput.data(),
+                                            refOutput.size(),
+                                            roc::host_validation::Layout::contiguous(
+                                                roc::host_validation::Shape{refOutput.size()})));
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
@@ -173,12 +180,15 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, toNumBytes);
 
     using namespace roc::host_validation;
+    Tensor referenceOutput = hipblaslt::host_validation::tensorFromMutableStorage(
+        refOutput.data(), refOutput.size(), Layout::contiguous(Shape{}));
     referenceMaximumAbsolute(
-        hipblaslt::host_validation::tensorView(
+        hipblaslt::host_validation::tensorFromStorage(
             cpuInput.data(), cpuInput.size(), Layout::contiguous(Shape{numElements})),
-        hipblaslt::host_validation::mutableTensorView(
-            refOutput.data(), refOutput.size(), Layout::contiguous(Shape{})),
+        referenceOutput,
         ScalarType::Float32);
+    hipblaslt::host_validation::copyTensorStorageTo(
+        refOutput.data(), refOutput.size(), referenceOutput);
 
     // dumpBuffer("Input", cpuInput.data(), m * n);
     // dumpBuffer("GPU", cpuOutput.data(), 1);

@@ -26,9 +26,8 @@
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <iostream>
 #include <hipblaslt/host_validation/Types.hpp>
-#include <roc/host_validation/typed_comparison.hpp>
+#include <iostream>
 #include <roc/host_validation/validation.hpp>
 
 #include "helper.h"
@@ -69,36 +68,48 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
         using namespace roc::host_validation;
         using namespace hipblaslt::host_validation;
 
-        GemmRequest problem(GemmOperand(tensorView(aPtr + batchStrideA * b,
-                                                   batchStrideA,
-                                                   Layout(Shape{size_t(runner.m), size_t(runner.k)},
-                                                          {1, static_cast<ptrdiff_t>(runner.m)}))),
-                            GemmOperand(tensorView(bPtr + batchStrideB * b,
-                                                   batchStrideB,
-                                                   Layout(Shape{size_t(runner.k), size_t(runner.n)},
-                                                          {1, static_cast<ptrdiff_t>(runner.k)}))),
-                            tensorView(cPtr + batchStrideC * b,
-                                       batchStrideC,
+        auto referenceTensor
+            = tensorFromMutableStorage(reference.data() + batchStrideD * b,
+                                       batchStrideD,
                                        Layout(Shape{size_t(runner.m), size_t(runner.n)},
-                                              {1, static_cast<ptrdiff_t>(runner.m)})),
-                            mutableTensorView(reference.data() + batchStrideD * b,
-                                              batchStrideD,
-                                              Layout(Shape{size_t(runner.m), size_t(runner.n)},
-                                                     {1, static_cast<ptrdiff_t>(runner.m)})),
-                            ScalarType::Float32);
+                                              {1, static_cast<ptrdiff_t>(runner.m)}));
+        GemmRequest problem(
+            GemmOperand(tensorFromStorage(aPtr + batchStrideA * b,
+                                          batchStrideA,
+                                          Layout(Shape{size_t(runner.m), size_t(runner.k)},
+                                                 {1, static_cast<ptrdiff_t>(runner.m)}))),
+            GemmOperand(tensorFromStorage(bPtr + batchStrideB * b,
+                                          batchStrideB,
+                                          Layout(Shape{size_t(runner.k), size_t(runner.n)},
+                                                 {1, static_cast<ptrdiff_t>(runner.k)}))),
+            tensorFromStorage(cPtr + batchStrideC * b,
+                              batchStrideC,
+                              Layout(Shape{size_t(runner.m), size_t(runner.n)},
+                                     {1, static_cast<ptrdiff_t>(runner.m)})),
+            referenceTensor,
+            ScalarType::Float32);
         problem.epilogue.alpha = static_cast<double>(runner.alpha) * scaleA;
         problem.epilogue.beta  = static_cast<double>(runner.beta);
         referenceGemm(problem);
+        copyTensorStorageTo(reference.data() + batchStrideD * b, batchStrideD, referenceTensor);
     }
 
     std::vector<TypeCD> gpuResult(runner.m * runner.n * runner.batch_count);
     CHECK_HIP_ERROR(hipMemcpyDtoH(
         gpuResult.data(), runner.d_d, runner.batch_count * runner.m * runner.n * sizeof(TypeCD)));
 
-    const auto comparison = roc::host_validation::compare(
-        roc::host_validation::TypedTensorView<TypeCD>(std::span<const TypeCD>(gpuResult)),
-        roc::host_validation::TypedTensorView<TypeCD>(std::span<const TypeCD>(reference)),
-        {.absoluteTolerance = 1e-5, .maxReportedMismatches = 10});
+    const auto comparison
+        = roc::host_validation::compare(hipblaslt::host_validation::tensorFromStorage(
+                                            gpuResult.data(),
+                                            gpuResult.size(),
+                                            roc::host_validation::Layout::contiguous(
+                                                roc::host_validation::Shape{gpuResult.size()})),
+                                        hipblaslt::host_validation::tensorFromStorage(
+                                            reference.data(),
+                                            reference.size(),
+                                            roc::host_validation::Layout::contiguous(
+                                                roc::host_validation::Shape{reference.size()})),
+                                        {.absoluteTolerance = 1e-5, .maxReportedMismatches = 10});
     for(const auto& mismatch : comparison.reportedMismatches)
     {
         std::cout << mismatch.expected << " vs " << mismatch.observed << '\n';

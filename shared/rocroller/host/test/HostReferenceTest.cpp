@@ -63,8 +63,7 @@ namespace
         const HostReferenceProblem problem
             = makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 2.0f, 3.0f);
         const Tensor reference = computeHostReference(problem);
-        require(convertHostReference<float>(reference.view())
-                    == std::vector<float>({41, 89, 47, 103}),
+        require(convertHostReference<float>(reference) == std::vector<float>({41, 89, 47, 103}),
                 "Unscaled rocroller-gemm host reference mismatch.");
     }
 
@@ -85,7 +84,7 @@ namespace
             const Tensor reference = computeHostReference(
                 makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f));
             require(reference.shape() == Shape{0, 3}
-                        && convertHostReference<float>(reference.view()).empty(),
+                        && convertHostReference<float>(reference).empty(),
                     "M-zero rocroller-gemm host reference mismatch.");
         }
 
@@ -102,7 +101,7 @@ namespace
             const Tensor reference = computeHostReference(
                 makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f));
             require(reference.shape() == Shape{2, 0}
-                        && convertHostReference<float>(reference.view()).empty(),
+                        && convertHostReference<float>(reference).empty(),
                     "N-zero rocroller-gemm host reference mismatch.");
         }
 
@@ -118,8 +117,7 @@ namespace
 
             const Tensor reference = computeHostReference(
                 makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 7.0f, -2.0f));
-            require(convertHostReference<float>(reference.view())
-                        == std::vector<float>({-2, -4, -6, -8}),
+            require(convertHostReference<float>(reference) == std::vector<float>({-2, -4, -6, -8}),
                     "K-zero rocroller-gemm host reference did not apply beta to C.");
         }
     }
@@ -140,35 +138,34 @@ namespace
         const HostReferenceProblem problem
             = makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 2, 1.0f, 0.0f);
         const Tensor reference = computeHostReference(problem);
-        require(convertHostReference<float>(reference.view()) == std::vector<float>({160}),
+        require(convertHostReference<float>(reference) == std::vector<float>({160}),
                 "Block-scaled rocroller-gemm host reference mismatch.");
 
         const std::array<uint8_t, 1> singleScaleA{128};
         const std::array<uint8_t, 1> singleScaleB{130};
         HostReferenceProblem         singleScaleProblem
             = makeHostReferenceProblem(inputs,
-                                       hostScaleTensorView(DataType::E8M0, singleScaleA, 1, 4, 4),
-                                       hostScaleTensorView(DataType::E8M0, singleScaleB, 1, 4, 4),
+                                       hostScaleTensor(DataType::E8M0, singleScaleA, 1, 4, 4),
+                                       hostScaleTensor(DataType::E8M0, singleScaleB, 1, 4, 4),
                                        4,
                                        1.0f,
                                        0.0f);
         const Tensor singleScaleReference = computeHostReference(singleScaleProblem);
-        require(convertHostReference<float>(singleScaleReference.view())
-                    == std::vector<float>({64}),
+        require(convertHostReference<float>(singleScaleReference) == std::vector<float>({64}),
                 "Single-scale rocroller-gemm host reference mismatch.");
 
         GeneratedGEMMInputs onlyA = inputs;
         onlyA.scaleB.reset();
         const Tensor onlyAReference = computeHostReference(
             makeHostReferenceProblem(onlyA, std::nullopt, std::nullopt, 2, 1.0f, 0.0f));
-        require(convertHostReference<float>(onlyAReference.view()) == std::vector<float>({12}),
+        require(convertHostReference<float>(onlyAReference) == std::vector<float>({12}),
                 "One-sided A scaling did not use a unity B scale.");
 
         GeneratedGEMMInputs onlyB = inputs;
         onlyB.scaleA.reset();
         const Tensor onlyBReference = computeHostReference(
             makeHostReferenceProblem(onlyB, std::nullopt, std::nullopt, 2, 1.0f, 0.0f));
-        require(convertHostReference<float>(onlyBReference.view()) == std::vector<float>({48}),
+        require(convertHostReference<float>(onlyBReference) == std::vector<float>({48}),
                 "One-sided B scaling did not use a unity A scale.");
     }
 
@@ -199,8 +196,7 @@ namespace
 
         const Tensor reference = computeHostReference(
             makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 2, 1.0f, 0.0f));
-        require(convertHostReference<float>(reference.view())
-                    == std::vector<float>({4, 4, 4, 4, 4, 4}),
+        require(convertHostReference<float>(reference) == std::vector<float>({4, 4, 4, 4, 4, 4}),
                 "Generated logical-K scales produced the wrong host reference.");
     }
 
@@ -210,16 +206,16 @@ namespace
         const std::array<float, 3> values{1.25f, -2.5f, bfloat16RoundingBoundary};
         const Tensor input = nativeTensor(ScalarType::Float32, Layout(Shape{3, 1}, {1, 3}), values);
 
-        require(convertHostReference<float>(input.view())
+        require(convertHostReference<float>(input)
                     == std::vector<float>(values.begin(), values.end()),
                 "F32 host-reference output conversion mismatch.");
 
-        const auto half = convertHostReference<Half>(input.view());
+        const auto half = convertHostReference<Half>(input);
         require(static_cast<float>(half[0]) == static_cast<float>(Half(values[0]))
                     && static_cast<float>(half[1]) == static_cast<float>(Half(values[1])),
                 "F16 host-reference output conversion mismatch.");
 
-        const auto bfloat16 = convertHostReference<BFloat16>(input.view());
+        const auto bfloat16 = convertHostReference<BFloat16>(input);
         require(bfloat16[0].data == BFloat16(values[0]).data
                     && bfloat16[1].data == BFloat16(values[1]).data,
                 "BF16 host-reference output conversion mismatch.");
@@ -231,8 +227,8 @@ namespace
     {
         const std::array<float, 1> expected{1.0f};
         const std::array<float, 1> observed{2.0f};
-        const auto                 expectedView = hostOutputTensorView<float>(expected, 1, 1);
-        const auto                 observedView = hostOutputTensorView<float>(observed, 1, 1);
+        const auto                 expectedView = hostOutputTensor<float>(expected, 1, 1);
+        const auto                 observedView = hostOutputTensor<float>(observed, 1, 1);
 
         const HostComparisonResult boundary = compareHostReference(
             observedView, expectedView, AcceptableGEMMError{1.0, "strict boundary"});
@@ -246,16 +242,16 @@ namespace
                 "rocroller-gemm comparison rejected a relative error below tolerance.");
 
         const std::array<float, 1> zero{};
-        const auto zeroResult = compareHostReference(hostOutputTensorView<float>(zero, 1, 1),
-                                                     hostOutputTensorView<float>(zero, 1, 1),
+        const auto zeroResult = compareHostReference(hostOutputTensor<float>(zero, 1, 1),
+                                                     hostOutputTensor<float>(zero, 1, 1),
                                                      AcceptableGEMMError{1.0, "zero reference"});
         require(std::isnan(zeroResult.relativeNormL2) && !zeroResult.ok,
                 "rocroller-gemm comparison changed zero-reference acceptance semantics.");
 
         const std::array<float, 1> infinity{std::numeric_limits<float>::infinity()};
         const auto                 infinityResult
-            = compareHostReference(hostOutputTensorView<float>(infinity, 1, 1),
-                                   hostOutputTensorView<float>(infinity, 1, 1),
+            = compareHostReference(hostOutputTensor<float>(infinity, 1, 1),
+                                   hostOutputTensor<float>(infinity, 1, 1),
                                    AcceptableGEMMError{1.0, "matching infinity"});
         require(std::isnan(infinityResult.relativeNormL2) && !infinityResult.ok,
                 "rocroller-gemm comparison changed matching-infinity acceptance semantics.");
