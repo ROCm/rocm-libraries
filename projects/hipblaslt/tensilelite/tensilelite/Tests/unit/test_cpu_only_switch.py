@@ -207,7 +207,7 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 
     monkeypatch.setattr(Arch, "detectGlobalCurrentISA", _no_detect)
 
-    # Mirror the isaList-building logic at tensilelite.py (the --gpu-targets branch):
+    # Mirror the isaList-building logic at run.py (the --gpu-targets branch):
     # ISA comes straight from gfxToIsa(arch); enumerator is None; detection untouched.
     args = _parse(["--cpu-only", "--device", "0"])
     assert args.cpuOnly is True
@@ -233,7 +233,7 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 def _run_freq_block(device_id=0):
     """Replay the guarded frequency-probe block from tensilelite.Tensile() exactly.
 
-    The gating predicate mirrors tensilelite.py:601 verbatim:
+    The gating predicate mirrors run.py:601 verbatim:
         'LibraryLogic' in config and UseEffLike and not buildOnly
         and not globalParameters["CpuOnly"]
     The 'LibraryLogic'/UseEffLike/buildOnly preconditions are held True/True/False so

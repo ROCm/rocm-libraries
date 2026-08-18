@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Extended tests for tensilelite.py backend configuration parsing (patch coverage).
+"""Extended tests for run.py backend configuration parsing (patch coverage).
 
 Targets uncovered lines reported by codecov:
 - Backend dict without 'Name' key → printExit

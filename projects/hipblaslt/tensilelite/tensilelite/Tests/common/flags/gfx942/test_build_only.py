@@ -98,7 +98,7 @@ def test_compile(tensile_args: list[str], tmp_path: Path) -> None:
     Explicitly pins --gpu-targets to gfx942, overriding any --gpu-targets
     tensile_args may have forwarded from the harness (e.g. tox injects one
     for the host's detected revision target). --gpu-targets takes priority
-    over the config's own ISA in tensilelite.py, so without this the test would
+    over the config's own ISA in run.py, so without this the test would
     silently compile for the host's architecture instead of gfx942.
     """
     config_path = str(tmp_path / "config.yaml")

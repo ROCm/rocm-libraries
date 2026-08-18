@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Unit tests for tensilelite.tensilelite.get_gpu_max_frequency_smi.
+Unit tests for tensilelite.run.get_gpu_max_frequency_smi.
 
 These verify that the amd-smi based max-GFX-clock lookup parses the
 `amd-smi metric --clock --json` output correctly, without real GPUs.

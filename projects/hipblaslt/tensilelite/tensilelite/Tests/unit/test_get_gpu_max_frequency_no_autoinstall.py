@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Regression tests for tensilelite.tensilelite.get_gpu_max_frequency (ROCM-26748 / SEC-00581).
+Regression tests for tensilelite.run.get_gpu_max_frequency (ROCM-26748 / SEC-00581).
 
 When hip-python is not importable, get_gpu_max_frequency must degrade
 gracefully (return None so the caller falls back to amd-smi) and MUST NOT

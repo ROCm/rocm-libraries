@@ -76,7 +76,7 @@ Consequences:
   perf-meaningless.
 
 For this reason `--cpu-only` must never *silently* drive a real `LibraryLogic`
-generation step. The seam itself enforces this structurally: `tensilelite.py`
+generation step. The seam itself enforces this structurally: `run.py`
 declines the efficiency-based (`UseEffLike`) frequency path — and therefore the
 real `LibraryLogic` winner-selection path — under `CpuOnly`, so synthetic perf
 is never consumed for tuning in the first place.

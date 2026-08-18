@@ -450,7 +450,7 @@ globalParameters["StinkyTofuRegisterAllocationDump"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
 
-# Internal plumbing for the --cpu-only CLI switch (see tensilelite.py addCommonArguments).
+# Internal plumbing for the --cpu-only CLI switch (see run.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
 # probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.
 # This is undocumented plumbing only: it is NOT exposed via --global-parameters help and
