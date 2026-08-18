@@ -15,7 +15,7 @@ from tensilelite.ExecutionPolicy import (
 )
 from tensilelite.ExperimentalLibrary import _apply_overrides
 from tensilelite.SolutionStructs.Naming import getSolutionNameFull
-from tensilelite.TensileMergeLibrary import addKernel, reNameSolutions
+from tensilelite.merge_library import addKernel, reNameSolutions
 
 pytestmark = pytest.mark.unit
 
