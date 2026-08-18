@@ -19,7 +19,7 @@ import ast
 
 
 _SOLUTION_PY = (
-    Path(__file__).resolve().parents[2] / "SolutionStructs" / "Solution.py"
+    Path(__file__).resolve().parents[3] / "SolutionStructs" / "Solution.py"
 )
 
 
