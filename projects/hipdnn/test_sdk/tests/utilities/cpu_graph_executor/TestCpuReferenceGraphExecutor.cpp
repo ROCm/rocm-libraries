@@ -609,8 +609,6 @@ public:
 
             indexTensor.memory().markHostModified();
             directIndexTensor.memory().markHostModified();
-
-            // variantPack[3] = indexTensor.memory().hostData();
         }
 
         CpuReferenceGraphExecutor().execute(

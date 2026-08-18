@@ -81,71 +81,76 @@ public:
             });
 
         // Compute the backward pass
-        auto resampleBwdFunc = [&](const std::vector<int64_t>& dyIndices) {
-            // Gradient from next layer at current position
-            const auto gradient = static_cast<ComputeDataType>(dy.getHostValue(dyIndices));
+        auto resampleBwdFunc = [&](const std::vector<int64_t>& dxIndices) {
+            auto result = static_cast<ComputeDataType>(0);
+            const auto currentFlattenedIndex = flattenDxSpatialIndex(dxDims, dxIndices);
 
-            if(resampleMode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
-            {
-                const auto flattenedIndex = static_cast<int64_t>(index->getHostValue(dyIndices));
-                if(flattenedIndex < 0) // No contribution to dx from this index
-                {
-                    return;
-                }
-
-                // dL/dx[flattenedIndex -> dxIndices] += 1.0 * dL/dy[dyIndices]
-                auto dxIndices = unflattenSpatialIndex(dxDims, dyIndices, flattenedIndex);
-                accumulate(dx, dxIndices, gradient);
-                return;
-            }
-
-            // For average pooling, determine how many valid contributions (for
-            // AVGPOOL_EXCLUDE_PADDING) or the window size (for AVGPOOL_INCLUDE_PADDING)
-            // to split dy across the contributing dx elements
-            int64_t validCount = 0;
-            if(resampleMode
-               == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING)
-            {
-                hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                    window, [&](const std::vector<int64_t>& windowIndices) {
-                        if(makeDxIndices(dxDims, dyIndices, windowIndices, prePadding, stride)
-                               .has_value())
-                        {
-                            ++validCount;
-                        }
-                    });
-            }
-            int64_t divisor = validCount;
-            if(resampleMode
-               == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
-            {
-                divisor = 1;
-                for(const auto windowDim : window)
-                {
-                    divisor *= windowDim;
-                }
-            }
-
-            if(divisor == 0) // Avoid division by zero, if no valid contributions
-            {
-                divisor = 1;
-            }
-
-            // dL/dx[dxIndices] += (1.0 / numContributions) * dL/dy[dyIndices]
-            const auto contribution = gradient / static_cast<ComputeDataType>(divisor);
+            // Evalute if the current dxIndices has valid contributions from dy in the window
             hipdnn_data_sdk::utilities::iterateAlongDimensions(
                 window, [&](const std::vector<int64_t>& windowIndices) {
-                    auto dxIndices
-                        = makeDxIndices(dxDims, dyIndices, windowIndices, prePadding, stride);
-                    if(dxIndices.has_value())
+                    const auto dyIndices
+                        = makeDyIndices(dyDims, dxIndices, windowIndices, prePadding, stride);
+                    if(!dyIndices.has_value())
                     {
-                        accumulate(dx, *dxIndices, contribution);
+                        return;
                     }
+
+                    const auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(*dyIndices));
+
+                    if(resampleMode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+                    {
+                        const auto flattenedIndex
+                            = static_cast<int64_t>(index->getHostValue(*dyIndices));
+                        if(flattenedIndex
+                           != currentFlattenedIndex) // No contribution to dx from this dy index
+                        {
+                            return;
+                        }
+
+                        // Only this dy element contributes to the current dx element,
+                        // so we can add the dy to the result and return early
+                        result += dyVal;
+                        return;
+                    }
+
+                    // For average pooling, determine how many valid contributions (for
+                    // AVGPOOL_EXCLUDE_PADDING) or the window size (for AVGPOOL_INCLUDE_PADDING)
+                    // to split the dy gradient across
+                    int64_t divisor = 1;
+                    if(resampleMode
+                       == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::
+                           AVGPOOL_EXCLUDE_PADDING)
+                    {
+                        int64_t validCount = 0;
+                        hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                            window, [&](const std::vector<int64_t>& innerWindowIndices) {
+                                if(makeDxIndices(
+                                       dxDims, *dyIndices, innerWindowIndices, prePadding, stride)
+                                       .has_value())
+                                {
+                                    ++validCount;
+                                }
+                            });
+                        divisor = validCount == 0 ? 1 : validCount;
+                    }
+                    else
+                    {
+                        divisor = 1;
+                        for(const auto windowDim : window)
+                        {
+                            divisor *= windowDim;
+                        }
+                    }
+
+                    // Add the contribution from this dy element to the current dx element
+                    result += dyVal / static_cast<ComputeDataType>(divisor);
                 });
+
+            dx.setHostValue(static_cast<DxDataType>(result), dxIndices);
         };
 
         auto parallelFunc
-            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(resampleBwdFunc, dyDims);
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(resampleBwdFunc, dxDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         dx.memory().markHostModified();
@@ -176,32 +181,42 @@ private:
         return dxIndices;
     }
 
-    static std::vector<int64_t> unflattenSpatialIndex(const std::vector<int64_t>& dxDims,
-                                                      const std::vector<int64_t>& dyIndices,
-                                                      int64_t flattenedIndex)
+    static std::optional<std::vector<int64_t>>
+        makeDyIndices(const std::vector<int64_t>& dyDims,
+                      const std::vector<int64_t>& dxIndices,
+                      const std::vector<int64_t>& windowIndices,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& stride)
     {
-        std::vector<int64_t> dxIndices(dxDims.size(), 0);
-        dxIndices[0] = dyIndices[0];
-        dxIndices[1] = dyIndices[1];
-        for(size_t i = dxDims.size() - 1; i >= 2; --i)
+        std::vector<int64_t> dyIndices(dyDims.size(), 0);
+        dyIndices[0] = dxIndices[0];
+        dyIndices[1] = dxIndices[1];
+        for(size_t i = 0; i < windowIndices.size(); ++i)
         {
-            dxIndices[i] = flattenedIndex % dxDims[i];
-            flattenedIndex /= dxDims[i];
+            const auto numerator = dxIndices[i + 2] + prePadding[i] - windowIndices[i];
+            if(numerator % stride[i] != 0)
+            {
+                return std::nullopt;
+            }
+            const auto outIndex = numerator / stride[i];
+            if(outIndex < 0 || outIndex >= dyDims[i + 2])
+            {
+                return std::nullopt;
+            }
+            dyIndices[i + 2] = outIndex;
         }
-        if(flattenedIndex != 0)
-        {
-            throw std::runtime_error("ResampleBwd index is outside the dx spatial dimensions.");
-        }
-        return dxIndices;
+        return dyIndices;
     }
 
-    template <class DxDataType, class ComputeDataType>
-    static void accumulate(hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
-                           const std::vector<int64_t>& dxIndices,
-                           ComputeDataType contribution)
+    static int64_t flattenDxSpatialIndex(const std::vector<int64_t>& dxDims,
+                                         const std::vector<int64_t>& dxIndices)
     {
-        const auto current = static_cast<ComputeDataType>(dx.getHostValue(dxIndices));
-        dx.setHostValue(static_cast<DxDataType>(current + contribution), dxIndices);
+        int64_t flattened = 0;
+        for(size_t i = 2; i < dxDims.size(); ++i)
+        {
+            flattened = flattened * dxDims[i] + dxIndices[i];
+        }
+        return flattened;
     }
 };
 
