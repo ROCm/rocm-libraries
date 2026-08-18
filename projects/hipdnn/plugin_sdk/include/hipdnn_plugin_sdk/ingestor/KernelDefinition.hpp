@@ -27,6 +27,11 @@ struct KernelDefinition
     KernelSource source;
     MetadataValues metadata;
     int64_t priority = 0;
+    /// Devices this kernel runs on, already resolved: its own list when it declared one,
+    /// otherwise the pack's. Empty means every device, which is also what an unrestricted
+    /// kernel of an unrestricted pack gets. Read at match time, so one pack can hold an
+    /// implementation per capability -- an MFMA build beside a portable one.
+    std::vector<std::string> arch;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {

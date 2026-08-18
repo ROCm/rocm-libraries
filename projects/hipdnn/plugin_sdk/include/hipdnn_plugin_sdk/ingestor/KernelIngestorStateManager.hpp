@@ -258,30 +258,37 @@ private:
                 }
 
                 auto key = completeMetadata(kernel);
+                // A kernel that declared no arch of its own runs wherever its pack does;
+                // one that declared a narrower list claims only that. Claiming by the
+                // kernel rather than the pack is what lets two kernels of ONE pack share a
+                // tuple under disjoint arch -- one implementation per capability -- while
+                // still catching two that a single device would see together.
+                std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
                 // try_emplace, not operator[], only because misc-const-correctness
                 // misreads the operator[] form here and demands a const map.
                 std::vector<std::vector<std::string>>& claimants
                     = archesClaimingTuple.try_emplace(key).first->second;
                 for(const auto& claimed : claimants)
                 {
-                    if(archOverlaps(claimed, pack.arch))
+                    if(archOverlaps(claimed, kernelArch))
                     {
                         throw std::invalid_argument(
                             "kernel '" + toString(kernel.id)
                             + "' duplicates the metadata tuple of another kernel under schema '"
                             + _schema.name
-                            + "' on an arch both packs claim; the tuple is the catalog key "
+                            + "' on an arch both reach; the tuple is the catalog key "
                             + "and must be unique per device");
                     }
                 }
-                claimants.push_back(pack.arch);
+                claimants.push_back(kernelArch);
 
                 packDefinitions.push_back(KernelDefinition{kernel.id,
                                                            pack.id,
                                                            pack.dispatchId,
                                                            kernel.source,
                                                            std::move(key),
-                                                           kernel.priority});
+                                                           kernel.priority,
+                                                           std::move(kernelArch)});
             }
             _definitions.push_back(std::move(packDefinitions));
         }
@@ -429,6 +436,20 @@ private:
             size_t admitted = 0;
             for(const auto& precomputed : _definitions[packIndex])
             {
+                // The pack gate above answered for the pack's own list; a kernel that
+                // narrowed itself still has to be asked. Restating it for an unrestricted
+                // kernel is one empty-list test, and the alternative -- trusting the pack
+                // gate for some kernels and not others -- is the kind of conditional that
+                // stops being true the next time this loop changes.
+                if(!archSupports(precomputed.arch, context.deviceProperties.gcnArchName))
+                {
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: kernel "
+                                           << toString(precomputed.kernelId)
+                                           << " does not support device arch '"
+                                           << context.deviceProperties.gcnArchName << "'");
+                    continue;
+                }
+
                 // Copied, not rebuilt: every field was settled at construction, and the
                 // kernel matcher below reads the definition without mutating it.
                 KernelDefinition definition = precomputed;
@@ -442,9 +463,11 @@ private:
 
             if(admitted == 0)
             {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack "
-                                       << toString(pack.id) << " admitted no kernel of "
-                                       << pack.kernels.size() << " at a kernel-scoped matcher");
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
+                                                         << " admitted no kernel of "
+                                                         << pack.kernels.size()
+                                                         << " at the arch gate or a "
+                                                            "kernel-scoped matcher");
                 continue;
             }
 

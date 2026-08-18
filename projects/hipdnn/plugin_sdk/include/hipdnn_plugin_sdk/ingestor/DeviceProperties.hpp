@@ -56,6 +56,25 @@ inline bool archOverlaps(const std::vector<std::string>& a, const std::vector<st
     });
 }
 
+/// Is every device @p inner admits also admitted by @p outer? The asymmetric counterpart
+/// to archOverlaps, for asking whether a kernel stays within the pack that binds it.
+/// Empty @p outer admits every device, so it covers anything; empty @p inner declares no
+/// restriction of its own and is covered by anything. Suffixes fall out of the PREFIX
+/// direction: `gfx942:sramecc+` is covered by `gfx942`, and `gfx942` is NOT covered by
+/// `gfx942:sramecc+`, since it also admits `gfx942:xnack-`.
+inline bool archCovers(const std::vector<std::string>& outer, const std::vector<std::string>& inner)
+{
+    if(outer.empty())
+    {
+        return true;
+    }
+    return std::all_of(inner.begin(), inner.end(), [&outer](const std::string& entry) {
+        return std::any_of(outer.begin(), outer.end(), [&entry](const std::string& candidate) {
+            return archMatches(entry, candidate, ArchMatchMode::PREFIX);
+        });
+    });
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

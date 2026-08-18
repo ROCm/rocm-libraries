@@ -530,23 +530,17 @@ TEST(TestDescriptorLoader, TreatsArchOrderAsOneKey)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "both define"));
 }
 
-/// Both spellings of one kernel id present at once: the pack's own arch is the answer,
-/// and the arch-independent entry is the fallback for a pack that finds nothing else --
-/// tested together, since each resolves on its own and only the order between them can
-/// regress.
-TEST(TestDescriptorLoader, PrefersTheKernelBuiltForThePacksArchOverTheArchIndependentOne)
+/// A kernel may cover part of what its pack claims: the pack advertises the union, the
+/// kernel serves its slice, and the arch gate picks at match time. This is the shape a
+/// pack holding one implementation per capability takes -- an MFMA build beside a
+/// portable one -- and the exact-key lookup this replaced dropped the pack for it.
+TEST(TestDescriptorLoader, ResolvesAStandaloneKernelCoveringPartOfThePacksArch)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_precedence"));
-    auto documents = makeSetDocuments('1', "test:arch_precedence");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_subset"));
+    auto documents = makeSetDocuments('1', "test:subset");
     referenceLastKernel(documents);
-    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
-
-    // The referenced kernel, a second time: same id, stamped for this pack's arch, and
-    // named differently so which one resolved is visible in the result.
-    auto pinned = documentOfType(documents, ".ukd.json");
-    pinned["arch"] = nlohmann::json::array({"gfx942"});
-    pinned["name"] = "the gfx942 build";
-    documents.push_back(TestDocument{".ukd.json", pinned});
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    documentOfType(documents, ".ukd.json")["arch"] = nlohmann::json::array({"gfx942"});
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -555,12 +549,147 @@ TEST(TestDescriptorLoader, PrefersTheKernelBuiltForThePacksArchOverTheArchIndepe
     ASSERT_EQ(sets.front().packs.size(), 1u);
     const auto& kernels = sets.front().packs.front().kernels;
     ASSERT_EQ(kernels.size(), 3u);
-    EXPECT_EQ(kernels.back().name, "the gfx942 build");
+    EXPECT_EQ(kernels.back().arch, std::vector<std::string>{"gfx942"});
 }
 
-/// A pack missing its shard's arch stamp names a kernel that exists -- just not under any
-/// arch it claims. Reporting that as "no descriptor defines it" sends the reader hunting
-/// for a missing file.
+/// The other direction is an authoring error, not a narrowing: the kernel claims a device
+/// its pack never offers it to, so nothing would ever dispatch it there. Reported as its
+/// own failure because "defined only for another arch" reads as a missing shard, and this
+/// file is present and wrong.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelReachesPastItsArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_reaching"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    documentOfType(broken, ".ukd.json")["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "declares arch [gfx90a, gfx942] reaching past the "
+                                          "pack's [gfx942]"));
+}
+
+/// Both spellings of one kernel id within reach of one pack. Nothing in the format ranks
+/// them, so binding either would make dispatch depend on catalog order, and letting the
+/// arch-specific one win is the silent shadowing the drop-in rule refuses elsewhere. The
+/// shapes are not supposed to mix: a kernel ships arch-independent, or per arch.
+TEST(TestDescriptorLoader, RejectsAKernelDefinedBothArchIndependentlyAndPerArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_ambiguous"));
+    auto documents = makeSetDocuments('1', "test:ambiguous");
+    referenceLastKernel(documents);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+
+    // The referenced kernel a second time, stamped for this pack's arch, so both the bare
+    // and the stamped spelling resolve for it. In a sibling directory because a fixture
+    // file is named for its id: written beside the first it would simply replace it, and
+    // the case under test needs both present at once.
+    auto pinned = documentOfType(documents, ".ukd.json");
+    pinned["arch"] = nlohmann::json::array({"gfx942"});
+    pinned["name"] = "the gfx942 build";
+    writeDocuments(dir.path(), documents);
+    writeDocuments(dir.path() / "gfx942", {TestDocument{".ukd.json", pinned}});
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "which several descriptors define within the pack's arch"));
+}
+
+/// An inline kernel carries the same `arch` as a standalone one, and means the same
+/// thing: the devices this kernel runs on, within what the pack claims. Absent, which is
+/// every shipped kernel today, it inherits the pack.
+TEST(TestDescriptorLoader, NarrowsAnInlineKernelToPartOfItsPacksArch)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_arch"));
+    auto documents = makeSetDocuments('1', "test:inline_arch");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.front().arch, std::vector<std::string>{"gfx942"});
+    EXPECT_TRUE(kernels.back().arch.empty()) << "an unstamped inline kernel inherits the pack";
+}
+
+/// Caught while parsing rather than at resolution: an inline kernel has exactly one
+/// parent and it is already in hand, so reaching past it is a property of this file alone
+/// and fails the file, not every pack that might have bound it.
+TEST(TestDescriptorLoader, RejectsAnInlineKernelReachingPastItsPacksArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_arch_past"));
+    auto documents = makeSetDocuments('1', "test:inline_past");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = nlohmann::json::array({"gfx942"});
+    pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx90a"});
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "declares arch [gfx90a], which reaches past the pack's [gfx942]"));
+}
+
+/// Coverage is asymmetric, and a feature suffix is the only place that shows: `gfx942`
+/// admits every gfx942 device, `gfx942:sramecc+` only the ones with it, so the suffixed
+/// list is the narrower one. Bare ids compare equal in both directions and cannot tell
+/// the two apart, which is what makes this the test that pins the direction.
+TEST(TestDescriptorLoader, TreatsAFeatureSuffixAsNarrowerThanItsBaseTarget)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("suffix_narrows"));
+        auto documents = makeSetDocuments('1', "test:suffix_narrows");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({"gfx942"});
+        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942:sramecc+"});
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u) << "a suffixed kernel is within its bare-target pack";
+        ASSERT_EQ(sets.front().packs.size(), 1u);
+        EXPECT_EQ(sets.front().packs.front().kernels.front().arch,
+                  std::vector<std::string>{"gfx942:sramecc+"});
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("suffix_widens"));
+        auto documents = makeSetDocuments('2', "test:suffix_widens");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({"gfx942:sramecc+"});
+        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942"});
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty())
+            << "a bare-target kernel also admits gfx942:xnack-, which the pack never claims";
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                              "declares arch [gfx942], which reaches past the "
+                                              "pack's [gfx942:sramecc+]"));
+    }
+}
+
+/// A shard's pack names a kernel that exists -- just not under any arch it claims, which
+/// is what a shard whose kernels never got stamped looks like. Reporting that as "no
+/// descriptor defines it" sends the reader hunting for a missing file. Disjoint, not
+/// merely different: a kernel inside the pack's arch is a narrowing and resolves.
 TEST(TestDescriptorLoader, DropsAPackWhoseKernelIsDefinedOnlyForAnotherArch)
 {
     auto recorder
@@ -570,6 +699,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseKernelIsDefinedOnlyForAnotherArch)
 
     auto broken = makeSetDocuments('2', "test:broken");
     referenceLastKernel(broken);
+    documentOfType(broken, ".kdp.json")["arch"] = nlohmann::json::array({"gfx90a"});
     documentOfType(broken, ".ukd.json")["arch"] = nlohmann::json::array({"gfx942"});
     writeDocuments(dir.path(), broken);
 

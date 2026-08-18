@@ -652,6 +652,26 @@ inline bool isPlausibleArchBaseId(std::string_view value)
     }
 }
 
+/// An arch list as a diagnostic reads it: `[gfx942, gfx950]`, or `any arch` when empty,
+/// since an empty list is a claim on everything rather than a claim on nothing.
+inline std::string describeArch(const std::vector<std::string>& arch)
+{
+    if(arch.empty())
+    {
+        return "any arch";
+    }
+    std::string text = "[";
+    for(const auto& entry : arch)
+    {
+        if(text.size() > 1)
+        {
+            text += ", ";
+        }
+        text += entry;
+    }
+    return text + "]";
+}
+
 /// `arch`: every entry must be non-empty, non-repeated, and a plausible gfx base id.
 /// archSupports is a case-sensitive exact compare, so `""`, `" gfx942"`, or `"gfx94"`
 /// would otherwise silently disable the pack everywhere with nothing louder than an
@@ -849,20 +869,24 @@ inline KernelDescriptor parseKernelDescriptorBody(const nlohmann::json& root,
 }
 
 /// A kernel spelled inside its pack. Takes the pack's file, so a diagnostic about an
-/// inline kernel names the file it is spelled in rather than only its shape.
+/// inline kernel names the file it is spelled in rather than only its shape. `arch` is
+/// optional here and means the same as on a `.ukd.json`: the devices this one kernel
+/// runs on, which must stay within what its pack claims. Absent, it inherits the pack.
 inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
                                               const std::string& packWhere)
 {
     const std::string where = "a 'kernelDescriptors' entry in " + packWhere;
     requireObject(root, where);
-    requireKnownKeys(root, {"id", "name", "kernel_source", "metadata", "priority"}, where);
-    return parseKernelDescriptorBody(root, where);
+    requireKnownKeys(root, {"id", "name", "kernel_source", "metadata", "priority", "arch"}, where);
+    auto kernel = parseKernelDescriptorBody(root, where);
+    kernel.arch = requireArchList(root, where);
+    return kernel;
 }
 
 /// UKD: a kernel shipped in its own file, named from a pack by bare id. Identical to an
-/// inline one once loaded apart from `arch`, which only this form carries -- an inline
-/// kernel takes its pack's arch. The file exists so a kernel can ship separately from the
-/// pack that binds it, or be shared by packs of different engines.
+/// inline one once loaded, `arch` included -- the file exists so a kernel can ship
+/// separately from the pack that binds it, or be shared by packs of different engines,
+/// and only this form carries `version`, since only this form is a file.
 inline KernelDescriptor parseStandaloneKernelDescriptor(const nlohmann::json& root,
                                                         const std::string& where)
 {
@@ -934,7 +958,18 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
         }
         else
         {
-            pack.kernels.push_back(parseKernelDescriptor(entry, where));
+            auto kernel = parseKernelDescriptor(entry, where);
+            // Checked here rather than at resolution, because an inline kernel has exactly
+            // one parent and it is already parsed: a kernel reaching past its pack is a
+            // property of this file alone, so it fails the file instead of every pack that
+            // might bind it.
+            if(!archCovers(pack.arch, kernel.arch))
+            {
+                fail("kernel '" + kernel.name + "' in " + where + " declares arch "
+                     + describeArch(kernel.arch) + ", which reaches past the pack's "
+                     + describeArch(pack.arch));
+            }
+            pack.kernels.push_back(std::move(kernel));
         }
     }
     return pack;
@@ -1052,27 +1087,75 @@ inline const T* findDescriptor(const DescriptorMap<T>& map, const DescriptorId& 
     return &it->second.descriptor;
 }
 
-/// The kernel @p id names, as seen by a pack targeting @p packArch. A shard's kernels are
-/// keyed by that shard's arch, so a pack resolves its own first; an arch-independent
-/// kernel (empty arch) is the shared fallback, which is how one `.ukd.json` serves packs
-/// of several engines. A conflicted exact match returns nullptr rather than falling
-/// through -- substituting the shared kernel would hide the collision the conflict
-/// recorded.
-inline const KernelDescriptor* findKernelForPack(const KernelMap& kernels,
-                                                 const DescriptorId& id,
-                                                 const std::vector<std::string>& packArch)
+/// What a pack's `kernelDescriptors` reference resolved to, or why it did not.
+struct KernelMatch
 {
-    auto arch = packArch;
-    std::sort(arch.begin(), arch.end());
-    if(const auto exact = kernels.find(ArchKey{id, arch}); exact != kernels.end())
+    const KernelDescriptor* kernel = nullptr;
+    std::string reason; ///< empty iff @c kernel is set; the pack's drop diagnostic otherwise
+};
+
+/// The kernel @p id names, as seen by a pack targeting @p packArch.
+///
+/// Identity is the id. The arch half of the catalog key exists only because per-arch
+/// shards ship one id more than once, so this reads the id's whole range and then decides
+/// by arch rather than rebuilding a key it would have to guess. One definition is the
+/// ordinary case and the decision reduces to a check: a kernel may restrict itself to
+/// part of what its pack claims, never to anything outside it.
+inline KernelMatch findKernelForPack(const KernelMap& kernels,
+                                     const DescriptorId& id,
+                                     const std::vector<std::string>& packArch)
+{
+    const CatalogEntry<KernelDescriptor>* covered = nullptr;
+    bool ambiguous = false;
+    bool exists = false;
+    std::string reaching;
+
+    // Entries sharing an id are contiguous from the empty-arch key, which sorts first.
+    for(auto it = kernels.lower_bound(ArchKey{id, {}});
+        it != kernels.end() && it->first.first == id;
+        ++it)
     {
-        return exact->second.conflicted ? nullptr : &exact->second.descriptor;
+        exists = true;
+        const auto& candidate = it->second.descriptor;
+        if(archCovers(packArch, candidate.arch))
+        {
+            ambiguous = covered != nullptr;
+            covered = &it->second;
+        }
+        else if(archOverlaps(packArch, candidate.arch))
+        {
+            // Reaches past the pack on one arch while serving it on another. Named
+            // separately because "defined only for another arch" reads as a missing
+            // shard, and this is an authoring error in the file that is present.
+            reaching = describeArch(candidate.arch);
+        }
     }
-    if(const auto shared = kernels.find(ArchKey{id, {}}); shared != kernels.end())
+
+    const std::string names = "names kernel " + toString(id);
+    if(ambiguous)
     {
-        return shared->second.conflicted ? nullptr : &shared->second.descriptor;
+        // Two definitions this pack can reach, so which one it dispatches would depend on
+        // catalog order. Nothing in the format ranks them, and an arch-specific spelling
+        // silently shadowing an arch-independent one is the shadowing the drop-in rule
+        // refuses elsewhere.
+        return {nullptr, names + ", which several descriptors define within the pack's arch"};
     }
-    return nullptr;
+    if(covered != nullptr)
+    {
+        // A conflicted definition is unusable, and falling through to another would hide
+        // the collision the conflict recorded.
+        return covered->conflicted ? KernelMatch{nullptr, names + ", which no descriptor defines"}
+                                   : KernelMatch{&covered->descriptor, {}};
+    }
+    if(!reaching.empty())
+    {
+        return {nullptr,
+                names + ", which declares arch " + reaching + " reaching past the pack's "
+                    + describeArch(packArch)};
+    }
+    return {nullptr,
+            exists ? names + ", which is defined only for another arch"
+                   : names + ", which no descriptor defines"};
 }
 
 /// Checks and completes one kernel's metadata against its engine's KMD, mirroring the
@@ -1651,35 +1734,19 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             {
                 for(const auto& kernelId : pack.kernelIds)
                 {
-                    const auto* kernel
+                    const auto match
                         = detail::findKernelForPack(catalog.kernels, kernelId, pack.arch);
-                    if(kernel == nullptr)
+                    if(match.kernel == nullptr)
                     {
-                        // A kernel defined only under an arch this pack does not claim is
-                        // a different failure from one nothing defines, and "no descriptor
-                        // defines it" is actively misleading there -- that is what a pack
-                        // missing its shard's arch stamp looks like. A conflicted entry
-                        // under one of this pack's own keys keeps the original wording:
-                        // the two definitions poisoned each other, so nothing usably
-                        // defines the id. Entries sharing an id are contiguous from the
-                        // empty-arch key, which sorts first.
-                        auto packArch = pack.arch;
-                        std::sort(packArch.begin(), packArch.end());
-                        const auto first = catalog.kernels.lower_bound(ArchKey{kernelId, {}});
-                        const bool existsUnderAnotherArch
-                            = first != catalog.kernels.end() && first->first.first == kernelId
-                              && catalog.kernels.find(ArchKey{kernelId, packArch})
-                                     == catalog.kernels.end()
-                              && catalog.kernels.find(ArchKey{kernelId, {}})
-                                     == catalog.kernels.end();
-                        reason = existsUnderAnotherArch
-                                     ? "names kernel " + toString(kernelId)
-                                           + ", which is defined only for another arch"
-                                     : "names kernel " + toString(kernelId)
-                                           + ", which no descriptor defines";
+                        // Why it did not resolve is decided where the candidates are in
+                        // hand: "no descriptor defines it" reads as a missing file, and
+                        // saying that about a kernel present under an arch this pack does
+                        // not claim -- what a missing shard stamp looks like -- sends the
+                        // reader hunting for the wrong thing.
+                        reason = match.reason;
                         break;
                     }
-                    pack.kernels.push_back(*kernel);
+                    pack.kernels.push_back(*match.kernel);
                 }
             }
 
@@ -1797,7 +1864,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                   const auto& ids = pack.kernelIds;
                   return !packEntry.second.conflicted
                          && std::find(ids.begin(), ids.end(), kernelId) != ids.end()
-                         && detail::findKernelForPack(catalog.kernels, kernelId, pack.arch)
+                         && detail::findKernelForPack(catalog.kernels, kernelId, pack.arch).kernel
                                 == &kernelEntry.second.descriptor;
               });
         if(!named)
