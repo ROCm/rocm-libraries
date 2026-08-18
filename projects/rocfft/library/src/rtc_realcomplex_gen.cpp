@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -251,7 +251,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
                                        "to write global memory."};
             // R to complex always loads real data
             CallbackLoadDeclaration load;
-            load.scalar_type = input_type;
+            load.set_scalar_type(input_type);
             guard.body += load;
             guard.body += CallbackStoreDeclaration{};
 
@@ -288,7 +288,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
             func.body += CallbackLoadDeclaration{};
             // complex to R always stores real data
             CallbackStoreDeclaration store;
-            store.scalar_type = output_type;
+            store.set_scalar_type(output_type);
             func.body += store;
 
             Variable elem{"elem", "auto"};

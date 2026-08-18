@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -753,14 +753,27 @@ class CallbackLoadDeclaration
 {
 public:
     CallbackLoadDeclaration() = default;
-    // non-null if we're using a JIT callback for loading
-    const char* jit_symbol = nullptr;
-    // are we using a legacy callback?
-    bool legacy_callback = false;
-    // whether we are loading complex data through a real-typed callback
-    bool r2c_callback = false;
-    // the data type that the callback loads
-    std::string scalar_type = "scalar_type";
+
+    void set_scalar_type(const char* _scalar_type)
+    {
+        scalar_type = _scalar_type;
+    }
+    // Enable use of JIT or funcptr callbacks as necessary.
+    // r2c_callback means we call a real-valued callback twice to load
+    // a complex element.
+    void set_jit_or_funcptr_callback(const char* _jit_symbol,
+                                     bool        _funcptr_callback,
+                                     bool        _r2c_callback)
+    {
+        // jit symbol and funcptr callback are mutually exclusive
+        if(_jit_symbol && _funcptr_callback)
+            throw std::invalid_argument("jit symbol cannot be combined with funcptr callback");
+
+        jit_symbol       = _jit_symbol;
+        funcptr_callback = _funcptr_callback;
+        r2c_callback     = _r2c_callback;
+    }
+
     std::string render() const
     {
         std::string ret;
@@ -784,9 +797,9 @@ public:
             }
             else
             {
-                if(legacy_callback)
+                if(funcptr_callback)
                 {
-                    ret += "// declare a lambda that calls the real legacy callback twice to\n";
+                    ret += "// declare a lambda that calls the real funcptr callback twice to\n";
                     ret += "// load one complex element\n";
                     ret += "auto load_cb = [load_cb_fn](" + scalar_type
                            + "* data, size_t offset, void* cbdata, void* sharedMem)\n";
@@ -831,7 +844,7 @@ public:
             }
             else
             {
-                if(legacy_callback)
+                if(funcptr_callback)
                 {
                     return "auto load_cb = reinterpret_cast<typename "
                            "callback_type<"
@@ -845,20 +858,43 @@ public:
         }
         return ret;
     }
+
+private:
+    // non-null if we're using a JIT callback for loading
+    const char* jit_symbol = nullptr;
+    // are we using a funcptr callback?
+    bool funcptr_callback = false;
+    // whether we are loading complex data through a real-typed callback
+    bool r2c_callback = false;
+    // the data type that the callback loads
+    std::string scalar_type = "scalar_type";
 };
 
 class CallbackStoreDeclaration
 {
 public:
     CallbackStoreDeclaration() = default;
-    // non-null if we're using a JIT callback for storing
-    const char* jit_symbol = nullptr;
-    // are we using a legacy callback?
-    bool legacy_callback = false;
-    // whether we are storing complex data through a real-typed callback
-    bool c2r_callback = false;
-    // the data type that the callback stores
-    std::string scalar_type = "scalar_type";
+
+    void set_scalar_type(const char* _scalar_type)
+    {
+        scalar_type = _scalar_type;
+    }
+    // Enable use of JIT or funcptr callbacks as necessary.
+    // c2r_callback means we call a real-valued callback twice to store
+    // a complex element.
+    void set_jit_or_funcptr_callback(const char* _jit_symbol,
+                                     bool        _funcptr_callback,
+                                     bool        _c2r_callback)
+    {
+        // jit symbol and funcptr callback are mutually exclusive
+        if(_jit_symbol && _funcptr_callback)
+            throw std::invalid_argument("jit symbol cannot be combined with funcptr callback");
+
+        jit_symbol       = _jit_symbol;
+        funcptr_callback = _funcptr_callback;
+        c2r_callback     = _c2r_callback;
+    }
+
     std::string render() const
     {
         std::string ret;
@@ -879,9 +915,9 @@ public:
             }
             else
             {
-                if(legacy_callback)
+                if(funcptr_callback)
                 {
-                    ret += "// declare a lambda that calls the real legacy callback twice to\n";
+                    ret += "// declare a lambda that calls the real funcptr callback twice to\n";
                     ret += "// store one complex element\n";
                     ret += "auto store_cb = [store_cb_fn](" + scalar_type
                            + "* data, size_t offset, " + scalar_type
@@ -921,7 +957,7 @@ public:
             }
             else
             {
-                if(legacy_callback)
+                if(funcptr_callback)
                 {
                     return "auto store_cb = reinterpret_cast<typename "
                            "callback_type<"
@@ -935,6 +971,16 @@ public:
         }
         return ret;
     }
+
+private:
+    // non-null if we're using a JIT callback for storing
+    const char* jit_symbol = nullptr;
+    // are we using a funcptr callback?
+    bool funcptr_callback = false;
+    // whether we are storing complex data through a real-typed callback
+    bool c2r_callback = false;
+    // the data type that the callback stores
+    std::string scalar_type = "scalar_type";
 };
 
 class ReturnExpr
@@ -2039,7 +2085,7 @@ struct MakeCallbackRealComplexVisitor : public BaseVisitor
         , store_cb_jit_symbol(store_cb_jit_symbol)
     {
         if(!load_cb_jit_symbol && !store_cb_jit_symbol && cbtype != CallbackType::NONE)
-            legacy_callback = true;
+            funcptr_callback = true;
         r2c_callback = cbtype == CallbackType::USER_LOAD_STORE_R2C;
         c2r_callback = cbtype == CallbackType::USER_LOAD_STORE_C2R;
     }
@@ -2047,26 +2093,22 @@ struct MakeCallbackRealComplexVisitor : public BaseVisitor
     StatementList visit_CallbackLoadDeclaration(const CallbackLoadDeclaration& x) override
     {
         CallbackLoadDeclaration y{x};
-        y.jit_symbol      = load_cb_jit_symbol;
-        y.legacy_callback = legacy_callback;
-        y.r2c_callback    = r2c_callback;
+        y.set_jit_or_funcptr_callback(load_cb_jit_symbol, funcptr_callback, r2c_callback);
         return {y};
     }
 
     StatementList visit_CallbackStoreDeclaration(const CallbackStoreDeclaration& x) override
     {
         CallbackStoreDeclaration y{x};
-        y.jit_symbol      = store_cb_jit_symbol;
-        y.legacy_callback = legacy_callback;
-        y.c2r_callback    = c2r_callback;
+        y.set_jit_or_funcptr_callback(store_cb_jit_symbol, funcptr_callback, c2r_callback);
         return {y};
     }
 
-    bool legacy_callback = false;
-    // Is the load callback (JIT or legacy) reading real elements,
+    bool funcptr_callback = false;
+    // Is the load callback (JIT or funcptr) reading real elements,
     // while the kernel uses complex elements?
     bool r2c_callback = false;
-    // Is the store callback (JIT or legacy) writing real elements,
+    // Is the store callback (JIT or funcptr) writing real elements,
     // while the kernel uses complex elements?
     bool        c2r_callback        = false;
     const char* load_cb_jit_symbol  = nullptr;
