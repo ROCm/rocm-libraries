@@ -106,6 +106,25 @@ bool batchFoldable(const TensorAttributesWrapper& t, int64_t batch, int64_t seqL
     return strides.size() == 4 && strides[0] == seqLen * strides[2];
 }
 
+// A kernel with NO stride arguments at all cannot merely require a contiguous D
+// axis -- it dictates the whole layout. rocKE's gfx950 dense attention bakes
+// packed BSHD (physical [B, S, H, D]): stride over D is 1, over heads is D, over
+// tokens is H*D, over batch is S*H*D. `d_contiguous` + `batch_foldable` do NOT
+// imply that: canonical contiguous BHSD also satisfies both at batch == 1, and
+// selecting a BSHD kernel for a BHSD graph reads the wrong elements silently.
+// Published as a fact so such a kernel can constrain it, exactly as
+// `batch_foldable` exists for kernels with no batch-stride argument.
+bool bshdPacked(const TensorAttributesWrapper& t, int64_t heads, int64_t seqLen, int64_t headDim)
+{
+    const auto strides = t.strides();
+    if(strides.size() != 4)
+    {
+        return false;
+    }
+    return strides[3] == 1 && strides[1] == headDim && strides[2] == heads * headDim
+           && strides[0] == seqLen * heads * headDim;
+}
+
 // Mask classification, resolved from the full attribute set.
 //
 // This intentionally DUPLICATES asm_sdpa_engine::plan_utils::getMaskType rather
@@ -297,6 +316,10 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         const bool batchFold = batchFoldable(q, batch, seqLenQ) && batchFoldable(o, batch, seqLenQ)
                                && batchFoldable(k, batch, seqLenKv)
                                && batchFoldable(v, batch, seqLenKv);
+        const bool bshdPack = bshdPacked(q, numHeads, seqLenQ, headDim)
+                              && bshdPacked(o, numHeads, seqLenQ, headDim)
+                              && bshdPacked(k, numHeadsKv, seqLenKv, headDim)
+                              && bshdPacked(v, numHeadsKv, seqLenKv, headDim);
 
         // Masking / bias features (each formerly a hard decline). The mask facts
         // are derived from the resolved mask type so a graph expressing a causal
@@ -358,6 +381,7 @@ std::optional<catalog::ProblemShape> SdpaAdapter::decode(const IGraph& graph) co
         shape.emplace("gqa_ratio", catalog::ShapeValue{gqaRatio});
         shape.emplace("d_contiguous", catalog::ShapeValue{dContiguous});
         shape.emplace("batch_foldable", catalog::ShapeValue{batchFold});
+        shape.emplace("bshd_packed", catalog::ShapeValue{bshdPack});
         shape.emplace("causal", catalog::ShapeValue{causal});
         shape.emplace("causal_bottom_right", catalog::ShapeValue{causalBottomRight});
         shape.emplace("has_diagonal_band", catalog::ShapeValue{hasDiagonalBand});
