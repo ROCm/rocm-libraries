@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/rain_ref.hpp"
@@ -102,7 +103,7 @@ void run_rain(const TestConfig& cfg, const RainParams& op) {
 
 // Full name:
 // Image_Effects/RainTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>
-class RainTest : public ::testing::TestWithParam<WithParams<RainParams>> {};
+class RainTest : public SkipListTest<WithParams<RainParams>> {};
 
 TEST_P(RainTest, Correctness) {
     const auto& p = GetParam();

@@ -33,6 +33,7 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/generic_tensor_setup.hpp"  // nd_slack_poison
 #include "framework/tensor_setup.hpp"
 #include "reference/yuv_to_rgb_ref.hpp"
@@ -177,9 +178,9 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
 }  // namespace
 
 // Full name: Image_DataExchange/<Suite>.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Standard>_<Range>
-class YuvToRgbTest : public ::testing::TestWithParam<WithParams<YuvParams>> {};
-class YuvToRgbCubicVTest : public ::testing::TestWithParam<WithParams<YuvParams>> {};
-class YuvToRgbLinearVTest : public ::testing::TestWithParam<WithParams<YuvParams>> {};
+class YuvToRgbTest : public SkipListTest<WithParams<YuvParams>> {};
+class YuvToRgbCubicVTest : public SkipListTest<WithParams<YuvParams>> {};
+class YuvToRgbLinearVTest : public SkipListTest<WithParams<YuvParams>> {};
 
 TEST_P(YuvToRgbTest, Correctness) {
     const auto& p = GetParam();

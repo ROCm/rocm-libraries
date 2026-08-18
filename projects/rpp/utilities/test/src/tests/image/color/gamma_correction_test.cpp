@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/gamma_correction_ref.hpp"
@@ -95,7 +96,7 @@ void run_gamma_correction(const TestConfig& cfg, const GammaCorrectionParams& op
 
 // Full name:
 // Image_Color/GammaCorrectionTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Gamma>
-class GammaCorrectionTest : public ::testing::TestWithParam<WithParams<GammaCorrectionParams>> {};
+class GammaCorrectionTest : public SkipListTest<WithParams<GammaCorrectionParams>> {};
 
 TEST_P(GammaCorrectionTest, Correctness) {
     const auto& p = GetParam();

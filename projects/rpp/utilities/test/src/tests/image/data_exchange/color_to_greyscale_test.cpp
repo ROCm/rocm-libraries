@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/color_to_greyscale_ref.hpp"
@@ -101,7 +102,7 @@ void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams&
 }  // namespace
 
 // Full name: Image_DataExchange/ColorToGreyscaleTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Subpixel>
-class ColorToGreyscaleTest : public ::testing::TestWithParam<WithParams<ColorToGreyscaleParams>> {};
+class ColorToGreyscaleTest : public SkipListTest<WithParams<ColorToGreyscaleParams>> {};
 
 TEST_P(ColorToGreyscaleTest, Correctness) {
     const auto& p = GetParam();

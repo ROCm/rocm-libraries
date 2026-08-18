@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/gaussian_filter_ref.hpp"
@@ -116,7 +117,7 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
 }  // namespace
 
 // Full name: Image_Filter/GaussianFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>_sd<StdDev>
-class GaussianFilterTest : public ::testing::TestWithParam<WithParams<GaussianFilterParams>> {};
+class GaussianFilterTest : public SkipListTest<WithParams<GaussianFilterParams>> {};
 
 TEST_P(GaussianFilterTest, Correctness) {
     const auto& p = GetParam();

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/non_linear_blend_ref.hpp"
@@ -94,7 +95,7 @@ void run_non_linear_blend(const TestConfig& cfg, const NonLinearBlendParams& op)
 
 // Full name:
 // Image_Effects/NonLinearBlendTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<StdDev>
-class NonLinearBlendTest : public ::testing::TestWithParam<WithParams<NonLinearBlendParams>> {};
+class NonLinearBlendTest : public SkipListTest<WithParams<NonLinearBlendParams>> {};
 
 TEST_P(NonLinearBlendTest, Correctness) {
     const auto& p = GetParam();

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/box_filter_ref.hpp"
@@ -109,7 +110,7 @@ void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
 }  // namespace
 
 // Full name: Image_Filter/BoxFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
-class BoxFilterTest : public ::testing::TestWithParam<WithParams<BoxFilterParams>> {};
+class BoxFilterTest : public SkipListTest<WithParams<BoxFilterParams>> {};
 
 TEST_P(BoxFilterTest, Correctness) {
     const auto& p = GetParam();

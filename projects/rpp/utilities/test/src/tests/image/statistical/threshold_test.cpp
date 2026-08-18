@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/threshold_ref.hpp"
@@ -114,7 +115,7 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
 }  // namespace
 
 // Full name: Image_Statistical/ThresholdTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Min>_<Max>
-class ThresholdTest : public ::testing::TestWithParam<WithParams<ThresholdParams>> {};
+class ThresholdTest : public SkipListTest<WithParams<ThresholdParams>> {};
 
 TEST_P(ThresholdTest, Correctness) {
     const auto& p = GetParam();

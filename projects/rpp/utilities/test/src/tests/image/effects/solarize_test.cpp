@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/solarize_ref.hpp"
@@ -90,7 +91,7 @@ void run_solarize(const TestConfig& cfg, const SolarizeParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/SolarizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Threshold>
-class SolarizeTest : public ::testing::TestWithParam<WithParams<SolarizeParams>> {};
+class SolarizeTest : public SkipListTest<WithParams<SolarizeParams>> {};
 
 TEST_P(SolarizeTest, Correctness) {
     const auto& p = GetParam();

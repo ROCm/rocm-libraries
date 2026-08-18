@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/copy_ref.hpp"
 
@@ -80,7 +81,7 @@ void run_copy(const TestConfig& cfg) {
 }  // namespace
 
 // Full name: Image_DataExchange/CopyTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class CopyTest : public ::testing::TestWithParam<TestConfig> {};
+class CopyTest : public SkipListTest<TestConfig> {};
 
 TEST_P(CopyTest, Correctness) {
     const TestConfig cfg = GetParam();

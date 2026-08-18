@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/crop_mirror_normalize_ref.hpp"
@@ -115,7 +116,7 @@ void run_crop_mirror_normalize(const TestConfig& cfg, const CmnParams& op) {
 
 // Full name:
 // Image_Geometric/CropMirrorNormalizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>
-class CropMirrorNormalizeTest : public ::testing::TestWithParam<WithParams<CmnParams>> {};
+class CropMirrorNormalizeTest : public SkipListTest<WithParams<CmnParams>> {};
 
 TEST_P(CropMirrorNormalizeTest, Correctness) {
     const auto& p = GetParam();

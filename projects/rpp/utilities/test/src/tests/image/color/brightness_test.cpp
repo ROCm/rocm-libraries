@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/brightness_ref.hpp"
@@ -97,7 +98,7 @@ void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
 
 // Full name:
 // Image_Color/BrightnessTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>_<Beta>
-class BrightnessTest : public ::testing::TestWithParam<WithParams<BrightnessParams>> {};
+class BrightnessTest : public SkipListTest<WithParams<BrightnessParams>> {};
 
 TEST_P(BrightnessTest, Correctness) {
     const auto& p = GetParam();

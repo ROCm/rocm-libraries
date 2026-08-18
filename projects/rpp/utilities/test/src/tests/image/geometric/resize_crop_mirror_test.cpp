@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/resize_crop_mirror_ref.hpp"
@@ -127,7 +128,7 @@ void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams&
 //    value fails.
 //  - BILINEAR runs but samples the trailing edge one texel short (interior matches the golden
 //    exactly); the same bilinear defect as resize et al.
-class ResizeCropMirrorTest : public ::testing::TestWithParam<WithParams<ResizeCropMirrorParams>> {};
+class ResizeCropMirrorTest : public SkipListTest<WithParams<ResizeCropMirrorParams>> {};
 
 TEST_P(ResizeCropMirrorTest, Correctness) {
     const auto& p = GetParam();

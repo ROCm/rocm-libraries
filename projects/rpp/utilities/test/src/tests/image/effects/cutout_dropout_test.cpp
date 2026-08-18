@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/cutout_dropout_ref.hpp"
@@ -135,7 +136,7 @@ void run_cutout_dropout(const TestConfig& cfg) {
 
 // Full name:
 // Image_Effects/CutoutDropoutTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class CutoutDropoutTest : public ::testing::TestWithParam<TestConfig> {};
+class CutoutDropoutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(CutoutDropoutTest, Correctness) {
     const auto& cfg = GetParam();

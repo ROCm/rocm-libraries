@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/concat_ref.hpp"
 
@@ -141,7 +142,7 @@ void run_concat(const NdConfig& cfg, AxisKind kind) {
 }  // namespace
 
 // Full name: Misc_Geometric/ConcatTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Axis>_<Shape>
-class ConcatTest : public ::testing::TestWithParam<NdWithParams<ConcatParams>> {};
+class ConcatTest : public SkipListTest<NdWithParams<ConcatParams>> {};
 
 TEST_P(ConcatTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;

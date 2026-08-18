@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/channel_permute_ref.hpp"
 
@@ -103,7 +104,7 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
 
 // Full name:
 // Image_DataExchange/ChannelPermuteTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Perm>
-class ChannelPermuteTest : public ::testing::TestWithParam<WithParams<ChannelPermuteParams>> {};
+class ChannelPermuteTest : public SkipListTest<WithParams<ChannelPermuteParams>> {};
 
 TEST_P(ChannelPermuteTest, Correctness) {
     const auto& p = GetParam();

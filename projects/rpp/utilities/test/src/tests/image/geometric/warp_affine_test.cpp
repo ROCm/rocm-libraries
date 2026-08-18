@@ -33,6 +33,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/warp_affine_ref.hpp"
@@ -114,7 +115,7 @@ void run_warp_affine(const TestConfig& cfg, const WarpAffineParams& op) {
 }  // namespace
 
 // Full name: Image_Geometric/WarpAffineTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Matrix>_<Interp>
-class WarpAffineTest : public ::testing::TestWithParam<WithParams<WarpAffineParams>> {};
+class WarpAffineTest : public SkipListTest<WithParams<WarpAffineParams>> {};
 
 TEST_P(WarpAffineTest, Correctness) {
     const auto& p = GetParam();

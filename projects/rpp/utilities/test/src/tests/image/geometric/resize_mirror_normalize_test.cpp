@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/resize_mirror_normalize_ref.hpp"
@@ -136,7 +137,7 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
 
 // Full name:
 // Image_Geometric/ResizeMirrorNormalizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>
-class ResizeMirrorNormalizeTest : public ::testing::TestWithParam<WithParams<RmnParams>> {};
+class ResizeMirrorNormalizeTest : public SkipListTest<WithParams<RmnParams>> {};
 
 TEST_P(ResizeMirrorNormalizeTest, Correctness) {
     const auto& p = GetParam();

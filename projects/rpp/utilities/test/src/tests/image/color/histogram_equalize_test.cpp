@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/histogram_equalize_ref.hpp"
 
@@ -82,7 +83,7 @@ void run_histogram_equalize(const TestConfig& cfg) {
 // HOST is green on the full grid. The two HIP 3-channel PartialRoi cases (PKD3, PLN3) are documented
 // reds: the HIP 3-channel partial-ROI path is broken (grayscale-partial and 3-channel-full pass).
 // The golden matches HOST and stays correct.
-class HistogramEqualizeTest : public ::testing::TestWithParam<TestConfig> {};
+class HistogramEqualizeTest : public SkipListTest<TestConfig> {};
 
 TEST_P(HistogramEqualizeTest, Correctness) {
     const TestConfig cfg = GetParam();

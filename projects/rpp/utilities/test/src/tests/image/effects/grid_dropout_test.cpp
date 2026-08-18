@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/grid_dropout_ref.hpp"
@@ -120,7 +121,7 @@ void run_grid_dropout(const TestConfig& cfg) {
 }  // namespace
 
 // Full name: Image_Effects/GridDropoutTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class GridDropoutTest : public ::testing::TestWithParam<TestConfig> {};
+class GridDropoutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(GridDropoutTest, Correctness) {
     const TestConfig cfg = GetParam();

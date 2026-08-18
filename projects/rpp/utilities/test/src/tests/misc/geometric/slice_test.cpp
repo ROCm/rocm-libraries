@@ -33,6 +33,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/slice_ref.hpp"
 
@@ -211,7 +212,7 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
 // Misc_Geometric/SliceTest.Correctness/<Backend>_<DTypeConv>_<Rank>_<Layout>_<Kind>_<Shape> (the
 // shape token is the framework's nominal rank shape, not this op's layout-ordered extents -- see
 // slice_extents; the rank and layout tokens identify the case).
-class SliceTest : public ::testing::TestWithParam<NdWithParams<SliceParams>> {};
+class SliceTest : public SkipListTest<NdWithParams<SliceParams>> {};
 
 // The planar cases are instantiated but not executed. Both HOST planar branches advance the
 // destination channel pointer by the SOURCE channel stride, so every channel after the first is

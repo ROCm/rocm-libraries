@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/contrast_ref.hpp"
@@ -97,7 +98,7 @@ void run_contrast(const TestConfig& cfg, const ContrastParams& op) {
 
 // Full name:
 // Image_Color/ContrastTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Factor>_<Center>
-class ContrastTest : public ::testing::TestWithParam<WithParams<ContrastParams>> {};
+class ContrastTest : public SkipListTest<WithParams<ContrastParams>> {};
 
 TEST_P(ContrastTest, Correctness) {
     const auto& p = GetParam();

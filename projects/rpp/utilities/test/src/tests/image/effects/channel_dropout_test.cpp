@@ -33,6 +33,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/channel_dropout_ref.hpp"
@@ -104,7 +105,7 @@ void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) 
 
 // Full name:
 // Image_Effects/ChannelDropoutTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Mask>
-class ChannelDropoutTest : public ::testing::TestWithParam<WithParams<ChannelDropoutParams>> {};
+class ChannelDropoutTest : public SkipListTest<WithParams<ChannelDropoutParams>> {};
 
 TEST_P(ChannelDropoutTest, Correctness) {
     const auto& p = GetParam();

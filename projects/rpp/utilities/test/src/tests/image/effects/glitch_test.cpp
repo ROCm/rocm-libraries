@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/glitch_ref.hpp"
 
@@ -108,7 +109,7 @@ void run_glitch(const TestConfig& cfg, const GlitchParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/GlitchTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Kind>
-class GlitchTest : public ::testing::TestWithParam<WithParams<GlitchParams>> {};
+class GlitchTest : public SkipListTest<WithParams<GlitchParams>> {};
 
 TEST_P(GlitchTest, Correctness) {
     const auto& p = GetParam();

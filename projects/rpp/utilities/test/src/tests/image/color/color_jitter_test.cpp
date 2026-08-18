@@ -33,6 +33,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/color_jitter_ref.hpp"
@@ -131,7 +132,7 @@ std::vector<TestConfig> host_configs(std::vector<TestConfig> configs) {
 
 // Full name:
 // Image_Color/ColorJitterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Params>
-class ColorJitterTest : public ::testing::TestWithParam<WithParams<ColorJitterParams>> {};
+class ColorJitterTest : public SkipListTest<WithParams<ColorJitterParams>> {};
 
 TEST_P(ColorJitterTest, Correctness) {
     const auto& p = GetParam();

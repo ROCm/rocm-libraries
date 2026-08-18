@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/color_twist_ref.hpp"
@@ -109,7 +110,7 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
 
 // Full name:
 // Image_Color/ColorTwistTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Params>
-class ColorTwistTest : public ::testing::TestWithParam<WithParams<ColorTwistParams>> {};
+class ColorTwistTest : public SkipListTest<WithParams<ColorTwistParams>> {};
 
 TEST_P(ColorTwistTest, Correctness) {
     const auto& p = GetParam();

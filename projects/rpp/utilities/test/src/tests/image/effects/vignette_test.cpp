@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/vignette_ref.hpp"
@@ -102,7 +103,7 @@ void run_vignette(const TestConfig& cfg, const VignetteParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/VignetteTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Intensity>
-class VignetteTest : public ::testing::TestWithParam<WithParams<VignetteParams>> {};
+class VignetteTest : public SkipListTest<WithParams<VignetteParams>> {};
 
 TEST_P(VignetteTest, Correctness) {
     const auto& p = GetParam();

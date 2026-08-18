@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/gaussian_noise_ref.hpp"
 
@@ -136,7 +137,7 @@ void run_gaussian_noise_negative(const TestConfig& cfg, const GaussianNoiseNegat
 
 // Full name:
 // Image_Effects/GaussianNoiseTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class GaussianNoiseTest : public ::testing::TestWithParam<TestConfig> {};
+class GaussianNoiseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(GaussianNoiseTest, Correctness) {
     const TestConfig& cfg = GetParam();
@@ -155,7 +156,7 @@ INSTANTIATE_TEST_SUITE_P(Image_Effects, GaussianNoiseTest,
 // Full name:
 // Image_Effects/GaussianNoiseNegativeTest.Negative/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_m<M>_s<S>
 class GaussianNoiseNegativeTest
-    : public ::testing::TestWithParam<WithParams<GaussianNoiseNegativeParams>> {};
+    : public SkipListTest<WithParams<GaussianNoiseNegativeParams>> {};
 
 TEST_P(GaussianNoiseNegativeTest, Negative) {
     const auto& p = GetParam();

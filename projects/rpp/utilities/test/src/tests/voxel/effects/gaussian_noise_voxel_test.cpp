@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/voxel_tensor_setup.hpp"
 #include "reference/gaussian_noise_voxel_ref.hpp"
 
@@ -143,7 +144,7 @@ void run_gaussian_noise_voxel_negative(const VoxelConfig& cfg,
 
 // Full name:
 // Voxel_Effects/GaussianNoiseVoxelTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Roi3DType>_<Shape>
-class GaussianNoiseVoxelTest : public ::testing::TestWithParam<VoxelConfig> {};
+class GaussianNoiseVoxelTest : public SkipListTest<VoxelConfig> {};
 
 TEST_P(GaussianNoiseVoxelTest, Correctness) {
     const VoxelConfig& cfg = GetParam();
@@ -164,7 +165,7 @@ INSTANTIATE_TEST_SUITE_P(Voxel_Effects, GaussianNoiseVoxelTest,
 // Full name:
 // Voxel_Effects/GaussianNoiseVoxelNegativeTest.Negative/<Backend>_..._m<M>_s<S>
 class GaussianNoiseVoxelNegativeTest
-    : public ::testing::TestWithParam<VoxelWithParams<GaussianNoiseVoxelNegativeParams>> {};
+    : public SkipListTest<VoxelWithParams<GaussianNoiseVoxelNegativeParams>> {};
 
 TEST_P(GaussianNoiseVoxelNegativeTest, Negative) {
     const auto& p = GetParam();

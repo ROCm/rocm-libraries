@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/blend_ref.hpp"
@@ -93,7 +94,7 @@ void run_blend(const TestConfig& cfg, const BlendParams& op) {
 
 // Full name:
 // Image_Color/BlendTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>
-class BlendTest : public ::testing::TestWithParam<WithParams<BlendParams>> {};
+class BlendTest : public SkipListTest<WithParams<BlendParams>> {};
 
 TEST_P(BlendTest, Correctness) {
     const auto& p = GetParam();

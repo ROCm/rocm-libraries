@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/jitter_ref.hpp"
 
@@ -266,7 +267,7 @@ std::vector<WithParams<JitterParams>> jitter_configs() {
 
 // Full name:
 // Image_Effects/JitterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<N>_<Check>
-class JitterTest : public ::testing::TestWithParam<WithParams<JitterParams>> {};
+class JitterTest : public SkipListTest<WithParams<JitterParams>> {};
 
 TEST_P(JitterTest, Correctness) {
     const auto& p = GetParam();

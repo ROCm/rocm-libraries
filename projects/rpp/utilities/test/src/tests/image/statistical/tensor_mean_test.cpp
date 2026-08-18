@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/reduction.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/tensor_mean_ref.hpp"
@@ -86,7 +87,7 @@ void run_tensor_mean(const TestConfig& cfg) {
 
 // Full name:
 // Image_Statistical/TensorMeanTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class TensorMeanTest : public ::testing::TestWithParam<TestConfig> {};
+class TensorMeanTest : public SkipListTest<TestConfig> {};
 
 TEST_P(TensorMeanTest, Correctness) {
     const TestConfig cfg = GetParam();

@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/remap_ref.hpp"
@@ -159,7 +160,7 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
 }  // namespace
 
 // Full name: Image_Geometric/RemapTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>_<Interp>
-class RemapTest : public ::testing::TestWithParam<WithParams<RemapParams>> {};
+class RemapTest : public SkipListTest<WithParams<RemapParams>> {};
 
 TEST_P(RemapTest, Correctness) {
     const auto& p = GetParam();

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/hue_ref.hpp"
@@ -93,7 +94,7 @@ void run_hue(const TestConfig& cfg, const HueParams& op) {
 }  // namespace
 
 // Full name: Image_Color/HueTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Hue>
-class HueTest : public ::testing::TestWithParam<WithParams<HueParams>> {};
+class HueTest : public SkipListTest<WithParams<HueParams>> {};
 
 TEST_P(HueTest, Correctness) {
     const auto& p = GetParam();

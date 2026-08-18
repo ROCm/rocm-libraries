@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/rotate_ref.hpp"
@@ -116,7 +117,7 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
 }  // namespace
 
 // Full name: Image_Geometric/RotateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Angle>_<Interp>
-class RotateTest : public ::testing::TestWithParam<WithParams<RotateParams>> {};
+class RotateTest : public SkipListTest<WithParams<RotateParams>> {};
 
 TEST_P(RotateTest, Correctness) {
     const auto& p = GetParam();

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/median_filter_ref.hpp"
 
@@ -103,7 +104,7 @@ void run_median_filter(const TestConfig& cfg, const MedianFilterParams& op) {
 }  // namespace
 
 // Full name: Image_Filter/MedianFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
-class MedianFilterTest : public ::testing::TestWithParam<WithParams<MedianFilterParams>> {};
+class MedianFilterTest : public SkipListTest<WithParams<MedianFilterParams>> {};
 
 TEST_P(MedianFilterTest, Correctness) {
     const auto& p = GetParam();

@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/resize_ref.hpp"
@@ -121,7 +122,7 @@ void run_resize(const TestConfig& cfg, const ResizeParams& op) {
 }  // namespace
 
 // Full name: Image_Geometric/ResizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>_<DstWxDstH>_<Interp>
-class ResizeTest : public ::testing::TestWithParam<WithParams<ResizeParams>> {};
+class ResizeTest : public SkipListTest<WithParams<ResizeParams>> {};
 
 TEST_P(ResizeTest, Correctness) {
     const auto& p = GetParam();

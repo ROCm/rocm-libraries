@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/reduction.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/tensor_max_ref.hpp"
@@ -84,7 +85,7 @@ void run_tensor_max(const TestConfig& cfg) {
 
 // Full name:
 // Image_Statistical/TensorMaxTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class TensorMaxTest : public ::testing::TestWithParam<TestConfig> {};
+class TensorMaxTest : public SkipListTest<TestConfig> {};
 
 TEST_P(TensorMaxTest, Correctness) {
     const TestConfig cfg = GetParam();

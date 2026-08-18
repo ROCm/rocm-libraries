@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/log_ref.hpp"
 
@@ -111,7 +112,7 @@ void run_log(const NdConfig& cfg) {
 }  // namespace
 
 // Full name: Misc_Arithmetic/LogTest.Correctness/<Backend>_<DTypeConv>_<Rank>_<Shape>
-class LogTest : public ::testing::TestWithParam<NdConfig> {};
+class LogTest : public SkipListTest<NdConfig> {};
 
 TEST_P(LogTest, Correctness) {
     const NdConfig cfg = GetParam();

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/voxel_tensor_setup.hpp"
 #include "reference/arithmetic_scalar_ref.hpp"
@@ -102,7 +103,7 @@ void run_multiply_scalar(const VoxelConfig& cfg, const MultiplyScalarParams& p) 
 
 // Full name:
 // Voxel_Arithmetic/MultiplyScalarTest.Correctness/<Backend>_F32toF32_<Layout>_<Roi>_<Roi3DType>_<Shape>_<Mul>
-class MultiplyScalarTest : public ::testing::TestWithParam<VoxelWithParams<MultiplyScalarParams>> {
+class MultiplyScalarTest : public SkipListTest<VoxelWithParams<MultiplyScalarParams>> {
 };
 
 TEST_P(MultiplyScalarTest, Correctness) {

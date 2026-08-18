@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/spatter_ref.hpp"
@@ -201,7 +202,7 @@ std::vector<WithParams<SpatterParams>> spatter_configs() {
 
 // Full name:
 // Image_Effects/SpatterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Check>
-class SpatterTest : public ::testing::TestWithParam<WithParams<SpatterParams>> {};
+class SpatterTest : public SkipListTest<WithParams<SpatterParams>> {};
 
 TEST_P(SpatterTest, Correctness) {
     const auto& p = GetParam();

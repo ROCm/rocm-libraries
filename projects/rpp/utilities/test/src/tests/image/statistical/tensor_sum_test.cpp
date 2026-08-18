@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
 #include "framework/reduction.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/tensor_sum_ref.hpp"
@@ -86,7 +87,7 @@ void run_tensor_sum(const TestConfig& cfg) {
 
 // Full name:
 // Image_Statistical/TensorSumTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class TensorSumTest : public ::testing::TestWithParam<TestConfig> {};
+class TensorSumTest : public SkipListTest<TestConfig> {};
 
 TEST_P(TensorSumTest, Correctness) {
     const TestConfig cfg = GetParam();

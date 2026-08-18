@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/bitwise_tensor_ref.hpp"
 
@@ -95,7 +96,7 @@ void run_tensor_xor_tensor(const NdConfig& cfg, Broadcast broadcast) {
 }  // namespace
 
 // Full name: Misc_Bitwise/TensorXorTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
-class TensorXorTensorTest : public ::testing::TestWithParam<NdWithParams<BroadcastParams>> {};
+class TensorXorTensorTest : public SkipListTest<NdWithParams<BroadcastParams>> {};
 
 TEST_P(TensorXorTensorTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;

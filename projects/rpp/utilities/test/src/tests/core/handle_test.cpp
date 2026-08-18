@@ -26,10 +26,11 @@ SOFTWARE.
 #include <rpp/rpp.h>
 
 #include "framework/backend_param.hpp"
+#include "framework/skip_list.hpp"
 
 using namespace rpptest;
 
-class HandleTest : public ::testing::TestWithParam<RppBackend> {};
+class HandleTest : public SkipListTest<RppBackend> {};
 
 TEST_P(HandleTest, CreateDestroy) {
     rppHandle_t handle = nullptr;

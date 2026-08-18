@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/dilate_ref.hpp"
 
@@ -116,7 +117,7 @@ void run_dilate(const TestConfig& cfg, const DilateParams& op) {
 
 // Full name:
 // Image_Morphological/DilateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
-class DilateTest : public ::testing::TestWithParam<WithParams<DilateParams>> {};
+class DilateTest : public SkipListTest<WithParams<DilateParams>> {};
 
 TEST_P(DilateTest, Correctness) {
     const auto& p = GetParam();

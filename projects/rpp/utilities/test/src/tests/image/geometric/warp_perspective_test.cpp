@@ -33,6 +33,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/warp_perspective_ref.hpp"
@@ -117,7 +118,7 @@ void run_warp_perspective(const TestConfig& cfg, const WarpPerspectiveParams& op
 }  // namespace
 
 // Full name: Image_Geometric/WarpPerspectiveTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Matrix>_<Interp>
-class WarpPerspectiveTest : public ::testing::TestWithParam<WithParams<WarpPerspectiveParams>> {};
+class WarpPerspectiveTest : public SkipListTest<WithParams<WarpPerspectiveParams>> {};
 
 TEST_P(WarpPerspectiveTest, Correctness) {
     const auto& p = GetParam();

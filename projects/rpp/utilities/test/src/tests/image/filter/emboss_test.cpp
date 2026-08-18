@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/emboss_ref.hpp"
@@ -119,7 +120,7 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
 
 // Full name:
 // Image_Filter/EmbossTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<K>_s<Strength>
-class EmbossTest : public ::testing::TestWithParam<WithParams<EmbossParams>> {};
+class EmbossTest : public SkipListTest<WithParams<EmbossParams>> {};
 
 TEST_P(EmbossTest, Correctness) {
     const auto& p = GetParam();

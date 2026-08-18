@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 
 using namespace rpptest;
@@ -166,7 +167,7 @@ void run_fog_negative(const TestConfig& cfg, const FogNegativeParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/FogTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class FogTest : public ::testing::TestWithParam<TestConfig> {};
+class FogTest : public SkipListTest<TestConfig> {};
 
 TEST_P(FogTest, Correctness) {
     const TestConfig& cfg = GetParam();
@@ -184,7 +185,7 @@ INSTANTIATE_TEST_SUITE_P(Image_Effects, FogTest,
 
 // Full name:
 // Image_Effects/FogNegativeTest.Negative/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_i<I>_g<G>
-class FogNegativeTest : public ::testing::TestWithParam<WithParams<FogNegativeParams>> {};
+class FogNegativeTest : public SkipListTest<WithParams<FogNegativeParams>> {};
 
 TEST_P(FogNegativeTest, Negative) {
     const auto& p = GetParam();

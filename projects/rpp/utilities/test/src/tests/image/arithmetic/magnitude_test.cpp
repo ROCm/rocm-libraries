@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/magnitude_ref.hpp"
@@ -84,7 +85,7 @@ void run_magnitude(const TestConfig& cfg) {
 }  // namespace
 
 // Full name: Image_Arithmetic/MagnitudeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>
-class MagnitudeTest : public ::testing::TestWithParam<TestConfig> {};
+class MagnitudeTest : public SkipListTest<TestConfig> {};
 
 TEST_P(MagnitudeTest, Correctness) {
     const TestConfig cfg = GetParam();

@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/pixelate_ref.hpp"
@@ -109,7 +110,7 @@ void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
 
 // Full name:
 // Image_Effects/PixelateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_p<Pct>
-class PixelateTest : public ::testing::TestWithParam<WithParams<PixelateParams>> {};
+class PixelateTest : public SkipListTest<WithParams<PixelateParams>> {};
 
 TEST_P(PixelateTest, Correctness) {
     const auto& p = GetParam();

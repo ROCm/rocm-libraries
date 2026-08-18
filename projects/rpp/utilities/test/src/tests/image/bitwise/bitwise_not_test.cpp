@@ -30,6 +30,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/bitwise_not_ref.hpp"
 
@@ -78,7 +79,7 @@ void run_bitwise_not(const TestConfig& cfg) {
 }  // namespace
 
 // Full name: Image_Bitwise/BitwiseNotTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>
-class BitwiseNotTest : public ::testing::TestWithParam<TestConfig> {};
+class BitwiseNotTest : public SkipListTest<TestConfig> {};
 
 TEST_P(BitwiseNotTest, Correctness) {
     const TestConfig cfg = GetParam();

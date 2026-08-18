@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/erase_ref.hpp"
@@ -135,7 +136,7 @@ void run_erase(const TestConfig& cfg) {
 // semantics). Every PartialRoi case is a documented kernel red: HOST copies correctly but does not
 // apply the boxes; HIP leaves the whole ROI region unwritten. The golden holds to absolute-frame
 // box semantics -- do not weaken it to force green.
-class EraseTest : public ::testing::TestWithParam<TestConfig> {};
+class EraseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(EraseTest, Correctness) {
     const auto& cfg = GetParam();

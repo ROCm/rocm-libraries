@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/voxel_tensor_setup.hpp"
 #include "reference/flip_voxel_ref.hpp"
 
@@ -106,7 +107,7 @@ void run_flip_voxel(const VoxelConfig& cfg, const FlipVoxelParams& p) {
 
 // Full name:
 // Voxel_Geometric/FlipVoxelTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Roi3DType>_<Shape>_<Flags>
-class FlipVoxelTest : public ::testing::TestWithParam<VoxelWithParams<FlipVoxelParams>> {};
+class FlipVoxelTest : public SkipListTest<VoxelWithParams<FlipVoxelParams>> {};
 
 TEST_P(FlipVoxelTest, Correctness) {
     const auto& p = GetParam();

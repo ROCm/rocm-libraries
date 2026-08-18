@@ -36,6 +36,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/sobel_filter_ref.hpp"
@@ -117,7 +118,7 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
 }  // namespace
 
 // Full name: Image_Filter/SobelFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<grad>_k<KernelSize>
-class SobelFilterTest : public ::testing::TestWithParam<WithParams<SobelFilterParams>> {};
+class SobelFilterTest : public SkipListTest<WithParams<SobelFilterParams>> {};
 
 TEST_P(SobelFilterTest, Correctness) {
     const auto& p = GetParam();

@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/snow_ref.hpp"
@@ -102,7 +103,7 @@ void run_snow(const TestConfig& cfg, const SnowParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/SnowTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Params>
-class SnowTest : public ::testing::TestWithParam<WithParams<SnowParams>> {};
+class SnowTest : public SkipListTest<WithParams<SnowParams>> {};
 
 TEST_P(SnowTest, Correctness) {
     const auto& p = GetParam();

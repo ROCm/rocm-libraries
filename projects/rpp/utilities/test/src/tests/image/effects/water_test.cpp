@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/water_ref.hpp"
 
@@ -113,7 +114,7 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/WaterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Kind>
-class WaterTest : public ::testing::TestWithParam<WithParams<WaterParams>> {};
+class WaterTest : public SkipListTest<WithParams<WaterParams>> {};
 
 TEST_P(WaterTest, Correctness) {
     const auto& p = GetParam();

@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/lens_correction_ref.hpp"
@@ -169,7 +170,7 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
 
 // Full name:
 // Image_Geometric/LensCorrectionTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Kind>
-class LensCorrectionTest : public ::testing::TestWithParam<WithParams<LensParams>> {};
+class LensCorrectionTest : public SkipListTest<WithParams<LensParams>> {};
 
 TEST_P(LensCorrectionTest, Correctness) {
     const auto& p = GetParam();

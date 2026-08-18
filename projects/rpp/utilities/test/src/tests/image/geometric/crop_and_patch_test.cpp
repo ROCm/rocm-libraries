@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/crop_and_patch_ref.hpp"
 
@@ -109,7 +110,7 @@ void run_crop_and_patch(const TestConfig& cfg, const CropAndPatchParams& op) {
 }  // namespace
 
 // Full name: Image_Geometric/CropAndPatchTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Case>
-class CropAndPatchTest : public ::testing::TestWithParam<WithParams<CropAndPatchParams>> {};
+class CropAndPatchTest : public SkipListTest<WithParams<CropAndPatchParams>> {};
 
 TEST_P(CropAndPatchTest, Correctness) {
     const auto& p = GetParam();

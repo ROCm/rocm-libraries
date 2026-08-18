@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/coarse_dropout_ref.hpp"
@@ -129,7 +130,7 @@ void run_coarse_dropout(const TestConfig& cfg) {
 
 // Full name:
 // Image_Effects/CoarseDropoutTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_2x36x48
-class CoarseDropoutTest : public ::testing::TestWithParam<TestConfig> {};
+class CoarseDropoutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(CoarseDropoutTest, Correctness) {
     const TestConfig cfg = GetParam();

@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/noise_shot_ref.hpp"
 
@@ -225,7 +226,7 @@ std::vector<WithParams<NoiseShotParams>> noise_shot_configs() {
 
 // Full name:
 // Image_Effects/NoiseShotTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Check>
-class NoiseShotTest : public ::testing::TestWithParam<WithParams<NoiseShotParams>> {};
+class NoiseShotTest : public SkipListTest<WithParams<NoiseShotParams>> {};
 
 TEST_P(NoiseShotTest, Correctness) {
     const auto& p = GetParam();

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/phase_ref.hpp"
@@ -80,7 +81,7 @@ void run_phase(const TestConfig& cfg) {
 }  // namespace
 
 // Full name: Image_Geometric/PhaseTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>
-class PhaseTest : public ::testing::TestWithParam<TestConfig> {};
+class PhaseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(PhaseTest, Correctness) {
     const TestConfig cfg = GetParam();

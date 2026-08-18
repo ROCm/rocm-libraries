@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/posterize_ref.hpp"
@@ -91,7 +92,7 @@ void run_posterize(const TestConfig& cfg, const PosterizeParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/PosterizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<LevelBits>
-class PosterizeTest : public ::testing::TestWithParam<WithParams<PosterizeParams>> {};
+class PosterizeTest : public SkipListTest<WithParams<PosterizeParams>> {};
 
 TEST_P(PosterizeTest, Correctness) {
     const auto& p = GetParam();

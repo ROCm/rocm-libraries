@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/fisheye_ref.hpp"
 
@@ -85,7 +86,7 @@ void run_fisheye(const TestConfig& cfg) {
 }  // namespace
 
 // Full name: Image_Geometric/FisheyeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class FisheyeTest : public ::testing::TestWithParam<TestConfig> {};
+class FisheyeTest : public SkipListTest<TestConfig> {};
 
 TEST_P(FisheyeTest, Correctness) {
     const TestConfig cfg = GetParam();

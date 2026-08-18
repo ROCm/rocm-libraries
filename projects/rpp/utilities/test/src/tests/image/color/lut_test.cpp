@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/lut_ref.hpp"
 
@@ -96,7 +97,7 @@ void run_lut(const TestConfig& cfg) {
 }  // namespace
 
 // Full name: Image_Color/LutTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class LutTest : public ::testing::TestWithParam<TestConfig> {};
+class LutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(LutTest, Correctness) {
     const auto& cfg = GetParam();

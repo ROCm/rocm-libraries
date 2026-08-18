@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/reduction.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/tensor_min_ref.hpp"
@@ -84,7 +85,7 @@ void run_tensor_min(const TestConfig& cfg) {
 
 // Full name:
 // Image_Statistical/TensorMinTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
-class TensorMinTest : public ::testing::TestWithParam<TestConfig> {};
+class TensorMinTest : public SkipListTest<TestConfig> {};
 
 TEST_P(TensorMinTest, Correctness) {
     const TestConfig cfg = GetParam();

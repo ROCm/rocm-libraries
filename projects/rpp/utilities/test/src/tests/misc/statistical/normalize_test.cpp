@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/normalize_ref.hpp"
 
@@ -145,7 +146,7 @@ std::vector<NdWithParams<NormalizeParams>> normalize_grid() {
 
 // Full name:
 // Misc_Statistical/NormalizeTest.Correctness/<Backend>_<DTypeConv>_<Rank>_axis<M>_cms<C>_<Shape>
-class NormalizeTest : public ::testing::TestWithParam<NdWithParams<NormalizeParams>> {};
+class NormalizeTest : public SkipListTest<NdWithParams<NormalizeParams>> {};
 
 TEST_P(NormalizeTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;

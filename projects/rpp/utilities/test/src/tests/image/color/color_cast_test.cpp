@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/color_cast_ref.hpp"
@@ -107,7 +108,7 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
 
 // Full name:
 // Image_Color/ColorCastTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>_<RGB>
-class ColorCastTest : public ::testing::TestWithParam<WithParams<ColorCastParams>> {};
+class ColorCastTest : public SkipListTest<WithParams<ColorCastParams>> {};
 
 TEST_P(ColorCastTest, Correctness) {
     const auto& p = GetParam();

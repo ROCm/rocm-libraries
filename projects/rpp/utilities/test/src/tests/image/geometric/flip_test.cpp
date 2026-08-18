@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/flip_ref.hpp"
 
@@ -103,7 +104,7 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
 
 // Full name:
 // Image_Geometric/FlipTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Flags>
-class FlipTest : public ::testing::TestWithParam<WithParams<FlipParams>> {};
+class FlipTest : public SkipListTest<WithParams<FlipParams>> {};
 
 TEST_P(FlipTest, Correctness) {
     const auto& p = GetParam();

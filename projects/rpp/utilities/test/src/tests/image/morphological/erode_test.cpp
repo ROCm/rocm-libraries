@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/erode_ref.hpp"
 
@@ -115,7 +116,7 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
 
 // Full name:
 // Image_Morphological/ErodeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
-class ErodeTest : public ::testing::TestWithParam<WithParams<ErodeParams>> {};
+class ErodeTest : public SkipListTest<WithParams<ErodeParams>> {};
 
 TEST_P(ErodeTest, Correctness) {
     const auto& p = GetParam();

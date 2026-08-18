@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/random_erase_ref.hpp"
@@ -110,7 +111,7 @@ void run_random_erase(const TestConfig& cfg) {
 // There is no seed parameter anywhere in this API: box placement and noiseBuffer contents are both
 // supplied by the caller, so the golden is fully bit-exact and deterministic (unlike jitter /
 // noise_shot, which sample their own RNG state internally).
-class RandomEraseTest : public ::testing::TestWithParam<TestConfig> {};
+class RandomEraseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(RandomEraseTest, Correctness) {
     const auto& cfg = GetParam();

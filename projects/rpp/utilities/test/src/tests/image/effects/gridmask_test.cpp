@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/gridmask_ref.hpp"
@@ -103,7 +104,7 @@ void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
 
 // Full name:
 // Image_Effects/GridmaskTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Params>
-class GridmaskTest : public ::testing::TestWithParam<WithParams<GridmaskParams>> {};
+class GridmaskTest : public SkipListTest<WithParams<GridmaskParams>> {};
 
 TEST_P(GridmaskTest, Correctness) {
     const auto& p = GetParam();

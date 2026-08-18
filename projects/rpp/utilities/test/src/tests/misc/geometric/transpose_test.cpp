@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/transpose_ref.hpp"
 
@@ -115,7 +116,7 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
 
 // Full name: Misc_Geometric/TransposeTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Perm>_<Shape>
 // (the shape token is the *source* shape; the destination shape is that shape permuted).
-class TransposeTest : public ::testing::TestWithParam<NdWithParams<TransposeParams>> {};
+class TransposeTest : public SkipListTest<NdWithParams<TransposeParams>> {};
 
 TEST_P(TransposeTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/color_temperature_ref.hpp"
@@ -97,7 +98,7 @@ void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& 
 
 // color_temperature operates on RGB only (3 channels), so PLN1 is not instantiated.
 // Full name: Image_Color/ColorTemperatureTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Adj>
-class ColorTemperatureTest : public ::testing::TestWithParam<WithParams<ColorTemperatureParams>> {};
+class ColorTemperatureTest : public SkipListTest<WithParams<ColorTemperatureParams>> {};
 
 TEST_P(ColorTemperatureTest, Correctness) {
     const auto& p = GetParam();

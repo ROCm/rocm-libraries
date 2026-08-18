@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/arithmetic_tensor_ref.hpp"
@@ -104,7 +105,7 @@ void run_tensor_subtract_tensor(const NdConfig& cfg, Broadcast broadcast) {
 
 // Full name:
 // Misc_Arithmetic/TensorSubtractTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
-class TensorSubtractTensorTest : public ::testing::TestWithParam<NdWithParams<BroadcastParams>> {};
+class TensorSubtractTensorTest : public SkipListTest<NdWithParams<BroadcastParams>> {};
 
 TEST_P(TensorSubtractTensorTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;

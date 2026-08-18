@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/ricap_ref.hpp"
 
@@ -109,7 +110,7 @@ void run_ricap(const TestConfig& cfg, const RicapParams& op) {
 }  // namespace
 
 // Full name: Image_Effects/RicapTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Case>
-class RicapTest : public ::testing::TestWithParam<WithParams<RicapParams>> {};
+class RicapTest : public SkipListTest<WithParams<RicapParams>> {};
 
 TEST_P(RicapTest, Correctness) {
     const auto& p = GetParam();

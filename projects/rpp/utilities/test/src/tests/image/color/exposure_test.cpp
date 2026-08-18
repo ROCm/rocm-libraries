@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/exposure_ref.hpp"
@@ -90,7 +91,7 @@ void run_exposure(const TestConfig& cfg, const ExposureParams& op) {
 
 // Full name:
 // Image_Color/ExposureTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Exposure>
-class ExposureTest : public ::testing::TestWithParam<WithParams<ExposureParams>> {};
+class ExposureTest : public SkipListTest<WithParams<ExposureParams>> {};
 
 TEST_P(ExposureTest, Correctness) {
     const auto& p = GetParam();

@@ -32,6 +32,7 @@ SOFTWARE.
 #include "framework/compare_tensor.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/jpeg_compression_distortion_ref.hpp"
@@ -124,7 +125,7 @@ void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op
 // Full name:
 // Image_Geometric/JpegCompressionDistortionTest.Correctness/
 //   <Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_q<Quality>
-class JpegCompressionDistortionTest : public ::testing::TestWithParam<WithParams<JpegParams>> {};
+class JpegCompressionDistortionTest : public SkipListTest<WithParams<JpegParams>> {};
 
 TEST_P(JpegCompressionDistortionTest, Correctness) {
     const auto& p = GetParam();
