@@ -1,0 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#define TENSILELITE_CLIENT_VERSION "@TENSILELITE_DISTRIBUTION_VERSION@"
