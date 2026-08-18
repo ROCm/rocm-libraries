@@ -702,6 +702,24 @@ pipeline {
                         }
                     }
                 }
+                stage("Run DISPATCHER Tests on gfx950")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_DISPATCHER_TESTS.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx950")) {
+                                deleteDir()
+                                ck.runDispatcherTestsGfx950(params.BUILD_COMPILER)
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
             }
         }
 

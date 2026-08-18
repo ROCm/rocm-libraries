@@ -1510,8 +1510,8 @@ def runDispatcherTests(String arch, String compiler) {
             -D CK_TILE_DISPATCHER=ON \
             -D BUILD_DISPATCHER_BINDINGS=ON \
             -D DISPATCHER_RULE_SET=tests .. && \
-        ninja -j${nthreads()} dispatcher_gemm_lib && \
-        python3 ../dispatcher/tests/run_gemm_search_space.py \
+        ninja -j${nthreads()} ck_tile_dispatcher dispatcher_gemm_lib && \
+        python3 ../dispatcher/tests/test_gemm_search_space.py \
             --arch ${arch} \
             --dtypes fp16,bf16,fp8,bf8 \
             --layouts rcr,rrr,crr,ccr \
@@ -1519,9 +1519,27 @@ def runDispatcherTests(String arch, String compiler) {
             --warmup 5 \
             --repeat 5 \
             --size 1024 \
-            --json dispatcher_gemm_results.json"""
+            --json dispatcher_gemm_results.json && \
+        python3 ../dispatcher/tests/test_gemm_parity.py && \
+        python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
+        python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch}"""
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
     archiveArtifacts artifacts: "dispatcher_gemm_results.json", allowEmptyArchive: true
+}
+
+def runDispatcherTestsGfx950(String compiler) {
+    def arch = "gfx950"
+    def execute_cmd = """
+        cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+            -D CMAKE_CXX_COMPILER="${compiler}" \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D GPU_TARGETS="${arch}" \
+            -D CK_TILE_DISPATCHER=ON \
+            -D BUILD_DISPATCHER_BINDINGS=ON \
+            -D DISPATCHER_RULE_SET=tests .. && \
+        ninja -j${nthreads()} ck_tile_dispatcher dispatcher_gemm_lib && \
+        python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch}"""
+    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
 def runBuildCKAndTests(String arch) {
