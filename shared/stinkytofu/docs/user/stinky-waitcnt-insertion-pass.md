@@ -16,26 +16,46 @@
 
 ## Hardware background
 
-Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds`) retire out of order. The hardware exposes one FIFO counter per kind of async memop. Before a consumer reads a result, the compiler must insert the matching `s_wait_*` to drain the producer.
+Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
 
-| `CounterKind` | Covers | Wait instruction | Modifier field |
-|---------------|--------|------------------|----------------|
-| `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` |
-| `CK_Buffer` | global/buffer load + store, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` |
-| `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt N` | `SWaitCntData.kmcnt` |
-| `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` |
+| `CounterKind` | Covers | Wait instruction | Modifier field | Completion order |
+|---------------|--------|------------------|----------------|------------------|
+| `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` | in order |
+| `CK_Buffer` | global/buffer load + store, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` | in order |
+| `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt 0` | `SWaitCntData.kmcnt` | **out of order** |
+| `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
 
-`s_wait_*cnt N` blocks until **at most `N`** ops of that kind remain outstanding (it keeps the `N` most-recently-issued in flight and drains everything older).
+`s_wait_*cnt N` blocks until the counter has dropped to **at most `N`**. On the in-order counters each op contributes exactly 1, so `N` is an op count and it identifies precisely which ops completed: the `N` most-recently-issued stay in flight and everything older has landed. `kmcnt` is neither in order nor one-per-op (see below).
 
 ### Wait arithmetic
 
-If producer `D` sits at index `i` (0 = oldest) in a counter FIFO of size `n`, the wait immediate that drains `D` is:
+If producer `D` sits at index `i` (0 = oldest) in an in-order counter FIFO of size `n`, the wait immediate that drains `D` is:
 
 ```
 w(D) = n - i - 1
 ```
 
-`PerPredQueue::countFrom(D)` returns the number of ops from `D` (inclusive) to the tail. The emitted wait is `countFrom(D) - 1`. When multiple deps constrain the same counter, the pass takes the **min** of their wait values (the most permissive value that still drains the oldest needed dep on every constrained path).
+`PerPredQueue::countFrom(D)` returns the number of ops from `D` (inclusive) to the tail, so `w(D) = countFrom(D) - 1`. When multiple deps constrain the same counter, the pass takes the **min** of their wait values (the most permissive value that still drains the oldest needed dep on every constrained path).
+
+`waitToDrain(counter, countFrom)` is the **only** place a queue position is turned into a wait immediate, because the formula above is not valid on every counter.
+
+### Out-of-order counters
+
+Two independent hardware facts make a nonzero `kmcnt` immediate unusable:
+
+- **It is not a count of instructions.** Per the ISA spec, `kmcnt` increments by 1 for a single-DWORD fetch (or a cache invalidate) and by 2 for a fetch of two or more DWORDs, decrementing by the same amount when the instruction completes. A queue index therefore does not convert to an immediate at all.
+- **Completion order is unspecified.** Scalar loads may return in any order relative to how they were issued, and a load crossing two cache lines can return its halves at different times.
+
+Either one alone breaks the wait arithmetic above. Concretely, `s_wait_kmcnt 1` after two `s_load`s is satisfied by the second load returning first, leaving the first load's destination stale — so only `s_wait_kmcnt 0` ("everything issued so far has landed") has a well-defined meaning for a consumer.
+
+`CK_KM` is consequently marked `CounterOrder::OutOfOrder` in `CounterPolicy`, and `waitToDrain` returns `0` for it whenever a dependency is in flight. Consequences that follow automatically:
+
+- Every emitted `s_wait_kmcnt` has immediate `0`; the wait is a full drain.
+- `trimQueues(queues[CK_KM], 0)` empties the queue, so consumers after the drain need no further wait — a run of scalar-load consumers with no interleaved `s_load` collapses to one wait.
+- `ShallowPredPromotion` cannot relax a KM wait: every per-pred value it computes is already `0`.
+- The `kMaxInFlight` saturation diagnostic is suppressed for out-of-order counters; a saturated queue cannot cause an under-deep wait when the wait is always a full drain.
+
+Marking a counter out-of-order is a one-line policy change if hardware behaviour requires it for another counter.
 
 `classifyMemOp` maps an instruction to its counter; an instruction that is not a tracked memop returns `CK_Count` (no counter).
 
@@ -294,7 +314,7 @@ At block entry:
 
 1. **Seed per-pred queues** — copy each predecessor's exit queues, retagging `pred`. Self-predecessors (back-edges) are included; at fixed point the back-edge's exit is the loop body's true exit. Identical `(pred, ops)` queues are deduplicated so loop bodies converge (without dedup, back-edges would re-copy the same queue each iteration and the state would never stabilize).
 2. **Forward PHI summaries** from all preds; collisions keep the strictest (min) wait per counter.
-3. **Build PHI summaries** — for each PHI at the top of the block, compute per-counter wait as the **min** of `countFrom(src) - 1` over constrained incoming paths. Nested PHIs chain through the predecessor's already-computed summary.
+3. **Build PHI summaries** — for each PHI at the top of the block, compute per-counter wait as the **min** of `waitToDrain(c, countFrom(src))` over constrained incoming paths. Nested PHIs chain through the predecessor's already-computed summary.
 
 Queues are **copied, not merged** — a join holds one queue per (predecessor, original-queue) so per-path depth survives. The old "collapse to union queue at exit" design was deliberately removed; collapsing would lose per-pred position info and force over-deep waits.
 
@@ -317,7 +337,7 @@ Per-pred queues are **not** collapsed at block exit.
 
 RAW dependencies come from `inst->getSources()` after `buildUseDefChain(includePseudo=true)`:
 
-- Concrete memop sources: `classifyMemOp(*src)` maps to a counter; `countFrom(src) - 1` from each per-pred queue contributes via `tightenRequired` (min across hits).
+- Concrete memop sources: `classifyMemOp(*src)` maps to a counter; `waitToDrain(c, countFrom(src))` from each per-pred queue contributes via `tightenRequired` (min across hits).
 - PHI sources: `phiCurrentQueueWait` recurses through PHI inputs and scans **live** per-pred queues (not stored PHI summaries alone), so intervening in-block ops are counted.
 
 ```

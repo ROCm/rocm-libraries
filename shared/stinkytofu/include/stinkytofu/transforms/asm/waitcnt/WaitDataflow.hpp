@@ -71,11 +71,21 @@ enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Async 
 /// `inst` is not tracked by the waitcnt pass.
 CounterKind classifyMemOp(const StinkyInstruction& inst);
 
+/// Wait immediate that guarantees the op sitting `countFrom` positions from a
+/// queue's tail (i.e. PerPredQueue::countFrom(op), so 1 == tail) has completed.
+/// Returns kUnused for countFrom <= 0 (op not in flight).
+///
+/// This is the ONLY place a queue position becomes a wait immediate. Whether
+/// that conversion is possible at all is a per-counter property: an in-order
+/// counter may leave the countFrom - 1 newest ops in flight, while on an
+/// out-of-order counter (kmcnt) a nonzero immediate names no particular op, so
+/// the answer is a full drain. Never derive a wait from a queue index directly.
+int waitToDrain(CounterKind c, int countFrom);
+
 /// One queue of in-flight memops on a given counter, tagged by the CFG
 /// predecessor it was seeded from. For an op OP, the wait value is
-/// countFrom(OP) - 1, capped to the hardware maximum wait immediate. Ops
-/// older than the bounded tail are remembered in saturatedOps and report the
-/// maximum count.
+/// waitToDrain(counter, countFrom(OP)). Ops older than the bounded tail are
+/// remembered in saturatedOps and report the maximum count.
 ///
 /// At block entry there is one entry per CFG predecessor; these are kept
 /// (not collapsed) at block exit so a successor's mergeFromPredecessors can
