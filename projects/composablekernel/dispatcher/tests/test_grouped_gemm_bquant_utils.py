@@ -734,36 +734,36 @@ class TestExpandBquantSweep:
 from grouped_gemm_bquant_utils import (  # noqa: E402
     default_fp8_config_gfx1250,
     default_bf8_config_gfx1250,
-    default_fp8i4_config_gfx1250,
-    default_bf8i4_config_gfx1250,
 )
 
 
 class TestGfx1250Configs:
+    # gfx1250 correct config was determined empirically on MI400/gfx1250:
+    # BQuant fp8/bf8 verify with the SAME stock config (warp_tile_k=128, FlatMM);
+    # warp_tile_k=16 (WMMA) produces all-zeros on gfx12. i4 variants do not
+    # compile on gfx1250, so no gfx1250 helper exists for them.
 
     def _all(self):
         return [
             default_fp8_config_gfx1250(),
             default_bf8_config_gfx1250(),
-            default_fp8i4_config_gfx1250(),
-            default_bf8i4_config_gfx1250(),
         ]
 
-    def test_gfx1250_uses_wmma_warp_tile_k_16(self):
-        # gfx1250 must use the WMMA instruction (warp_tile_k=16); the gfx9 fp8/bf8
-        # defaults use warp_tile_k=128 (FlatMM) which is invalid on gfx12.
+    def test_gfx1250_uses_flatmm_warp_tile_k_128(self):
+        # GPU-verified: fp8/bf8 are correct on gfx1250 with warp_tile_k=128
+        # (== stock). warp_tile_k=16 silently returns zeros on gfx12.
         for cfg in self._all():
             assert cfg.warp_tile_m == 16
             assert cfg.warp_tile_n == 16
-            assert cfg.warp_tile_k == 16, f"{cfg.name} must use WMMA warp_tile_k=16"
+            assert cfg.warp_tile_k == 128, f"{cfg.name} must use FlatMM warp_tile_k=128"
 
     def test_gfx1250_arch_propagated(self):
         for cfg in self._all():
             assert cfg.gfx_arch == "gfx1250"
 
-    def test_gfx1250_names_16x16x16(self):
+    def test_gfx1250_names_16x16x128(self):
         for cfg in self._all():
-            assert "16x16x16" in cfg.name
+            assert "16x16x128" in cfg.name
 
     def test_gfx1250_pipeline_is_compv3(self):
         for cfg in self._all():
