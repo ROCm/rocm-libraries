@@ -14,6 +14,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -26,6 +27,23 @@ public:
     static flatbuffers::FlatBufferBuilder createValidGraph()
     {
         return test_utilities::createValidGraph();
+    }
+
+    static std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
+        unpack(const GraphDescriptor& descriptor)
+    {
+        const auto serialized = descriptor.getSerializedGraph();
+        return hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+            static_cast<const uint8_t*>(serialized.ptr));
+    }
+
+    static void setHandle(GraphDescriptor& descriptor)
+    {
+        auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                HIPDNN_TYPE_HANDLE,
+                                1,
+                                static_cast<const void*>(&handle));
     }
 
     static void verifyGraph(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph)
@@ -650,6 +668,27 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
     EXPECT_EQ(std::string(nameBuffer.data()), "graphB");
 }
 
+TEST_F(TestGraphDescriptor, DeserializeFailsAfterFinalizeAndPreservesIdentity)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serialized.data(), serialized.size());
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto original = unpack(descriptor);
+    ASSERT_NE(original->id, nullptr);
+    const auto originalId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*original->id);
+
+    ASSERT_THROW_HIPDNN_STATUS(descriptor.deserializeGraph(serialized.data(), serialized.size()),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_TRUE(descriptor.isFinalized());
+    const auto preserved = unpack(descriptor);
+    ASSERT_NE(preserved->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*preserved->id), originalId);
+}
+
 // ============================================================================
 // Binary/JSON serialization error-path tests
 // ============================================================================
@@ -854,6 +893,163 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
         static_cast<const uint8_t*>(binary2.ptr));
 
     EXPECT_EQ(*graph1, *graph2);
+}
+
+TEST_F(TestGraphDescriptor, FinalizingLegacyGraphGeneratesValidStableUuid)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    descriptor.buildSerializedGraph();
+    ASSERT_EQ(unpack(descriptor)->id, nullptr);
+
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto first = unpack(descriptor);
+    ASSERT_NE(first->id, nullptr);
+    const auto firstId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*first->id);
+    EXPECT_TRUE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(firstId));
+
+    const auto second = unpack(descriptor);
+    ASSERT_NE(second->id, nullptr);
+    EXPECT_EQ(firstId, hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*second->id));
+}
+
+TEST_F(TestGraphDescriptor, EquivalentGraphsReceiveDifferentUuids)
+{
+    auto firstBuilder = createValidGraph();
+    auto firstSerialized = firstBuilder.Release();
+    GraphDescriptor first;
+    first.deserializeGraph(firstSerialized.data(), firstSerialized.size());
+    setHandle(first);
+    first.finalize();
+
+    auto secondBuilder = createValidGraph();
+    auto secondSerialized = secondBuilder.Release();
+    GraphDescriptor second;
+    second.deserializeGraph(secondSerialized.data(), secondSerialized.size());
+    setHandle(second);
+    second.finalize();
+
+    const auto firstGraph = unpack(first);
+    const auto secondGraph = unpack(second);
+    ASSERT_NE(firstGraph->id, nullptr);
+    ASSERT_NE(secondGraph->id, nullptr);
+    EXPECT_NE(*firstGraph->id, *secondGraph->id);
+}
+
+TEST_F(TestGraphDescriptor, ExistingUuidSurvivesDeserializeHandleAndFinalize)
+{
+    auto legacyBuilder = createValidGraph();
+    auto legacySerialized = legacyBuilder.Release();
+    GraphDescriptor original;
+    original.deserializeGraph(legacySerialized.data(), legacySerialized.size());
+    setHandle(original);
+    original.finalize();
+    const auto originalGraph = unpack(original);
+    ASSERT_NE(originalGraph->id, nullptr);
+    const auto expectedId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*originalGraph->id);
+
+    const auto originalData = original.getSerializedGraph();
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(originalData.ptr), originalData.size);
+    setHandle(revived);
+    revived.finalize();
+    const auto revivedGraph = unpack(revived);
+    ASSERT_NE(revivedGraph->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*revivedGraph->id), expectedId);
+}
+
+TEST_F(TestGraphDescriptor, ContentMutationReplacesInheritedUuid)
+{
+    auto legacyBuilder = createValidGraph();
+    auto legacySerialized = legacyBuilder.Release();
+    GraphDescriptor original;
+    original.deserializeGraph(legacySerialized.data(), legacySerialized.size());
+    setHandle(original);
+    original.finalize();
+    const auto originalGraph = unpack(original);
+    ASSERT_NE(originalGraph->id, nullptr);
+    const auto originalId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*originalGraph->id);
+
+    const auto originalData = original.getSerializedGraph();
+    GraphDescriptor mutated;
+    mutated.deserializeGraph(static_cast<const uint8_t*>(originalData.ptr), originalData.size);
+    const std::array name{'m', 'u', 't', 'a', 't', 'e', 'd', '\0'};
+    mutated.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                         HIPDNN_TYPE_CHAR,
+                         static_cast<int64_t>(name.size()),
+                         name.data());
+    setHandle(mutated);
+    mutated.finalize();
+    const auto mutatedGraph = unpack(mutated);
+    ASSERT_NE(mutatedGraph->id, nullptr);
+    EXPECT_NE(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*mutatedGraph->id), originalId);
+}
+
+TEST_F(TestGraphDescriptor, PreservesOpaqueSerializedGraphId)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serialized.data());
+    std::array<uint8_t, 16> opaqueId{};
+    opaqueId[6] = 0x30;
+    opaqueId[8] = 0x40;
+    graph->id = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::Uuid>(
+        flatbuffers::span<const uint8_t, 16>(opaqueId));
+
+    flatbuffers::FlatBufferBuilder identifiedBuilder;
+    identifiedBuilder.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(identifiedBuilder, graph.get()));
+    auto identified = identifiedBuilder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(identified.data(), identified.size());
+    descriptor.buildSerializedGraph();
+    const auto roundTripped = unpack(descriptor);
+    ASSERT_NE(roundTripped->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*roundTripped->id), opaqueId);
+}
+
+TEST_F(TestGraphDescriptor, JsonRoundTripPreservesUuid)
+{
+    auto legacyBuilder = createValidGraph();
+    auto legacySerialized = legacyBuilder.Release();
+    GraphDescriptor original;
+    original.deserializeGraph(legacySerialized.data(), legacySerialized.size());
+    setHandle(original);
+    original.finalize();
+    const auto originalGraph = unpack(original);
+    ASSERT_NE(originalGraph->id, nullptr);
+    const auto expectedId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*originalGraph->id);
+
+    const auto json = original.getSerializedJsonGraph();
+    EXPECT_EQ(nlohmann::json::parse(json).at("id"),
+              hipdnn_flatbuffers_sdk::utilities::formatUuid(expectedId));
+
+    GraphDescriptor revived;
+    GraphDescriptor::createFromJsonGraph(revived, json.c_str(), json.size());
+    revived.buildSerializedGraph();
+    const auto revivedGraph = unpack(revived);
+    ASSERT_NE(revivedGraph->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*revivedGraph->id), expectedId);
+}
+
+TEST_F(TestGraphDescriptor, ToStringReportsGraphId)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serialized.data(), serialized.size());
+    EXPECT_NE(descriptor.toString().find("id=(none)"), std::string::npos);
+
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto id = hipdnn_flatbuffers_sdk::utilities::formatUuid(
+        hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*unpack(descriptor)->id));
+    EXPECT_NE(descriptor.toString().find("id=" + id), std::string::npos);
 }
 
 // ============================================================================

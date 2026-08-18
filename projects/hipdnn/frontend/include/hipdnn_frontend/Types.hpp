@@ -53,6 +53,7 @@
 namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
@@ -68,8 +69,8 @@ using hipdnn_data_sdk::types::half;
 enum class ConvolutionMode
 {
     NOT_SET = 0, ///< Mode not specified
-    CROSS_CORRELATION = 1, ///< Cross-correlation mode (standard deep learning convolution)
-    CONVOLUTION = 2 ///< Mathematical convolution (filter is flipped)
+    CONVOLUTION = 1, ///< Mathematical convolution (filter is flipped)
+    CROSS_CORRELATION = 2 ///< Cross-correlation mode (standard deep learning convolution)
 };
 typedef ConvolutionMode ConvolutionMode_t; ///< @brief Type alias for ConvolutionMode
 
@@ -85,56 +86,56 @@ typedef ConvolutionMode ConvolutionMode_t; ///< @brief Type alias for Convolutio
 enum class PointwiseMode
 {
     NOT_SET = 0, ///< Mode not specified
-    ABS = 1, ///< Absolute value: |x|
-    ADD = 2, ///< Addition: x + y
-    ADD_SQUARE = 3, ///< Add x to y squared: x + y²
-    BINARY_SELECT = 4, ///< Ternary select based on condition
-    CEIL = 5, ///< Ceiling function
-    CMP_EQ = 6, ///< Compare equal: x == y
-    CMP_GE = 7, ///< Compare greater or equal: x >= y
-    CMP_GT = 8, ///< Compare greater than: x > y
-    CMP_LE = 9, ///< Compare less or equal: x <= y
-    CMP_LT = 10, ///< Compare less than: x < y
-    CMP_NEQ = 11, ///< Compare not equal: x != y
-    DIV = 12, ///< Division: x / y
-    ELU_BWD = 13, ///< ELU activation backward pass
-    ELU_FWD = 14, ///< ELU activation forward pass
-    ERF = 15, ///< Error function
-    EXP = 16, ///< Exponential: e^x
-    FLOOR = 17, ///< Floor function
-    GELU_APPROX_TANH_BWD = 18, ///< GELU (tanh approximation) backward
-    GELU_APPROX_TANH_FWD = 19, ///< GELU (tanh approximation) forward
-    GELU_BWD = 20, ///< GELU activation backward
-    GELU_FWD = 21, ///< GELU activation forward
-    GEN_INDEX = 22, ///< Generate index tensor
-    IDENTITY = 23, ///< Identity: y = x
-    LOG = 24, ///< Natural logarithm
-    LOGICAL_AND = 25, ///< Logical AND
-    LOGICAL_NOT = 26, ///< Logical NOT
-    LOGICAL_OR = 27, ///< Logical OR
-    MAX = 28, ///< Element-wise maximum
-    MIN = 29, ///< Element-wise minimum
-    MUL = 30, ///< Multiplication: x * y
-    NEG = 31, ///< Negation: -x
-    RECIPROCAL = 32, ///< Reciprocal: 1/x
-    RELU_BWD = 33, ///< ReLU backward pass
-    RELU_FWD = 34, ///< ReLU forward pass
+    ADD = 1, ///< Addition: x + y
+    MUL = 2, ///< Multiplication: x * y
+    SQRT = 3, ///< Square root
+    MAX = 4, ///< Element-wise maximum
+    MIN = 5, ///< Element-wise minimum
+    RELU_FWD = 6, ///< ReLU forward pass
+    TANH_FWD = 7, ///< Tanh forward pass
+    SIGMOID_FWD = 8, ///< Sigmoid forward pass
+    ELU_FWD = 9, ///< ELU activation forward pass
+    GELU_FWD = 10, ///< GELU activation forward
+    SOFTPLUS_FWD = 11, ///< Softplus forward pass
+    SWISH_FWD = 12, ///< Swish activation forward
+    RELU_BWD = 13, ///< ReLU backward pass
+    TANH_BWD = 14, ///< Tanh backward pass
+    SIGMOID_BWD = 15, ///< Sigmoid backward pass
+    ELU_BWD = 16, ///< ELU activation backward pass
+    GELU_BWD = 17, ///< GELU activation backward
+    SOFTPLUS_BWD = 18, ///< Softplus backward pass
+    SWISH_BWD = 19, ///< Swish activation backward
+    ERF = 20, ///< Error function
+    IDENTITY = 21, ///< Identity: y = x
+    GELU_APPROX_TANH_BWD = 22, ///< GELU (tanh approximation) backward
+    GELU_APPROX_TANH_FWD = 23, ///< GELU (tanh approximation) forward
+    GEN_INDEX = 24, ///< Generate index tensor
+    BINARY_SELECT = 25, ///< Ternary select based on condition
+    EXP = 26, ///< Exponential: e^x
+    LOG = 27, ///< Natural logarithm
+    NEG = 28, ///< Negation: -x
+    MOD = 29, ///< Modulo: x mod y (binary)
+    POW = 30, ///< Power: x raised to y (binary)
+    ABS = 31, ///< Absolute value: |x|
+    CEIL = 32, ///< Ceiling function
+    COS = 33, ///< Cosine function (unary)
+    FLOOR = 34, ///< Floor function
     RSQRT = 35, ///< Reciprocal square root: 1/sqrt(x)
-    SIGMOID_BWD = 36, ///< Sigmoid backward pass
-    SIGMOID_FWD = 37, ///< Sigmoid forward pass
-    SIN = 38, ///< Sine function
-    SOFTPLUS_BWD = 39, ///< Softplus backward pass
-    SOFTPLUS_FWD = 40, ///< Softplus forward pass
-    SQRT = 41, ///< Square root
-    SUB = 42, ///< Subtraction: x - y
-    SWISH_BWD = 43, ///< Swish activation backward
-    SWISH_FWD = 44, ///< Swish activation forward
-    TAN = 45, ///< Tangent function
-    TANH_BWD = 46, ///< Tanh backward pass
-    TANH_FWD = 47, ///< Tanh forward pass
-    MOD = 48, ///< Modulo: x mod y (binary)
-    POW = 49, ///< Power: x raised to y (binary)
-    COS = 50, ///< Cosine function (unary)
+    SIN = 36, ///< Sine function
+    LOGICAL_NOT = 37, ///< Logical NOT
+    TAN = 38, ///< Tangent function
+    SUB = 39, ///< Subtraction: x - y
+    ADD_SQUARE = 40, ///< Add x to y squared: x + y²
+    DIV = 41, ///< Division: x / y
+    CMP_EQ = 42, ///< Compare equal: x == y
+    CMP_NEQ = 43, ///< Compare not equal: x != y
+    CMP_GT = 44, ///< Compare greater than: x > y
+    CMP_GE = 45, ///< Compare greater or equal: x >= y
+    CMP_LT = 46, ///< Compare less than: x < y
+    CMP_LE = 47, ///< Compare less or equal: x <= y
+    LOGICAL_AND = 48, ///< Logical AND
+    LOGICAL_OR = 49, ///< Logical OR
+    RECIPROCAL = 50, ///< Reciprocal: 1/x
     COUNT = 51 ///< Number of pointwise modes (sentinel — not a valid mode)
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
@@ -167,11 +168,11 @@ typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
 enum class ResampleMode
 {
     NOT_SET = 0, ///< Resample mode not specified
-    MAXPOOL = 1, ///< Maximum pooling
-    AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
-    AVGPOOL_INCLUDE_PADDING = 3, ///< Average pooling (includes padding in divisor)
-    BILINEAR = 4, ///< Bilinear resampling
-    NEAREST = 5 ///< Nearest-neighbor resampling
+    AVGPOOL_EXCLUDE_PADDING = 1, ///< Average pooling (excludes padding from divisor)
+    AVGPOOL_INCLUDE_PADDING = 2, ///< Average pooling (includes padding in divisor)
+    BILINEAR = 3, ///< Bilinear resampling
+    NEAREST = 4, ///< Nearest-neighbor resampling
+    MAXPOOL = 5 ///< Maximum pooling
 };
 typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
 
@@ -182,9 +183,9 @@ typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
 enum class PaddingMode
 {
     NOT_SET = 0, ///< Padding mode not specified
-    NEG_INF_PAD = 1, ///< Pad with negative infinity
-    ZERO_PAD = 2, ///< Pad with zeros
-    EDGE_VAL_PAD = 3 ///< Pad with the edge value
+    EDGE_VAL_PAD = 1, ///< Pad with the edge value
+    NEG_INF_PAD = 2, ///< Pad with negative infinity
+    ZERO_PAD = 3 ///< Pad with zeros
 };
 typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
 
@@ -199,32 +200,35 @@ enum class DataType
 {
     NOT_SET = 0, ///< Data type not specified
     FLOAT = 1, ///< 32-bit floating point (fp32)
-    HALF = 2, ///< 16-bit floating point (fp16, IEEE 754)
-    BFLOAT16 = 3, ///< 16-bit brain floating point (bf16)
-    DOUBLE = 4, ///< 64-bit floating point (fp64)
-    UINT8 = 5, ///< 8-bit unsigned integer
-    INT32 = 6, ///< 32-bit signed integer
-    INT8 = 7, ///< 8-bit signed integer
-    FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
-    FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
-    FP8_E8M0 = 10, ///< 8-bit floating point (8 exponent, 0 mantissa bits)
-    FP4_E2M1 = 11, ///< 4-bit floating point (2 exponent, 1 mantissa bit)
-    INT4 = 12, ///< 4-bit signed integer
-    FP6_E2M3 = 13, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
-    FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
-    INT64 = 15, ///< 64-bit signed integer
-    BOOLEAN = 16, ///< 8-bit boolean
-    FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
-    FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
+    DOUBLE = 2, ///< 64-bit floating point (fp64)
+    HALF = 3, ///< 16-bit floating point (fp16, IEEE 754)
+    INT8 = 4, ///< 8-bit signed integer
+    INT32 = 5, ///< 32-bit signed integer
     // NOLINTNEXTLINE(readability-identifier-naming)
-    INT8x4 = 19, ///< Four packed 8-bit signed integers (vectorized layout)
+    INT8x4 = 6, ///< Four packed 8-bit signed integers (vectorized layout)
+    UINT8 = 7, ///< 8-bit unsigned integer
     // NOLINTNEXTLINE(readability-identifier-naming)
-    UINT8x4 = 20, ///< Four packed 8-bit unsigned integers (vectorized layout)
+    UINT8x4 = 8, ///< Four packed 8-bit unsigned integers (vectorized layout)
     // NOLINTNEXTLINE(readability-identifier-naming)
-    INT8x32 = 21, ///< Thirty-two packed 8-bit signed integers (vectorized layout)
-    FAST_FLOAT_FOR_FP8 = 22, ///< Fast floating-point accumulation type for FP8
-    COMPLEX_FP32 = 23, ///< Complex number with 32-bit floating-point components
-    COMPLEX_FP64 = 24, ///< Complex number with 64-bit floating-point components
+    INT8x32 = 9, ///< Thirty-two packed 8-bit signed integers (vectorized layout)
+    BFLOAT16 = 10, ///< 16-bit brain floating point (bf16)
+    INT64 = 11, ///< 64-bit signed integer
+    BOOLEAN = 12, ///< 8-bit boolean
+    // cuDNN-compat spelling: no hipDNN backend mapping (see toHipdnnDataType).
+    FP8_E4M3 = 13, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
+    FP8_E5M2 = 14, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
+    FAST_FLOAT_FOR_FP8 = 15, ///< Fast floating-point accumulation type for FP8
+    FP8_E8M0 = 16, ///< 8-bit floating point (8 exponent, 0 mantissa bits)
+    FP4_E2M1 = 17, ///< 4-bit floating point (2 exponent, 1 mantissa bit)
+    INT4 = 18, ///< 4-bit signed integer
+    COMPLEX_FP32 = 19, ///< Complex number with 32-bit floating-point components
+    COMPLEX_FP64 = 20, ///< Complex number with 64-bit floating-point components
+    // hipDNN-only data types: no cuDNN counterpart, appended after the
+    // cuDNN-matching block so the shared spellings keep cuDNN's values.
+    FP6_E2M3 = 22, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
+    FP6_E3M2 = 23, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
+    FP8_E4M3_FNUZ = 24, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
+    FP8_E5M2_FNUZ = 25, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -289,10 +293,10 @@ typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mod
  */
 enum class HeuristicMode
 {
-    FALLBACK, ///< Use fallback heuristics for engine selection
-    A, ///< cuDNN heuristic mode A (mapped to fallback for now)
-    B, ///< cuDNN heuristic mode B (mapped to fallback for now)
-    OPENSOURCE, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
+    A = 0, ///< cuDNN heuristic mode A (mapped to fallback for now)
+    B = 1, ///< cuDNN heuristic mode B (mapped to fallback for now)
+    FALLBACK = 2, ///< Use fallback heuristics for engine selection
+    OPENSOURCE = 3, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
 };
 typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 
@@ -302,13 +306,51 @@ typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
  */
 enum class BehaviorNote : int32_t
 {
-    RUNTIME_COMPILATION = 0, ///< Engine may compile kernels or other code at runtime.
-    REQUIRES_LAYOUT_TRANSFORM = 1, ///< Engine may require internal tensor layout transforms.
-    SUPPORTS_GRAPH_CAPTURE = 2, ///< Engine supports execution during stream graph capture.
-    EXTERNAL_LIBRARY_DEPENDENCY = 3, ///< Engine depends on a library outside core hipDNN.
-    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4 ///< Engine supports execution plan serialization.
+    // cuDNN BehaviorNote_t values (source-compatible by value). hipDNN engines
+    // do not emit the cuDNN-only notes; they are advisory in the shim.
+    NOT_SET = 0, ///< No behavior note set (cuDNN compatibility).
+    RUNTIME_COMPILATION = 1, ///< Engine may compile kernels or other code at runtime.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    REQUIRES_FILTER_INT8x32_REORDER = 2, ///< cuDNN INT8x32 filter reorder (advisory).
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    REQUIRES_BIAS_INT8x32_REORDER = 3, ///< cuDNN INT8x32 bias reorder (advisory).
+    SUPPORTS_CUDA_GRAPH_NATIVE_API = 4, ///< cuDNN CUDA-graph native API (advisory).
+    CUBLASLT_DEPENDENCY = 5, ///< cuDNN cuBLASLt dependency (advisory).
+    // hipDNN-only behavior notes: no cuDNN counterpart, appended after the
+    // cuDNN-matching block so the shared spellings keep cuDNN's values.
+    REQUIRES_LAYOUT_TRANSFORM = 6, ///< Engine may require internal tensor layout transforms.
+    SUPPORTS_GRAPH_CAPTURE = 7, ///< Engine supports execution during stream graph capture.
+    EXTERNAL_LIBRARY_DEPENDENCY = 8, ///< Engine depends on a library outside core hipDNN.
+    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 9 ///< Engine supports execution plan serialization.
 };
 typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
+
+/**
+ * @enum NumericalNote
+ * @brief Numerical-precision/behavior metadata reported by an engine.
+ *
+ * Value set mirrors the cuDNN frontend NumericalNote_t for source compatibility.
+ * hipDNN does not yet surface per-plan numerical-note metadata, so these are
+ * accepted for API parity and triaged by the cuDNN-compatibility shim.
+ */
+enum class NumericalNote : int32_t
+{
+    NOT_SET = 0, ///< No numerical note set.
+    TENSOR_CORE = 1, ///< Engine uses tensor-core instructions.
+    DOWN_CONVERT_INPUTS = 2, ///< Engine down-converts inputs to lower precision.
+    REDUCED_PRECISION_REDUCTION = 3, ///< Engine reduces in reduced precision.
+    FFT = 4, ///< Engine uses an FFT-based algorithm.
+    NONDETERMINISTIC = 5, ///< Engine may produce non-deterministic results.
+    WINOGRAD = 6, ///< Engine uses a Winograd algorithm.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    WINOGRAD_TILE_4x4 = 7, ///< Winograd with a 4x4 tile.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    WINOGRAD_TILE_6x6 = 8, ///< Winograd with a 6x6 tile.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    WINOGRAD_TILE_13x13 = 9, ///< Winograd with a 13x13 tile.
+    STRICT_NAN_PROP = 10 ///< Engine strictly propagates NaNs.
+};
+typedef NumericalNote NumericalNote_t; ///< @brief Type alias for NumericalNote
 
 /**
  * @enum BuildPlanPolicy
@@ -401,6 +443,10 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::INT8;
     }
+    else if constexpr(std::is_same_v<T, fp4_e2m1>)
+    {
+        return DataType::FP4_E2M1;
+    }
     else if constexpr(std::is_same_v<T, fp8_e4m3>)
     {
         return DataType::FP8_E4M3;
@@ -476,13 +522,12 @@ inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMod
 /**
  * @brief Convert frontend DiagonalAlignment to backend hipdnnDiagonalAlignment_t
  *
- * Maps frontend diagonal alignment enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT attributes.
- *
  * @param type The frontend DiagonalAlignment value
- * @return The corresponding hipdnnDiagonalAlignment_t value
+ * @return The corresponding hipdnnDiagonalAlignment_t value, or std::nullopt if
+ *         the value has no backend mapping.
  */
-inline hipdnnDiagonalAlignment_t toBackendDiagonalAlignment(const DiagonalAlignment& type)
+inline std::optional<hipdnnDiagonalAlignment_t>
+    toBackendDiagonalAlignment(const DiagonalAlignment& type)
 {
     switch(type)
     {
@@ -491,20 +536,19 @@ inline hipdnnDiagonalAlignment_t toBackendDiagonalAlignment(const DiagonalAlignm
     case DiagonalAlignment::BOTTOM_RIGHT:
         return HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     default:
-        return HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
+        return std::nullopt;
     }
 }
 
 /**
- * @brief Convert frontend AttentionImplementation to backend hipdnnAttentionImplementation_t
- *
- * Maps frontend attention implementation enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT attributes.
+ * @brief Convert frontend AttentionImplementation to backend
+ *        hipdnnAttentionImplementation_t
  *
  * @param type The frontend AttentionImplementation value
- * @return The corresponding hipdnnAttentionImplementation_t value
+ * @return The corresponding hipdnnAttentionImplementation_t value, or
+ *         std::nullopt if the value has no backend mapping.
  */
-inline hipdnnAttentionImplementation_t
+inline std::optional<hipdnnAttentionImplementation_t>
     toBackendAttentionImplementation(const AttentionImplementation& type)
 {
     switch(type)
@@ -516,7 +560,7 @@ inline hipdnnAttentionImplementation_t
     case AttentionImplementation::UNIFIED:
         return HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
     default:
-        return HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
+        return std::nullopt;
     }
 }
 
@@ -994,8 +1038,12 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 }
 
 /// @brief Convert backend behavior note to frontend behavior note.
-/// @return A frontend behavior note. Unknown values are preserved numerically.
-inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
+/// @return The frontend behavior note, or std::nullopt if the backend value is
+///         not known to this frontend. Frontend and backend numbering are
+///         independent, so an unrecognized value is never reinterpreted
+///         numerically: a newer backend's note would otherwise alias onto an
+///         unrelated frontend enumerator.
+inline std::optional<BehaviorNote> fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
 {
     switch(note)
     {
@@ -1010,7 +1058,7 @@ inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
     case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
         return BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
     default:
-        return static_cast<BehaviorNote>(note);
+        return std::nullopt;
     }
 }
 
@@ -1048,12 +1096,63 @@ inline const char* to_string(const BehaviorNote& note)
         return "EXTERNAL_LIBRARY_DEPENDENCY";
     case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
         return "SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
+    case BehaviorNote::NOT_SET:
+        return "NOT_SET";
+    case BehaviorNote::REQUIRES_FILTER_INT8x32_REORDER:
+        return "REQUIRES_FILTER_INT8x32_REORDER";
+    case BehaviorNote::REQUIRES_BIAS_INT8x32_REORDER:
+        return "REQUIRES_BIAS_INT8x32_REORDER";
+    case BehaviorNote::SUPPORTS_CUDA_GRAPH_NATIVE_API:
+        return "SUPPORTS_CUDA_GRAPH_NATIVE_API";
+    case BehaviorNote::CUBLASLT_DEPENDENCY:
+        return "CUBLASLT_DEPENDENCY";
     default:
         return "unknown";
     }
 }
 
 inline std::ostream& operator<<(std::ostream& os, const BehaviorNote& note)
+{
+    os << to_string(note);
+    return os;
+}
+
+/// @brief Convert NumericalNote to a human-readable string
+/// @param note The numerical note to convert
+/// @return A C-string representation of the numerical note
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const NumericalNote& note)
+{
+    switch(note)
+    {
+    case NumericalNote::NOT_SET:
+        return "NOT_SET";
+    case NumericalNote::TENSOR_CORE:
+        return "TENSOR_CORE";
+    case NumericalNote::DOWN_CONVERT_INPUTS:
+        return "DOWN_CONVERT_INPUTS";
+    case NumericalNote::REDUCED_PRECISION_REDUCTION:
+        return "REDUCED_PRECISION_REDUCTION";
+    case NumericalNote::FFT:
+        return "FFT";
+    case NumericalNote::NONDETERMINISTIC:
+        return "NONDETERMINISTIC";
+    case NumericalNote::WINOGRAD:
+        return "WINOGRAD";
+    case NumericalNote::WINOGRAD_TILE_4x4:
+        return "WINOGRAD_TILE_4x4";
+    case NumericalNote::WINOGRAD_TILE_6x6:
+        return "WINOGRAD_TILE_6x6";
+    case NumericalNote::WINOGRAD_TILE_13x13:
+        return "WINOGRAD_TILE_13x13";
+    case NumericalNote::STRICT_NAN_PROP:
+        return "STRICT_NAN_PROP";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const NumericalNote& note)
 {
     os << to_string(note);
     return os;

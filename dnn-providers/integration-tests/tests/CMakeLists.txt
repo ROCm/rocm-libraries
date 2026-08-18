@@ -5,7 +5,6 @@ add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     ../src/harness/input-init/FillInputs.cpp
-    TestArchMatch.cpp
     TestBundleMetadata.cpp
     TestGraphDescription.cpp
     TestNodeTypeToString.cpp
@@ -17,6 +16,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReferenceGraphExecutor.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
+    TestGpuSdpaFwdSignatureKey.cpp
+    TestGpuSdpaFwdPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
@@ -55,6 +56,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/main.cpp
     gpu-ref/TestGpuFpReferencePointwise.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
+    gpu-ref/TestGpuFpReferenceSdpa.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp

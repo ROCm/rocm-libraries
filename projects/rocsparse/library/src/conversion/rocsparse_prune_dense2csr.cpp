@@ -70,8 +70,8 @@ namespace rocsparse
 template <typename T>
 rocsparse_status
     rocsparse::prune_dense2csr_buffer_size_template(rocsparse_handle          handle, //0
-                                                    rocsparse_int             m, //1
-                                                    rocsparse_int             n, //2
+                                                    int64_t                   m, //1
+                                                    int64_t                   n, //2
                                                     const T*                  A, //3
                                                     int64_t                   lda, //4
                                                     const T*                  threshold, //5
@@ -100,7 +100,7 @@ rocsparse_status
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
-    ROCSPARSE_CHECKARG_ARRAY(3, size_t(m) * n, A);
+    ROCSPARSE_CHECKARG_ARRAY(3, m * n, A);
     ROCSPARSE_CHECKARG(4, lda, (lda < m), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_POINTER(5, threshold);
     ROCSPARSE_CHECKARG_POINTER(6, descr);
@@ -118,8 +118,8 @@ rocsparse_status
 
 template <typename T>
 rocsparse_status rocsparse::prune_dense2csr_nnz_template(rocsparse_handle          handle, //0
-                                                         rocsparse_int             m, //1
-                                                         rocsparse_int             n, //2
+                                                         int64_t                   m, //1
+                                                         int64_t                   n, //2
                                                          const T*                  A, //3
                                                          int64_t                   lda, //4
                                                          const T*                  threshold, //5
@@ -146,7 +146,7 @@ rocsparse_status rocsparse::prune_dense2csr_nnz_template(rocsparse_handle       
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
-    ROCSPARSE_CHECKARG_ARRAY(3, size_t(m) * n, A);
+    ROCSPARSE_CHECKARG_ARRAY(3, m * n, A);
 
     ROCSPARSE_CHECKARG(4, lda, (lda < m), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_POINTER(5, threshold);
@@ -275,8 +275,8 @@ rocsparse_status rocsparse::prune_dense2csr_nnz_template(rocsparse_handle       
 
 template <typename T>
 rocsparse_status rocsparse::prune_dense2csr_template(rocsparse_handle          handle, //0
-                                                     rocsparse_int             m, //1
-                                                     rocsparse_int             n, //2
+                                                     int64_t                   m, //1
+                                                     int64_t                   n, //2
                                                      const T*                  A, //3
                                                      int64_t                   lda, //4
                                                      const T*                  threshold, //5
