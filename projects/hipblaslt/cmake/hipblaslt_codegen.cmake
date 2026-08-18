@@ -313,9 +313,8 @@ function(create_device_library)
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
-        COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
-        COMMAND ${_python_command}
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
+        COMMENT "Validating library logic (tensilelite logic --check-all) for ${_cdl_TARGET} ..."
+        COMMAND ${_python_command} -m tensilelite logic
             ${_tensile_logic_args}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
         DEPENDS ${_codegen_dependencies}
@@ -325,7 +324,7 @@ function(create_device_library)
 
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${_python_command} -m tensilelite.tensilelite_create_library
+        ${_python_command} -m tensilelite create-library
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"
