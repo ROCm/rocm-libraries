@@ -225,6 +225,12 @@ class _SetupNewTilePapTdmWriter:
     def tdmFuseAMx(self, kernel):
         return kwa_module.KernelWriterAssembly.tdmFuseAMx(self, kernel)
 
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
     def tdmSeparateABDescriptors(self, kernel):
         return kwa_module.KernelWriterAssembly.tdmSeparateABDescriptors(self, kernel)
 

@@ -237,6 +237,37 @@ def tdmFuseAMx(ks):
     return ks.get("NumWaves", 1) == 4 and not ks.get("UseSubtileImpl")
 
 
+def tdmFusePaired(ks):
+    """True when {MXSA,A} and {MXSB,B} each share one TDM descriptor set.
+
+    TDMFuse=5. Two sets of 4+8 is the same 24 SGPRs the default {A,B}+{MXSA,MXSB}
+    pairing already spends.
+
+    Selected only by TDMFuse=5, never derived, so 0 stays inert.
+
+    The wave division is crossed -- A and MXSB on the even waves, MXSA and B on
+    the odd (see tdmWavePartition) -- so A and B keep the parity the default
+    pairing gives them and their global-address arithmetic does not move.
+
+    Any power-of-two NumWaves above one works: both sets take the same two-way
+    parity split every pre-existing row uses, so unlike tdmFuseAMx there is no
+    remainder policy to pin the wave count.
+
+    TDMSplit is excluded for the same reason it is excluded from tdmDealiasAB and
+    tdmFuseAMx: its multi-wave increment recomputes one parity-selected split
+    stride for one shared descriptor, and this row has two.
+    """
+    if ks.get("TDMFuse") != 5:
+        return False
+    if not tdmBothTensors(ks):
+        return False
+    if ks.get("TDMSplit"):
+        return False
+    if not (ks["ProblemType"].get("MXBlockA") and ks["ProblemType"].get("MXBlockB")):
+        return False
+    return ks.get("NumWaves", 1) > 1 and not ks.get("UseSubtileImpl")
+
+
 def tdmWavePartition(ks, tc):
     """(numComp, waves) for tensor `tc` on the wave-separated TDM path.
 
@@ -262,6 +293,13 @@ def tdmWavePartition(ks, tc):
             return 1, (3,)
         if tc.endswith("B"):
             return numWaves, tuple(range(numWaves))
+    if tdmFusePaired(ks):
+        # Crossed: each set keeps its data tensor on the parity the default
+        # pairing gives it and takes the OTHER tensor's scales on the other
+        # parity, so A and B divide exactly as they do at TDMFuse=0.
+        isEvenArm = tc in ("A", "MXSB")
+        return numWaves // 2, tuple(
+            w for w in range(numWaves) if (w % 2 == 0) == isEvenArm)
     if ks.get("TDMWaveSpread", 0) == 1:
         # A and B each spread over every wave; the MX scales keep the parity pair.
         if "MXS" in tc:

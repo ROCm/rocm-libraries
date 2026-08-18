@@ -44,7 +44,7 @@ from Tensile.Common.DecouplePgr import pgrLevelsForTensors, ldsBlocksForPgrLevel
                                        tdmDealiasAB, tdmWaveComponents, decouplePgrBlocks, \
                                        equalPairDegeneratesToScalar, \
                                        divergentPairUnsupportedReason, \
-                                       tdmFuseAMx
+                                       tdmFuseAMx, tdmFusePaired
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config
@@ -3014,6 +3014,78 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "TDMFuse=4 does not describe the sparse metadata tensor, which the TDM moves on "
                  "a third descriptor (tdmMetadataGroup0) that no value of this parameter names")
+          return
+
+      if tdmFuse == 5:
+        # {MXSA,A} + {MXSB,B} on a crossed parity dispatch.
+        if state["NumWaves"] <= 1:
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 splits each of its two descriptor sets by wave parity, which needs "
+                 "wave-separated TDM (NumWaves > 1); at NumWaves=%d every tensor keeps its own "
+                 "descriptor and nothing is fused" % state["NumWaves"])
+          return
+        if state.get("UseSubtileImpl"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 is not available with UseSubtileImpl=1, which gives each tensor its "
+                 "own descriptor and so has no shared set to dispatch")
+          return
+        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 names MXSA and MXSB as the odd-wave member of one set each, so it "
+                 "requires MX scales on both tensors; without them both sets hold a single "
+                 "tensor and this is TDMFuse=6 without its third set")
+          return
+        if state.get("TDMSplit"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 is not available with TDMSplit, whose multi-wave increment recomputes "
+                 "one parity-selected split stride for one shared descriptor; this grouping has "
+                 "two shared descriptors and no arithmetic that names the second")
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 does not describe the sparse metadata tensor, which the TDM moves on "
+                 "a descriptor (tdmMetadataGroup0) that no value of this parameter names")
+          return
+        if state["StaggerU"]:
+          # The wrap is selected two ways per descriptor set, which this grouping
+          # keeps -- but a set's two members now arrive in different calls, the
+          # data pair and the scale pair, so the select would read the wrap of a
+          # tensor that set does not hold. A wrap applied with the wrong tensor's
+          # WrapU walks the pointer off its tile rather than failing loudly.
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 requires StaggerU=0; each descriptor set holds one data tensor and "
+                 "the other tensor's scales, so the two-way WrapU select -- which is emitted per "
+                 "(A,B) and per (MXSA,MXSB) pair -- would apply a wrap belonging to the other "
+                 "set, got StaggerU=%d" % state["StaggerU"])
+          return
+        if state.get("TDMWaveSpread"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 fixes its own per-tensor wave division (the crossed parity split), so "
+                 "TDMWaveSpread=%d would name a second, contradictory count for the same tensors"
+                 % state["TDMWaveSpread"])
+          return
+        # Compares block counts only: LdsOffsetBlkA/B are assigned later.
+        decoupled, blkA, blkB = decouplePgrBlocks(state)
+        if state["HalfPLR"] and decoupled and blkA != blkB:
+          # KernelWriter._dcpScheduleSingleBufferedFillLate moves the
+          # single-buffered set's advance with its fill, and HalfPLR's
+          # end-of-loop increment mask sits in the same module -- moving it late
+          # leaves the other set advancing by an increment that was never zeroed.
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 requires HalfPLR=0 at a divergent decoupled pair: the per-set fill "
+                 "relocation moves one set's advance into a later sub-iteration, and HalfPLR's "
+                 "increment mask rides in that same module, so the set that stays at the top "
+                 "would advance on the final iteration. Got HalfPLR=%d with PrefetchGlobalReadA=%d "
+                 "and PrefetchGlobalReadB=%d, resolving to %d and %d LDS blocks"
+                 % (state["HalfPLR"], state["PrefetchGlobalReadA"],
+                    state["PrefetchGlobalReadB"], blkA, blkB))
+          return
+        # These guards must stay exactly tdmFusePaired's preconditions; if they
+        # drift, decline rather than accept a name the writer will not honour.
+        if not tdmFusePaired(state):
+          reject(state, printRejectionReason,
+                 "TDMFuse=5 passed its solution-level guards but tdmFusePaired declined the "
+                 "solution, so the writer would emit a different grouping than the name claims")
           return
 
       if tdmFuse == 6:

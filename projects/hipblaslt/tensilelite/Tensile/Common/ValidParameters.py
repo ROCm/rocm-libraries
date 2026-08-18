@@ -1223,6 +1223,24 @@ validParameters = { # we need to make sure this matches develop
     #      reads as untouched. Costs the same 24 SGPRs as the default pairing.
     #      Restricted to NumWaves == 4: 4 does not divide by 3, so the 1/1/2 split
     #      is a remainder policy for three members rather than an even partition.
+    #   5  {MXSA,A} + {MXSB,B}, on the same two-way wave-parity dispatch as 0
+    #      but CROSSED: A and MXSB take the even waves, MXSA and B the odd ones.
+    #      A and B therefore keep the parity 0 gives them, so their global
+    #      addressing does not move and only the scales change side, and every
+    #      wave carries one data tensor plus one scale tensor -- which the
+    #      parallel assignment (both data tensors even, both scales odd) does
+    #      not. Costs the same 24 SGPRs as 0, 2 and 4.
+    #      Its sets are the only ones that coincide with the per-tensor LDS
+    #      block-count partition: {MXSA,A} is all of
+    #      KernelWriterAssembly._tdmDecoupledGroup "A" and {MXSB,B} all of "B".
+    #      One cadence per set is what lets the parity-aware swap arm express it
+    #      without the third arm row 2 would need. The price is the same coin's
+    #      other face: a wave's PARITY no longer decides its cadence, since each
+    #      cadence is now split across both parities. A divergent
+    #      PrefetchGlobalReadA/B pair therefore needs the per-set fill
+    #      relocation in KernelWriter._dcpScheduleSingleBufferedFillLate rather
+    #      than that function's parity split, and HalfPLR is refused there
+    #      because its increment mask rides in the module that moves.
     #   6  {A} + {B} + {MXSA,MXSB}. Three descriptor sets: A and B each own one,
     #      the MX scales stay parity-aliased on a third. Not in the design table,
     #      which runs 0..5, so 6 sits above the table rather than in it. Costs 12
@@ -1240,10 +1258,9 @@ validParameters = { # we need to make sure this matches develop
     # table's numbers provisionally:
     #     1  `AB`      {A,B}, MX scales unfused
     #     3  `B_MX`    {B,MXSA,MXSB} + {A}
-    #     5  `paired`  {MXSA,A} + {MXSB,B}
     # Row 3 is the mirror of 2 and realisable the same way, but is unimplemented:
     # it needs B's share of the shared set split across two waves against A alone.
-    "TDMFuse": [0, 2, 4, 6],
+    "TDMFuse": [0, 2, 4, 5, 6],
     # TDMWaveSpread -- how many wave-components each tensor's TDM transfer is split
     # into. A different axis from TDMFuse, which names only the grouping: two
     # configurations can share a grouping and split across different counts.

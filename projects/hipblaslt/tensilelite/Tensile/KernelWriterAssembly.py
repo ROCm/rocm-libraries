@@ -81,6 +81,7 @@ from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .Common.DecouplePgr import decouplePgrBlocks, decoupledSingleBuffered, decoupledOneBlockBoth, \
                                 tdmDealiasAB, tdmWaveComponents, tdmFuseAMx, \
+                                tdmFusePaired, \
                                 tdmWavePartition, tdmWaveCompIdMode
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
@@ -394,9 +395,14 @@ class KernelWriterAssembly(KernelWriter):
     """True when {A,MXSA,MXSB} share one descriptor set and B owns its own."""
     return self.isTdmWaveSeparated(kernel) and tdmFuseAMx(kernel)
 
+  def tdmFusePaired(self, kernel) -> bool:
+    """True when {MXSA,A} and {MXSB,B} each own a descriptor set, parity crossed."""
+    return self.isTdmWaveSeparated(kernel) and tdmFusePaired(kernel)
+
   def tdmSeparateABDescriptors(self, kernel) -> bool:
     """True when A's and B's TDM descriptors are distinct register sets."""
-    return self.tdmDealiasAB(kernel) or self.tdmFuseAMx(kernel)
+    return self.tdmDealiasAB(kernel) or self.tdmFuseAMx(kernel) \
+           or self.tdmFusePaired(kernel)
 
   def tdmDescriptorSetOwner(self, kernel, tc: str) -> str:
     """The tensor whose name programs the descriptor set that carries `tc`.
@@ -411,9 +417,24 @@ class KernelWriterAssembly(KernelWriter):
       return tc
     if self.tdmFuseAMx(kernel):
       return "B" if tc == "B" else "A"
+    if self.tdmFusePaired(kernel):
+      return "A" if tc in ("A", "MXSA") else "B"
     if tc in ("A", "B"):
       return tc if self.tdmDealiasAB(kernel) else "A"
     return "MXSA"
+
+  def _tdmPairedParityOrder(self, kernel, tPA, tPB):
+    """(even, odd) member of the descriptor set this (tPA,tPB) call programs.
+
+    The wave-separated helpers are called once per (A,B) and once per
+    (MXSA,MXSB) pair, and each call programs one descriptor set on the even
+    waves and one on the odd. TDMFuse=5 crosses those pairs, so the scale call
+    programs the set B rides and its even member is MXSB. Every other grouping
+    answers with the pair's own order.
+    """
+    if self.tdmFusePaired(kernel) and tPA["tensorChar"].startswith("MX"):
+      return tPB, tPA
+    return tPA, tPB
 
   def _emitTdmCompId(self, mod, kernel, tc, dstIdx, waveIdxSgpr="WaveIdx"):
     """Leave tensor `tc`'s TDM component id in SGPR `dstIdx`."""
@@ -790,9 +811,11 @@ class KernelWriterAssembly(KernelWriter):
                         (kernel["InternalSupportParams"]["SupportCustomStaggerU"]
                          and bool(self.states.staggerUCode))
     # B advances from GlobalReadIncsB every iteration once it owns a descriptor
-    # set, so the name must outlive setup.
+    # set, so the name must outlive setup. TDMFuse=5 is the exception among the
+    # separated groupings: both of its sets advance from a parity-selected copy,
+    # so the names die with setup exactly as under the shared pairing.
     if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs \
-       or self.tdmSeparateABDescriptors(kernel):
+       or (self.tdmSeparateABDescriptors(kernel) and not self.tdmFusePaired(kernel)):
       self.removeSgprVarFromPool("GlobalReadIncsA")
       self.removeSgprVarFromPool("GlobalReadIncsB")
       if kernel["ProblemType"]["MXBlockA"]:
@@ -813,8 +836,9 @@ class KernelWriterAssembly(KernelWriter):
     if not self.isTdmWaveSeparated(kernel):
       return module
     # When B owns its descriptor, GlobalReadIncs{A,B} are read inside the loop
-    # rather than a parity-selected copy, so there is nothing to release.
-    if self.tdmSeparateABDescriptors(kernel):
+    # rather than a parity-selected copy, so there is nothing to release. Under
+    # TDMFuse=5 both sets read a parity-selected copy, so there is.
+    if self.tdmSeparateABDescriptors(kernel) and not self.tdmFusePaired(kernel):
       return module
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsA"))
@@ -1050,7 +1074,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("s", "sgprtdmAGroup3", "sgprtdmAGroup2"))
 
       if kernel["ProblemType"]["MXBlockA"]:
-        if self.tdmFuseAMx(kernel):
+        if self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel):
           # Keeping the two sets at 4+8 twice holds this row at 24 SGPRs.
           module.add(RegSet("s", "sgprtdmMXSAGroup0", "sgprtdmAGroup0"))
           module.add(RegSet("s", "sgprtdmMXSAGroup1", "sgprtdmAGroup1"))
@@ -1066,12 +1090,24 @@ class KernelWriterAssembly(KernelWriter):
       # TDMFuse=6 takes separate A/B descriptors so each tensor's fill is its own
       # instruction; its MXSA/MXSB pair stays aliased.
       # TDMFuse=2 separates B and puts both scale tensors on A's set.
+      # TDMFuse=5 separates B and aliases each data tensor's own scales onto it.
       fuseAMx = self.tdmFuseAMx(kernel)
+      fusePaired = self.tdmFusePaired(kernel)
       aliasAB = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl") \
-                and not self.tdmDealiasAB(kernel) and not fuseAMx
+                and not self.tdmDealiasAB(kernel) and not fuseAMx and not fusePaired
       aliasMXS = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl") \
-                 and not fuseAMx
-      if fuseAMx:
+                 and not fuseAMx and not fusePaired
+      if fusePaired:
+        module.add(self.defineSgpr("tdmBGroup0", 4, 4))
+        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
+        if kernel.get("_TDMIterateModeB", False):
+          module.add(self.defineSgpr("tdmBGroup2", 4, 4))
+          module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
+        # Safe to alias: of the two members exactly one programs the set per wave.
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmBGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmBGroup1"))
+      elif fuseAMx:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
         if kernel.get("_TDMIterateModeB", False):
@@ -11640,9 +11676,10 @@ class KernelWriterAssembly(KernelWriter):
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
-      # A's shared load already moves MXSA and MXSB. MXSA's SGPR names alias A's
-      # here, so issuing again would fill the shared set twice rather than MXSA.
-      if self.tdmFuseAMx(kernel):
+      # A's shared load already moves MXSA, and MXSB too at TDMFuse=2. MXSA's
+      # SGPR names alias A's here, so issuing again would fill the shared set
+      # twice rather than MXSA.
+      if self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel):
         return imod
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
@@ -11668,14 +11705,14 @@ class KernelWriterAssembly(KernelWriter):
     if tc == "B" and kernel["enableTDMB"]:
       # An aliased descriptor issues one shared load, counted against A, so B emits
       # nothing here. B needs its own load whenever it owns a set; which waves issue
-      # it differs (parity when de-aliased, every wave at TDMFuse=2).
+      # it differs (parity when de-aliased, every wave at TDMFuse=2 and 5).
       if self.tdmSeparateABDescriptors(kernel):
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         comp.setMemToken([self.states.ldsTensorTokenIdx])
         isIterB = kernel.get("_TDMIterateModeB", False)
         tdmBGroup2 = "tdmBGroup2" if isIterB else None
         tdmBGroup3 = "tdmBGroup3" if isIterB else None
-        if self.tdmFuseAMx(kernel):
+        if self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel):
           imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
         else:
           self._emitTdmDealiasedIssue(imod.middle, kernel, "B", comp,
@@ -12009,6 +12046,24 @@ class KernelWriterAssembly(KernelWriter):
   # With NumWaves > 1 the B/MXSB descriptors are RegSet aliases of A/MXSA, so one
   # physical descriptor serves both and only the A/MXSA call sites are reached.
   _tdmDecoupledAliasPartner = {"A": "B", "MXSA": "MXSB"}
+  # TDMFuse=5 aliases each data tensor's own scales onto it instead.
+  _tdmDecoupledAliasPartnerPaired = {"A": "MXSA", "B": "MXSB"}
+
+  def _tdmAliasPartner(self, kernel, tc):
+    """The tensor whose TDM descriptor is a RegSet alias of `tc`'s, or None."""
+    if self.tdmFusePaired(kernel):
+      return self._tdmDecoupledAliasPartnerPaired.get(tc)
+    return self._tdmDecoupledAliasPartner.get(tc)
+
+  def _tdmParityMembers(self, kernel, tc, partner):
+    """(even, odd) member of an aliased pair, read from the wave partition.
+
+    Which parity carries which member is a property of the grouping, not of
+    which name owns the set: TDMFuse=5 puts MXSB on the even waves of the set
+    that B owns.
+    """
+    _numComp, waves = tdmWavePartition(kernel, tc)
+    return (tc, partner) if 0 in waves else (partner, tc)
 
   def _dcpDivergent(self, kernel):
     """True only when A and B carry different LDS block counts.
@@ -12087,7 +12142,8 @@ class KernelWriterAssembly(KernelWriter):
     """
     tc: str = tP["tensorChar"]
     aliased = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl")
-    if tc in ("A", "B") and self.tdmSeparateABDescriptors(kernel):
+    if tc in ("A", "B") and self.tdmSeparateABDescriptors(kernel) \
+       and not self.tdmFusePaired(kernel):
       aliased = False
     if self.tdmFuseAMx(kernel) and tc == "A":
       for mx in ("MXSA", "MXSB"):
@@ -12095,7 +12151,7 @@ class KernelWriterAssembly(KernelWriter):
                == self._tdmDecoupledBlocks(kernel, tc)[0], \
           f"TDMFuse=2: {mx} rides A's descriptor set but carries a different " \
           f"LDS block count, so the shared set needs a three-way swap arm"
-    partner = self._tdmDecoupledAliasPartner.get(tc) if (aliased and kernel["enableTDMB"]) else None
+    partner = self._tdmAliasPartner(kernel, tc) if (aliased and kernel["enableTDMB"]) else None
 
     if partner is None:
       module = Module(f"TDM LDS swap {tc} (decoupled)")
@@ -12106,31 +12162,32 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self._tdmDecoupledSwapArm(kernel, tc, ldsAddrSgprName, tmpSgprRes.idx))
       return module
 
-    numBlkEven = self._tdmDecoupledBlocks(kernel, tc)[0]
-    numBlkOdd = self._tdmDecoupledBlocks(kernel, partner)[0]
-    module = Module(f"TDM LDS swap {tc}/{partner} (decoupled, wave-parity)")
+    tcEven, tcOdd = self._tdmParityMembers(kernel, tc, partner)
+    numBlkEven = self._tdmDecoupledBlocks(kernel, tcEven)[0]
+    numBlkOdd = self._tdmDecoupledBlocks(kernel, tcOdd)[0]
+    module = Module(f"TDM LDS swap {tcEven}/{tcOdd} (decoupled, wave-parity)")
     if numBlkEven < 2 and numBlkOdd < 2:
-      module.addComment0(f"TDM decoupled swap {tc}/{partner}: both single-buffered, no swap")
+      module.addComment0(f"TDM decoupled swap {tcEven}/{tcOdd}: both single-buffered, no swap")
       return module
 
     with self.allocTmpSgpr(1, tag="tdmSwapLdsOffset_tmpSgprRes") as tmpSgprRes:
       tmpSgprIdx = tmpSgprRes.idx
-      lblEnd = Label(self.labels.getNameInc(f"TDMSwap{tc}{partner}End"), "")
-      module.addComment0(f"TDM decoupled swap: even waves={tc}({numBlkEven} blk), odd waves={partner}({numBlkOdd} blk)")
+      lblEnd = Label(self.labels.getNameInc(f"TDMSwap{tcEven}{tcOdd}End"), "")
+      module.addComment0(f"TDM decoupled swap: even waves={tcEven}({numBlkEven} blk), odd waves={tcOdd}({numBlkOdd} blk)")
       module.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
       if numBlkEven < 2:
-        module.add(SCBranchSCC0(lblEnd.getLabelName(), f"even waves hold {tc}, single-buffered: skip"))
-        module.add(self._tdmDecoupledSwapArm(kernel, partner, ldsAddrSgprName, tmpSgprIdx))
+        module.add(SCBranchSCC0(lblEnd.getLabelName(), f"even waves hold {tcEven}, single-buffered: skip"))
+        module.add(self._tdmDecoupledSwapArm(kernel, tcOdd, ldsAddrSgprName, tmpSgprIdx))
       elif numBlkOdd < 2:
-        module.add(SCBranchSCC1(lblEnd.getLabelName(), f"odd waves hold {partner}, single-buffered: skip"))
-        module.add(self._tdmDecoupledSwapArm(kernel, tc, ldsAddrSgprName, tmpSgprIdx))
+        module.add(SCBranchSCC1(lblEnd.getLabelName(), f"odd waves hold {tcOdd}, single-buffered: skip"))
+        module.add(self._tdmDecoupledSwapArm(kernel, tcEven, ldsAddrSgprName, tmpSgprIdx))
       else:
-        lblOdd = Label(self.labels.getNameInc(f"TDMSwap{partner}"), "")
-        module.add(SCBranchSCC1(lblOdd.getLabelName(), f"Jump to {partner} if wId is odd"))
-        module.add(self._tdmDecoupledSwapArm(kernel, tc, ldsAddrSgprName, tmpSgprIdx))
+        lblOdd = Label(self.labels.getNameInc(f"TDMSwap{tcOdd}"), "")
+        module.add(SCBranchSCC1(lblOdd.getLabelName(), f"Jump to {tcOdd} if wId is odd"))
+        module.add(self._tdmDecoupledSwapArm(kernel, tcEven, ldsAddrSgprName, tmpSgprIdx))
         module.add(SBranch(lblEnd.getLabelName()))
         module.add(lblOdd)
-        module.add(self._tdmDecoupledSwapArm(kernel, partner, ldsAddrSgprName, tmpSgprIdx))
+        module.add(self._tdmDecoupledSwapArm(kernel, tcOdd, ldsAddrSgprName, tmpSgprIdx))
       module.add(lblEnd)
     return module
 
@@ -20120,18 +20177,20 @@ class KernelWriterAssembly(KernelWriter):
                                        "Init"))
       return mod
 
-    tdmInitLblA = Label(self.labels.getNameInc(f"TDMInit{tcA}"), "")
-    tdmInitLblB = Label(self.labels.getNameInc(f"TDMInit{tcB}"), "")
-    tdmInitLblEnd = Label(self.labels.getNameInc(f"TDMInit{tcA}{tcB}End"), "")
+    tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tPA, tPB)
+    tcEven, tcOdd = tPEven["tensorChar"], tPOdd["tensorChar"]
+    tdmInitLblA = Label(self.labels.getNameInc(f"TDMInit{tcEven}"), "")
+    tdmInitLblB = Label(self.labels.getNameInc(f"TDMInit{tcOdd}"), "")
+    tdmInitLblEnd = Label(self.labels.getNameInc(f"TDMInit{tcEven}{tcOdd}End"), "")
     mod.add(tdmInitLblA)
 
     mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
     mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), "Jump to B if wId is odd"))
 
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA, waveIdxSgpr))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPEven, waveIdxSgpr))
     mod.add(SBranch(tdmInitLblEnd.getLabelName()))
     mod.add(tdmInitLblB)
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPB, waveIdxSgpr))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPOdd, waveIdxSgpr))
     mod.add(tdmInitLblEnd)
     return mod
 
@@ -20163,18 +20222,20 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(self._tdmFuseAMxDispatch(kernel, tPA, tPB, waveIdxSgpr, startAddr, "GlobalOffset"))
       return mod
 
-    tdmGlobalOffsetLblA = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcA}"), "")
-    tdmGlobalOffsetLblB = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcB}"), "")
-    tdmGlobalOffsetLblEnd = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcA}{tcB}End"), "")
+    tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tPA, tPB)
+    tcEven, tcOdd = tPEven["tensorChar"], tPOdd["tensorChar"]
+    tdmGlobalOffsetLblA = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcEven}"), "")
+    tdmGlobalOffsetLblB = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcOdd}"), "")
+    tdmGlobalOffsetLblEnd = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcEven}{tcOdd}End"), "")
     mod.add(tdmGlobalOffsetLblA)
 
     mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
     mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
 
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, f"Address{tcA}", dstGroup0A, waveIdxSgpr))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPEven, f"Address{tcEven}", f"tdm{tcEven}Group0", waveIdxSgpr))
     mod.add(SBranch(tdmGlobalOffsetLblEnd.getLabelName()))
     mod.add(tdmGlobalOffsetLblB)
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, f"Address{tcB}", dstGroup0B, waveIdxSgpr))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPOdd, f"Address{tcOdd}", f"tdm{tcOdd}Group0", waveIdxSgpr))
     mod.add(tdmGlobalOffsetLblEnd)
     return mod
 
@@ -20183,7 +20244,7 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    group0Name = f"tdm{tcA}Group0"
+    group0Name = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
     # DP-only: StreamKLocalStart == 0, so the K-offset is 0 * increment == 0 and
     # applying it is a no-op. StreamKLocalStart is not allocated in DP-only mode.
@@ -20236,7 +20297,7 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    group0Name = f"tdm{tcA}Group0"
+    group0Name = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
@@ -20625,8 +20686,11 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA['tensorChar']
     tcB: str = tPB['tensorChar']
     mod = Module("TDMGlobalIncrementsWaveSeparated")
-    tdmGroup0 = f"tdm{tcA}Group0"
+    # The increment register is named after the CALL, whose one set it advances;
+    # the descriptor is named after that set's even member, which TDMFuse=5
+    # crosses relative to the pair.
     incSgprName = f"tdm{tcA}{tcB}Incs"
+    tdmGroup0 = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
     # Separate descriptors advance independently, each by its own GlobalReadIncs,
     # so the wrap is per tensor because the pointer it wraps is per tensor.
@@ -20769,6 +20833,18 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SCMovB32(dst=sgpr(incSgprName), src=sgpr("GlobalReadIncsMXSB"),
                 comment="shared-set inc = MXSB's on wave 3"))
       return mod
+    if self.tdmFusePaired(kernel):
+      # A set's two members sit in different calls here, so both registers are
+      # primed on the A/B call and the scale call must not overwrite them. Each
+      # keeps the name of the call that advances its set.
+      if tcA != "A":
+        return mod
+      mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+      mod.add(SCSelectB32(sgpr("tdmABIncs"), sgpr("GlobalReadIncsMXSA"),
+                          sgpr("GlobalReadIncsA")))
+      mod.add(SCSelectB32(sgpr("tdmMXSAMXSBIncs"), sgpr("GlobalReadIncsB"),
+                          sgpr("GlobalReadIncsMXSB")))
+      return mod
     #TODO: should not directly use GRIA and GRIB
     srcOdd = 0 if zeroTc == tcB else self.globalReadIncsOperand(tcB, self.states.unrollIdx)
     srcEven = 0 if zeroTc == tcA else self.globalReadIncsOperand(tcA, self.states.unrollIdx)
@@ -20855,6 +20931,8 @@ class KernelWriterAssembly(KernelWriter):
     tcB: str = tPB["tensorChar"]
     numWaves: int = kernel["NumWaves"]
     wavelen: int = kernel["WavefrontSize"]
+    tPA, tPB = self._tdmPairedParityOrder(kernel, tPA, tPB)
+    tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
     numCompA, compShiftA = tdmWaveComponents(kernel, tcA)
     numCompB, compShiftB = tdmWaveComponents(kernel, tcB)
     tluA: int = tPA["tlu"]

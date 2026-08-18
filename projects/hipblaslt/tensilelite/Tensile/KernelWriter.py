@@ -772,6 +772,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
     late.add(SWaitCnt(dscnt=0, comment="TDM decoupled: all ds_reads done before %s refill" % singleTc))
     late.add(SBarrier(comment="TDM decoupled: signal+wait done reading %s block" % singleTc))
 
+    if self.tdmFusePaired(kernel):
+      # Here a cadence belongs to a descriptor SET, not to a wave parity: each
+      # set holds one data tensor and the other tensor's scales, so both
+      # parities carry one single-buffered tensor and one double-buffered one
+      # and the parity split below would leave a single-buffered scale fill at
+      # the top. The single-buffered set's fill is one instruction every wave
+      # issues, so it moves whole and unguarded, and the advance that follows it
+      # moves with it -- a wave fills from the pointer it holds and then
+      # advances it. Solution rejects HalfPLR here, whose increment mask would
+      # ride along inside the module that moves.
+      singleFill = self.codes.globalReadA if singleIsA else self.codes.globalReadB
+      singleIncName = "globalReadIncrement%s" % ("A" if singleIsA else "B")
+      kept = []
+      for item in src.items():
+        if item is singleFill or getattr(item, "name", None) == singleIncName:
+          late.add(item)
+        else:
+          kept.append(item)
+      src.setItems(kept)
+      self.codes.perIterGlobalRead[lateIter].add(late)
+      return
+
     if self.tdmDealiasAB(kernel):
       # A and B hold their own descriptors, so each fill is one instruction
       # already guarded to the waves that carry that tensor and the re-slot is a
