@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 TL_REL = Path("projects/hipblaslt/tensilelite")
-TESTS_REL = Path("Tensile/Tests/unit")
+TESTS_REL = Path("tensilelite/Tests/unit")
 SRC_REL = Path("Tensile")
 
 BROAD_TRIGGER_PARTS = (
@@ -71,7 +71,7 @@ def staged_files(root: Path) -> list[Path]:
 
 
 def module_dotted(rel_to_tl: Path) -> str | None:
-    """``Tensile/Common/Utilities.py`` -> ``Tensile.Common.Utilities``."""
+    """``tensilelite/Common/Utilities.py`` -> ``tensilelite.Common.Utilities``."""
     if rel_to_tl.suffix != ".py":
         return None
     parts = list(rel_to_tl.with_suffix("").parts)

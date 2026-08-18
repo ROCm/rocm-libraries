@@ -4,7 +4,7 @@ This file provides guidance for AI coding agents when working with code in this 
 
 ## Overview
 
-TensileLite is an auto-tuning framework for generating and selecting high-performance GPU kernels for tensor contractions (GEMM and related operations) on AMD GPUs. It is a component of hipBLASLt. The Python package (`Tensile/`) drives kernel generation and benchmarking; `rocisa/` provides a C++ (Nanobind-wrapped) assembly generation module; `include/` and `src/` form the C++ runtime library; and `client/` contains the benchmark executable.
+TensileLite is an auto-tuning framework for generating and selecting high-performance GPU kernels for tensor contractions (GEMM and related operations) on AMD GPUs. It is a component of hipBLASLt. The Python package (`tensilelite/`) drives kernel generation and benchmarking; `rocisa/` provides a C++ (Nanobind-wrapped) assembly generation module; `include/` and `src/` form the C++ runtime library; and `client/` contains the benchmark executable.
 
 ## Working environment
 
@@ -30,7 +30,7 @@ For custom CMake builds, cmake presets, linting, running tests, rebuilding assem
 
 ## License headers
 
-New source files (Python under `Tensile/`, C++/HIP under `include/`, `src/`, `client/`, `rocisa/`, plus CMake, shell, and YAML) MUST start with the short SPDX license header. Use the comment form that matches the file's syntax.
+New source files (Python under `tensilelite/`, C++/HIP under `include/`, `src/`, `client/`, `rocisa/`, plus CMake, shell, and YAML) MUST start with the short SPDX license header. Use the comment form that matches the file's syntax.
 
 C / C++ / HIP files (`//` comments):
 
@@ -102,26 +102,26 @@ Use the `users/<github-username>/<branch-name>` branch convention and base PRs o
 
 ### Three-Phase Workflow
 
-1. **BenchmarkProblems** (`Tensile/BenchmarkProblems.py`): Generates kernel candidates from a YAML problem spec, builds them with rocisa, benchmarks on hardware. Output: `1_BenchmarkProblems/`, `2_BenchmarkData/`.
+1. **BenchmarkProblems** (`tensilelite/BenchmarkProblems.py`): Generates kernel candidates from a YAML problem spec, builds them with rocisa, benchmarks on hardware. Output: `1_BenchmarkProblems/`, `2_BenchmarkData/`.
 
-2. **LibraryLogic** (`Tensile/LibraryLogic.py`): Analyzes benchmark data to pick the best kernel per problem size, generating heuristic selection logic as YAML/MsgPack. Output: `3_LibraryLogic/`.
+2. **LibraryLogic** (`tensilelite/LibraryLogic.py`): Analyzes benchmark data to pick the best kernel per problem size, generating heuristic selection logic as YAML/MsgPack. Output: `3_LibraryLogic/`.
 
-3. **ClientWriter** (`Tensile/ClientWriter.py`): Wraps the selected kernels in a C++ library and generates the benchmark client. Output: `4_LibraryClient/`.
+3. **ClientWriter** (`tensilelite/ClientWriter.py`): Wraps the selected kernels in a C++ library and generates the benchmark client. Output: `4_LibraryClient/`.
 
-Entry point: `Tensile/bin/Tensile` → `Tensile/Tensile.py:Tensile()` → `executeStepsInConfig()`.
+Entry point: `tensilelite/bin/Tensile` → `tensilelite/Tensile.py:Tensile()` → `executeStepsInConfig()`.
 
 ### Key Python Modules
 
 | Module | Role |
 |--------|------|
-| `Tensile/KernelWriter.py` | Emits GPU assembly via rocisa calls (largest module) |
-| `Tensile/SolutionStructs/Solution.py` | Solution parameter validation and properties |
-| `Tensile/SolutionStructs/Problem.py` | Problem definition and validation |
-| `Tensile/Contractions.py` | Problem type taxonomy (GEMM, batched, grouped, sparse, stream-k) |
-| `Tensile/LibraryIO.py` | YAML/MsgPack serialization |
-| `Tensile/Common/` | Global parameters, architecture tables, utilities |
-| `Tensile/Components/` | Modular kernel building blocks (MAC variants, local/global read/write, scheduling) |
-| `Tensile/TensileCreateLibrary.py` | Standalone library-creation utility (no benchmarking) |
+| `tensilelite/KernelWriter.py` | Emits GPU assembly via rocisa calls (largest module) |
+| `tensilelite/SolutionStructs/Solution.py` | Solution parameter validation and properties |
+| `tensilelite/SolutionStructs/Problem.py` | Problem definition and validation |
+| `tensilelite/Contractions.py` | Problem type taxonomy (GEMM, batched, grouped, sparse, stream-k) |
+| `tensilelite/LibraryIO.py` | YAML/MsgPack serialization |
+| `tensilelite/Common/` | Global parameters, architecture tables, utilities |
+| `tensilelite/Components/` | Modular kernel building blocks (MAC variants, local/global read/write, scheduling) |
+| `tensilelite/TensileCreateLibrary.py` | Standalone library-creation utility (no benchmarking) |
 
 ### rocisa
 
@@ -143,5 +143,5 @@ invoke rocisa            # editable pip install — picks up Python changes imme
 
 - `tox -e unit` skips the client build (hence "fast"); the env itself runs `pip install {toxinidir}/rocisa/` so it does **not** require a prior `invoke build-client` for rocisa to be importable. To run `pytest` directly outside tox, install rocisa once with `invoke rocisa`.
 - `tox -e py3` (the full common-tests env) does invoke `build-client` itself inside its `commands` block — that's where the "long client build" happens. Override its CMake/client args via `TENSILELITE_CLIENT_ARGS`, and parallelism via `TENSILE_NUM_PYTEST_WORKERS` (default 4).
-- Two test trees exist: `Tensile/Tests/` (YAML kernel tests, run via `tox`/`pytest`) vs `tests/` (C++ host-library gtest, gated by CMake `TENSILELITE_BUILD_TESTING=ON`).
+- Two test trees exist: `tensilelite/Tests/` (YAML kernel tests, run via `tox`/`pytest`) vs `tests/` (C++ host-library gtest, gated by CMake `TENSILELITE_BUILD_TESTING=ON`).
 - `rocisa.egg-info/` and `rocisa/build/` in the working tree are normal (left by editable install / cmake build); don't commit them.
