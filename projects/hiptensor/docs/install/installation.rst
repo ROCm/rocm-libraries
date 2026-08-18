@@ -286,8 +286,15 @@ Before installing hipTensor, make sure your system meets the ROCm hardware,
 software, and driver requirements. For instructions, see `Install AMD ROCm <https://rocm.docs.amd.com/en/latest/install/rocm.html>`_. Use the selector panel on that page to view instructions appropriate for your system
 environment.
 
-Install hipTensor
------------------
+Install the ROCm HPC SDK
+------------------------
+
+hipTensor is part of the ROCm HPC SDK on Linux. It is not included in the ROCm Core SDK. For the most complete installation, we recommend that developers use the ``amdrocm-hpc-sdk`` meta package.
+
+For instructions, see `Install ROCm HPC SDK <https://rocm.docs.amd.com/en/latest/components/hpc-sdk/install.html>`_. Use the selector panel on that page to view instructions appropriate for your system environment.
+
+Install hipTensor on Linux
+--------------------------
 
 .. selected:: i=tar
 
@@ -297,6 +304,8 @@ Install hipTensor
    installation method from installation environment selector.
 
 .. selected:: i=pkgman
+
+   If you want to install hipTensor without additional ROCm libraries and tools, install the ``amdrocm-hiptensor`` package.
 
    1. `Install AMD ROCm <https://rocm.docs.amd.com/en/latest/install/rocm.html>`_. Remember to complete the `ROCm
       installation prerequisites <https://rocm.docs.amd.com/en/latest/install/rocm.html#prerequisites>`_ to install dependencies
