@@ -108,7 +108,7 @@ class MxCase:
     block_axis: int
     block_size: int
     data: Recipe
-    scale: Optional[Recipe] = None
+    scale: object = hv.MxScaleGenerationMode.Derived
     seed: int = 0x10203040
 
 
@@ -314,39 +314,25 @@ def pack_little_endian(codes, bits_per_value):
     return bytes(storage)
 
 
-def recipes_equal(first, second):
-    return (
-        first.mode == second.mode
-        and first.parameter0 == second.parameter0
-        and first.parameter1 == second.parameter1
-    )
-
-
-def constant_scale_raw(scale_type, recipe):
-    if recipe.mode == hv.MxGenerationMode.Zeros:
+def explicit_scale_raw(scale_type, mode):
+    if mode == hv.MxScaleGenerationMode.Derived:
+        return None
+    if mode == hv.MxScaleGenerationMode.Minimum:
         return encode_scale(scale_type, 0.0)
-    if recipe.mode in (
-        hv.MxGenerationMode.Ones,
-        hv.MxGenerationMode.NegativeOnes,
-        hv.MxGenerationMode.DenormalMinimum,
-        hv.MxGenerationMode.DenormalMaximum,
-        hv.MxGenerationMode.Infinity,
-    ):
+    if mode == hv.MxScaleGenerationMode.One:
         return encode_scale(scale_type, 1.0)
-    if recipe.mode == hv.MxGenerationMode.Twos:
+    if mode == hv.MxScaleGenerationMode.Two:
         return encode_scale(scale_type, 2.0)
-    if recipe.mode == hv.MxGenerationMode.Maximum:
+    if mode == hv.MxScaleGenerationMode.Maximum:
         return maximum_scale_raw(scale_type)
-    if recipe.mode == hv.MxGenerationMode.NaN:
+    if mode == hv.MxScaleGenerationMode.NaN:
         return encode_scale(scale_type, math.nan)
-    return None
+    raise AssertionError(f"oracle has no MX scale formula for {mode}")
 
 
 def selected_constant_scale(case):
-    if case.scale is not None and not recipes_equal(case.data, case.scale):
-        selected = constant_scale_raw(case.scale_type, case.scale)
-        if selected is None:
-            raise ValueError("independent scale recipe is not constant")
+    selected = explicit_scale_raw(case.scale_type, case.scale)
+    if selected is not None:
         return selected
 
     if case.data.mode == hv.MxGenerationMode.Zeros:
@@ -626,13 +612,7 @@ def make_problem(case):
     data.parameter0 = case.data.parameter0
     data.parameter1 = case.data.parameter1
     problem.data = data
-
-    if case.scale is not None:
-        scale = hv.MxGenerationRecipe()
-        scale.mode = case.scale.mode
-        scale.parameter0 = case.scale.parameter0
-        scale.parameter1 = case.scale.parameter1
-        problem.scale = scale
+    problem.scale = case.scale
     return problem
 
 
@@ -837,13 +817,13 @@ class MxGenerationOracleTests(unittest.TestCase):
                 block_axis=0,
                 block_size=2,
                 data=Recipe(hv.MxGenerationMode.Sequential),
-                scale=Recipe(hv.MxGenerationMode.Twos),
+                scale=hv.MxScaleGenerationMode.Two,
             )
             with self.subTest(scale_type=scale_type.name):
                 observed, _ = self.assert_matches_oracle(case)
                 self.assertEqual(observed.scales.storage, bytes([raw_two]) * 6)
 
-    def test_invalid_bounds_and_unsupported_recipes_are_rejected(self):
+    def test_invalid_bounds_are_rejected(self):
         invalid_data_recipes = (
             ("bounded_equal", Recipe(hv.MxGenerationMode.Bounded, 1.0, 1.0)),
             ("bounded_reversed", Recipe(hv.MxGenerationMode.Bounded, 2.0, -1.0)),
@@ -900,29 +880,10 @@ class MxGenerationOracleTests(unittest.TestCase):
             0,
             2,
             Recipe(hv.MxGenerationMode.Bounded, 0.1, 0.2),
-            scale=Recipe(hv.MxGenerationMode.Ones),
+            scale=hv.MxScaleGenerationMode.One,
         )
         with self.assertRaises(ValueError):
             hv.generate_mx(make_problem(impossible_interval))
-
-        for scale_recipe in (
-            Recipe(hv.MxGenerationMode.Normal, 0.0, 1.0),
-            Recipe(hv.MxGenerationMode.Bounded, -2.0, 2.0),
-        ):
-            case = MxCase(
-                "nonconstant_scale",
-                hv.ScalarType.Float4E2M1,
-                hv.ScalarType.E8M0,
-                (3, 3),
-                3,
-                0,
-                2,
-                Recipe(hv.MxGenerationMode.Bounded, -1.0, 1.0),
-                scale=scale_recipe,
-            )
-            with self.subTest(scale_recipe=scale_recipe.mode.name):
-                with self.assertRaises(ValueError):
-                    hv.generate_mx(make_problem(case))
 
     def test_invalid_geometry_and_type_pairs_are_rejected(self):
         base = dict(

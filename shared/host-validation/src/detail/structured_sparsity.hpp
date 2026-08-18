@@ -112,7 +112,7 @@ inline StructuredSparsityPlan validateStructuredSparsity(const StructuredSparsit
     StructuredSparsityPlan plan;
     plan.compressedShape = compressedShape;
     plan.groupsPerLine = inputShape[problem.pattern.axis] / problem.pattern.groupSize;
-    plan.lineCount = inputShape.elementCount() / inputShape[problem.pattern.axis];
+    plan.lineCount = inputShape.elementCountExcluding(problem.pattern.axis);
 
     if (problem.pattern.selection == StructuredSparsitySelection::Fixed) {
         if (problem.pattern.fixedPositions.size() != problem.pattern.retainedElements)
@@ -695,8 +695,7 @@ TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem&
     const Shape metadataShape = detail::validateTwoOfFourMetadata(problem);
     const size_t sparsityGroups = problem.retainedIndices.shape()[problem.axis] / 2;
     const size_t metadataGroups = metadataShape[problem.axis];
-    const size_t lineCount = problem.retainedIndices.shape().elementCount() /
-                             problem.retainedIndices.shape()[problem.axis];
+    const size_t lineCount = problem.retainedIndices.shape().elementCountExcluding(problem.axis);
 
     std::vector<size_t> retainedCoordinates(problem.retainedIndices.shape().rank(), 0);
     const ptrdiff_t retainedAxisStride = problem.retainedIndices.layout().strides()[problem.axis];

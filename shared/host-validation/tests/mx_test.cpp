@@ -212,12 +212,43 @@ int main() {
     checkReference(infinity, generateMx(infinity));
 
     MxGenerationProblem explicitScale = stochasticProblem(MxGenerationMode::Bounded);
-    explicitScale.scale = MxGenerationRecipe{MxGenerationMode::Ones};
+    explicitScale.scale = MxScaleGenerationMode::One;
     const MxGenerationResult explicitlyScaled = generateMx(explicitScale);
     for (size_t scaleIndex = 0; scaleIndex < explicitlyScaled.scales.shape()[0]; ++scaleIndex)
         require(explicitlyScaled.scales.loadAs<float>({scaleIndex}) == 1.0f,
                 "MX explicit unity-scale generation mismatch.");
     checkReference(explicitScale, explicitlyScaled);
+
+    const std::array constantScaleModes{
+        std::pair{MxScaleGenerationMode::Minimum, uint8_t{0}},
+        std::pair{MxScaleGenerationMode::One, uint8_t{127}},
+        std::pair{MxScaleGenerationMode::Two, uint8_t{128}},
+    };
+    for (const auto& [mode, expectedRaw] : constantScaleModes) {
+        MxGenerationProblem constantScale = stochasticProblem(MxGenerationMode::Sequential);
+        constantScale.scale = mode;
+        const MxGenerationResult result = generateMx(constantScale);
+        for (size_t scaleIndex = 0; scaleIndex < result.scales.shape()[0]; ++scaleIndex)
+            require(std::to_integer<uint8_t>(result.scales.storage()[scaleIndex]) == expectedRaw,
+                    "MX explicit constant-scale generation mismatch.");
+        checkReference(constantScale, result);
+    }
+
+    MxGenerationProblem maximumScale = stochasticProblem(MxGenerationMode::Sequential);
+    maximumScale.scale = MxScaleGenerationMode::Maximum;
+    const MxGenerationResult maximumScaled = generateMx(maximumScale);
+    for (size_t scaleIndex = 0; scaleIndex < maximumScaled.scales.shape()[0]; ++scaleIndex)
+        require(std::to_integer<uint8_t>(maximumScaled.scales.storage()[scaleIndex]) == 0xfeU,
+                "MX explicit maximum-scale generation mismatch.");
+    checkReference(maximumScale, maximumScaled);
+
+    MxGenerationProblem nanScale = stochasticProblem(MxGenerationMode::Sequential);
+    nanScale.scale = MxScaleGenerationMode::NaN;
+    const MxGenerationResult nanScaled = generateMx(nanScale);
+    for (size_t scaleIndex = 0; scaleIndex < nanScaled.scales.shape()[0]; ++scaleIndex)
+        require(std::to_integer<uint8_t>(nanScaled.scales.storage()[scaleIndex]) == 0xffU,
+                "MX explicit NaN-scale generation mismatch.");
+    checkReference(nanScale, nanScaled);
 
     MxGenerationProblem impossibleInterval = explicitScale;
     impossibleInterval.shape = Shape{8192, 1};

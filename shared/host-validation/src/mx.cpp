@@ -148,39 +148,26 @@ uint8_t scaleAtLeast(double requested, const std::vector<ScaleCandidate>& candid
     return candidate->raw;
 }
 
-bool recipesEqual(const MxGenerationRecipe& first, const MxGenerationRecipe& second) {
-    return first.mode == second.mode && first.parameter0 == second.parameter0 &&
-           first.parameter1 == second.parameter1;
-}
-
-std::optional<uint8_t> constantScaleRaw(ScalarType scaleType, const MxGenerationRecipe& recipe) {
-    switch (recipe.mode) {
-        case MxGenerationMode::Zeros:
-            return scaleRawForValue(scaleType, 0.0);
-        case MxGenerationMode::Ones:
-        case MxGenerationMode::NegativeOnes:
-        case MxGenerationMode::DenormalMinimum:
-        case MxGenerationMode::DenormalMaximum:
-        case MxGenerationMode::Infinity:
-            return scaleRawForValue(scaleType, 1.0);
-        case MxGenerationMode::Twos:
-            return scaleRawForValue(scaleType, 2.0);
-        case MxGenerationMode::Maximum:
-            return maximumScaleRaw(scaleType);
-        case MxGenerationMode::NaN:
-            return scaleRawForValue(scaleType, std::numeric_limits<double>::quiet_NaN());
-        default:
+std::optional<uint8_t> explicitScaleRaw(const MxGenerationProblem& problem) {
+    switch (problem.scale) {
+        case MxScaleGenerationMode::Derived:
             return std::nullopt;
+        case MxScaleGenerationMode::Minimum:
+            return scaleRawForValue(problem.scaleType, 0.0);
+        case MxScaleGenerationMode::One:
+            return scaleRawForValue(problem.scaleType, 1.0);
+        case MxScaleGenerationMode::Two:
+            return scaleRawForValue(problem.scaleType, 2.0);
+        case MxScaleGenerationMode::Maximum:
+            return maximumScaleRaw(problem.scaleType);
+        case MxScaleGenerationMode::NaN:
+            return scaleRawForValue(problem.scaleType, std::numeric_limits<double>::quiet_NaN());
     }
+    throw std::invalid_argument("Invalid MX scale generation mode.");
 }
 
 std::optional<uint8_t> selectedConstantScale(const MxGenerationProblem& problem) {
-    if (problem.scale && !recipesEqual(problem.data, *problem.scale)) {
-        if (const auto explicitScale = constantScaleRaw(problem.scaleType, *problem.scale))
-            return explicitScale;
-        throw std::invalid_argument(
-            "Independent MX scale generation currently supports only constant recipes.");
-    }
+    if (const auto explicitScale = explicitScaleRaw(problem)) return explicitScale;
 
     switch (problem.data.mode) {
         case MxGenerationMode::Zeros:
@@ -583,10 +570,6 @@ void validateProblem(const MxGenerationProblem& problem) {
         throw std::invalid_argument("Unsupported MX scale scalar type.");
     if (!isSupportedTypePair(problem.dataType, problem.scaleType))
         throw std::invalid_argument("Unsupported MX data/scale scalar type combination.");
-    if (problem.scale && !recipesEqual(problem.data, *problem.scale) &&
-        !constantScaleRaw(problem.scaleType, *problem.scale))
-        throw std::invalid_argument(
-            "Independent MX scale generation currently supports only constant recipes.");
     validateRecipe(problem);
 }
 }  // namespace
