@@ -206,6 +206,42 @@ double rocblas_internal_value_category(const T* beta, rocblas_datatype compute_t
 
 extern const char* c_rocblas_internal;
 
+// Fields for one ROCBLAS_LAYER=0x10 kernel-select bench line. Populated by the internal-GEMM
+// paths (tensile_host.cpp, gemm_templates.cpp) and rendered by
+// rocblas_internal_logger::log_kernel_select_bench, which owns the replay-order argument list.
+// Strings are non-owning views; the caller must keep the backing storage alive across the call.
+struct rocblas_kernel_select_bench_line
+{
+    const char* bench_prefix; // e.g. ROCBLAS_API_BENCH
+    // "gemm_ex" for a single sub-problem, "gemm_strided_batched_ex" when batched/strided.
+    const char* function;
+    char        trans_a;
+    char        trans_b;
+    int64_t     m;
+    int64_t     n;
+    int64_t     k;
+    const char* alpha; // preformatted "--alpha <v>"
+    const char* a_type;
+    int64_t     lda;
+    rocblas_stride stride_a;
+    const char* b_type;
+    int64_t     ldb;
+    rocblas_stride stride_b;
+    const char* beta; // preformatted "--beta <v>"
+    const char* c_type;
+    int64_t     ldc;
+    rocblas_stride stride_c;
+    const char* d_type;
+    int64_t     ldd;
+    rocblas_stride stride_d;
+    int64_t     batch_count;
+    const char* compute_type;
+    int32_t     algo;
+    int32_t     solution_index;
+    uint32_t    flags;
+    const char* metadata; // trailing "# source=... kernel=... fallback_from=... parent_api=..."
+};
+
 /******************************************************************
  * ROCBLAS LOGGER *
  ******************************************************************/
@@ -260,6 +296,66 @@ public:
     void log_kernel_select(rocblas_handle handle, Ts&&... xs)
     {
         log_arguments(*handle->log_trace_os, " ", std::forward<Ts>(xs)...);
+    }
+
+    // Emits a single rocblas-bench-replayable kernel-select line from a filled-in
+    // rocblas_kernel_select_bench_line. This centralizes the long, replay-order-sensitive
+    // argument list so the Tensile (tensile_host.cpp) and source-GEMM fallback
+    // (gemm_templates.cpp) paths cannot drift out of sync.
+    void log_kernel_select_bench(rocblas_handle handle, const rocblas_kernel_select_bench_line& b)
+    {
+        log_arguments(*handle->log_trace_os,
+                      " ",
+                      b.bench_prefix,
+                      "-f",
+                      b.function,
+                      "--transposeA",
+                      b.trans_a,
+                      "--transposeB",
+                      b.trans_b,
+                      "-m",
+                      b.m,
+                      "-n",
+                      b.n,
+                      "-k",
+                      b.k,
+                      b.alpha,
+                      "--a_type",
+                      b.a_type,
+                      "--lda",
+                      b.lda,
+                      "--stride_a",
+                      b.stride_a,
+                      "--b_type",
+                      b.b_type,
+                      "--ldb",
+                      b.ldb,
+                      "--stride_b",
+                      b.stride_b,
+                      b.beta,
+                      "--c_type",
+                      b.c_type,
+                      "--ldc",
+                      b.ldc,
+                      "--stride_c",
+                      b.stride_c,
+                      "--d_type",
+                      b.d_type,
+                      "--ldd",
+                      b.ldd,
+                      "--stride_d",
+                      b.stride_d,
+                      "--batch_count",
+                      b.batch_count,
+                      "--compute_type",
+                      b.compute_type,
+                      "--algo",
+                      b.algo,
+                      "--solution_index",
+                      b.solution_index,
+                      "--flags",
+                      b.flags,
+                      b.metadata);
     }
 
     // if profile logging is turned on with

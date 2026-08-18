@@ -1507,57 +1507,39 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
         if(!hipblaslt_backend && !selected_tensile_name.empty())
             metadata_field << " kernel=" << selected_tensile_name;
         metadata_field << " fallback_from=" << fallback << " parent_api=" << parent_api;
+        const std::string metadata = metadata_field.str();
+
+        rocblas_kernel_select_bench_line line{};
+        line.bench_prefix   = ROCBLAS_API_BENCH;
+        line.function       = prob.batch_count > 1 ? "gemm_strided_batched_ex" : "gemm_ex";
+        line.trans_a        = rocblas_transpose_letter(prob.trans_a);
+        line.trans_b        = rocblas_transpose_letter(prob.trans_b);
+        line.m              = prob.m;
+        line.n              = prob.n;
+        line.k              = prob.k;
+        line.alpha          = alphas.c_str();
+        line.a_type         = rocblas_datatype_string(rocblas_datatype_from_type<Ti>);
+        line.lda            = prob.col_stride_a;
+        line.stride_a       = prob.batch_stride_a;
+        line.b_type         = rocblas_datatype_string(rocblas_datatype_from_type<Ti>);
+        line.ldb            = prob.col_stride_b;
+        line.stride_b       = prob.batch_stride_b;
+        line.beta           = betas.c_str();
+        line.c_type         = rocblas_datatype_string(rocblas_datatype_from_type<To>);
+        line.ldc            = prob.col_stride_c;
+        line.stride_c       = prob.batch_stride_c;
+        line.d_type         = rocblas_datatype_string(rocblas_datatype_from_type<To>);
+        line.ldd            = prob.col_stride_d;
+        line.stride_d       = prob.batch_stride_d;
+        line.batch_count    = prob.batch_count;
+        line.compute_type   = rocblas_datatype_string(rocblas_datatype_from_type<Tc>);
+        line.algo           = (int32_t)algo;
+        line.solution_index = solution_index;
+        line.flags          = (uint32_t)prob.flags;
+        line.metadata       = metadata.c_str();
 
         rocblas_internal_logger logger;
-        logger.log_kernel_select(prob.handle,
-                                 ROCBLAS_API_BENCH " -f gemm_strided_batched_ex",
-                                 "--transposeA",
-                                 rocblas_transpose_letter(prob.trans_a),
-                                 "--transposeB",
-                                 rocblas_transpose_letter(prob.trans_b),
-                                 "-m",
-                                 prob.m,
-                                 "-n",
-                                 prob.n,
-                                 "-k",
-                                 prob.k,
-                                 alphas,
-                                 "--a_type",
-                                 rocblas_datatype_string(rocblas_datatype_from_type<Ti>),
-                                 "--lda",
-                                 prob.col_stride_a,
-                                 "--stride_a",
-                                 prob.batch_stride_a,
-                                 "--b_type",
-                                 rocblas_datatype_string(rocblas_datatype_from_type<Ti>),
-                                 "--ldb",
-                                 prob.col_stride_b,
-                                 "--stride_b",
-                                 prob.batch_stride_b,
-                                 betas,
-                                 "--c_type",
-                                 rocblas_datatype_string(rocblas_datatype_from_type<To>),
-                                 "--ldc",
-                                 prob.col_stride_c,
-                                 "--stride_c",
-                                 prob.batch_stride_c,
-                                 "--d_type",
-                                 rocblas_datatype_string(rocblas_datatype_from_type<To>),
-                                 "--ldd",
-                                 prob.col_stride_d,
-                                 "--stride_d",
-                                 prob.batch_stride_d,
-                                 "--batch_count",
-                                 prob.batch_count,
-                                 "--compute_type",
-                                 rocblas_datatype_string(rocblas_datatype_from_type<Tc>),
-                                 "--algo",
-                                 (int)algo,
-                                 "--solution_index",
-                                 solution_index,
-                                 "--flags",
-                                 (uint32_t)prob.flags,
-                                 metadata_field.str());
+        logger.log_kernel_select_bench(prob.handle, line);
     }
 
     return status;

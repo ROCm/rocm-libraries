@@ -27,6 +27,7 @@
 
 #include "client_utility.hpp"
 #include "device_vector.hpp"
+#include "host_vector.hpp"
 #include "rocblas_test.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -36,8 +37,16 @@
 #include <rocblas/rocblas.h>
 #include <sstream>
 #include <string>
-#ifndef WIN32
-#include <unistd.h>
+#include <vector>
+
+#if __has_include(<filesystem>)
+#include <filesystem>
+namespace fs = std::filesystem;
+#elif __has_include(<experimental/filesystem>)
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#else
+#error no filesystem found
 #endif
 
 #ifdef WIN32
@@ -68,14 +77,14 @@ namespace
         return n;
     }
 
-    // Generates a unique trace-file path under /tmp for this test invocation.
+    // Generates a unique, temp-dir-rooted trace-file path for this test invocation
+    // using rocblas_tempname().
     std::string make_trace_path(const char* test_name)
     {
-        std::string p = "/tmp/rocblas_kernel_select_";
-        p += test_name;
-        p += "_";
-        p += std::to_string(getpid());
-        p += ".log";
+        static const std::string tmp_dir = rocblas_tempname();
+        const fs::path           fspath
+            = tmp_dir + std::string("kernel_select_") + test_name + std::string(".log");
+        const std::string p = fspath.generic_string();
         std::remove(p.c_str());
         return p;
     }
@@ -130,8 +139,18 @@ TEST(KernelSelect, TrsmDecompositionParentApi)
         rocblas_handle handle;
         ASSERT_EQ(rocblas_create_handle(&handle), rocblas_status_success);
 
+        host_vector<float> hA(size_t(m) * m);
+        host_vector<float> hB(size_t(m) * n);
+        for(int col = 0; col < m; ++col)
+            for(int row = 0; row < m; ++row)
+                hA[size_t(col) * m + row] = row == col ? float(m) : (row < col ? 0.5f : 0.0f);
+        for(size_t i = 0; i < size_t(m) * n; ++i)
+            hB[i] = 1.0f;
+
         device_vector<float> dA(size_t(m) * m);
         device_vector<float> dB(size_t(m) * n);
+        ASSERT_EQ(dA.transfer_from(hA), hipSuccess);
+        ASSERT_EQ(dB.transfer_from(hB), hipSuccess);
 
         ASSERT_EQ(rocblas_strsm(handle,
                                 rocblas_side_left,
@@ -156,7 +175,8 @@ TEST(KernelSelect, TrsmDecompositionParentApi)
     const size_t lines = count_occurrences(trace, "parent_api=rocblas_strsm");
     EXPECT_GT(lines, size_t(1)) << "expected multiple sub-problems attributed to rocblas_strsm, "
                                 << "got " << lines << " in " << trace_path;
-    EXPECT_NE(trace.find("-f gemm_strided_batched_ex"), std::string::npos);
+    // Non-batched sub-problems (batch_count == 1) replay as gemm_ex.
+    EXPECT_NE(trace.find("-f gemm_ex"), std::string::npos);
     EXPECT_NE(trace.find("# source="), std::string::npos);
 
     std::remove(trace_path.c_str());
