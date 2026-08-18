@@ -102,15 +102,18 @@ TEST_F(CPU_TuningPolicy_NONE, TestGetApiLogged)
     auto status = miopenGetTuningPolicy(&handle, &policy);
     ASSERT_EQ(status, miopenStatusSuccess);
     std::string output = testing::internal::GetCapturedStderr();
-    // Under the public/private split the logged function name is the renamed
-    // private entry point (miopenGetTuningPolicy_impl), since MIOPEN_LOG_FUNCTION
-    // runs inside the _impl definition. Accept either the public name or its
-    // _impl form. Spelled with HasSubstr rather than a regex: gtest's built-in
-    // regex engine (used wherever POSIX REs are unavailable, notably Windows)
-    // supports neither grouping nor alternation.
-    EXPECT_THAT(output,
-                testing::AnyOf(testing::HasSubstr(" miopenGetTuningPolicy("),
-                               testing::HasSubstr(" miopenGetTuningPolicy_impl(")));
+    // When MIOpen is built as a public wrapper over a private implementation the
+    // logged function name is the renamed private entry point, because
+    // MIOPEN_LOG_FUNCTION runs inside the _impl definition. Each configuration
+    // asserts its own exact name, so a default build that somehow emitted an
+    // _impl name still fails. Spelled with HasSubstr rather than a regex:
+    // gtest's built-in regex engine (used wherever POSIX REs are unavailable,
+    // notably Windows) supports neither grouping nor alternation.
+#ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
+    EXPECT_THAT(output, testing::HasSubstr(" miopenGetTuningPolicy_impl("));
+#else
+    EXPECT_THAT(output, testing::HasSubstr(" miopenGetTuningPolicy("));
+#endif
 }
 
 TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
@@ -128,10 +131,12 @@ TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
         status = miopenSetTuningPolicy(&handle, miopenTuningPolicy_t::miopenTuningPolicySearch);
         ASSERT_EQ(status, miopenStatusSuccess);
         std::string output = testing::internal::GetCapturedStderr();
-        // Accept the renamed _impl form under the public/private split (see above).
-        EXPECT_THAT(output,
-                    testing::AnyOf(testing::HasSubstr(" miopenSetTuningPolicy("),
-                                   testing::HasSubstr(" miopenSetTuningPolicy_impl(")));
+        // Exact per-configuration name, for the reasons given above.
+#ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
+        EXPECT_THAT(output, testing::HasSubstr(" miopenSetTuningPolicy_impl("));
+#else
+        EXPECT_THAT(output, testing::HasSubstr(" miopenSetTuningPolicy("));
+#endif
     }
 
     status = miopenSetTuningPolicy(&handle, original_policy);
