@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.SolutionLibrary
+# Characterization tests for tensilelite.SolutionLibrary
 #
 # ADD-ONLY: pins the library (de)serialization class tree. The heavy
 # integration entry points — MasterSolutionLibrary.FromOriginalState (and its
@@ -14,7 +14,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.SolutionLibrary")
+M = importlib.import_module("tensilelite.SolutionLibrary")
 
 
 class FakeSol:
