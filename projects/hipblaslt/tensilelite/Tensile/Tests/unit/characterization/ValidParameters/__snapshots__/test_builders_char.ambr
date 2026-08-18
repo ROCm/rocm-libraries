@@ -1392,6 +1392,7 @@
     'ExtraLatencyForLR',
     'ExtraMiLatencyLeft',
     'ForceDisableShadowInit',
+    'FusedGemmA2A',
     'GlobalReadPerMfma',
     'GlobalReadVectorWidthA',
     'GlobalReadVectorWidthB',
@@ -1805,6 +1806,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'FusedGemmA2A': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',
