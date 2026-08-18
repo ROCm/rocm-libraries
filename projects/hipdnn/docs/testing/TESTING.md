@@ -89,7 +89,7 @@ hipDNN sends graphs to provider engines; providers run most kernels. Every perfo
 
 Use [ROCm dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) for manual graph benchmarks. Record the workload revision, graph inputs, GPU, provider, engine, plugin version or artifact, and software build. Compare only with a baseline from the same GPU architecture.
 
-Keep GPU execution time separate from host submission time. See [Testing Strategy](./TESTING_STRATEGY.md#performance-and-benchmarking) for details. There is no automated performance gate today; see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#automated-performance-checks).
+Keep GPU execution time separate from host submission time. See [Testing Strategy](./TESTING_STRATEGY.md#4-performance-testing) for details. There is no automated performance gate today; see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#automated-performance-checks).
 
 ## Pre-submit / CI gates
 

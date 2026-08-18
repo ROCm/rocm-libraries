@@ -1,210 +1,199 @@
 # hipDNN Testing Strategy
 
-## Purpose
+This document describes how hipDNN is tested. It keeps the original split between unit tests, integration tests, and performance tests, then adds current links and requirements.
 
-This document explains what each test layer should check, who owns it, and what current CI results do and do not prove.
-
-Other documents own the detailed instructions:
-- [Testing](./TESTING.md) tells contributors what to run before pushing.
-- [Building](../Building.md) has build, coverage, sanitizer, and test commands.
-- [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md#11-test-naming-guidelines) has test naming rules.
-- The [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) explains bundles, provider setup, and categories.
-- Workflow files and [CODEOWNERS](../../../../.github/CODEOWNERS) define CI jobs and review routing.
-- [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) lists work that is missing or incomplete. A listed gap is not a current requirement.
-
-**Current state** describes what the repository does today. **Strategy** describes the target design. Future work belongs in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) until it is implemented.
+For commands, see [Testing](./TESTING.md) and [Building](../Building.md). For test names, see [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md). For known limits, see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
 
 ## Principles
 
-1. **Test the smallest useful part.** Put a test at the lowest layer that can check the behavior without copying production logic.
-2. **Classify tests by what they depend on.** Unit tests replace outside dependencies. Integration tests use real components, plugins, runtimes, or devices.
-3. **Avoid GPU use in unit tests when practical.** A unit test may use a GPU when the behavior cannot be tested otherwise, but it must skip with `SKIP_IF_NO_DEVICES()` on machines without a device.
-4. **Separate routing from numerical results.** hipDNN owns graph handling and plugin calls. Providers own whether an engine produces correct results on a device.
-5. **A skip is not a pass.** A skipped test gives no result for that configuration.
-6. **CI does not define product support.** A green job proves only that its selected tests passed in that environment.
-7. **Make failures easy to trace.** Name the layer and engine, use repeatable inputs, and avoid duplicate tests that report the same failure.
+- Test the smallest useful part.
+- Keep unit tests fast and independent. GPU use is allowed when required, but GPU-dependent tests must call `SKIP_IF_NO_DEVICES()`.
+- Use integration tests for public APIs and real boundaries between components, providers, libraries, runtimes, or devices.
+- hipDNN tests own graph routing and plugin communication. Providers own operation results on supported GPUs.
+- A skipped test gives no result for that configuration.
+- A green CI job proves only that its selected tests passed in that environment; it does not define full product support.
 
-## Unit Tests Should Avoid GPU Use
+## 1. White Box Testing (Unit Tests)
 
-### Target Design
+Unit tests check the internal behavior of one hipDNN component.
 
-**Strategy:** A unit test checks one production unit.
+### Component Comparison
 
-- Replace outside dependencies with fakes, stubs, or mocks when practical.
-- Prefer CPU-only tests because they are faster and run on more machines.
-- A focused unit test may use a GPU when GPU access is part of the behavior under test.
-- Every GPU-dependent unit test must call `SKIP_IF_NO_DEVICES()` so it skips cleanly on CPU-only machines.
+| Component | Location | Purpose | GPU use | Platforms |
+|---|---|---|---|---|
+| Backend | `backend/tests/` | Test backend implementation details | Usually none | Windows and Linux |
+| Frontend | `frontend/tests/` | Test frontend implementation details | Usually none | Windows and Linux |
+| Data SDK | `data_sdk/tests/` | Test Data SDK implementation details | Usually none | Windows and Linux |
+| FlatBuffers SDK | `flatbuffers_sdk/tests/` | Test serialization and generated data helpers | Usually none | Windows and Linux |
+| Plugin SDK | `plugin_sdk/tests/` | Test Plugin SDK helpers and base classes | Usually none | Windows and Linux |
+| Test SDK | `test_sdk/tests/` | Test reference code and shared test tools | Usually none | Windows and Linux |
+| Provider | `dnn-providers/<name>/tests/` | Test one provider's internal behavior | Minimal and fast | Windows and Linux |
 
-GPU use alone does not make a test an integration test. A test becomes an integration test when it checks a real boundary between components, plugins, runtimes, libraries, or devices.
+Unit tests should avoid GPU use when practical, but they may use a GPU when the behavior cannot be tested otherwise. Every GPU-dependent unit test must call `SKIP_IF_NO_DEVICES()` so it skips cleanly on CPU-only machines.
 
-### Who Tests What
+### Test Areas by Component
 
-| Layer | What it checks | What the test replaces |
-|---|---|---|
-| Backend | State, descriptors, lifetime, errors, plugin coordination | Production providers and unrelated GPU work |
-| Frontend | Graph building and backend API calls | Backend implementation |
-| Data and FlatBuffers SDKs | Data models, serialization, logging, utilities | Consumers and providers |
-| Plugin SDK | Provider helpers and base behavior | Real provider engines |
-| Test SDK | Reference results, comparisons, shared test tools | Production plugins |
-| Provider adapter | Graph translation, support checks, configuration, errors | Lower-level library or kernel work not being tested |
+#### Backend
 
-Public backend and frontend tests are integration tests because they cross the public API boundary, even when they use controlled test plugins.
+- Descriptors
+- Plugin loading and management
+- Error handling
+- Backend utilities
+- Handles
+- Graph extensions
 
-## Integration and Provider Tests
+#### Frontend
 
-### Test Layers
+- Attributes
+- Nodes
+- Graph construction and flow
+- Frontend utilities
 
-| Layer | What it runs | What it proves | What it does not prove |
-|---|---|---|---|
-| Public backend API | Public C API with controlled plugins | API lifetime, descriptors, errors, and plugin management | Numerical results from a real provider |
-| Frontend-to-backend | Frontend API through the backend with a controlled plugin | Graph conversion, routing, execution flow, and returned results | Kernel correctness on a GPU |
-| Provider-local integration | One provider with its real libraries and GPU | Provider-specific support, errors, engine behavior, and repeatability | Behavior of another provider |
-| Shared provider integration | Provider-agnostic `hipdnn_integration_tests` with one plugin, one engine, and reference results | End-to-end graph execution and numerical results for that engine, device, and problem | Full operation or GPU support |
-| Library or kernel tests | MIOpen, hipBLASLt, rocKE, or another lower-level library | Behavior owned by that library | hipDNN routing unless the test runs through hipDNN |
+#### SDKs
 
-Use the shared suite for graph execution and result checks. Use provider-local tests for provider-specific errors, options, engine selection, compilation, or behavior that a graph bundle cannot express. See the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) for setup and authoring rules.
+- Data objects and serialization
+- Logging
+- API helpers and base classes
+- CPU reference implementations
+- Test and validation utilities
 
-The executable contains one shared graph set. Each provider runs it separately with its own plugin and engine; one run never loads or compares several providers.
+#### Providers
 
-Reference execution gives the expected result, but it does not prove that a provider supports the graph. The provider must accept the graph, choose an engine, and run it before results are compared. See the [CPU Graph Executor design](../rfcs/0001_CpuGraphExecutorDesign.md).
+- Graph translation
+- Support checks
+- Engine configuration
+- Error handling
+- Provider-specific utilities
 
-### Ownership
+### Unit Test Requirements
 
-| Item | Owner |
+- Keep tests fast and repeatable.
+- Use existing fakes, stubs, or mocks for outside dependencies when practical.
+- Put tests beside the component's current test suite.
+- Use `SKIP_IF_NO_DEVICES()` for every GPU-dependent test.
+- Add a regression test for each bug fix.
+- Treat the 80% code-coverage number as a goal, not a merge requirement.
+
+## 2. Integration Tests
+
+Integration tests check public APIs or real boundaries between hipDNN components, providers, libraries, runtimes, and devices.
+
+### Black Box API Tests
+
+Black box tests use public interfaces instead of internal implementation details.
+
+#### Backend API Tests
+
+| Attribute | Details |
 |---|---|
-| Public API, graph serialization, routing, plugin lifetime, and frontend/backend data | hipDNN core tests |
-| Shared graphs, reference comparison, tolerances, and provider-agnostic test harness | Shared provider integration code |
-| Provider graph translation, support checks, engine binding, skips, tolerances, and adapter errors | Provider tests and configuration |
-| Kernel selection and results below the provider adapter | Lower-level library tests and provider integration tests |
-| GPU-specific support checks | Provider or engine runtime checks |
-| Review routing | [CODEOWNERS](../../../../.github/CODEOWNERS) |
+| Location | `tests/backend/` |
+| Purpose | Check the public hipDNN backend API |
+| Requirements | Use public headers, controlled test plugins, and `SKIP_IF_NO_DEVICES()` for GPU paths |
+| Platforms | Windows and supported Linux distributions |
+| Frequency | Run for matching pull requests |
 
-CODEOWNERS chooses reviewers; it does not define product support or who owns performance regressions. Keep the provider and engine name in failures, then find the lowest layer that still fails.
+These tests cover descriptor APIs, handles, execution, plugin management, graph extensions, and logging.
 
-### Product Support and CI Coverage Are Different
+### End-to-End Integration Tests
 
-Support claims and CI results come from different sources:
+| Test type | Location | Purpose | GPU use |
+|---|---|---|---|
+| Frontend-to-backend | `tests/frontend/` | Check graph creation, descriptor conversion, routing, and execution flow | Optional; GPU paths must skip without a device |
+| Provider integration | `dnn-providers/<name>/integration_tests/` | Check behavior specific to one provider | Required for GPU behavior |
+| Shared provider integration | `dnn-providers/integration-tests/` | Run shared graphs through one provider and compare results with a reference | Required for numerical validation |
 
-1. **Support sources** are operation-support docs, build options, runtime checks, and explicit exclusions.
-2. **CI results** show that one job ran selected tests on a specific OS, GPU, and configuration.
+#### Frontend-to-Backend Tests
 
-One cannot replace the other. A green job does not prove support for every engine, operation, shape, datatype, option, or GPU. A missing job does not prove lack of support. A family name such as `gfx94X` is not a specific tested GPU unless the runner identifies one.
+- Use controlled test plugins.
+- Check graph creation and execution APIs.
+- Check frontend-to-backend descriptor conversion.
+- Do not claim provider numerical correctness from controlled-plugin results.
 
-Provider capability sources:
+#### Provider Tests
 
-- [MIOpen provider operation support](../../../../dnn-providers/miopen-provider/docs/OperationSupport.md)
-- [hipBLASLt provider operation support](../../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)
-- [HIP-kernel provider engine architecture and build flags](../../../../dnn-providers/hip-kernel-provider/README.md#architecture)
+- Each provider keeps tests for its own errors, support checks, engine behavior, determinism, and tuning controls.
+- Test every GPU family the provider claims to support.
+- Use provider category and configuration files as the source of truth.
 
-These sources are not combined into one support table because support can depend on build options, library behavior, execution direction, runtime checks, and exclusions.
+#### Shared Provider Integration Tests
 
-**Current state:** Shared integration tests prefer data-driven bundles, but checked-in provider builds and workflows do not enable them. Bundles available in the repository must not be reported as tests that ran.
+`hipdnn_integration_tests` is provider-agnostic. It contains one shared graph set. Each provider runs the executable independently with its own plugin and engine; one run never loads or compares several providers.
 
-## Current CI Workflows
+Use the shared suite for graph execution and numerical comparison against the CPU reference executor. See the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) for bundles, provider configuration, and categories.
+
+### Graph Validation
+
+The CPU Graph Executor provides expected results for integration tests. A provider must first accept the graph, choose an engine, and run it. The test then compares the provider result with the reference result. See [CPU Graph Executor Design](../rfcs/0001_CpuGraphExecutorDesign.md).
+
+## Validation Responsibilities and GPU Coverage
+
+| Component | Responsibility |
+|---|---|
+| hipDNN core | Public APIs, graph data, routing, plugin lifetime, and frontend/backend flow |
+| Shared provider integration | Shared graph cases, reference results, tolerances, and the provider-agnostic harness |
+| Providers | Graph translation, support checks, engine selection, provider skips and tolerances, and operation results on supported GPUs |
+| Lower-level libraries and kernels | Kernel selection, compilation, workspace use, and device execution |
+| CI or lab | Runners, hardware, system software, and repeatable test environments |
+
+A green hipDNN core job proves that its selected routing and API tests passed. It does not prove that every provider, operation, shape, datatype, engine, or GPU is supported. Provider support comes from provider documentation and runtime support checks.
+
+[CODEOWNERS](../../../../.github/CODEOWNERS) chooses reviewers; it does not define product support.
+
+## Key Quality Concerns
+
+- **Frontend-to-plugin data path:** hipDNN must pass the right tensors, attributes, and scalars to the selected provider and return its results correctly.
+- **Operation results:** Provider integration tests must compare graph results with a reference result.
+- **Public API behavior:** Backend C and frontend C++ APIs must keep their documented behavior.
+- **Windows and Linux:** GPU-dependent tests must skip cleanly when no device is available.
+- **Memory and thread safety:** Use ASAN and TSAN for the code they support.
+- **Static analysis:** Use `clang-tidy` to catch common C++ and HIP problems.
+
+## 3. General Testing Requirements
 
 ### Test Categories
 
-The public test categories are `quick`, `standard`, `comprehensive`, and `full`. Provider category mechanics belong to the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md).
+The public test categories are `quick`, `standard`, `comprehensive`, and `full`. In core hipDNN, `quick` currently matches every core test and higher categories inherit that set. Provider categories may differ; see the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md).
 
-In core hipDNN, `quick` matches every core test and the higher categories inherit the same set. This is intentional behavior, not a coverage gap or a request to differentiate the categories.
+### Code Coverage
 
-### Checked on 2026-08-17
+- Enable coverage with `-DHIPDNN_ENABLE_COVERAGE=ON`.
+- Build the `coverage` target to create reports under `coverage-report/`.
+- The 80% coverage number is a goal, not an enforced merge rule.
+- Coverage shows which code ran; it does not prove correct behavior or GPU support.
 
-This table shows repository settings, not a support list. An enabled test job may still skip GPU tests, and external runner settings can change the exact hardware.
+### GPU Requirements
 
-| Workflow | When it runs | Requested systems | What runs |
-|---|---|---|---|
-| [TheRock CI](../../../../.github/workflows/therock-ci.yml) | Pull requests, selected pushes, manual runs | Linux `gfx94X`, `gfx950`, `gfx125X`; Windows `gfx1151` | Linux package tests are disabled for `gfx950` and `gfx125X`. Other test jobs still depend on external runner assignments. |
-| [hipDNN Superbuild CI](../../../../.github/workflows/hipdnn-superbuild-ci.yml) | Matching pull requests | Linux `gfx94X-dcgpu`/`gfx942`; Windows `gfx1151` | Root CTest and frontend wheel tests run. A runner name does not prove every GPU test ran instead of skipping. |
-| [Legacy TheRock Nightly](../../../../.github/workflows/therock-ci-nightly.yml) | Daily and manual | Linux `gfx94X`, `gfx950`; Windows `gfx1151` | Scheduled runs use `comprehensive`; Linux `gfx950` is build-only. Other tests depend on external runners. |
-| [Release Multi-Arch Nightly](../../../../.github/workflows/therock-multi-arch-ci-nightly.yml) | Daily and manual | Linux `gfx94X`, `gfx950`; Windows `gfx1151` | External settings choose the exact test runners. |
-| [Release Multi-Arch CI](../../../../.github/workflows/therock-multi-arch-ci.yml) | Manual only | Defaults to Linux `gfx94X`, `gfx950`; Windows `gfx110X` | It is not an automatic pull-request check. |
+- Tests must run on CPU-only machines.
+- GPU-dependent tests must call `SKIP_IF_NO_DEVICES()`.
+- A skip is not a pass for that GPU configuration.
+- Tests should use every available GPU only when the test's purpose requires it.
 
-Update this table when workflow triggers, GPU families, runner assignments, path filters, or test categories change. Workflow files are always the source of truth.
+### Static Analysis
 
-### Test Failures and Merge Rules
+hipDNN uses `clang-tidy`. Linux builds and Linux superbuild CI enable it; Windows builds and Windows superbuild CI disable it. Local developers can use `-DENABLE_CLANG_TIDY=ON` or the `hipdnn-tidy` target. See [Building: Clang Tools](../Building.md#clang-tools).
 
-**Current state:** An enabled hipDNN test job fails when one of its selected tests fails. A skipped or unselected job is not a failure, but it is also not proof that the tests passed.
+### Sanitizers
 
-GitHub settings outside this repository decide which jobs block a merge. Do not claim that every listed workflow blocks merging unless those settings were checked.
+Standalone ASAN tests are run manually. Pull-request ASAN jobs build host-ASAN binaries but do not run their tests. Manual workflow runs and the scheduled nightly can run ASAN tests where matching GPU runners are available.
 
-## Static Analysis
+TSAN supports Linux host code. ASAN and TSAN use separate build configurations. See [Testing](./TESTING.md#asantsansanitizer-coverage), [Building](../Building.md#address-sanitizer-build), and [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#sanitizers-and-platforms).
 
-`clang-tidy` checks source code for common correctness, safety, and style problems. It does not run the program, so it cannot replace tests.
+### CI Results
 
-**Current state:**
+An enabled test failure fails its workflow. A skipped or unselected job is not proof that tests passed. GitHub settings outside this repository decide which jobs block a merge.
 
-- Linux hipDNN builds enable `clang-tidy` by default; Windows builds disable it by default.
-- The Linux hipDNN superbuild CI enables `clang-tidy`; the Windows job disables it.
-- Local developers can enable it with `-DENABLE_CLANG_TIDY=ON` or run the `hipdnn-tidy` target when `run-clang-tidy` is installed.
+### Flaky Tests
 
-The root `.clang-tidy` file defines the checks. [Building](../Building.md#clang-tools) owns setup and commands, and [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md#151-clang-tidy-rules) explains project-specific rules.
+Tests should give a reliable result. Fix or remove a test that fails intermittently; do not leave it as a non-blocking failure.
 
-## Sanitizers and Coverage
+## 4. Performance Testing
 
-### Who Owns Sanitizer Failures
+Use [ROCm dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) for manual graph benchmarks.
 
-Sanitizers check only the code they instrument. hipDNN owns sanitizer errors in core code. Providers own errors in their adapters. Errors in lower-level libraries must be reported to those library owners. A provider test without sanitizer instrumentation does not check memory safety.
+- Record workload revision, graph inputs, GPU, provider, engine, plugin version or artifact, and software build.
+- Compare only with a baseline from the same GPU architecture and, when possible, the same system setup.
+- Keep GPU graph time separate from host submission time.
+- Re-run suspicious results before calling them regressions.
+- Do not compare performance when correctness tests fail.
 
-See [Building: Address Sanitizer Build](../Building.md#address-sanitizer-build) for supported commands.
-
-**Current state:**
-
-- Standalone ASAN supports Linux and Windows, but repository settings do not prove that every platform and test combination is clean.
-- Standalone TSAN supports Linux host code only. No verified hipDNN TSAN CI job exists.
-- The [opt-in ASAN workflow](../../../../.github/workflows/therock-multi-arch-ci-asan.yml) builds sanitizer variants for labeled pull requests and manual runs. Pull requests build only; manual runs may test when a runner is available.
-- The [ASAN nightly workflow](../../../../.github/workflows/therock-multi-arch-ci-asan-nightly.yml) runs device ASAN on Linux. On 2026-08-17, `gfx94X` had a test runner, `gfx950` was build-only, and `gfx125X` had no supported ASAN build. External settings can change.
-
-ASAN does not test every pull request, provider, or GPU. See [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) for missing coverage.
-
-### Coverage
-
-LLVM coverage reports are run manually; see [Building](../Building.md). The 80% coverage number is a goal, not a CI requirement.
-
-Line coverage shows which code ran. It does not prove correct behavior, provider support, GPU coverage, or numerical accuracy.
-
-## Performance and Benchmarking
-
-### Goal
-
-Performance tests measure graph execution and host submission time. They are separate from correctness tests, and every result must include its test environment.
-
-Use the public [ROCm dnn-benchmarking project](https://github.com/ROCm/dnn-benchmarking#readme) for commands, result formats, and workloads. This document explains how hipDNN teams should read those results.
-
-### Workloads and Source Details
-
-Workloads are stored as DVC pointer files under `Workloads/**/*.tar.gz.dvc`. Record the pointer revision and selected graph inputs because benchmark output does not save them automatically.
-
-Use fixed, reviewable workloads. Record any change to graph structure, shapes, datatypes, inputs, or engine selection.
-
-### What Each Time Measures
-
-Keep these times separate:
-
-- **GPU graph time:** device time for all GPU work started by the graph. A graph may run several kernels.
-- **Host submission time:** host time used to enqueue the graph. It does not include later GPU completion.
-- **Total elapsed time:** may include setup, allocation, correctness checks, synchronization, or cleanup. State exactly what it includes.
-
-Finish warmups before timing. Record warmup count, timed run count, synchronization method, timing method, and summary statistic. Current output does not save all of these fields.
-
-### Comparing Results
-
-- Compare with a baseline from the same GPU architecture. Prefer the same GPU model, OS, runtime, power settings, library versions, provider build, engine, workload, and benchmark options.
-- Record provider, engine name and ID, plugin version or artifact, and feature flags. Some of this information must still be saved outside the benchmark output.
-- Keep host and GPU statistics separate. Save raw samples separately when distribution analysis is needed.
-- Re-run suspicious results in a controlled environment before calling them regressions. Do not compare performance when correctness tests fail.
-- Set pass/fail limits in the owning experiment or release policy after measuring normal variation. This document defines no universal limit.
-
-### Who Owns Performance
-
-| Layer | Responsibility |
-|---|---|
-| Workload and benchmark tool | Inputs, timing code, result format, statistics, and repeatability |
-| hipDNN core | Graph building, serialization, provider dispatch, API overhead, and engine identity |
-| Provider adapter | Support checks, graph translation, engine selection, plugin overhead, and provider options |
-| Lower-level library or kernel | Kernel choice, compilation, workspace use, and GPU execution |
-| CI or lab | Hardware, system software, power settings, baselines, and comparable runs |
-
-CODEOWNERS chooses reviewers but does not assign performance triage. First reproduce the result, decide whether the change is in host or GPU time, and then find the lowest layer that still shows it.
-
-**Current state:** dnn-benchmarking reports engine name, ID, version, and an optional plugin path. It does not save all workload, build, timing, or feature details. No checked-in hipDNN CI job compares GPU performance with a baseline.
+hipDNN has no checked-in automated GPU performance gate. See [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#automated-performance-checks).

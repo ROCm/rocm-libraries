@@ -19,6 +19,11 @@ Integration test bundles are off by default. See [Bundles are opt-in at runtime]
 
 The 80% coverage number is a goal, not a merge requirement. Local [coverage targets](../../CMakeLists.txt) create reports but do not enforce a minimum. The repository has a hipDNN [Codecov configuration](../../../../codecov.yml), but checked-in workflows do not prove that uploads or coverage limits are required.
 
+## Static analysis
+
+- Linux superbuild CI runs `clang-tidy` during compilation, but the Windows job disables it.
+- The repository-wide [`clang-tidy` workflow](../../../../.github/workflows/clang-tidy.yml) does not include hipDNN. hipDNN therefore has no separate cross-platform static-analysis job.
+
 ## Tested GPUs and supported GPUs
 
 - A configured build does not prove that tests ran on a physical GPU. Some Linux targets are build-only, and external runner settings choose the actual hardware. See [TheRock CI](../../../../.github/workflows/therock-ci.yml), [Linux test workflow](../../../../.github/workflows/therock-ci-linux.yml), and [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
