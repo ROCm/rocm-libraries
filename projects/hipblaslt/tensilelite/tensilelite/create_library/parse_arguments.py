@@ -228,7 +228,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         "in StreamK hybrid-assignment kernels"
     )
 
-    args = argParser.parse_args()
+    args = argParser.parse_args(input)
 
     arguments = {}
     arguments["RuntimeLanguage"] = args.RuntimeLanguage
