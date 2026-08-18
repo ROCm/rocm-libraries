@@ -2,9 +2,14 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21)
+
 if(POLICY CMP0140)
   # policies CMP0140 not known to CMake until 3.25
   cmake_policy(SET CMP0140 NEW)
+endif()
+
+if(WIN32)
+    set(CMAKE_OBJECT_PATH_MAX 8192)
 endif()
 
 get_property(_GENERATOR_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
@@ -31,8 +36,6 @@ endif()
 # Default installation path
 if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
-else()
-    set(CMAKE_INSTALL_PREFIX "C:/dist/TheRock" CACHE PATH "")
 endif()
 
 # Enable ASAN  when THEROCK_SANITIZER is set to ASAN or HOST_ASAN
