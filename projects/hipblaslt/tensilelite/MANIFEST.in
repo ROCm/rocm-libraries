@@ -12,5 +12,6 @@ recursive-include tensilelite/CustomKernels *.s
 include tensilelite/tensilelite_logic/known_bugs.yaml
 include tensilelite/ductile/config/defaults.yaml
 include release_metadata.py
+include VERSION
 include requirements.txt
 global-exclude __pycache__ *.py[cod] CMakeCache.txt install_manifest.txt
