@@ -61,7 +61,7 @@ function(hip_cuda_detect_lowest_cc out_variable)
     endif()
 
     if(NOT HIP_CUDA_lowest_cc)
-        set(HIP_CUDA_lowest_cc "52")
+        set(HIP_CUDA_lowest_cc "35")
         set(${out_variable} ${HIP_CUDA_lowest_cc} PARENT_SCOPE)
     else()
         set(${out_variable} ${HIP_CUDA_lowest_cc} PARENT_SCOPE)
