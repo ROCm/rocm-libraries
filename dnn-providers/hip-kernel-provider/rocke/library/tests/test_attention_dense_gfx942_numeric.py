@@ -53,19 +53,23 @@ requires_gfx942_gpu = pytest.mark.skipif(
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
 
-# (dtype, head_size, num_query_heads, num_kv_heads, persistent) -- a compact cohort
-# spanning both dtypes, D64/D128, GQA + MHA, and both grid variants. Sq is fixed at
-# 512 (a 256 multiple so the persistent grid-stride has >1 q-block of work).
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal) -- a compact
+# cohort spanning both dtypes, D64/D128, GQA + MHA, causal + non-causal, and both grid
+# variants. Sq is fixed at 512 (a 256 multiple so the persistent grid-stride has >1
+# q-block of work). The last two rows cover the fp16-D128 swizzle default grid on the
+# paths dispatch actually ships but the base rows miss: MHA, and non-causal.
 _COHORT = [
-    ("fp16", 128, 16, 4, False),  # flagship default
-    ("fp16", 128, 16, 4, True),  # flagship persistent
-    ("bf16", 128, 16, 4, True),  # bf16 D128 persistent (the VGPR-starved config)
-    ("fp16", 64, 16, 16, False),  # D64 MHA default
-    ("bf16", 64, 16, 4, True),  # D64 bf16 persistent (the wpe=4 config)
+    ("fp16", 128, 16, 4, False, True),  # flagship default (causal)
+    ("fp16", 128, 16, 4, True, True),  # flagship persistent
+    ("bf16", 128, 16, 4, True, True),  # bf16 D128 persistent (the VGPR-starved config)
+    ("fp16", 64, 16, 16, False, True),  # D64 MHA default
+    ("bf16", 64, 16, 4, True, True),  # D64 bf16 persistent (the wpe=4 config)
+    ("fp16", 128, 16, 16, False, True),  # fp16 D128 MHA default -- swizzle path, MHA
+    ("fp16", 128, 16, 4, False, False),  # fp16 D128 non-causal default -- swizzle path
 ]
 
 
-def _spec(dtype, d, hq, hkv, persistent, *, batch=1, sq=512):
+def _spec(dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     factory (``dispatch.attention.gfx942._dense_spec``) rather than hand-rolled.
 
@@ -105,7 +109,7 @@ def _spec(dtype, d, hq, hkv, persistent, *, batch=1, sq=512):
             hdim_q=d,
             hdim_v=d,
             arch="gfx942",
-            mask_type=1,  # causal
+            mask_type=1 if causal else 0,
             dtype=dtype,
             algorithm="attention_dense",
             dense_persistent="on" if persistent else "off",
@@ -115,8 +119,8 @@ def _spec(dtype, d, hq, hkv, persistent, *, batch=1, sq=512):
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype,d,hq,hkv,persistent", _COHORT)
-def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent):
+@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,causal", _COHORT)
+def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     import torch
     import torch.nn.functional as F
 
@@ -132,7 +136,7 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent):
     v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
     out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
 
-    spec = _spec(dtype, d, hq, hkv, persistent, batch=B, sq=S)
+    spec = _spec(dtype, d, hq, hkv, persistent, causal=causal, batch=B, sq=S)
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
 
@@ -150,14 +154,14 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent):
     kf = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
     vf = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
     ref = F.scaled_dot_product_attention(
-        qf, kf, vf, is_causal=True, scale=scale
+        qf, kf, vf, is_causal=causal, scale=scale
     ).transpose(
         1, 2
     )  # -> [B,S,Hq,D]
 
     max_abs = (ref - out.float()).abs().max().item()
     assert max_abs < tol, (
-        f"{dtype} D{d} GQA{hq}/{hkv} "
+        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
     )
 
@@ -165,12 +169,13 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent):
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("block_n", [32])
-def test_dense_fp16_d128_cfvst_swizzle_correct_at_other_tile_widths(block_n):
-    """The fp16-D128 cfvst V^T swizzle must stay CORRECT at tile widths other than the
-    shipped block_n=64. The derived v_row_pad keeps V_LDROW a pow2 (>=64) so the XOR
-    swizzle engages here too (block_n=32 is the active small-tile double-K direction);
-    before the derived pad it silently fell back to no-swizzle. On-silicon guard vs
-    fp32 SDPA for the tile-width axis the policy tests only cover structurally."""
+def test_dense_fp16_d128_numeric_correct_at_non_shipped_tile_width(block_n):
+    """fp16-D128 stays numerically correct at a tile width dispatch never emits
+    (``_DENSE_BLOCK_N = 64`` is a hard constant; block_n=32 is the small-tile double-K
+    sweep direction). This does NOT prove the swizzle is engaged -- store and read
+    apply the same permutation, so an off build is bit-identical here; the IR guard
+    ``test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask`` (CPU lane)
+    covers that. This is the on-silicon correctness guard for the tile-width axis."""
     import torch
     import torch.nn.functional as F
 

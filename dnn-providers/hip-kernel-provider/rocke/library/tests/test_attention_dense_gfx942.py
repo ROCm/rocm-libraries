@@ -902,6 +902,45 @@ def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     assert _v_row_pad(128, "bf16", block_n) == 8
 
 
+@pytest.mark.parametrize("block_n", [64, 32])
+def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
+    """The V^T swizzle must appear in the lowered IR with the SAME mask on the store
+    and the read. A store/read mask mismatch is the silent-wrong-answer bug for this
+    pattern, and the fp32-oracle numeric test cannot catch it -- store and read apply
+    the same permutation regardless, so an off build is numerically identical. Pure
+    text lowering, CPU lane (no comgr / no GPU).
+
+    The swizzle key ``(dim & (V_LDROW//4 - 1)) << 2`` lowers to an ``and i32`` / ``shl
+    i32 .., 2`` / ``xor i32`` triple, and the ONLY ``and i32 x, C`` mask in this kernel
+    is that swizzle mask -- so the set of such constants must be exactly the derived
+    ``V_LDROW//4 - 1`` (two distinct values == store and read drifted). Forcing a pad
+    off the derived width breaks the pow2 gate, so the mask disappears and 'on' is
+    provably distinct from 'off'."""
+    import re
+
+    spec = _spec(head_size=128, dtype="fp16", block_n=block_n)
+    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n)) // 4 - 1
+
+    def _swz_masks(ir):
+        consts = {int(c) for c in re.findall(r"\band i32 [^,]+, (\d+)", ir)}
+        return sorted(consts & {7, 15, 31, 63})
+
+    def _xors(ir):
+        return len(re.findall(r"\bxor i32\b", ir))
+
+    on = _lower(build_attention_dense(spec, arch="gfx942"))
+    assert _swz_masks(on) == [expected_mask], (block_n, _swz_masks(on))
+    assert _xors(on) > 2, ("swizzle triple absent", block_n, _xors(on))
+
+    off = _lower(
+        build_attention_dense(
+            spec, arch="gfx942", tuning=Gfx942DenseTuning(v_row_pad=8)
+        )
+    )
+    assert _swz_masks(off) == [], (block_n, _swz_masks(off))
+    assert _xors(off) < _xors(on)
+
+
 def test_default_tuning_v_row_pad_resolves_through_policy():
     """The shipped default leaves ``v_row_pad=None`` and resolves through the policy,
     derived from (head_size, dtype, block_n): fp16-D128 -> a pow2 (>=64) V_LDROW at any
