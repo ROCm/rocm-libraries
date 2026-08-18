@@ -21,16 +21,18 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// once for the process. A pack that fails to register is logged and excluded.
 void registerNativeIngestorSymbols();
 
-/// The provider's own descriptor tree: HIPDNN_DESCRIPTOR_DIR if it names a real
-/// directory, else the installed copy. Only the install path is compiled in -- a baked
+/// The provider's own descriptor tree, from the first of three sources that answers:
+/// HIPDNN_DESCRIPTOR_DIR if it names a real directory, else the copy sitting beside this
+/// module (resolved through dladdr, so a relocated or DESTDIR install finds its own
+/// files), else the configure-time install prefix. Only the last is compiled in -- a baked
 /// build-tree path would ship inside the plugin and shadow the installed files. Declared
 /// here so tests resolve exactly what the provider resolves.
 std::filesystem::path descriptorSearchDirectory();
 
 /// Every directory discoverDescriptorSets() reads, in order: the tree above, then
 /// HIPDNN_DESCRIPTOR_RUNTIME_DIR when it names one. The runtime tree is additive rather
-/// than an override -- it can add engines beside the shipped ones, but cannot redefine
-/// one, because two files disagreeing over an id drop both.
+/// than an override -- it can add descriptors beside the shipped ones, but a file
+/// redefining a shipped id is refused and the shipped definition stands.
 std::vector<std::filesystem::path> descriptorSearchDirectories();
 
 /// Every descriptor set this provider serves. Registers symbols first so validation can

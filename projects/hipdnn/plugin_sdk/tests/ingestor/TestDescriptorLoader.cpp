@@ -354,7 +354,7 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.engine.behaviorNotes.front(), HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
 }
 
-/// A UED naming no UHD ranks by declared order instead of failing, so the SDK can adopt a
+/// A UED naming no UHD ranks on priority then id instead of failing, so the SDK can adopt a
 /// model later without the engine being unloadable until it does. The UHD is removed with
 /// the reference: a descriptor no engine names is the orphan case, tested separately.
 TEST(TestDescriptorLoader, LoadsAnEngineThatShipsNoHeuristic)
@@ -485,6 +485,8 @@ TEST(TestDescriptorLoader, DropsBothWhenOneIdAndArchIsDefinedTwiceWithDifferentC
 /// collide on content like any other repeated key. Unsorted, these would be two packs.
 TEST(TestDescriptorLoader, TreatsArchOrderAsOneKey)
 {
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_order"));
     auto documents = makeSetDocuments('1', "test:arch_order");
     documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942", "gfx950"});
@@ -496,6 +498,39 @@ TEST(TestDescriptorLoader, TreatsArchOrderAsOneKey)
     std::ofstream(dir.path() / "reordered.kdp.json", std::ios::binary) << reordered.dump(2);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
+    // Named rather than inferred from the empty result: two entries under two keys would
+    // also leave nothing loadable, for an entirely different reason.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "arch=[gfx942,gfx950]"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "both define"));
+}
+
+/// Both spellings of one kernel id present at once: the pack's own arch is the answer,
+/// and the arch-independent entry is the fallback for a pack that finds nothing else --
+/// tested together, since each resolves on its own and only the order between them can
+/// regress.
+TEST(TestDescriptorLoader, PrefersTheKernelBuiltForThePacksArchOverTheArchIndependentOne)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_precedence"));
+    auto documents = makeSetDocuments('1', "test:arch_precedence");
+    referenceLastKernel(documents);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+
+    // The referenced kernel, a second time: same id, stamped for this pack's arch, and
+    // named differently so which one resolved is visible in the result.
+    auto pinned = documentOfType(documents, ".ukd.json");
+    pinned["arch"] = nlohmann::json::array({"gfx942"});
+    pinned["name"] = "the gfx942 build";
+    documents.push_back(TestDocument{".ukd.json", pinned});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.back().name, "the gfx942 build");
 }
 
 /// A pack missing its shard's arch stamp names a kernel that exists -- just not under any
@@ -569,27 +604,73 @@ TEST(TestDescriptorLoader, CollapsesAnIdenticalDescriptorSetPresentInBothRoots)
     EXPECT_EQ(sets.front().engine.name, "test:mirrored");
 }
 
-TEST(TestDescriptorLoader, DropsAnIdTwoRootsDisagreeAbout)
+/// The drop-in rule: a later root may add descriptors, never replace one. Two files
+/// disagreeing inside one root drop both, because nothing ranks them; across roots the
+/// installed tree is the answer, so the newcomer is refused and the incumbent survives
+/// intact -- an operator-controlled root that could delete a shipped engine would do it
+/// at a severity the default log level never shows.
+TEST(TestDescriptorLoader, RefusesADropInRedefiningAnInstalledId)
 {
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_conflict"));
-    const auto rootA = dir.path() / "a";
-    const auto rootB = dir.path() / "b";
+    const auto installed = dir.path() / "a";
+    const auto dropIn = dir.path() / "b";
 
-    writeDocuments(rootA, makeSetDocuments('1', "test:survivor"));
+    auto documents = makeSetDocuments('1', "test:installed");
+    writeDocuments(installed, documents);
 
-    auto conflicted = makeSetDocuments('2', "test:conflicted");
-    writeDocuments(rootA, conflicted);
-    // Same id as the UED just written into root A, differing content, but filed under
-    // root B instead: the two roots feed one catalog, so this is a same-id conflict
-    // exactly as it would be inside a single root.
-    auto& engine = documentOfType(conflicted, ".ued.json");
-    engine["name"] = "test:conflicted_other";
-    writeDocument(rootB, TestDocument{".ued.json", engine});
+    // Same UED id, different content, filed under the later root.
+    auto& engine = documentOfType(documents, ".ued.json");
+    engine["name"] = "test:redefined";
+    writeDocument(dropIn, TestDocument{".ued.json", engine});
 
-    const auto sets = loadFromRoots({rootA, rootB});
+    const auto sets = loadFromRoots({installed, dropIn});
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:survivor");
+    EXPECT_EQ(sets.front().engine.name, "test:installed");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The other half: a drop-in that claims no installed id is loaded like any other file,
+/// so the tree is genuinely additive rather than decorative.
+TEST(TestDescriptorLoader, LoadsAnEngineThatOnlyTheDropInRootDefines)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_add"));
+    const auto installed = dir.path() / "a";
+    const auto dropIn = dir.path() / "b";
+
+    writeDocuments(installed, makeSetDocuments('1', "test:installed"));
+    writeDocuments(dropIn, makeSetDocuments('2', "test:dropped_in"));
+
+    const auto sets = loadFromRoots({installed, dropIn});
+
+    ASSERT_EQ(sets.size(), 2u);
+    EXPECT_EQ(sets.front().engine.name, "test:installed");
+    EXPECT_EQ(sets.back().engine.name, "test:dropped_in");
+}
+
+/// The multi-root overload the provider actually calls, rather than the catalog helper
+/// the tests above use: a drop-in descriptor has to survive symbol validation, the
+/// engine-name claim, and the state-manager probe before it is an engine anyone can
+/// serve. Registering the engine name is process-wide, so the names here are unique to
+/// this test.
+TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_validated"));
+    const auto installed = dir.path() / "a";
+    const auto dropIn = dir.path() / "b";
+
+    writeDocuments(installed, makeSetDocuments('1', "test:validated_installed"));
+    writeDocuments(dropIn, makeSetDocuments('2', "test:validated_drop_in"));
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>({installed, dropIn});
+
+    ASSERT_EQ(sets.size(), 2u);
+    EXPECT_EQ(sets.front().engine.name, "test:validated_installed");
+    EXPECT_EQ(sets.back().engine.name, "test:validated_drop_in");
 }
 
 TEST(TestDescriptorLoader, AMissingRootContributesNothingButTheOtherRootStillLoads)
@@ -723,6 +804,22 @@ INSTANTIATE_TEST_SUITE_P(
         ViolationCase{
             "missing_required_key",
             [](Documents& documents) { documentOfType(documents, ".ued.json").erase("metadata"); }},
+        // RFC 0017 §4 names fields Descriptors.hpp does not model yet, so an authored one
+        // is either a typo or a field arriving before its parsed form -- both are load
+        // errors rather than something to ignore, unless they carry an extension prefix
+        // (LoadsADescriptorCarryingTrackingFields covers that half).
+        ViolationCase{"unknown_key",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["features_signature"]
+                              = nlohmann::json::array({"tensor_core"});
+                      }},
+        // A file's type comes from its filename alone. A `schema` member would be a second
+        // spelling of that fact, so it is rejected outright rather than tolerated: two
+        // sources of truth have no correct reading when they disagree.
+        ViolationCase{"schema_key_is_not_a_member",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["schema"] = "hipdnn.ued/v1";
+                      }},
         ViolationCase{"unknown_behavior_note",
                       [](Documents& documents) {
                           documentOfType(documents, ".ued.json")["behavior_notes"]
@@ -1926,47 +2023,59 @@ TEST(TestDescriptorLoader, RejectsAStandaloneKernelWithNoVersion)
 }
 
 /// Pins the asymmetry the contract draws: `version` is a file-level key, so the field
-/// required standalone is warned about, not enforced, on the inline spelling of the very
-/// same kernel -- an unknown key no longer costs the file.
-TEST(TestDescriptorLoader, WarnsOnAnInlineKernelCarryingAVersion)
+/// required standalone is not merely unused on the inline spelling of the very same
+/// kernel -- it is a key that spelling has no place for, and the pack carrying it fails.
+TEST(TestDescriptorLoader, RejectsAnInlineKernelCarryingAVersion)
 {
     auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_with_version"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
-    auto tolerated = makeSetDocuments('2', "test:broken");
-    documentOfType(tolerated, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.0";
-    writeDocuments(dir.path(), tolerated);
-
-    const auto sets = loadFrom(dir.path());
-
-    EXPECT_EQ(sets.size(), 2u);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
-                                          "unknown key 'version' in a 'kernelDescriptors' entry"));
-}
-
-/// A leftover `schema` key was a hard error when the field was dropped in favour of the
-/// filename suffix. It is an unknown key like any other now, so it warns and the engine
-/// still loads.
-TEST(TestDescriptorLoader, WarnsOnALeftoverSchemaKey)
-{
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("leftover_schema"));
-    auto documents = makeSetDocuments('1', "test:leftover_schema");
-    documentOfType(documents, ".ued.json")["schema"] = "hipdnn.ued/v1";
-    writeDocuments(dir.path(), documents);
+    auto broken = makeSetDocuments('2', "test:broken");
+    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.0";
+    writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "unknown key 'schema'"));
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    // The locator is the point: "a 'kernelDescriptors' entry" alone names no file, and a
+    // shard layout ships the same filename under every arch.
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "unknown key 'version' in a 'kernelDescriptors' entry in "))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, ".kdp.json"));
 }
 
-/// The point of the policy: a descriptor may carry provenance or tracking fields the
-/// loader has no reader for -- exactly what the build-time packager stamps onto its
-/// output -- and still load.
+/// A typo in an OPTIONAL key is the case the extension rule exists to catch: `heuristik`
+/// leaves a UED with no heuristic at all, which is legal, so warning about it would let
+/// the engine load and rank by the fallback forever with the default log level off.
+TEST(TestDescriptorLoader, RejectsAMisspelledOptionalKey)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("misspelled_optional"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    auto& engine = documentOfType(broken, ".ued.json");
+    engine["heuristik"] = engine.at("heuristic");
+    engine.erase("heuristic");
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'heuristik'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The point of the policy: a descriptor may carry tracking fields the loader has no
+/// reader for -- what the build-time packager stamps onto its output -- and still load,
+/// as long as they announce themselves. `provenance` is the packager's one unprefixed
+/// block; anything else has to wear the `x-`/`_` prefix.
 TEST(TestDescriptorLoader, LoadsADescriptorCarryingTrackingFields)
 {
     auto recorder
@@ -1976,13 +2085,16 @@ TEST(TestDescriptorLoader, LoadsADescriptorCarryingTrackingFields)
     auto& engine = documentOfType(documents, ".ued.json");
     engine["provenance"] = {{"origin_kind", "hip"}};
     engine["x-build-id"] = "abc123";
+    engine["_internal"] = 7;
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:tracked");
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "unknown key 'provenance'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key 'provenance'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key 'x-build-id'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key '_internal'"));
 }
 
 /// Follows AnUnsupportedVersionDropsBeforeItCanCollideByName's shape: an unreadable file

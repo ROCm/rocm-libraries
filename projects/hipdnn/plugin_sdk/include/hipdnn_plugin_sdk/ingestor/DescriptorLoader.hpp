@@ -82,17 +82,19 @@
  *    same reason -- a shard ships one kernel id many times and the id alone cannot
  *    distinguish them.
  *  - RFC 0020 §10.1 and §11 make any unknown field a hard rejection
- *    (`additionalProperties: false`); this warns and ignores instead, so a descriptor may
- *    carry provenance or tracking fields. A leftover `schema` key -- deliberately a hard
- *    error when the field was removed above -- is therefore only a warning too.
+ *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus the packager's
+ *    `provenance` block, is warned about and ignored instead, so a descriptor may carry
+ *    tracking data. Every other unknown key is still the hard rejection the RFC asks
+ *    for, including a leftover `schema`.
  *
  * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
  * parseEngineDescriptor().
  *
  * Apart from the UED and KDP, whose keys the RFCs fix, every JSON key is the snake_case
- * spelling of its C++ field, and an unrecognized key is a WARN naming the file, then
- * ignored -- only a *missing required* key is fatal. The KDP's `kernelDescriptors` key
- * is camelCase, the RFCs' own inconsistency, kept as-is rather than silently "fixed".
+ * spelling of its C++ field, and an unrecognized key fails the file naming the path unless
+ * it announces itself as extension data (see requireKnownKeys). The KDP's
+ * `kernelDescriptors` key is camelCase, the RFCs' own inconsistency, kept as-is rather
+ * than silently "fixed".
  *
  * Only fields Descriptors.hpp models are parsed; the RFCs describe more (declarative
  * `nodes`/`criteria`, `features_signature`) that arrive with follow-up RFCs. This loader
@@ -115,6 +117,10 @@ struct CatalogEntry
     nlohmann::json source;
     std::filesystem::path path; ///< first file that defined this id
     bool conflicted = false; ///< two files disagreed; treat as absent
+    /// Set once the root this came from is fully read. A later root may add descriptors
+    /// beside a settled one but never redefine it: the drop-all rule below exists because
+    /// two files inside one root have no defensible order, and two roots do.
+    bool settled = false;
 };
 
 /// Identity for the two types a per-arch shard ships more than once. Arch is sorted so two
@@ -171,8 +177,9 @@ struct FileType
     void (*insert)(DescriptorCatalog&, const nlohmann::json&, const std::filesystem::path&);
 };
 
-/// Every parse violation leaves through here, so the caller catches one type and the
-/// message never carries the path: the caller already has it and adds it to the log.
+/// Every parse violation leaves through here, so the caller catches one type. The message
+/// carries the file path only because `where` is the path: the caller logs it too, and the
+/// duplication is worth an exception that is readable on its own.
 [[noreturn]] inline void fail(const std::string& message)
 {
     throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE, message);
@@ -186,24 +193,39 @@ inline void requireObject(const nlohmann::json& value, const std::string& where)
     }
 }
 
-/// Warns on any key the struct does not spell, then carries on: a descriptor may carry
-/// provenance or tracking fields the loader has no use for, and rejecting the file over
-/// one is worse than ignoring it. Only a MISSING required key is fatal (requireKey).
-/// The cost is real and accepted: a typo in an OPTIONAL key -- UED `heuristic`, `knobs`,
-/// `behavior_notes`, `numerical_notes`, `sdk_version`; KDP `arch`; UKD `priority`,
-/// `metadata`, `arch`; a KMD field's `default_value` -- now silently does nothing, and
-/// the default log level is `off`, so nothing says so.
-inline void warnOnUnknownKeys(const nlohmann::json& object,
-                              std::initializer_list<std::string_view> allowed,
-                              const std::string& where)
+/// Extension data has to look like extension data: a key starting `x-` or `_`, plus
+/// `provenance`, the one unprefixed block the descriptor packager emits. Those warn and
+/// are ignored, so a descriptor can carry tracking fields the loader has no use for.
+///
+/// Anything else the struct does not spell fails the file, because the alternative is
+/// silent damage. A UED spelling `heuristik` has no heuristic key, and absence is legal:
+/// the engine loads and ranks by the fallback heuristic for the rest of its life. A KDP
+/// spelling `arh` is arch-independent and dispatches its kernels on every GPU. The
+/// default log level is `off` (LogLevel.hpp), so a warning about either reaches nobody.
+/// A producer that wants a key of its own prefixes it -- a one-line change there, against
+/// a descriptor tree that otherwise cannot be trusted to mean what it spells.
+inline bool isExtensionKey(std::string_view key)
+{
+    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == "provenance";
+}
+
+inline void requireKnownKeys(const nlohmann::json& object,
+                             std::initializer_list<std::string_view> allowed,
+                             const std::string& where)
 {
     for(const auto& item : object.items())
     {
-        if(std::find(allowed.begin(), allowed.end(), item.key()) == allowed.end())
+        if(std::find(allowed.begin(), allowed.end(), item.key()) != allowed.end())
         {
-            HIPDNN_PLUGIN_LOG_WARN("descriptor loader: unknown key '" << item.key() << "' in "
-                                                                      << where << "; ignoring it");
+            continue;
         }
+        if(!isExtensionKey(item.key()))
+        {
+            fail("unknown key '" + item.key() + "' in " + where
+                 + "; extension keys must start with 'x-' or '_'");
+        }
+        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: extension key '" << item.key() << "' in "
+                                                                    << where << "; ignoring it");
     }
 }
 
@@ -514,11 +536,11 @@ inline bool coerceToDeclaredType(MetadataValue& value, MetadataType declared)
 }
 
 /// Deviates from RFC 0017 §4: the RFC's example field also carries `optional` and spells
-/// the default `default`, but MetadataField has neither, so a conforming field is warned
-/// about and ignored until the struct grows one.
+/// the default `default`, but MetadataField has neither, so a conforming field is rejected
+/// as an unknown key until the struct grows one.
 inline MetadataSchema parseMetadataSchema(const nlohmann::json& root, const std::string& where)
 {
-    warnOnUnknownKeys(root, {"version", "id", "name", "fields"}, where);
+    requireKnownKeys(root, {"version", "id", "name", "fields"}, where);
 
     MetadataSchema schema;
     schema.id = requireId(root, "id", where);
@@ -531,12 +553,15 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root, const std:
     }
     for(const auto& fieldJson : fields)
     {
-        requireObject(fieldJson, "a 'fields' entry");
-        warnOnUnknownKeys(fieldJson, {"name", "type", "default_value"}, "a 'fields' entry");
+        // Nested labels carry the file too: a bare "a 'fields' entry" is unlocatable in a
+        // tree of shards all shipping the same filename.
+        const std::string entryWhere = "a 'fields' entry in " + where;
+        requireObject(fieldJson, entryWhere);
+        requireKnownKeys(fieldJson, {"name", "type", "default_value"}, entryWhere);
 
         MetadataField field;
-        field.name = requireString(fieldJson, "name", "a 'fields' entry");
-        const std::string fieldWhere = "field '" + field.name + "'";
+        field.name = requireString(fieldJson, "name", entryWhere);
+        const std::string fieldWhere = "field '" + field.name + "' in " + where;
         field.type
             = metadataTypeFromString(requireString(fieldJson, "type", fieldWhere), fieldWhere);
 
@@ -557,7 +582,7 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root, const std:
 inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
                                                     const std::string& where)
 {
-    warnOnUnknownKeys(root, {"version", "id", "name", "kind", "payload"}, where);
+    requireKnownKeys(root, {"version", "id", "name", "kind", "payload"}, where);
 
     HeuristicDescriptor heuristic;
     heuristic.id = requireId(root, "id", where);
@@ -662,24 +687,24 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
     // it: RFC 0017 §4 puts the graph schema version on the UMD, but every descriptor
     // under an engine reads tokens that engine's binding produced, so it belongs on the
     // engine instead. Accepted here pending the RFC amendment that moves the field.
-    warnOnUnknownKeys(root,
-                      {"version",
-                       "id",
-                       "name",
-                       "sdk_version",
-                       "heuristic",
-                       "metadata",
-                       "knobs",
-                       "behavior_notes",
-                       "numerical_notes"},
-                      where);
+    requireKnownKeys(root,
+                     {"version",
+                      "id",
+                      "name",
+                      "sdk_version",
+                      "heuristic",
+                      "metadata",
+                      "knobs",
+                      "behavior_notes",
+                      "numerical_notes"},
+                     where);
 
     EngineDescriptor engine;
     engine.id = requireId(root, "id", where);
     engine.name = requireString(root, "name", where);
     requireScopedName(engine.name, where);
-    // Optional: a UED naming no UHD ranks by declared order, and makeKernelHeuristic()
-    // warns and substitutes DeclaredOrderKernelHeuristic. Absence is the only way out --
+    // Optional: a UED naming no UHD ranks on priority then id, and makeKernelHeuristic()
+    // warns and substitutes UnrankedKernelHeuristic. Absence is the only way out --
     // a `heuristic` key present but naming nothing is still a parse error below.
     if(root.find("heuristic") != root.end())
     {
@@ -724,7 +749,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    warnOnUnknownKeys(root, {"version", "id", "name", "scope", "match_symbol"}, where);
+    requireKnownKeys(root, {"version", "id", "name", "scope", "match_symbol"}, where);
 
     MatchDescriptor matcher;
     matcher.id = requireId(root, "id", where);
@@ -737,7 +762,7 @@ inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const st
 inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
                                                   const std::string& where)
 {
-    warnOnUnknownKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
+    requireKnownKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
 
     DispatchDescriptor dispatch;
     dispatch.id = requireId(root, "id", where);
@@ -749,7 +774,7 @@ inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
 inline KernelSource parseKernelSource(const nlohmann::json& root, const std::string& where)
 {
     requireObject(root, where);
-    warnOnUnknownKeys(root, {"kind", "source_file", "entry_point"}, where);
+    requireKnownKeys(root, {"kind", "source_file", "entry_point"}, where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
@@ -815,12 +840,14 @@ inline KernelDescriptor parseKernelDescriptorBody(const nlohmann::json& root,
     return kernel;
 }
 
-/// A kernel spelled inside its pack.
-inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
+/// A kernel spelled inside its pack. Takes the pack's file, so a diagnostic about an
+/// inline kernel names the file it is spelled in rather than only its shape.
+inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
+                                              const std::string& packWhere)
 {
-    const std::string where = "a 'kernelDescriptors' entry";
+    const std::string where = "a 'kernelDescriptors' entry in " + packWhere;
     requireObject(root, where);
-    warnOnUnknownKeys(root, {"id", "name", "kernel_source", "metadata", "priority"}, where);
+    requireKnownKeys(root, {"id", "name", "kernel_source", "metadata", "priority"}, where);
     return parseKernelDescriptorBody(root, where);
 }
 
@@ -831,7 +858,7 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
 inline KernelDescriptor parseStandaloneKernelDescriptor(const nlohmann::json& root,
                                                         const std::string& where)
 {
-    warnOnUnknownKeys(
+    requireKnownKeys(
         root, {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"}, where);
     auto kernel = parseKernelDescriptorBody(root, where);
     kernel.arch = requireArchList(root, where);
@@ -861,7 +888,7 @@ inline DescriptorId
 inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root,
                                                       const std::string& where)
 {
-    warnOnUnknownKeys(
+    requireKnownKeys(
         root,
         {"version", "id", "name", "arch", "matchers", "engine", "dispatch", "kernelDescriptors"},
         where);
@@ -899,7 +926,7 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
         }
         else
         {
-            pack.kernels.push_back(parseKernelDescriptor(entry));
+            pack.kernels.push_back(parseKernelDescriptor(entry, where));
         }
     }
     return pack;
@@ -947,8 +974,9 @@ inline std::string keyDescription(const ArchKey& key)
 }
 
 /// Inserts a freshly parsed descriptor, resolving a repeated key against what is already
-/// held: identical content is a duplicate shard and is dropped, differing content
-/// poisons the entry so neither definition is used.
+/// held: identical content is a duplicate shard and is dropped, differing content from a
+/// later root is refused, and differing content from the same root poisons the entry so
+/// neither definition is used.
 template <typename Map, typename T>
 inline void insertCatalogEntry(Map& map,
                                T descriptor,
@@ -980,11 +1008,27 @@ inline void insertCatalogEntry(Map& map,
                                << "', already loaded from " << it->second.path << "; skipping");
         return;
     }
+    // A settled incumbent came from an earlier root, so there is a defensible answer to
+    // "which one meant it": the tree that was installed, not the one dropped in beside
+    // it. Refusing the newcomer is what keeps a drop-in additive -- poisoning the entry
+    // here would let any operator-controlled file delete a shipped engine, and at a
+    // severity the default log level (off) never shows. HIPDNN_DESCRIPTOR_DIR remains the
+    // way to replace a tree wholesale.
+    if(it->second.settled)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                << path << " redefines " << description << " name='" << name
+                                << "' already loaded from " << it->second.path
+                                << " under an earlier root; ignoring the redefinition");
+        return;
+    }
     HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
                             << path << " and " << it->second.path << " both define " << description
                             << " name='" << name << "' with different contents; ignoring both");
     // Never cleared by a later file: once two files disagree about what an id means,
-    // no third file can decide which of them was right.
+    // no third file can decide which of them was right. A later root does not repair it
+    // either -- the refusal above keeps the poisoned entry, since the disagreement is
+    // between two files that both outrank the newcomer.
     it->second.conflicted = true;
 }
 
@@ -1313,31 +1357,30 @@ inline void
     files.insert(files.end(), found.begin(), found.end());
 }
 
-} // namespace detail
-
-/**
- * @brief Every descriptor file under @p roots, parsed and keyed by (type, id).
- *
- * Walks each root in turn, taking every file whose name ends in one of the seven type
- * suffixes. The roots feed one catalog, so two files claiming one id resolve by the same
- * rules whether they sit in one root or in two: identical content collapses, and content
- * that disagrees drops both. A later root therefore extends the earlier ones and cannot
- * quietly redefine them.
- *
- * Never throws: a file that fails to open, fails to parse, or violates the authored
- * format is logged at ERROR with its path and the reason, and skipped; a `.json` naming
- * no type is logged at WARN and skipped before it is opened.
- */
-inline DescriptorCatalog loadDescriptorCatalog(const std::vector<std::filesystem::path>& roots)
+/// Marks everything read so far as belonging to an earlier root, which is what makes a
+/// later root additive: insertCatalogEntry refuses a redefinition of a settled entry.
+inline void settleCatalog(DescriptorCatalog& catalog)
 {
-    DescriptorCatalog catalog;
+    const auto settle = [](auto& map) {
+        for(auto& entry : map)
+        {
+            entry.second.settled = true;
+        }
+    };
+    settle(catalog.schemas);
+    settle(catalog.heuristics);
+    settle(catalog.engines);
+    settle(catalog.matchers);
+    settle(catalog.dispatches);
+    settle(catalog.packs);
+    settle(catalog.kernels);
+}
 
-    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
-    for(const auto& root : roots)
-    {
-        detail::collectDescriptorFiles(root, files);
-    }
-
+/// Parses one root's files into @p catalog, in the order they were collected.
+inline void
+    loadDescriptorFiles(const std::vector<std::pair<std::filesystem::path, const FileType*>>& files,
+                        DescriptorCatalog& catalog)
+{
     for(const auto& [path, fileType] : files)
     {
         nlohmann::json document;
@@ -1369,12 +1412,12 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::vector<std::filesystem
 
         try
         {
-            detail::requireObject(document, "the document root");
-            // Version before schema tag: a file from a newer toolchain bumps both, and
-            // "unsupported version 2.0" names the actionable mismatch where "must be
-            // 'hipdnn.ued/v1'" would blame the wrong field. Both still precede the insert,
-            // so RFC 0020 §10.2.1's version-before-duplicate ordering is unaffected.
-            if(!detail::versionIsSupported(document, *fileType, path))
+            requireObject(document, "the document root");
+            // Version before the insert: a file from a newer toolchain is rejected for the
+            // version it names rather than for whatever its body does with keys this build
+            // has never heard of, and RFC 0020 §10.2.1's version-before-duplicate ordering
+            // is unaffected.
+            if(!versionIsSupported(document, *fileType, path))
             {
                 continue;
             }
@@ -1385,6 +1428,35 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::vector<std::filesystem
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: " << path << " is not a valid descriptor: "
                                                           << formatError.what());
         }
+    }
+}
+
+} // namespace detail
+
+/**
+ * @brief Every descriptor file under @p roots, parsed and keyed by (type, id).
+ *
+ * Walks each root in turn, taking every file whose name ends in one of the seven type
+ * suffixes. The roots feed one catalog, and which root a file came from decides how a
+ * repeated id resolves: within one root, identical content collapses and content that
+ * disagrees drops both, since nothing ranks two files of one tree. Across roots the
+ * earlier tree wins and the later file is refused, so a drop-in root adds descriptors
+ * beside the installed ones and cannot delete one by claiming its id.
+ *
+ * Never throws: a file that fails to open, fails to parse, or violates the authored
+ * format is logged at ERROR with its path and the reason, and skipped; a `.json` naming
+ * no type is logged at WARN and skipped before it is opened.
+ */
+inline DescriptorCatalog loadDescriptorCatalog(const std::vector<std::filesystem::path>& roots)
+{
+    DescriptorCatalog catalog;
+
+    for(const auto& root : roots)
+    {
+        std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+        detail::collectDescriptorFiles(root, files);
+        detail::loadDescriptorFiles(files, catalog);
+        detail::settleCatalog(catalog);
     }
 
     return catalog;
@@ -1725,9 +1797,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             unreferenced.push_back(&kernelEntry.second);
         }
     }
-    std::sort(unreferenced.begin(), unreferenced.end(), [](const auto* lhs, const auto* rhs) {
-        return lhs->descriptor.id < rhs->descriptor.id;
-    });
+    // No sort: catalog.kernels is ordered by (id, arch), and an id alone no longer orders
+    // these -- it repeats across shards.
     for(const auto* entry : unreferenced)
     {
         HIPDNN_PLUGIN_LOG_WARN("descriptor loader: kernel '"

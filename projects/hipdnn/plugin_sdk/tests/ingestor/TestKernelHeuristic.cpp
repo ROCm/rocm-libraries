@@ -329,7 +329,7 @@ TEST(TestIngestorKernelHeuristic, WarnsNamingTheEngineWhenNoHeuristicIsSupplied)
         << recorder.getRecordedLogsAsString();
 }
 
-TEST(TestIngestorKernelHeuristic, DeclaredOrderRanksOnPriorityWhenNoHeuristicIsSupplied)
+TEST(TestIngestorKernelHeuristic, UnrankedFallsToPriorityWhenNoHeuristicIsSupplied)
 {
     const TestGraph graph;
     const auto properties = testDeviceProperties();
@@ -351,7 +351,7 @@ TEST(TestIngestorKernelHeuristic, DeclaredOrderRanksOnPriorityWhenNoHeuristicIsS
     EXPECT_EQ(ranked.front().kernelId, highPriorityId);
 }
 
-TEST(TestIngestorKernelHeuristic, DeclaredOrderFallsToKernelIdWhenPriorityTies)
+TEST(TestIngestorKernelHeuristic, UnrankedFallsToKernelIdWhenPriorityTies)
 {
     const TestGraph graph;
     const auto properties = testDeviceProperties();
@@ -372,7 +372,7 @@ TEST(TestIngestorKernelHeuristic, DeclaredOrderFallsToKernelIdWhenPriorityTies)
     EXPECT_EQ(ranked.front().kernelId, lowerId);
 }
 
-TEST(TestIngestorKernelHeuristic, DeclaredOrderRanksEveryKernelEqually)
+TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 {
     // The fallback must contribute no ordering of its own: any score spread would
     // outrank priority, which is the one signal an engine without a model still has.
@@ -380,7 +380,7 @@ TEST(TestIngestorKernelHeuristic, DeclaredOrderRanksEveryKernelEqually)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    const DeclaredOrderKernelHeuristic heuristic;
+    const UnrankedKernelHeuristic heuristic;
 
     EXPECT_EQ(heuristic.score(makeDefinition(testId(0x01), 64), context),
               heuristic.score(makeDefinition(testId(0x02), 4096), context));
