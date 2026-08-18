@@ -130,6 +130,17 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
             auto kk = idx_lower(kcol, kcol, lda);
             auto const akk = std::real(A[kk]);
             bool const isok = (akk > 0) && (std::isfinite(akk));
+
+            // Every thread in the block reads A[kk] just above, and thread 0
+            // overwrites it just below. Without this barrier a wave that
+            // reaches the read late observes the already-stored sqrt(akk),
+            // so its local lkk/ukk becomes sqrt(sqrt(akk)) and it scales its
+            // slice of column kcol by the wrong scalar -- silently returning
+            // a matrix that is not a Cholesky factor, with info still 0.
+            // The barrier also makes isok uniform across the block, so the
+            // break below can no longer diverge at a later __syncthreads().
+            __syncthreads();
+
             if(!isok)
             {
                 if(tid == 0)
@@ -210,6 +221,17 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
             auto const kk = idx_upper(kcol, kcol, lda);
             auto const akk = std::real(A[kk]);
             bool const isok = (akk > 0) && (std::isfinite(akk));
+
+            // Every thread in the block reads A[kk] just above, and thread 0
+            // overwrites it just below. Without this barrier a wave that
+            // reaches the read late observes the already-stored sqrt(akk),
+            // so its local lkk/ukk becomes sqrt(sqrt(akk)) and it scales its
+            // slice of column kcol by the wrong scalar -- silently returning
+            // a matrix that is not a Cholesky factor, with info still 0.
+            // The barrier also makes isok uniform across the block, so the
+            // break below can no longer diverge at a later __syncthreads().
+            __syncthreads();
+
             if(!isok)
             {
                 if(tid == 0)
