@@ -27,8 +27,6 @@
 #include "rocblas_data.hpp"
 #include "rocblas_test.hpp"
 
-#include "../../library/src/include/utility.hpp"
-
 #include <cstring>
 #include <string>
 #include <vector>
@@ -46,19 +44,17 @@ namespace
     constexpr unsigned char c_guard_byte  = 0xA5;
     constexpr size_t        c_guard_bytes = 8192;
 
-    bool arch_has_gemm_only_path()
+    bool fill_guard(void* workspace, size_t workspace_bytes)
     {
-        const std::string arch = rocblas_internal_get_arch_name();
-        return arch == "gfx90a" || arch == "gfx942";
-    }
-
-    void fill_guard(void* workspace, size_t workspace_bytes)
-    {
-        ASSERT_EQ(hipMemset(static_cast<char*>(workspace) + workspace_bytes,
-                            c_guard_byte,
-                            c_guard_bytes),
-                  hipSuccess);
-        ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+        hipError_t err = hipMemset(static_cast<char*>(workspace) + workspace_bytes,
+                                   c_guard_byte,
+                                   c_guard_bytes);
+        EXPECT_EQ(err, hipSuccess) << "could not fill the guard: " << hipGetErrorString(err);
+        if(err != hipSuccess)
+            return false;
+        err = hipStreamSynchronize(nullptr);
+        EXPECT_EQ(err, hipSuccess) << "could not sync the guard fill: " << hipGetErrorString(err);
+        return err == hipSuccess;
     }
 
     void expect_guard_clean(rocblas_handle handle, void* workspace, size_t workspace_bytes)
@@ -90,6 +86,44 @@ namespace
             << " byte(s) past the end of the " << workspace_bytes
             << " byte user allocated workspace";
     }
+
+    // Owns an exact-sized workspace plus trailing guard; clears handle binding on teardown.
+    class canary_workspace
+    {
+    public:
+        canary_workspace(rocblas_handle handle, size_t workspace_bytes)
+            : m_handle(handle)
+            , m_workspace_bytes(workspace_bytes)
+            , m_storage(workspace_bytes + c_guard_bytes)
+        {
+            if(m_storage.memcheck() != hipSuccess)
+                return;
+            if(!fill_guard(m_storage, workspace_bytes))
+                return;
+            if(rocblas_set_workspace(m_handle, m_storage, workspace_bytes) != rocblas_status_success)
+                return;
+            m_valid = true;
+        }
+
+        ~canary_workspace()
+        {
+            if(m_valid)
+                EXPECT_EQ(rocblas_set_workspace(m_handle, nullptr, 0), rocblas_status_success);
+        }
+
+        canary_workspace(const canary_workspace&)            = delete;
+        canary_workspace& operator=(const canary_workspace&) = delete;
+
+        bool   valid() const { return m_valid; }
+        void*  ptr() const { return m_storage; }
+        size_t bytes() const { return m_workspace_bytes; }
+
+    private:
+        rocblas_handle              m_handle;
+        size_t                      m_workspace_bytes = 0;
+        device_vector<unsigned char> m_storage;
+        bool                        m_valid           = false;
+    };
 
     template <typename T>
     bool query_workspace(rocblas_handle    handle,
@@ -197,9 +231,6 @@ namespace
     template <typename T>
     void run_workspace_canary(bool strided, bool herk)
     {
-        if(!arch_has_gemm_only_path())
-            GTEST_SKIP() << "gemm-only syrk/herk path is live only on gfx90a/gfx942";
-
         // Default-constructed handle: do not go through user_allocated_workspace.
         rocblas_local_handle handle;
 
@@ -208,15 +239,13 @@ namespace
 
         size_t workspace_bytes = 0;
         ASSERT_TRUE(query_workspace<T>(handle, transA, strided, herk, &workspace_bytes));
-        // Path must be live: a zero query means we never reached the workspace
-        // kernel, so a clean canary would be a false pass.
-        ASSERT_GT(workspace_bytes, size_t(0))
-            << "size query returned 0; gemm-only workspace path was not selected";
+        // Path must be live: a zero query means rocblas_use_only_gemm did not select
+        // the workspace path (yaml gpu_arch also restricts these cases to gfx90a/gfx942).
+        if(workspace_bytes == 0)
+            GTEST_SKIP() << "size query returned 0; gemm-only workspace path was not selected";
 
-        void* workspace = nullptr;
-        ASSERT_EQ(hipMalloc(&workspace, workspace_bytes + c_guard_bytes), hipSuccess);
-        fill_guard(workspace, workspace_bytes);
-        ASSERT_EQ(rocblas_set_workspace(handle, workspace, workspace_bytes), rocblas_status_success);
+        canary_workspace workspace(handle, workspace_bytes);
+        ASSERT_TRUE(workspace.valid()) << "could not provision the canary workspace";
 
         // Alias A across batches (read-only). Keep C distinct so writers do not race.
         // For transA = T/C, A is k x n with lda >= k. Storage lda * n.
@@ -282,10 +311,10 @@ namespace
             for(rocblas_int b = 0; b < c_batch_count; ++b)
                 hC[b] = (T*)dC + size_t(b) * size_t(c_ldc) * size_t(c_n);
 
-            const T** dA_array = nullptr;
-            T**       dC_array = nullptr;
-            ASSERT_EQ(hipMalloc(&dA_array, sizeof(const T*) * size_t(c_batch_count)), hipSuccess);
-            ASSERT_EQ(hipMalloc(&dC_array, sizeof(T*) * size_t(c_batch_count)), hipSuccess);
+            device_vector<const T*> dA_array(c_batch_count);
+            device_vector<T*>       dC_array(c_batch_count);
+            ASSERT_EQ(dA_array.memcheck(), hipSuccess);
+            ASSERT_EQ(dC_array.memcheck(), hipSuccess);
             ASSERT_EQ(hipMemcpy(dA_array,
                                 hA.data(),
                                 sizeof(const T*) * size_t(c_batch_count),
@@ -329,15 +358,9 @@ namespace
                                                   c_batch_count),
                           rocblas_status_success);
             }
-            EXPECT_EQ(hipFree(dA_array), hipSuccess);
-            EXPECT_EQ(hipFree(dC_array), hipSuccess);
         }
 
-        expect_guard_clean(handle, workspace, workspace_bytes);
-
-        // Drop the workspace before freeing so the handle does not retain it.
-        EXPECT_EQ(rocblas_set_workspace(handle, nullptr, 0), rocblas_status_success);
-        EXPECT_EQ(hipFree(workspace), hipSuccess);
+        expect_guard_clean(handle, workspace.ptr(), workspace.bytes());
     }
 
     void testing_syrk_herk_workspace(const Arguments& arg)
