@@ -179,9 +179,10 @@ the only check that would notice the metadata being dropped downstream of the `.
 ### Post-process: why a sidecar
 
 The decoder flattens each instruction's DWARF to its innermost frame. On a kernel
-assembled from helpers that is nearly useless — on the GEMM this was built
-against, one line of a masking helper owned about 94% of the stall cycles, which
-says nothing about which phase issued the loads.
+assembled from helpers that is nearly useless: the innermost frame is a one-line
+utility, so the listing credits nearly everything to a handful of lines inside
+the masking and load helpers, which says nothing about which phase issued the
+work.
 
 Rather than change the decoder, which is a separate upstream component,
 `emit_inline_frames.py` reads the `DW_TAG_inlined_subroutine` tree out of the code
@@ -194,16 +195,73 @@ that moved all of them. That property is what lets the
 feature ship without coupling to a decoder release.
 
 Nothing in the file can prove it belongs to the trace it sits beside: the keys are
-bare addresses. So the producer does not try to validate what it finds, it
-replaces it — every sidecar under the trace is removed as soon as the dispatch
-folders are known, ahead of code-object discovery, of locating `llvm-dwarfdump`,
-and of the loop, all of which can end the run early. Each write then goes to a
-temporary that is renamed over the destination and deleted if anything raises.
-A dispatch is therefore left holding a complete sidecar from this run or none,
-where none degrades to innermost-frame attribution and the previous run's answer
-would silently attribute to a layout that no longer exists. `--no-source` follows
-the same rule: it writes no sidecar, so it removes any it finds rather than
-leaving one beside a trace it does not describe.
+bare addresses. So neither side tries to validate what it finds — each removes it,
+and the rule is that whoever is about to invalidate a trace takes its sidecars
+with it, before doing anything that can fail half way.
+
+For the producer that means every sidecar under the trace goes first, ahead of
+code-object discovery, of locating `llvm-dwarfdump`, and of the per-dispatch
+loop, each of which can end the run early. Each write then goes to a temporary
+renamed over the destination, deleted if anything raises. A dispatch is left
+holding a complete sidecar from this run or none, and none degrades to
+innermost-frame attribution rather than to a layout that no longer exists.
+
+For a capture it means the same removal happens in `capture_att_trace.py` before
+`rocprofv3` starts, because rocprofv3 rewrites the directory in place and can
+exit nonzero having already replaced part of it. Putting it there rather than in
+the wrapper is what makes a failed capture, a capture with `--no-source`, and a
+direct `capture_att_trace.py` run behave alike — the two entry points cannot
+disagree about a folder neither of them finished writing. A removal that fails
+ends the run before the trace is touched; a capture is cheap next to an
+optimization pass spent reading another kernel's attribution.
+
+## Artifact identity and failed captures
+
+Invalidation is the first line of defense: before `rocprofv3` runs, every
+`inline_frames.json` and `wavescope-trace.json` under the output directory is
+removed so a partial or failed capture cannot leave provenance from an earlier
+run beside new `code.json` bytes. Content hashes are the second line: they detect
+stale pairings that invalidation missed — a sidecar copied in by hand, a
+regenerated sidecar against an old trace, or a truncated capture that still
+decoded enough to open.
+
+### State machine
+
+```text
+capture starts
+  -> invalidate sidecar + sentinel (+ temps)
+  -> rocprofv3 writes trace bytes
+  -> on success: stamp wavescope-trace.json capture=complete for changed dispatches
+  -> on rocprofv3 failure: stamp capture=truncated for changed dispatches, then fail
+  -> emit_inline_frames.py writes inline_frames.json v3 and enriches the sentinel
+viewer opens folder
+  -> hash raw code.json UTF-8 bytes (never re-serialized JSON)
+  -> v3 sidecar: require matching codeJsonHash, traceId, codeObjectHash, and complete capture
+  -> v1/v2 sidecar: load with address-coverage checks and an explicit unverified warning
+```
+
+Timestamps and folder mtimes are recorded for human provenance only. Validity is
+always decided from the bytes on disk.
+
+### Schemas
+
+| Artifact | Version | Identity fields |
+| --- | --- | --- |
+| `wavescope-trace.json` | 2 (rocke capture) / 1 (WaveScope managed runner) | `traceId`, `codeJsonHash`, optional `codeObjectHash`, `capture` (`complete` / `truncated` / `empty`) |
+| `inline_frames.json` | 3 | same `traceId`, `codeJsonHash`, `codeObjectHash` as the sentinel when present |
+
+Hashes are formatted `sha256:<hex>` over the exact file bytes. `codeJsonHash` is
+the UTF-8 text rocprofv3 wrote. `codeObjectHash` is the object whose DWARF
+produced the stacks.
+
+A rejected v3 sidecar does not prevent the trace from opening: the viewer drops
+the sidecar and falls back to innermost-frame attribution, with a console warning.
+Legacy v1/v2 sidecars still attach after the usual address-coverage check, but
+always with an “unverified legacy sidecar” warning because they carry no content
+binding.
+
+Shared helpers live in
+[`trace_provenance.py`](../optimization/utilities/tools/wavescope/trace_provenance.py).
 
 ## Invariants
 
@@ -231,7 +289,8 @@ whole reason the feature is usable for optimization rather than just for reading
 | --- | --- | --- |
 | `Op.loc` | `file:line:col:func` frames, `;`-separated, innermost first | `core/ir.py` |
 | debug metadata | `DILocation` chain via `inlinedAt`, one `DISubprogram` per Python function | `core/lower_llvm.py`, mirrored by `cpp/core/lower_llvm/debug.cpp` |
-| `inline_frames.json` | `{version: 2, functions, files, stacks: {"codeobj:addr": [[func, call_file, call_line, call_col], ...]}}`, outermost frame first, indices into the interned tables | `emit_inline_frames.py` |
+| `inline_frames.json` | `{version: 3, traceId, codeJsonHash, codeObjectHash, functions, files, stacks: {"codeobj:addr": [[func, call_file, call_line, call_col], ...]}}`, outermost frame first, indices into the interned tables | `emit_inline_frames.py` |
+| `wavescope-trace.json` | per-dispatch sentinel: `{version: 2, traceId, codeJsonHash, codeObjectHash?, capture}` | `capture_att_trace.py`, enriched by `emit_inline_frames.py` |
 | `code.json` | per-instruction rows; `Codeobj` and `Vaddr` together are the join key | rocprofv3 |
 
 Virtual addresses are per code object, so a trace that loaded more than one has the

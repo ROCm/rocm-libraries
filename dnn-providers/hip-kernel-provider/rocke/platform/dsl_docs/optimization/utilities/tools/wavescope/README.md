@@ -137,14 +137,19 @@ clickable. `capture_wavescope_trace.py` writes the sidecar for you;
 already have.
 
 Re-running over a folder that already has sidecars is the expected way to use
-this. Every sidecar in it goes as soon as the dispatch folders are known, before
-anything that could fail, so each dispatch ends up with a sidecar from this run
-or none — never the previous one. That matters because a stale sidecar cannot be
-recognized as stale: its keys are addresses, and a rebuild that moved only some
-of them still joins on the rest and reports the old build's call stacks.
-`--no-source` clears them too, since a capture that writes no sidecar must not
-leave one behind; `emit_inline_frames.py <dir> --invalidate-only` does just that
-step if you need it on its own.
+this, and so is capturing into one. A stale sidecar cannot be recognized as
+stale — its keys are addresses, and a rebuild that moved only some of them still
+joins on the rest and reports the old build's call stacks — so whichever step is
+about to invalidate the trace removes them first, before anything that can fail:
+
+- a capture drops them before `rocprofv3` starts, so a run that fails part way,
+  a `--no-source` run, and a direct `capture_att_trace.py` run all leave none;
+- `emit_inline_frames.py` drops them before it looks for a code object, so each
+  dispatch ends with a sidecar from this run or none, never the previous one;
+- `emit_inline_frames.py <dir> --invalidate-only` is that step on its own.
+
+If a sidecar cannot be removed, the run stops rather than reporting a trace that
+is safe to open.
 
 ## When it doesn't work
 
@@ -157,6 +162,7 @@ step if you need it on its own.
 | Console warns the sidecar matched few or no instructions | it was built from a different build of the kernel — re-run `emit_inline_frames.py` against *this* trace |
 | No dispatch folder decoded at all | the kernel regex matched nothing, or the trace decoder is missing — the capture script says which |
 | `emit_inline_frames.py` skipped a dispatch | it ran a code object none of the dumped DWARF belongs to; pass `--code-object` to name the right one. Skipping is deliberate — addresses repeat across objects, so a guess would attribute another kernel's source rather than fail. A skipped dispatch is left with no sidecar, including one from an earlier run, and the run still succeeds if any other dispatch resolved |
+| Every dispatch skipped as "ran several dumped code objects" | you captured twice into one `--output-dir`. Each capture leaves its own dump and numbers it per process, so two runs can both claim id 5 and nothing distinguishes them. Capture into a fresh directory, or pass `--code-object` |
 | Stall totals exceed wall-clock | `code.json` columns are totals over every execution; divide by `Hit`, don't multiply |
 
 ## Related

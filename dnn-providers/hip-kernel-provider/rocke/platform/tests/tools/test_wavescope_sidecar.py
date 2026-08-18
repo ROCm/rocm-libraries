@@ -27,19 +27,17 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-_TOOLS = (
-    Path(__file__).resolve().parents[2]
-    / "dsl_docs/optimization/utilities/tools/wavescope"
-)
+_TOOLS = Path(__file__).resolve().parents[2] / "dsl_docs/optimization/utilities/tools"
 
 
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, _TOOLS / f"{name}.py")
+def _load(name: str, subdir: str = "wavescope"):
+    spec = importlib.util.spec_from_file_location(name, _TOOLS / subdir / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -47,6 +45,14 @@ def _load(name: str):
 
 efi = _load("emit_inline_frames")
 cwt = _load("capture_wavescope_trace")
+cat = _load("capture_att_trace", "stage2_capture")
+tp = _load("trace_provenance")
+
+IDENTITY = dict(
+    trace_id="trace-test",
+    code_json_hash="sha256:" + "0" * 64,
+    code_object_hash=None,
+)
 
 
 def dumped(tmp: Path, ident: int, size: int = 1024) -> Path:
@@ -132,7 +138,7 @@ class TestSelectCodeObject(unittest.TestCase):
 class TestBuildSidecar(unittest.TestCase):
     def test_rows_from_another_object_are_skipped(self):
         rows = [row("v_mov", 1, 100), row("v_add", 2, 100)]
-        sidecar = efi.build_sidecar(rows, [frame("load_a", 0, 200)], "1")
+        sidecar = efi.build_sidecar(rows, [frame("load_a", 0, 200)], "1", **IDENTITY)
         self.assertEqual(sidecar["resolved"], 1)
         self.assertEqual(sidecar["skipped_other_object"], 1)
         self.assertEqual(list(sidecar["stacks"]), ["1:100"])
@@ -140,13 +146,17 @@ class TestBuildSidecar(unittest.TestCase):
     def test_keys_carry_the_code_object(self):
         """Two objects share address 100; the key is what keeps them apart."""
         rows = [row("v_mov", 1, 100), row("v_add", 2, 100)]
-        sidecar = efi.build_sidecar(rows, [frame("load_a", 0, 200)], None)
+        sidecar = efi.build_sidecar(rows, [frame("load_a", 0, 200)], None, **IDENTITY)
         self.assertEqual(sorted(sidecar["stacks"]), ["1:100", "2:100"])
 
     def test_version_is_stamped(self):
-        sidecar = efi.build_sidecar([row("v_mov", 1, 8)], [frame("f", 0, 16)], "1")
+        sidecar = efi.build_sidecar(
+            [row("v_mov", 1, 8)], [frame("f", 0, 16)], "1", **IDENTITY
+        )
         self.assertEqual(sidecar["version"], efi.SIDECAR_VERSION)
         self.assertEqual(sidecar["code_object_id"], "1")
+        self.assertEqual(sidecar["traceId"], IDENTITY["trace_id"])
+        self.assertEqual(sidecar["codeJsonHash"], IDENTITY["code_json_hash"])
 
 
 class TwoObjectTrace:
@@ -201,7 +211,11 @@ class TwoObjectTrace:
 
     def leftovers(self, d: Path) -> list[str]:
         """Everything sidecar-shaped in ``d``, temporary files included."""
-        return sorted(p.name for p in d.iterdir() if p.name.startswith(efi.SIDECAR))
+        return sorted(
+            p.name
+            for p in d.iterdir()
+            if p.name.startswith(efi.SIDECAR) or p.name.startswith(tp.TRACE_SENTINEL)
+        )
 
 
 class TestMainPerDispatch(TwoObjectTrace, unittest.TestCase):
@@ -211,8 +225,15 @@ class TestMainPerDispatch(TwoObjectTrace, unittest.TestCase):
         one = self.dispatch("1", 1)
         two = self.dispatch("2", 2)
         self.assertEqual(efi.main([str(self.tmp)]), 0)
-        self.assertEqual(self.sidecar_of(one)["functions"], ["from_object_one"])
-        self.assertEqual(self.sidecar_of(two)["functions"], ["from_object_two"])
+        for d, func in ((one, "from_object_one"), (two, "from_object_two")):
+            sidecar = self.sidecar_of(d)
+            self.assertEqual(sidecar["functions"], [func])
+            self.assertEqual(sidecar["version"], efi.SIDECAR_VERSION)
+            self.assertEqual(sidecar["codeJsonHash"], tp.sha256_file(d / "code.json"))
+            sentinel = tp.read_trace_sentinel(d)
+            self.assertEqual(sentinel["codeJsonHash"], sidecar["codeJsonHash"])
+            self.assertEqual(sentinel["codeObjectHash"], sidecar["codeObjectHash"])
+            self.assertEqual(sentinel["traceId"], sidecar["traceId"])
 
     def test_a_dispatch_with_no_matching_object_is_skipped_not_mislabelled(self):
         """Skipping one dispatch is still a successful run.
@@ -272,7 +293,7 @@ class TestRerunOverAnExistingSidecar(TwoObjectTrace, unittest.TestCase):
         """The write goes through a temp name; it must not survive the run."""
         d = self.dispatch("1", 1)
         self.assertEqual(efi.main([str(self.tmp)]), 0)
-        self.assertEqual(self.leftovers(d), [efi.SIDECAR])
+        self.assertEqual(self.leftovers(d), [efi.SIDECAR, tp.TRACE_SENTINEL])
 
 
 class TestNothingSurvivesAFailedRun(TwoObjectTrace, unittest.TestCase):
@@ -362,41 +383,253 @@ class TestInvalidateOnly(TwoObjectTrace, unittest.TestCase):
         self.dispatch("1", 1)
         self.assertEqual(efi.main([str(self.tmp), "--invalidate-only"]), 0)
 
+    def test_a_dispatch_whose_code_json_is_gone_is_still_cleaned(self):
+        """The folder nothing else will clean up.
 
-class TestCaptureWithoutSource(unittest.TestCase):
-    """``--no-source`` writes no sidecar, so it has to remove the one it finds.
+        A re-decode that removed or never finished writing ``code.json`` leaves
+        a dispatch that cannot be resolved and therefore never reaches the loop
+        -- while still holding the sidecar the last decode produced for it.
+        Deciding what to clean from what is *resolvable* would skip exactly the
+        folder most likely to be serving an answer for a trace that is gone.
+        """
+        d = self.dispatch("1", 1)
+        self.stale(d)
+        (d / "code.json").unlink()
+        self.assertEqual(efi.main([str(self.tmp), "--invalidate-only"]), 0)
+        self.assertEqual(self.leftovers(d), [])
 
-    The trace in the folder is new after a recapture and the sidecar beside it
-    describes a build that no longer exists. Skipping the sidecar step is not
-    the same as leaving the folder alone.
+    def test_a_sidecar_that_cannot_be_removed_stops_the_run(self):
+        d = self.dispatch("1", 1)
+        self.stale(d)
+        with mock.patch.object(Path, "unlink", side_effect=OSError("read-only")):
+            with self.assertRaises(SystemExit):
+                efi.main([str(self.tmp), "--invalidate-only"])
+
+
+class TestCaptureInvalidatesBeforeItWrites(unittest.TestCase):
+    """Capture owns the removal, because capture is what invalidates the trace.
+
+    rocprofv3 rewrites the output directory in place and can exit nonzero having
+    already replaced part of it, so anything done after it returns is skipped on
+    exactly the paths that leave a stale sidecar beside a new or half-written
+    trace. Doing it in the shared capture entry point rather than in the
+    WaveScope wrapper is also what keeps a direct ``capture_att_trace.py`` run
+    from behaving differently to a wrapped one.
     """
 
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.out = self.tmp / "att_out"
-        self.dispatch_dir = self.out / "ui_output_kernel_dispatch_0"
-        self.dispatch_dir.mkdir(parents=True)
-        (self.dispatch_dir / "code.json").write_text(
-            json.dumps({"code": [row("v_mov", 1, 100)]})
-        )
-        self.sidecar = self.dispatch_dir / efi.SIDECAR
+        self.dispatch = self.out / "ui_output_kernel_dispatch_0"
+        self.dispatch.mkdir(parents=True)
+        self.code = self.dispatch / "code.json"
+        self.code.write_text(json.dumps({"code": [row("v_mov", 1, 100)]}))
+        self.sidecar = self.dispatch / efi.SIDECAR
         self.sidecar.write_text(json.dumps({"version": 2, "stacks": {"9:100": []}}))
+        (self.dispatch / tp.TRACE_SENTINEL).write_text(
+            json.dumps(
+                {
+                    "version": tp.TRACE_SENTINEL_VERSION,
+                    "traceId": "old-run",
+                    "codeJsonHash": tp.sha256_text(self.code.read_text()),
+                    "capture": tp.CAPTURE_COMPLETE,
+                }
+            )
+        )
+        self.enterContext(
+            mock.patch.object(cat, "_preflight", lambda: Path("/opt/rocm/lib"))
+        )
+        self.enterContext(mock.patch.object(cat, "report", lambda d: None))
+
+    def run_capture(self, fake_capture) -> int:
+        argv = [
+            "capture_att_trace.py",
+            "--kernel-regex",
+            "k",
+            "--output-dir",
+            str(self.out),
+            "--",
+            "true",
+        ]
+        with mock.patch.object(sys, "argv", argv):
+            with mock.patch.object(cat, "capture", fake_capture):
+                return cat.main()
+
+    def test_a_capture_that_fails_after_partial_output_leaves_no_sidecar(self):
+        """The reported case: rocprofv3 rewrote code.json, then failed."""
+
+        def partial_then_fail(*a, **kw):
+            self.code.write_text(json.dumps({"code": [row("v_add", 2, 200)]}))
+            raise SystemExit("rocprofv3 exited 1")
+
+        with self.assertRaises(SystemExit):
+            self.run_capture(partial_then_fail)
+        self.assertFalse(self.sidecar.exists())
+        doc = json.loads((self.dispatch / tp.TRACE_SENTINEL).read_text())
+        self.assertEqual(doc["capture"], tp.CAPTURE_TRUNCATED)
+        self.assertEqual(doc["codeJsonHash"], tp.sha256_file(self.code))
+
+    def test_a_successful_standalone_recapture_leaves_no_sidecar(self):
+        def rewrite(*a, **kw):
+            self.code.write_text(json.dumps({"code": [row("v_add", 2, 200)]}))
+
+        self.assertEqual(self.run_capture(rewrite), 0)
+        self.assertFalse(self.sidecar.exists())
+        doc = json.loads((self.dispatch / tp.TRACE_SENTINEL).read_text())
+        self.assertEqual(doc["capture"], tp.CAPTURE_COMPLETE)
+
+    def test_a_sidecar_that_cannot_be_removed_stops_the_capture(self):
+        """Nothing is captured, so the old trace and its sidecar still agree."""
+        started = []
+        with mock.patch.object(Path, "unlink", side_effect=OSError("read-only")):
+            with self.assertRaises(SystemExit):
+                self.run_capture(lambda *a, **kw: started.append(True))
+        self.assertEqual(started, [])
+        self.assertTrue(self.sidecar.exists())
+
+    def test_an_abandoned_temporary_is_cleaned_too(self):
+        (self.dispatch / f"{efi.SIDECAR}{efi.TMP_SUFFIX}").write_text("half")
+        (
+            self.dispatch / f"{tp.TRACE_SENTINEL}{tp.TRACE_SENTINEL_TMP_SUFFIX}"
+        ).write_text("{")
+        self.assertEqual(self.run_capture(lambda *a, **kw: None), 0)
+        self.assertEqual(
+            [
+                p.name
+                for p in self.dispatch.iterdir()
+                if efi.SIDECAR in p.name or tp.TRACE_SENTINEL in p.name
+            ],
+            [],
+        )
+
+
+class TestTraceProvenance(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_sha256_matches_exact_bytes(self):
+        path = self.tmp / "code.json"
+        path.write_text('{"code":[]}')
+        self.assertEqual(tp.sha256_file(path), tp.sha256_text('{"code":[]}'))
+        path.write_text('{"code":[]}\n')
+        self.assertNotEqual(tp.sha256_file(path), tp.sha256_text('{"code":[]}'))
+
+    def test_invalidate_removes_sidecars_and_sentinels(self):
+        d = self.tmp / "ui_output_k_dispatch_0"
+        d.mkdir()
+        (d / efi.SIDECAR).write_text("{}")
+        (d / tp.TRACE_SENTINEL).write_text("{}")
+        (d / f"{efi.SIDECAR}{efi.TMP_SUFFIX}").write_text("{}")
+        self.assertEqual(tp.invalidate_provenance(self.tmp), 3)
+        self.assertEqual(self.leftovers(d), [])
+
+    def leftovers(self, d: Path) -> list[str]:
+        return sorted(
+            p.name
+            for p in d.iterdir()
+            if p.name.startswith(efi.SIDECAR) or p.name.startswith(tp.TRACE_SENTINEL)
+        )
+
+
+class TestCaptureSentinelStamping(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.out = self.tmp / "att_out"
+        self.dispatch = self.out / "ui_output_kernel_dispatch_0"
+        self.dispatch.mkdir(parents=True)
+        self.code = self.dispatch / "code.json"
+        self.code.write_text(json.dumps({"code": [row("v_mov", 1, 100)]}))
+        self.enterContext(
+            mock.patch.object(cat, "_preflight", lambda: Path("/opt/rocm/lib"))
+        )
+        self.enterContext(mock.patch.object(cat, "report", lambda d: None))
+
+    def run_capture(self, fake_capture) -> int:
+        argv = [
+            "capture_att_trace.py",
+            "--kernel-regex",
+            "k",
+            "--output-dir",
+            str(self.out),
+            "--",
+            "true",
+        ]
+        with mock.patch.object(sys, "argv", argv):
+            with mock.patch.object(cat, "capture", fake_capture):
+                return cat.main()
+
+    def sentinel(self) -> dict:
+        return json.loads((self.dispatch / tp.TRACE_SENTINEL).read_text())
+
+    def test_success_stamps_complete_with_code_json_hash(self):
+        def rewrite(*a, **kw):
+            self.code.write_text(json.dumps({"code": [row("v_add", 2, 200)]}))
+
+        self.assertEqual(self.run_capture(rewrite), 0)
+        doc = self.sentinel()
+        self.assertEqual(doc["version"], tp.TRACE_SENTINEL_VERSION)
+        self.assertEqual(doc["capture"], tp.CAPTURE_COMPLETE)
+        self.assertEqual(doc["codeJsonHash"], tp.sha256_file(self.code))
+
+    def test_failure_stamps_truncated_when_code_json_changes(self):
+        def partial_then_fail(*a, **kw):
+            self.code.write_text(json.dumps({"code": [row("v_add", 2, 200)]}))
+            raise SystemExit("rocprofv3 exited 1")
+
+        with self.assertRaises(SystemExit):
+            self.run_capture(partial_then_fail)
+        doc = self.sentinel()
+        self.assertEqual(doc["capture"], tp.CAPTURE_TRUNCATED)
+        self.assertEqual(doc["codeJsonHash"], tp.sha256_file(self.code))
+
+    def test_unchanged_code_json_leaves_no_sentinel_after_capture(self):
+        """Invalidation clears the old sentinel; an unchanged code.json is not re-stamped."""
+        before_hash = tp.sha256_file(self.code)
+        (self.dispatch / tp.TRACE_SENTINEL).write_text(
+            json.dumps(
+                {
+                    "version": tp.TRACE_SENTINEL_VERSION,
+                    "traceId": "keep-me",
+                    "codeJsonHash": before_hash,
+                    "capture": tp.CAPTURE_COMPLETE,
+                }
+            )
+        )
+
+        self.assertEqual(self.run_capture(lambda *a, **kw: None), 0)
+        self.assertFalse((self.dispatch / tp.TRACE_SENTINEL).exists())
+
+
+class TestCaptureWrapper(unittest.TestCase):
+    """The wrapper adds the environment and the sidecar step, nothing else.
+
+    Invalidation deliberately does not live here: it belongs to the capture the
+    wrapper delegates to, so that a direct capture behaves the same way.
+    """
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.out = self.tmp / "att_out"
+        (self.out / "ui_output_kernel_dispatch_0").mkdir(parents=True)
         self.enterContext(mock.patch.object(cwt, "run_capture", lambda *a, **kw: None))
 
     def run_wrapper(self, *flags: str) -> int:
-        return cwt.main(["--output-dir", str(self.out), *flags, "--", "true"])
-
-    def test_a_recapture_without_source_removes_the_old_sidecar(self):
-        self.assertEqual(self.run_wrapper("--no-source"), 0)
-        self.assertFalse(self.sidecar.exists())
-
-    def test_a_capture_with_source_still_delegates_to_the_sidecar_tool(self):
         seen = []
         with mock.patch.object(
             cwt, "run_sidecar", lambda out, obj: seen.append(Path(out)) or True
         ):
-            self.assertEqual(self.run_wrapper(), 0)
+            code = cwt.main(["--output-dir", str(self.out), *flags, "--", "true"])
+        return code, seen
+
+    def test_the_source_path_delegates_to_the_sidecar_tool(self):
+        code, seen = self.run_wrapper()
+        self.assertEqual(code, 0)
         self.assertEqual(seen, [self.out.resolve()])
+
+    def test_no_source_skips_the_sidecar_step(self):
+        code, seen = self.run_wrapper("--no-source")
+        self.assertEqual(code, 0)
+        self.assertEqual(seen, [])
 
 
 if __name__ == "__main__":

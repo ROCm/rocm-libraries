@@ -702,10 +702,22 @@ class TestLlvmToolDiscovery(unittest.TestCase):
             self.assertEqual(llvm_tool("llc"), on_path)
 
     def test_a_configured_root_without_the_tool_falls_through(self):
+        """A configured root that does not hold the tool must not shadow the rest.
+
+        What answers instead is the host's business -- PATH where it has one,
+        the ``/opt/rocm`` default otherwise -- so asserting one host's answer
+        would fail on the other kind of host rather than on a real regression.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}) as env:
                 env.pop(LLVM_BIN_ENV, None)
-                self.assertEqual(llvm_tool("llc"), shutil.which("llc"))
+                found = llvm_tool("llc")
+                self.assertNotIn(tmp, found or "")
+                on_path = shutil.which("llc")
+                if on_path is not None:
+                    self.assertEqual(found, on_path)
+                elif found is not None:
+                    self.assertTrue(os.path.isfile(found))
 
 
 class TestObjectRoundTrip(unittest.TestCase):

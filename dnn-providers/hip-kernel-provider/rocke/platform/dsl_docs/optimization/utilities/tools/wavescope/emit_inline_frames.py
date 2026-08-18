@@ -23,10 +23,14 @@ and collide across objects, so a trace that loaded more than one needs both
 columns to identify an instruction.
 
 Re-running over a folder that already has sidecars is safe and is the expected
-way to use this: every dispatch's old sidecar goes away as soon as the dispatch
-folders are known -- before this run looks for a code object or for
-llvm-dwarfdump, either of which can end the run -- so a dispatch this run does
-not rewrite is left with no sidecar rather than the previous run's answer.
+way to use this: every sidecar under the trace directory goes first, before this
+run looks for a code object or for llvm-dwarfdump, either of which can end the
+run -- so a dispatch this run does not rewrite is left with no sidecar rather
+than the previous run's answer. A capture into an existing directory clears them
+too, from ``stage2_capture/capture_att_trace.py``, before rocprofv3 starts.
+
+Sidecar version 3 binds each file to the exact ``code.json`` bytes and code
+object whose DWARF produced the stacks, via ``wavescope-trace.json``.
 
     python emit_inline_frames.py <att-output-dir>
     python emit_inline_frames.py <att-output-dir> --code-object k.hsaco
@@ -37,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import json
 import re
 import shutil
@@ -45,14 +50,26 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-SIDECAR = "inline_frames.json"
+_HERE = Path(__file__).resolve().parent
+_spec = importlib.util.spec_from_file_location(
+    "trace_provenance", _HERE / "trace_provenance.py"
+)
+_tp = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_tp)
 
-# Written first and renamed over the destination, so a viewer never opens a
-# half-written file.
-TMP_SUFFIX = ".tmp"
-
-# The dispatch folders rocprofv3 writes, each a self-contained trace.
-DISPATCH_GLOB = "ui_output_*_dispatch_*"
+CAPTURE_COMPLETE = _tp.CAPTURE_COMPLETE
+DISPATCH_GLOB = _tp.DISPATCH_GLOB
+SIDECAR = _tp.SIDECAR
+SIDECAR_VERSION = _tp.SIDECAR_VERSION
+TMP_SUFFIX = _tp.SIDECAR_TMP_SUFFIX
+TRACE_SENTINEL = _tp.TRACE_SENTINEL
+dispatch_dirs = _tp.dispatch_dirs
+enrich_trace_sentinel = _tp.enrich_trace_sentinel
+invalidate_provenance = _tp.invalidate_provenance
+new_trace_id = _tp.new_trace_id
+read_trace_sentinel = _tp.read_trace_sentinel
+sha256_file = _tp.sha256_file
+write_trace_sentinel = _tp.write_trace_sentinel
 
 # rocprofv3 dumps each loaded code object next to the raw trace.
 CODE_OBJECT_GLOB = "*code_object_id_*.out"
@@ -62,10 +79,6 @@ CODE_OBJECT_ID_RE = re.compile(r"code_object_id_(\d+)")
 # instruction in a trace that loaded more than one. Both columns form the join key.
 CODEOBJ_COL = 4
 VADDR_COL = 5
-
-# Bumped whenever the on-disk shape changes. The viewer refuses versions it does
-# not know rather than guessing at a layout and mis-attributing cost.
-SIDECAR_VERSION = 2
 
 # Frames shallower than this are the enclosing GPU function itself, not a call.
 _DIE_RE = re.compile(r"^(0x[0-9a-f]+):(\s+)DW_TAG_(\w+)")
@@ -164,8 +177,6 @@ def parse_inline_frames(code_object: Path, dwarfdump: str) -> list[dict]:
                 "depth": die["depth"],
                 "name": die["name"],
                 "ranges": ranges,
-                # The call site is recorded on the *callee*, so it describes where
-                # this frame was entered from -- which is the line a reader wants.
                 "call_file": die.get("call_file"),
                 "call_line": die.get("call_line", 0),
                 "call_col": die.get("call_column", 0),
@@ -181,22 +192,16 @@ def stack_for(frames: list[dict], addr: int) -> list[dict]:
     return hits
 
 
-def build_sidecar(rows: list, frames: list[dict], code_object_id: str | None) -> dict:
-    """Map each instruction to its authoring call stack, keyed by code object and address.
-
-    The DWARF came from exactly one code object, so rows belonging to any other
-    are skipped: virtual addresses repeat across objects, and matching on address
-    alone would confidently attach this object's call stacks to another's
-    instructions wherever the two happen to collide.
-
-    ``code_object_id`` of ``None`` means the caller could not identify which
-    object the DWARF came from; every row is then a candidate, but the key still
-    carries the row's own code object so the viewer's join stays exact.
-
-    Files and function names are interned: the same handful repeat across
-    hundreds of instructions, and the sidecar crosses a network hop to the
-    viewer on a remote workspace.
-    """
+def build_sidecar(
+    rows: list,
+    frames: list[dict],
+    code_object_id: str | None,
+    *,
+    trace_id: str,
+    code_json_hash: str,
+    code_object_hash: str | None,
+) -> dict:
+    """Map each instruction to its authoring call stack, keyed by code object and address."""
     files: dict[str, int] = {}
     funcs: dict[str, int] = {}
 
@@ -237,10 +242,10 @@ def build_sidecar(rows: list, frames: list[dict], code_object_id: str | None) ->
 
     return {
         "version": SIDECAR_VERSION,
-        # [funcIndex, callFileIndex, callLine, callColumn], outermost frame first.
-        # The call site describes where the frame was entered, so the innermost
-        # frame's own line stays in code.json's Source column.
         "schema": '"codeobj:addr" -> [[func, call_file, call_line, call_col], ...]',
+        "traceId": trace_id,
+        "codeJsonHash": code_json_hash,
+        "codeObjectHash": code_object_hash,
         "code_object_id": code_object_id,
         "functions": list(funcs),
         "files": list(files),
@@ -250,56 +255,15 @@ def build_sidecar(rows: list, frames: list[dict], code_object_id: str | None) ->
     }
 
 
-def dispatch_dirs(root: Path) -> list[Path]:
-    if (root / "code.json").is_file():
-        return [root]
-    return sorted(root.glob(DISPATCH_GLOB))
-
-
-def invalidate_sidecars(dirs: list[Path]) -> None:
-    """Drop every dispatch's sidecar before this run decides anything.
-
-    This runs ahead of code-object discovery and of looking for
-    llvm-dwarfdump, both of which end the run, and ahead of the loop, which an
-    unreadable object ends part way through. A trace folder gets re-decoded and
-    re-run over, and a sidecar left beside a dispatch this run does not rewrite
-    is worse than no sidecar at all: the viewer loads it and attributes the
-    dispatch to whichever code object the previous run picked, which is the
-    address-overlap mis-attribution the per-dispatch selection exists to stop.
-    No sidecar just falls back to innermost-frame attribution, which is how the
-    Source tab behaved before this file existed.
-
-    Staleness cannot be detected by reading the file. Its keys are bare
-    addresses with nothing in them tying the file to a build, and a rebuild that
-    moved only some addresses still joins on the rest. The file's presence is
-    therefore the only signal there is, so this run has to earn it back.
-    """
-    for d in dirs:
-        for path in (d / SIDECAR, d / f"{SIDECAR}{TMP_SUFFIX}"):
-            if path.exists():
-                path.unlink()
-                print(f"  {d.name}: removed {path.name} from an earlier run")
-
-
 @contextlib.contextmanager
 def sidecar_write(d: Path) -> Iterator[Path]:
-    """Yield the temporary path to write ``d``'s sidecar to.
-
-    Leaving the block normally renames that file over the destination, so a
-    viewer only ever opens a whole one: a partial write, from a full disk or an
-    interrupt, is indistinguishable from a valid sidecar until it fails to
-    parse. An exception removes the temporary instead and leaves no destination
-    -- in particular it does not put back what was there before, which is the
-    one outcome that would be read as this run's answer.
-    """
+    """Yield the temporary path to write ``d``'s sidecar to."""
     out = d / SIDECAR
     tmp = out.with_name(out.name + TMP_SUFFIX)
     out.unlink(missing_ok=True)
     tmp.unlink(missing_ok=True)
     try:
         yield tmp
-        # Inside the guard: a full disk can fail the rename as easily as the
-        # write, and that would otherwise leave the temporary behind.
         tmp.replace(out)
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -307,19 +271,12 @@ def sidecar_write(d: Path) -> Iterator[Path]:
 
 
 def find_code_objects(root: Path) -> list[Path]:
-    """Every code object rocprofv3 dumped under ``root``, largest first.
-
-    All of them are kept rather than just the biggest: a trace with more than
-    one dispatch can carry a different object per dispatch, and the biggest one
-    is not necessarily the one any particular dispatch ran.
-    """
     candidates = [p for p in root.rglob(CODE_OBJECT_GLOB) if p.is_file()]
     candidates += [p for p in root.rglob("*.hsaco") if p.is_file()]
     return sorted(candidates, key=lambda p: (-p.stat().st_size, p.name))
 
 
 def code_object_id_of(path: Path) -> str | None:
-    """The id rocprofv3 put in the dump's filename, if it named one that way."""
     m = CODE_OBJECT_ID_RE.search(path.name)
     return m.group(1) if m else None
 
@@ -327,16 +284,6 @@ def code_object_id_of(path: Path) -> str | None:
 def select_code_object(
     candidates: list[Path], present: set[str], explicit: Path | None
 ) -> tuple[Path | None, str | None, str | None]:
-    """Pick the code object a single dispatch ran, as ``(path, id, problem)``.
-
-    Matching is by the id rocprofv3 named the dump with against the ids the
-    dispatch's own rows carry, so a trace with several objects attributes each
-    dispatch to the one it actually executed. Guessing is what makes this
-    dangerous -- addresses repeat across objects, so a wrong pick still joins
-    and silently reports another kernel's source -- and every case that cannot
-    be decided returns a ``problem`` instead.
-    """
-
     matches = [(p, cid) for p in candidates if (cid := code_object_id_of(p)) in present]
     if len(matches) == 1:
         return matches[0][0], matches[0][1], None
@@ -349,9 +296,6 @@ def select_code_object(
             "choose which one to read DWARF from",
         )
     if explicit is not None and code_object_id_of(explicit) is None:
-        # A file rocprofv3 did not label with an id -- an .hsaco from the build,
-        # say. The caller named it, so trust that over a filename convention,
-        # but only where there is a single object for it to be.
         if len(present) == 1:
             return explicit, next(iter(present)), None
         return (
@@ -378,6 +322,24 @@ def row_code_objects(rows: list) -> set[str]:
     }
 
 
+def trace_identity_for(dispatch: Path, code_json: Path) -> tuple[str, str]:
+    """Return ``(trace_id, code_json_hash)`` for a dispatch about to get a sidecar."""
+    code_json_hash = sha256_file(code_json)
+    sentinel = read_trace_sentinel(dispatch)
+    if sentinel and sentinel.get("codeJsonHash") == code_json_hash:
+        trace_id = sentinel.get("traceId")
+        if isinstance(trace_id, str) and trace_id:
+            return trace_id, code_json_hash
+    trace_id = new_trace_id()
+    write_trace_sentinel(
+        dispatch,
+        trace_id=trace_id,
+        code_json_hash=code_json_hash,
+        capture=CAPTURE_COMPLETE,
+    )
+    return trace_id, code_json_hash
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("trace_dir", type=Path, help="rocprofv3 --att output directory")
@@ -390,7 +352,7 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--invalidate-only",
         action="store_true",
-        help="drop existing sidecars and write none, for a capture that has none",
+        help="drop existing sidecars and sentinels, write none",
     )
     args = ap.parse_args(argv)
 
@@ -398,14 +360,13 @@ def main(argv=None) -> int:
     if not root.is_dir():
         raise SystemExit(f"not a directory: {root}")
 
-    # Identify the dispatches, then invalidate, then everything that can fail.
-    dirs = dispatch_dirs(root)
-    invalidate_sidecars(dirs)
+    dropped = invalidate_provenance(root)
 
     if args.invalidate_only:
-        print(f"  {len(dirs)} dispatch(es) left without a sidecar")
+        print(f"  {dropped} provenance file(s) removed under {root}")
         return 0
 
+    dirs = dispatch_dirs(root)
     if not dirs:
         raise SystemExit(f"no decoded dispatch folder under {root}")
 
@@ -453,10 +414,26 @@ def main(argv=None) -> int:
             skipped += 1
             continue
 
-        sidecar = build_sidecar(rows, frames, code_object_id)
+        trace_id, code_json_hash = trace_identity_for(d, code_json)
+        code_object_hash = sha256_file(code_object)
+        sidecar = build_sidecar(
+            rows,
+            frames,
+            code_object_id,
+            trace_id=trace_id,
+            code_json_hash=code_json_hash,
+            code_object_hash=code_object_hash,
+        )
         total = len([r for r in rows if r and r[0] and not r[0].startswith(";")])
         with sidecar_write(d) as tmp:
             tmp.write_text(json.dumps(sidecar))
+        enrich_trace_sentinel(
+            d,
+            traceId=trace_id,
+            codeJsonHash=code_json_hash,
+            codeObjectHash=code_object_hash,
+            capture=CAPTURE_COMPLETE,
+        )
         out = d / SIDECAR
         written += 1
         print(
@@ -467,10 +444,6 @@ def main(argv=None) -> int:
     if written == 0:
         raise SystemExit(f"no sidecar written ({skipped} dispatch(es) skipped)")
     if skipped:
-        # Success: the dispatches named above have a sidecar each. The skipped
-        # ones have none, having had any stale file removed, so they fall back
-        # to innermost-frame attribution. Reporting failure here would have the
-        # caller announce that nothing was written at all.
         print(
             f"  {written} dispatch(es) resolved, {skipped} left without a "
             "sidecar (innermost frame only)"
