@@ -22,10 +22,8 @@
 #
 ################################################################################
 
-import inspect
 import os
 import subprocess
-import shlex
 import shutil
 
 from pathlib import Path
@@ -36,16 +34,13 @@ from tensilelite.SolutionStructs.Problem import ProblemType, ProblemSizesMock, P
 from tensilelite.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from tensilelite.Toolchain.Component import Assembler
 
-import rocisa
-
-from . import ROOT_PATH
 from . import LibraryIO
 from tensilelite.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from tensilelite.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
 from tensilelite.Common.GlobalParameters import globalParameters
 from tensilelite.Common.TimingInstrumentation import timing_context
-from .tensilelite_create_library import copyStaticFiles, libraryDir
+from .tensilelite_create_library import copyStaticFiles, libraryDir, run as createLibrary
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -142,18 +137,12 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   functions = []
   functionNames = []
 
-  # Get rocIsa path, remove this when subprocess is removed
-  module_path = os.path.dirname(inspect.getfile(rocisa))
-  env = os.environ.copy()
-  if 'PYTHONPATH' in env:
-    if not module_path in env['PYTHONPATH']:
-        env["PYTHONPATH"] = module_path + ":" + env["PYTHONPATH"]
-  else:
-    env["PYTHONPATH"] = module_path
-
   targetGfx = buildTargetGfx(isaInfoMap, archNames)
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
-  subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
+  createLibrary(
+      getBuildClientLibraryArguments(
+          clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx
+      )
+  )
   archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
   # Kernels fan out into one per-base subdir per arch; union the globs across them.
   coList = []
@@ -313,39 +302,31 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
 
   return process.returncode
 
-
-def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
-  import io
-  runScriptFile = io.StringIO()
-
-  callCreateLibraryCmd = ROOT_PATH + "/bin/TensileCreateLibrary"
+def getBuildClientLibraryArguments(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
+  args = []
 
   if not globalParameters["LazyLibraryLoading"]:
-    callCreateLibraryCmd += " --no-lazy-library-loading"
+    args.append("--no-lazy-library-loading")
 
   if globalParameters.get("AsmDebug", False):
-    callCreateLibraryCmd += " --asm-debug"
+    args.append("--asm-debug")
 
   if globalParameters["KeepBuildTmp"]:
-    callCreateLibraryCmd += " --keep-build-tmp"
+    args.append("--keep-build-tmp")
 
   if globalParameters["DisableAsmComments"]:
-    callCreateLibraryCmd += " --disable-asm-comments"
+    args.append("--disable-asm-comments")
 
-  callCreateLibraryCmd += " --architecture=" + targetGfx
-  callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
-  callCreateLibraryCmd += " --cxx-compiler=" + cxxCompiler
-  callCreateLibraryCmd += " --library-format=" + globalParameters["LibraryFormat"]
-
-  callCreateLibraryCmd += " %s" % libraryLogicPath
-  callCreateLibraryCmd += " %s" % buildPath #" ../source"
-  callCreateLibraryCmd += " %s\n" % globalParameters["RuntimeLanguage"]
-
-  runScriptFile.write(callCreateLibraryCmd)
-
-  return runScriptFile.getvalue()
-
-
+  args.extend([
+      "--architecture=" + targetGfx,
+      "--code-object-version=" + globalParameters["CodeObjectVersion"],
+      "--cxx-compiler=" + cxxCompiler,
+      "--library-format=" + globalParameters["LibraryFormat"],
+      os.path.abspath(os.fspath(libraryLogicPath)),
+      os.path.abspath(os.fspath(buildPath)),
+      globalParameters["RuntimeLanguage"],
+  ])
+  return args
 def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, buildDir, configPaths=None):
   if configPaths is None:
     configPaths = []

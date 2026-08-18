@@ -56,77 +56,10 @@ from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
 from tensilelite.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
 from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Common.GlobalParameters import assignGlobalParameters
+from tensilelite.Common.GlobalParameters import assignGlobalParameters, defaultSolution
 from tensilelite.LibraryIO import readYAML
 from tensilelite.Toolchain.Validators import validateToolchain
-
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
-
-
 from tensilelite.CustomYamlLoader import load_logic_gfx_arch, archMatch
-
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
 
 
 class Check(NamedTuple):
@@ -267,8 +200,8 @@ def _runChecks(
     return keep, total, known_bug_skips, chip_id_failures, stale_known_bugs
 
 
-def _setup():
-    args = parseArguments()
+def _setup(argv=None):
+    args = parseArguments() if argv is None else parseArguments(argv)
 
     setVerbosity(args.Verbose)
     jobs = int(args.Jobs)
@@ -325,13 +258,15 @@ def _progress_loop(stop_event: threading.Event, interval: float = 5.0) -> None:
     sys.stdout.flush()
 
 
-def main():
+def main(argv=None):
     # Suppress noisy joblib warnings (serial fallback, timeout) before any imports that pull in joblib
     warnings.filterwarnings("ignore", message=".*will operate in serial mode.*")
     warnings.filterwarnings("ignore", message=".*timeout.*will not be used.*")
 
     reset_reported_failures()
-    jobs, isaInfoMap, logicPath, files, check, args = _setup()
+    jobs, isaInfoMap, logicPath, files, check, args = (
+        _setup() if argv is None else _setup(argv)
+    )
 
     # Cross-file invariants (sibling DeviceNames, gfx1250v0-overlay
     # consistency) run only when --check-all is given, and only over the
@@ -366,7 +301,7 @@ def main():
         )
     except (ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
-        exit(1)
+        raise SystemExit(1)
 
     # Use more, smaller batches for better load balancing (workers stay busy as tasks complete)
     num_batches_target = min(len(files), jobs * 8)
@@ -422,4 +357,5 @@ def main():
         )
     strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
     if rejects > 0 or chip_id_failures > 0 or strict_stale:
-        exit(1)
+        raise SystemExit(1)
+    return 0
