@@ -1001,7 +1001,7 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
 }
 
 // ===========================================================================
-// Coherence-mode Stream-K grid steering (parallel admission + never-upward snap)
+// Coherence-mode Stream-K grid steering (parallel admission + mixed-split snap)
 // ===========================================================================
 
 namespace
@@ -1111,12 +1111,12 @@ TEST(StreamKCoherenceGridSteeringTest, NonDivisorGridBelowTilesSnapsToTiles)
     EXPECT_EQ(onGrid, tiles) << "g0 < T and g0 does not divide T must snap to T";
 }
 
-TEST(StreamKCoherenceGridSteeringTest, DivisorGridBelowTilesIsKept)
+TEST(StreamKCoherenceGridSteeringTest, DivisorGridBelowTilesSnapsToTiles)
 {
     StreamK5AnalyticalEnv env;
     initSk3CoherenceSolution(env.solution);
     env.device.skDynamicGrid = 0;
-    env.device.skFixedGrid   = 8; // 8 | 16
+    env.device.skFixedGrid   = 8; // 8 | 16, mixed GridDividesTiles
 
     auto problem = makeGemmProblem(512, 512, 1024);
     problem.setWorkspaceSize(32ull << 20);
@@ -1124,8 +1124,8 @@ TEST(StreamKCoherenceGridSteeringTest, DivisorGridBelowTilesIsKept)
     ASSERT_EQ(tiles, 16u);
 
     problem.setParams().setUniformSummationOrder(true);
-    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree), 8u)
-        << "g0 | T must be left alone";
+    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree), tiles)
+        << "mixed GridDividesTiles (g0 | T, g0 < T) must snap up to all-full";
 }
 
 TEST(StreamKCoherenceGridSteeringTest, AllPartialNonDivisorFRequiresCapability)

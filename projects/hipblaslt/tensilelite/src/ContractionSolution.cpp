@@ -213,13 +213,17 @@ namespace TensileLite
         // in the launch must therefore share one signature. Ways that happens:
         //
         //  skTiles == 0        force-DP-only, so every tile is whole.
-        //  skItersPerWG == I   every StreamK chunk is one whole tile;
-        //                      equivalent to tiles % grid == 0.
         //  skTiles == tiles && I % skItersPerWG == 0 && extraIters == 0
-        //                      no data-parallel region, and every tile is cut
-        //                      into I/skItersPerWG equal chunks at identical
-        //                      offsets; equivalent to tiles | grid and
-        //                      (grid/tiles) | I.
+        //                      no data-parallel region. Includes GridEqualsTiles
+        //                      (skItersPerWG == I) and all-partial equal chunks
+        //                      (tiles | grid and (grid/tiles) | I).
+        //                      Mixed GridDividesTiles (skTiles == grid < tiles,
+        //                      skItersPerWG == I) is two-tile DP-first then SK.
+        //                      gfx950 skips tree-partials workspace when
+        //                      tiles % grid == 0, and the SK half of D is never
+        //                      stored (uso-row-sweep C1: 992/1024 rows stay
+        //                      poison). Refuse that split until the device path
+        //                      writes every tile.
         //  per-tile extras: skTiles == tiles && grid % tiles == 0 with a kernel
         //                      that redistributes extras within each tile.
         //                      extraIters may be nonzero; fold signatures still
@@ -234,9 +238,8 @@ namespace TensileLite
         if(split.skTiles == 0)
             return true;
 
-        if(split.skItersPerWG != 0 && split.extraIters == 0
-           && (split.skItersPerWG == itersPerTile
-               || (split.skTiles == tiles && itersPerTile % split.skItersPerWG == 0)))
+        if(split.skItersPerWG != 0 && split.extraIters == 0 && split.skTiles == tiles
+           && itersPerTile % split.skItersPerWG == 0)
             return true;
 
         if(perTileExtraIters && split.skTiles == tiles && tiles != 0 && skGrid % tiles == 0
@@ -4957,11 +4960,14 @@ namespace TensileLite
                 skGrid = cuCount;
             }
 
-            // Under coherence + static two-tile packing, never-upward snap the
-            // chain output g0 onto an admissible uniform grid. Must run before
-            // the magic-division guard below so that guard still validates the
-            // final grid (a snap after it can emit out-of-range itersPerWG).
-            // Same ABI predicate as checkUniformSummationOrder.
+            // Under coherence + static two-tile packing, snap the chain output
+            // g0 onto an admissible uniform grid. F-star is never-upward
+            // (g0 > tiles). When g0 < tiles, snap up to tiles (all-full): mixed
+            // GridDividesTiles (tiles % g0 == 0) is two-tile DP+SK that gfx950
+            // does not store (workspace skipped, SK D rows stay poison). Must
+            // run before the magic-division guard below so that guard still
+            // validates the final grid (a snap after it can emit out-of-range
+            // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
             if(problem.getParams().uniformSummationOrder() && tiles > 0 && skGrid > 0)
             {
                 const bool effectiveDynamic
@@ -5005,7 +5011,7 @@ namespace TensileLite
                         }
                         skGrid = tiles * FStar;
                     }
-                    else if((tiles % g0) != 0)
+                    else if(g0 < tiles)
                     {
                         skGrid = tiles;
                     }
