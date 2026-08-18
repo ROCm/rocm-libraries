@@ -1,5 +1,16 @@
 name: TheRock CI
 
+# TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
+# for the whole run. On pull_request events it pins to the tip of TheRock@main
+# as it existed at the PR branch's merge-base time, so the pin stays stable
+# while a PR is authored and only advances when the base branch is merged/
+# rebased in (see .github/scripts/resolve_therock_ref.py, and
+# ROCm/rocm-libraries#9602 which introduced this for Multi-Arch CI). Other
+# events (push/workflow_dispatch/workflow_call) use the live tip of main. The
+# setup job checks out that resolved SHA and re-exports it as
+# needs.setup.outputs.therock_ref so downstream jobs consume the single
+# resolved commit instead of re-resolving main independently.
+
 on:
   push:
     branches:
@@ -25,6 +36,10 @@ on:
         type: string
         description: "Insert comma-separated list of Windows GPU families to build and test. ex: gfx94X, gfx1151"
         default: ""
+      therock_ref_override:
+        type: string
+        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the ref per event (merge-base time for PRs, live tip of main otherwise)."
+        default: ""
   workflow_call:
 
 permissions:
@@ -39,11 +54,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve_therock_ref:
+    name: Resolve TheRock ref
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      therock_ref: ${{ steps.resolve.outputs.therock_ref }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Install dependencies
+        run: pip install requests
+
+      # Picks one concrete TheRock SHA for the whole run. See the header
+      # comment above and .github/scripts/resolve_therock_ref.py for the
+      # policy. Uses the REST API only, so no deep clone of this repository
+      # is required.
+      - name: Resolve TheRock ref
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
+        run: python .github/scripts/resolve_therock_ref.py
+
   setup:
     name: "Setup"
+    needs: resolve_therock_ref
     runs-on: ubuntu-24.04
     outputs:
-      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      therock_ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       rocm_package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
@@ -72,7 +118,9 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          # Concrete SHA resolved once by resolve_therock_ref; do not
+          # re-resolve main here.
+          ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
