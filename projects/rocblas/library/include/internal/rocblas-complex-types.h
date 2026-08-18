@@ -163,6 +163,15 @@ class ROCBLAS_EXPORT rocblas_complex_num
         return rocblas_bfloat16{::sqrtf(float(x))};
     }
 
+    template <typename U>
+    static __forceinline__ __device__ __host__ T convert_low_precision_input(const U& value)
+    {
+        if constexpr(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
+            return T(float(value));
+        else
+            return T(value);
+    }
+
 public:
     // We do not initialize the members x or y by default, to ensure that it can
     // be used in __shared__ and that it is a trivial class compatible with C.
@@ -181,10 +190,35 @@ public:
     {
     }
 
+    template <typename U,
+              typename V,
+              std::enable_if_t<(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
+                                   && std::is_constructible_v<float, U>
+                                   && std::is_constructible_v<float, V>
+                                   && (!std::is_same_v<std::decay_t<U>, T>
+                                       || !std::is_same_v<std::decay_t<V>, T>),
+                               int> = 0>
+    __device__ __host__ rocblas_complex_num(U r, V i)
+        : x{convert_low_precision_input(r)}
+        , y{convert_low_precision_input(i)}
+    {
+    }
+
     // Conversion from real
     // TODO: Make constexpr after HSA_STATUS_ERROR_INVALID_ISA bug goes away
     __device__ __host__ rocblas_complex_num(T r)
         : x{r}
+        , y{0}
+    {
+    }
+
+    template <typename U,
+              std::enable_if_t<(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
+                                   && std::is_constructible_v<float, U>
+                                   && !std::is_same_v<std::decay_t<U>, T>,
+                               int> = 0>
+    __device__ __host__ rocblas_complex_num(U r)
+        : x{convert_low_precision_input(r)}
         , y{0}
     {
     }
