@@ -215,9 +215,9 @@ def test_r6_sol_breadth_notailloop_arm(_config_path):
 
 def _make_isa_info_map():
     """Build a gfx942 ISA info map using the real toolchain (session-cached)."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx942")
@@ -226,8 +226,8 @@ def _make_isa_info_map():
 
 def _get_rocm_version():
     """Get rocm_version from assembler (needed by assignDerivedParameters)."""
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -248,9 +248,9 @@ def _rocm_version():
 @pytest.fixture(scope="module")
 def _base_state(_isa_info_map):
     """A fully-derived gfx942 BBS solution state from a curated logic file."""
-    import Tensile.LibraryIO as LibraryIO
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    import tensilelite.LibraryIO as LibraryIO
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     _DATA = os.path.join(
         os.path.dirname(__file__), "..", "_codegen", "data"
@@ -273,7 +273,7 @@ def _base_state(_isa_info_map):
 
 def _reset_and_derive(state, isa_info_map, rocm_version, print_reject=False):
     """Reset derivation flags and run assignDerivedParameters."""
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Solution import Solution
     import codegen_harness as _ch
 
     state = copy.deepcopy(state)
@@ -330,7 +330,7 @@ def test_r6_wgm_variants(_base_state, _isa_info_map, _rocm_version):
     WGM=4 should pass normally.
     """
     import codegen_harness as _ch
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Solution import Solution
 
     # WGM=4: expect valid derivation.
     state4 = copy.deepcopy(_base_state)
