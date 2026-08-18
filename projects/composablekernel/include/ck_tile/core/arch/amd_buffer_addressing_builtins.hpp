@@ -3175,8 +3175,8 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
                                           const bool dst_thread_element_valid,
                                           const index_t dst_element_space_size)
 {
-#if defined(__gfx12__)
-    // gfx12 (RDNA) lacks a correct packed-fp16 *buffer* atomic add: the
+#if defined(__gfx1250__)
+    // gfx1250 lacks a correct packed-fp16 *buffer* atomic add: the
     // llvm.amdgcn.raw.buffer.atomic.fadd.v2f16 lowering produces wrong results
     // (split-K C accumulation is ~38% off). The packed *global* atomic
     // (global_atomic_pk_add_f16) is correct, so route fp16 through it -- the same
