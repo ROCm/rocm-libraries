@@ -53,8 +53,9 @@ def _forbidden_literals_in_file(path):
     found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value in _FORBIDDEN_SEGMENTS:
-                found.add(node.value)
+            for segment in _FORBIDDEN_SEGMENTS:
+                if segment in node.value:
+                    found.add(segment)
     return found
 
 
