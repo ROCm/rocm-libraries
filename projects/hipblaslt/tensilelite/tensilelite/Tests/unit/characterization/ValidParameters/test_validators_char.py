@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the validators in
-``Tensile.Common.ValidParameters``: ``checkParametersAreValid`` (the central
+``tensilelite.Common.ValidParameters``: ``checkParametersAreValid`` (the central
 parameter validator) and the two space-filling sub-validators
 ``checkSpaceFillAlgoIsValid`` / ``checkSpaceFillAlgoWGMIsValid``.
 
@@ -37,7 +37,7 @@ is used only for the realistic accept case).
 
 import pytest
 
-import Tensile.Common.ValidParameters as VP
+import tensilelite.Common.ValidParameters as VP
 
 pytestmark = pytest.mark.unit
 

@@ -28,7 +28,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch, mock_open
 
-from Tensile.EmbeddedData import (
+from tensilelite.EmbeddedData import (
     Namespace,
     Indent,
     EmbeddedDataFile,

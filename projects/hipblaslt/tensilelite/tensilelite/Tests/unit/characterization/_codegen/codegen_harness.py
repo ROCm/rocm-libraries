@@ -86,10 +86,10 @@ def canonicalize_asm(text):
 @functools.lru_cache(maxsize=1)
 def _toolchain():
     """Build (assembler, isaInfoMap) once. Uses amdclang++; no GPU required."""
-    from Tensile.Common.Architectures import SUPPORTED_ISA
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Common.Architectures import SUPPORTED_ISA
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
@@ -118,8 +118,8 @@ def get_isa_info_map():
 
 @contextlib.contextmanager
 def _isolated_globals():
-    from Tensile.Common.GlobalParameters import globalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -155,7 +155,7 @@ def _init_rocisa_for(kernel):
 
 
 def _solutions_from_logic_unguarded(logic_path):
-    import Tensile.LibraryIO as L
+    import tensilelite.LibraryIO as L
 
     asm = get_assembler()
     lib = L.parseLibraryLogicFile(str(logic_path), asm, False, False, False, get_isa_info_map(), False)
@@ -174,7 +174,7 @@ def solutions_from_logic(logic_path):
 
 def _prepare_kernel(kernel, splitGSU=False):
     """Set the per-kernel fields ``writeSolutionsAndKernels`` sets before emit."""
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
     base = getKernelFileBase(splitGSU, kernel)
     kernel.duplicate = False
@@ -195,13 +195,13 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
     logic files (e.g. the StreamK corpus) without emitting thousands.
     """
     import rocisa
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
     asm = get_assembler()
 
@@ -260,7 +260,7 @@ def emit_helpers_from_logic(logic_path):
     MMA scheduler state) but we still key the golden on identity + return code
     for consistency with the asm suites.
     """
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         generateKernelHelperObjects,
     )
