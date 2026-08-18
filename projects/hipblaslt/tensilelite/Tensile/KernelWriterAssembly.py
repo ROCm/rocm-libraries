@@ -75,6 +75,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Components.GL2Prefetch import GL2PrefetchLoad
+from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
@@ -82,7 +83,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKMulticast
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
@@ -350,6 +351,16 @@ class KernelWriterAssembly(KernelWriter):
     if tc == "MXSB":
       return self.states.mxsb.useConstSgprGlobalReadIncs
     return False
+
+  def globalReadIncsOperand(self, tc: str, loopIdx: int):
+    """Return the operand holding the loopIdx global-read increment for tc.
+
+    useConstSgprGlobalReadIncs trades the SGPR for an assembler symbol of the
+    same value, so the operand is then a constant expression, not a register.
+    """
+    if self.useConstSgprGlobalReadIncsForTc(tc):
+      return "GlobalReadIncs%s"%tc
+    return sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
 
   def isTdmWaveSeparated(self, kernel) -> bool:
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
@@ -2395,14 +2406,23 @@ class KernelWriterAssembly(KernelWriter):
     tilesN*GSU.
 
     Writes the reduced-bit masks into maskColSgpr/maskRowSgpr and returns True;
-    returns False (no write) for Stream-K or non-cluster, where the caller falls
-    back to the full mask.
+    returns False (no write) where the caller must fall back to the full mask.
+
+    The Stream-K ForceDPOnly cluster multicast IS handled: at this (kernel-init)
+    point WorkGroup0/1 hold the raw M-tile/N-tile coords (the linear StreamKIdx
+    fold runs later in StreamK.preLoop), the ClusterDim axes are Cs (X/M,
+    B-multicast) and Ck (Y/N, A-multicast), and the grid is rounded up to a
+    ClusterDim multiple, so the same validX/validY reduction applies. Its padded
+    peers early-exit in StreamK.streamKClusterPadEarlyExit, so the surviving
+    peers' ld_bcst must wait only on the present lanes. The two-tile
+    (StreamKForceDPOnly==0) Stream-K cluster is excluded: WorkGroup0 there is the
+    linear work index rather than an M-tile, so it derives Multicast=False and
+    emits no multicast masks to reduce (cluster reduction only, as on develop).
     """
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
-    # Stream-K's 1-D grid is not padded and WorkGroup0/1 are not M/N tile indices,
-    # so the reduction (like the padded early-exit) does not apply.
-    if not ((cx > 1 or cy > 1) and kernel["StreamK"] == 0):
+    if not ((cx > 1 or cy > 1)
+            and (kernel["StreamK"] == 0 or streamKMulticast(kernel))):
       return False
 
     module.addComment0("reduce multicast mask to real WGs in cluster")
@@ -2777,74 +2797,15 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-            if kernel["Multicast"]:
-              moduleRegInit.addComment0("Calculate multicast mask")
-              sgprWgX  = sTmp+1
-              sgprWgY  = sTmp+2
-              sgprNWgX = sTmp+3
-              maskColSgpr = sTmp+0  # runtime (1<<(validY*cx))-1 to AND with maskA
-              maskRowSgpr = sTmp+4  # runtime (1<<validX)-1       to AND with maskB
-
-              maskA = 1
-              for idx in range(kernel["ClusterDim"][1]):
-                maskA |= (1 << (idx * kernel["ClusterDim"][0]))
-
-              maskB = (1 << kernel["ClusterDim"][0]) - 1
-
-              # Reduce the broadcast mask to the WGs actually present in a padded
-              # boundary cluster. Writes maskColSgpr/maskRowSgpr and returns True; for
-              # Stream-K or non-cluster it returns False and we fall back to the full mask.
-              reduced = self.computeMulticastMaskReduction(kernel, moduleRegInit, sgprWgX, sgprWgY, maskColSgpr, maskRowSgpr)
-              if not reduced:
-                maskColSgpr = None
-                maskRowSgpr = None
-
-              # Emit dst = (maskConst [& reducedBits]) << shiftReg. When a reduced-bits
-              # sgpr is present the constant is ANDed to the WGs that really exist in
-              # this cluster before the shift; otherwise it degenerates to the original
-              # single shift of the immediate.
-              def setMask(dst, maskConst, shiftReg, reducedBits, comment):
-                if reducedBits is not None:
-                  moduleRegInit.add(SMovB32(dst=sgpr(dst), src=hex(maskConst), comment=comment))
-                  moduleRegInit.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=sgpr(reducedBits), comment="reduce to real WGs"))
-                  moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=sgpr(dst), comment=comment))
-                else:
-                  moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=hex(maskConst), comment=comment))
-
-              if kernel["enableTDMMetadata"]:
-                if kernel["ProblemType"]["Sparse"] == 1:
-                  setMask("MulticastMaskMetadata", maskA, sgprWgX, maskColSgpr,
-                          "Setting metadata mask (follows sparse A)")
-                elif kernel["ProblemType"]["Sparse"] == 2:
-                  with self.allocTmpSgpr(1, tag="multicastMetadataShift") as shiftTmp:
-                    moduleRegInit.add(SMulI32(dst=sgpr(shiftTmp.idx), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                              comment="Shift factor: wg_y * nwg_x (metadata)"))
-                    setMask("MulticastMaskMetadata", maskB, shiftTmp.idx, maskRowSgpr,
-                            "Setting metadata mask (follows sparse B)")
-
-              if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-                setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
-                setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
-                setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
-
-                moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
-                moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
-
-                moduleRegInit.add(setMulticastMaskLblEven)
-                setMask("MulticastMask", maskA, sgprWgX, maskColSgpr, "Setting maskA for even wave")
-                moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
-                moduleRegInit.add(setMulticastMaskLblOdd)
-                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                          comment="Shift factor: wg_y * nwg_x"))
-                setMask("MulticastMask", maskB, sgprWgY, maskRowSgpr, "Setting maskB for odd wave")
-                moduleRegInit.add(setMulticastMaskLblEnd)
-
-              else:
-                setMask("MulticastMaskA", maskA, sgprWgX, maskColSgpr, "Setting maskA")
-
-                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                          comment="Shift factor: wg_y * nwg_x"))
-                setMask("MulticastMaskB", maskB, sgprWgY, maskRowSgpr, "Setting maskB")
+        # Guard the compute site like the apply sites: find() returns None
+        # unless TDMInst==3 + HasTDM match, so Multicast with TDMInst in {1,2}
+        # or a non-TDM arch would otherwise None-deref here.
+        clusterComp = ClusterLoadTDM.find(self)
+        if kernel["Multicast"] and clusterComp:
+          # Same SGPR operands allocated above (wg_x=sTmp+1, wg_y=sTmp+2,
+          # nwg_x=sTmp+3, scratch=sTmp+4) are passed through.
+          moduleRegInit.add(clusterComp.computeMasks(
+              self, kernel, sgprWgX=sTmp+1, sgprWgY=sTmp+2, sgprNWgX=sTmp+3, sTmp=sTmp))
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
@@ -5039,8 +5000,7 @@ class KernelWriterAssembly(KernelWriter):
     elemsPerLane = 16 // bpe  # bf16 -> 8
     tileInfoA       = self.states.a.tileInfo
     subtileKElems   = int(tileInfoA.subtileShape[1]) * int(tileInfoA.mmaTileShape[1])
-    def _isPow2(n): return n > 0 and (n & (n - 1)) == 0
-    assert _isPow2(subtileKElems)
+    assert isPow2(subtileKElems)
 
     skipLabel = Label(self.labels.getNameInc("tailBoundarySkipAB"), "")
 
@@ -5098,10 +5058,10 @@ class KernelWriterAssembly(KernelWriter):
         mt                  = kernel[tP["mt"]]
         tileIdx             = tP["tileIdx"]
         mElemsPerSubtileRow = int(tileInfo.subtileShape[0]) * int(tileInfo.mmaTileShape[0])
-        assert _isPow2(mElemsPerSubtileRow)
+        assert isPow2(mElemsPerSubtileRow)
         withinSubMask       = (subtileKElems - 1) & ~(elemsPerLane - 1)
         numGR               = int(tileInfo.numGRPerSubtile)
-        assert numGR >= 1 and _isPow2(numGR) and (mElemsPerSubtileRow % numGR == 0)
+        assert numGR >= 1 and isPow2(numGR) and (mElemsPerSubtileRow % numGR == 0)
         mPerGRLoad          = mElemsPerSubtileRow // numGR
         subtileSizeBytes    = mElemsPerSubtileRow * subtileKElems * bpe
         subtileOffsetBytes  = subtileSizeBytes // numGR
@@ -5157,7 +5117,7 @@ class KernelWriterAssembly(KernelWriter):
           mRowStrideBytes  = subtileKElems * bpe
           kBandStrideBytes = int(tileInfo.globalSubtileGrid[0]) * subtileSizeBytes
           # offsetM_lds_bytes (M-row part) = offsetM_floor * subtileKElems * bpe
-          if _isPow2(mRowStrideBytes):
+          if isPow2(mRowStrideBytes):
             module.add(SLShiftLeftB32(dst=sgpr(stmp+8),
                                       shiftHex=log2(mRowStrideBytes),
                                       src=sgpr(stmp+9),
@@ -5174,7 +5134,7 @@ class KernelWriterAssembly(KernelWriter):
                                        shiftHex=log2(subtileKElems * bpe),
                                        src=sgpr(sOffK),
                                        comment="kSubtileIdx = offsetK_bytes >> log2(subtileKElems*bpe)"))
-            if _isPow2(kBandStrideBytes):
+            if isPow2(kBandStrideBytes):
               module.add(SLShiftLeftB32(dst=sgpr(stmp+9),
                                         shiftHex=log2(kBandStrideBytes),
                                         src=sgpr(stmp+9),
@@ -10011,6 +9971,15 @@ class KernelWriterAssembly(KernelWriter):
             if self.isPrefetchAcrossPersistentEnabled(kernel):
               module.add(SCMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                          comment="discard primed PAP group when current slice skips NLL"))
+            # StreamKMulticast: the long branch below skips the pass's first-load
+            # cluster wait on the zero-iteration path; emit the matching
+            # cluster-scope wait on that skip edge so the prologue cluster arrive
+            # is consumed on every control-flow path (whole-cluster barrier
+            # symmetry). scc (from checkLastIter) is preserved for the branch
+            # below. No-op unless StreamKMulticast.
+            if streamKMulticast(kernel):
+              skComponent = Component.StreamK.find(self)
+              module.add(skComponent.streamKMulticastZeroIterClusterWait(self, kernel))
             # use positive offset only long jump
             with self.allocTmpSgpr(3, tag="openSumAtLeastUnroll_tmpSgprInfo") as tmpSgprInfo:
               module.add(self.longBranchScc1(lastIterEnd, posNeg=1, tmpSgprInfo=tmpSgprInfo))
@@ -10430,9 +10399,8 @@ class KernelWriterAssembly(KernelWriter):
             imod.addModuleAsFlatItems(self.incrementSrd(tP, sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), sgpr(incUpper)))
         else:
           incUpper = 0 # GRO is positive for loop unroll
-          srcGRInc = sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx))
-          if tc in grIncTcs and self.useConstSgprGlobalReadIncsForTc(tc):
-            srcGRInc = "GlobalReadIncs%s"%tc
+          srcGRInc = self.globalReadIncsOperand(tc, loopIdx) if tc in grIncTcs \
+                     else sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx))
           imod.addModuleAsFlatItems(self.incrementSrd(tP, srcGRInc, hex(incUpper)))
 
         if kernel["ProblemType"]["Sparse"]:
@@ -19272,7 +19240,6 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
-    enableCluster = clusterEnabled(kernel["ClusterDim"])
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
@@ -19285,13 +19252,6 @@ class KernelWriterAssembly(KernelWriter):
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
-
-    def maskSgprName(tc: str) -> str:
-      if tc.startswith("MXS"):
-        string = tc.removeprefix("MXS")
-      else:
-        string = tc
-      return f"MulticastMask{string}"
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
@@ -19323,8 +19283,9 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), isMetadata))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
-    if kernel["Multicast"] and enableCluster:
-      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
+    clusterComp = ClusterLoadTDM.find(self)
+    if clusterComp:
+      mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc))
 
     with self.allocTmpSgpr(2, tag="initTDMDescriptor_tmpSgprRes") as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
@@ -19425,7 +19386,6 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
-    enableCluster = clusterEnabled(kernel["ClusterDim"])
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
@@ -19438,9 +19398,6 @@ class KernelWriterAssembly(KernelWriter):
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
-
-    def maskSgprName(tc: str) -> str:
-      return f"MulticastMask"
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
@@ -19481,8 +19438,9 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
-    if kernel["Multicast"] and enableCluster:
-      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
+    clusterComp = ClusterLoadTDM.find(self)
+    if clusterComp:
+      mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc, waveSeparated=True))
 
     with self.allocTmpSgpr(2, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgprRes") as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
@@ -20161,11 +20119,17 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module()
     tcA: str = tpA["tensorChar"]
     tcB: str = tpB["tensorChar"]
-    wavelen: int = kernel["WavefrontSize"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
     #TODO: should not directly use GRIA and GRIB
-    mod.add(SCSelectB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{tcB}"), sgpr(f"GlobalReadIncs{tcA}")))
+    incA = self.globalReadIncsOperand(tcA, self.states.unrollIdx)
+    incB = self.globalReadIncsOperand(tcB, self.states.unrollIdx)
+    # s_cselect_b32 accepts at most one literal, so when both increments are
+    # compile-time constants stage the even-wave one in the destination first.
+    if not isinstance(incA, RegisterContainer) and not isinstance(incB, RegisterContainer):
+      mod.add(SMovB32(sgpr(incSgprName), incA, f"incr{tcA} (even wave)"))
+      incA = sgpr(incSgprName)
+    mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+    mod.add(SCSelectB32(sgpr(incSgprName), incB, incA))
     return mod
 
   def resetTDMDescriptorForTail(self, kernel: Mapping, tP: Mapping, tmpSgprWaveOffset = None) -> Module:
