@@ -14,7 +14,7 @@ While this validation is no longer applied during the build process it can be ap
 using the **TensileLogic** script as follows:
 
 ```
-Tensile/bin/TensileLogic --check-only-custom-kernels <path to logic file>
+tensilelite/bin/TensileLogic --check-only-custom-kernels <path to logic file>
 ```
 
 where `<path to logic file>` is a path to a logic file containing a solution where
