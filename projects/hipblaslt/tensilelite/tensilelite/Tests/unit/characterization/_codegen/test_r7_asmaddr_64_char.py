@@ -121,7 +121,7 @@ def test_r7_asmaddr_initstrides_emits_assembly():
 
 def test_r7_incrementSrdMultipleRows_positive():
     """incrementSrdMultipleRows with numRows>1 emits SMulI32 + SAddU32/SAddCU32."""
-    from Tensile.AsmAddressCalculation import AddrCalculation
+    from tensilelite.AsmAddressCalculation import AddrCalculation
 
     mod = AddrCalculation.incrementSrdMultipleRows(
         srcDstBaseSgpr="SrdD",
@@ -140,7 +140,7 @@ def test_r7_incrementSrdMultipleRows_positive():
 
 def test_r7_incrementSrdMultipleRows_one():
     """incrementSrdMultipleRows with numRows==1 emits SLShiftLeftB32 + SAdd*."""
-    from Tensile.AsmAddressCalculation import AddrCalculation
+    from tensilelite.AsmAddressCalculation import AddrCalculation
 
     mod = AddrCalculation.incrementSrdMultipleRows(
         srcDstBaseSgpr="SrdD",
@@ -158,7 +158,7 @@ def test_r7_incrementSrdMultipleRows_one():
 
 def test_r7_incrementSrdMultipleRows_negative():
     """incrementSrdMultipleRows with numRows<0 emits SMulI32 + SSubU32/SSubBU32."""
-    from Tensile.AsmAddressCalculation import AddrCalculation
+    from tensilelite.AsmAddressCalculation import AddrCalculation
 
     mod = AddrCalculation.incrementSrdMultipleRows(
         srcDstBaseSgpr="SrdD",

@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — ShiftVectorComponents full characterization test.
 
-Targets: Tensile/Components/ShiftVectorComponents.py
+Targets: tensilelite/Components/ShiftVectorComponents.py
   Primary ranges:   47-200  (ShiftVectorComponentsVALU.__call__)
                     552-784 (ShiftVectorComponentsMFMAAllThread)
   Secondary ranges: 208-546 (ShiftVectorComponentsMFMA dispatch + PartialThread)

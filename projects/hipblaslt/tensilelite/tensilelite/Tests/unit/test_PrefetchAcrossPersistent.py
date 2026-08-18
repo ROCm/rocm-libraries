@@ -17,26 +17,51 @@ from rocisa.code import Module
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
 
-import Tensile.KernelWriter as kw_module
-from Tensile.KernelWriter import KernelWriter
-import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
 from Tensile.Components.TDMFuse import TDM_GROUPS, tdmGrouping, tdmPapRejectReason, tdmScaleSharesDataSet
-from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
-from Tensile.Common.RequiredParameters import getRequiredParametersMin
-from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Contractions import SizeMapping
 from Tensile.SolutionStructs.Solution import (
-    Solution,
-    _disableUnsupportedRuntimeStaggerU,
-    validateParameterTypes,
 )
 
 pytestmark = pytest.mark.unit
 
 
 # Tensile keeps process-global, module-level default dicts (`defaultSolution`,
+# `globalParameters`) that `Solution.__init__` reads while constructing a solution.
+# Some sibling unit tests mutate these in place -- e.g. test_MatrixInstructionConversion
+# injects a "ProblemType" key into `defaultSolution`, which makes Solution.__init__'s
+# `for key in defaultSolution` loop overwrite the already-converted ProblemType object
+# with the raw config dict, leaving DataType a str and crashing
+# assignProblemIndependentDerivedParameters. That manifested as order-dependent
+# failures of the Solution-validation tests below under pytest-xdist. Snapshot the
+# pristine defaults at import time (collection runs before any test executes, so they
+# are clean here) and restore them around every test so Solution construction in this
+# module is hermetic regardless of suite ordering.
+_PRISTINE_DEFAULT_SOLUTION = deepcopy(defaultSolution)
+_PRISTINE_GLOBAL_PARAMETERS = deepcopy(globalParameters)
+
+
+import tensilelite.KernelWriter as kw_module
+from tensilelite.KernelWriter import KernelWriter
+import tensilelite.KernelWriterAssembly as kwa_module
+from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
+from tensilelite.Common.GlobalParameters import defaultSolution, globalParameters
+from tensilelite.Common.RequiredParameters import getRequiredParametersMin
+from tensilelite.Common.Types import IsaInfo, IsaVersion, SemanticVersion
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Contractions import SizeMapping
+from tensilelite.SolutionStructs.Solution import (
+    Solution,
+    _disableUnsupportedRuntimeStaggerU,
+    validateParameterTypes,
+)
+
+################################################################################
+#
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+################################################################################
+pytestmark = pytest.mark.unit
 # `globalParameters`) that `Solution.__init__` reads while constructing a solution.
 # Some sibling unit tests mutate these in place -- e.g. test_MatrixInstructionConversion
 # injects a "ProblemType" key into `defaultSolution`, which makes Solution.__init__'s
@@ -1137,7 +1162,7 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
     remap_name,
     expected_transform_levels,
 ):
-    import Tensile.Components.WorkGroupMappingAlgos as wgm_algos
+    import tensilelite.Components.WorkGroupMappingAlgos as wgm_algos
 
     monkeypatch.setattr(
         wgm_algos,
