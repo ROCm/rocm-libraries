@@ -82,10 +82,7 @@ namespace MatrixMultiplyTest
     public:
         CommandKernelPtr commandKernel;
 
-        template <typename TA,
-                  typename TB,
-                  typename TD,
-                  typename ACC = float>
+        template <typename TA, typename TB, typename TD, typename ACC = float>
         void matrixMultiplyMacroTile(int                            wave_m,
                                      int                            wave_n,
                                      int                            wave_k,

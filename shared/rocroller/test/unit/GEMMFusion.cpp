@@ -124,17 +124,17 @@ namespace GEMMDriverTest
 
             auto const bounded         = HostNumerics::DataInitialization{};
             auto       generatedInputs = HostNumerics::generateGEMMInputs(descA,
-                                                                          descB,
-                                                                          descC,
-                                                                          bounded,
-                                                                          bounded,
-                                                                          bounded,
-                                                                          DataType::None,
-                                                                          DataType::None,
-                                                                          1,
-                                                                          -1.0f,
-                                                                          1.0f,
-                                                                          31415u);
+                                                                    descB,
+                                                                    descC,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    DataType::None,
+                                                                    DataType::None,
+                                                                    1,
+                                                                    -1.0f,
+                                                                    1.0f,
+                                                                    31415u);
             hostA                      = HostNumerics::copyTensorStorage<T>(generatedInputs.a);
             hostB                      = HostNumerics::copyTensorStorage<T>(generatedInputs.b);
             hostC                      = HostNumerics::copyTensorStorage<T>(generatedInputs.c);
