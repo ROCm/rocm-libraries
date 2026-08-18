@@ -114,7 +114,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     assert "#kernels 3" in cfg_log.read_text(encoding="utf-8")
 
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     script = tmp_path / "e1.sh"
     ow.write_run_script(script, "e1", hip, client_path=hip / "client")
     assert script.is_file()
