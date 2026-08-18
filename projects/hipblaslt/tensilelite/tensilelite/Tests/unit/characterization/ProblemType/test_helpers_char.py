@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the module-level helpers of
-``Tensile.SolutionStructs.Problem`` (the ProblemType slice): the mix-type dtype
+``tensilelite.SolutionStructs.Problem`` (the ProblemType slice): the mix-type dtype
 mappers ``getRealDataTypeA`` / ``getRealDataTypeB``, the in-place enum converter
 ``problemTypeToEnum`` (incl. the ``DataTypeMetadata`` / ``DataTypeMXSA`` /
 ``DataTypeMXSB`` present/absent branches), the type checker
@@ -36,10 +36,10 @@ registry + its derived ``_expectedProblemTypeParamTypes``.
 import pytest
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Activation import ActivationType
-from Tensile.Common.DataType import DataType
-import Tensile.SolutionStructs.Problem as P
-from Tensile.SolutionStructs.Problem import (
+from tensilelite.Activation import ActivationType
+from tensilelite.Common.DataType import DataType
+import tensilelite.SolutionStructs.Problem as P
+from tensilelite.SolutionStructs.Problem import (
     getRealDataTypeA,
     getRealDataTypeB,
     problemTypeToEnum,
@@ -138,7 +138,7 @@ def test_problem_type_to_enum_with_metadata_and_no_mx(snapshot):
 def _run_validate_capture(state, srcFile="fixture.yaml"):
     """Run the validator against an isolated copy of Solution's shared collector
     and return the delta it produced (then restore the collector)."""
-    from Tensile.SolutionStructs.Solution import _typeMismatchCollector
+    from tensilelite.SolutionStructs.Solution import _typeMismatchCollector
 
     saved = {k: dict(v) for k, v in _typeMismatchCollector.items()}
     _typeMismatchCollector.clear()

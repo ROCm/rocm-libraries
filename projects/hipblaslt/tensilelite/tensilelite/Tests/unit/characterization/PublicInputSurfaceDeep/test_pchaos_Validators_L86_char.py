@@ -64,7 +64,7 @@ def test_nt_os_name_guard_is_false():
 def _import_windows_with_extensions():
     """Import the private _windowsWithExtensions function."""
     import importlib
-    M = importlib.import_module("Tensile.Toolchain.Validators")
+    M = importlib.import_module("tensilelite.Toolchain.Validators")
     return M._windowsWithExtensions
 
 

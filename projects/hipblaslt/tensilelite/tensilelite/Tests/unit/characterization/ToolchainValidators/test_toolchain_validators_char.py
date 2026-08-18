@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.Toolchain.Validators
+# Characterization tests for tensilelite.Toolchain.Validators
 #
 # ADD-ONLY: pins current behavior of the toolchain component validators.
 # Posix-focused (the container is Linux); Windows-only branches are documented
@@ -15,7 +15,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-V = importlib.import_module("Tensile.Toolchain.Validators")
+V = importlib.import_module("tensilelite.Toolchain.Validators")
 
 
 # ---------------------------------------------------------------------------

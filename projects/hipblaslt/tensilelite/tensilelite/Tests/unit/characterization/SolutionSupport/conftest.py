@@ -32,7 +32,7 @@ import contextlib
 
 import pytest
 
-from Tensile.SolutionStructs.Problem import ProblemType
+from tensilelite.SolutionStructs.Problem import ProblemType
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def isolated_collector():
 
     @contextlib.contextmanager
     def _ctx():
-        from Tensile.SolutionStructs.Solution import _typeMismatchCollector
+        from tensilelite.SolutionStructs.Solution import _typeMismatchCollector
 
         saved = {k: {"count": v["count"], "values": set(v["values"]), "files": set(v["files"])}
                  for k, v in _typeMismatchCollector.items()}

@@ -31,7 +31,7 @@ from os.path import basename
 
 import pytest
 
-from Tensile.Toolchain.Validators import (
+from tensilelite.Toolchain.Validators import (
     supportedCCompiler,
     supportedCxxCompiler,
     supportedDeviceEnumerator,

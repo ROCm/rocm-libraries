@@ -25,7 +25,7 @@
 
 """Mutation-targeted characterization tests for
 ``_validateWorkGroupMappingXCC`` in
-``Tensile.TensileLogic.ValidWorkGroupMappingXCC``.
+``tensilelite.TensileLogic.ValidWorkGroupMappingXCC``.
 
 These are add-only tests that pin the *current* (clean-source) behavior of
 specific branches so that the corresponding mutmut survivors fail when applied.
@@ -39,7 +39,7 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.TensileLogic.ValidWorkGroupMappingXCC import (
+from tensilelite.TensileLogic.ValidWorkGroupMappingXCC import (
     _validateWorkGroupMappingXCC,
     reset_reported_failures,
 )

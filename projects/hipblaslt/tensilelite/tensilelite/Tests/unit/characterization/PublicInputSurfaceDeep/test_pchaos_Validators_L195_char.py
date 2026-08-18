@@ -64,7 +64,7 @@ def test_posix_os_name_selects_posix_branch():
 def _import_supported_device_enumerator():
     """Import the public supportedDeviceEnumerator function."""
     import importlib
-    M = importlib.import_module("Tensile.Toolchain.Validators")
+    M = importlib.import_module("tensilelite.Toolchain.Validators")
     return M.supportedDeviceEnumerator
 
 

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""PublicInputSurface characterization: the GPU-frequency guard at Tensile.py:603.
+"""PublicInputSurface characterization: the GPU-frequency guard at tensilelite.py:603.
 
 Branch 26f1acfe1ff93095519d418855bb9593f2c4f4bb. The predicate is a pure
 4-ary boolean conjunction controlling entry into the GPU-frequency configuration
@@ -16,7 +16,7 @@ Exhaustive 2^4 truth table: exactly 1 TRUE assignment (all four conjuncts
 hold), 15 FALSE assignments. The four false_examples each negate exactly one
 conjunct, covering the four minimal failure modes.
 
-Caveat (not part of this guard logic): Tensile.py:600 forces
+Caveat (not part of this guard logic): tensilelite.py:600 forces
 UseEffLike=False on RHEL8, making the TRUE branch unreachable on a RHEL8
 host -- an input-reachability constraint on the enclosing call path.
 
@@ -34,7 +34,7 @@ def liblogic_freq_branch(
     build_only: bool,
     cpu_only: bool,
 ) -> bool:
-    """Mirrors Tensile.py:603 guard: enter GPU-frequency configuration block."""
+    """Mirrors tensilelite.py:603 guard: enter GPU-frequency configuration block."""
     return (
         library_logic_in_config
         and use_eff_like
