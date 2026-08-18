@@ -117,7 +117,7 @@ def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
     from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
     from tensilelite.Common.Types import makeDebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     import codegen_harness as _ch
 

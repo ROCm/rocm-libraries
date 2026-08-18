@@ -54,7 +54,7 @@ import py
 import pytest
 import yaml
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import tensilelite
 
 from artifact_helpers import artifact_name_for_config, extract_artifact
 
@@ -73,7 +73,7 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     with open(config) as source:
         schedules = yaml.safe_load(source).get("TestParameters", {}).get("streamk_schedules", [])
     if not schedules:
-        tensilelite.Tensile(args)
+        tensilelite.tensilelite(args)
         return
     for index, schedule in enumerate(schedules):
         mode = schedule["reduction"]
@@ -89,8 +89,8 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
         # Each client run uses a fresh process and the same compiled artifact.
         with open(log_path, "w+") as log:
             result = subprocess.run(
-                [sys.executable, "-c", "import sys; from tensilelite.Tensile import Tensile; "
-                 "Tensile(sys.argv[1:])", *run_args], env=env, stdout=log, stderr=subprocess.STDOUT)
+                [sys.executable, "-c", "import sys; from tensilelite.tensilelite import tensilelite; "
+                 "tensilelite(sys.argv[1:])", *run_args], env=env, stdout=log, stderr=subprocess.STDOUT)
             assert result.returncode == 0, f"Numerical run failed: {log_path}"
             log.seek(0)
             records = {}
