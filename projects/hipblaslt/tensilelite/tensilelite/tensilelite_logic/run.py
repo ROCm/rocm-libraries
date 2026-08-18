@@ -26,6 +26,7 @@
 import contextlib
 import functools
 import io
+import os
 import sys
 import threading
 import time
@@ -217,8 +218,10 @@ def _setup(argv=None):
     if logicPath.is_file() and logicPath.suffix == ".yaml":
         files = [logicPath]
     else:
-        pattern = "**/*.yaml"
-        files = list(logicPath.glob(pattern))
+        logic_filter = getattr(args, "logic_filter", "**/*.yaml")
+        if not isinstance(logic_filter, (str, os.PathLike)):
+            logic_filter = "**/*.yaml"
+        files = list(logicPath.glob(logic_filter))
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
