@@ -26,7 +26,7 @@ class CleanBuildPy(build_py):
 
 
 setup(
-    version=_metadata["distribution_version"]("5.0.0"),
+    version=_metadata["distribution_version"](),
     install_requires=[
         "packaging",
         "pyyaml",
