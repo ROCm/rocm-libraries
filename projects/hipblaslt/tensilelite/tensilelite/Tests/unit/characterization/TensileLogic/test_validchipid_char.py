@@ -50,7 +50,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.TensileLogic.ValidChipId import (
+from tensilelite.tensilelite_logic.valid_chip_id import (
     _archChipIds,
     _chipIdDirFromPath,
     _chipIdKey,

@@ -108,7 +108,7 @@ def custom_kernel_text(name: str) -> str:
 
 def known_bugs_text() -> str:
     """Read the bundled TensileLogic known-bugs YAML resource."""
-    return _resource_text("TensileLogic", "known_bugs.yaml")
+    return _resource_text("tensilelite_logic", "known_bugs.yaml")
 
 
 def ductile_defaults_text() -> str:

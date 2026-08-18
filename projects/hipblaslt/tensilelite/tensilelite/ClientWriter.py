@@ -45,7 +45,7 @@ from tensilelite.Common import ensurePath, print1, printExit, printWarning, Clie
 from tensilelite.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
 from tensilelite.Common.GlobalParameters import globalParameters
 from tensilelite.Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .tensilelite_create_library import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType

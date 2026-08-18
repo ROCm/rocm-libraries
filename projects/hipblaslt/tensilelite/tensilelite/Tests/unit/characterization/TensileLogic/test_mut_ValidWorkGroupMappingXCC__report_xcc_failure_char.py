@@ -43,8 +43,8 @@ from pathlib import Path
 
 import pytest
 
-import tensilelite.TensileLogic.ValidWorkGroupMappingXCC as xcc_mod
-from tensilelite.TensileLogic.ValidWorkGroupMappingXCC import (
+import tensilelite.tensilelite_logic.valid_work_group_mapping_xcc as xcc_mod
+from tensilelite.tensilelite_logic.valid_work_group_mapping_xcc import (
     _report_xcc_failure,
     reset_reported_failures,
 )

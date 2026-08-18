@@ -25,15 +25,15 @@
 ################################################################################
 
 try:
-    from tensilelite import TensileLibLogicToYaml
+    from tensilelite import lib_logic_to_yaml
 except ImportError:
     import os.path
     import sys
     parentdir = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."))
     sys.path.append(parentdir)
 
-    from tensilelite import TensileLibLogicToYaml
+    from tensilelite import lib_logic_to_yaml
 
 # script run from commandline
 if __name__ == "__main__":
-    TensileLibLogicToYaml.main()
+    lib_logic_to_yaml.main()

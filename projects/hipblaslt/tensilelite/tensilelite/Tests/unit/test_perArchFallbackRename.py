@@ -37,7 +37,7 @@ from tensilelite.SolutionLibrary import (
     PredicateLibrary,
     ProblemMapLibrary,
 )
-from tensilelite.TensileCreateLibrary.Run import renameFallbacksPerArch
+from tensilelite.tensilelite_create_library.run import renameFallbacksPerArch
 
 
 def _placeholder(name: str) -> PlaceholderLibrary:
