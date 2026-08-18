@@ -26,6 +26,27 @@ inline std::vector<int64_t> tensorDims(const data_objects::TensorAttributes& ten
     return toStdVector(tensor.dims());
 }
 
+inline int64_t dimAt(const data_objects::TensorAttributes* tensor, size_t index)
+{
+    return tensor->dims()->Get(static_cast<flatbuffers::uoffset_t>(index));
+}
+
+inline int64_t strideAt(const data_objects::TensorAttributes* tensor, size_t index)
+{
+    return tensor->strides()->Get(static_cast<flatbuffers::uoffset_t>(index));
+}
+
+inline const char* getIndexTypeString(const data_objects::TensorAttributes* index)
+{
+    if(index == nullptr || index->data_type() == data_objects::DataType::INT32)
+    {
+        return "int32_t";
+    }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Resample index tensor must have INT32 data type.");
+}
+
 inline void validateSpatialVector(const std::vector<int64_t>& values,
                                   size_t spatialDims,
                                   const std::string& operationName,

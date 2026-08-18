@@ -21,28 +21,6 @@ using namespace hip_kernel_provider::core::utils;
 
 namespace
 {
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-
-int64_t dimAt(const data_objects::TensorAttributes* tensor, size_t index)
-{
-    return tensor->dims()->Get(static_cast<flatbuffers::uoffset_t>(index));
-}
-
-int64_t strideAt(const data_objects::TensorAttributes* tensor, size_t index)
-{
-    return tensor->strides()->Get(static_cast<flatbuffers::uoffset_t>(index));
-}
-
-const char* getIndexTypeString(const data_objects::TensorAttributes* index)
-{
-    if(index == nullptr || index->data_type() == data_objects::DataType::INT32)
-    {
-        return "int32_t";
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "ResampleFwd index tensor must have INT32 data type.");
-}
 
 void addDimOptions(KernelCompileOptions& options,
                    const ResampleFwdParams& params,
