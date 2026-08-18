@@ -16,7 +16,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _SCRIPT = (
-    pathlib.Path(__file__).resolve().parents[3]
+    pathlib.Path(__file__).resolve().parents[4]
     / "scripts"
     / "precommit_affected_tests.py"
 )
