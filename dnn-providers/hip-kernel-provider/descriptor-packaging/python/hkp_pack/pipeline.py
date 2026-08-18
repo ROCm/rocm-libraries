@@ -265,6 +265,12 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
 
     for kdp in inter.kdps:
         out_doc = dict(kdp.header)
+        # Each shard targets exactly its own arch, so narrow the authored arch
+        # list (which may span several arches, or be empty for a wildcard) to the
+        # single arch this shard is for. The descriptor's logical key is
+        # (id, arch): the same KDP/UKD id ships under multiple arch shards with
+        # per-arch content, unique per arch rather than globally.
+        out_doc["arch"] = [arch]
         out_doc["kernelDescriptors"] = [
             _rewrite_ukd_kpack(u, arch, u.variant_key, variant_sha[u.variant_key])
             for u in kdp.ukds
@@ -304,7 +310,7 @@ def run_pipeline(
         return results
 
     kpack_mod, comp = load_kpack(kpack_python_dir)
-    flat = load_flat_input(source_root)
+    flat = load_flat_input(source_root, log=log)
 
     if inter_root is None:
         inter_root = out_root.parent / "hkp-intermediate"

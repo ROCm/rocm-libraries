@@ -440,3 +440,92 @@ def test_wildcard_arch_matches(main_fixture):
     explicit = next(k for k in flat.kdps() if k.id == "kdp-copy")
     assert arch_matches(explicit.doc, "gfx942")
     assert not arch_matches(explicit.doc, "gfx950")
+
+
+# --- Per-shard arch narrowing (C-004 part 1) -------------------------------
+def test_shard_kdp_arch_is_narrowed(built):
+    # Every shipped KDP in a shard targets exactly that shard's arch, even when
+    # the authored arch list spans several arches or is empty (wildcard).
+    for arch in ("gfx942", "gfx950", "gfx90a"):
+        shard = built["out"] / arch
+        if not shard.is_dir():
+            continue
+        for kdp_path in shard.glob("*.kdp.json"):
+            assert _read(kdp_path)["arch"] == [arch], kdp_path.name
+    # The pointwise KDP authored [gfx942, gfx950] narrows in each shard.
+    assert _read(built["out"] / "gfx942" / "pointwise.kdp.json")["arch"] == ["gfx942"]
+    assert _read(built["out"] / "gfx950" / "pointwise.kdp.json")["arch"] == ["gfx950"]
+    # The wildcard KDP (authored []) narrows to the shard arch wherever it lands.
+    assert _read(built["out"] / "gfx90a" / "pointwise_wild.kdp.json")["arch"] == [
+        "gfx90a"
+    ]
+
+
+# --- Cross-shard collision invariant (C-001) -------------------------------
+def test_same_ukd_id_across_shards_distinct_content(built):
+    # The pointwise KDP survives on both gfx942 and gfx950; the same UKD id ships
+    # in both shards but with per-arch kpack details (different library + sha256).
+    # This is the (id, arch) identity shape the runtime loader must accept without
+    # treating the two as a global-id collision.
+    add942 = _inline_ukds(built["out"] / "gfx942", "pointwise.kdp.json")[0]
+    add950 = _inline_ukds(built["out"] / "gfx950", "pointwise.kdp.json")[0]
+    assert add942["id"] == add950["id"]
+    ks942, ks950 = add942["kernel_source"], add950["kernel_source"]
+    assert ks942["library"] == "kpack/hip_kernel_provider_gfx942.kpack"
+    assert ks950["library"] == "kpack/hip_kernel_provider_gfx950.kpack"
+    assert ks942["sha256"] != ks950["sha256"]
+
+
+# --- Compiler determinism (C-008) ------------------------------------------
+def test_determinism_same_variant_twice(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # -fuse-cuid=none makes hipcc emit byte-identical .co for identical inputs, so
+    # the sha256 stamped on each shipped UKD is stable across builds. Two full
+    # runs of the same fixture must yield identical UKD sha256 values.
+    def _shas(out):
+        result = {}
+        for kdp in sorted((out).glob("gfx942/*.kdp.json")):
+            for ukd in _read(kdp)["kernelDescriptors"]:
+                result[ukd["id"]] = ukd["kernel_source"]["sha256"]
+        return result
+
+    run_pipeline(
+        source_root=main_fixture,
+        arches=["gfx942"],
+        out_root=tmp_path / "out1",
+        hipcc=hipcc,
+        kpack_python_dir=kpack_python_dir,
+        inter_root=tmp_path / "inter1",
+    )
+    run_pipeline(
+        source_root=main_fixture,
+        arches=["gfx942"],
+        out_root=tmp_path / "out2",
+        hipcc=hipcc,
+        kpack_python_dir=kpack_python_dir,
+        inter_root=tmp_path / "inter2",
+    )
+    a, b = _shas(tmp_path / "out1"), _shas(tmp_path / "out2")
+    assert a and a == b
+
+
+# --- Non-descriptor .json warn/skip (C-007) --------------------------------
+def test_non_descriptor_json_skipped(tmp_path, main_fixture, hipcc, kpack_python_dir):
+    # A stray .json whose name carries no <type> token is skipped, not fatal.
+    src = _copy_fixture(tmp_path, main_fixture)
+    (src / "notes.json").write_text('{"arbitrary": true}\n', encoding="utf-8")
+    results = _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+    assert set(results) == {"gfx942"}
+    assert not (tmp_path / "out" / "gfx942" / "notes.json").exists()
+
+
+def test_unknown_type_token_still_errors(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # A file that IS type-tagged (<name>.<type>.json) but with an unrecognized
+    # token still hard-errors; only token-less files are skipped.
+    src = _copy_fixture(tmp_path, main_fixture)
+    (src / "stray.bogus.json").write_text('{"id": "x"}\n', encoding="utf-8")
+    with pytest.raises(HkpPackError, match="unknown type token 'bogus'"):
+        _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])

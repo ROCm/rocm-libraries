@@ -6,7 +6,12 @@ from .variant import variant_key
 
 
 def _hipcc_command(hipcc, source_path, arch, build, out_co):
-    cmd = [hipcc, "--genco", f"--offload-arch={arch}"]
+    # -fuse-cuid=none: hipcc defaults to a random compilation unit id, which
+    # perturbs the __hip_cuid_ symbol so identical inputs produce different .co
+    # bytes. Pinning it keeps the sha256/provenance stamped on each UKD a stable
+    # traceability record across builds. In the fixed prefix so build flags
+    # cannot displace it.
+    cmd = [hipcc, "--genco", f"--offload-arch={arch}", "-fuse-cuid=none"]
     for name, val in (build.get("defines") or {}).items():
         if isinstance(val, bool):
             val = "1" if val else "0"

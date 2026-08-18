@@ -178,14 +178,17 @@ def _validate_shape(desc):
         _validate_kdp(desc)
 
 
-def load_flat_input(root):
+def load_flat_input(root, log=print):
     """Load and structurally validate every *.json descriptor in a flat folder.
 
     root holds the authored source folder: KDP files (with inline hip UKDs) and
     the by-Id generic files (UMD/UED/UDD/KMD/UHD), plus the HIP sources the UKDs
     name. Each descriptor's type is derived from its `<name>.<type>.json`
-    filename. Raises HkpPackError on any malformed / missing-field / unknown-type
-    / dangling-reference descriptor.
+    filename. A `*.json` whose name carries no type token (not `<name>.<type>.json`)
+    is not one of ours: warn and skip it rather than aborting the pack, so an
+    incidental file in the source folder is tolerated. Raises HkpPackError on any
+    malformed / missing-field / unknown-type / dangling-reference descriptor that
+    IS type-tagged.
     """
     root = Path(root)
     if not root.is_dir():
@@ -193,6 +196,9 @@ def load_flat_input(root):
 
     descriptors = []
     for jp in sorted(root.glob("*.json")):
+        if type_from_filename(jp) is None:
+            log(f"skipping non-descriptor file {jp.name}")
+            continue
         desc = Descriptor(path=jp, doc=_read_json(jp))
         _validate_shape(desc)
         descriptors.append(desc)
