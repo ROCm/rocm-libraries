@@ -105,13 +105,13 @@ provenance only — they are read by the validator, not by the runtime.
 
 ## Adding a new external kernel
 
-The `Tensile.AddCustomConfig` helper extracts the Tensile-side interface from
+The `tensilelite.AddCustomConfig` helper extracts the Tensile-side interface from
 a benchmark test YAML and injects a `custom.config` block into the `.s` file:
 
 ```bash
-python -m Tensile.AddCustomConfig \
-    Tensile/CustomKernels/aiter/<kernel>.s \
-    --yaml Tensile/Tests/custom/<test>.yaml
+python -m tensilelite.AddCustomConfig \
+    tensilelite/CustomKernels/aiter/<kernel>.s \
+    --yaml tensilelite/Tests/custom/<test>.yaml
 ```
 
 Useful flags:
@@ -144,7 +144,7 @@ Two ways to validate:
 1. **CI gate** (recommended for pull-request checks):
 
    ```bash
-   python -m Tensile.ValidateMetadata --strict
+   python -m tensilelite.ValidateMetadata --strict
    ```
 
    Walks the `CustomKernels/` tree, validates every `.s` file, exits non-zero
