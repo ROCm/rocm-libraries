@@ -1,6 +1,6 @@
 # hipDNN Feature Release Test Plan
 
-This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../testing/TESTING.md) and its [Development Workflow](../testing/TESTING.md#development-workflow).
+This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../TESTING.md) and its [Development Workflow](../TESTING.md#development-workflow).
 
 > [!IMPORTANT]
 > ⚠️ **All prerequisites and tests in this document must pass for a successful release.**
@@ -176,7 +176,7 @@ ctest --test-dir build/release
 > - **Linux**: standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
 > - **Windows**: standalone ASAN instruments code built in this project, not installed ROCm libraries.
 >
-> See [Testing § ASAN/TSAN/sanitizer coverage](../testing/TESTING.md#asantsansanitizer-coverage) and [Known Testing Gaps](../testing/KNOWN_TESTING_GAPS.md#sanitizers-and-platforms) for current automation and platform details.
+> See [Testing § ASAN/TSAN/sanitizer coverage](../TESTING.md#asantsansanitizer-coverage) and [Known Testing Gaps](../testing/KNOWN_TESTING_GAPS.md#sanitizers-and-platforms) for current automation and platform details.
 
 Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the `standard` tier (`ctest --test-dir <build> -L standard`).
 

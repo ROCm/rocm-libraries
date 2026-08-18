@@ -359,7 +359,7 @@ The `hipdnn-`prefixed target names below work in both the standalone and superbu
 | Target | Description |
 |--------|-------------|
 | \<no target\> | Build all components |
-| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./testing/TESTING.md)) |
+| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./TESTING.md)) |
 | `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, and `full` |
 | `hipdnn-format` | Auto-format all C++ source files |
 | `hipdnn-check-format` | Check code formatting compliance |
@@ -402,10 +402,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. For test category targets and other details, see [Testing](./testing/TESTING.md#development-workflow).
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. For test category targets and other details, see [Testing](./TESTING.md#development-workflow).
 
 > [!NOTE]
-> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./testing/TESTING.md#development-workflow) for the available test paths.
+> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./TESTING.md#development-workflow) for the available test paths.
 
 To build only hipDNN core from the superbuild (the same components as the [standalone build](#2-build-hipdnn), without the providers), use the `hipdnn` preset:
 

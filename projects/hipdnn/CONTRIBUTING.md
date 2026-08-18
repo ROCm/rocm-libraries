@@ -59,7 +59,7 @@ All contributions must meet the following requirements before they can be merged
   - New code should not decrease existing coverage
   - Each component should maintain >80% coverage individually
 
-See [Testing](./docs/testing/TESTING.md) for further details.
+See [Testing](./docs/TESTING.md) for further details.
 
 ### Documentation Requirements
 

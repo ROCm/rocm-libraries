@@ -2,7 +2,7 @@
 
 This document describes how hipDNN is tested. It keeps the original split between unit tests, integration tests, and performance tests, then adds current links and requirements.
 
-For commands, see [Testing](./TESTING.md) and [Building](../Building.md). For test names, see [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md). For known limits, see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
+For commands, see [Testing](../TESTING.md) and [Building](../Building.md). For test names, see [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md). For known limits, see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
 
 ## Principles
 
@@ -176,7 +176,7 @@ hipDNN uses `clang-tidy`. Linux builds and Linux superbuild CI enable it; Window
 
 Standalone ASAN tests are run manually. Pull-request ASAN jobs build host-ASAN binaries but do not run their tests. Manual workflow runs and the scheduled nightly can run ASAN tests where matching GPU runners are available.
 
-TSAN supports Linux host code. ASAN and TSAN use separate build configurations. See [Testing](./TESTING.md#asantsansanitizer-coverage), [Building](../Building.md#address-sanitizer-build), and [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#sanitizers-and-platforms).
+TSAN supports Linux host code. ASAN and TSAN use separate build configurations. See [Testing](../TESTING.md#asantsansanitizer-coverage), [Building](../Building.md#address-sanitizer-build), and [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#sanitizers-and-platforms).
 
 ### CI Results
 
