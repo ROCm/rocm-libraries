@@ -211,7 +211,7 @@ fixture or pinning current behavior. In spirit this is closer to
 validate tuning data rather than code, and where each one lives follows from that.
 
 One of these checks, sibling-`DeviceNames` consistency, is implemented in
-`tensilelite.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
+`tensilelite.tensilelite_logic.ValidCorpusConsistency` and runs unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks it regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy also lives in
@@ -438,7 +438,7 @@ of reaching a customer's model three months earlier in the story. There is no wa
 times that has already happened, because a build that fails on line one of a bad YAML file does not
 generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
 
-Its known-bug list, [`tensilelite/TensileLogic/known_bugs.yaml`](tensilelite/TensileLogic/known_bugs.yaml), is
+Its known-bug list, [`tensilelite/tensilelite_logic/known_bugs.yaml`](tensilelite/tensilelite_logic/known_bugs.yaml), is
 the best-structured quarantine in the component (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc). Entries are keyed on the logic file path plus the solution's `SolutionNameMin`, a

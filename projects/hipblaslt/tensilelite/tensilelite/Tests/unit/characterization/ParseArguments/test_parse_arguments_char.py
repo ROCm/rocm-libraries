@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for tensilelite.TensileCreateLibrary.ParseArguments
+# Characterization tests for tensilelite.tensilelite_create_library.parse_arguments
 #
 # ADD-ONLY: pins the argv -> arguments-dict mapping of parseArguments.
 #
@@ -15,7 +15,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-PA = importlib.import_module("tensilelite.TensileCreateLibrary.ParseArguments")
+PA = importlib.import_module("tensilelite.tensilelite_create_library.parse_arguments")
 coVersionMap = importlib.import_module("tensilelite.Common").coVersionMap
 
 BASE = ["prog", "/logic", "/out", "HSA"]

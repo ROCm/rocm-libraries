@@ -541,7 +541,7 @@ def _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.SolutionStructs.Solution import Solution
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
