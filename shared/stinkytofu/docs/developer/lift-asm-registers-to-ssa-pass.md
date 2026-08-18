@@ -467,7 +467,8 @@ accumulator classes  an AGPR and a VGPR can name the same storage on some
                      unsound; needs target register information
 True16 halves        needs sub-DWORD atomic units, normalised from the
                      architecture rules in RegHalfKeyer.hpp
-unreachable blocks   dominance is undefined there; needs a dominance forest
+unreachable blocks   dominance is undefined there; run
+                     StinkyUnreachableBlockElimPass after CFG construction
 entry loop headers   a live-in reaching a loop header has no predecessor edge
                      to merge on; needs a distinct preheader
 call sites           need a calling convention describing argument, result,

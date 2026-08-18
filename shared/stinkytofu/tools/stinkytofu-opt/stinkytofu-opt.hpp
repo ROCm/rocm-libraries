@@ -64,6 +64,7 @@
 #include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
@@ -161,6 +162,11 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
+    // Erases blocks not reachable from the entry along CFG successor edges.
+    // Run after CFGBuilderPass / LongBranchLoweringPass; an incomplete CFG
+    // would make this delete live targets.
+    {"StinkyUnreachableBlockElimPass",
+     [](const auto&) { return createStinkyUnreachableBlockElimPass(); }},
     // Discards physical-register PHIs and def-use chains. Lifting rejects a
     // leftover analysis PHI, so this runs immediately before
     // LiftAsmRegistersToSSAPass rather than inside it.

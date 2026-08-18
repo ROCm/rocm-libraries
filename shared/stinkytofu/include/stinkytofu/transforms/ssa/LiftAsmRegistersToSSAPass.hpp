@@ -63,11 +63,13 @@ struct LiftAttachedSSAResult {
 /// created. Reducible and irreducible CFGs are both supported.
 ///
 /// Current scope is deliberately narrow. Operands must be full-DWORD VGPRs or
-/// SGPRs, and every block must be reachable from the entry. Literals, special
-/// registers such as EXEC or SCC, and pseudo registers become immediate SSA
-/// operands rather than values. Anything else - accumulator classes, unresolved
-/// template virtual registers, True16 halves, calls, or leftover analysis PHIs
-/// - is reported as an error instead of being silently mishandled.
+/// SGPRs, and every block must be reachable from the entry. Run
+/// StinkyUnreachableBlockElimPass after CFG construction to drop dead blocks.
+/// Literals, special registers such as EXEC or SCC, and pseudo registers
+/// become immediate SSA operands rather than values. Anything else -
+/// accumulator classes, unresolved template virtual registers, True16 halves,
+/// calls, or leftover analysis PHIs - is reported as an error instead of
+/// being silently mishandled.
 ///
 /// The function must already be free of def-use analysis state; a leftover
 /// `GFX::PHI` is an error rather than something to clean up. Run
