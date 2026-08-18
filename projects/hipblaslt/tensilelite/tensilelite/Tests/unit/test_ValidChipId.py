@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 
-# Load ValidChipId.py via importlib to bypass Tensile/TensileLogic/__init__.py,
+# Load ValidChipId.py via importlib to bypass tensilelite/TensileLogic/__init__.py,
 # which transitively imports joblib / heavy build deps via Run.py.
 def _load_validchipid_mod():
     p = Path(__file__).resolve().parents[2] / "TensileLogic" / "ValidChipId.py"
@@ -83,7 +83,7 @@ def arch_mod(monkeypatch):
     # is not viable here. The fixture-scoped rocisa stub is sufficient to import
     # it normally without the C-extension.
     _install_rocisa_stub(monkeypatch)
-    from Tensile.Common import Architectures
+    from tensilelite.Common import Architectures
 
     return Architectures
 

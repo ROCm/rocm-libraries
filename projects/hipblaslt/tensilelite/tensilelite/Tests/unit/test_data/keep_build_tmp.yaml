@@ -1,4 +1,4 @@
-# Trimmed from Tensile/Tests/common/gemm/fp16_tn.yaml: a single Assembly
+# Trimmed from tensilelite/Tests/common/gemm/fp16_tn.yaml: a single Assembly
 # kernel and a single problem size, ISA pinned to gfx950 so --build-only
 # compiles regardless of host GPU. Consumed by test_keep_build_tmp.py;
 # placed under test_data/ so findConfigs() in test_config.py skips it.

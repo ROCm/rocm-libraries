@@ -17,18 +17,18 @@ from types import SimpleNamespace
 
 import pytest
 
-# The coverage tox env runs `pytest -m unit Tensile/Tests/unit`; without this
+# The coverage tox env runs `pytest -m unit tensilelite/Tests/unit`; without this
 # explicit declaration the file is silently deselected and reports 0% coverage.
 pytestmark = pytest.mark.unit
 
-from Tensile.OccupancyMeasure import (
+from tensilelite.OccupancyMeasure import (
     compute_occupancy_from_asm_source,
     compute_occupancy_from_resources,
     _arch_caps_for_kernel,
 )
 
 try:
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly as _KWA
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly as _KWA
     _KWA_AVAILABLE = True
 except Exception:
     _KWA_AVAILABLE = False
@@ -356,7 +356,7 @@ class TestNonGfx9OccupancyNotComputed:
 class TestPythonDebugWarning:
     """Verify the print2-gated CUOccupancy<=0 warning in processKernelSource (Run.py).
 
-    Tests replicate the conditional directly without importing Tensile.Common.
+    Tests replicate the conditional directly without importing tensilelite.Common.
     """
 
     def _run_warning_check(self, cuocc_value, verbosity):
@@ -652,7 +652,7 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
         kwa = self._make_kwa(self._good_asm())
         kernel = self._make_kernel_obj()
 
-        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+        with patch("tensilelite.KernelWriterAssembly.rocIsa") as mock_rocisa:
             mock_rocisa.getInstance.return_value = mock_ti
             errcode, code = kwa.getSourceFileString(kernel)
 
@@ -677,7 +677,7 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
         kwa = self._make_kwa(self._good_asm())
         kernel = self._make_kernel_obj()
 
-        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+        with patch("tensilelite.KernelWriterAssembly.rocIsa") as mock_rocisa:
             mock_rocisa.getInstance.return_value = mock_ti
             kwa.getSourceFileString(kernel)
 
@@ -704,7 +704,7 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
         kwa = self._make_kwa(asm_no_directives)
         kernel = self._make_kernel_obj()
 
-        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+        with patch("tensilelite.KernelWriterAssembly.rocIsa") as mock_rocisa:
             mock_rocisa.getInstance.return_value = mock_ti
             errcode, _ = kwa.getSourceFileString(kernel)
 
@@ -726,7 +726,7 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
         kwa = self._make_kwa(self._good_asm())
         kernel = self._make_kernel_obj()
 
-        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+        with patch("tensilelite.KernelWriterAssembly.rocIsa") as mock_rocisa:
             mock_rocisa.getInstance.return_value = mock_ti
             errcode, code = kwa.getSourceFileString(kernel)
 
@@ -757,7 +757,7 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
         kwa = self._make_kwa(self._good_asm())
         kernel = self._make_kernel_obj()
 
-        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+        with patch("tensilelite.KernelWriterAssembly.rocIsa") as mock_rocisa:
             mock_rocisa.getInstance.return_value = mock_ti
             kwa.getSourceFileString(kernel)
 

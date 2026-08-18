@@ -2,23 +2,13 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for StreamK=5 hybrid mode codegen intent.
 
-These tests import Tensile modules directly and inspect emitted rocisa
+These tests import TensileLite modules directly and inspect emitted rocisa
 instructions rather than matching Python source text. Signature layout
 is covered by sk_hybrid.yaml kernel tests.
 """
 
 # Prime the component registry before StreamK imports (avoids circular import).
-from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
-
 from rocisa.instruction import SAndB32, SLShiftLeftB32, SLShiftRightB32, SXorB32
-
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Components.StreamK import (
-    StreamK,
-    StreamKHybrid,
-    StreamKTwoTileDPFirst,
-    streamKVariantClass,
-)
 
 from streamk5_test_helpers import (
     SK5_KERNARG_ALIASES,
@@ -28,6 +18,15 @@ from streamk5_test_helpers import (
     reg_name,
 )
 
+
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components.StreamK import (
+    StreamK,
+    StreamKHybrid,
+    StreamKTwoTileDPFirst,
+    streamKVariantClass,
+)
 
 class TestStreamK5ValidParameters:
     def test_streamk_enum_includes_5(self):

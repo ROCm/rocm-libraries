@@ -25,7 +25,7 @@ from types import SimpleNamespace
 import pytest
 from rocisa.code import Module, TextBlock
 
-from Tensile.Components.SIA import noSchedGlobalRead
+from tensilelite.Components.SIA import noSchedGlobalRead
 
 pytestmark = pytest.mark.unit
 

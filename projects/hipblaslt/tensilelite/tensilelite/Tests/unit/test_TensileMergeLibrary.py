@@ -11,9 +11,9 @@ from unittest.mock import patch
 
 import pytest
 
-from Tensile import LibraryIO
-from Tensile.CustomYamlLoader import DEFAULT_YAML_LOADER, load_yaml_stream
-from Tensile.TensileMergeLibrary import (
+from tensilelite import LibraryIO
+from tensilelite.CustomYamlLoader import DEFAULT_YAML_LOADER, load_yaml_stream
+from tensilelite.TensileMergeLibrary import (
     addKernel,
     allFiles,
     avoidRegressions,
@@ -302,8 +302,8 @@ class TestCompareProblemType:
             def __init__(self, state: Any, _assign_gpus: bool) -> None:
                 self.state = deepcopy(state)
 
-        with patch("Tensile.TensileMergeLibrary.ProblemType", _FakeProblemType), patch(
-            "Tensile.TensileMergeLibrary.problemTypeToEnum", lambda _pt: None
+        with patch("tensilelite.TensileMergeLibrary.ProblemType", _FakeProblemType), patch(
+            "tensilelite.TensileMergeLibrary.problemTypeToEnum", lambda _pt: None
         ):
             compareProblemType(ori, inc)
 
@@ -316,8 +316,8 @@ class TestCompareProblemType:
             def __init__(self, state: Any, _assign_gpus: bool) -> None:
                 self.state = deepcopy(state)
 
-        with patch("Tensile.TensileMergeLibrary.ProblemType", _FakeProblemType), patch(
-            "Tensile.TensileMergeLibrary.problemTypeToEnum", lambda _pt: None
+        with patch("tensilelite.TensileMergeLibrary.ProblemType", _FakeProblemType), patch(
+            "tensilelite.TensileMergeLibrary.problemTypeToEnum", lambda _pt: None
         ):
             with pytest.raises(SystemExit, match="ProblemType"):
                 compareProblemType(ori, inc)
@@ -657,7 +657,7 @@ class TestFixSizeInconsistencies:
         assert len(result) == 1
         assert result[0][0] == [1, 2, 3, 4]
 
-    @patch("Tensile.TensileMergeLibrary.verbose")
+    @patch("tensilelite.TensileMergeLibrary.verbose")
     def test_remove_duplicates_verbose_message(self, mock_verbose: Any) -> None:
         """Verbose message reports duplicate count when sizes are deduplicated."""
         sizes = [
@@ -741,28 +741,28 @@ class TestMessageFunctions:
         assert mock_print.call_count >= 1
 
     @patch("builtins.print")
-    @patch("Tensile.TensileMergeLibrary.verbosity", 1)
+    @patch("tensilelite.TensileMergeLibrary.verbosity", 1)
     def test_verbose_output_when_enabled(self, mock_print: Any) -> None:
         """``verbose`` prints when verbosity >= 1."""
         verbose("test", "message")
         assert mock_print.call_count >= 1
 
     @patch("builtins.print")
-    @patch("Tensile.TensileMergeLibrary.verbosity", 0)
+    @patch("tensilelite.TensileMergeLibrary.verbosity", 0)
     def test_verbose_no_output_when_disabled(self, mock_print: Any) -> None:
         """``verbose`` is silent when verbosity < 1."""
         verbose("test", "message")
         assert mock_print.call_count == 0
 
     @patch("builtins.print")
-    @patch("Tensile.TensileMergeLibrary.verbosity", 2)
+    @patch("tensilelite.TensileMergeLibrary.verbosity", 2)
     def test_debug_output_when_enabled(self, mock_print: Any) -> None:
         """``debug`` prints when verbosity >= 2."""
         debug("test", "message")
         assert mock_print.call_count >= 1
 
     @patch("builtins.print")
-    @patch("Tensile.TensileMergeLibrary.verbosity", 1)
+    @patch("tensilelite.TensileMergeLibrary.verbosity", 1)
     def test_debug_no_output_when_disabled(self, mock_print: Any) -> None:
         """``debug`` is silent when verbosity < 2."""
         debug("test", "message")
@@ -817,9 +817,9 @@ class TestFindSolutionWithIndex:
 class TestReNameSolutions:
     """Test ``reNameSolutions`` function."""
 
-    @patch("Tensile.TensileMergeLibrary.getSolutionNameMin")
-    @patch("Tensile.TensileMergeLibrary.getKernelNameMin")
-    @patch("Tensile.TensileMergeLibrary.assignParameterWithDefault")
+    @patch("tensilelite.TensileMergeLibrary.getSolutionNameMin")
+    @patch("tensilelite.TensileMergeLibrary.getKernelNameMin")
+    @patch("tensilelite.TensileMergeLibrary.assignParameterWithDefault")
     def test_rename_solutions(
         self,
         mock_assign: Any,
@@ -841,9 +841,9 @@ class TestReNameSolutions:
         assert data["Solutions"][0]["KernelNameMin"] == "kernel_min"
         assert "ProblemType" not in data["Solutions"][0]
 
-    @patch("Tensile.TensileMergeLibrary.getSolutionNameMin")
-    @patch("Tensile.TensileMergeLibrary.getKernelNameMin")
-    @patch("Tensile.TensileMergeLibrary.assignParameterWithDefault")
+    @patch("tensilelite.TensileMergeLibrary.getSolutionNameMin")
+    @patch("tensilelite.TensileMergeLibrary.getKernelNameMin")
+    @patch("tensilelite.TensileMergeLibrary.assignParameterWithDefault")
     def test_rename_applies_default_gsu_and_strips_match(
         self,
         mock_assign: Any,
@@ -864,9 +864,9 @@ class TestReNameSolutions:
 
         assert "GlobalSplitU" not in data["Solutions"][0]
 
-    @patch("Tensile.TensileMergeLibrary.getSolutionNameMin")
-    @patch("Tensile.TensileMergeLibrary.getKernelNameMin")
-    @patch("Tensile.TensileMergeLibrary.assignParameterWithDefault")
+    @patch("tensilelite.TensileMergeLibrary.getSolutionNameMin")
+    @patch("tensilelite.TensileMergeLibrary.getKernelNameMin")
+    @patch("tensilelite.TensileMergeLibrary.assignParameterWithDefault")
     def test_rename_applies_missing_default_gsu(
         self,
         mock_assign: Any,
@@ -887,9 +887,9 @@ class TestReNameSolutions:
 
         assert "GlobalSplitU" not in data["Solutions"][0]
 
-    @patch("Tensile.TensileMergeLibrary.getSolutionNameMin")
-    @patch("Tensile.TensileMergeLibrary.getKernelNameMin")
-    @patch("Tensile.TensileMergeLibrary.assignParameterWithDefault")
+    @patch("tensilelite.TensileMergeLibrary.getSolutionNameMin")
+    @patch("tensilelite.TensileMergeLibrary.getKernelNameMin")
+    @patch("tensilelite.TensileMergeLibrary.assignParameterWithDefault")
     def test_rename_keeps_gsu_for_custom_kernel(
         self,
         mock_assign: Any,
@@ -954,9 +954,9 @@ class TestAvoidRegressions:
                 sort_keys=False,
             )
 
-            with patch("Tensile.TensileMergeLibrary.compareProblemType"), patch(
-                "Tensile.TensileMergeLibrary.compareDestFolderToYaml"
-            ), patch("Tensile.TensileMergeLibrary.reNameSolutions"):
+            with patch("tensilelite.TensileMergeLibrary.compareProblemType"), patch(
+                "tensilelite.TensileMergeLibrary.compareDestFolderToYaml"
+            ), patch("tensilelite.TensileMergeLibrary.reNameSolutions"):
                 avoidRegressions(orig_dir, inc_dir, out_dir, forceMerge=True)
 
             merged = LibraryIO.readYAML(os.path.join(out_dir, logic_name))
@@ -969,11 +969,11 @@ class TestAvoidRegressions:
 class TestMainFunction:
     """Test main function argument parsing."""
 
-    @patch("Tensile.TensileMergeLibrary.avoidRegressions")
+    @patch("tensilelite.TensileMergeLibrary.avoidRegressions")
     @patch("sys.argv", ["script", "/orig", "/inc", "/out", "-v", "2"])
     def test_main_with_arguments(self, mock_avoid: Any) -> None:
         """Main forwards positional directories to ``avoidRegressions``."""
-        from Tensile.TensileMergeLibrary import main
+        from tensilelite.TensileMergeLibrary import main
 
         main()
 
@@ -983,33 +983,33 @@ class TestMainFunction:
         assert args[1] == "/inc"
         assert args[2] == "/out"
 
-    @patch("Tensile.TensileMergeLibrary.avoidRegressions")
+    @patch("tensilelite.TensileMergeLibrary.avoidRegressions")
     @patch("sys.argv", ["script", "/orig", "/inc", "/out", "--force_merge", "true"])
     def test_main_with_force_merge_true(self, mock_avoid: Any) -> None:
         """``--force_merge true`` sets force merge flag."""
-        from Tensile.TensileMergeLibrary import main
+        from tensilelite.TensileMergeLibrary import main
 
         main()
 
         args = mock_avoid.call_args[0]
         assert args[3] is True
 
-    @patch("Tensile.TensileMergeLibrary.avoidRegressions")
+    @patch("tensilelite.TensileMergeLibrary.avoidRegressions")
     @patch("sys.argv", ["script", "/orig", "/inc", "/out", "--force_merge", "false"])
     def test_main_with_force_merge_false(self, mock_avoid: Any) -> None:
         """``--force_merge false`` clears force merge flag."""
-        from Tensile.TensileMergeLibrary import main
+        from tensilelite.TensileMergeLibrary import main
 
         main()
 
         args = mock_avoid.call_args[0]
         assert args[3] is False
 
-    @patch("Tensile.TensileMergeLibrary.avoidRegressions")
+    @patch("tensilelite.TensileMergeLibrary.avoidRegressions")
     @patch("sys.argv", ["script", "/orig", "/inc", "/out", "--no_eff"])
     def test_main_with_no_eff_flag(self, mock_avoid: Any) -> None:
         """``--no_eff`` enables zero-efficiency merge mode."""
-        from Tensile.TensileMergeLibrary import main
+        from tensilelite.TensileMergeLibrary import main
 
         main()
 

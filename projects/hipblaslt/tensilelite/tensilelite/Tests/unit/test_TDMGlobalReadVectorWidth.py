@@ -26,8 +26,8 @@ import pytest
 
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Solution import Solution
 
 
 def _build_state(*, data_type_a, data_type_b, tdm_inst=3, num_threads=256, sparse=0):
