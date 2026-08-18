@@ -143,15 +143,14 @@ void testModeratelyLargeExactGemm() {
     using namespace roc::host_validation;
 
     constexpr size_t dimension = 256;
-    const Layout layout(Shape{dimension, dimension},
-                        {1, static_cast<ptrdiff_t>(dimension)});
+    const Layout layout(Shape{dimension, dimension}, {1, static_cast<ptrdiff_t>(dimension)});
     const std::vector<float> ones(dimension * dimension, 1.0f);
     Tensor output(ScalarType::Float32, layout);
 
     GemmRequest problem(
         GemmOperand(Tensor::fromNative<float>(layout, std::span<const float>(ones))),
-        GemmOperand(Tensor::fromNative<float>(layout, std::span<const float>(ones))),
-        output, output, ScalarType::Float32);
+        GemmOperand(Tensor::fromNative<float>(layout, std::span<const float>(ones))), output,
+        output, ScalarType::Float32);
     BlasGemmBackend backend;
     referenceGemm(problem,
                   {
