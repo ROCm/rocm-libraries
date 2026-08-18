@@ -632,15 +632,6 @@ def _lraTileAssignment_legacy(writer, kernel):
   return module
 
 
-def localReadResetOffsetsSubtile(writer, kernel):
-  module = Module()
-  module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based LR offset reset code")
-  for i in range(8):
-    module.addComment("")
-
-  return module
-
-
 def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
