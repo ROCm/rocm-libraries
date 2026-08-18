@@ -1,0 +1,90 @@
+name: THROWAWAY - env-var-only dbsync POC (no rocjitsu)
+
+# Temporary, disposable workflow to test whether MIOPEN_DEVICE_ARCH alone
+# (no rocjitsu KMD interposer) can run StaticFDBSync on a genuinely
+# GPU-less runner. Mirrors the miopen-dbsync-rocjitsu job on
+# users/jlichtne/almiopen-1779-rocjitsu-dbsync (same runner, same
+# container, same build flags) but skips the rocjitsu checkout/build/
+# LD_PRELOAD/RJ_CONFIG steps entirely. Delete this file / branch once the
+# POC question is answered.
+
+on:
+  push:
+    branches:
+      - users/jlichtne/throwaway-envvar-dbsync-poc
+
+jobs:
+  envvar-dbsync-poc:
+    name: "envvar dbsync POC (${{ matrix.arch }})"
+    timeout-minutes: 20
+    container:
+      image: rocm/miopen-dev:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [gfx90a]
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+            shared/ctest
+
+      - name: Pull DVC files for rocm-libraries
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Confirm no GPU / no rocjitsu present
+        run: |
+          echo "=== ls /dev ==="
+          ls -la /dev | grep -i kfd || echo "no /dev/kfd"
+          echo "=== rocminfo (expect failure/absence) ==="
+          which rocminfo && rocminfo || echo "rocminfo not usable (expected on a GPU-less runner)"
+          echo "=== confirming no LD_PRELOAD / RJ_CONFIG set ==="
+          env | grep -i -E 'LD_PRELOAD|RJ_CONFIG' || echo "(none set - as intended)"
+
+      - name: Configure and build (${{ matrix.arch }})
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S projects/miopen -B build \
+            -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+            -DCMAKE_BUILD_TYPE=release \
+            -DBUILD_DEV=OFF \
+            -DMIOPEN_TEST_DISCRETE=OFF \
+            -DMIOPEN_USE_MLIR=ON \
+            -DMIOPEN_GPU_SYNC=OFF \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DGPU_TARGETS="${{ matrix.arch }}" \
+            -DMIOPEN_INSTALL_GPU_DATABASES="${{ matrix.arch }}"
+          cmake --build build --target miopen_gtest --target miopen-generate-kernels -j$(nproc)
+
+      - name: Run StaticFDBSync (env-var only, NO rocjitsu, ${{ matrix.arch }})
+        run: |
+          unset LD_PRELOAD
+          unset RJ_CONFIG
+          export MIOPEN_DEVICE_ARCH=${{ matrix.arch }}
+          export SKIP_KDB_TESTING=1
+          echo "Running with MIOPEN_DEVICE_ARCH=$MIOPEN_DEVICE_ARCH, no interposer, no GPU present."
+          set +e
+          ./build/bin/miopen_gtest --gtest_filter='*StaticFDBSync*' --gtest_color=no
+          rc=$?
+          set -e
+          echo "miopen_gtest exit code: $rc"
+          echo "EXIT_CODE=$rc" >> "$GITHUB_STEP_SUMMARY"
+          # Do not fail the job on a non-zero exit here - we want to see the
+          # actual failure signature (device exception, abort, etc.) in logs
+          # rather than have the workflow step itself just report red/failed
+          # with the underlying stdout truncated.
+          exit 0
