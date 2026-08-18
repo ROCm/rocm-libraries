@@ -7,6 +7,7 @@
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstddef>
@@ -106,8 +107,7 @@ namespace TensileLite::Client::reference_adapter
 
         inline std::complex<double> scalarFromStorage(ScalarType type, const void* pointer)
         {
-            const TensorView view(
-                type, Layout::contiguous(Shape{1}), storageSpan(type, pointer, 1));
+            const Tensor view(type, Layout::contiguous(Shape{1}), storageSpan(type, pointer, 1));
             if(scalarTypeInfo(type).category == ScalarCategory::Complex)
                 return view.loadAs<std::complex<double>>({0});
             return {view.loadAs<double>({0}), 0.0};
@@ -180,25 +180,27 @@ namespace TensileLite::Client::reference_adapter
 
         struct BatchInputs
         {
-            TensorView                       a;
-            TensorView                       b;
-            TensorView                       c;
-            MutableTensorView                d;
-            OutputSelection                  outputSelection;
-            std::optional<VectorBinding>     bias;
-            std::optional<MutableTensorView> biasOutput;
-            std::optional<TensorView>        auxiliaryInput;
-            std::optional<MutableTensorView> auxiliaryOutput;
-            std::optional<TensorView>        gateResidual;
+            Tensor                              a;
+            Tensor                              b;
+            Tensor                              c;
+            Tensor                              d;
+            OutputSelection                     outputSelection;
+            std::optional<VectorBinding>        bias;
+            std::optional<Tensor>               biasOutput;
+            std::optional<Tensor>               auxiliaryInput;
+            std::optional<Tensor>               auxiliaryOutput;
+            std::optional<Tensor>               gateResidual;
+            std::span<std::byte>                dDestination;
+            std::optional<std::span<std::byte>> biasOutputDestination;
+            std::optional<std::span<std::byte>> auxiliaryOutputDestination;
         };
     } // namespace detail
 
     struct GemmProblemAdapter::State
     {
-        using Activation        = roc::host_validation::Activation;
-        using MutableTensorView = roc::host_validation::MutableTensorView;
-        using ScalarType        = roc::host_validation::ScalarType;
-        using TensorView        = roc::host_validation::TensorView;
+        using Activation = roc::host_validation::Activation;
+        using ScalarType = roc::host_validation::ScalarType;
+        using Tensor     = roc::host_validation::Tensor;
 
         State(ContractionProblemGemm const& problem_,
               ContractionInputs const&      inputs_,
@@ -284,12 +286,12 @@ namespace TensileLite::Client::reference_adapter
                 operationAccumulatorType = toHostValidationScalarType(problem.computeType());
                 betaType                 = toHostValidationScalarType(problem.betaType());
                 alphaType                = toHostValidationScalarType(problem.alphaType());
-                computeTypeA = problem.computeInputTypeA() == rocisa::DataType::None
-                                   ? typeA
-                                   : toHostValidationScalarType(problem.computeInputTypeA());
-                computeTypeB = problem.computeInputTypeB() == rocisa::DataType::None
-                                   ? typeB
-                                   : toHostValidationScalarType(problem.computeInputTypeB());
+                computeTypeA             = problem.computeInputTypeA() == rocisa::DataType::None
+                                               ? typeA
+                                               : toHostValidationScalarType(problem.computeInputTypeA());
+                computeTypeB             = problem.computeInputTypeB() == rocisa::DataType::None
+                                               ? typeB
+                                               : toHostValidationScalarType(problem.computeInputTypeB());
             }
             catch(std::invalid_argument const& error)
             {
@@ -460,27 +462,37 @@ namespace TensileLite::Client::reference_adapter
             std::span<const std::byte> bStorage;
             std::span<const std::byte> cStorage;
             std::span<std::byte>       dStorage;
+            std::optional<Tensor>      aTensor;
+            std::optional<Tensor>      bTensor;
+            std::optional<Tensor>      cTensor;
+            std::optional<Tensor>      dTensor;
             if(inputs.batchA == nullptr)
             {
                 aStorage = detail::descriptorStorage(typeA, problem.a(), inputs.a, batchOffsetA);
+                aTensor.emplace(typeA, detail::descriptorLayout(problem.a()), aStorage);
             }
             if(inputs.batchB == nullptr)
             {
                 bStorage = detail::descriptorStorage(typeB, problem.b(), inputs.b, batchOffsetB);
+                bTensor.emplace(typeB, detail::descriptorLayout(problem.b()), bStorage);
             }
             if(inputs.batchC == nullptr)
             {
                 cStorage = detail::descriptorStorage(typeC, problem.c(), inputs.c, batchOffsetC);
+                cTensor.emplace(typeC, detail::descriptorLayout(problem.c()), cStorage);
             }
             if(inputs.batchD == nullptr)
             {
                 dStorage
                     = detail::mutableDescriptorStorage(typeD, problem.d(), inputs.d, batchOffsetD);
+                dTensor.emplace(typeD, detail::descriptorLayout(problem.d()), dStorage);
             }
 
             std::optional<ScalarType>  biasType;
             std::span<const std::byte> biasStorage;
             std::span<std::byte>       biasOutputStorage;
+            std::optional<Tensor>      biasTensor;
+            std::optional<Tensor>      biasOutputTensor;
             if(problem.useBias())
             {
                 try
@@ -494,10 +506,14 @@ namespace TensileLite::Client::reference_adapter
                 if(inputs.batchBias == nullptr)
                 {
                     biasStorage = detail::descriptorStorage(*biasType, problem.bias(), inputs.bias);
+                    biasTensor.emplace(
+                        *biasType, detail::descriptorLayout(problem.bias()), biasStorage);
                     if(problem.useGradient())
                     {
                         biasOutputStorage = detail::mutableDescriptorStorage(
                             *biasType, problem.bias(), const_cast<void*>(inputs.bias));
+                        biasOutputTensor.emplace(
+                            *biasType, detail::descriptorLayout(problem.bias()), biasOutputStorage);
                     }
                 }
             }
@@ -505,6 +521,7 @@ namespace TensileLite::Client::reference_adapter
             std::optional<ScalarType> auxiliaryType;
             std::span<std::byte>      auxiliaryStorage;
             TensorDescriptor const*   auxiliaryDescriptor = nullptr;
+            std::optional<Tensor>     auxiliaryTensor;
             if(problem.useE())
             {
                 auxiliaryDescriptor = &problem.tensors()[ContractionProblemGemm::TENSOR::E];
@@ -518,11 +535,15 @@ namespace TensileLite::Client::reference_adapter
                 }
                 auxiliaryStorage = detail::mutableDescriptorStorage(
                     *auxiliaryType, *auxiliaryDescriptor, inputs.e);
+                auxiliaryTensor.emplace(*auxiliaryType,
+                                        detail::descriptorLayout(*auxiliaryDescriptor),
+                                        auxiliaryStorage);
             }
 
             std::optional<ScalarType>  gateType;
             std::span<const std::byte> gateStorage;
             TensorDescriptor const*    gateDescriptor = nullptr;
+            std::optional<Tensor>      gateTensor;
             if(problem.useGateResidual())
             {
                 gateDescriptor = &problem.tensors()[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
@@ -535,8 +556,12 @@ namespace TensileLite::Client::reference_adapter
                     return failure(TranslationFailureCode::UnsupportedDataType, error.what());
                 }
                 if(inputs.batchGateResidual == nullptr)
+                {
                     gateStorage = detail::descriptorStorage(
                         *gateType, *gateDescriptor, inputs.gateResidual);
+                    gateTensor.emplace(
+                        *gateType, detail::descriptorLayout(*gateDescriptor), gateStorage);
+                }
             }
 
             if(problem.outputAmaxD())
@@ -547,7 +572,8 @@ namespace TensileLite::Client::reference_adapter
                     const ScalarType amaxType = toHostValidationScalarType(descriptor.dataType());
                     const auto       storage
                         = detail::mutableDescriptorStorage(amaxType, descriptor, inputs.amaxD);
-                    amax = MutableTensorView(amaxType, Layout::contiguous(Shape{1}), storage);
+                    amax            = Tensor(amaxType, Layout::contiguous(Shape{1}), storage);
+                    amaxDestination = storage;
                 }
                 catch(std::invalid_argument const& error)
                 {
@@ -558,28 +584,28 @@ namespace TensileLite::Client::reference_adapter
             const size_t scaleAlphaLength = problem.getParams().factorDim() == 0 ? m : n;
             if(problem.useScaleAlphaVec())
             {
-                scaleAlpha = TensorView(
+                scaleAlpha = Tensor(
                     alphaType,
                     Layout::contiguous(Shape{scaleAlphaLength}),
                     detail::storageSpan(alphaType, inputs.scaleAlphaVec, scaleAlphaLength));
             }
             if(problem.useScaleAB() == "Scalar")
             {
-                scaleA = TensorView(alphaType,
-                                    Layout::contiguous(Shape{1}),
-                                    detail::storageSpan(alphaType, inputs.scaleA, 1));
-                scaleB = TensorView(alphaType,
-                                    Layout::contiguous(Shape{1}),
-                                    detail::storageSpan(alphaType, inputs.scaleB, 1));
+                scaleA = Tensor(alphaType,
+                                Layout::contiguous(Shape{1}),
+                                detail::storageSpan(alphaType, inputs.scaleA, 1));
+                scaleB = Tensor(alphaType,
+                                Layout::contiguous(Shape{1}),
+                                detail::storageSpan(alphaType, inputs.scaleB, 1));
             }
             else if(problem.useScaleAB() == "Vector")
             {
-                scaleA = TensorView(alphaType,
-                                    Layout::contiguous(Shape{m}),
-                                    detail::storageSpan(alphaType, inputs.scaleA, m));
-                scaleB = TensorView(alphaType,
-                                    Layout::contiguous(Shape{n}),
-                                    detail::storageSpan(alphaType, inputs.scaleB, n));
+                scaleA = Tensor(alphaType,
+                                Layout::contiguous(Shape{m}),
+                                detail::storageSpan(alphaType, inputs.scaleA, m));
+                scaleB = Tensor(alphaType,
+                                Layout::contiguous(Shape{n}),
+                                detail::storageSpan(alphaType, inputs.scaleB, n));
             }
 
             translatedBatches.reserve(batches);
@@ -659,9 +685,22 @@ namespace TensileLite::Client::reference_adapter
                           : std::span<std::byte>(static_cast<std::byte*>(inputs.batchD[batch])
                                                      + batchOffsetD,
                                                  storageBytesForLayout(typeD, layoutD));
+                Tensor currentA = inputs.batchA == nullptr
+                                      ? aTensor->alias(layoutA)
+                                      : Tensor(typeA, layoutA, currentAStorage);
+                Tensor currentB = inputs.batchB == nullptr
+                                      ? bTensor->alias(layoutB)
+                                      : Tensor(typeB, layoutB, currentBStorage);
+                Tensor currentC = inputs.batchC == nullptr
+                                      ? cTensor->alias(layoutC)
+                                      : Tensor(typeC, layoutC, currentCStorage);
+                Tensor currentD = inputs.batchD == nullptr
+                                      ? dTensor->alias(layoutD)
+                                      : Tensor(typeD, layoutD, currentDStorage);
 
-                std::optional<VectorBinding>     runtimeBias;
-                std::optional<MutableTensorView> runtimeBiasOutput;
+                std::optional<VectorBinding>        runtimeBias;
+                std::optional<Tensor>               runtimeBiasOutput;
+                std::optional<std::span<std::byte>> runtimeBiasOutputDestination;
                 if(problem.useBias())
                 {
                     ptrdiff_t        runtimeBiasOffset = 0;
@@ -690,17 +729,23 @@ namespace TensileLite::Client::reference_adapter
                         }
                     }
                     const Layout biasLayout(Shape{runtimeBiasLength}, {1}, runtimeBiasOffset);
-                    runtimeBias = VectorBinding{
-                        TensorView(*biasType, biasLayout, currentBiasStorage), runtimeBiasAxis};
+                    runtimeBias
+                        = VectorBinding{inputs.batchBias == nullptr
+                                            ? biasTensor->alias(biasLayout)
+                                            : Tensor(*biasType, biasLayout, currentBiasStorage),
+                                        runtimeBiasAxis};
                     if(problem.useGradient())
                     {
                         runtimeBiasOutput
-                            = MutableTensorView(*biasType, biasLayout, currentBiasOutputStorage);
+                            = inputs.batchBias == nullptr
+                                  ? biasOutputTensor->alias(biasLayout)
+                                  : Tensor(*biasType, biasLayout, currentBiasOutputStorage);
+                        runtimeBiasOutputDestination = currentBiasOutputStorage;
                     }
                 }
 
-                std::optional<TensorView>        auxiliaryInput;
-                std::optional<MutableTensorView> auxiliaryOutput;
+                std::optional<Tensor> auxiliaryInput;
+                std::optional<Tensor> auxiliaryOutput;
                 if(problem.useE())
                 {
                     const ptrdiff_t offsetE
@@ -711,13 +756,12 @@ namespace TensileLite::Client::reference_adapter
                          detail::checkedToPtrdiff(auxiliaryDescriptor->strides()[indexND])},
                         offsetE);
                     if(problem.useGradient())
-                        auxiliaryInput = TensorView(*auxiliaryType, layoutE, auxiliaryStorage);
+                        auxiliaryInput = auxiliaryTensor->alias(layoutE);
                     else
-                        auxiliaryOutput
-                            = MutableTensorView(*auxiliaryType, layoutE, auxiliaryStorage);
+                        auxiliaryOutput = auxiliaryTensor->alias(layoutE);
                 }
 
-                std::optional<TensorView> runtimeGate;
+                std::optional<Tensor> runtimeGate;
                 if(problem.useGateResidual())
                 {
                     const ptrdiff_t offsetGate
@@ -736,7 +780,9 @@ namespace TensileLite::Client::reference_adapter
                             static_cast<const std::byte*>(inputs.batchGateResidual[batch]),
                             storageBytesForLayout(*gateType, gateLayout));
                     }
-                    runtimeGate = TensorView(*gateType, gateLayout, currentGateStorage);
+                    runtimeGate = inputs.batchGateResidual == nullptr
+                                      ? gateTensor->alias(gateLayout)
+                                      : Tensor(*gateType, gateLayout, currentGateStorage);
                 }
 
                 OutputSelection outputSelection = OutputSelection::all();
@@ -744,16 +790,21 @@ namespace TensileLite::Client::reference_adapter
                     outputSelection = OutputSelection::explicitIndices(selectedByBatch[batch]);
 
                 translatedBatches.push_back(detail::BatchInputs{
-                    TensorView(typeA, layoutA, currentAStorage),
-                    TensorView(typeB, layoutB, currentBStorage),
-                    TensorView(typeC, layoutC, currentCStorage),
-                    MutableTensorView(typeD, layoutD, currentDStorage),
+                    std::move(currentA),
+                    std::move(currentB),
+                    std::move(currentC),
+                    std::move(currentD),
                     std::move(outputSelection),
                     std::move(runtimeBias),
                     std::move(runtimeBiasOutput),
                     std::move(auxiliaryInput),
                     std::move(auxiliaryOutput),
                     std::move(runtimeGate),
+                    currentDStorage,
+                    runtimeBiasOutputDestination,
+                    problem.useE() && !problem.useGradient()
+                        ? std::optional<std::span<std::byte>>(auxiliaryStorage)
+                        : std::nullopt,
                 });
             }
 
@@ -811,11 +862,12 @@ namespace TensileLite::Client::reference_adapter
         size_t strideBatchMxsa = 0;
         size_t strideBatchMxsb = 0;
 
-        std::optional<TensorView>        scaleAlpha;
-        std::optional<TensorView>        scaleA;
-        std::optional<TensorView>        scaleB;
-        std::optional<MutableTensorView> amax;
-        std::vector<detail::BatchInputs> translatedBatches;
+        std::optional<Tensor>               scaleAlpha;
+        std::optional<Tensor>               scaleA;
+        std::optional<Tensor>               scaleB;
+        std::optional<Tensor>               amax;
+        std::optional<std::span<std::byte>> amaxDestination;
+        std::vector<detail::BatchInputs>    translatedBatches;
     };
 
     GemmProblemAdapter::GemmProblemAdapter(std::unique_ptr<const State> state)
@@ -828,6 +880,28 @@ namespace TensileLite::Client::reference_adapter
     GemmProblemAdapter::GemmProblemAdapter(GemmProblemAdapter&&) noexcept = default;
 
     GemmProblemAdapter& GemmProblemAdapter::operator=(GemmProblemAdapter&&) noexcept = default;
+
+    void TranslatedGemmBatch::copyOutputs() const
+    {
+        for(const auto& copyBack : copyBacks)
+        {
+            if(copyBack.source.storage().size() != copyBack.destination.size())
+                throw std::invalid_argument(
+                    "TensileLite translated output storage size does not match its destination.");
+            roc::host_validation::Tensor destination(
+                copyBack.source.type(), copyBack.source.layout(), copyBack.destination);
+            if(copyBack.selection && !copyBack.selection->selectsAll())
+            {
+                const auto selected = copyBack.selection->indices(copyBack.source.size());
+                destination.copyFrom(copyBack.source, selected);
+            }
+            else
+            {
+                destination.copyFrom(copyBack.source);
+            }
+            std::ranges::copy(destination.storage(), copyBack.destination.begin());
+        }
+    }
 
     size_t GemmProblemAdapter::batchCount() const
     {
@@ -922,9 +996,9 @@ namespace TensileLite::Client::reference_adapter
                                                        ? blockCountA - 1 - block
                                                        : block;
                         const size_t index       = batch * m_state->strideBatchMxsa
-                                                   + row * m_state->strideMxsaM
-                                                   + sourceBlock * m_state->strideMxsaBlock;
-                        translated.runtimeScaleA->mutableView().storeFrom(
+                                             + row * m_state->strideMxsaM
+                                             + sourceBlock * m_state->strideMxsaBlock;
+                        translated.runtimeScaleA->storeFrom(
                             {row, block},
                             detail::mxScaleElementAsFloat(
                                 m_state->problem.mxTypeA(), m_state->inputs.mxsa, index));
@@ -938,26 +1012,38 @@ namespace TensileLite::Client::reference_adapter
                                                        ? blockCountB - 1 - block
                                                        : block;
                         const size_t index       = batch * m_state->strideBatchMxsb
-                                                   + column * m_state->strideMxsbN
-                                                   + sourceBlock * m_state->strideMxsbBlock;
-                        translated.runtimeScaleB->mutableView().storeFrom(
+                                             + column * m_state->strideMxsbN
+                                             + sourceBlock * m_state->strideMxsbBlock;
+                        translated.runtimeScaleB->storeFrom(
                             {column, block},
                             detail::mxScaleElementAsFloat(
                                 m_state->problem.mxTypeB(), m_state->inputs.mxsb, index));
                     }
                 }
                 operandA.blockScale
-                    = BlockScaleBinding{translated.runtimeScaleA->view(), m_state->mxBlockA};
+                    = BlockScaleBinding{*translated.runtimeScaleA, m_state->mxBlockA};
                 operandB.blockScale
-                    = BlockScaleBinding{translated.runtimeScaleB->view(), m_state->mxBlockB};
+                    = BlockScaleBinding{*translated.runtimeScaleB, m_state->mxBlockB};
             }
 
-            MutableTensorView productOutput = source.d;
-            MutableTensorView gemmOutput    = productOutput;
+            Tensor productOutput = source.d;
+            translated.copyBacks.push_back(
+                {source.dDestination, productOutput, source.outputSelection});
+            if(m_state->amax && m_state->amaxDestination)
+                translated.copyBacks.push_back(
+                    {*m_state->amaxDestination, *m_state->amax, std::nullopt});
+            if(source.biasOutput && source.biasOutputDestination)
+                translated.copyBacks.push_back(
+                    {*source.biasOutputDestination, *source.biasOutput, std::nullopt});
+            if(source.auxiliaryOutput && source.auxiliaryOutputDestination)
+                translated.copyBacks.push_back({*source.auxiliaryOutputDestination,
+                                                *source.auxiliaryOutput,
+                                                source.outputSelection});
+            Tensor gemmOutput = productOutput;
             if(m_state->useStandaloneEpilogue)
             {
                 translated.intermediate.emplace(accumulatorType, Shape{m_state->m, m_state->n});
-                gemmOutput = translated.intermediate->mutableView();
+                gemmOutput = *translated.intermediate;
             }
 
             translated.gemmRequest.emplace(
@@ -998,8 +1084,7 @@ namespace TensileLite::Client::reference_adapter
 
             if(m_state->useStandaloneEpilogue)
             {
-                EpilogueProblem epilogue(
-                    translated.intermediate->view(), productOutput, accumulatorType);
+                EpilogueProblem epilogue(*translated.intermediate, productOutput, accumulatorType);
                 if(!m_state->problem.useGradient())
                     epilogue.bias = source.bias;
                 epilogue.activation           = m_state->activation;
@@ -1015,7 +1100,7 @@ namespace TensileLite::Client::reference_adapter
                 {
                     translated.biasWorkspace.emplace(accumulatorType,
                                                      Shape{m_state->m, m_state->n});
-                    epilogue.rawOutput = translated.biasWorkspace->mutableView();
+                    epilogue.rawOutput = *translated.biasWorkspace;
                 }
                 epilogue.auxiliaryInput  = source.auxiliaryInput;
                 epilogue.auxiliaryOutput = source.auxiliaryOutput;
@@ -1026,7 +1111,7 @@ namespace TensileLite::Client::reference_adapter
                     {
                         translated.gradientAuxiliary.emplace(accumulatorType,
                                                              Shape{m_state->m, m_state->n});
-                        epilogue.auxiliaryInput = translated.gradientAuxiliary->view();
+                        epilogue.auxiliaryInput = *translated.gradientAuxiliary;
                     }
                 }
                 epilogue.gateResidual = source.gateResidual;
@@ -1044,7 +1129,7 @@ namespace TensileLite::Client::reference_adapter
                     if(m_state->problem.biasSrc() == ContractionProblemGemm::D)
                     {
                         translated.biasReduction.emplace(
-                            translated.biasWorkspace->view(),
+                            *translated.biasWorkspace,
                             biasOutput,
                             accumulatorType,
                             std::vector<size_t>{biasAxis == MatrixAxis::Row ? size_t(1)

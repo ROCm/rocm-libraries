@@ -23,7 +23,7 @@ struct BlasMatrixLayout {
     int leadingDimension;
 };
 
-BlasMatrixLayout toBlasLayout(const TensorView& view, bool conjugate, const char* name) {
+BlasMatrixLayout toBlasLayout(const Tensor& view, bool conjugate, const char* name) {
     const ptrdiff_t rowStride = view.layout().strides()[0];
     const ptrdiff_t columnStride = view.layout().strides()[1];
     const size_t rows = view.shape()[0];
@@ -80,7 +80,7 @@ const T* typedData(const View& view, const char* name) {
 }
 
 template <typename T>
-T* typedMutableData(const MutableTensorView& view, const char* name) {
+T* typedMutableData(const Tensor& view, const char* name) {
     const std::byte* data = adjustedStorage(view);
     if (reinterpret_cast<uintptr_t>(data) % alignof(T) != 0)
         throw std::invalid_argument(std::string("BLAS backend ") + name +
@@ -241,7 +241,7 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode,
     using namespace detail;
     Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(operand.values.shape()));
     const RuntimeMatrixReader<Accumulator> input(operand.values);
-    const RuntimeMatrixWriter<Accumulator> writer(output.mutableView());
+    const RuntimeMatrixWriter<Accumulator> writer(output);
     const RuntimeQuantizer<Accumulator> quantize(operand.computeType);
     const RuntimeMathFunction<Accumulator> operandMath = runtimeMathFunction<Accumulator>(mathMode);
     std::vector<RuntimeVectorReader<Accumulator>> scaleReaders;
@@ -278,11 +278,11 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode,
 }
 
 template <typename Accumulator>
-Tensor materializeMatrix(TensorView input) {
+Tensor materializeMatrix(Tensor input) {
     using namespace detail;
     Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(input.shape()));
     const RuntimeMatrixReader<Accumulator> reader(input);
-    const RuntimeMatrixWriter<Accumulator> writer(output.mutableView());
+    const RuntimeMatrixWriter<Accumulator> writer(output);
     for (size_t row = 0; row < input.shape()[0]; ++row)
         for (size_t column = 0; column < input.shape()[1]; ++column)
             writer.store(row, column, reader(row, column));
@@ -298,8 +298,8 @@ GemmRunInfo runTransforming(const GemmRequest& problem) {
         materializeOperand<Accumulator>(problem.b, problem.mathMode, GemmOperandPosition::B);
     Tensor stagedC = materializeMatrix<Accumulator>(problem.c);
 
-    GemmRequest stagedProblem(GemmOperand(stagedA.view()), GemmOperand(stagedB.view()),
-                              stagedC.view(), stagedC.mutableView(), nativeScalarType<Accumulator>);
+    GemmRequest stagedProblem(GemmOperand(stagedA), GemmOperand(stagedB), stagedC, stagedC,
+                              nativeScalarType<Accumulator>);
     stagedProblem.epilogue.alpha = problem.epilogue.alpha;
     stagedProblem.epilogue.beta = problem.epilogue.beta;
 
@@ -311,7 +311,7 @@ GemmRunInfo runTransforming(const GemmRequest& problem) {
                   },
                   &blas);
 
-    const RuntimeMatrixReader<Accumulator> stagedOutput(stagedC.view());
+    const RuntimeMatrixReader<Accumulator> stagedOutput(stagedC);
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
                                                         problem.epilogue.outputConversion);

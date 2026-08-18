@@ -9,9 +9,11 @@
 #include <roc/host_validation/comparison.hpp>
 #include <roc/host_validation/generation.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -72,10 +74,13 @@ namespace
         GenerationOptions options;
         options.seed = seed;
         options.real = std::move(pattern);
-        generate(MutableTensorView(type,
-                                   Layout::contiguous(Shape{values.size()}),
-                                   std::as_writable_bytes(std::span<T>(values))),
-                 options);
+        Tensor generated(type, Layout::contiguous(Shape{values.size()}));
+        generate(generated, options);
+
+        const std::span<std::byte> destination = std::as_writable_bytes(std::span<T>(values));
+        if(generated.storage().size() != destination.size())
+            throw std::runtime_error("Generated Tensor storage does not match test value storage.");
+        std::ranges::copy(generated.storage(), destination.begin());
     }
 
 #ifdef TENSILE_USE_FP8_BF8
@@ -171,6 +176,11 @@ TEST(ReferenceMXFastPath, MatchesCanonicalForScaledFP8Gemm)
     generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scale, 12345, 2);
     generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scale, 12345, 3);
 
+    EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
+    EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
+    EXPECT_TRUE(std::ranges::any_of(mxsa, [](E8 value) { return float(value) != 0.0f; }));
+    EXPECT_TRUE(std::ranges::any_of(mxsb, [](E8 value) { return float(value) != 0.0f; }));
+
     ContractionInputs inputsCanonical(a.data(), b.data(), c.data(), dCanonical.data(), 1.0f, 0.0f);
     inputsCanonical.mxsa = mxsa.data();
     inputsCanonical.mxsb = mxsb.data();
@@ -183,8 +193,8 @@ TEST(ReferenceMXFastPath, MatchesCanonicalForScaledFP8Gemm)
     ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsTiled, /*elementsToValidate=*/-1));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dTiled)),
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dCanonical)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dTiled)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dCanonical)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
@@ -231,6 +241,13 @@ TEST(ReferenceMXFastPath, MatchesCanonicalWithBetaAndBias)
     generateValues(c, roc::host_validation::ScalarType::Float32, cPattern, 54321, 4);
     generateValues(bias, roc::host_validation::ScalarType::Float32, biasPattern, 54321, 5);
 
+    EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
+    EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
+    EXPECT_TRUE(std::ranges::any_of(mxsa, [](E8 value) { return float(value) != 0.0f; }));
+    EXPECT_TRUE(std::ranges::any_of(mxsb, [](E8 value) { return float(value) != 0.0f; }));
+    EXPECT_EQ(c.front(), 0.25f);
+    EXPECT_EQ(bias.front(), 0.5f);
+
     ContractionInputs inputsCanonical(a.data(), b.data(), c.data(), dCanonical.data(), 1.0f, 0.5f);
     inputsCanonical.mxsa = mxsa.data();
     inputsCanonical.mxsb = mxsb.data();
@@ -245,8 +262,8 @@ TEST(ReferenceMXFastPath, MatchesCanonicalWithBetaAndBias)
     ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsTiled, /*elementsToValidate=*/-1));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dTiled)),
-        roc::host_validation::TensorView::fromNative(std::span<const float>(dCanonical)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dTiled)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dCanonical)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches

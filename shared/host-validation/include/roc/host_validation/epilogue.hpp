@@ -16,17 +16,17 @@ enum class ActivationApplication {
 };
 
 struct EpilogueProblem {
-    EpilogueProblem(TensorView inputTensor, MutableTensorView outputTensor, ScalarType compute)
+    EpilogueProblem(Tensor inputTensor, Tensor outputTensor, ScalarType compute)
         : input(std::move(inputTensor)), output(std::move(outputTensor)), computeType(compute) {}
 
-    TensorView input;
-    MutableTensorView output;
+    Tensor input;
+    Tensor output;
     ScalarType computeType;
-    std::optional<MutableTensorView> rawOutput;
-    std::optional<MutableTensorView> auxiliaryOutput;
-    std::optional<TensorView> auxiliaryInput;
-    std::optional<TensorView> gateResidual;
-    std::optional<MutableTensorView> amax;
+    std::optional<Tensor> rawOutput;
+    std::optional<Tensor> auxiliaryOutput;
+    std::optional<Tensor> auxiliaryInput;
+    std::optional<Tensor> gateResidual;
+    std::optional<Tensor> amax;
     bool accumulateAmax = false;
     std::optional<VectorBinding> bias;
     std::complex<double> outputScale = {1.0, 0.0};

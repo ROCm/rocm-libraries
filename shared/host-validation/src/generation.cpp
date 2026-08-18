@@ -18,7 +18,7 @@ uint64_t strideMagnitude(ptrdiff_t stride) {
     return static_cast<uint64_t>(-(stride + 1)) + 1;
 }
 
-bool hasProvablyIndependentElements(const MutableTensorView& destination) {
+bool hasProvablyIndependentElements(const Tensor& destination) {
     if (scalarTypeInfo(destination.type()).storageBits % 8 != 0) return false;
 
     std::vector<std::pair<uint64_t, size_t>> dimensions;
@@ -54,7 +54,7 @@ void incrementLastDimensionFast(std::vector<size_t>& indices, const Shape& shape
 }
 #endif
 
-void generateSerial(MutableTensorView destination, const GenerationOptions& options) {
+void generateSerial(Tensor destination, const GenerationOptions& options) {
     detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
         const size_t logicalIndex =
             detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
@@ -62,8 +62,7 @@ void generateSerial(MutableTensorView destination, const GenerationOptions& opti
     });
 }
 
-void generateParallel(MutableTensorView destination, const GenerationOptions& options,
-                      int threadCount) {
+void generateParallel(Tensor destination, const GenerationOptions& options, int threadCount) {
 #ifdef _OPENMP
     std::exception_ptr error;
     const size_t elementCount = destination.shape().elementCount();
@@ -102,7 +101,7 @@ void generateParallel(MutableTensorView destination, const GenerationOptions& op
 }
 }  // namespace
 
-GenerationRunInfo generate(MutableTensorView destination, const GenerationOptions& options) {
+GenerationRunInfo generate(Tensor destination, const GenerationOptions& options) {
     const size_t elementCount = destination.shape().elementCount();
     const int threadCount = hasProvablyIndependentElements(destination)
                                 ? detail::operationThreadCount(elementCount)
@@ -114,7 +113,29 @@ GenerationRunInfo generate(MutableTensorView destination, const GenerationOption
     return {.elementsGenerated = elementCount};
 }
 
-GenerationRunInfo generateAt(MutableTensorView destination, size_t logicalIndex,
+Tensor generate(ScalarType type, Layout layout, const GenerationOptions& options) {
+    Tensor result(type, std::move(layout));
+    generate(result, options);
+    return result;
+}
+
+Tensor generate(ScalarType type, Layout layout, const GenerationOptions& options,
+                const TensorStorageAllocator& allocator) {
+    Tensor result(type, std::move(layout), allocator);
+    generate(result, options);
+    return result;
+}
+
+Tensor generate(ScalarType type, Shape shape, const GenerationOptions& options) {
+    return generate(type, Layout::contiguous(shape), options);
+}
+
+Tensor generate(ScalarType type, Shape shape, const GenerationOptions& options,
+                const TensorStorageAllocator& allocator) {
+    return generate(type, Layout::contiguous(shape), options, allocator);
+}
+
+GenerationRunInfo generateAt(Tensor destination, size_t logicalIndex,
                              const GenerationOptions& options) {
     const std::vector<size_t> indices =
         detail::logicalCoordinates(logicalIndex, destination.shape(), options.indexOrder);

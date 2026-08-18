@@ -137,10 +137,10 @@ namespace rocRoller::HostNumerics
     }
 
     template <typename T>
-    roc::host_validation::TensorView hostTensorView(TensorDescriptor const& descriptor,
-                                                    std::span<const T>      values,
-                                                    DataTypeInterpretation  interpretation
-                                                    = DataTypeInterpretation::Unscaled)
+    roc::host_validation::Tensor hostTensor(TensorDescriptor const& descriptor,
+                                            std::span<const T>      values,
+                                            DataTypeInterpretation  interpretation
+                                            = DataTypeInterpretation::Unscaled)
     {
         static_assert(std::is_trivially_copyable_v<T>);
 
@@ -157,15 +157,15 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument(
                 "rocRoller host tensor storage does not match its descriptor and packing.");
 
-        return roc::host_validation::TensorView(type, layout, std::as_bytes(values));
+        return roc::host_validation::Tensor(type, layout, std::as_bytes(values));
     }
 
     template <typename T, typename Allocator>
-    roc::host_validation::TensorView hostTensorView(TensorDescriptor const&          descriptor,
-                                                    std::vector<T, Allocator> const& values,
-                                                    DataTypeInterpretation           interpretation
-                                                    = DataTypeInterpretation::Unscaled)
+    roc::host_validation::Tensor hostTensor(TensorDescriptor const&          descriptor,
+                                            std::vector<T, Allocator> const& values,
+                                            DataTypeInterpretation           interpretation
+                                            = DataTypeInterpretation::Unscaled)
     {
-        return hostTensorView(descriptor, std::span<const T>(values), interpretation);
+        return hostTensor(descriptor, std::span<const T>(values), interpretation);
     }
 }

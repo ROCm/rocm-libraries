@@ -32,13 +32,12 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_validation/GroupedGemmDataInitialization.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <hipblaslt_arguments.hpp>
 #include <hipblaslt_vector.hpp>
 #include <iostream>
 #include <limits>
-#include <hipblaslt/host_validation/GroupedGemmDataInitialization.hpp>
-#include <hipblaslt/host_validation/Types.hpp>
-#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
 #include <stdexcept>
@@ -907,28 +906,30 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     const size_t cElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldc[i]);
                     const size_t dElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldd[i]);
 
+                    auto referenceOutput = tensorFromMutableStorage(
+                        d_ptr + i3 * stride_d[i],
+                        dElements,
+                        Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]}));
                     GemmRequest problem(
-                        GemmOperand(tensorView(a_ptr + i3 * stride_a[i],
-                                               aElements,
-                                               Layout(Shape{size_t(m[i]), size_t(k[i])},
-                                                      {a_stride_1[i], a_stride_2[i]}))),
-                        GemmOperand(tensorView(b_ptr + i3 * stride_b[i],
-                                               bElements,
-                                               Layout(Shape{size_t(k[i]), size_t(n[i])},
-                                                      {b_stride_1[i], b_stride_2[i]}))),
-                        tensorView(c_ptr + i3 * stride_c[i],
-                                   cElements,
-                                   Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]})),
-                        mutableTensorView(d_ptr + i3 * stride_d[i],
-                                          dElements,
-                                          Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]})),
+                        GemmOperand(tensorFromStorage(a_ptr + i3 * stride_a[i],
+                                                      aElements,
+                                                      Layout(Shape{size_t(m[i]), size_t(k[i])},
+                                                             {a_stride_1[i], a_stride_2[i]}))),
+                        GemmOperand(tensorFromStorage(b_ptr + i3 * stride_b[i],
+                                                      bElements,
+                                                      Layout(Shape{size_t(k[i]), size_t(n[i])},
+                                                             {b_stride_1[i], b_stride_2[i]}))),
+                        tensorFromStorage(c_ptr + i3 * stride_c[i],
+                                          cElements,
+                                          Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]})),
+                        referenceOutput,
                         ScalarType::Float32);
                     problem.epilogue.alpha      = static_cast<double>(alpha[i]);
                     problem.epilogue.beta       = static_cast<double>(beta[i]);
                     problem.epilogue.activation = toHostValidationActivation(actType[i]);
                     if(bias_ptr)
                         problem.epilogue.bias
-                            = VectorBinding{TensorView::fromNative<float>(
+                            = VectorBinding{Tensor::fromNative<float>(
                                                 Layout::contiguous(Shape{size_t(m[i])}),
                                                 std::span<const float>(bias_ptr, size_t(m[i]))),
                                             MatrixAxis::Row};
@@ -940,6 +941,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         problem.epilogue.activationParameter1 = 1.0;
                     }
                     referenceGemm(problem);
+                    copyTensorStorageTo(d_ptr + i3 * stride_d[i], dElements, referenceOutput);
 
                     ComparisonOptions comparisonOptions{
                         .symmetricRelativeTolerance = std::nextafter(0.001, 0.0),
@@ -949,13 +951,10 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     const Layout comparisonLayout(
                         Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]});
                     const auto comparison = roc::host_validation::compare(
-                        TypedTensorView<Tout>(
-                            comparisonLayout,
-                            std::span<const Tout>(
-                                hd[i].data() + i3 * stride_d[i], dElements)),
-                        TypedTensorView<Tout>(
-                            comparisonLayout,
-                            std::span<const Tout>(d_ptr + i3 * stride_d[i], dElements)),
+                        hipblaslt::host_validation::tensorFromStorage(
+                            hd[i].data() + i3 * stride_d[i], dElements, comparisonLayout),
+                        hipblaslt::host_validation::tensorFromStorage(
+                            d_ptr + i3 * stride_d[i], dElements, comparisonLayout),
                         comparisonOptions);
                     passed = passed && comparison.passed();
                     for(const auto& mismatch : comparison.reportedMismatches)

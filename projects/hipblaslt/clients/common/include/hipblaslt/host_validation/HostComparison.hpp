@@ -3,17 +3,16 @@
 
 #pragma once
 
-// Product-private hipBLASLt comparison program. This header translates
-// hipBLASLt descriptors and acceptance policy into the product-independent
-// roc::host-validation comparison API. It intentionally contains no GTest
-// assertions or output formatting.
+// Product-private hipBLASLt comparison adapter. This header translates
+// hipBLASLt descriptor geometry and acceptance policy into the product-independent
+// roc::host-validation comparison API; presentation of the result is caller-owned.
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <hipblaslt/hipblaslt.h>
-#include <optional>
 #include <hipblaslt/host_validation/Comparison.hpp>
+#include <optional>
 #include <span>
 #include <stdexcept>
 
@@ -23,35 +22,75 @@ namespace hipblaslt::host_validation
 
     enum class HostPointwiseComparison
     {
+        /// Skip finite-value pointwise acceptance.
         Disabled,
+
+        /// Apply the hipBLASLt unit-check policy: exact comparison for narrow and integer
+        /// storage, or at most four encoded ULPs for float32/float64 real or complex storage.
         Unit,
+
+        /// Apply an absolute pointwise tolerance supplied by HostComparisonRequest.
         Near,
     };
 
     struct HostComparisonRequest
     {
-        int64_t     rows             = 0;
-        int64_t     columns          = 0;
-        int64_t     leadingDimension = 0;
-        int64_t     batchStride      = 0;
-        int64_t     batchCount       = 0;
-        const void* expected         = nullptr;
-        const void* observed         = nullptr;
-        hipDataType type             = HIPBLASLT_DATATYPE_INVALID;
+        /// Logical row count of each column-major matrix.
+        int64_t rows = 0;
 
-        HostPointwiseComparison pointwise                      = HostPointwiseComparison::Disabled;
-        double                  absoluteTolerance              = 0.0;
-        bool                    requireSpecialValueConsistency = false;
-        bool                    computeRelativeFrobeniusError  = false;
-        bool                    findAllCloseTolerance          = false;
-        bool                    computeUnitsInLastPlace        = false;
+        /// Logical column count of each column-major matrix.
+        int64_t columns = 0;
+
+        /// Element stride between consecutive columns.
+        int64_t leadingDimension = 0;
+
+        /// Element stride between consecutive batches.
+        int64_t batchStride = 0;
+
+        /// Number of matrices in each buffer.
+        int64_t batchCount = 0;
+
+        /// Buffer containing the reference values.
+        const void* expected = nullptr;
+
+        /// Buffer containing the values under test.
+        const void* observed = nullptr;
+
+        /// hipBLASLt storage type shared by expected and observed.
+        hipDataType type = HIPBLASLT_DATATYPE_INVALID;
+
+        /// Finite-value pointwise acceptance policy.
+        HostPointwiseComparison pointwise = HostPointwiseComparison::Disabled;
+
+        /// Absolute tolerance used only when pointwise is Near.
+        double absoluteTolerance = 0.0;
+
+        /// Collect NaN/infinity agreement statistics in comparison, independently of finite
+        /// pointwise acceptance.
+        bool requireSpecialValueConsistency = false;
+
+        /// Sum the independently computed relative Frobenius error for each batch.
+        bool computeRelativeFrobeniusError = false;
+
+        /// Search the built-in absolute/relative tolerance candidates for the first passing pair.
+        bool findAllCloseTolerance = false;
+
+        /// Compute ULP summary statistics independently of the primary pointwise policy.
+        bool computeUnitsInLastPlace = false;
     };
 
     struct HostComparisonReport
     {
-        ComparisonResult                   comparison;
-        ComparisonResult                   unitsInLastPlaceComparison;
-        double                             relativeFrobeniusError = 0.0;
+        /// Primary pointwise result and/or special-value statistics requested by comparison.
+        ComparisonResult comparison;
+
+        /// ULP metrics requested by computeUnitsInLastPlace.
+        ComparisonResult unitsInLastPlaceComparison;
+
+        /// Sum of per-batch relative Frobenius errors.
+        double relativeFrobeniusError = 0.0;
+
+        /// First passing all-close candidate, or no value if the search was disabled or failed.
         std::optional<ComparisonTolerance> allCloseTolerance;
     };
 
@@ -212,8 +251,8 @@ namespace hipblaslt::host_validation
                 1e-1,
             };
             report.allCloseTolerance
-                = findAllCloseTolerance(comparisonView(request.observed, request.type, layout),
-                                        comparisonView(request.expected, request.type, layout),
+                = findAllCloseTolerance(comparisonTensor(request.observed, request.type, layout),
+                                        comparisonTensor(request.expected, request.type, layout),
                                         std::span<const double>(candidates),
                                         std::span<const double>(candidates),
                                         allCloseOptions);

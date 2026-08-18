@@ -40,7 +40,6 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/host_validation/Types.hpp>
-#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
 
@@ -118,42 +117,42 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     aGeneration.real.dimensionCoefficients = {1, 1, 1};
     aGeneration.real.remainderDivisor      = 7;
     aGeneration.real.valueOffset           = 1;
-    roc::host_validation::generate(
-        hipblaslt::host_validation::mutableTensorView(
-            h_A_full.data(),
-            h_A_full.size(),
-            roc::host_validation::Layout(
-                roc::host_validation::Shape{size_t(A_row), size_t(A_col), size_t(batch_count)},
-                {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(size_A_full)},
-                static_cast<ptrdiff_t>(padding_a) + static_cast<ptrdiff_t>(offset_a))),
-        aGeneration);
+    auto tensorA                           = hipblaslt::host_validation::tensorFromMutableStorage(
+        h_A_full.data(),
+        h_A_full.size(),
+        roc::host_validation::Layout(
+            roc::host_validation::Shape{size_t(A_row), size_t(A_col), size_t(batch_count)},
+            {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(size_A_full)},
+            static_cast<ptrdiff_t>(padding_a) + static_cast<ptrdiff_t>(offset_a)));
+    roc::host_validation::generate(tensorA, aGeneration);
+    hipblaslt::host_validation::copyTensorStorageTo(h_A_full.data(), h_A_full.size(), tensorA);
 
     roc::host_validation::GenerationOptions bGeneration = aGeneration;
     bGeneration.real.dimensionCoefficients              = {1, -1, 1};
     bGeneration.real.remainderDivisor                   = 5;
-    roc::host_validation::generate(
-        hipblaslt::host_validation::mutableTensorView(
-            h_B_full.data(),
-            h_B_full.size(),
-            roc::host_validation::Layout(
-                roc::host_validation::Shape{size_t(B_row), size_t(B_col), size_t(batch_count)},
-                {1, static_cast<ptrdiff_t>(ldb), static_cast<ptrdiff_t>(size_B_full)},
-                static_cast<ptrdiff_t>(padding_b) + static_cast<ptrdiff_t>(offset_b))),
-        bGeneration);
+    auto tensorB = hipblaslt::host_validation::tensorFromMutableStorage(
+        h_B_full.data(),
+        h_B_full.size(),
+        roc::host_validation::Layout(
+            roc::host_validation::Shape{size_t(B_row), size_t(B_col), size_t(batch_count)},
+            {1, static_cast<ptrdiff_t>(ldb), static_cast<ptrdiff_t>(size_B_full)},
+            static_cast<ptrdiff_t>(padding_b) + static_cast<ptrdiff_t>(offset_b)));
+    roc::host_validation::generate(tensorB, bGeneration);
+    hipblaslt::host_validation::copyTensorStorageTo(h_B_full.data(), h_B_full.size(), tensorB);
 
     roc::host_validation::GenerationOptions cGeneration = aGeneration;
     cGeneration.real.dimensionCoefficients              = {1, 1, 0};
     cGeneration.real.remainderDivisor                   = 3;
     cGeneration.real.valueOffset                        = 0;
-    roc::host_validation::generate(
-        hipblaslt::host_validation::mutableTensorView(
-            h_C_full.data(),
-            h_C_full.size(),
-            roc::host_validation::Layout(
-                roc::host_validation::Shape{size_t(M), size_t(N), size_t(batch_count)},
-                {1, static_cast<ptrdiff_t>(ldc), static_cast<ptrdiff_t>(size_C_full)},
-                static_cast<ptrdiff_t>(padding_c) + static_cast<ptrdiff_t>(offset_c))),
-        cGeneration);
+    auto tensorC = hipblaslt::host_validation::tensorFromMutableStorage(
+        h_C_full.data(),
+        h_C_full.size(),
+        roc::host_validation::Layout(
+            roc::host_validation::Shape{size_t(M), size_t(N), size_t(batch_count)},
+            {1, static_cast<ptrdiff_t>(ldc), static_cast<ptrdiff_t>(size_C_full)},
+            static_cast<ptrdiff_t>(padding_c) + static_cast<ptrdiff_t>(offset_c)));
+    roc::host_validation::generate(tensorC, cGeneration);
+    hipblaslt::host_validation::copyTensorStorageTo(h_C_full.data(), h_C_full.size(), tensorC);
 
     // Allocate device memory
     device_vector<Ti> d_A_full(size_A_full * batch_count);
@@ -330,26 +329,29 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                          + (columns - 1) * size_t(std::abs(columnStride));
               };
 
+        auto outputTensor = tensorFromMutableStorage(
+            D_sub,
+            storageElements(size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
+            Layout(Shape{size_t(M), size_t(N)}, {1, static_cast<ptrdiff_t>(ldd)}));
         GemmRequest problem(
-            GemmOperand(
-                tensorView(A_sub,
-                           storageElements(size_t(M), size_t(K), aRowStride, aColumnStride),
-                           Layout(Shape{size_t(M), size_t(K)}, {aRowStride, aColumnStride}))),
-            GemmOperand(
-                tensorView(B_sub,
-                           storageElements(size_t(K), size_t(N), bRowStride, bColumnStride),
-                           Layout(Shape{size_t(K), size_t(N)}, {bRowStride, bColumnStride}))),
-            tensorView(C_sub,
-                       storageElements(size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldc)),
-                       Layout(Shape{size_t(M), size_t(N)}, {1, static_cast<ptrdiff_t>(ldc)})),
-            mutableTensorView(
-                D_sub,
-                storageElements(size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
-                Layout(Shape{size_t(M), size_t(N)}, {1, static_cast<ptrdiff_t>(ldd)})),
+            GemmOperand(tensorFromStorage(
+                A_sub,
+                storageElements(size_t(M), size_t(K), aRowStride, aColumnStride),
+                Layout(Shape{size_t(M), size_t(K)}, {aRowStride, aColumnStride}))),
+            GemmOperand(tensorFromStorage(
+                B_sub,
+                storageElements(size_t(K), size_t(N), bRowStride, bColumnStride),
+                Layout(Shape{size_t(K), size_t(N)}, {bRowStride, bColumnStride}))),
+            tensorFromStorage(
+                C_sub,
+                storageElements(size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldc)),
+                Layout(Shape{size_t(M), size_t(N)}, {1, static_cast<ptrdiff_t>(ldc)})),
+            outputTensor,
             scalarType<Tc>());
         problem.epilogue.alpha = static_cast<double>(h_alpha);
         problem.epilogue.beta  = static_cast<double>(h_beta);
         referenceGemm(problem);
+        copyTensorStorageTo(D_sub, size_D_sub, outputTensor);
     }
 
     // Tolerance: epsilon * factor * K (accumulation over K elements)
@@ -415,12 +417,12 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 .maxReportedMismatches = 0};
             comparisonOptions.selection.indexOrder
                 = roc::host_validation::ComparisonIndexOrder::FirstDimensionFastest;
-            const auto comparison = roc::host_validation::compare(
-                roc::host_validation::TypedTensorView<To>(
-                    comparisonLayout, std::span<const To>(result_gpu, size_D_sub)),
-                roc::host_validation::TypedTensorView<To>(
-                    comparisonLayout, std::span<const To>(result_cpu, size_D_sub)),
-                comparisonOptions);
+            const auto comparison
+                = roc::host_validation::compare(hipblaslt::host_validation::tensorFromStorage(
+                                                    result_gpu, size_D_sub, comparisonLayout),
+                                                hipblaslt::host_validation::tensorFromStorage(
+                                                    result_cpu, size_D_sub, comparisonLayout),
+                                                comparisonOptions);
             max_error = std::max(max_error, comparison.maxAbsoluteDifference);
             all_close = all_close && comparison.passed();
         }

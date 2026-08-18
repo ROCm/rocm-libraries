@@ -30,11 +30,31 @@
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
 
 #include <gtest/gtest-spi.h>
+
+TEST(HostValidationTypeBridge, ConvergesOnScalarType)
+{
+    using namespace hipblaslt::host_validation;
+    using roc::host_validation::ScalarType;
+
+    EXPECT_EQ(scalarType<float>(), scalarType(HIP_R_32F));
+    EXPECT_EQ(scalarType(static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)), ScalarType::E5M3);
+    EXPECT_FALSE(tryScalarType(static_cast<hipDataType>(-1)));
+}
+
+TEST(HostValidationDataInitializationBridge, RuntimeRangeUsesTensorLayoutOffset)
+{
+    std::array<float, 6> values{1, 2, 3, 4, 5, 6};
+
+    hipblaslt_init_zero(static_cast<void*>(values.data()), 2, 5, HIP_R_32F);
+
+    EXPECT_EQ(values, (std::array<float, 6>{1, 2, 0, 0, 0, 6}));
+}
 
 TEST(HostValidationEpilogueBridge, DelegatesToProductIndependentComponent)
 {
@@ -149,15 +169,13 @@ TEST(HostValidationEpilogueBridge, RejectsOverflowingLeadingDimensionLayout)
     hipblaslt::host_validation::EpilogueArguments arguments;
     arguments.rows             = 1;
     arguments.columns          = 3;
-    arguments.leadingDimension
-        = std::numeric_limits<decltype(arguments.leadingDimension)>::max();
-    arguments.input       = &input;
-    arguments.output      = &output;
-    arguments.outputType  = HIP_R_32F;
-    arguments.computeType = HIP_R_32F;
+    arguments.leadingDimension = std::numeric_limits<decltype(arguments.leadingDimension)>::max();
+    arguments.input            = &input;
+    arguments.output           = &output;
+    arguments.outputType       = HIP_R_32F;
+    arguments.computeType      = HIP_R_32F;
 
-    EXPECT_THROW(hipblaslt::host_validation::referenceEpilogue(arguments),
-                 std::overflow_error);
+    EXPECT_THROW(hipblaslt::host_validation::referenceEpilogue(arguments), std::overflow_error);
 }
 
 TEST(HostValidationReductionBridge, DelegatesStridedBiasSum)

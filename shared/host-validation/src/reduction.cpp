@@ -36,8 +36,7 @@ ReductionRunInfo referenceSum(const ReductionProblem& problem) {
     return referenceReduce(problem);
 }
 
-ReductionRunInfo referenceMaximumAbsolute(TensorView input, MutableTensorView output,
-                                          ScalarType accumulatorType) {
+ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType) {
     std::vector<size_t> axes(input.shape().rank());
     std::iota(axes.begin(), axes.end(), 0);
     return referenceReduce(ReductionProblem(std::move(input), std::move(output), accumulatorType,

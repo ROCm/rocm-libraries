@@ -21,6 +21,7 @@ using roc::host_validation::IntegerOverflow;
 using roc::host_validation::IntegerRounding;
 using roc::host_validation::Layout;
 using roc::host_validation::Scalar;
+using roc::host_validation::ScalarCategory;
 using roc::host_validation::ScalarConversionOptions;
 using roc::host_validation::ScalarType;
 using roc::host_validation::scalarTypeInfo;
@@ -82,7 +83,7 @@ uint32_t tensorRaw(const Tensor& tensor) {
 
 uint32_t encodeRaw(ScalarType type, float value) {
     Tensor tensor(type, Shape{1});
-    tensor.mutableView().storeFrom({0}, value);
+    tensor.storeFrom({0}, value);
     return tensorRaw(tensor);
 }
 
@@ -94,6 +95,8 @@ struct ExpectedBinaryFormat {
     bool hasSign;
 };
 
+// Keep the test oracle independent of the production tag traits so adding a format requires an
+// explicit expectation rather than copying the implementation's metadata path.
 ExpectedBinaryFormat expectedFormat(ScalarType type) {
     switch (type) {
         case ScalarType::Float4E2M1:
@@ -119,6 +122,8 @@ ExpectedBinaryFormat expectedFormat(ScalarType type) {
     }
 }
 
+// This is likewise an independent encoding oracle; replacing it with visitScalarType would make
+// exhaustive tests agree with the implementation by construction.
 bool expectedNaN(ScalarType type, uint32_t raw) {
     switch (type) {
         case ScalarType::Float8E4M3:
@@ -167,11 +172,44 @@ float expectedBinaryDecode(ScalarType type, uint32_t raw) {
     return negative ? -positive : positive;
 }
 
+void testScalarTypeInfoContract() {
+    const auto& boolean = scalarTypeInfo(ScalarType::Boolean);
+    require(boolean.name == "bool" && boolean.category == ScalarCategory::Boolean &&
+                boolean.storageBits == 8 && boolean.exponentBits == 0 &&
+                boolean.mantissaBits == 0 && boolean.exponentBias == 0 && !boolean.supportsNaN &&
+                !boolean.supportsInfinity,
+            "Boolean scalar metadata contract mismatch.");
+
+    const auto& complex = scalarTypeInfo(ScalarType::ComplexFloat32);
+    require(complex.name == "c64" && complex.category == ScalarCategory::Complex &&
+                complex.storageBits == 64 && complex.exponentBits == 8 &&
+                complex.mantissaBits == 23 && complex.exponentBias == 127 && complex.supportsNaN &&
+                complex.supportsInfinity,
+            "Complex scalar metadata contract mismatch.");
+
+    const auto& finiteFloat = scalarTypeInfo(ScalarType::Float4E2M1);
+    require(finiteFloat.category == ScalarCategory::FloatingPoint && finiteFloat.storageBits == 4 &&
+                finiteFloat.exponentBits == 2 && finiteFloat.mantissaBits == 1 &&
+                finiteFloat.exponentBias == 1 && !finiteFloat.supportsNaN &&
+                !finiteFloat.supportsInfinity,
+            "Finite minifloat metadata contract mismatch.");
+
+    // Int12 is intentionally retained as design-generality coverage for cross-byte packing.
+    const auto& int12 = scalarTypeInfo(ScalarType::Int12);
+    require(int12.name == "i12" && int12.category == ScalarCategory::SignedInteger &&
+                int12.storageBits == 12 && int12.isPacked(),
+            "Int12 generality metadata contract mismatch.");
+
+    requireThrows<std::invalid_argument>(
+        [] { (void)Scalar::zero(ScalarType::Count); },
+        "Runtime scalar construction accepted the Count sentinel.");
+}
+
 void testExhaustiveBinaryFormat(ScalarType type) {
     const uint32_t count = 1U << scalarTypeInfo(type).storageBits;
     for (uint32_t raw = 0; raw < count; ++raw) {
         const Tensor tensor = tensorFromRaw(type, raw);
-        const float observed = tensor.view().loadAs<float>({0});
+        const float observed = tensor.loadAs<float>({0});
         const float expected = expectedBinaryDecode(type, raw);
         if (std::isnan(expected)) {
             require(std::isnan(observed), "Binary format NaN decode mismatch.");
@@ -417,48 +455,43 @@ void testIntegerCodecPolicies() {
     const std::array<int8_t, 4> saturatedExpected{127, 127, -128, -128};
     const std::array<int8_t, 4> wrappedExpected{-128, -128, -128, 126};
     for (size_t index = 0; index < sourceValues.size(); ++index) {
-        require(saturated.view().loadAs<int8_t>({index}) == saturatedExpected[index],
+        require(saturated.loadAs<int8_t>({index}) == saturatedExpected[index],
                 "Tensor saturating conversion mismatch.");
-        require(wrapped.view().loadAs<int8_t>({index}) == wrappedExpected[index],
+        require(wrapped.loadAs<int8_t>({index}) == wrappedExpected[index],
                 "Tensor modulo-wrap conversion mismatch.");
     }
     requireThrows<std::overflow_error>(
         [&] { (void)source.to(ScalarType::Int8, rejectNearestEven); },
         "Tensor rejecting conversion accepted a rounded overflow.");
-    require(source.view().loadAs<int8_t>({0}, saturateNearestEven) == 127 &&
-                source.view().loadAs<int8_t>({0}, wrapNearestEven) == -128,
+    require(source.loadAs<int8_t>({0}, saturateNearestEven) == 127 &&
+                source.loadAs<int8_t>({0}, wrapNearestEven) == -128,
             "Tensor load conversion options were not applied.");
 
     Tensor nativeInteger(ScalarType::Int8, Shape{1});
-    nativeInteger.mutableView().storeFrom({0}, 128, saturateNearestEven);
-    require(nativeInteger.view().loadAs<int8_t>({0}) == 127,
-            "Native integer store did not saturate.");
-    nativeInteger.mutableView().storeFrom({0}, 128, wrapNearestEven);
-    require(nativeInteger.view().loadAs<int8_t>({0}) == -128,
-            "Native integer store did not modulo-wrap.");
+    nativeInteger.storeFrom({0}, 128, saturateNearestEven);
+    require(nativeInteger.loadAs<int8_t>({0}) == 127, "Native integer store did not saturate.");
+    nativeInteger.storeFrom({0}, 128, wrapNearestEven);
+    require(nativeInteger.loadAs<int8_t>({0}) == -128, "Native integer store did not modulo-wrap.");
     requireThrows<std::overflow_error>(
-        [&] { nativeInteger.mutableView().storeFrom({0}, 128, rejectNearestEven); },
+        [&] { nativeInteger.storeFrom({0}, 128, rejectNearestEven); },
         "Native integer store did not reject overflow.");
 
     const std::array<int16_t, 1> overflowingValue{128};
     const Tensor saturatedFactory = Tensor::fromValues<int16_t>(
         ScalarType::Int8, Shape{1}, overflowingValue, saturateNearestEven);
-    require(saturatedFactory.view().loadAs<int8_t>({0}) == 127,
+    require(saturatedFactory.loadAs<int8_t>({0}) == 127,
             "Tensor value factory did not apply conversion options.");
 
     Tensor packedInteger(ScalarType::Int4, Shape{4});
-    packedInteger.mutableView().storeFrom({0}, 9);
-    packedInteger.mutableView().storeFrom({1}, -9, saturateNearestEven);
-    packedInteger.mutableView().storeFrom({2}, 8, wrapNearestEven);
-    packedInteger.mutableView().storeFrom({3}, -9, wrapNearestEven);
-    require(packedInteger.view().loadAs<int32_t>({0}) == 7 &&
-                packedInteger.view().loadAs<int32_t>({1}) == -8 &&
-                packedInteger.view().loadAs<int32_t>({2}) == -8 &&
-                packedInteger.view().loadAs<int32_t>({3}) == 7,
+    packedInteger.storeFrom({0}, 9);
+    packedInteger.storeFrom({1}, -9, saturateNearestEven);
+    packedInteger.storeFrom({2}, 8, wrapNearestEven);
+    packedInteger.storeFrom({3}, -9, wrapNearestEven);
+    require(packedInteger.loadAs<int32_t>({0}) == 7 && packedInteger.loadAs<int32_t>({1}) == -8 &&
+                packedInteger.loadAs<int32_t>({2}) == -8 && packedInteger.loadAs<int32_t>({3}) == 7,
             "Packed integer policy conversion mismatch.");
-    requireThrows<std::overflow_error>(
-        [&] { packedInteger.mutableView().storeFrom({0}, 8, rejectNearestEven); },
-        "Packed integer store did not reject overflow.");
+    requireThrows<std::overflow_error>([&] { packedInteger.storeFrom({0}, 8, rejectNearestEven); },
+                                       "Packed integer store did not reject overflow.");
 
     const Scalar zeroImaginary = Scalar::from(std::complex<double>{3.5, 0.0});
     require(zeroImaginary.as<int32_t>(rejectNearestEven) == 4,
@@ -469,18 +502,14 @@ void testIntegerCodecPolicies() {
         "Runtime scalar conversion discarded a nonzero imaginary component.");
 
     Tensor realTensor(ScalarType::Float32, Shape{1});
-    realTensor.mutableView().storeFrom({0}, std::complex<double>{1.25, 0.0}, rejectNearestEven);
-    require(realTensor.view().loadAs<float>({0}) == 1.25f,
-            "Zero-imaginary complex store mismatch.");
+    realTensor.storeFrom({0}, std::complex<double>{1.25, 0.0}, rejectNearestEven);
+    require(realTensor.loadAs<float>({0}) == 1.25f, "Zero-imaginary complex store mismatch.");
     requireThrows<std::domain_error>(
-        [&] {
-            realTensor.mutableView().storeFrom({0}, std::complex<double>{1.25, 0.5},
-                                               rejectNearestEven);
-        },
+        [&] { realTensor.storeFrom({0}, std::complex<double>{1.25, 0.5}, rejectNearestEven); },
         "Real tensor store discarded a nonzero imaginary component.");
 
     Tensor floatingCodec(ScalarType::Float8E4M3, Shape{1});
-    floatingCodec.mutableView().storeFrom({0}, 1.0625f, wrapNearestEven);
+    floatingCodec.storeFrom({0}, 1.0625f, wrapNearestEven);
     require(tensorRaw(floatingCodec) == 0x38,
             "Integer conversion options changed floating codec tie behavior.");
 }
@@ -489,6 +518,7 @@ void testIntegerCodecPolicies() {
 int main() {
     using namespace roc::host_validation;
 
+    testScalarTypeInfoContract();
     testIntegerConversionPrimitives();
     testNearestEvenIgnoresHostRoundingMode();
     testIntegerCodecPolicies();
@@ -505,6 +535,8 @@ int main() {
                 complexScalar.as<std::complex<float>>() == complexValue,
             "Runtime scalar did not preserve a complex native value.");
 
+    // Int12 is deliberate generality coverage: its second element would straddle byte boundaries
+    // in a tensor, while this scalar case also verifies unused high-bit canonicalization.
     const std::array<std::byte, 2> int12Storage{std::byte{0x2e}, std::byte{0xfb}};
     const Scalar int12Scalar = Scalar::fromStorage(ScalarType::Int12, int12Storage);
     require(int12Scalar.as<int32_t>() == -1234,
@@ -539,12 +571,12 @@ int main() {
     const Tensor fp4Decoded = Tensor::fromStorage(ScalarType::Float4E2M1,
                                                   Layout::contiguous(Shape{16}), std::move(fp4Raw));
     for (size_t index = 0; index < fp4Expected.size(); ++index)
-        require(fp4Decoded.view().loadAs<float>({index}) == fp4Expected[index],
+        require(fp4Decoded.loadAs<float>({index}) == fp4Expected[index],
                 "FP4 exhaustive decode mismatch.");
 
     Tensor fp4Encoded(ScalarType::Float4E2M1, Shape{16});
     for (size_t index = 0; index < fp4Expected.size(); ++index)
-        fp4Encoded.mutableView().storeFrom({index}, fp4Expected[index]);
+        fp4Encoded.storeFrom({index}, fp4Expected[index]);
     for (uint8_t index = 0; index < 16; ++index) {
         const uint8_t byte = std::to_integer<uint8_t>(fp4Encoded.storage()[index / 2]);
         const uint8_t raw = (index & 1) ? byte >> 4 : byte & 0xf;
@@ -558,8 +590,7 @@ int main() {
         Tensor::fromStorage(ScalarType::Int4, Layout::contiguous(Shape{16}), std::move(int4Raw));
     for (uint8_t index = 0; index < 16; ++index) {
         const int32_t expected = index < 8 ? index : static_cast<int32_t>(index) - 16;
-        require(int4.view().loadAs<int32_t>({index}) == expected,
-                "Int4 exhaustive decode mismatch.");
+        require(int4.loadAs<int32_t>({index}) == expected, "Int4 exhaustive decode mismatch.");
     }
 
     for (uint32_t raw = 0; raw <= 0xffff; ++raw) {
@@ -569,9 +600,9 @@ int main() {
         };
         const Tensor value = Tensor::fromStorage(ScalarType::Float16, Layout::contiguous(Shape{1}),
                                                  std::move(storage));
-        const float decoded = value.view().loadAs<float>({0});
+        const float decoded = value.loadAs<float>({0});
         Tensor roundTrip(ScalarType::Float16, Shape{1});
-        roundTrip.mutableView().storeFrom({0}, decoded);
+        roundTrip.storeFrom({0}, decoded);
         const uint16_t encoded = bytesToUint16(roundTrip.storage());
         if (std::isnan(decoded)) {
             require((encoded & 0x7c00U) == 0x7c00U && (encoded & 0x03ffU) != 0,
@@ -583,9 +614,9 @@ int main() {
 
     for (uint32_t raw = 0; raw <= 0xffff; ++raw) {
         const Tensor value = tensorFromRaw(ScalarType::BFloat16, raw);
-        const float decoded = value.view().loadAs<float>({0});
+        const float decoded = value.loadAs<float>({0});
         Tensor roundTrip(ScalarType::BFloat16, Shape{1});
-        roundTrip.mutableView().storeFrom({0}, decoded);
+        roundTrip.storeFrom({0}, decoded);
         const uint16_t encoded = bytesToUint16(roundTrip.storage());
         if (std::isnan(decoded)) {
             require((encoded & 0x7f80U) == 0x7f80U && (encoded & 0x007fU) != 0,
@@ -650,15 +681,15 @@ int main() {
                                  std::byte{128}, std::byte{254}, std::byte{255}};
     const Tensor e8 =
         Tensor::fromStorage(ScalarType::E8M0, Layout::contiguous(Shape{6}), std::move(e8Raw));
-    require(e8.view().loadAs<float>({0}) == std::ldexp(1.0f, -127), "E8M0 minimum mismatch.");
-    require(e8.view().loadAs<float>({1}) == std::ldexp(1.0f, -126), "E8M0 exponent mismatch.");
-    require(e8.view().loadAs<float>({2}) == 1.0f, "E8M0 unity mismatch.");
-    require(e8.view().loadAs<float>({3}) == 2.0f, "E8M0 exponent mismatch.");
-    require(e8.view().loadAs<float>({4}) == std::ldexp(1.0f, 127), "E8M0 maximum mismatch.");
-    require(std::isnan(e8.view().loadAs<float>({5})), "E8M0 NaN mismatch.");
+    require(e8.loadAs<float>({0}) == std::ldexp(1.0f, -127), "E8M0 minimum mismatch.");
+    require(e8.loadAs<float>({1}) == std::ldexp(1.0f, -126), "E8M0 exponent mismatch.");
+    require(e8.loadAs<float>({2}) == 1.0f, "E8M0 unity mismatch.");
+    require(e8.loadAs<float>({3}) == 2.0f, "E8M0 exponent mismatch.");
+    require(e8.loadAs<float>({4}) == std::ldexp(1.0f, 127), "E8M0 maximum mismatch.");
+    require(std::isnan(e8.loadAs<float>({5})), "E8M0 NaN mismatch.");
     for (uint32_t raw = 0; raw < 0xffU; ++raw) {
         const Tensor value = tensorFromRaw(ScalarType::E8M0, raw);
-        require(encodeRaw(ScalarType::E8M0, value.view().loadAs<float>({0})) == raw,
+        require(encodeRaw(ScalarType::E8M0, value.loadAs<float>({0})) == raw,
                 "E8M0 finite round-trip mismatch.");
     }
     require(encodeRaw(ScalarType::E8M0, 0.0f) == 0, "E8M0 zero saturation mismatch.");

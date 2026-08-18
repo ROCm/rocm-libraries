@@ -11,12 +11,13 @@
 #include <cstring>
 #include <limits>
 #include <optional>
-#include <roc/host_validation/typed_comparison.hpp>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include "detail/comparison_common.hpp"
 
 namespace roc::host_validation {
 
@@ -422,7 +423,7 @@ bool forEachRegularSelectedRun(const Layout& observedLayout, const Layout& expec
     return true;
 }
 
-inline ComparisonValue loadComparisonValue(const TensorView& view, ptrdiff_t logicalOffset) {
+inline ComparisonValue loadComparisonValue(const Tensor& view, ptrdiff_t logicalOffset) {
     const auto storage = view.storage();
     if (scalarTypeInfo(view.type()).category == ScalarCategory::Complex)
         return typedComparisonValue(
@@ -575,8 +576,8 @@ auto loadFastComparisonReal(std::span<const std::byte> storage, ptrdiff_t logica
 }
 
 template <typename Tag>
-bool knownPointwiseDecision(const TensorView& observed, ptrdiff_t observedOffset,
-                            const TensorView& expected, ptrdiff_t expectedOffset,
+bool knownPointwiseDecision(const Tensor& observed, ptrdiff_t observedOffset,
+                            const Tensor& expected, ptrdiff_t expectedOffset,
                             const ComparisonOptions& options) {
     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
         const ComparisonValue observedValue =
@@ -615,7 +616,7 @@ inline bool isUnwrittenSentinelValue(ScalarType type, const ComparisonValue& val
 }
 
 template <typename Tag>
-ComparisonResult comparePointwiseOnlyKnown(const TensorView& observed, const TensorView& expected,
+ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor& expected,
                                            const ComparisonOptions& options) {
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonResult result;
@@ -787,7 +788,7 @@ ComparisonResult compareWithPairLoader(const Layout& observedLayout, const void*
 }
 }  // namespace detail
 
-ComparisonResult compare(const TensorView& observed, const TensorView& expected,
+ComparisonResult compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options) {
     if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host validation tensor comparison shape mismatch.");
@@ -847,8 +848,8 @@ ComparisonResult compare(const TensorView& observed, const TensorView& expected,
     return accumulator.finish();
 }
 
-std::optional<ComparisonTolerance> findAllCloseTolerance(const TensorView& observed,
-                                                         const TensorView& expected,
+std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
+                                                         const Tensor& expected,
                                                          std::span<const double> absoluteCandidates,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options) {
@@ -895,7 +896,7 @@ SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte
     return result;
 }
 
-SentinelResult checkUnusedTensorStorage(const TensorView& logicalTensor, size_t allocatedElements,
+SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
                                         SentinelRegion region, size_t maxReportedMismatches) {
     const auto& layout = logicalTensor.layout();
     std::vector<bool> used(allocatedElements, false);

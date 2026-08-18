@@ -43,7 +43,6 @@
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
-#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 
 /*
@@ -167,7 +166,7 @@ namespace
 
         Tensor generated(toHostValidationScalarType(TypeTraits<T>::value),
                          Shape{destination.size()});
-        generate(generated.mutableView(), options);
+        generate(generated, options);
         const std::span<std::byte> destinationBytes
             = std::as_writable_bytes(std::span<T>(destination));
         if(generated.storage().size() != destinationBytes.size())
@@ -182,11 +181,11 @@ namespace
         static_assert(std::is_trivially_copyable_v<Source>);
         static_assert(std::is_trivially_copyable_v<Destination>);
 
-        const TensorView sourceView(toHostValidationScalarType(TypeTraits<Source>::value),
-                                    Layout::contiguous(Shape{source.size()}),
-                                    std::as_bytes(source));
-        const Tensor     converted
-            = sourceView.to(toHostValidationScalarType(TypeTraits<Destination>::value));
+        const Tensor sourceTensor(toHostValidationScalarType(TypeTraits<Source>::value),
+                                  Layout::contiguous(Shape{source.size()}),
+                                  std::as_bytes(source));
+        const Tensor converted
+            = sourceTensor.to(toHostValidationScalarType(TypeTraits<Destination>::value));
 
         std::vector<Destination>   result(source.size());
         const std::span<std::byte> resultBytes
@@ -215,12 +214,12 @@ namespace
         const std::span<const std::byte> sourceBytes = std::as_bytes(source);
         for(size_t batch = 0; batch < batchCount; ++batch)
         {
-            const TensorView sourceView(
+            const Tensor sourceTensor(
                 ScalarType::Float4E2M1,
                 Layout::contiguous(Shape{logicalElementsPerBatch}),
                 sourceBytes.subspan(batch * storageBytesPerBatch, storageBytesPerBatch));
             const Tensor converted
-                = sourceView.to(toHostValidationScalarType(TypeTraits<Destination>::value));
+                = sourceTensor.to(toHostValidationScalarType(TypeTraits<Destination>::value));
             const std::span<std::byte> destinationBytes
                 = std::as_writable_bytes(std::span<Destination>(result).subspan(
                     batch * logicalElementsPerBatch, logicalElementsPerBatch));
@@ -613,7 +612,7 @@ int runGemm(size_t             m,
                 options.real.parameter0 = 0;
                 options.real.parameter1 = 7;
                 options.real.stream     = stream;
-                roc::host_validation::generate(generated.mutableView(), options);
+                roc::host_validation::generate(generated, options);
                 std::memcpy(values.data(), generated.storage().data(), generated.storage().size());
             };
             fillScale(mxsa, 0);
@@ -745,26 +744,27 @@ int runGemm(size_t             m,
             const ptrdiff_t strideBRow    = transB ? static_cast<ptrdiff_t>(n) : 1;
             const ptrdiff_t strideBColumn = transB ? 1 : static_cast<ptrdiff_t>(k);
 
-            GemmOperand operandA(TensorView::fromNative<AccumulateT>(
-                Layout(Shape{m, k}, {strideARow, strideAColumn}),
-                std::span<const AccumulateT>(aPtr, numA)));
-            GemmOperand operandB(TensorView::fromNative<AccumulateT>(
-                Layout(Shape{k, n}, {strideBRow, strideBColumn}),
-                std::span<const AccumulateT>(bPtr, numB)));
+            GemmOperand operandA(
+                Tensor::fromNative<AccumulateT>(Layout(Shape{m, k}, {strideARow, strideAColumn}),
+                                                std::span<const AccumulateT>(aPtr, numA)));
+            GemmOperand operandB(
+                Tensor::fromNative<AccumulateT>(Layout(Shape{k, n}, {strideBRow, strideBColumn}),
+                                                std::span<const AccumulateT>(bPtr, numB)));
             if(computeInputA != dtypeEnumA)
                 operandA.computeType = toHostValidationScalarType(computeInputA);
             if(computeInputB != dtypeEnumB)
                 operandB.computeType = toHostValidationScalarType(computeInputB);
 
-            GemmRequest problem(std::move(operandA),
-                                std::move(operandB),
-                                TensorView::fromNative<AccumulateT>(
-                                    Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
-                                    std::span<const AccumulateT>(cPtr, numC)),
-                                MutableTensorView::fromNative<AccumulateT>(
-                                    Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
-                                    std::span<AccumulateT>(dPtr, numC)),
-                                nativeScalarType<AccumulateT>);
+            Tensor outputTensor = Tensor::fromNative<AccumulateT>(
+                Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
+                std::span<AccumulateT>(dPtr, numC));
+            GemmRequest problem(
+                std::move(operandA),
+                std::move(operandB),
+                Tensor::fromNative<AccumulateT>(Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
+                                                std::span<const AccumulateT>(cPtr, numC)),
+                outputTensor,
+                nativeScalarType<AccumulateT>);
 
             problem.epilogue.alpha = static_cast<double>(
                 (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha);
@@ -775,7 +775,7 @@ int runGemm(size_t             m,
             if(useBias)
             {
                 problem.epilogue.bias = VectorBinding{
-                    TensorView::fromNative<AccumulateT>(
+                    Tensor::fromNative<AccumulateT>(
                         Layout::contiguous(Shape{m}),
                         std::span<const AccumulateT>(biasVec.data() + batch * m, m)),
                     MatrixAxis::Row};
@@ -783,19 +783,19 @@ int runGemm(size_t             m,
             if(useScaleAlphaVec)
             {
                 problem.epilogue.scaleAlpha
-                    = VectorBinding{TensorView::fromNative<AccumulateT>(
+                    = VectorBinding{Tensor::fromNative<AccumulateT>(
                                         Layout::contiguous(Shape{scaleAlphaVecBuf.size()}),
                                         std::span<const AccumulateT>(scaleAlphaVecBuf)),
                                     factorDim == 0 ? MatrixAxis::Row : MatrixAxis::Column};
             }
             if(useScaleAB == "Vector")
             {
-                problem.epilogue.scaleA = TensorView::fromNative<AccumulateT>(
-                    Layout::contiguous(Shape{scaleABuf.size()}),
-                    std::span<const AccumulateT>(scaleABuf));
-                problem.epilogue.scaleB = TensorView::fromNative<AccumulateT>(
-                    Layout::contiguous(Shape{scaleBBuf.size()}),
-                    std::span<const AccumulateT>(scaleBBuf));
+                problem.epilogue.scaleA
+                    = Tensor::fromNative<AccumulateT>(Layout::contiguous(Shape{scaleABuf.size()}),
+                                                      std::span<const AccumulateT>(scaleABuf));
+                problem.epilogue.scaleB
+                    = Tensor::fromNative<AccumulateT>(Layout::contiguous(Shape{scaleBBuf.size()}),
+                                                      std::span<const AccumulateT>(scaleBBuf));
             }
 
             std::optional<Tensor> runtimeBlockScaleA;
@@ -825,8 +825,8 @@ int runGemm(size_t             m,
                         {
                             const size_t index
                                 = scaleABase + row * mxsaStrideM + block * mxsaStrideKBlk;
-                            runtimeBlockScaleA->mutableView().storeFrom(
-                                {row, block}, static_cast<float>(mxsa[index]));
+                            runtimeBlockScaleA->storeFrom({row, block},
+                                                          static_cast<float>(mxsa[index]));
                         }
                     }
                     for(size_t column = 0; column < n; ++column)
@@ -835,19 +835,20 @@ int runGemm(size_t             m,
                         {
                             const size_t index
                                 = scaleBBase + column * mxsbStrideN + block * mxsbStrideKBlk;
-                            runtimeBlockScaleB->mutableView().storeFrom(
-                                {column, block}, static_cast<float>(mxsb[index]));
+                            runtimeBlockScaleB->storeFrom({column, block},
+                                                          static_cast<float>(mxsb[index]));
                         }
                     }
-                    problem.a.blockScale = BlockScaleBinding{runtimeBlockScaleA->view(),
-                                                             static_cast<size_t>(mxBlockA)};
-                    problem.b.blockScale = BlockScaleBinding{runtimeBlockScaleB->view(),
-                                                             static_cast<size_t>(mxBlockB)};
+                    problem.a.blockScale
+                        = BlockScaleBinding{*runtimeBlockScaleA, static_cast<size_t>(mxBlockA)};
+                    problem.b.blockScale
+                        = BlockScaleBinding{*runtimeBlockScaleB, static_cast<size_t>(mxBlockB)};
                 }
             }
 #endif
 
             referenceGemm(problem);
+            std::memcpy(dPtr, outputTensor.storage().data(), outputTensor.storage().size());
         }
 
         // Compare results — reduced-precision types need wider tolerance.
@@ -860,9 +861,15 @@ int runGemm(size_t             m,
             return 0.05;
         }();
 
+        const auto comparisonType = toHostValidationScalarType(TypeTraits<AccumulateT>::value);
+        const auto comparisonLayout
+            = roc::host_validation::Layout::contiguous(roc::host_validation::Shape{d.size()});
         const auto comparison = roc::host_validation::compare(
-            roc::host_validation::TypedTensorView<AccumulateT>(std::span<const AccumulateT>(d)),
-            roc::host_validation::TypedTensorView<AccumulateT>(std::span<const AccumulateT>(dRef)),
+            roc::host_validation::Tensor(
+                comparisonType, comparisonLayout, std::as_bytes(std::span<const AccumulateT>(d))),
+            roc::host_validation::Tensor(comparisonType,
+                                         comparisonLayout,
+                                         std::as_bytes(std::span<const AccumulateT>(dRef))),
             {.absoluteTolerance     = tolerance,
              .relativeTolerance     = 0.0,
              .maxReportedMismatches = 10});
