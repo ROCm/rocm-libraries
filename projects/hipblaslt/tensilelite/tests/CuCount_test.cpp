@@ -999,3 +999,139 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
     EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwA))
         << "SK3-static solution must remain selectable on MI300A";
 }
+
+// ===========================================================================
+// AIHPBLAS-4254 — coherence-mode Stream-K grid steering (P3 + P0)
+// ===========================================================================
+
+namespace
+{
+    void initSk3CoherenceSolution(ContractionSolution& solution)
+    {
+        solution.sizeMapping.streamK               = 3;
+        solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
+        solution.sizeMapping.depthU                = 64;
+        solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
+        solution.sizeMapping.CUOccupancy           = 1;
+        solution.sizeMapping.workspaceSizePerElemC = 4;
+        solution.sizeMapping.streamKAtomic         = 0;
+        solution.internalArgsSupport.perTileExtraIters = false;
+    }
+} // namespace
+
+TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrder)
+{
+    // Same window as SmCountTargetChangesReductionAndGrid: 512x512 => 16 tiles,
+    // K=8192 => I=128, C=256 => tiles <= C/4 and I >= 64 => parallel without
+    // coherence; P3 forces tree when the flag is on.
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    env.device.skFixedGrid   = 0;
+
+    auto problem = makeGemmProblem(512, 512, 8192);
+    problem.setWorkspaceSize(32ull << 20);
+
+    EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
+        << "Mode off must keep origami's parallel reduction";
+
+    problem.setParams().setUniformSummationOrder(true);
+    EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::tree)
+        << "P3 must force tree under coherence for SK3 static packing";
+}
+
+TEST(StreamKCoherenceGridSteeringTest, NonDivisorGridBelowTilesSnapsToTiles)
+{
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.device.skDynamicGrid = 0;
+    env.device.skFixedGrid   = 10; // does not divide tiles=16
+
+    auto problem = makeGemmProblem(512, 512, 1024);
+    problem.setWorkspaceSize(32ull << 20);
+    const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+    ASSERT_EQ(tiles, 16u);
+
+    const size_t offGrid = env.solution.getSKGrid(
+        problem, env.device, tiles, origami::reduction_t::tree);
+    EXPECT_EQ(offGrid, 10u) << "Mode off must honour skFixedGrid";
+
+    problem.setParams().setUniformSummationOrder(true);
+    const size_t onGrid = env.solution.getSKGrid(
+        problem, env.device, tiles, origami::reduction_t::tree);
+    EXPECT_EQ(onGrid, tiles) << "g0 < T and g0 does not divide T must snap to T";
+}
+
+TEST(StreamKCoherenceGridSteeringTest, DivisorGridBelowTilesIsKept)
+{
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.device.skDynamicGrid = 0;
+    env.device.skFixedGrid   = 8; // 8 | 16
+
+    auto problem = makeGemmProblem(512, 512, 1024);
+    problem.setWorkspaceSize(32ull << 20);
+    const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+    ASSERT_EQ(tiles, 16u);
+
+    problem.setParams().setUniformSummationOrder(true);
+    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree), 8u)
+        << "g0 | T must be left alone";
+}
+
+TEST(StreamKCoherenceGridSteeringTest, AllPartialNonDivisorFRequiresCapability)
+{
+    // T=4, I=17 (K=1088, DepthU=64), g0=8=T*F with F=2 and 2 does not divide 17.
+    // Without perTileExtraIters: snap to T. With capability: keep T*F.
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.device.skDynamicGrid = 0;
+    env.device.skFixedGrid   = 8;
+
+    auto problem = makeGemmProblem(256, 256, 1088);
+    problem.setWorkspaceSize(32ull << 20);
+    const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+    const size_t I
+        = std::max(size_t{1}, problem.getItersPerTile(env.solution.sizeMapping));
+    ASSERT_EQ(tiles, 4u);
+    ASSERT_EQ(I, 17u);
+    ASSERT_EQ(I % 2, 1u);
+
+    // Mode off: fixed grid unchanged.
+    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree), 8u);
+
+    problem.setParams().setUniformSummationOrder(true);
+    env.solution.internalArgsSupport.perTileExtraIters = false;
+    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree), tiles)
+        << "Without perTileExtraIters, F that does not divide I must snap down to T";
+
+    env.solution.internalArgsSupport.perTileExtraIters = true;
+    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree), 8u)
+        << "With perTileExtraIters, F need not divide I; keep T*F when workspace fits";
+}
+
+TEST(StreamKCoherenceGridSteeringTest, ModeOffLeavesNaturalGridAndReduction)
+{
+    StreamK5AnalyticalEnv env;
+    initSk3CoherenceSolution(env.solution);
+    env.device.skDynamicGrid    = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    env.device.skFixedGrid      = 0;
+    env.device.skMaxCUs         = 0;
+    env.device.skGridMultiplier = 1;
+
+    auto problem = makeGemmProblem(512, 512, 8192);
+    problem.setWorkspaceSize(32ull << 20);
+    const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+
+    const auto   redOff  = env.solution.getSKReduction(problem, env.device);
+    const size_t gridOff = env.solution.getSKGrid(problem, env.device, tiles, redOff);
+
+    // Flag stays false (default): second call must match.
+    EXPECT_EQ(env.solution.getSKReduction(problem, env.device), redOff);
+    EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, redOff), gridOff);
+
+    // Coherence on changes reduction for this shape; that is P3, not a mode-off
+    // regression. Confirm the off path above was actually parallel so the
+    // comparison is meaningful.
+    EXPECT_EQ(redOff, origami::reduction_t::parallel);
+}
