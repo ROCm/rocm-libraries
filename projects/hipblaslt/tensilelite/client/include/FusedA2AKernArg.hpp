@@ -5,12 +5,10 @@
 
 // Host side of the fused GEMM.A2A kernarg segment ABI. Must stay
 // byte-identical with the kernel side (Tensile/Components/Signature.py
-// fusedA2AKernArgLayout + addArg). Declared in a header rather than inside
-// FusedA2AClient.cpp so tests/FusedA2AKernArg_test.cpp can drive the real
-// append sequence.
+// fusedA2AKernArgLayout + addArg).
 
 #include <cstdint>
-#include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -47,8 +45,8 @@ namespace TensileLite
 
         // Expected byte growth of args after appending the fused segment:
         //   (MAX_RANKS peer + 1 counter + 1 FusedSdmaQueues) pointers * 8B
-        //   + 7 scalars * 4B = 108B.
-        constexpr size_t FUSED_A2A_SEGMENT_BYTES = (FUSED_A2A_MAX_RANKS + 2) * 8 + 7 * 4;
+        //   + 4 scalars * 4B = 96B.
+        constexpr size_t FUSED_A2A_SEGMENT_BYTES = (FUSED_A2A_MAX_RANKS + 2) * 8 + 4 * 4;
 
         // Whether worldSize fits the fixed segment above: ranks >=
         // FUSED_A2A_MAX_RANKS have no peer_ptr slot, and worldSize <= 0 would
@@ -70,11 +68,8 @@ namespace TensileLite
             void*                     sdmaQueues, // W-element SdmaQueueDeviceHandle array
             uint32_t                  myRank,
             uint32_t                  worldSize,
-            uint32_t                  nShard,
             uint32_t                  drain,
-            uint32_t                  an,
-            uint32_t                  tilesPerRank,
-            uint32_t                  tokenTiles)
+            uint32_t                  am)
         {
             size_t before = args.size();
 
@@ -90,20 +85,16 @@ namespace TensileLite
             args.append<void*>("FusedSdmaQueues", sdmaQueues);
             args.append<uint32_t>("FusedMyRank", myRank);
             args.append<uint32_t>("FusedW", worldSize);
-            args.append<uint32_t>("FusedNShard", nShard);
             args.append<uint32_t>("FusedDrain", drain);
-            // FusedAM: `an` carries AM (A2A width along FEATURE) from the swapped client.
-            args.append<uint32_t>("FusedAM", an);
-            args.append<uint32_t>("FusedTilesPerRank", tilesPerRank);
-            args.append<uint32_t>("FusedTokenTiles", tokenTiles);
+            args.append<uint32_t>("FusedAM", am);
 
             size_t grew = args.size() - before;
             if(grew != FUSED_A2A_SEGMENT_BYTES)
             {
-                std::cerr << "[fused-a2a] WARNING: fused segment grew args by " << grew
-                          << " bytes, expected " << FUSED_A2A_SEGMENT_BYTES
-                          << " (alignment/padding mismatch — epilogue will read wrong offsets)"
-                          << std::endl;
+                throw std::runtime_error(
+                    "[fused-a2a] fused segment grew args by " + std::to_string(grew)
+                    + " bytes, expected " + std::to_string(FUSED_A2A_SEGMENT_BYTES)
+                    + " (alignment/padding mismatch; the epilogue would read wrong offsets)");
             }
         }
     } // namespace Client

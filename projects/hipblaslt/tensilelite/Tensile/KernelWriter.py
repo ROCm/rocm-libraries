@@ -9478,6 +9478,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
       self.defineSgpr("FusedCounter3Ptr", 2, 2)
+      # n_shard = FusedAM / FusedW, divided once in the prologue (W is not a
+      # power of two, so this is a real u32 divide, not a shift).
+      self.defineSgpr("FusedNShard", 1)
+      # ceil(N / MT1), needed by both the counter3 address and the handshake's
+      # counter index; latched so the two do not each recompute it.
+      self.defineSgpr("FusedTokenTiles", 1)
 
     # Calculate numSgpr preload
     self.states.preloadGuard = []

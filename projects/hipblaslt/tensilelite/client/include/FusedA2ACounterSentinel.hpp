@@ -12,10 +12,6 @@
 // off-by-one in a lower level lands on a live slot above it instead -- at the
 // top of counter2's range, that slot is counter3, so the failure there is a
 // mis-elected DRAIN owner rather than a loud error.
-//
-// These are free functions in a header (rather than TU-private helpers in
-// FusedA2AClient.cpp) so tests/FusedA2ACounterSentinel_test.cpp can drive the
-// real fill and check.
 
 #include <cstddef>
 #include <cstdint>

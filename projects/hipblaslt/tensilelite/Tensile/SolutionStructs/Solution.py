@@ -993,11 +993,7 @@ class Solution(collections.abc.Mapping):
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
-      # FusedGemmA2A needs SourceSwap=True so the subtile store's 4 accumulators lie
-      # along N, aligning with the row-major out/recv contiguous axis for wide stores.
-      # Non-fused subtile keeps the historical SourceSwap=False (regular store path).
-      if not state["FusedGemmA2A"]:
-        state["SourceSwap"] = False
+      state["SourceSwap"] = False
       # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
       state["BufferStore"] = True
@@ -1715,32 +1711,16 @@ class Solution(collections.abc.Mapping):
       return
 
     if state["FusedGemmA2A"]:
+      if not state["ProblemType"]["DestDataType"].isBFloat16():
+        reject(state, printRejectionReason, "FusedGemmA2A only supports a bf16 D")
+        return
       if state["StreamK"] != 0:
         reject(state, printRejectionReason, "FusedGemmA2A requires StreamK=0 (data-parallel carrier)")
         return
-      # Divisibility over the runtime world size W is checked client-side;
-      # at compile time we only guarantee the M tile is aligned.
-      # The A2A codegen is MacroTile-agnostic (recv layout / rank election read
-      # MacroTile0, FusedAM, n_shard at runtime and shift by log2(MacroTile0)),
-      # so any power-of-two MT is admissible as long as MacroTile0 divides n_shard
-      # (guaranteed client-side since n_shard is a multiple of 256).
       mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
       if mt0 not in (128, 256) or mt1 not in (128, 256):
         reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
         return
-      # The last-WG election counts arrivals against NumWorkGroups0*NumWorkGroups1,
-      # latched in the prologue; GSU!=1 multiplies the surviving-workgroup population,
-      # so the DRAIN would fire at 1/GSU of the arrivals. Full derivation, incl. why
-      # ClusterDim padding does NOT break the latch: emitFusedA2ATotalWGsLatch in
-      # Components/GlobalWriteBatch.py.
-      #
-      # The batch dim multiplies the population the same way, but is NOT rejected
-      # here: compile time can only see that a batch index is DECLARED, and every
-      # fused config declares one (Batched: True -> NumIndicesBatch == 1) while
-      # running extent 1. The extent is instead checked host-side, in
-      # client/src/FusedA2AClient.cpp.
-      # GSU=-1 defers the factor to calculateAutoGSU at runtime, so a compile-time
-      # latch cannot fold it in at all; only GSU=1 makes the product exact.
       if state["GlobalSplitU"] != 1:
         reject(state, printRejectionReason,
                "FusedGemmA2A requires GlobalSplitU=1 (the DRAIN owner is elected "
@@ -1748,11 +1728,7 @@ class Solution(collections.abc.Mapping):
                "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
                "the election may fire early)")
         return
-      # Rejecting GSU!=1 above only pins the compile-time value; SupportUserGSU
-      # would still let a runtime caller raise GSU (ContractionSolution.cpp honours
-      # problem.getParams().gsu()) and re-inflate the grid under a latch that is a
-      # compile-time constant. Disable UserGSU for the last-WG election.
-      state["InternalSupportParams"]["SupportUserGSU"] = False
+      state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")

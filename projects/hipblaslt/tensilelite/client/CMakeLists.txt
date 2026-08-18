@@ -21,7 +21,7 @@ else()
     find_package(amd_smi)
 endif()
 
-# The GPU-initiated SDMA path for fused A2A (SdmaQueue.cpp) needs hsakmt (KFD
+# The GPU-initiated SDMA path for fused A2A (SdmaQueue.hpp) needs hsakmt (KFD
 # thunk) + hsa-runtime64. It is OFF by default so the ordinary client build
 # carries no hsakmt/hsa-runtime64/libnuma dependency: environments that never
 # built these can still configure and build the client unchanged. Turn it on
@@ -75,8 +75,7 @@ if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
     # ROCm 7.x's hsakmtTargets.cmake bakes BUILD-HOST absolute paths into
     # hsakmt::hsakmt's INTERFACE_LINK_LIBRARIES that do not exist on a fresh
     # container, so every executable linking hsakmt fails. The repair lives in
-    # cmake/HsakmtLinkInterface.cmake -- which documents the two broken forms
-    # and is unit-tested by cmake/tests/test_hsakmt_link_interface.cmake.
+    # cmake/HsakmtLinkInterface.cmake, which documents the two broken forms.
     if(TARGET hsakmt::hsakmt)
         include("${CMAKE_CURRENT_LIST_DIR}/../cmake/HsakmtLinkInterface.cmake")
         get_target_property(_hsakmt_ill hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
@@ -100,8 +99,10 @@ target_link_libraries(tensilelite-client-common
 if(amd_smi_FOUND)
     target_link_libraries(tensilelite-client-common PUBLIC amd_smi)
 endif()
-# PRIVATE: only SdmaQueue.cpp (compiled into this target) calls hsakmt/hsa;
-# downstream consumers use our own wrapper, so the dependency must not leak.
+# PRIVATE: hsakmt/hsa are needed only by TUs in this target that include the
+# header-only SdmaQueue.hpp -- today just FusedA2AClient.cpp, itself gated on
+# the macro below. The two executables compile one source each and never
+# include it, so they get neither the headers nor the libs.
 if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
     target_link_libraries(tensilelite-client-common
         PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)

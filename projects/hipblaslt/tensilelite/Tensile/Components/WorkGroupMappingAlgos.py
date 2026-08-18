@@ -1113,58 +1113,34 @@ def SpaceFillCurveSimpleImpl(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sg
 
     return module
 
-def fusedA2AWgRemapIndex(wg0, wg1, n0, n1, amTiles):
-    """Reference model for FusedA2AWgRemap: (wg0_raw, wg1_raw) -> (m, j).
-
-    Lifts the PUSH segment (M-tiles [0, amTiles)) out of its per-token-tile bands
-    and lays it down as one run at the front of the dispatch order, so the last
-    PUSH work-group moves from (n1-1)*n0 + amTiles - 1 to amTiles*n1 - 1.  Within
-    each segment m stays the fast axis, which both preserves the band-internal
-    locality the identity mapping had and keeps the in-flight work-groups spread
-    across all dst_ranks, so every SDMA queue stays busy.
-
-    Bijective on [0,n0) x [0,n1), which is what leaves the counter grain, counter2
-    and counter3's FusedTotalWGs untouched.  Correctness therefore does not depend
-    on the hardware dispatching in t order -- only the benefit does.
-
-    Precondition: amTiles <= n0.  Enforced host-side by the AM <= M check in
-    client/src/FusedA2AClient.cpp:282-284 (together with AM % MT0 == 0 and
-    M % MT0 == 0, which make both quotients exact), so neither this nor the
-    emitted assembly re-checks it.  Above that bound the result is out of range,
-    NOT the identity -- keep the two in step: a reference model more forgiving
-    than the code it models tests something the hardware never runs.
-    """
-    t = wg0 + wg1 * n0
-    S = amTiles * n1
-    if t < S:
-        return t % amTiles, t // amTiles          # PUSH segment
-    u = t - S
-    L = n0 - amTiles
-    return amTiles + u % L, u // L                # local segment
-
 def FusedA2AWgRemap(writer, kernel):
-    """Emit the segment-first workgroup remap.
+    """Emit the segment-first workgroup remap: (wg0, wg1) -> (m, j).
 
-    Straight-line lowering of fusedA2AWgRemapIndex above; see that docstring for
-    the mapping, its bijectivity and its precondition.  Placed in graWorkGroup
-    after DefaultWGM, ahead of every consumer of WorkGroup0/1.
+        A = AM_tiles,  t = wg0 + wg1*N0,  S = A*N1,  u = t-S,  L = N0-A
+        t <  S:  m, j = t % A,      t // A          (PUSH segment)
+        t >= S:  m, j = A + u % L,  u // L          (local segment)
 
-    Two hazards worth stating, because both fail silently:
+    Lifts the PUSH segment (M-tiles [0, A)) out of its per-token-tile bands into
+    one run at the front of the dispatch order.  Within each segment m stays the
+    fast axis, which preserves the band-internal locality the identity mapping
+    had and keeps the in-flight work-groups spread across all dst_ranks, so every
+    SDMA queue stays busy.
 
-      SCC.  s_sub_u32 / s_add_u32 / s_lshr_b32 all write SCC and s_cselect_b32
-      reads it, so u and L are computed BEFORE the compare and the three selects
-      follow it back to back.  A stray SCC write in between selects from a dead
-      condition -- which is still a bijection, so the numerics stay correct and
-      only the dispatch order (i.e. the entire point) is wrong.
+    Bijective on [0,N0) x [0,N1), which is what leaves the counter grain and
+    FusedTotalWGs untouched.  Correctness therefore does not depend on the
+    hardware dispatching in t order -- only the benefit does.
 
-      EXEC.  scalarUInt24DivideAndRemainder corrects its quotient by writing EXEC
-      with v_cmp_x_ge_u32 and then resets EXEC to -1 unconditionally.  That is fine
-      here (EXEC is full in the prologue and DefaultWGM already calls the same
-      routine at this point) but this block cannot move anywhere EXEC is narrowed.
+    Precondition: A <= N0, enforced host-side by the AM <= M check in
+    client/src/FusedA2AClient.cpp (with AM % MT0 == 0 and M % MT0 == 0 making
+    both quotients exact), so neither this nor the emitted assembly re-checks it.
+
+    Placed in graWorkGroup after DefaultWGM, ahead of every consumer of
+    WorkGroup0/1.  The three s_cselect_b32 must stay glued to the compare: a
+    stray SCC write in between selects from a dead condition, which is still a
+    bijection, so the numerics stay correct and only the dispatch order -- the
+    entire point -- is wrong.
     """
     module = Module("FusedA2AWgRemap")
-    if not kernel.get("FusedGemmA2A"):
-        return module
 
     from .Signature import fusedA2AKernArgLayout
     layout = fusedA2AKernArgLayout()
@@ -1180,7 +1156,7 @@ def FusedA2AWgRemap(writer, kernel):
     sU = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_u", preventOverflow=False)
 
     # A = FusedAM >> log2(MT0) -- the same expression as the epilogue's PUSH gate
-    # (GlobalWriteBatch.py:89). Deriving it differently would split the grid at one
+    # (emitFusedA2AGate). Deriving it differently would split the grid at one
     # boundary and classify PUSH/local at another.
     module.add(writer.argLoader.loadKernArg(sA, "KernArgAddress",
         sgprOffset=hex(fusedBase + layout["FusedAM"]), dword=1))
@@ -1188,8 +1164,6 @@ def FusedA2AWgRemap(writer, kernel):
     module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2mt0, src=sgpr(sA),
                                comment="A = AM_tiles = FusedAM >> log2(MT0=%u)" % kernel["MacroTile0"]))
 
-    # t = wg0 + wg1*N0, S = A*N1, L = N0-A, u = t-S. All SCC writers, all ahead of
-    # the compare.
     module.add(SMulI32(dst=sgpr(sT), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1"),
                        comment="t = wg1*N0 ..."))
     module.add(SAddU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr("WorkGroup0"),

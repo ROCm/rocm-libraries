@@ -514,6 +514,80 @@ namespace rocisa
         }
     };
 
+    // Scalar compare-and-swap. `dst` is ONE register group that is both the
+    // data source and the return: DATA[63:0] is the swap value, DATA[127:64]
+    // the compare value, and the pre-op memory value is written back over
+    // DATA[63:0] (CDNA4 ISA, S_ATOMIC_CMPSWAP_X2). It is therefore listed as
+    // both a dst and a src param, unlike the inc/dec forms whose dst is purely
+    // a return.
+    //
+    // GLC means something different here than on a scalar store: on a store it
+    // forces the write past the K$ and L2, on an atomic it selects return of
+    // the pre-op value (ISA 8.2.2). An atomic has no bit left with which to ask
+    // for a coherence scope, so whether it serializes against other
+    // workgroups is not answerable from the encoding -- measured separately on
+    // gfx950 before this was used.
+    struct SMemAtomicCmpswapInstruction : public AtomicReadWriteInstruction
+    {
+        std::shared_ptr<Container>   base;
+        InstructionInput             soffset;
+        std::optional<SMEMModifiers> smem;
+
+        SMemAtomicCmpswapInstruction(InstType                          instType,
+                                     const std::shared_ptr<Container>& dst,
+                                     const std::shared_ptr<Container>& base,
+                                     const InstructionInput&           soffset,
+                                     std::optional<SMEMModifiers>      smem    = std::nullopt,
+                                     const std::string&                comment = "")
+            : AtomicReadWriteInstruction(instType, dst, nullptr, comment)
+            , base(base)
+            , soffset(soffset)
+            , smem(smem)
+        {
+            instStr = "s_atomic_cmpswap";
+        }
+
+        SMemAtomicCmpswapInstruction(const SMemAtomicCmpswapInstruction& other)
+            : AtomicReadWriteInstruction(other)
+            , base(other.base ? other.base->clone() : nullptr)
+            , soffset(copyInstructionInput(other.soffset))
+            , smem(other.smem)
+        {
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, base, soffset};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {dst, base, soffset};
+        }
+
+        std::string getArgStr() const
+        {
+            return dst->toString() + ", " + base->toString() + ", "
+                   + InstructionInputToString(soffset);
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            if(smem)
+            {
+                kStr += smem->toString();
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
     struct SMemLoadInstruction : public GlobalReadInstruction
     {
         std::shared_ptr<Container>   base;
@@ -2228,142 +2302,6 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> dst;
     };
 
-    // global_atomic_add dst, vaddr, data, saddr sc0  — 32-bit integer atomic add
-    // with return-of-pre-op-value on gfx950 (CDNA4). Return semantics come from
-    // the sc0 bit (GLOBALModifiers glc=True), NOT th:TH_ATOMIC_RETURN (which is
-    // gfx1250 syntax). sc1 (slc) selects scope: 0=device, 1=system. dst receives
-    // the pre-op value.
-    struct GlobalAtomicAddU32 : public GlobalWriteInstruction
-    {
-        std::shared_ptr<Container>     vaddr;
-        std::shared_ptr<Container>     saddr;
-        std::optional<GLOBALModifiers> modifier;
-
-        GlobalAtomicAddU32(const std::shared_ptr<RegisterContainer>& dst,
-                           const std::shared_ptr<RegisterContainer>& vaddr,
-                           const std::shared_ptr<RegisterContainer>& data,
-                           const std::shared_ptr<RegisterContainer>& saddr,
-                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
-                           const std::string&                        comment  = "")
-            : GlobalWriteInstruction(InstType::INST_B32, data, comment)
-            , vaddr(vaddr)
-            , saddr(saddr)
-            , modifier(modifier)
-            , dst(dst)
-        {
-            setInst("global_atomic_add");
-        }
-
-        GlobalAtomicAddU32(const GlobalAtomicAddU32& other)
-            : GlobalWriteInstruction(other)
-            , vaddr(other.vaddr ? other.vaddr->clone() : nullptr)
-            , saddr(other.saddr ? other.saddr->clone() : nullptr)
-            , modifier(other.modifier)
-            , dst(other.dst ? other.dst->clone2() : nullptr)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<GlobalAtomicAddU32>(*this);
-        }
-
-        std::vector<InstructionInput> getParams() const override { return {vaddr, srcData, saddr}; }
-        std::vector<InstructionInput> getDstParams() const override { return {dst}; }
-        std::vector<InstructionInput> getSrcParams() const override { return {vaddr, srcData, saddr}; }
-
-        std::string getArgStr() const
-        {
-            return dst->toString() + ", " + vaddr->toString() + ", "
-                 + srcData->toString() + ", " + saddr->toString();
-        }
-
-        std::string toString() const override
-        {
-            std::string kStr = instStr + " " + getArgStr();
-            if(modifier)
-                kStr += modifier->toString();
-            return formatWithComment(kStr);
-        }
-
-    private:
-        std::shared_ptr<RegisterContainer> dst;
-    };
-
-    // global_atomic_cmpswap_x2 dst, vaddr, data, saddr sc0  — 64-bit compare-and-
-    // swap with return-of-pre-op-value on gfx950 (CDNA4). `data` is a 4-dword
-    // VGPR: [0:1] = swap value (new), [2:3] = compare value (expected cur); the
-    // pre-op memory value is returned in [0:1], success iff it equals the
-    // compare value.
-    //
-    // The type suffix is chosen HERE (isa[0] < 11 ? "_x2" : "_b64"), NOT via the
-    // ReadWriteInstruction generic type table: on gfx9 the atomic mnemonic is
-    // `..._x2`, and the generic table's `dwordx2`/`b64` forms are BOTH invalid on
-    // atomic opcodes ("invalid instruction" on gfx950). Return-of-pre-op comes
-    // from sc0 (GLOBALModifiers glc=True); the assembler *requires* sc0 on this
-    // op ("instruction must use sc0"). sc1 (slc) selects device(0)/system(1)
-    // scope; the ring reserve uses device scope (slc=False).
-    struct GlobalAtomicCmpswapB64 : public GlobalWriteInstruction
-    {
-        std::shared_ptr<Container>     vaddr;
-        std::shared_ptr<Container>     saddr;
-        std::optional<GLOBALModifiers> modifier;
-
-        GlobalAtomicCmpswapB64(const std::shared_ptr<RegisterContainer>& dst,
-                               const std::shared_ptr<RegisterContainer>& vaddr,
-                               const std::shared_ptr<RegisterContainer>& data,
-                               const std::shared_ptr<RegisterContainer>& saddr,
-                               std::optional<GLOBALModifiers>            modifier = std::nullopt,
-                               const std::string&                        comment  = "")
-            : GlobalWriteInstruction(InstType::INST_B64, data, comment)
-            , vaddr(vaddr)
-            , saddr(saddr)
-            , modifier(modifier)
-            , dst(dst)
-        {
-            setInst("global_atomic_cmpswap");
-        }
-
-        GlobalAtomicCmpswapB64(const GlobalAtomicCmpswapB64& other)
-            : GlobalWriteInstruction(other)
-            , vaddr(other.vaddr ? other.vaddr->clone() : nullptr)
-            , saddr(other.saddr ? other.saddr->clone() : nullptr)
-            , modifier(other.modifier)
-            , dst(other.dst ? other.dst->clone2() : nullptr)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<GlobalAtomicCmpswapB64>(*this);
-        }
-
-        std::vector<InstructionInput> getParams() const override { return {vaddr, srcData, saddr}; }
-        std::vector<InstructionInput> getDstParams() const override { return {dst}; }
-        std::vector<InstructionInput> getSrcParams() const override { return {vaddr, srcData, saddr}; }
-
-        std::string getArgStr() const
-        {
-            return dst->toString() + ", " + vaddr->toString() + ", "
-                 + srcData->toString() + ", " + saddr->toString();
-        }
-
-        std::string toString() const override
-        {
-            // gfx9 uses the "_x2" mnemonic; gfx11+ uses "_b64". Chosen locally
-            // because the generic type suffix is illegal on atomic opcodes.
-            auto              isa    = kernel().isaVersion;
-            const std::string suffix = isa[0] < 11 ? "_x2" : "_b64";
-            std::string       kStr   = instStr + suffix + " " + getArgStr();
-            if(modifier)
-                kStr += modifier->toString();
-            return formatWithComment(kStr);
-        }
-
-    private:
-        std::shared_ptr<RegisterContainer> dst;
-    };
-
     struct GLOBALStoreInstruction : public GlobalWriteInstruction
     {
         std::shared_ptr<Container>     vaddr;
@@ -2481,6 +2419,96 @@ namespace rocisa
 
     private:
         std::shared_ptr<Container> dst;
+    };
+
+    struct GlobalAtomicAddU32 : public GLOBALStoreInstruction
+    {
+        GlobalAtomicAddU32(const std::shared_ptr<RegisterContainer>& dst,
+                           const std::shared_ptr<RegisterContainer>& vaddr,
+                           const std::shared_ptr<RegisterContainer>& data,
+                           const std::shared_ptr<RegisterContainer>& saddr,
+                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                           const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B32, vaddr, data, saddr, modifier, comment)
+            , dst(dst)
+        {
+            setInst("global_atomic_add");
+        }
+
+        GlobalAtomicAddU32(const GlobalAtomicAddU32& other)
+            : GLOBALStoreInstruction(other)
+            , dst(other.dst ? other.dst->clone2() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicAddU32>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::string getArgStr() const override
+        {
+            return dst->toString() + ", " + vaddr->toString() + ", " + srcData->toString() + ", "
+                   + saddr->toString();
+        }
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+
+    private:
+        std::shared_ptr<RegisterContainer> dst;
+    };
+
+    struct GlobalAtomicCmpswapB64 : public GLOBALStoreInstruction
+    {
+        GlobalAtomicCmpswapB64(const std::shared_ptr<RegisterContainer>& dst,
+                               const std::shared_ptr<RegisterContainer>& vaddr,
+                               const std::shared_ptr<RegisterContainer>& data,
+                               const std::shared_ptr<RegisterContainer>& saddr,
+                               std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                               const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B64, vaddr, data, saddr, modifier, comment)
+            , dst(dst)
+        {
+            setInst("global_atomic_cmpswap");
+        }
+
+        GlobalAtomicCmpswapB64(const GlobalAtomicCmpswapB64& other)
+            : GLOBALStoreInstruction(other)
+            , dst(other.dst ? other.dst->clone2() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicCmpswapB64>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::string getArgStr() const override
+        {
+            return dst->toString() + ", " + vaddr->toString() + ", " + srcData->toString() + ", "
+                   + saddr->toString();
+        }
+
+        std::string typeConvert() const override
+        {
+            return kernel().isaVersion[0] < 11 ? "_x2" : "_b64";
+        }
+
+    private:
+        std::shared_ptr<RegisterContainer> dst;
     };
 
     struct GlobalStoreB8 : public GLOBALStoreInstruction
@@ -3760,6 +3788,33 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SAtomicInc>(*this);
+        }
+    };
+
+    // 64-bit scalar CAS. SDATA is FOUR dwords and must be 4-aligned (ISA 8.4,
+    // "a multiple of four for larger fetches"); the assembler rejects an
+    // unaligned group outright. The mnemonic carries its own _x2 -- preStr()
+    // emits instStr verbatim, so instType only feeds register-width accounting.
+    struct SAtomicCmpswapX2 : public SMemAtomicCmpswapInstruction
+    {
+        SAtomicCmpswapX2(const std::shared_ptr<Container>& dst,
+                         const std::shared_ptr<Container>& base,
+                         const InstructionInput&           soffset,
+                         std::optional<SMEMModifiers>      smem    = std::nullopt,
+                         const std::string&                comment = "")
+            : SMemAtomicCmpswapInstruction(InstType::INST_B128, dst, base, soffset, smem, comment)
+        {
+            instStr = "s_atomic_cmpswap_x2";
+        }
+
+        SAtomicCmpswapX2(const SAtomicCmpswapX2& other)
+            : SMemAtomicCmpswapInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAtomicCmpswapX2>(*this);
         }
     };
 

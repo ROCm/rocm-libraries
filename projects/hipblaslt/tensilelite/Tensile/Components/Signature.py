@@ -32,19 +32,14 @@ from dataclasses import dataclass, field
 
 # Fused GEMM.A2A kernarg segment layout.
 #
-# When kernel["FusedGemmA2A"] is set, the Signature appends a fixed-size segment
-# of kernarg metadata at the very end of the kernarg buffer (after every GEMM /
-# store arg). These args are registered as kernarg metadata ONLY -- they are
-# deliberately NOT loaded in the prologue (no defineSgpr, not counted in
-# numSgprToLoad). The A2A fusion logic runs solely in the D-store epilogue,
-# so the epilogue reads each arg on demand via
-# loadKernArg(..., sgprOffset=hex(fused_base + intra-offset), dword=...) into a
-# scratch SGPR that is freed immediately after use. A WG maps to a single
-# dst_rank, so it reads exactly one peer_ptr (via a switch on dst_rank); flag
-# and recv live at two offsets inside that one block, never the whole array.
+# When kernel["FusedGemmA2A"] is set, Signature appends a fixed-size segment at
+# the tail of the kernarg buffer. These args are kernarg metadata ONLY -- no
+# defineSgpr, not counted in numSgprToLoad. The fusion logic runs solely in the
+# D-store epilogue, which reads each arg on demand by absolute byte offset into
+# a scratch SGPR freed right after use. A WG maps to a single dst_rank, so it
+# reads exactly one peer_ptr; flag and recv are two offsets inside that block.
 #
-# The array slot count is a COMPILE-TIME constant (8), independent of the runtime
-# world size W; unused slots cost nothing here because nothing enters SGPR.
+# The slot count is a COMPILE-TIME constant, independent of the runtime W.
 FUSED_A2A_MAX_RANKS = 8
 
 # Byte offset of recv inside a peer block. Mirrored in client/include/FusedA2AKernArg.hpp.
@@ -55,32 +50,12 @@ if FUSED_A2A_MAX_RANKS * 4 > FUSED_A2A_PEER_RECV_OFFSET:
         "FUSED_A2A_PEER_RECV_OFFSET=%d; raise the offset before raising the rank bound."
         % (FUSED_A2A_MAX_RANKS * 4, FUSED_A2A_PEER_RECV_OFFSET))
 
-# ...but it is not a free constant: the DRAIN barrier's EXEC mask
-# (GlobalWriteBatch.py _emitFusedA2AHandshake) is one S_BFM whose width operand
-# is the runtime W, and that operand is a TRUNCATED bit field -- 6 bits on the
-# wave64 arm (S_BFM_B64: ((1 << src0[5:0]) - 1) << src1[5:0]) and 5 on the wave32
-# arm (S_BFM_B32, the same with [4:0]). A width at the field's modulus wraps to
-# zero instead of saturating: W=64 (resp. 32) gives (1 << 0) - 1 == 0, so EXEC is
-# EMPTY. That does not hang -- the poll simply never issues, the barrier is
-# skipped, and the epilogue consumes peer tiles still in flight. A wrong answer,
-# silently, which is why the bound is enforced here rather than left to testing.
-#
-# The bound is 31, the wave32 arm's, not the wave64 arm's 63: neither this
+# The bound below is the wave32 arm's 31, not the wave64 arm's 63: neither this
 # constant nor its C++ twin (client/include/FusedA2AKernArg.hpp) knows the wave
-# width of the kernel that will consume it -- both are fixed long before a
-# solution's WavefrontSize is in hand -- so the only sound bound is the one that
-# holds for both arms. Every fused config today is wave64, so 31 costs nothing
-# real; raising past it means first proving no fused config is wave32.
-#
-# 31 is the mask's CEILING, not a recommendation, and the bound is necessary
-# rather than sufficient. The shipped value is 8 because no node is known to
-# carry more than 8 GPUs -- it is the world size this ABI is built for, not a
-# placeholder awaiting a raise.
-#
-# `raise`, not `assert`: `python -O` strips asserts, which would collapse "the
-# bound was checked and held" and "the bound was never evaluated" into the same
-# observation. At module level this runs on every import -- every codegen run and
-# every test that touches Signature -- so it cannot be forgotten.
+# width of the kernel that will consume it, so the only sound bound is the one
+# that holds for both arms. 31 is the mask's CEILING, not a recommendation --
+# the shipped 8 is the world size this ABI is built for, not a placeholder.
+# `raise`, not `assert`: `python -O` strips asserts.
 if FUSED_A2A_MAX_RANKS > 31:
     raise ValueError(
         "FUSED_A2A_MAX_RANKS=%d exceeds the %d the DRAIN EXEC mask can encode: the "
@@ -92,73 +67,36 @@ if FUSED_A2A_MAX_RANKS > 31:
         "client/include/FusedA2AKernArg.hpp to match."
         % (FUSED_A2A_MAX_RANKS, 31))
 
-# Intra-segment byte layout, in emission order. Pointers are 8 bytes
-# (SIG_GLOBALBUFFER), scalars are 4 bytes (u32). The epilogue adds fused_base
-# (the byte offset of peer_ptr_0 in kernarg memory, exposed as
-# writer.states.fusedA2AKernArgBase) to these to get an absolute sgprOffset.
+# (argName, byteSize) in addArg() order. Both the offset map and the segment
+# size derive from this one list, so an arg added to the segment cannot reach
+# only one of them:
+#   peer_ptr_j       per-peer block base, incl. self; flag at offset 0, recv at
+#                    FUSED_A2A_PEER_RECV_OFFSET
+#   counter_ptr      this device's counter base
+#   FusedSdmaQueues  device pointer to the W-element SdmaQueueDeviceHandle array
+#                    (SdmaQueueSet::deviceHandles), consumed by the SDMA
+#                    ring/packet emitters
+#   FusedDrain       runtime drain flag (NOT a compile-time gate)
+#   FusedAM          A2A feature-row count (first AM rows PUSH, rest local)
+_FUSED_A2A_SEGMENT_ARGS = (
+    [("peer_ptr_%u" % j, 8) for j in range(FUSED_A2A_MAX_RANKS)]
+    + [("counter_ptr", 8), ("FusedSdmaQueues", 8),
+       ("FusedMyRank", 4), ("FusedW", 4), ("FusedDrain", 4), ("FusedAM", 4)])
+
 def fusedA2AKernArgLayout():
     """Return {argName: intra-segment byte offset} for the fused-A2A segment.
 
     The offsets are relative to the segment base (peer_ptr_0 == 0). Order and
-    sizes MUST match the addArg() sequence in SignatureDefault.__call__:
-      peer_ptr_0..7    : 8B each  (per-peer block base, incl. self; flag at
-                                   offset 0, recv at FUSED_A2A_PEER_RECV_OFFSET)
-      counter_ptr      : 8B       (this device's counter base)
-      FusedSdmaQueues  : 8B        device pointer to the W-element SdmaQueueDeviceHandle
-                                   array (SdmaQueueSet::deviceHandles); consumed by the
-                                   SDMA ring/packet emitters
-      FusedMyRank      : 4B (u32)
-      FusedW           : 4B (u32)  world size
-      FusedNShard      : 4B (u32)
-      FusedDrain       : 4B (u32)  runtime drain flag (NOT a compile-time gate)
-      FusedAM          : 4B (u32)  A2A feature-row count (first AM rows PUSH, rest local)
-      FusedTilesPerRank: 4B (u32)  feature-tiles per rank shard (nShard/MT0), == the
-                                   SDMA counter target
-      FusedTokenTiles  : 4B (u32)  token-tiles across N (N/MT1), == the SDMA flag target
-
-    FusedSdmaQueues sits right after counter_ptr, ahead of the scalars. All
-    three pointer groups are 8-aligned; the seven scalars trail contiguously.
+    sizes MUST match the addArg() sequence in SignatureDefault.__call__.
     """
     layout = {}
     off = 0
-    for j in range(FUSED_A2A_MAX_RANKS):
-        layout["peer_ptr_%u" % j] = off
-        off += 8
-    for name in ("counter_ptr", "FusedSdmaQueues"):
+    for name, size in _FUSED_A2A_SEGMENT_ARGS:
         layout[name] = off
-        off += 8
-    for name in ("FusedMyRank", "FusedW", "FusedNShard", "FusedDrain", "FusedAM",
-                 "FusedTilesPerRank", "FusedTokenTiles"):
-        layout[name] = off
-        off += 4
+        off += size
     return layout
 
-# Total bytes of the fused-A2A kernarg segment. Pointers: MAX_RANKS peer_ptr +
-# counter_ptr + FusedSdmaQueues == (MAX_RANKS + 2) * 8. Scalars: MyRank/W/
-# NShard/Drain/AM/TilesPerRank/TokenTiles == 7 * 4.
-FUSED_A2A_SEGMENT_BYTES = (FUSED_A2A_MAX_RANKS + 2) * 8 + 7 * 4
-
-def _currentKernArgOffset(signature) -> int:
-    """Byte offset the NEXT addArg() would receive (== accumulated kernarg size).
-
-    SignatureCodeMeta accumulates a running byte offset per arg but does not
-    expose it to Python. We recover it from the already-emitted metadata: each
-    arg prints ``.size:`` and ``.offset:`` lines, so the next offset is the last
-    arg's offset + size. This keeps the fused-segment base byte-identical to
-    what Signature actually emits, with no rocisa C++ change.
-    """
-    text = str(signature)
-    lastSize = None
-    lastOffset = None
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith(".size:"):
-            lastSize = int(s.split(":", 1)[1].strip())
-        elif s.startswith(".offset:"):
-            lastOffset = int(s.split(":", 1)[1].strip())
-    if lastOffset is None or lastSize is None:
-        return 0
-    return lastOffset + lastSize
+FUSED_A2A_SEGMENT_BYTES = sum(size for _, size in _FUSED_A2A_SEGMENT_ARGS)
 
 @dataclass
 class UserArgumentsInfo:
@@ -477,37 +415,24 @@ class SignatureDefault(Signature):
             signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
             userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
 
-        # Fused GEMM.A2A kernarg metadata. Registered LAST so the fused
-        # args occupy the tail of the kernarg buffer. These are metadata-only:
-        # no defineSgpr / no numSgprToLoad change -- the epilogue reads each
-        # on demand by absolute byte offset. See the module-level
-        # fusedA2AKernArgLayout() docstring for the offset contract.
+        # Fused GEMM.A2A kernarg metadata; registered LAST so it lands at the
+        # tail. See fusedA2AKernArgLayout() for the offset contract.
         if kernel["FusedGemmA2A"]:
-            # Byte offset of the first fused arg (peer_ptr_0) in kernarg memory,
-            # i.e. the accumulated size of every preceding kernarg. Recover it
-            # from the metadata already emitted so it matches Signature exactly.
-            fusedBase = _currentKernArgOffset(signature)
+            fusedBase = signature.offset
             for j in range(FUSED_A2A_MAX_RANKS):
                 signature.addArg("peer_ptr_%u" % j, SVK.SIG_GLOBALBUFFER, "void", "generic")
             signature.addArg("counter_ptr",     SVK.SIG_GLOBALBUFFER, "void", "generic")
             signature.addArg("FusedSdmaQueues", SVK.SIG_GLOBALBUFFER, "void", "generic")
             signature.addArg("FusedMyRank",       SVK.SIG_VALUE, "u32")
             signature.addArg("FusedW",            SVK.SIG_VALUE, "u32")
-            signature.addArg("FusedNShard",       SVK.SIG_VALUE, "u32")
             signature.addArg("FusedDrain",        SVK.SIG_VALUE, "u32")
             signature.addArg("FusedAM",           SVK.SIG_VALUE, "u32")
-            signature.addArg("FusedTilesPerRank", SVK.SIG_VALUE, "u32")
-            signature.addArg("FusedTokenTiles",   SVK.SIG_VALUE, "u32")
-            # Publish the segment base for the epilogue. The epilogue
-            # dereferences fused args against sgprKernArgAddress, which the
-            # prologue has already advanced past the common-args header by
-            # commonArgsSize (Bypass_ArgType3_to_ArgType0 "Shift common args" in
-            # KernelWriterAssembly.py; argType 0/3 single-GEMM path, the only
-            # path fused stage-1 takes). Normal GEMM arg loads reset to that
-            # shifted base; the fused loads use metadata offsets that INCLUDE the
-            # header, so subtract commonArgsSize once here to rebase them onto the
-            # same shifted address. Absolute offset of arg X (relative to the
-            # shifted base) = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
+            # Publish the segment base. The prologue has already advanced
+            # sgprKernArgAddress past the common-args header by commonArgsSize
+            # ("Shift common args" in KernelWriterAssembly.py), while these
+            # metadata offsets INCLUDE that header -- subtract it once to rebase
+            # onto the shifted address. Absolute offset of arg X, relative to
+            # that base = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
             writer.states.fusedA2AKernArgBase = fusedBase - userArgumentsInfo.commonArgsSize
 
         activationType = ActivationType("all")

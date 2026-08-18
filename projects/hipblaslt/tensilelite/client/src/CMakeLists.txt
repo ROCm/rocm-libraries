@@ -25,18 +25,6 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
 )
 
-# The fused-A2A SDMA queue pulls in hsakmt/hsa-runtime64 and (via SdmaQueue.hpp)
-# the hsakmt headers, so it is only compiled when the SDMA path is enabled.
-# Building it unconditionally would either fail to compile (no hsakmt headers)
-# or link with undefined references (hsakmt libs not linked) -- both harder to
-# diagnose than the option simply being off.
-if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
-    target_sources(tensilelite-client-common
-        PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/SdmaQueue.cpp"
-    )
-endif()
-
 # Profiler sources only target tensilelite-client (cpu-gemm-driver does not
 # expose ROCprofiler counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)

@@ -3426,22 +3426,21 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
 
-    # Lift the PUSH segment to the front of the dispatch order, then
-    # latch the grid-wide WG count before anything can borrow NumWorkGroups0/1, and
-    # resolve &counter3 here so the per-work-group tally in the epilogue is a bare
+    # Resolving &counter3 here makes the per-work-group tally in the epilogue a bare
     # atomic on a register pair rather than a kernarg load it has to wait on.
     #
-    # The remap goes after DefaultWGM -- a runtime no-op at the WGM=1 every fused
-    # config runs -- and reads NumWorkGroups0/1 raw, so it also precedes the latch.
-    # Not for correctness: both orders compose bijections and the latch's product is
-    # order-independent. Reading the grid dims before anything reorders them is just
-    # the only order that does not require an argument.
+    # The product counts SURVIVING work-groups: ClusterDim != [1,1] rounds the grid
+    # up host-side, but those padded work-groups s_endpgm in the prologue
+    # (clusterPadEarlyExit).
     if kernel["FusedGemmA2A"]:
-      from .Components.GlobalWriteBatch import emitFusedA2ATotalWGsLatch, \
-        emitFusedA2ACounter3PtrLatch
+      from .Components.GlobalWriteBatch import emitFusedA2ACounter3PtrLatch, \
+        emitFusedA2ANShardLatch
       module.add(FusedA2AWgRemap(self, kernel))
-      emitFusedA2ATotalWGsLatch(module, "FusedTotalWGs")
-      emitFusedA2ACounter3PtrLatch(module, self, "FusedCounter3Ptr")
+      module.add(SMulI32(dst=sgpr("FusedTotalWGs"), src0=sgpr("NumWorkGroups0"),
+                         src1=sgpr("NumWorkGroups1"),
+                         comment="FusedTotalWGs = NumWorkGroups0 * NumWorkGroups1 (counter3 election target)"))
+      emitFusedA2ACounter3PtrLatch(module, self, "FusedCounter3Ptr", "FusedTokenTiles")
+      emitFusedA2ANShardLatch(module, self, "FusedNShard")
 
     return module
 
@@ -16561,8 +16560,7 @@ class KernelWriterAssembly(KernelWriter):
           m = Module("storeBatchLoop")
           # codeAccVgprRead / codeMulAlpha are consumed in-place (popFirstItem) by
           # globalWriteBatch. For the FusedGemmA2A two-pass replay each pass must start
-          # from an unconsumed queue, so take a per-pass deepcopy. Single-pass paths are
-          # unaffected (one deepcopy of the same starting queue yields identical output).
+          # from an unconsumed queue, so take a per-pass deepcopy.
           passAccVgprRead = deepcopy(codeAccVgprRead) if codeAccVgprRead is not None else None
           passMulAlpha    = deepcopy(codeMulAlpha) if codeMulAlpha is not None else None
           for batchIdx in range(0, numBatchesCLS):
@@ -16610,20 +16608,17 @@ class KernelWriterAssembly(KernelWriter):
                              "fused-A2A hoisted: WG>=AM_tiles -> local")
           afterLabel = Label(self.labels.getNameInc("fusedA2A_hoist_after"),
                              "fused-A2A hoisted: after PUSH/local")
-          emitFusedA2AGate(actLoopModule, self.argLoader, self.sgprPool,
-                           self.states.fusedA2AKernArgBase, kernel["MacroTile0"],
-                           localLabel.getLabelName())
-          # try/finally guarantees the dispatch mode is restored to "BOTH" even if
-          # codegen raises mid-pass, so the flag never leaks "PUSH"/"LOCAL" into a
-          # subsequent kernel.
+          emitFusedA2AGate(actLoopModule, self, localLabel.getLabelName())
+          # self.states outlives this call, so a mid-pass raise would otherwise leak
+          # "PUSH"/"LOCAL" into a subsequent kernel.
           try:
             # PUSH pass
             self.states.fusedA2ADispatchMode = "PUSH"
             actLoopModule.add(_emit_batch_loop())
             actLoopModule.add(SBranch(labelName=afterLabel.getLabelName(), comment="skip local store"))
-            # rollback codegen-time ss state so LOCAL pass regenerates from batch-loop start.
-            # resetState() clears singleCol*AddrUpdated + lastCoordOffset1 but NOT firstBatch,
-            # so set firstBatch manually; biasLocalBarrierInit must match the pass-1 start (False).
+            # Roll back codegen-time state so the LOCAL pass regenerates from the
+            # batch-loop start. firstBatch and biasLocalBarrierInit are outside
+            # resetState()'s remit, so restore them here.
             ss.resetState()
             ss.firstBatch = True
             biasLocalBarrierInit = False
@@ -17098,7 +17093,7 @@ class KernelWriterAssembly(KernelWriter):
     `forceSlc` forces the slc bit (prints as sc1 on gfx950) on the D store
     regardless of NonTemporalD. Used by the fused-A2A PUSH pass so the tile
     bypasses L2 and is visible in HBM to the SDMA engine. Only honoured for
-    tc == 'D'; the TD/WS/E/Bias paths are untouched.
+    tc == 'D'.
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:

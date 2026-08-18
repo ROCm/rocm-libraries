@@ -926,10 +926,10 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
-    # FusedGemmA2A: fuse an all-to-all (PUSH along N) into the GEMM epilogue.
-    # 0 = off (standard data-parallel GEMM). 1 = on: the first AN columns are
-    # PUSHed to remote recv[W,M,n_shard] slots, the remaining columns stored
-    # locally. Requires StreamK=0 (data-parallel carrier).
+    # FusedGemmA2A: fuse an all-to-all (PUSH along the feature dim) into the
+    # GEMM epilogue. 0 = off (standard data-parallel GEMM). 1 = on: the first
+    # AM feature columns are PUSHed to remote recv[W,N,n_shard] slots, the
+    # rest stored locally. Requires StreamK=0 (data-parallel carrier).
     "FusedGemmA2A": [0, 1],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.

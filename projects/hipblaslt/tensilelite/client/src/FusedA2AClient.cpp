@@ -17,7 +17,8 @@
 #include "FusedA2AKernArg.hpp"
 #include "SolutionIterator.hpp"
 
-// SdmaQueue.cpp is only compiled, and hsakmt only linked, under this option.
+// SdmaQueue.hpp is header-only and pulls in hsakmt, which is only on the
+// include path (and linked) under this option.
 #ifdef TENSILELITE_ENABLE_SDMA_A2A
 #include "SdmaQueue.hpp"
 #endif
@@ -103,17 +104,17 @@ namespace TensileLite
 
             // Tile sizes must come from THIS solution's macro-tile: the kernel
             // epilogue derives dst_rank and the counter index from MT0/MT1.
-            const uint32_t FUSED_A2A_M_TILE = (uint32_t)solution->sizeMapping.macroTile.x;
-            const uint32_t FUSED_A2A_N_TILE = (uint32_t)solution->sizeMapping.macroTile.y;
-            if(FUSED_A2A_M_TILE == 0 || FUSED_A2A_N_TILE == 0)
+            const uint32_t macroTileM = (uint32_t)solution->sizeMapping.macroTile.x;
+            const uint32_t macroTileN = (uint32_t)solution->sizeMapping.macroTile.y;
+            if(macroTileM == 0 || macroTileN == 0)
             {
-                std::cerr << "[fused-a2a] solution macro-tile is zero (MT0=" << FUSED_A2A_M_TILE
-                          << " MT1=" << FUSED_A2A_N_TILE << "); cannot derive fused-A2A tile sizes"
+                std::cerr << "[fused-a2a] solution macro-tile is zero (MT0=" << macroTileM
+                          << " MT1=" << macroTileN << "); cannot derive fused-A2A tile sizes"
                           << std::endl;
                 return 1;
             }
-            std::cout << "[fused-a2a] macro-tile from solution: MT0(M)=" << FUSED_A2A_M_TILE
-                      << " MT1(N)=" << FUSED_A2A_N_TILE << "\n";
+            std::cout << "[fused-a2a] macro-tile from solution: MT0(M)=" << macroTileM
+                      << " MT1(N)=" << macroTileN << "\n";
 
             // M/N-swap (col-major first-class): A=w[feature,K], B=x[token,K].
             const uint32_t M = (uint32_t)problem->freeSizeA(0); // = nFeature (A2A dim)
@@ -129,62 +130,59 @@ namespace TensileLite
 
             // The first `AM` FEATURE columns go all-to-all; [AM, M) stay local in
             // `out`.
-            const uint32_t AM = (uint32_t)args["fused-a2a-am"].as<int>();
-            // nShard = AM/W is a FEATURE sub-segment (one rank's slice of feature M).
-            const uint32_t nShard = AM / (uint32_t)W;
-            // tilesPerRank: whole feature-tiles per rank shard (nShard is feature).
-            const uint32_t tilesPerRank = (uint32_t)(nShard / FUSED_A2A_M_TILE);
-            // tokenTiles: token-tiles across N. CEIL, not floor -- it is a DIMENSION
-            // of the counter array and the grid has CeilDivide(N, MT1) of them.
-            const uint32_t tokenTiles = (N + FUSED_A2A_N_TILE - 1) / FUSED_A2A_N_TILE;
-            // mTiles: feature-tiles across the full feature dim M (diagnostic only).
-            const uint32_t mTiles = M / FUSED_A2A_M_TILE;
+            const uint32_t AM           = (uint32_t)args["fused-a2a-am"].as<int>();
+            const uint32_t nShard       = AM / (uint32_t)W;
+            const uint32_t tilesPerRank = (uint32_t)(nShard / macroTileM);
+            // tokenTiles sizes the counter array and the padded recv buffer.
+            const uint32_t tokenTiles = (N + macroTileN - 1) / macroTileN;
+            // mTiles: diagnostic only.
+            const uint32_t mTiles = M / macroTileM;
 
-            if(AM % (uint32_t)W != 0 || (nShard % FUSED_A2A_M_TILE) != 0
-               || (M % FUSED_A2A_M_TILE) != 0 || (AM % FUSED_A2A_M_TILE) != 0 || AM > M)
+            if(AM % (uint32_t)W != 0 || (nShard % macroTileM) != 0 || (M % macroTileM) != 0
+               || (AM % macroTileM) != 0 || AM > M)
             {
                 std::cerr << "[fused-a2a] ERROR: problem shape violates fused-A2A "
                              "constraints (spec section 0).\n"
                           << "  M(feature)=" << M << " N(token)=" << N << " AM=" << AM << " W=" << W
-                          << " n_shard=AM/W=" << nShard
-                          << " MacroTile0(feature)=" << FUSED_A2A_M_TILE << "\n"
-                          << "  require: AM % W == 0, (AM/W) % " << FUSED_A2A_M_TILE
-                          << " == 0 (so n_shard >= " << FUSED_A2A_M_TILE
-                          << " and every rank is covered), M % " << FUSED_A2A_M_TILE
-                          << " == 0, AM % " << FUSED_A2A_M_TILE << " == 0, AM <= M.\n"
-                          << "  e.g. W=4 needs AM >= " << ((size_t)W * FUSED_A2A_M_TILE)
-                          << " (n_shard >= " << FUSED_A2A_M_TILE
+                          << " n_shard=AM/W=" << nShard << " MacroTile0(feature)=" << macroTileM
+                          << "\n"
+                          << "  require: AM % W == 0, (AM/W) % " << macroTileM
+                          << " == 0 (so n_shard >= " << macroTileM
+                          << " and every rank is covered), M % " << macroTileM << " == 0, AM % "
+                          << macroTileM << " == 0, AM <= M.\n"
+                          << "  e.g. W=4 needs AM >= " << ((size_t)W * macroTileM)
+                          << " (n_shard >= " << macroTileM
                           << "). Refusing to launch (would deadlock in the DRAIN barrier)."
                           << std::endl;
                 return -1;
             }
 
             // SDMA COPY_SUBWIN rect_x/rect_y are 14-bit; rect_x = n_shard scaled into
-            // 16-byte packet elements, rect_y <= MT1. Mirrors
-            // SdmaPacketEmitter.py:checkA2AFieldsFit. `>=` is one tighter than the
-            // hardware because the extents are minus-one encoded.
-            const size_t FUSED_A2A_ELEM_SHIFT    = 3; // log2(16B packet elem / 2B bf16)
-            const size_t FUSED_A2A_ELEM_MULTIPLE = (size_t)1 << FUSED_A2A_ELEM_SHIFT;
-            if(nShard % FUSED_A2A_ELEM_MULTIPLE != 0)
+            // 16-byte packet elements, rect_y <= MT1. These are the only guard
+            // for the fields SdmaPacketEmitter.py packs unmasked. `>=` is one
+            // tighter than the hardware: the extents are minus-one encoded.
+            const size_t elemShift    = 3; // log2(16B packet elem / 2B bf16)
+            const size_t elemMultiple = (size_t)1 << elemShift;
+            if(nShard % elemMultiple != 0)
             {
                 std::cerr << "[fused-a2a] ERROR: n_shard is not addressable at the SDMA "
                              "packet's 16-byte element.\n"
                           << "  n_shard=AM/W=" << nShard << " must be a multiple of "
-                          << FUSED_A2A_ELEM_MULTIPLE << ".\n"
-                          << "  Refusing to launch (the emitter's >>" << FUSED_A2A_ELEM_SHIFT
+                          << elemMultiple << ".\n"
+                          << "  Refusing to launch (the emitter's >>" << elemShift
                           << " would truncate it and copy a short band)." << std::endl;
                 return -1;
             }
-            const size_t maxRectX = (size_t)nShard >> FUSED_A2A_ELEM_SHIFT;
-            const size_t maxRectY = (size_t)FUSED_A2A_N_TILE;
+            const size_t maxRectX = (size_t)nShard >> elemShift;
+            const size_t maxRectY = (size_t)macroTileN;
             if(maxRectX >= (1u << 14) || maxRectY >= (1u << 14))
             {
                 std::cerr << "[fused-a2a] ERROR: geometry overflows the SDMA packet's "
                              "14-bit rect fields.\n"
                           << "  W=" << W << " AM=" << AM << " n_shard=AM/W=" << nShard
-                          << " N(token)=" << N << " MacroTile1(token)=" << FUSED_A2A_N_TILE
+                          << " N(token)=" << N << " MacroTile1(token)=" << macroTileN
                           << " tokenTiles=" << tokenTiles << "\n"
-                          << "  rect_x=n_shard>>" << FUSED_A2A_ELEM_SHIFT << "=" << maxRectX
+                          << "  rect_x=n_shard>>" << elemShift << "=" << maxRectX
                           << " max rect_y=MT1=" << maxRectY << "; each must be < " << (1u << 14)
                           << ".\n"
                           << "  Refusing to launch (the copy would silently move the "
@@ -192,14 +190,14 @@ namespace TensileLite
                              "width itself and cannot be folded into the base address "
                              "the way the coordinates were: reduce AM or raise W "
                              "(the bound is AM < "
-                          << ((size_t)(1u << 14) << FUSED_A2A_ELEM_SHIFT) << "*W)." << std::endl;
+                          << ((size_t)(1u << 14) << elemShift) << "*W)." << std::endl;
                 return -1;
             }
 
             // recv is feature-contiguous [W, token, feature_shard]. Token is padded to
             // a whole MacroTile1 tile: the PUSH store writes the full macro-tile edge
             // with no edge clamp.
-            const size_t nTokenPad = (size_t)tokenTiles * FUSED_A2A_N_TILE;
+            const size_t nTokenPad = (size_t)tokenTiles * macroTileN;
             const size_t recvBytes = (size_t)W * nTokenPad * nShard * sizeof(uint16_t); // bf16
             // One u32 flag slot per source rank. Must stay in step with
             // emitComputeFlagAddr's *4 stride and the DRAIN poll's j*4.
@@ -214,10 +212,10 @@ namespace TensileLite
             const size_t cBytes            = problem->c().totalAllocatedBytes();
             const size_t dBytes            = problem->d().totalAllocatedBytes();
 
-            std::cout << "[fused-a2a] nFeature(M)=" << M << " nToken(N)=" << N
-                      << " K=" << K << " AM=" << AM << " nShard=" << nShard
-                      << " tilesPerRank=" << tilesPerRank << " tokenTiles=" << tokenTiles
-                      << " mTiles=" << mTiles << " drain=" << drain << "\n";
+            std::cout << "[fused-a2a] nFeature(M)=" << M << " nToken(N)=" << N << " K=" << K
+                      << " AM=" << AM << " nShard=" << nShard << " tilesPerRank=" << tilesPerRank
+                      << " tokenTiles=" << tokenTiles << " mTiles=" << mTiles << " drain=" << drain
+                      << "\n";
 
             // Physical layouts come from the tensor descriptors, never hardcoded:
             // A(m,k) sits at m*aFreeStride + k*aBoundStride, likewise B(k,n), D(m,n).
@@ -237,27 +235,39 @@ namespace TensileLite
                       << " boundStride=" << bBoundStride << ") D(mStride=" << dMStride
                       << " nStride=" << dNStride << ")\n";
 
+            // rect_x above is n_shard CONTIGUOUS bf16 features per token row, so the
+            // feature axis has to be unit-stride for the copy to mean anything.
+            if(dMStride != 1)
+            {
+                std::cerr << "[fused-a2a] ERROR: D's feature axis is not contiguous.\n"
+                          << "  D mStride=" << dMStride << " must be 1.\n"
+                          << "  Refusing to launch (the packet copies rect_x=" << maxRectX
+                          << " 16-byte elements as one contiguous run, so a strided "
+                             "feature axis would ship unrelated data to every peer)."
+                          << std::endl;
+                return -1;
+            }
+
             // dNStride is the packet's src_pitch (StrideD1J), a 19-bit field, and is
             // only knowable once the descriptors are read. dst_pitch is n_shard,
             // already bounded by the rect_x check above.
-            if(dNStride % FUSED_A2A_ELEM_MULTIPLE != 0)
+            if(dNStride % elemMultiple != 0)
             {
                 std::cerr << "[fused-a2a] ERROR: D's token-axis stride is not "
                              "addressable at the SDMA packet's 16-byte element.\n"
                           << "  ldd(D nStride)=" << dNStride << " must be a multiple of "
-                          << FUSED_A2A_ELEM_MULTIPLE << ".\n"
-                          << "  Refusing to launch (the emitter's >>" << FUSED_A2A_ELEM_SHIFT
+                          << elemMultiple << ".\n"
+                          << "  Refusing to launch (the emitter's >>" << elemShift
                           << " would truncate the pitch and skew every token row)." << std::endl;
                 return -1;
             }
-            if((dNStride >> FUSED_A2A_ELEM_SHIFT) >= (1u << 19))
+            if((dNStride >> elemShift) >= (1u << 19))
             {
                 std::cerr << "[fused-a2a] ERROR: D's token-axis stride overflows the "
                              "SDMA packet's 19-bit src_pitch field.\n"
-                          << "  ldd(D nStride)=" << dNStride << " -> ldd>>" << FUSED_A2A_ELEM_SHIFT
-                          << "=" << (dNStride >> FUSED_A2A_ELEM_SHIFT) << " must be < "
-                          << (1u << 19) << " (i.e. ldd < "
-                          << ((size_t)(1u << 19) << FUSED_A2A_ELEM_SHIFT) << ").\n"
+                          << "  ldd(D nStride)=" << dNStride << " -> ldd>>" << elemShift << "="
+                          << (dNStride >> elemShift) << " must be < " << (1u << 19)
+                          << " (i.e. ldd < " << ((size_t)(1u << 19) << elemShift) << ").\n"
                           << "  Refusing to launch (the pitch would OR into the "
                              "neighbouring packet field). Reduce M or the D padding."
                           << std::endl;
@@ -373,9 +383,9 @@ namespace TensileLite
                     HIP_CHECK_EXC(hipDeviceCanAccessPeer(&canAccess, s, t));
                     if(!canAccess)
                     {
-                        std::cerr << "[fused-a2a] WARNING: device " << s << " cannot P2P device "
-                                  << t << std::endl;
-                        continue;
+                        std::cerr << "[fused-a2a] ERROR: device " << s << " cannot P2P device " << t
+                                  << std::endl;
+                        return 1;
                     }
                     hipError_t pe = hipDeviceEnablePeerAccess(t, 0);
                     if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
@@ -416,17 +426,14 @@ namespace TensileLite
             {
                 HIP_CHECK_EXC(hipSetDevice(d));
                 HIP_CHECK_EXC(hipStreamCreate(&streams[d]));
-                adapters[d]    = std::make_shared<hip::SolutionAdapter>();
-                bool loadedAny = false;
+                adapters[d] = std::make_shared<hip::SolutionAdapter>();
                 for(auto const& co : codeObjectFiles)
                 {
-                    if(adapters[d]->loadCodeObjectFile(co) == hipSuccess)
-                        loadedAny = true;
+                    (void)adapters[d]->loadCodeObjectFile(co);
                 }
                 // Lazy loading discovers the fused .co by kernel name from the
                 // TensileLibrary directory (same mechanism as main()).
                 (void)adapters[d]->initializeLazyLoading(hardware->archName(), libraryDirectory);
-                (void)loadedAny;
             }
 
             // Repeat loop: race detection + p50/p90 latency. Each iteration re-zeroes
@@ -454,7 +461,7 @@ namespace TensileLite
             // slotStride uses the UNPADDED N, to match the kernel's SizeJ slot
             // multiply.
             const size_t slotStride = (size_t)N * nShard; // elems per src slot
-            const size_t rowStride = (size_t)nShard; // per-token stride (feature-shard contiguous)
+            const size_t rowStride  = (size_t)nShard; // per-token stride (feature-shard contiguous)
 
             // Only sized when validating; empty otherwise, and no D2H copy-back.
             std::vector<uint16_t> hRecv, hOut;
@@ -474,10 +481,10 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipEventCreate(&stopEv[d]));
             }
 
-            std::vector<double> latMeasUs; // post-warmup only (for percentiles)
-
-            // Fed only when all W cards reported: a partial row would misalign the
-            // per-card percentiles against each other and against the spread.
+            // Both fed only when all W cards reported. A partial row would misalign
+            // the per-card percentiles against each other and against the spread, and
+            // would make maxCardUs a max over the survivors -- 0.0 if none reported.
+            std::vector<double>              latMeasUs; // post-warmup only (percentiles)
             std::vector<std::vector<double>> perCardUs(W);
             std::vector<int>                 slowestCount(W, 0);
             int                              perCardSkipped = 0;
@@ -502,8 +509,7 @@ namespace TensileLite
                 inputs.beta  = static_cast<float>(0);
                 inputs.gpu   = true;
 
-                auto kernels
-                    = solution->solve(*problem, inputs, *hardware, nullptr, 0, streams[d]);
+                auto kernels = solution->solve(*problem, inputs, *hardware, nullptr, 0, streams[d]);
                 // Not back(): solve() appends conversion/reduction kernels after the
                 // GEMM, and the fused segment belongs to the GEMM.
                 if(kernels.size() != 1)
@@ -523,13 +529,10 @@ namespace TensileLite
                                    sdmaHandles[d],
                                    (uint32_t)d, // my_rank
                                    (uint32_t)W,
-                                   nShard,
                                    (uint32_t)drain,
                                    // kernarg "FusedAM" (Signature.py); pass AM as
                                    // the value to keep the client/kernel ABI matched.
-                                   (uint32_t)AM,
-                                   tilesPerRank,
-                                   tokenTiles);
+                                   (uint32_t)AM);
                 std::cout << "[fused-a2a] dev " << d
                           << " kernarg: host base(before append)=" << beforeSize
                           << " size(after)=" << gemm.args.size() << "\n";
@@ -632,17 +635,17 @@ namespace TensileLite
                 }
 
                 // -- Dual-segment numeric validation, EVERY iteration. --
-                // Skipped entirely when validate=0 (l2Pass/l1Pass default to `ok`,
+                // Skipped entirely when validate=0 (recvPass/localPass default to `ok`,
                 // so the per-iteration verdict reduces to "kernel exited cleanly").
-                bool l2Pass = ok;
-                bool l1Pass = ok;
+                bool recvPass  = ok;
+                bool localPass = ok;
                 if(ok && validate)
                 {
-                    // L2: on destination card dst, slot src must hold features
+                    // Recv: on destination card dst, slot src must hold features
                     // [dst*nShard, dst*nShard+nShard) of card SRC's golden, across all
                     // N tokens. Depending on src is what makes a slot filled by the
                     // wrong sender visible.
-                    for(int dst = 0; dst < W && l2Pass; dst++)
+                    for(int dst = 0; dst < W && recvPass; dst++)
                     {
                         HIP_CHECK_EXC(hipSetDevice(dst));
                         HIP_CHECK_EXC(
@@ -663,7 +666,7 @@ namespace TensileLite
                                     if(!closeBf16(got, want))
                                     {
                                         if(mism < 5)
-                                            std::cerr << "[fused-a2a] L2 MISMATCH iter=" << it
+                                            std::cerr << "[fused-a2a] RECV MISMATCH iter=" << it
                                                       << " card=" << dst << " src=" << src
                                                       << " t=" << t << " f=" << f << " got=" << got
                                                       << " want=" << want << "\n";
@@ -673,87 +676,52 @@ namespace TensileLite
                             }
                         }
                         if(verbose || mism)
-                            std::cout << "[fused-a2a] L2 recv card " << dst << ": "
+                            std::cout << "[fused-a2a] RECV card " << dst << ": "
                                       << (mism == 0 ? "PASS" : "FAIL") << " (mismatches=" << mism
                                       << ")\n";
                         if(mism)
-                            l2Pass = false;
+                            recvPass = false;
                     }
 
-                    // L1: card d's local tail out[m in [AM,M)] against its OWN golden.
-                    // Two independent reads, both must pass: (a) via the descriptor
-                    // strides the kernel was told to write with, and (b) via a
-                    // hardcoded col-major off=n*M+m. (a) alone cannot tell the intended
-                    // layout from any other the descriptor also describes.
-                    const bool descColMajor = (dMStride == 1 && dNStride == M);
-                    if(verbose)
-                        std::cout << "[fused-a2a] D descriptor layout: dMStride=" << dMStride
-                                  << " dNStride=" << dNStride << " -> "
-                                  << (descColMajor ? "COL-MAJOR [M,N] (M/feature contiguous)"
-                                                   : "NOT col-major (row-major or padded)")
-                                  << "  (raw-bytes L1 check uses hardcoded off=n*M+m"
-                                     " regardless)\n";
-                    for(int d = 0; d < W && l1Pass; d++)
+                    // Local: card d's local tail out[m in [AM,M)] against its OWN
+                    // golden, read through the descriptor strides the kernel was told
+                    // to write with. The layout itself is pinned by the dMStride and
+                    // dNStride guards at launch, not re-derived here.
+                    for(int d = 0; d < W && localPass; d++)
                     {
                         HIP_CHECK_EXC(hipSetDevice(d));
                         HIP_CHECK_EXC(
                             hipMemcpy(hOut.data(), outD[d], dBytes, hipMemcpyDeviceToHost));
-                        size_t mismDesc = 0; // (a) descriptor-driven
-                        size_t mismRaw  = 0; // (b) raw-bytes col-major (off=n*M+m)
+                        size_t mism = 0;
                         for(size_t m = AM; m < M; m++) // feature-local tail beyond A2A slice
                         {
                             for(size_t n = 0; n < N; n++) // all tokens
                             {
-                                float want = (float)Dgold[(size_t)d * goldStride + m * N + n];
-
-                                // (a) descriptor-driven read.
+                                float    want = (float)Dgold[(size_t)d * goldStride + m * N + n];
+                                BFloat16 g;
+                                g.data    = hOut[m * dMStride + n * dNStride];
+                                float got = (float)g;
+                                if(!closeBf16(got, want))
                                 {
-                                    size_t   off = m * dMStride + n * dNStride;
-                                    BFloat16 g;
-                                    g.data    = hOut[off];
-                                    float got = (float)g;
-                                    if(!closeBf16(got, want))
-                                    {
-                                        if(mismDesc < 5)
-                                            std::cerr << "[fused-a2a] L1(desc) MISMATCH iter=" << it
-                                                      << " card=" << d << " m=" << m << " n=" << n
-                                                      << " got=" << got << " want=" << want << "\n";
-                                        mismDesc++;
-                                    }
-                                }
-
-                                // (b) raw-bytes col-major read.
-                                {
-                                    size_t   off = n * M + m;
-                                    BFloat16 g;
-                                    g.data    = hOut[off];
-                                    float got = (float)g;
-                                    if(!closeBf16(got, want))
-                                    {
-                                        if(mismRaw < 5)
-                                            std::cerr << "[fused-a2a] L1(raw col-major n*M+m) "
-                                                         "MISMATCH iter="
-                                                      << it << " card=" << d << " m=" << m
-                                                      << " n=" << n << " got=" << got
-                                                      << " want=" << want << "\n";
-                                        mismRaw++;
-                                    }
+                                    if(mism < 5)
+                                        std::cerr << "[fused-a2a] LOCAL MISMATCH iter=" << it
+                                                  << " card=" << d << " m=" << m << " n=" << n
+                                                  << " got=" << got << " want=" << want << "\n";
+                                    mism++;
                                 }
                             }
                         }
-                        if(verbose || mismDesc || mismRaw)
-                            std::cout << "[fused-a2a] L1 out card " << d
-                                      << ": desc=" << (mismDesc == 0 ? "PASS" : "FAIL") << "("
-                                      << mismDesc
-                                      << ") rawColMajor=" << (mismRaw == 0 ? "PASS" : "FAIL") << "("
-                                      << mismRaw << ")\n";
-                        if(mismDesc || mismRaw)
-                            l1Pass = false;
+                        if(verbose || mism)
+                            std::cout << "[fused-a2a] LOCAL card " << d << ": "
+                                      << (mism == 0 ? "PASS" : "FAIL") << " (mismatches=" << mism
+                                      << ")\n";
+                        if(mism)
+                            localPass = false;
                     }
                 }
 
                 // -- Per-iteration verdict + latency bookkeeping. --
-                const bool iterPass = ok && l2Pass && l1Pass;
+                const bool iterPass = ok && recvPass && localPass;
                 if(iterPass)
                     passIters++;
                 else
@@ -762,19 +730,19 @@ namespace TensileLite
                         firstFailIt = it;
                     raceFail = true;
                     std::cerr << "[fused-a2a] RACE FAIL at iter " << it << " (hipOk=" << ok
-                              << " L2=" << l2Pass << " L1=" << l1Pass << ")\n";
+                              << " recv=" << recvPass << " local=" << localPass << ")\n";
                 }
 
                 if(it >= warmup)
                 {
-                    latMeasUs.push_back(maxCardUs);
-
                     bool rowComplete = true;
                     for(int d = 0; d < W; d++)
                         if(cardUs[d] < 0.0)
                             rowComplete = false;
                     if(rowComplete)
                     {
+                        latMeasUs.push_back(maxCardUs);
+
                         int slowest = 0;
                         for(int d = 1; d < W; d++)
                             if(cardUs[d] > cardUs[slowest])
@@ -832,6 +800,14 @@ namespace TensileLite
                 std::cout << "[fused-a2a] latency: no post-warmup samples collected\n";
             }
 
+            // Outside both blocks below: when EVERY post-warmup row was incomplete,
+            // both are empty and this is the only line that says why.
+            if(perCardSkipped)
+                std::cout << "[fused-a2a] timing: " << perCardSkipped
+                          << " post-warmup iteration(s) excluded from both the latency and "
+                             "per-card stats (not all "
+                          << W << " cards reported)\n";
+
             // Per-card breakdown. The slowest-card histogram separates the three
             // sources of the max-vs-mean gap: concentrated on the first-enqueued id
             // means enqueue-order skew, concentrated elsewhere means one slow card,
@@ -875,11 +851,6 @@ namespace TensileLite
                           << " cards): p50=" << pctOf(spread, 0.5)
                           << " us p90=" << pctOf(spread, 0.9) << " us max=" << pctOf(spread, 1.0)
                           << " us\n";
-
-                if(perCardSkipped)
-                    std::cout << "[fused-a2a] per-card: " << perCardSkipped
-                              << " post-warmup iteration(s) excluded (not all " << W
-                              << " cards reported)\n";
             }
 
             // Cleanup.

@@ -21,9 +21,6 @@
 # Entries that are already correct are returned untouched, so on a normally
 # installed ROCm -- where the exported paths are live and there may be no
 # vendored sysdeps dir at all -- this is a no-op.
-#
-# Lives in its own module, separate from client/CMakeLists.txt, so that
-# cmake/tests/test_hsakmt_link_interface.cmake can exercise it directly.
 function(tensilelite_sanitize_hsakmt_link_interface out_var sysdeps_lib in_list_var)
     # Rewriting a search dir to a directory that does not exist would trade one
     # unresolvable -L for another, so the repoint is only ever offered when

@@ -87,7 +87,7 @@ namespace TensileLite
         int runFusedA2A(po::variables_map const&                                       args,
                         std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                         std::shared_ptr<Hardware>                                      hardware,
-                        ClientProblemFactory&                                          problemFactory);
+                        ClientProblemFactory& problemFactory);
 
         __global__ void flush_icache()
         {
@@ -297,8 +297,8 @@ namespace TensileLite
                 ("fused-a2a-drain",          po::value<int>()->default_value(1), "Runtime DRAIN flag passed to the fused kernel (1=on).")
                 ("fused-a2a-iters",          po::value<int>()->default_value(100), "Number of repeat iterations for --fused-a2a (race detection + latency sampling). Each iteration re-zeroes counter/flag/recv and re-validates.")
                 ("fused-a2a-warmup",         po::value<int>()->default_value(10), "Number of leading --fused-a2a iterations excluded from the p50/p90 latency percentiles (they still run and count toward the race check).")
-                ("fused-a2a-validate",       po::value<int>()->default_value(1), "1 = compute the host golden GEMM and numerically validate recv(L2)+out(L1) every iteration (default); 0 = SKIP the golden + numeric compares (used on shapes whose CPU golden is too slow, e.g. the full production shape). With 0, race detection degrades to 'iteration exited cleanly' (no HIP error / no DRAIN hang), not byte-verified.")
-                ("fused-a2a-am",             po::value<int>()->default_value(1024), "A2A column count along FEATURE (M, index-0) for --fused-a2a (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). Pass the value matching the shape being run (e.g. 2048 for the medium shape, 10240 for the full shape). Renamed from the pre-swap --fused-a2a-an (feature was N).")
+                ("fused-a2a-validate",       po::value<int>()->default_value(1), "1 = compute the host golden GEMM and numerically validate recv+out every iteration (default); 0 = SKIP the golden + numeric compares (used on shapes whose CPU golden is too slow, e.g. the full production shape). With 0, race detection degrades to 'iteration exited cleanly' (no HIP error / no DRAIN hang), not byte-verified.")
+                ("fused-a2a-am",             po::value<int>()->default_value(1024), "A2A column count along FEATURE (M, index-0) for --fused-a2a (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). Pass the value matching the shape being run (e.g. 2048 for the medium shape, 10240 for the full shape).")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
                 ("platform-idx",             po::value<int>()->default_value(0), "OpenCL Platform Index")
 
