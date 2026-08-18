@@ -121,10 +121,10 @@ def _emit_with_reg_state(config_path, arch, limit):
     writer. Drive the same emit path and snapshot them per kernel.
     """
     import rocisa  # noqa: F401
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )

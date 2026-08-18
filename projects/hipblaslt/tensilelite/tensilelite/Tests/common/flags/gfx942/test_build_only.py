@@ -24,7 +24,7 @@ import os
 import pytest
 from pathlib import Path
 
-from tensilelite import tensilelite
+from tensilelite import Tensile as tensilelite
 from tensilelite.Tests.gpu_detection import has_arch
 
 # The yaml config is defined inline (rather than as a separate .yaml file) to

@@ -62,7 +62,7 @@ _MAC_CONFIG = os.path.join(
 
 _XFP32_GFX950_CONFIG = os.path.join(
     _PROJ_ROOT,
-    "Tensile",
+    "tensilelite",
     "Tests",
     "common",
     "gemm",
