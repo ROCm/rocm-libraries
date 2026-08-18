@@ -23,7 +23,7 @@
 ################################################################################
 
 from . import LibraryIO
-from .Tensile import addCommonArguments, argUpdatedGlobalParameters
+from .tensilelite import addCommonArguments, argUpdatedGlobalParameters
 
 from .Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters, globalParameters, __version__
 from .Common.Utilities import print1, ensurePath
