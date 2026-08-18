@@ -956,9 +956,7 @@ def test_default_tuning_v_row_pad_resolves_through_policy():
     fp16_d128_bn32 = _spec(head_size=128, dtype="fp16", block_n=32)
     bf16_d128 = _spec(head_size=128, dtype="bf16")
     assert _DEFAULT_TUNING.v_row_pad is None
-    assert (
-        _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128) == 0
-    )  # V_LDROW=64, swizzle on
+    assert _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128) == 0  # V_LDROW=64, swizzle on
     assert _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128_bn32) == 32  # V_LDROW=64 too
     assert _DEFAULT_TUNING.resolved_v_row_pad(bf16_d128) == 8
     assert (
