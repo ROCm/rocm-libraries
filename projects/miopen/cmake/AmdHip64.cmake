@@ -24,13 +24,13 @@ include_guard(GLOBAL)
 
 macro(miopen_workaround_amdhip64_missing TARGET_NAME)
     if(WIN32 AND TARGET hip::amdhip64)
-        set(_rocblas_hip_compat_dir "${CMAKE_CURRENT_BINARY_DIR}/hip_compat")
+        set(_miopen_hip_compat_dir "${CMAKE_CURRENT_BINARY_DIR}/hip_compat")
         add_custom_command(TARGET ${TARGET_NAME} PRE_LINK
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${_rocblas_hip_compat_dir}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_miopen_hip_compat_dir}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<TARGET_LINKER_FILE:hip::amdhip64>" "${_rocblas_hip_compat_dir}/amdhip64.lib"
+                "$<TARGET_LINKER_FILE:hip::amdhip64>" "${_miopen_hip_compat_dir}/amdhip64.lib"
             VERBATIM
         )
-        target_link_directories(${TARGET_NAME} PRIVATE "${_rocblas_hip_compat_dir}")
+        target_link_directories(${TARGET_NAME} PRIVATE "${_miopen_hip_compat_dir}")
     endif()
 endmacro()
