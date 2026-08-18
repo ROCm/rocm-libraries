@@ -126,7 +126,7 @@ def main() -> None:
     # TensileLogic: LOGIC_PATH [options] --check-all
     sys.argv = ["TensileLogic", str(lib_logic_path.resolve())] + passthrough + ["--check-all"]
 
-    from Tensile.TensileLogic import main as tensile_logic_main
+    from tensilelite.TensileLogic import main as tensile_logic_main
     tensile_logic_main()
 
 
