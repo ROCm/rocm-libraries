@@ -68,6 +68,25 @@ namespace TensileLite::Client
         }
     }
 
+    inline roc::host_validation::ScalarType
+        toHostValidationMxScaleType(rocisa::DataType type)
+    {
+        using roc::host_validation::ScalarType;
+        switch(type)
+        {
+        case rocisa::DataType::Float8:
+            return ScalarType::E4M3;
+        case rocisa::DataType::E5M3:
+            return ScalarType::E5M3;
+        case rocisa::DataType::E8:
+        case rocisa::DataType::None:
+            return ScalarType::E8M0;
+        default:
+            throw std::invalid_argument(
+                "rocisa data type has no MX scale host-validation mapping.");
+        }
+    }
+
     inline roc::host_validation::Activation
         toHostValidationActivation(ActivationType activation, bool gradientApplication = false)
     {
