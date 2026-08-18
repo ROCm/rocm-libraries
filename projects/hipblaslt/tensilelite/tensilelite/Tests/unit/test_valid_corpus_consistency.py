@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Hermetic unit tests for ``Tensile.TensileLogic.ValidCorpusConsistency``.
+"""Hermetic unit tests for ``tensilelite.tensilelite_logic.ValidCorpusConsistency``.
 
 Everything here builds its own tiny corpus under ``tmp_path`` -- no dependency
 on the real ``Logic/asm_full`` checkout, unlike ``test_PlaceholderMerge.py`` /
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 # Tensile/TensileLogic/__init__.py, which transitively imports joblib / heavy
 # build deps via Run.py (see test_ValidChipId.py for the same pattern).
 def _load_vcc_mod():
-    p = Path(__file__).resolve().parents[2] / "TensileLogic" / "ValidCorpusConsistency.py"
+    p = Path(__file__).resolve().parents[2] / "tensilelite_logic" / "ValidCorpusConsistency.py"
     spec = importlib.util.spec_from_file_location("ValidCorpusConsistency_under_test", p)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)

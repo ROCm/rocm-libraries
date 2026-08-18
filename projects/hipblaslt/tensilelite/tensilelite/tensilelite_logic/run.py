@@ -44,21 +44,20 @@ from tensilelite.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from tensilelite.LibraryIO import readYAML
 from tensilelite.Toolchain.Validators import validateToolchain
 
-from .ParseArguments import parseArguments, BUNDLED_KNOWN_BUGS
-from .KnownBugs import (
+from .parse_arguments import parseArguments, BUNDLED_KNOWN_BUGS
+from .known_bugs import (
     KnownBugKey,
     is_known_bug,
     load_known_bugs,
     normalize_logic_relative_path,
     load_bundled_known_bugs,
 )
-from .ValidChipId import _validateChipId
+from .valid_chip_id import _validateChipId
 from .ValidCorpusConsistency import check_corpus_invariants, report_corpus_invariant_violations
-from .ValidMatrixInstruction import _validateMatrixInstruction
-from .ValidWorkGroup import _validateWorkGroup
-from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
-from .HandleCustomKernel import handleCustomKernel, hasCustomKernel
-
+from .valid_matrix_instruction import _validateMatrixInstruction
+from .valid_work_group import _validateWorkGroup
+from .valid_work_group_mapping_xcc import _validateWorkGroupMappingXCC, reset_reported_failures
+from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
 
 
 class Check(NamedTuple):

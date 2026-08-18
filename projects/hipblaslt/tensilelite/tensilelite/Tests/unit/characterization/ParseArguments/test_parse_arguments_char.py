@@ -57,7 +57,14 @@ def test_defaults(monkeypatch):
 def test_quirk_input_param_ignored(monkeypatch):
     # Even with a fully-formed `input` list, sys.argv is what gets parsed.
     monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
-    a = PA.parseArguments(["prog", "/fake", "/fakeout", "OCL"])
+    a = PA.parseArguments(["/fake", "/fakeout", "HSA"])
+    assert a["RuntimeLanguage"] == "HSA"
+    assert a["LogicPath"] == "/fake"
+
+
+def test_no_argument_uses_sys_argv(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
+    a = PA.parseArguments()
     assert a["RuntimeLanguage"] == "HIP"
     assert a["LogicPath"] == "/real"
 
