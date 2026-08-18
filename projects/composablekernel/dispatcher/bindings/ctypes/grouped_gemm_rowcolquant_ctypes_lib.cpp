@@ -45,7 +45,7 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 }
 
 // HIP_CHECK calls cleanup() which must be a lambda in scope at every call site.
-// All uses of this macro are inside dispatcher_run_rowcolquant_gemm, after the
+// All uses of this macro are inside dispatcher_run_gemm, after the
 // lambda is defined.
 #define HIP_CHECK(call)                                                                        \
     {                                                                                          \
@@ -64,7 +64,7 @@ static std::atomic<int> g_ref_count{0};
 extern "C" {
 
 /**
- * Initialize the ctypes lib. Must be called before dispatcher_run_rowcolquant_gemm.
+ * Initialize the ctypes lib. Must be called before dispatcher_run_gemm.
  * Returns 0 on success.
  */
 int dispatcher_initialize()
@@ -79,18 +79,8 @@ int dispatcher_initialize()
     // GFX_ARCH is injected at compile time by CMake (e.g. "gfx942" or "gfx950").
     // Validate that the runtime device matches the compiled kernel architecture so
     // that we don't attempt to launch a kernel image on a mismatched device.
-    // gfx90a is intentionally excluded: fp8/bf8 CompV3 kernels require native FP8
-    // hardware which gfx90a lacks (produces NaN without -DCK_USE_OCP_FP8).
     const std::string arch(props.gcnArchName);
     const std::string compiled_arch(GFX_ARCH);
-    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
-       arch.rfind("gfx1250", 0) != 0)
-    {
-        std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << arch
-                  << "' (supported: gfx942, gfx950, gfx1250; fp8/bf8 kernels require native FP8 "
-                     "hardware)\n";
-        return -1;
-    }
     if(arch.rfind(compiled_arch, 0) != 0)
     {
         std::cerr << "dispatcher_initialize: runtime device architecture '" << arch
@@ -128,7 +118,7 @@ int dispatcher_initialize()
  *
  * Returns 0 on success, negative on error.
  */
-int dispatcher_run_rowcolquant_gemm(const void* A,
+int dispatcher_run_gemm(const void* A,
                                     const void* B,
                                     const void* AQ,
                                     const void* BQ,
@@ -150,22 +140,22 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     // that all device-property checks performed there are visible here.
     if(g_ref_count.load(std::memory_order_acquire) <= 0)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: not initialized\n";
+        std::cerr << "dispatcher_run_gemm: not initialized\n";
         return -1;
     }
     if(!A || !B || !AQ || !BQ || !C)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: null pointer argument\n";
+        std::cerr << "dispatcher_run_gemm: null pointer argument\n";
         return -1;
     }
     if(M <= 0 || N <= 0 || K <= 0)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: invalid dimensions\n";
+        std::cerr << "dispatcher_run_gemm: invalid dimensions\n";
         return -1;
     }
     if(k_batch <= 0)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: k_batch must be >= 1, got " << k_batch
+        std::cerr << "dispatcher_run_gemm: k_batch must be >= 1, got " << k_batch
                   << " (k_batch is used as a divisor in split-K)\n";
         return -1;
     }
@@ -173,13 +163,13 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     // Smaller counts cause device out-of-bounds reads; QK_A must equal M, QK_B must equal N.
     if(QK_A != M)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: QK_A must equal M (" << M
+        std::cerr << "dispatcher_run_gemm: QK_A must equal M (" << M
                   << ") for RowColQuant; got QK_A=" << QK_A << "\n";
         return -1;
     }
     if(QK_B != N)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: QK_B must equal N (" << N
+        std::cerr << "dispatcher_run_gemm: QK_B must equal N (" << N
                   << ") for RowColQuant; got QK_B=" << QK_B << "\n";
         return -1;
     }
@@ -195,7 +185,7 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     //   with stride_B=K would cause the kernel to read the wrong elements.
     if(stride_A != K || stride_B != K || stride_C != N)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: non-packed strides are not supported. "
+        std::cerr << "dispatcher_run_gemm: non-packed strides are not supported. "
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_C=" << N
                   << ", got stride_A=" << stride_A << " stride_B=" << stride_B
                   << " stride_C=" << stride_C << "\n";
@@ -298,20 +288,20 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     }
     catch(const std::exception& e)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: kernel launch threw: " << e.what() << "\n";
+        std::cerr << "dispatcher_run_gemm: kernel launch threw: " << e.what() << "\n";
         cleanup();
         return -3;
     }
     catch(...)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: kernel launch threw unknown exception\n";
+        std::cerr << "dispatcher_run_gemm: kernel launch threw unknown exception\n";
         cleanup();
         return -3;
     }
 
     if(exec_time < 0.0f)
     {
-        std::cerr << "dispatcher_run_rowcolquant_gemm: kernel reported unsupported args\n";
+        std::cerr << "dispatcher_run_gemm: kernel reported unsupported args\n";
         cleanup();
         return -2;
     }
@@ -338,7 +328,7 @@ int dispatcher_get_kernel_count() { return 1; }
 
 /**
  * Decrement the initialisation reference count. When it reaches zero the library
- * is considered uninitialised and the next call to dispatcher_run_rowcolquant_gemm
+ * is considered uninitialised and the next call to dispatcher_run_gemm
  * will fail until dispatcher_initialize() is called again.
  *
  * Using a reference count instead of a boolean allows multiple independent Python
@@ -346,7 +336,7 @@ int dispatcher_get_kernel_count() { return 1; }
  * invalidating another live wrapper.
  *
  * This function does not free any GPU memory or unload the library; those are
- * managed per-call inside dispatcher_run_rowcolquant_gemm.
+ * managed per-call inside dispatcher_run_gemm.
  */
 void dispatcher_cleanup()
 {

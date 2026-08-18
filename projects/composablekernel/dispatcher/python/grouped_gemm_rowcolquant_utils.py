@@ -175,10 +175,10 @@ class RowColQuantDispatcherLib:
 
     Expected .so exports:
       int  dispatcher_initialize()
-      int  dispatcher_run_rowcolquant_gemm(A, B, AQ, BQ, C,
-                                            M, N, K,
-                                            stride_A, stride_B, stride_AQ, stride_BQ, stride_C,
-                                            QK_A, QK_B, k_batch, *time_ms)
+      int  dispatcher_run_gemm(A, B, AQ, BQ, C,
+                               M, N, K,
+                               stride_A, stride_B, stride_AQ, stride_BQ, stride_C,
+                               QK_A, QK_B, k_batch, *time_ms)
       char* dispatcher_get_kernel_name()
       int   dispatcher_get_kernel_count()
       void  dispatcher_cleanup()
@@ -201,8 +201,8 @@ class RowColQuantDispatcherLib:
         lib.dispatcher_initialize.restype  = ctypes.c_int
         lib.dispatcher_initialize.argtypes = []
 
-        lib.dispatcher_run_rowcolquant_gemm.restype  = ctypes.c_int
-        lib.dispatcher_run_rowcolquant_gemm.argtypes = [
+        lib.dispatcher_run_gemm.restype  = ctypes.c_int
+        lib.dispatcher_run_gemm.argtypes = [
             ctypes.c_void_p,   # A
             ctypes.c_void_p,   # B
             ctypes.c_void_p,   # AQ
@@ -240,7 +240,7 @@ class RowColQuantDispatcherLib:
         QK_A: int, QK_B: int,
         k_batch: int = 1,
     ) -> Tuple[int, float]:
-        """Call dispatcher_run_rowcolquant_gemm with ctypes-wrapped pointers.
+        """Call dispatcher_run_gemm with ctypes-wrapped pointers.
 
         B must already be F-contiguous (column-major) — the caller (GpuGemmRunner)
         converts it with asfortranarray before passing it here.  Using
@@ -256,7 +256,7 @@ class RowColQuantDispatcherLib:
         C  = np.ascontiguousarray(C)
 
         time_ms = ctypes.c_float(0.0)
-        rc = self._lib.dispatcher_run_rowcolquant_gemm(
+        rc = self._lib.dispatcher_run_gemm(
             A.ctypes.data_as(ctypes.c_void_p),
             B.ctypes.data_as(ctypes.c_void_p),
             AQ.ctypes.data_as(ctypes.c_void_p),
@@ -388,7 +388,7 @@ class RowColQuantGpuGemmRunner:
 
         if rc != 0:
             raise RuntimeError(
-                f"dispatcher_run_rowcolquant_gemm failed with code {rc} "
+                f"dispatcher_run_gemm failed with code {rc} "
                 f"for kernel {self.kernel_name}"
             )
 

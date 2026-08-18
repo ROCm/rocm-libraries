@@ -165,10 +165,10 @@ class TensorQuantDispatcherLib:
 
     Expected .so exports:
       int  dispatcher_initialize()
-      int  dispatcher_run_tensorquant_gemm(A, B, AQ, BQ, C,
-                                            M, N, K,
-                                            stride_A, stride_B, stride_AQ, stride_BQ, stride_C,
-                                            k_batch, *time_ms)
+      int  dispatcher_run_gemm(A, B, AQ, BQ, C,
+                               M, N, K,
+                               stride_A, stride_B, stride_AQ, stride_BQ, stride_C,
+                               QK_A, QK_B, k_batch, *time_ms)
       char* dispatcher_get_kernel_name()
       int   dispatcher_get_kernel_count()
       void  dispatcher_cleanup()
@@ -191,8 +191,8 @@ class TensorQuantDispatcherLib:
         lib.dispatcher_initialize.restype  = ctypes.c_int
         lib.dispatcher_initialize.argtypes = []
 
-        lib.dispatcher_run_tensorquant_gemm.restype  = ctypes.c_int
-        lib.dispatcher_run_tensorquant_gemm.argtypes = [
+        lib.dispatcher_run_gemm.restype  = ctypes.c_int
+        lib.dispatcher_run_gemm.argtypes = [
             ctypes.c_void_p,   # A
             ctypes.c_void_p,   # B
             ctypes.c_void_p,   # AQ
@@ -206,6 +206,8 @@ class TensorQuantDispatcherLib:
             ctypes.c_int64,    # stride_AQ
             ctypes.c_int64,    # stride_BQ
             ctypes.c_int64,    # stride_C
+            ctypes.c_int64,    # QK_A
+            ctypes.c_int64,    # QK_B
             ctypes.c_int,      # k_batch
             ctypes.POINTER(ctypes.c_float),  # time_ms
         ]
@@ -225,9 +227,10 @@ class TensorQuantDispatcherLib:
         M: int, N: int, K: int,
         stride_A: int, stride_B: int,
         stride_AQ: int, stride_BQ: int, stride_C: int,
+        QK_A: int, QK_B: int,
         k_batch: int = 1,
     ) -> Tuple[int, float]:
-        """Call dispatcher_run_tensorquant_gemm with ctypes-wrapped pointers.
+        """Call dispatcher_run_gemm with ctypes-wrapped pointers.
 
         B must already be F-contiguous (column-major) — the caller (GpuGemmRunner)
         converts it with asfortranarray before passing it here.  Using
@@ -243,7 +246,7 @@ class TensorQuantDispatcherLib:
         C  = np.ascontiguousarray(C)
 
         time_ms = ctypes.c_float(0.0)
-        rc = self._lib.dispatcher_run_tensorquant_gemm(
+        rc = self._lib.dispatcher_run_gemm(
             A.ctypes.data_as(ctypes.c_void_p),
             B.ctypes.data_as(ctypes.c_void_p),
             AQ.ctypes.data_as(ctypes.c_void_p),
@@ -257,6 +260,8 @@ class TensorQuantDispatcherLib:
             ctypes.c_int64(stride_AQ),
             ctypes.c_int64(stride_BQ),
             ctypes.c_int64(stride_C),
+            ctypes.c_int64(QK_A),
+            ctypes.c_int64(QK_B),
             ctypes.c_int(k_batch),
             ctypes.byref(time_ms),
         )
@@ -357,17 +362,19 @@ class TensorQuantGpuGemmRunner:
         stride_BQ = 1
         stride_C  = N
 
+        # TensorQuant: single scalar scale per tensor → QK_A=1, QK_B=1
         rc, time_ms = self._lib.run(
             A=A, B=B, AQ=AQ, BQ=BQ, C=C,
             M=M, N=N, K=K,
             stride_A=stride_A, stride_B=stride_B,
             stride_AQ=stride_AQ, stride_BQ=stride_BQ, stride_C=stride_C,
+            QK_A=1, QK_B=1,
             k_batch=problem.k_batch,
         )
 
         if rc != 0:
             raise RuntimeError(
-                f"dispatcher_run_tensorquant_gemm failed with code {rc} "
+                f"dispatcher_run_gemm failed with code {rc} "
                 f"for kernel {self.kernel_name}"
             )
 

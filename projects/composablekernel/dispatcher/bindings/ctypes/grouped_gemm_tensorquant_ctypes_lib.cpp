@@ -46,7 +46,7 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 }
 
 // HIP_CHECK calls cleanup() which must be a lambda in scope at every call site.
-// All uses of this macro are inside dispatcher_run_tensorquant_gemm, after the
+// All uses of this macro are inside dispatcher_run_gemm, after the
 // lambda is defined.
 #define HIP_CHECK(call)                                                                        \
     {                                                                                          \
@@ -65,7 +65,7 @@ static std::atomic<int> g_ref_count{0};
 extern "C" {
 
 /**
- * Initialize the ctypes lib. Must be called before dispatcher_run_tensorquant_gemm.
+ * Initialize the ctypes lib. Must be called before dispatcher_run_gemm.
  * Returns 0 on success.
  */
 int dispatcher_initialize()
@@ -80,18 +80,8 @@ int dispatcher_initialize()
     // GFX_ARCH is injected at compile time by CMake (e.g. "gfx942" or "gfx950").
     // Validate that the runtime device matches the compiled kernel architecture so
     // that we don't attempt to launch a kernel image on a mismatched device.
-    // gfx90a is intentionally excluded: fp8/bf8 CompV3 kernels require native FP8
-    // hardware which gfx90a lacks (produces NaN without -DCK_USE_OCP_FP8).
     const std::string arch(props.gcnArchName);
     const std::string compiled_arch(GFX_ARCH);
-    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
-       arch.rfind("gfx1250", 0) != 0)
-    {
-        std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << arch
-                  << "' (supported: gfx942, gfx950, gfx1250; fp8/bf8 kernels require native FP8 "
-                     "hardware)\n";
-        return -1;
-    }
     if(arch.rfind(compiled_arch, 0) != 0)
     {
         std::cerr << "dispatcher_initialize: runtime device architecture '" << arch
@@ -120,48 +110,63 @@ int dispatcher_initialize()
  *   stride_AQ        - leading dimension of AQ (1 for tensor-wise scale)
  *   stride_BQ        - leading dimension of BQ (1 for tensor-wise scale)
  *   stride_C         - leading dimension of C (row-major: N)
+ *   QK_A             - number of AQ elements (must be 1 for TensorQuant)
+ *   QK_B             - number of BQ elements (must be 1 for TensorQuant)
  *   k_batch          - split-K factor (1 = no split)
  *   time_ms          - output: kernel execution time in ms (may be NULL)
  *
  * Returns 0 on success, negative on error.
  */
-int dispatcher_run_tensorquant_gemm(const void* A,
-                                    const void* B,
-                                    const void* AQ,
-                                    const void* BQ,
-                                    void* C,
-                                    int64_t M,
-                                    int64_t N,
-                                    int64_t K,
-                                    int64_t stride_A,
-                                    int64_t stride_B,
-                                    int64_t stride_AQ,
-                                    int64_t stride_BQ,
-                                    int64_t stride_C,
-                                    int k_batch,
-                                    float* time_ms)
+int dispatcher_run_gemm(const void* A,
+                        const void* B,
+                        const void* AQ,
+                        const void* BQ,
+                        void* C,
+                        int64_t M,
+                        int64_t N,
+                        int64_t K,
+                        int64_t stride_A,
+                        int64_t stride_B,
+                        int64_t stride_AQ,
+                        int64_t stride_BQ,
+                        int64_t stride_C,
+                        int64_t QK_A,
+                        int64_t QK_B,
+                        int k_batch,
+                        float* time_ms)
 {
     // acquire: synchronise with the release fetch_add in dispatcher_initialize so
     // that all device-property checks performed there are visible here.
     if(g_ref_count.load(std::memory_order_acquire) <= 0)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: not initialized\n";
+        std::cerr << "dispatcher_run_gemm: not initialized\n";
         return -1;
     }
     if(!A || !B || !AQ || !BQ || !C)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: null pointer argument\n";
+        std::cerr << "dispatcher_run_gemm: null pointer argument\n";
         return -1;
     }
     if(M <= 0 || N <= 0 || K <= 0)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: invalid dimensions\n";
+        std::cerr << "dispatcher_run_gemm: invalid dimensions\n";
         return -1;
     }
     if(k_batch <= 0)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: k_batch must be >= 1, got " << k_batch
+        std::cerr << "dispatcher_run_gemm: k_batch must be >= 1, got " << k_batch
                   << " (k_batch is used as a divisor in split-K)\n";
+        return -1;
+    }
+    // TensorQuant uses a single scalar scale per tensor; QK_A and QK_B must be 1.
+    if(QK_A != 1)
+    {
+        std::cerr << "dispatcher_run_gemm: TensorQuant requires QK_A=1, got QK_A=" << QK_A << "\n";
+        return -1;
+    }
+    if(QK_B != 1)
+    {
+        std::cerr << "dispatcher_run_gemm: TensorQuant requires QK_B=1, got QK_B=" << QK_B << "\n";
         return -1;
     }
 
@@ -175,7 +180,7 @@ int dispatcher_run_tensorquant_gemm(const void* A,
     //   with stride_B=K would cause the kernel to read the wrong elements.
     if(stride_A != K || stride_B != K || stride_C != N)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: non-packed strides are not supported. "
+        std::cerr << "dispatcher_run_gemm: non-packed strides are not supported. "
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_C=" << N
                   << ", got stride_A=" << stride_A << " stride_B=" << stride_B
                   << " stride_C=" << stride_C << "\n";
@@ -185,7 +190,7 @@ int dispatcher_run_tensorquant_gemm(const void* A,
     // TensorQuant uses a single scalar scale per tensor; strides must be 1.
     if(stride_AQ != 1 || stride_BQ != 1)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: TensorQuant requires stride_AQ=1 and "
+        std::cerr << "dispatcher_run_gemm: TensorQuant requires stride_AQ=1 and "
                   << "stride_BQ=1, got stride_AQ=" << stride_AQ << " stride_BQ=" << stride_BQ
                   << "\n";
         return -1;
@@ -282,20 +287,20 @@ int dispatcher_run_tensorquant_gemm(const void* A,
     }
     catch(const std::exception& e)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: kernel launch threw: " << e.what() << "\n";
+        std::cerr << "dispatcher_run_gemm: kernel launch threw: " << e.what() << "\n";
         cleanup();
         return -3;
     }
     catch(...)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: kernel launch threw unknown exception\n";
+        std::cerr << "dispatcher_run_gemm: kernel launch threw unknown exception\n";
         cleanup();
         return -3;
     }
 
     if(exec_time < 0.0f)
     {
-        std::cerr << "dispatcher_run_tensorquant_gemm: kernel reported unsupported args\n";
+        std::cerr << "dispatcher_run_gemm: kernel reported unsupported args\n";
         cleanup();
         return -2;
     }
@@ -322,7 +327,7 @@ int dispatcher_get_kernel_count() { return 1; }
 
 /**
  * Decrement the initialisation reference count. When it reaches zero the library
- * is considered uninitialised and the next call to dispatcher_run_tensorquant_gemm
+ * is considered uninitialised and the next call to dispatcher_run_gemm
  * will fail until dispatcher_initialize() is called again.
  *
  * Using a reference count instead of a boolean allows multiple independent Python
@@ -330,7 +335,7 @@ int dispatcher_get_kernel_count() { return 1; }
  * invalidating another live wrapper.
  *
  * This function does not free any GPU memory or unload the library; those are
- * managed per-call inside dispatcher_run_tensorquant_gemm.
+ * managed per-call inside dispatcher_run_gemm.
  */
 void dispatcher_cleanup()
 {
