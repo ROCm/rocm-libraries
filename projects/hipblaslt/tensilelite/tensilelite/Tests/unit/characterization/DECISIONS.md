@@ -180,12 +180,12 @@ equivalent source forms are fenced so mutmut does not keep reporting them:
 
 **M3 — accepted equivalent mutants (expanded mutation run).** These survivors
 are behaviorally equivalent on the specific public surface under test:
-- `tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
+- `tensilelite.tensilelite_logic.valid_work_group_mapping_xcc.x__cu_count_from_path__mutmut_9` —
   changing `cu` to `CU` inside the regex literal is equivalent because the search
   uses `re.IGNORECASE`.
 
 Two former survivors are intentionally no longer accepted equivalents:
-`tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+`tensilelite.tensilelite_logic.valid_work_group_mapping_xcc.x__validateWorkGroupMappingXCC__mutmut_14`
 is avoided by making the missing-key / `-1` sentinel branch explicit before
 reading the fixed `WorkGroupMappingXCC` value, and
 `tensilelite.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because

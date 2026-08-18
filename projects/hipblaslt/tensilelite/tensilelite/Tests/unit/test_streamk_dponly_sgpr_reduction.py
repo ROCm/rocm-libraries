@@ -498,7 +498,7 @@ def _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.SolutionStructs.Solution import Solution
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )

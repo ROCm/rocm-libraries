@@ -356,7 +356,7 @@ class TestLocalReadVALUCheckValue1:
         ))
         from config_harness import _toolchain_for, _isolated_globals_with_isa, _solutions_from_config_unguarded
         from codegen_harness import _init_rocisa_for, _prepare_kernel
-        from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions, processKernelSource
+        from tensilelite.tensilelite_create_library.run import generateKernelObjectsFromSolutions, processKernelSource
         from tensilelite.KernelWriterAssembly import KernelWriterAssembly
         from tensilelite.Common.Types import DebugConfig
 
