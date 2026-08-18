@@ -1,5 +1,10 @@
 # hipDNN Testing
 
+- **Status:** Draft
+- **Owner:** @ROCm/hipdnn-core
+- **Technical Lead:** Brian Harrison
+- **Last Updated:** 2026-08-17
+
 This guide answers the immediate contributor question: “I just made a change. What do I do before I push?”
 For project context, start with the [README](../../README.md), [design overview](../Design.md), and [contribution guide](../../CONTRIBUTING.md).
 Detailed test models and coverage responsibilities live in [Testing Strategy](./TESTING_STRATEGY.md); tracked limitations live in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).

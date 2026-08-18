@@ -1,10 +1,5 @@
 # hipDNN Testing Strategy
 
-- **Status:** Draft
-- **Owner:** @ROCm/hipdnn-core
-- **Technical Lead:** Brian Harrison
-- **Last Updated:** 2026-08-17
-
 ## Purpose and Scope
 
 This document defines the validation model and responsibility boundaries for hipDNN maintainers. It explains what each test layer is expected to prove, how provider and GPU coverage are interpreted, and how current automation relates to product capability.
