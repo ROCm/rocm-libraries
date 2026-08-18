@@ -1037,10 +1037,12 @@ namespace
         {"MultipleGridHalfTile", 100, 128, 200, 1, false, 100, 64, 0, true},
         {"MultipleGridQuarterTile", 16, 32, 64, 1, false, 16, 8, 0, true},
 
-        // Accepted before this change and still accepted: the grid divides the
-        // tile count, so every chunk is one whole tile.
+        // GridEqualsTiles: every WG writes one whole SK tile, no DP region.
+        // GridDividesTiles is mixed two-tile DP+SK (skTiles == grid < tiles).
+        // gfx950 does not store the SK half when workspace is skipped
+        // (tiles % grid == 0), so the predicate refuses it.
         {"GridEqualsTiles", 256, 64, 256, 1, false, 256, 64, 0, true},
-        {"GridDividesTiles", 512, 64, 256, 1, false, 256, 64, 0, true},
+        {"GridDividesTiles", 512, 64, 256, 1, false, 256, 64, 0, false},
 
         // extraIters == 0 and skTiles == tiles, but the chunk length does not
         // divide the tile length, so some tiles are split and others are not.
@@ -1755,7 +1757,7 @@ namespace
     }
 
     // =======================================================================
-    // Coherence-mode Stream-K grid steering (parallel admission + never-upward snap)
+    // Coherence-mode Stream-K grid steering (parallel admission + mixed-split snap)
     //
     // Host-only: synthesised SK3 solution + gfx950 analytical HipAMDGPU, same
     // pattern as tensilelite CuCount_test (which CI does not build).
@@ -1883,7 +1885,7 @@ namespace
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles);
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, DivisorGridBelowTilesIsKept)
+    TEST(RowUniformityCoherenceGridSteering_pre_checkin, DivisorGridBelowTilesSnapsToTiles)
     {
         auto solution = coherenceSteeringSolution();
         auto device   = coherenceSteeringDevice();
@@ -1895,7 +1897,8 @@ namespace
         ASSERT_EQ(tiles, 16u);
 
         problem.setParams().setUniformSummationOrder(true);
-        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles)
+            << "mixed GridDividesTiles (g0 | T, g0 < T) must snap up to all-full";
     }
 
     TEST(RowUniformityCoherenceGridSteering_pre_checkin, AllPartialNonDivisorFRequiresCapability)
