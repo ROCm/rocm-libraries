@@ -23,16 +23,16 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.SolutionStructs.Naming`` — the kernel /
+"""Characterization tests for ``tensilelite.SolutionStructs.Naming`` — the kernel /
 solution name builders. All pure string-building over a solution ``state`` dict;
 snapshot the returned name strings.
 """
 
 import pytest
 
-from Tensile.SolutionStructs.Problem import ProblemType
-import Tensile.SolutionStructs.Naming as N
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
+from tensilelite.SolutionStructs.Problem import ProblemType
+import tensilelite.SolutionStructs.Naming as N
+from tensilelite.Common.Constants import MAX_FILENAME_LENGTH
 
 pytestmark = pytest.mark.unit
 

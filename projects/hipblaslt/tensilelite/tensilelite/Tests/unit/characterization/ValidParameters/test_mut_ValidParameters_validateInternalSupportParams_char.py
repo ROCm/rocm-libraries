@@ -5,9 +5,9 @@
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultInternalSupportParams
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Common.ValidParameters import validateInternalSupportParams
+from tensilelite.Common.GlobalParameters import defaultInternalSupportParams
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.ValidParameters import validateInternalSupportParams
 
 pytestmark = pytest.mark.unit
 

@@ -12,7 +12,7 @@
 #
 # Classification: solver-backed-under-assumptions.
 # cacheValid is a derived local initialized False (L541) and set True only when:
-#   (a) useCache is True  (--use-cache CLI flag, Tensile.py:503 argparse store_true)
+#   (a) useCache is True  (--use-cache CLI flag, tensilelite.py:503 argparse store_true)
 #   AND
 #   (b) _loadCacheIfMatches/_loadLegacyCacheIfMatches returns a non-None matchCO,
 #       which happens only when cache.yaml exists on disk AND _cacheDataMatches(params).
