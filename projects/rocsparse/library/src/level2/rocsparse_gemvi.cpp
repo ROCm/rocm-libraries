@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -89,26 +89,69 @@ namespace rocsparse
             if(handle->wavefront_size == 32)
             {
                 dim3 gemvi_blocks((m - 1) / 32 + 1);
-                dim3 gemvi_threads(GEMVI_DIM);
 
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::gemvi_kernel<GEMVI_DIM, 32>),
-                    gemvi_blocks,
-                    gemvi_threads,
-                    0,
-                    handle->stream,
-                    m,
-                    n,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                    A,
-                    lda,
-                    nnz,
-                    x_val,
-                    x_ind,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                    y,
-                    idx_base,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                // RDNA4 (gfx1201, wave32) launch tuning.
+                //
+                // Each block processes WFSIZE(=32) output rows and spreads the
+                // sparse-vector dot product across BLOCKSIZE/32 wavefronts,
+                // reducing the partial sums through LDS. The baseline always
+                // used a 1024-thread block (32 wavefronts). gemvi is memory
+                // bound, so when there are already enough row-blocks to saturate
+                // the GPU, a 1024-thread block is oversized: it caps occupancy
+                // (fewer concurrent blocks per CU) and deepens the LDS reduction.
+                //
+                // In that regime we shrink the block to raise occupancy and
+                // shorten the reduction. We keep the original 1024-thread block
+                // whenever the grid is small (few row-blocks), so those shapes
+                // launch byte-for-byte identically to the baseline and cannot
+                // regress. nnz gates how many wavefronts are actually useful for
+                // the reduction (no point spreading a sparse vector shorter than
+                // a wavefront over 32 wavefronts).
+                //
+                // GEMVI_SATURATION_NBLOCKS is the empirically tuned large-grid
+                // crossover on gfx1201; below it we reproduce the baseline
+                // launch exactly.
+                constexpr int64_t GEMVI_SATURATION_NBLOCKS = 1024;
+                const int64_t     gemvi_nblocks            = (static_cast<int64_t>(m) - 1) / 32 + 1;
+                uint32_t          gemvi_dim                = GEMVI_DIM;
+                if(gemvi_nblocks >= GEMVI_SATURATION_NBLOCKS)
+                {
+                    gemvi_dim = (nnz <= static_cast<I>(handle->wavefront_size)) ? 256 : 512;
+                }
+
+#define LAUNCH_GEMVI_WAVE32(DIM_)                                     \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+        (rocsparse::gemvi_kernel<DIM_, 32>),                          \
+        gemvi_blocks,                                                 \
+        dim3(DIM_),                                                   \
+        0,                                                            \
+        handle->stream,                                               \
+        m,                                                            \
+        n,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        A,                                                            \
+        lda,                                                          \
+        nnz,                                                          \
+        x_val,                                                        \
+        x_ind,                                                        \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        idx_base,                                                     \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+                switch(gemvi_dim)
+                {
+                case 256:
+                    LAUNCH_GEMVI_WAVE32(256);
+                    break;
+                case 512:
+                    LAUNCH_GEMVI_WAVE32(512);
+                    break;
+                default:
+                    LAUNCH_GEMVI_WAVE32(1024);
+                    break;
+                }
+#undef LAUNCH_GEMVI_WAVE32
             }
             else
             {

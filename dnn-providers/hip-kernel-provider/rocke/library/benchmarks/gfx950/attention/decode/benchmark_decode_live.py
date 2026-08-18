@@ -4,7 +4,7 @@
 """Generic decode attention benchmark: DSL split-KV 3D vs AITER Triton (gfx950).
 
 Takes a JSON file with shapes (batch, nhead_q, nhead_k, head_size, block_size,
-kv_len) and sweeps num_sms to find the best DSL configuration for each
+kv_len) and sweeps num_cus to find the best DSL configuration for each
 shape. Baseline: AITER Triton unified_attention.
 
 Run::
@@ -15,7 +15,7 @@ Run::
     # or multiple shapes files:
     python -m benchmarks.gfx950.attention.decode.benchmark_decode_live \\
         --shapes shapes_a.json shapes_b.json \\
-        --num-sms-sweep 60 120 152 304 \\
+        --num-cus-sweep 60 120 152 304 \\
         --output-json /tmp/decode_gfx950.json
 
     # --flydsl requires FLYDSL_PATH env var set to the ROCm/FlyDSL repo root:
@@ -31,7 +31,7 @@ import json
 import math
 import sys
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -52,14 +52,21 @@ class DecodeShape:
     block_size: int
     dtype: str
     label: str
+    use_sinks: bool = False
+    sliding_window: int = 0
 
     @property
     def signature(self) -> str:
-        return (
+        sig = (
             f"b{self.batch}_sq{self.seqlen_q}_sk{self.seqlen_k}"
             f"_nhq{self.num_query_heads}_nhk{self.num_kv_heads}"
             f"_hd{self.head_size}_bs{self.block_size}_{self.dtype}"
         )
+        if self.use_sinks:
+            sig += "_sinks"
+        if self.sliding_window:
+            sig += f"_sw{self.sliding_window}"
+        return sig
 
 
 def load_decode_shapes(paths: List[Path]) -> List[DecodeShape]:
@@ -94,6 +101,8 @@ def load_decode_shapes(paths: List[Path]) -> List[DecodeShape]:
                     block_size=int(merged["block_size"]),
                     dtype=str(merged.get("dtype", "bf16")),
                     label=str(merged.get("label", f"kv{merged['seqlen_k']}")),
+                    use_sinks=bool(merged.get("use_sinks", False)),
+                    sliding_window=int(merged.get("sliding_window", 0)),
                 )
                 shapes.append(shape)
     return shapes
@@ -174,6 +183,11 @@ def _make_inputs(
         if use_qq_bias
         else None
     )
+    sinks = (
+        torch.randn(shape.num_query_heads, dtype=dtype, device="cuda") * 0.1
+        if shape.use_sinks
+        else None
+    )
 
     return dict(
         q=q,
@@ -186,6 +200,7 @@ def _make_inputs(
         softcap=softcap,
         alibi_slopes=alibi_slopes,
         qq_bias=qq_bias,
+        sinks=sinks,
     )
 
 
@@ -203,6 +218,7 @@ def _run_triton(
 
     hip_stream = _bench_stream_handle()
     out = torch.empty_like(data["q"])
+    window_size = (shape.sliding_window - 1, 0) if shape.sliding_window else (-1, -1)
 
     def call_once():
         tri(
@@ -216,7 +232,7 @@ def _run_triton(
             max_seqlen_k=shape.seqlen_k,
             softmax_scale=data["scale"],
             causal=True,
-            window_size=(-1, -1),
+            window_size=window_size,
             block_table=data["block_table"],
             softcap=data["softcap"],
             q_descale=None,
@@ -224,7 +240,7 @@ def _run_triton(
             v_descale=None,
             alibi_slopes=data["alibi_slopes"],
             qq_bias=data["qq_bias"],
-            sinks=None,
+            sinks=data["sinks"],
         )
 
     try:
@@ -235,8 +251,8 @@ def _run_triton(
         return None
 
 
-def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters: int):
-    """Time DSL run_unified_attention_torch for one num_sms value.
+def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters: int):
+    """Time DSL run_unified_attention_torch for one num_cus value.
 
     Uses :func:`~dispatch.attention.dispatch_attention` to select the
     registered kernel candidate (2d-tiled or 3d split-KV) for this shape,
@@ -270,7 +286,9 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             arch=arch,
             dtype=shape.dtype,
             kv_block_size=shape.block_size,
-            num_sms=num_sms,
+            num_cus=num_cus,
+            use_sinks=shape.use_sinks,
+            sliding_window=shape.sliding_window,
         )
         result = dispatch_attention(req)
         path = result.spec.path  # "2d" or "3d"
@@ -290,7 +308,9 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             softcap=data["softcap"],
             use_alibi=data["alibi_slopes"] is not None,
             use_qq_bias=data["qq_bias"] is not None,
-            num_sms=num_sms,
+            use_sinks=data["sinks"] is not None,
+            sliding_window=shape.sliding_window,
+            num_cus=num_cus,
         )
 
         def call_once():
@@ -305,6 +325,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
                 softmax_scale=data["scale"],
                 block_table=data["block_table"],
                 softcap=data["softcap"],
+                sinks=data["sinks"],
                 alibi_slopes=data["alibi_slopes"],
                 qq_bias=data["qq_bias"],
                 backend=run_backend,
@@ -324,9 +345,9 @@ def _run_aoTriton(
     """Time AOTriton flash SDPA for decode. Returns ms or None on failure.
 
     Reconstructs dense [B, H, S_k, D] KV from the paged cache outside the
-    timed region. Returns None (skipped) when any bias operand is active
-    (softcap, alibi_slopes, or qq_bias) because
-    scaled_dot_product_attention does not support them.
+    timed region. Returns None (skipped) when any operand it cannot express
+    is active (softcap, alibi_slopes, qq_bias, attention sinks, or a sliding
+    window) because scaled_dot_product_attention does not support them.
     """
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -361,10 +382,16 @@ def _run_aoTriton(
         alibi_slopes = data["alibi_slopes"]
         softcap = data["softcap"]
 
-        # scaled_dot_product_attention does not support alibi, qq_bias or
-        # softcap
-        use_bias = alibi_slopes is not None or data["qq_bias"] is not None or softcap
-        if use_bias:
+        # scaled_dot_product_attention does not support alibi, qq_bias,
+        # softcap, attention sinks, or a sliding window.
+        unsupported = (
+            alibi_slopes is not None
+            or data["qq_bias"] is not None
+            or softcap
+            or shape.use_sinks
+            or shape.sliding_window > 0
+        )
+        if unsupported:
             return None
 
         # Probe eligibility.
@@ -459,6 +486,10 @@ def _flydsl_supported(shape: DecodeShape) -> tuple[bool, str]:
         return False, f"head_size={shape.head_size} (need 64 or 128)"
     if shape.dtype not in ("bf16", "fp16"):
         return False, f"dtype={shape.dtype} (need bf16 or fp16)"
+    if shape.use_sinks:
+        return False, "sinks unsupported"
+    if shape.sliding_window:
+        return False, "sliding_window unsupported"
     return True, ""
 
 
@@ -555,12 +586,12 @@ def main() -> int:
         help="One or more shapes JSON files.",
     )
     ap.add_argument(
-        "--num-sms-sweep",
+        "--num-cus-sweep",
         nargs="+",
         type=int,
         default=[30, 60, 80, 120, 152, 304],
         metavar="N",
-        help="num_sms values to sweep (default: 30 60 80 120 152 304).",
+        help="num_cus values to sweep (default: 30 60 80 120 152 304).",
     )
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--iterations", type=int, default=50)
@@ -633,35 +664,9 @@ def main() -> int:
 
     shapes = load_decode_shapes(args.shapes)
     if args.dtype is not None:
-        shapes = [
-            DecodeShape(
-                batch=s.batch,
-                seqlen_q=s.seqlen_q,
-                seqlen_k=s.seqlen_k,
-                num_query_heads=s.num_query_heads,
-                num_kv_heads=s.num_kv_heads,
-                head_size=s.head_size,
-                block_size=s.block_size,
-                dtype=args.dtype,
-                label=s.label,
-            )
-            for s in shapes
-        ]
+        shapes = [replace(s, dtype=args.dtype) for s in shapes]
     if args.batch is not None:
-        shapes = [
-            DecodeShape(
-                batch=args.batch,
-                seqlen_q=s.seqlen_q,
-                seqlen_k=s.seqlen_k,
-                num_query_heads=s.num_query_heads,
-                num_kv_heads=s.num_kv_heads,
-                head_size=s.head_size,
-                block_size=s.block_size,
-                dtype=s.dtype,
-                label=s.label,
-            )
-            for s in shapes
-        ]
+        shapes = [replace(s, batch=args.batch) for s in shapes]
     if args.limit is not None:
         shapes = shapes[: args.limit]
 
@@ -681,15 +686,15 @@ def main() -> int:
 
     print(f"device : {torch.cuda.get_device_name(0)}")
     print(f"shapes : {len(shapes)}")
-    print(f"num_sms sweep: {args.num_sms_sweep}")
+    print(f"num_cus sweep: {args.num_cus_sweep}")
     print(f"bias   : {bias_tag}")
     print()
 
     fly_col = f"  {'fly_us':>10}" if args.flydsl else ""
     header = (
         f"{'label':<22}  {'triton_us':>10}  {'aot_us':>10}{fly_col}  "
-        + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
-        + f"  {'best_sms':>8}  {'best_spd':>9}  path  kernel"
+        + "  ".join(f"CUs{s:>4}" for s in args.num_cus_sweep)
+        + f"  {'best_cus':>8}  {'best_spd':>9}  path  kernel"
     )
     print(header)
     print("-" * len(header))
@@ -731,37 +736,37 @@ def main() -> int:
                     fly_error = "runtime error (see stderr)"
 
         dsl_results: Dict[int, Dict] = {}
-        best_sms: Optional[int] = None
+        best_cus: Optional[int] = None
         best_ms: Optional[float] = None
         best_path: str = "n/a"
         best_kernel_name: str = "n/a"
 
-        for sms in args.num_sms_sweep:
+        for cus in args.num_cus_sweep:
             ms, path, kname = _run_dsl(
-                shape, data, sms, warmup=args.warmup, iters=args.iterations
+                shape, data, cus, warmup=args.warmup, iters=args.iterations
             )
             if ms is not None:
-                dsl_results[sms] = {"ms": ms, "path": path}
+                dsl_results[cus] = {"ms": ms, "path": path}
                 if best_ms is None or ms < best_ms:
                     best_ms = ms
-                    best_sms = sms
+                    best_cus = cus
                     best_path = path or "n/a"
                     best_kernel_name = kname or "n/a"
             else:
-                dsl_results[sms] = {"ms": None, "path": None}
+                dsl_results[cus] = {"ms": None, "path": None}
 
         best_spd = (tri_ms / best_ms) if (tri_ms and best_ms) else float("nan")
         best_spd_aot = (aot_ms / best_ms) if (aot_ms and best_ms) else float("nan")
         if math.isfinite(best_spd):
             speedups.append(best_spd)
 
-        sms_cols = "  ".join(
+        cu_cols = "  ".join(
             (
                 f"{dsl_results[s]['ms'] * 1000:>8.1f}u"
                 if dsl_results[s]["ms"]
                 else f"{'ERR':>9}"
             )
-            for s in args.num_sms_sweep
+            for s in args.num_cus_sweep
         )
         aot_spd_str = (
             f"{best_spd_aot:>8.3f}x" if math.isfinite(best_spd_aot) else f"{'N/A':>9}"
@@ -776,8 +781,8 @@ def main() -> int:
             )
         )
         print(
-            f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}{fly_col_val}  {sms_cols}"
-            f"  {best_sms or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)"
+            f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}{fly_col_val}  {cu_cols}"
+            f"  {best_cus or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)"
             f"  {best_path}  {best_kernel_name}"
         )
 
@@ -794,10 +799,12 @@ def main() -> int:
                 "head_size": shape.head_size,
                 "block_size": shape.block_size,
                 "dtype": shape.dtype,
+                "use_sinks": shape.use_sinks,
+                "sliding_window": shape.sliding_window,
                 "triton_ms": tri_ms,
                 "aoTriton_ms": aot_ms,
-                "dsl": {str(sms): dsl_results[sms] for sms in args.num_sms_sweep},
-                "best_sms": best_sms,
+                "dsl": {str(cus): dsl_results[cus] for cus in args.num_cus_sweep},
+                "best_cus": best_cus,
                 "best_ms": best_ms,
                 "best_speedup_vs_triton": best_spd if math.isfinite(best_spd) else None,
                 "best_speedup_vs_aoTriton": (

@@ -10,6 +10,38 @@ cmake_minimum_required(VERSION 3.16)
 # Find Python
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
+add_test(
+    NAME dispatcher_test_batched_gemm_gpu_correctness
+    # Run the script directly: this module is script-style (a parameterized
+    # function + main() guard), not unittest.TestCase, so `unittest discover`
+    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # GPU/built lib and returns nonzero only on a real correctness failure.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_gemm_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_batched_gemm_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
+add_test(
+    NAME dispatcher_test_batched_contraction_gpu_correctness
+    # Run the script directly: this module is script-style (a parameterized
+    # function + main() guard), not unittest.TestCase, so `unittest discover`
+    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # GPU/built lib and returns nonzero only on a real correctness failure.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_contraction_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_batched_contraction_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # =============================================================================
 # Python Tests
 # =============================================================================
@@ -36,6 +68,20 @@ add_test(
 
 set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
     LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# gemm_utils host-helper + runner-shape regression test. Also acts as an import
+# canary: a merge that truncates python/gemm_utils.py (see #9308) makes this fail.
+add_test(
+    NAME dispatcher_test_gemm_utils
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_gemm_utils.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
     TIMEOUT 60
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )

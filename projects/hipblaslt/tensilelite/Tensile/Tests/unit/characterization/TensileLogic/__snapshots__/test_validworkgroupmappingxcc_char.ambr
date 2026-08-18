@@ -40,6 +40,13 @@
     ]),
   })
 # ---
+# name: test_report_false_is_side_effect_free
+  dict({
+    'reported_failures': dict({
+    }),
+    'returned': False,
+  })
+# ---
 # name: test_reset_clears_state
   dict({
     'after_reset': dict({

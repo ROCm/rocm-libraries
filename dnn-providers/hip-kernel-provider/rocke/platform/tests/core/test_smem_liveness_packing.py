@@ -70,7 +70,7 @@ class TestSmemLiveness(unittest.TestCase):
 
     def _live(self, *ops: Op) -> dict:
         low = _lowerer(*ops)
-        raw = low._collect_smem_liveness(low.kernel.body)
+        raw, _ = low._collect_smem_liveness(low.kernel.body)
         # Strip the kernel-name suffix for readability: "@A.k" -> "A"
         return {k.lstrip("@").split(".")[0]: v for k, v in raw.items()}
 
@@ -118,7 +118,7 @@ class TestSmemLiveness(unittest.TestCase):
             regions=[loop_body],
         )
         low = _lowerer(op_a, for_op)
-        raw = low._collect_smem_liveness(low.kernel.body)
+        raw, _ = low._collect_smem_liveness(low.kernel.body)
         live = {k.lstrip("@").split(".")[0]: v for k, v in raw.items()}
         # seq: op_a=0, for_op=1, inner_use=2. The loop subtree spans [1, 2], so
         # the use inside extends A's last_seq to 2 (the loop end).
@@ -132,7 +132,7 @@ class TestSmemLiveness(unittest.TestCase):
         if_body = Region(label="then", ops=[inner_use])
         if_op = Op(name="scf.if", operands=[], results=[], regions=[if_body])
         low = _lowerer(op_a, if_op)
-        raw = low._collect_smem_liveness(low.kernel.body)
+        raw, _ = low._collect_smem_liveness(low.kernel.body)
         live = {k.lstrip("@").split(".")[0]: v for k, v in raw.items()}
         # scf.if is not a loop → use inside extends last normally (to inner idx)
         # The inner use is at seq 2 (after op_a=0, if_op=1); but since
@@ -162,10 +162,40 @@ class TestSmemPacking(unittest.TestCase):
     # -- single alloc ---------------------------------------------------------
 
     def test_single_alloc(self):
-        op_a, _ = _alloc("%A", _smem(F32, 128, 24))
-        offsets, pool = self._pack(op_a)
+        # A single *referenced* allocation lands at offset 0 with a 16-rounded
+        # pool. (A never-referenced allocation is dead-stripped and costs 0 --
+        # see TestSmemPacking.test_dead_alloc_costs_nothing -- so give A a use.)
+        op_a, va = _alloc("%A", _smem(F32, 128, 24))
+        op_u = _use(va)
+        offsets, pool = self._pack(op_a, op_u)
         self.assertEqual(offsets["A"], 0)
         self.assertEqual(pool, (_12KB + 15) & ~15)
+
+    def test_dead_alloc_costs_nothing(self):
+        # An allocation that is never read/written/address-taken must not
+        # consume pool bytes: the pre-pool lowering emitted it as its own
+        # addrspace(3) global that the AMDGPU backend dead-strips. Folding it
+        # into the pool used to inflate LDS and overflow the 64 KB limit (the
+        # fp16 D128 nw=4 attention Acc_lds regression).
+        op_a, _ = _alloc("%A", _smem(F32, 128, 24))  # 12KB, no uses -> dead
+        op_b, vb = _alloc("%B", _smem(F32, 128, 24))  # 12KB, used -> live
+        op_u = _use(vb)
+        offsets, pool = self._pack(op_a, op_b, op_u)
+        self.assertEqual(offsets["B"], 0)
+        self.assertEqual(pool, (_12KB + 15) & ~15)  # only B counts
+
+    def test_all_dead_allocs_emit_no_pool(self):
+        # When EVERY allocation is dead, the pool is empty AND _smem_globals is
+        # cleared so finalize() emits no pool global. Otherwise Python would
+        # emit a zero-length `[0 x i8]` addrspace(3) global while the C++ engine
+        # (gated on pool_size > 0) emits nothing -- a byte-identity divergence,
+        # and some LLVM/AMDGPU pipelines reject a zero-length global.
+        op_a, _ = _alloc("%A", _smem(F32, 128, 24))  # dead
+        op_b, _ = _alloc("%B", _smem(F16, 64, 64))  # dead
+        low = _lowerer(op_a, op_b)
+        low._compute_smem_layout()
+        self.assertEqual(low._smem_pool_size, 0)
+        self.assertEqual(low._smem_globals, [])
 
     # -- interfering allocs must not overlap ----------------------------------
 

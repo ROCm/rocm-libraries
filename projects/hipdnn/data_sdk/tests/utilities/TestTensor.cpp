@@ -4,9 +4,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 
+#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <numeric>
+#include <random>
+#include <stdexcept>
+#include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
@@ -93,6 +98,159 @@ TEST(TestTensor, FillWithRandomValuesNonPacked)
         EXPECT_GE(val, 1.0f);
         EXPECT_LE(val, 3.0f);
     }
+}
+
+TEST(TestTensor, FillWithValuesHostGeneratorPacked)
+{
+    Tensor<float> tensor({1, 2, 3, 4});
+    struct UniformCpuGenerator
+    {
+        explicit UniformCpuGenerator(float min, float max, unsigned int seed)
+            : _min(min)
+            , _max(max)
+            , _seed(seed)
+        {
+        }
+
+        void operator()(float* data, size_t count) const
+        {
+            std::mt19937 rng(_seed);
+            std::uniform_real_distribution<float> dist(_min, _max);
+
+            for(size_t i = 0; i < count; ++i)
+            {
+                data[i] = static_cast<float>(dist(rng));
+            }
+        }
+
+    private:
+        float _min;
+        float _max;
+        unsigned int _seed;
+    };
+
+    const float min = 7.0f;
+    const float max = 10.0f;
+    tensor.fillWithValues(UniformCpuGenerator(min, max, std::random_device{}()), true);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, min);
+        EXPECT_LE(val, max);
+    }
+}
+
+TEST(TestTensor, FillWithValuesHostGeneratorNonPacked)
+{
+    Tensor<float> tensor({1, 2, 3, 4}, {30, 15, 5, 1});
+    struct UniformCpuGenerator
+    {
+        explicit UniformCpuGenerator(float min, float max, unsigned int seed)
+            : _min(min)
+            , _max(max)
+            , _seed(seed)
+        {
+        }
+
+        void operator()(float* data, size_t count) const
+        {
+            std::mt19937 rng(_seed);
+            std::uniform_real_distribution<float> dist(_min, _max);
+
+            for(size_t i = 0; i < count; ++i)
+            {
+                data[i] = static_cast<float>(dist(rng));
+            }
+        }
+
+    private:
+        float _min;
+        float _max;
+        unsigned int _seed;
+    };
+
+    const float min = -10.0f;
+    const float max = -7.0f;
+    tensor.fillWithValues(UniformCpuGenerator(min, max, std::random_device{}()), true);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, min);
+        EXPECT_LE(val, max);
+    }
+}
+
+TEST(TestTensor, FillWithValuesDeviceGeneratorPacked)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> tensor({1, 2, 3, 4});
+
+    struct DeviceGpuGenerator
+    {
+        void operator()(float* data, size_t count) const
+        {
+            std::vector<float> writeData(count);
+            std::iota(writeData.begin(), writeData.end(), 0.0f);
+
+            auto err = hipMemcpyWithStream(
+                data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
+            if(err != hipSuccess)
+            {
+                throw std::runtime_error("hipMemcpyWithStream failed");
+            }
+        }
+    };
+
+    tensor.fillWithValues(DeviceGpuGenerator(), false);
+
+    auto hostData = static_cast<float*>(tensor.rawHostData());
+    for(size_t i = 0; i < tensor.elementCount(); i++)
+    {
+        EXPECT_EQ(hostData[i], static_cast<float>(i));
+    }
+}
+
+TEST(TestTensor, FillWithValuesDeviceGeneratorNonPacked)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> tensor({1, 2, 3, 4}, {30, 15, 5, 1});
+
+    struct DeviceGpuGenerator
+    {
+        void operator()(float* data, size_t count) const
+        {
+            std::vector<float> writeData(count);
+            std::iota(writeData.begin(), writeData.end(), 0.0f);
+
+            auto err = hipMemcpyWithStream(
+                data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
+            if(err != hipSuccess)
+            {
+                throw std::runtime_error("hipMemcpyWithStream failed");
+            }
+        }
+    };
+
+    tensor.fillWithValues(DeviceGpuGenerator(), false);
+
+    auto hostData = static_cast<float*>(tensor.rawHostData());
+    for(size_t i = 0; i < tensor.elementCount(); i++)
+    {
+        EXPECT_EQ(hostData[i], static_cast<float>(i));
+    }
+}
+
+TEST(TestTensor, FillWithValuesInvalidGeneratorThrows)
+{
+    Tensor<float> tensor({1, 2, 3, 4});
+    const ValueGenerator<float> invalidGenerator;
+
+    EXPECT_THROW(tensor.fillWithValues(invalidGenerator, false), std::invalid_argument);
+    EXPECT_THROW(tensor.fillWithValues(invalidGenerator, true), std::invalid_argument);
 }
 
 TEST(TestTensor, BasicNclUsage)

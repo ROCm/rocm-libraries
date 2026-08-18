@@ -18,6 +18,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/moe_grouped_matmul_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
@@ -221,6 +222,19 @@ void getPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode source
                       int64_t* elementCount,
                       void* arrayOfElements,
                       const char* errorPrefix);
+
+void setMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode& target,
+                             hipdnnBackendAttributeType_t attributeType,
+                             int64_t elementCount,
+                             const void* arrayOfElements,
+                             const char* errorPrefix);
+
+void getMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode source,
+                             hipdnnBackendAttributeType_t attributeType,
+                             int64_t requestedElementCount,
+                             int64_t* elementCount,
+                             void* arrayOfElements,
+                             const char* errorPrefix);
 
 // setOptionalScalar/getOptionalScalar are templated on flatbuffers::Optional<T>.
 // This works with std::optional<T> members because flatbuffers aliases Optional to

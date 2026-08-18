@@ -14,7 +14,7 @@ differ only in per-case data (dims/strides/dtype/inline values/node attributes)
 into one ``graph.template.json`` + ``sweep.json``.
 
 Conforms to the Compressed Template Sweeps spec:
-    integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
+    integration-test-bundles/{Tier}/{Operation}/{TopologyName}/
         graph.template.json
         sweep.json
 
@@ -367,7 +367,7 @@ def main() -> int:
         "--output-dir",
         type=Path,
         required=True,
-        help="root of output tree (e.g. integration_test_bundles/)",
+        help="root of output tree (e.g. integration-test-bundles/)",
     )
     ap.add_argument(
         "--dry-run",

@@ -287,9 +287,10 @@ def test_nested_loop_inner_alloc_interferes_with_outer_body_alloc():
 
 
 def test_single_alloc_offset_zero():
-    """A lone allocation lands at offset 0 with a 16-rounded pool."""
-    op_a, _ = _alloc("%A", _smem(F32, 128, 24))  # 12KB
-    offsets, pool = _pack(op_a)
+    """A lone *referenced* allocation lands at offset 0 with a 16-rounded pool."""
+    op_a, va = _alloc("%A", _smem(F32, 128, 24))  # 12KB
+    op_u = _use(va)
+    offsets, pool = _pack(op_a, op_u)
     assert offsets["A"] == 0
     assert pool == _round16(_12KB)
 
@@ -327,7 +328,10 @@ def _pack_from_intervals(sizes, intervals, elems=None):
         gnames.append(f"@a{i}.k")
     low = _lowerer(*ops)
     live = {gnames[i]: tuple(intervals[i]) for i in range(n)}
-    low._collect_smem_liveness = lambda region, _live=live: dict(_live)
+    # Return (intervals, used): every allocation with an injected interval is
+    # considered referenced, so the packer places all of them (this harness
+    # tests interval packing, not dead-allocation stripping).
+    low._collect_smem_liveness = lambda region, _live=live: (dict(_live), set(_live))
     low._compute_smem_layout()
     return [low._smem_offsets[g] for g in gnames]
 

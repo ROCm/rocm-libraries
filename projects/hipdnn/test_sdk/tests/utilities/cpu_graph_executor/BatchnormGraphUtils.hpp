@@ -13,8 +13,7 @@ namespace hipdnn_sdk_test_utils
 {
 
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildBatchnormTrainGraph(
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
         hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
@@ -370,8 +369,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> buildBatchnormFwdInference
 }
 
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildBatchnormBwdGraph(
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
         hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,

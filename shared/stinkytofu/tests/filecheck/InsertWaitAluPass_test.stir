@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
 #
 # InsertWaitAluPass: whole-kernel mode-2 s_wait_alu insertion + SCHED_MODE enable.
 # - setreg HW_REG_WAVE_SCHED_MODE (size=2, value=2) inserted at function entry
@@ -400,4 +400,27 @@ st.func @vm_many_ds() {
   v12 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v13 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- g_enableESM2SuppressValuToGlobalVaVdst gate on global_prefetch_b8: a VALU
+#--- writes a vaddr VGPR (v0), then global_prefetch_b8 reads it. The gate drops the
+#--- src-RAW va_vdst wait (the DAG already spaces the producer >=32 cycles). Two
+#--- unrelated VALUs sit between, so WITHOUT the suppression a non-zero va_vdst wait
+#--- would be emitted before the prefetch.
+#---
+#--- Regression for the classifier fix: global_prefetch_b8 does NOT carry
+#--- IF_GLOBALLoad, so the original isGLOBALOrAtomic-only gate silently skipped it,
+#--- leaving the wait in place. The gate must also classify it via isGlobalPrefetch().
+#--- No s_wait_alu va_vdst may appear between the producer and the prefetch.
+# CHECK-LABEL: @valu_to_global_prefetch_suppressed
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: "st.global_prefetch_b8"
+
+st.func @valu_to_global_prefetch_suppressed() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  "st.global_prefetch_b8"(v0, s[0:1]) { issueCycles = 1, latencyCycles = 1 }
 }

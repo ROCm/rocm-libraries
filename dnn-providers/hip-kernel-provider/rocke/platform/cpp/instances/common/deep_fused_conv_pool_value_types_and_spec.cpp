@@ -855,8 +855,13 @@ extern "C"
     cs->warp_tile_k = spec->warp_tile_k;
     cs->wave_size = spec->wave_size;
     cs->pipeline = spec->pipeline;
-    /* epilogue = "default" if wave_size == 32 else "cshuffle" */
-    cs->epilogue = (spec->wave_size == 32) ? "default" : "cshuffle";
+    /* Python conv_spec() now selects epilogue by K parity, not wave_size:
+     *   epilogue = "default" if self.problem.conv.K % 2 != 0 else "cshuffle"
+     * This avoids the is_valid_spec gate that rejects default+vec_c>1 (vec_c
+     * is auto-derived from K, so even K always gives vec_c>=2 -> must use
+     * cshuffle). wave_size==32 (RDNA) also stays on cshuffle since K is even
+     * in all tested configs. */
+    cs->epilogue = (spec->problem.conv.K % 2 != 0) ? "default" : "cshuffle";
     cs->async_dma = spec->async_dma;
     cs->unroll_k = spec->unroll_k;
     cs->acc_epilogue = spec->acc_epilogue;

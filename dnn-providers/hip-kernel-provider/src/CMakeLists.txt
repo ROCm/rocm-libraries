@@ -46,6 +46,10 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+endif()
+
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
@@ -74,27 +78,6 @@ set_target_properties(hip_kernel_provider PROPERTIES
 # Tests
 # ============================================================================
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
-    set(HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../HIP_MLOPS_ENGINE_test_categories.yaml")
-    set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../HIP_MLOPS_ENGINE_test_categories_external.yaml")
-    set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../HIP_MLOPS_ENGINE_test_categories_integration.yaml")
-    set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
-    set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
-    if(EXISTS "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
-       AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
-       AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
-       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-        set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}")
-        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
-            "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
-            "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
-            "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
-        )
-        set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
-        message(STATUS "hip-kernel-provider: YAML-based CTest categorization enabled")
-    else()
-        message(STATUS "hip-kernel-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
-    endif()
 
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
@@ -141,12 +124,17 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
         )
+        # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
+        # merged with any per-target ENVIRONMENT passed to add_integration_test_target()
+        # (e.g. HIPDNN_AITER_ASM_DIR for the SDPA engine), published by
+        # dnn-providers/cmake/Tests.cmake since the raw test name below is never
+        # itself registered as a CTest test in this YAML-categorized mode.
         apply_test_category_labels(
             hip_kernel_provider_integration_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-            ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT ${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}
         )
     endif()
 
@@ -190,6 +178,19 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
                     "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 )
+                # Also apply rocKE's pre-registered CTest categories now that
+                # the platform's staged add_test() entries (folded above) are
+                # present in the file. This overwrites -- rather than merges
+                # with -- the ad hoc "ckc;unit;host" / "ckc;python;..." labels
+                # rocke/platform/CMakeLists.txt bakes into its install text:
+                # ctest's install-tree script interpreter only honors the
+                # last set_tests_properties() call per test, and
+                # quick/standard/comprehensive/full is the RFC0010-standardized
+                # replacement for those ad hoc tags (see ALMIOPEN-2278).
+                apply_ctest_category_labels(
+                    "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
             endif()
             # Build tree.
             apply_ctest_category_labels(
@@ -201,20 +202,53 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
 
-    # For standalone builds we need to install the ctest files.
-    # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
-    # to bin/hip_kernel_provider/ so TheRock CI's test_runner.py can drive `ctest -L quick`
-    # (etc.) from the artifact's install tree. Otherwise, fall back to the project's
-    # own install_provider_ctest_files() which emits an unlabeled CTestTestfile.cmake.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
-            install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-                    DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
-                    RENAME "CTestTestfile.cmake"
-            )
-        else()
-            install_provider_ctest_files("hip_kernel_provider")
-        endif()
+    set(_asm_sdpa_external_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+        list(APPEND _asm_sdpa_external_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-asm-sdpa-external-integration
+            ENVIRONMENT ${TEST_ENVIRONMENT}
+        )
+    endif()
+
+    if(TARGET hipdnn_integration_tests)
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-asm-sdpa-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    ASM_SDPA_ENGINE
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/ASM_SDPA_ENGINE.toml
+            ${_asm_sdpa_external_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-asm-sdpa-external-integration-check target")
+
+        # Unlike the HIP_MLOPS block above, this target does not re-fold
+        # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider or re-apply
+        # HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML (the provider-wide
+        # _external.yaml): that staging/labeling is provider-wide and already
+        # applied exactly once above. Re-running it here would re-append the
+        # same rocke-staged add_test() entries into
+        # HIPKERNELPROVIDER_CTEST_INSTALL_FILE a second time (duplicate CTest
+        # test names). ASM_SDPA's own category suites are labeled via
+        # TEST_CATEGORIES_YAML/INSTALL_TEST_FILE in
+        # _asm_sdpa_external_category_args above.
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
+    endif()
+
+    # Install the ctest files. When YAML-based categorization is active, install the
+    # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
+    # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
+    # Otherwise, fall back to the project's own install_provider_ctest_files() which
+    # emits an unlabeled CTestTestfile.cmake.
+    if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
+        install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
+                RENAME "CTestTestfile.cmake"
+        )
+    else()
+        install_provider_ctest_files("hip_kernel_provider")
     endif()
 endif()
 

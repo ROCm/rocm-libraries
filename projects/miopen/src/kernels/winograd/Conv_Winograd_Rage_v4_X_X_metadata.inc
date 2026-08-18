@@ -26,6 +26,7 @@ amdhsa.kernels:
     .max_flat_workgroup_size: \wg_x
     .wavefront_size: 64
     .workgroup_processor_mode: 0
+    .uniform_work_group_size: 1
     .args:
     - { .size: 4, .offset:   0, .value_kind: by_value, .name: N_ }
     - { .size: 4, .offset:   4, .value_kind: by_value, .name: C }
@@ -134,7 +135,29 @@ __fp16_overflow = 0
 
 .rodata
 .p2align 6
-.if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 0)
+.if (.amdgcn.gfx_generation_number == 9 && ((.amdgcn.gfx_generation_minor == 4 && .amdgcn.gfx_generation_stepping == 2) || (.amdgcn.gfx_generation_minor == 5 && .amdgcn.gfx_generation_stepping == 0)))
+.amdhsa_kernel \arg_kernel_name
+    .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
+    .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
+    .amdhsa_user_sgpr_kernarg_segment_ptr    __sgpr_kernarg_segment_ptr // s[2:3]
+    .amdhsa_system_sgpr_workgroup_id_x       __sgpr_workgroup_id_x
+    .amdhsa_system_sgpr_workgroup_id_y       __sgpr_workgroup_id_y
+    .amdhsa_system_sgpr_workgroup_id_z       __sgpr_workgroup_id_z
+    .amdhsa_system_sgpr_workgroup_info       __sgpr_workgroup_info
+    .amdhsa_system_vgpr_workitem_id          __vgpr_workitem_id
+    .amdhsa_reserve_vcc                      __reserve_vcc
+    .amdhsa_next_free_sgpr                   .amdgcn.next_free_sgpr
+    .amdhsa_next_free_vgpr                   .amdgcn.next_free_vgpr
+    .amdhsa_accum_offset                     __accum_offset
+    .amdhsa_float_round_mode_32              __float_round_mode_32
+    .amdhsa_float_round_mode_16_64           __float_round_mode_16_64
+    .amdhsa_float_denorm_mode_32             __float_denorm_mode_32
+    .amdhsa_float_denorm_mode_16_64          __float_denorm_mode_16_64
+    .amdhsa_dx10_clamp                       __dx10_clamp
+    .amdhsa_ieee_mode                        __ieee_mode
+    .amdhsa_fp16_overflow                    __fp16_overflow
+.end_amdhsa_kernel
+.elseif (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 0)
 .amdhsa_kernel \arg_kernel_name
     .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
     .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
@@ -158,24 +181,26 @@ __fp16_overflow = 0
     .amdhsa_float_denorm_mode_16_64          __float_denorm_mode_16_64
     .amdhsa_fp16_overflow                    __fp16_overflow
 .end_amdhsa_kernel
+.else
+.error "Unsupported gfx version in kernel descriptor"
 .endif
 
 METADATA_WRAPPER \arg_sc, \arg_wc, \arg_wg_x, <\arg_kernel_name>
 
 .endm
 
-.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER machine_version:req, kernel_version:req, kernel_name_postfix:req
-    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version\()\kernel_name_postfix
+.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER machine_version_major:req, machine_version_minor:req, kernel_version:req, kernel_name_postfix:req
+    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version_major\()\machine_version_minor\()\kernel_name_postfix
 .endm
 
-.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER sc:req, wc:req, accum_offset:req, wg_x:req, machine_version:req, kernel_version:req, kernel_name_postfix:req
-    EPILOG_KERNEL_DESCRIPTOR \sc, \wc, \accum_offset, \wg_x, miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version\()\kernel_name_postfix
+.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER sc:req, wc:req, accum_offset:req, wg_x:req, machine_version_major:req, machine_version_minor:req, kernel_version:req, kernel_name_postfix:req
+    EPILOG_KERNEL_DESCRIPTOR \sc, \wc, \accum_offset, \wg_x, miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version_major\()\machine_version_minor\()\kernel_name_postfix
 .endm
 
 .macro KERNEL_PROLOG kernel_version:req, kernel_name_postfix:req
-	PROLOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, \kernel_version, \kernel_name_postfix
+	PROLOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, %.amdgcn.gfx_generation_minor, \kernel_version, \kernel_name_postfix
 .endm
 
 .macro KERNEL_EPILOG sc:req, wc:req, accum_offset:req, wg_x:req, kernel_version:req, kernel_name_postfix:req
-	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \sc, \wc, \accum_offset, \wg_x, %.amdgcn.gfx_generation_number, \kernel_version, \kernel_name_postfix
+	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \sc, \wc, \accum_offset, \wg_x, %.amdgcn.gfx_generation_number, %.amdgcn.gfx_generation_minor, \kernel_version, \kernel_name_postfix
 .endm

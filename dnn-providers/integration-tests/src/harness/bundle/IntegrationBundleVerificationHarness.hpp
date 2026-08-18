@@ -23,7 +23,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
-#include "harness/input-init/SynthesisConfig.hpp"
+#include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -71,12 +71,12 @@ std::unordered_map<int64_t, void*> buildVariantPack(
 // TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
 //   Stage 1 — Route non-golden ops whose initializeBundle() is plain randomize
 //             (conv, matmul, BN-inference, reduction, rmsnorm-fwd, layernorm,
-//             pointwise) through the synthesis switch. Zero behavioral change.
+//             pointwise) through the fill-inputs switch. Zero behavioral change.
 //   Stage 2 — Migrate structured recipes one op at a time: copy the exact
 //             ranges/seeds/derivation from each non-golden subclass override
 //             into the corresponding fill function, using fillComputed/tensorAt
 //             for derived inputs. Delete each override once its fill fn works.
-//   Stage 3 — Both harnesses share one init pipeline via synthesizeInputs().
+//   Stage 3 — Both harnesses share one init pipeline via fillInputs().
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
@@ -92,12 +92,12 @@ public:
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
-            _synthesisConfig.setGlobalSeed(static_cast<unsigned int>(*_bundle->metadata.seed));
+            _inputFillRecipes.setGlobalSeed(static_cast<unsigned int>(*_bundle->metadata.seed));
         }
 
         if(_bundle != nullptr && _bundle->metadata.inputs.has_value())
         {
-            _synthesisConfig.loadFromJson(*_bundle->metadata.inputs);
+            _inputFillRecipes.loadFromJson(*_bundle->metadata.inputs);
         }
     }
 
@@ -152,16 +152,16 @@ protected:
     // TestConfig singleton, which is only initialized by the real test main.
     virtual void applyMetadataGuards() const;
 
-    SynthesisConfig& synthesis()
+    InputFillRecipes& inputFillRecipes()
     {
-        return _synthesisConfig;
+        return _inputFillRecipes;
     }
 
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
     std::shared_ptr<IntegrationTestBundle> _bundle;
-    SynthesisConfig _synthesisConfig;
+    InputFillRecipes _inputFillRecipes;
 
     enum class RefStatus
     {
@@ -184,27 +184,25 @@ private:
     // ── inputs ──────────────────────────────────────────────────────────
     bool ensureInputsAvailable();
 
-    // Synthesizes leaf input tensors for the graph when no golden data exists.
+    // Fills leaf input tensors for the graph when no golden data exists.
     //
     // Phase 1 — allocate: walks the graph's tensor list, skips virtual
     //   (inter-node) and output tensors, allocates a CPU-side buffer for
     //   each remaining leaf input tensor (shape/dtype from TensorAttributes).
     //
-    // Phase 2 — fill: iterates each node (internal op) and calls its
-    //   registered declaration function via declareNodeInputs(). Each
-    //   function reads its tensor UIDs from the node's attributes and
-    //   declares each one as FREE (random values), STRUCTURED (needs
-    //   specific format), or DERIVED (needs another op's output) through
-    //   a shared SynthesisConfig.
+    // Phase 2 — fill: calls fillInputs(), which registers each op's default
+    //   fill recipes into _inputFillRecipes and then fills every leaf input
+    //   as FREE (random values), STRUCTURED (needs specific format), or
+    //   DERIVED (needs another op's output).
     //
-    // Phase 3 — verify: calls synth.synthesize() which checks that every
-    //   leaf input was accounted for by some fill function and none were
-    //   refused (STRUCTURED/DERIVED). Returns false and SKIPs the test
-    //   if any leaf was missed or refused.
+    // Phase 3 — verify: checks _inputFillRecipes.unfilled() so that every
+    //   leaf input was accounted for and none were refused (STRUCTURED/
+    //   DERIVED). Returns false and SKIPs the test if any leaf was missed
+    //   or refused.
     //
     // On success, moves the filled tensors into the bundle so downstream
     // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
-    bool synthesizeInputs();
+    bool fillBundleInputs();
 
     // ── buffer allocation + execution ───────────────────────────────────
     // allocateSentinelOutputs / buildVariantPack prepare the buffers;
@@ -269,7 +267,7 @@ private:
     // UnverifiableBundleReport (printed as a summary after all tests),
     // then GTEST_SKIP()s this test. The reason is a flat human-readable
     // string — per-tensor details are concatenated into it by the caller
-    // (e.g., synth.synthesize()), not stored as structured data.
+    // (e.g., fillBundleInputs()), not stored as structured data.
     void skipUnverifiable(const std::string& reason);
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);

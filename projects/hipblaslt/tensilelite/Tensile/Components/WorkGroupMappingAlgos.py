@@ -28,7 +28,7 @@ from rocisa.instruction import SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, SBa
     SBranch, SBfmB32, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQU32, SCmpEQU64, \
     SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SFf1B32, SFlbitI32B32, \
     SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
-    SMaxU32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSExtI16toI32, SSleep, SStoreB32, SSubU32, \
+    SMaxU32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSExtI16toI32, SSleep, SStoreB32, SSubU32, SXorB32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VMovB64, VMulF32, VMulF64, \
     VReadfirstlaneB32, VReadlaneB32, VWritelaneB32, VCvtBF16toFP32, VCvtU32toF32, VCvtU32toF64, VRcpIFlagF32, \
     VRcpF64, VCvtF32toU32, VCvtF64toU32, VMulU32U24, VMulLOU32, VSubU32, VCmpXGeU32, VCmpXGtU32, VCmpXEqU32
@@ -90,6 +90,21 @@ def scalarUInt24DivideAndRemainderPair(qReg, dReg, divReg, rReg, tmpVgprRes, wav
     return module
 
 def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
+    ##  WGM sgpr bit layout (StreamK path, WorkGroupMappingXCC == -1):
+    ##
+    ##   31────22  21──14  13──10  9────0
+    ##  ┌──────────┬──────┬──────┬──────────┐
+    ##  │  K (10)  │ck(8) │XCC(4)│ WGM(10)  │
+    ##  └──────────┴──────┴──────┴──────────┘
+    ##
+    ##  WGM     [9:0]    Workgroup mapping (signed 10-bit, range -511..511).
+    ##  WGMXCC  [13:10]  Number of XCDs (0-15). Mapping skipped when <= 1.
+    ##  chunk   [21:14]  Chunk size for chiplet_transform_chunked (0-255).
+    ##  K       [31:22]  Split-K factor for K-Coherent reorder (0-1023).
+    ##                   K > 1 enables chunked K-Coherent: K-first->K-last
+    ##                   conversion runs first, then chiplet_transform_chunked
+    ##                   distributes K-last positions across XCDs.
+    ##
     module = Module("WGMXCC")
     module.addComment1("remap workgroup to XCCs")
 
@@ -99,37 +114,95 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     if clusterEnabled(kernel["ClusterDim"]):
         module.add(SBranch(label_skipWGMXCC.getLabelName()))
     if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
-        # We need to get WGMXCC from WGM
-        # This value will be used as number of XCCs for both chunked and non-chunked remapping
-        SgprWGMXCC = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprWGMXCC")
-        module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
-        module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
+        SgprWGMXCC    = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprWGMXCC")
+        SgprChunkSize = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprChunkSize", preventOverflow=False)
+        SgprK         = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprK", preventOverflow=False)
+        SgprIndex     = "WorkGroup0"
+
+        module.addComment0("Extract WGMXCC [13:10]")
+        module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(10), src=sgpr(sgprWGM), comment=""))
+        module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(0xF), comment=""))
         module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1, comment="No mapping if WGMXCC <= 1"))
         module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
-        label_skipWGMCHUNK = Label(label="skip_WGMCHUNK", comment="skip WGMCHUNK if no enough WGs to remap")
-        """
-        Use chiplet_transform_chunk, skip classic wgmxcc remapping
-        """        
-        SgprIndex = "WorkGroup0"
-        SgprChunkSize = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprChunkSize", preventOverflow=False)
-        module.add(SLShiftRightB32(dst=sgpr(SgprChunkSize), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get WGMCHUNK"))
-        module.add(SAndB32(dst=sgpr(SgprChunkSize), src0=sgpr(SgprChunkSize), src1=hex(1023), comment="Get WGMCHUNK"))
-        module.addComment0("remap WGs if WGMCHUNK > 1")
-        module.add(SCmpGtU32(src0=sgpr(SgprChunkSize), src1=1))
-        module.add(SCBranchSCC0(label_skipWGMCHUNK.getLabelName()))
+
+        module.addComment0("Extract chunk [21:14], K [31:22]")
+        module.add(SLShiftRightB32(dst=sgpr(SgprChunkSize), shiftHex=hex(14), src=sgpr(sgprWGM), comment=""))
+        module.add(SAndB32(dst=sgpr(SgprChunkSize), src0=sgpr(SgprChunkSize), src1=hex(0xFF), comment=""))
+        module.add(SLShiftRightB32(dst=sgpr(SgprK), shiftHex=hex(22), src=sgpr(sgprWGM), comment=""))
+        module.add(SAndB32(dst=sgpr(SgprK), src0=sgpr(SgprK), src1=hex(0x3FF), comment=""))
+
+        label_skipChunked = Label(label="skip_chunked", comment="skip chunked remap; fall to contiguous group")
+        label_kcoherent   = Label(label="kcoherent", comment="chunked K-Coherent path")
+
+        # Path selection:
+        #   chunk <= 1               -> contiguous group only
+        #   chunk > 1, K <= 1        -> plain chunked
+        #   chunk > 1, K  > 1        -> chunked K-Coherent
+        module.addComment0("chunk > 1 required for both plain chunked and K-Coherent")
+        module.add(SCmpGtU32(src0=sgpr(SgprChunkSize), src1=1, comment="chunk > 1?"))
+        module.add(SCBranchSCC0(label_skipChunked.getLabelName()))
+        module.addComment0("chunk > 1: K > 1 -> K-Coherent; else plain chunked")
+        module.add(SCmpGtU32(src0=sgpr(SgprK), src1=1, comment="K > 1?"))
+        module.add(SCBranchSCC1(label_kcoherent.getLabelName()))
         module.add(chiplet_transform_chunked(writer, kernel, SgprWGMXCC, SgprIndex, tmpSgprNumWorkGroups, SgprChunkSize))
-        writer.sgprPool.checkIn(SgprChunkSize)
         module.add(SBranch(label_skipWGMXCC.getLabelName()))
-        module.add(label_skipWGMCHUNK)
 
-
+        # ---- Chunked K-Coherent path (K > 1) ----
+        module.add(label_kcoherent)
         """
-        Formula:
-        x, g   = divmod(old_wg, WGMXCC)
-        q, r   = divmod(WG, WGMXCC)
-        group  = q + (1 if g < r else 0)
-        offset = 0 if g < r else r
-        new    = x + offset + g * group
+        Step 1: K-first -> K-last conversion for the first K*MN WGs.
+          K = split_factor (floor division), MN = numWGs / K.
+          K*MN <= numWGs; tail WGs (>= K*MN) are identity-mapped.
+        Step 2: chiplet_transform_chunked distributes K-last positions across XCDs.
+
+        Use the preloaded tmpSgprNumWorkGroups (== skGrid) for the dividend so we
+        avoid waiting on the bulk SMEM load for sgpr[skGrid].
+        """
+        label_skipKConvert = Label(label="skip_kconvert", comment="tail WG: skip K-first to K-last conversion")
+
+        with writer.allocTmpSgpr(4, 2) as tmpSgprKC:
+            sgprMN     = tmpSgprKC.idx
+            sgprKval   = tmpSgprKC.idx + 1
+            sgprMNval  = tmpSgprKC.idx + 2
+            sgprKMN    = tmpSgprKC.idx + 3
+
+            tmpVgpr    = writer.vgprPool.checkOutAligned(6, 2)
+            tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
+
+            module.addComment0("Pair divmod: [MN, mn] = [numWGs, WG0] / [K, K], remainders [_, k]")
+            module.add(scalarUInt24DivideAndRemainderPair(
+                qReg=[sgprMN, sgprMNval],
+                dReg=[tmpSgprNumWorkGroups, "WorkGroup0"],
+                divReg=[SgprK, SgprK],
+                rReg=[sgprKMN, sgprKval],
+                tmpVgprRes=tmpVgprRes,
+                wavewidth=kernel["WavefrontSize"],
+                doRemainder=True))
+            writer.vgprPool.checkIn(tmpVgpr)
+
+            module.addComment0("K_MN = K * MN; skip conversion for tail WGs")
+            module.add(SMulI32(dst=sgpr(sgprKMN), src0=sgpr(SgprK), src1=sgpr(sgprMN)))
+            module.add(SCmpGeU32(src0=sgpr("WorkGroup0"), src1=sgpr(sgprKMN), comment="WorkGroup0 >= K*MN?"))
+            module.add(SCBranchSCC1(label_skipKConvert.getLabelName()))
+
+            module.addComment0("WorkGroup0 = mn + MN * k  (K-last position)")
+            module.add(SMulI32(dst=sgpr(sgprKval), src0=sgpr(sgprMN), src1=sgpr(sgprKval)))
+            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(sgprMNval), src1=sgpr(sgprKval)))
+
+        module.add(label_skipKConvert)
+        module.addComment0("chiplet_transform_chunked in K-last space")
+        module.add(chiplet_transform_chunked(writer, kernel, SgprWGMXCC, SgprIndex, tmpSgprNumWorkGroups, SgprChunkSize))
+        module.add(SBranch(label_skipWGMXCC.getLabelName()))
+
+        # ---- Contiguous group path (chunk <= 1) ----
+        module.add(label_skipChunked)
+        """
+        Contiguous group formula:
+          x, g   = divmod(old_wg, WGMXCC)
+          q, r   = divmod(numWGs, WGMXCC)
+          group  = q + (1 if g < r else 0)
+          offset = 0 if g < r else r
+          new    = x + offset + g * group
         """
         with writer.allocTmpSgpr(6, 2, tag="wgmXCC_tmpSgprRes") as tmpSgprRes:
             SgprX      = tmpSgprRes.idx + 1
@@ -146,21 +219,20 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
 
             module.addComment0("divmod(old_wg, WGMXCC)")
             module.add(scalarUInt24DivideAndRemainder(qReg=SgprX, rReg=SgprG, dReg="WorkGroup0", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
-            module.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
-            module.addComment0("divmod(WG, WGMXCC)")
-            module.add(scalarUInt24DivideAndRemainder(qReg=SgprQ, rReg=SgprR, dReg="skGrid", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))            
+            module.addComment0("divmod(numWGs, WGMXCC) -- preloaded tmpSgprNumWorkGroups (== skGrid)")
+            module.add(scalarUInt24DivideAndRemainder(qReg=SgprQ, rReg=SgprR, dReg=tmpSgprNumWorkGroups, divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
             writer.vgprPool.checkIn(tmpVgpr)
-            # Check if current group requires a remainder WG or not
             module.add(SCmpLtU32(src0=sgpr(SgprG), src1=sgpr(SgprR)))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(1), src1=hex(0), comment="Select multiplier"))
             module.add(SCSelectB32(dst=sgpr(SgprO), src0=hex(0), src1=sgpr(SgprR), comment="Select remainder"))
             module.add(SAddU32(dst=sgpr(group), src0=sgpr(SgprQ), src1=sgpr(tmpSgpr), comment="Adjust multiplier"))
-            # Assemble everything
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(SgprX), src1=sgpr(SgprO)))
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(SgprG), src1=sgpr(group)))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr)))
-        # Skip
+
         writer.sgprPool.checkIn(SgprWGMXCC)
+        writer.sgprPool.checkIn(SgprChunkSize)
+        writer.sgprPool.checkIn(SgprK)
         module.add(label_skipWGMXCC)
     else:
         with writer.allocTmpSgpr(6, 2, tag="wgmXCC_tmpSgprRes2") as tmpSgprRes:
@@ -236,7 +308,14 @@ def DefaultWGM(writer, kernel, sgprWGM):
     tmpWGM = writer.sgprPool.checkOut(1, tag="DefaultWGM_tmpWGM")
 
     module.add(SMovB32(dst=sgpr(tmpWGM), src=sgpr(sgprWGM), comment="Restore WGM"))
-    module.add(SSExtI16toI32(dst=sgpr(tmpWGM), src=sgpr(tmpWGM), comment="Restore WGM"))
+    if(kernel["WorkGroupMappingXCC"] == -1):
+        # New bit layout: WGM is in bits [9:0] (10-bit signed, range -511..511).
+        # Sign-extend from bit 9: (val & 0x3FF) ^ 0x200 - 0x200
+        module.add(SAndB32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x3FF), comment="extract bits [9:0]"))
+        module.add(SXorB32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x200), comment="flip sign bit"))
+        module.add(SSubU32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x200), comment="sign-extend 10-bit"))
+    else:
+        module.add(SSExtI16toI32(dst=sgpr(tmpWGM), src=sgpr(tmpWGM), comment="Restore WGM"))
 
     wgmLabel         = Label(label=writer.labels.getNameInc("WGM"), comment="")
     wgmLabelPositive = Label(label=writer.labels.getNameInc("WGMPositive"), comment="")

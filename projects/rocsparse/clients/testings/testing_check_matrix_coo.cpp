@@ -197,21 +197,22 @@ void testing_check_matrix_coo(const Arguments& arg)
 
             if(row > 0 && row < n - 1)
             {
-                if(uplo == rocsparse_fill_mode_lower)
+                switch(uplo)
                 {
+                case rocsparse_fill_mode_lower:
                     // Find index of last column in row
                     while((index + 1) < nnz && row == (hcoo_row_ind[index + 1] - base))
                     {
                         index++;
                     }
-                }
-                else
-                {
+                    break;
+                case rocsparse_fill_mode_upper:
                     // Find index of first column in row
                     while((index - 1) >= 0 && row == (hcoo_row_ind[index - 1] - base))
                     {
                         index--;
                     }
+                    break;
                 }
 
                 temp = hcoo_col_ind[index];
