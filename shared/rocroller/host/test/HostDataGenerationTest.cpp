@@ -120,7 +120,7 @@ namespace
         TensorDescriptor descriptor(DataType::Float, {4, 4}, "N");
 
         auto bounded = generateC(descriptor, DataInitialization{DataInitializationMode::Bounded});
-        auto boundedView = bounded.view();
+        auto boundedView = bounded;
         for(size_t column = 0; column < 4; ++column)
             for(size_t row = 0; row < 4; ++row)
             {
@@ -130,7 +130,7 @@ namespace
 
         auto alternating = generateC(
             descriptor, DataInitialization{DataInitializationMode::BoundedAlternatingSign});
-        auto alternatingView = alternating.view();
+        auto alternatingView = alternating;
         for(size_t column = 0; column < 4; ++column)
             for(size_t row = 0; row < 4; ++row)
             {
@@ -143,7 +143,7 @@ namespace
 
         auto unbounded
             = generateC(descriptor, DataInitialization{DataInitializationMode::Unbounded});
-        auto unboundedView        = unbounded.view();
+        auto unboundedView        = unbounded;
         bool hasMagnitudeAboveOne = false;
         for(size_t column = 0; column < 4; ++column)
             for(size_t row = 0; row < 4; ++row)
@@ -156,7 +156,7 @@ namespace
                 "Unbounded generation did not exercise values outside [-1, 1].");
 
         auto identity = generateC(descriptor, DataInitialization{DataInitializationMode::Identity});
-        auto identityView = identity.view();
+        auto identityView = identity;
         for(size_t column = 0; column < 4; ++column)
             for(size_t row = 0; row < 4; ++row)
                 require(identityView.loadAs<float>({row, column}) == (row == column ? 1.0f : 0.0f),
@@ -167,10 +167,8 @@ namespace
         for(size_t column = 0; column < 4; ++column)
             for(size_t row = 0; row < 4; ++row)
             {
-                require(ones.view().loadAs<float>({row, column}) == 1.0f,
-                        "Ones generation mismatch.");
-                require(zeros.view().loadAs<float>({row, column}) == 0.0f,
-                        "Zeros generation mismatch.");
+                require(ones.loadAs<float>({row, column}) == 1.0f, "Ones generation mismatch.");
+                require(zeros.loadAs<float>({row, column}) == 0.0f, "Zeros generation mismatch.");
             }
 
         auto trigonometric = generateC(
@@ -178,7 +176,7 @@ namespace
         for(size_t column = 0; column < 4; ++column)
             for(size_t row = 0; row < 4; ++row)
             {
-                auto const value = trigonometric.view().loadAs<float>({row, column});
+                auto const value = trigonometric.loadAs<float>({row, column});
                 require(value >= -1.0f && value <= 1.0f,
                         "Trigonometric generation exceeded [-1, 1].");
             }
@@ -187,7 +185,7 @@ namespace
         auto               normalValues = generateC(descriptor, normal);
         for(size_t column = 0; column < 4; ++column)
             for(size_t row = 0; row < 4; ++row)
-                require(normalValues.view().loadAs<float>({row, column}) == 2.0f,
+                require(normalValues.loadAs<float>({row, column}) == 2.0f,
                         "Normal generation did not preserve its mean and deviation.");
     }
 

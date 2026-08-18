@@ -11,12 +11,15 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
   - Exports only `roc/host_validation/tensor.hpp`.
   - Builds with an ordinary host compiler and the C++ standard library.
 - `roc::host-validation-amd-gpu-layout`
-  - Header-only physical MX layout permutations requested by product adapters.
+  - Compiled physical MX layout permutations requested by product adapters.
   - Exports `roc/host_validation/amd_gpu_layout/mx.hpp`.
   - Does not depend on the tensor or numerical targets.
-  - Uses optional OpenMP parallelism, disabled with
+  - Keeps type-generic copy templates in the public header and compiles
+    validation, layout planning, and scheduling into a private source file.
+  - Uses private optional OpenMP parallelism, disabled with
     `HOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP=OFF`. Large transforms use at
     most eight threads by default; `OMP_NUM_THREADS` overrides the cap.
+    Consumers do not inherit OpenMP compile definitions or include `omp.h`.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
   - Exports `axpby.hpp`, `comparison.hpp`, `epilogue.hpp`, `generation.hpp`,
@@ -30,8 +33,6 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
     work-aware default cap of eight threads. `OMP_NUM_THREADS` overrides the
     cap; small, nested, packed, or potentially aliased generation remains
     serial.
-  - `typed_comparison.hpp` is an explicit opt-in extension for caller-defined
-    scalar wrappers and the measured pointwise fast path.
 - `roc::host-validation-blas`
   - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
   - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
@@ -75,7 +76,6 @@ include/roc/host_validation/
   amd_gpu_layout/mx.hpp
   tensor.hpp
   comparison.hpp
-  typed_comparison.hpp
   validation.hpp
 
 src/
@@ -88,11 +88,8 @@ The core layer is GEMM- and AMDGPU-agnostic. It contains only:
 - `ScalarType` and `ScalarTypeInfo`;
 - `Shape`;
 - `Layout`;
-- owning, runtime-typed `Tensor`;
-- non-owning, runtime-typed `TensorView`; and
-- non-owning, runtime-typed `MutableTensorView`; and
-- the narrow compile-time `TypedTensorView<T>` adapter used for caller-defined
-  scalar wrappers and measured hot paths.
+- shared-storage, runtime-typed `Tensor`; and
+- allocator-independent `TensorStorage`.
 
 The core public header must not include or name GEMM, GPU runtimes, GPU
 architectures, product enums, test frameworks, BLAS, generation policies,
@@ -111,61 +108,63 @@ visitScalarType(ScalarType, visitor);
 
 Shape::Shape(std::vector<size_t>);
 Shape::rank();
+Shape::extent(dimension);
 Shape::dimensions();
 Shape::elementCount();
+Shape::elementCount(firstDimension, lastDimension);
+Shape::elementCountExcluding(dimension);
 
 Layout::Layout(Shape, std::vector<ptrdiff_t>, ptrdiff_t offset = 0);
 Layout::contiguous(const Shape&);
+Layout::contiguousLastDimensionFastest(const Shape&);
+Layout::contiguousFirstDimensionFastest(const Shape&);
 Layout::shape();
+Layout::rank();
+Layout::extent(dimension);
+Layout::elementCount();
 Layout::strides();
+Layout::stride(dimension);
 Layout::offset();
 Layout::elementOffset(indices);
 
 Tensor::Tensor(ScalarType, Shape);
 Tensor::Tensor(ScalarType, Layout);
+Tensor::Tensor(ScalarType, Shape, TensorStorageAllocator);
+Tensor::Tensor(ScalarType, Layout, TensorStorageAllocator);
+Tensor::fromStorage(ScalarType, Layout, TensorStorage);
 Tensor::fromStorage(ScalarType, Layout, std::vector<std::byte>);
 Tensor::fromValues(ScalarType, Shape, values);
 Tensor::fromNativeValues(Shape, nativeValues);
+Tensor::fromNative(Layout, nativeValues);
 Tensor::type();
 Tensor::shape();
 Tensor::layout();
 Tensor::storage();
-Tensor::view();
-Tensor::mutableView();
+Tensor::loadAs<T>(indices);
+Tensor::storeFrom(indices, value);
+Tensor::alias(Layout);
+Tensor::clone();
+Tensor::clone(TensorStorageAllocator);
+Tensor::copyFrom(Tensor);
+Tensor::copyFrom(Tensor, linearIndices);
 Tensor::to(ScalarType);
 Tensor::to(ScalarType, ScalarConversionOptions);
-
-TensorView::fromNative(Layout, nativeValues);
-TensorView::fromNative(nativeValues);
-TensorView::type();
-TensorView::shape();
-TensorView::layout();
-TensorView::storage();
-TensorView::loadAs<T>(indices);
-TensorView::loadAs<T>(indices, ScalarConversionOptions);
-TensorView::to(ScalarType);
-TensorView::to(ScalarType, ScalarConversionOptions);
-
-MutableTensorView::fromNative(Layout, nativeValues);
-MutableTensorView::loadAs<T>(indices);
-MutableTensorView::storeFrom(indices, value);
-MutableTensorView::storeFrom(indices, value, ScalarConversionOptions);
-
-TypedTensorView<T>::TypedTensorView(Layout, nativeValues);
-TypedTensorView<T>::TypedTensorView(nativeValues);
-TypedTensorView<T>::shape();
-TypedTensorView<T>::layout();
-TypedTensorView<T>::storage();
-TypedTensorView<T>::at(indices);
 ```
 
-`Tensor` owns its bytes and has value semantics: copying it performs a deep
-copy. Views never own storage. `TypedTensorView<T>` binds storage and layout
-without requiring `T` to be a component-native scalar type; this is how
-product wrappers cross the typed comparison boundary without becoming
-component dependencies. Layout strides and offsets are measured in logical
-scalar elements, including for sub-byte formats; the tensor layer performs the
-element-to-bit addressing internally.
+`Tensor` is a reference-counted handle. Copy construction and assignment copy
+type/layout metadata and share the same storage; mutations are visible through
+every alias. `clone()` is the explicit deep-copy operation. `alias(Layout)`
+creates another layout over the same owned storage. Shallow constness is
+intentional: a const Tensor handle may still mutate its shared data.
+
+Every Tensor participates in owning its storage lifetime. The default storage
+uses ordinary host bytes; an allocator callback may return owned storage backed
+by a product-specific allocator such as pooled HIP-pinned memory. Native-array
+factories copy into owned storage. There is no public borrowed tensor/view type.
+
+Layout strides and offsets are measured in logical scalar elements, including
+for sub-byte formats; the tensor layer performs the element-to-bit addressing
+internally.
 
 `to(ScalarType)` performs explicit runtime storage conversion while preserving
 shape, strides, and offset. Same-type conversion copies the layout's required
@@ -197,8 +196,8 @@ options.indexOrder = LogicalIndexOrder::FirstDimensionFastest;
 options.real.pattern = GenerationPattern::Sine;
 options.imaginary.pattern = GenerationPattern::Cosine;
 
-GenerationRunInfo run = generate(outputView, options);
-GenerationRunInfo patch = generateAt(outputView, logicalIndex, options);
+Tensor output = generate(ScalarType::ComplexFloat32, layout, options);
+GenerationRunInfo patch = generateAt(output, logicalIndex, options);
 ```
 
 The current patterns cover constants, selection from an explicit candidate
@@ -236,13 +235,13 @@ generator has been removed.
 explicit accumulator and output storage types:
 
 ```cpp
-AxpbyProblem problem(xView, yView, outputView, ScalarType::Float32);
+AxpbyProblem problem(xTensor, yTensor, outputTensor, ScalarType::Float32);
 problem.alpha = 2.0;
 problem.beta = -0.5;
 AxpbyRunInfo run = referenceAxpby(problem);
 ```
 
-Either input may be absent, but at least one is required. The views must share
+Either input may be absent, but at least one is required. The Tensors must share
 the output shape; strides, offsets, transposes, batching, and padding are
 represented entirely by their layouts.
 
@@ -306,39 +305,16 @@ One plan can select logical elements and collect:
 - candidate-grid allclose tolerance search; and
 - unwritten-sentinel checks before, inside, and after logical tensor storage.
 
-Comparison policy is intentionally entered through tensor views. The former
+Comparison policy is intentionally entered through Tensors. The former
 scalar `valuesClose` helper and typed allclose-tolerance search were removed;
 one-element values use ordinary tensors, while tolerance search remains on the
 canonical runtime-typed API.
 
 The exhaustive numerical policy matrix is tested through the Python API
 against NumPy and raw-bit Python oracles. C++ comparison tests retain layout,
-selection, typed-wrapper, exact-integer, packaging, sanitizer, and performance
+selection, exact-integer, packaging, sanitizer, and performance
 contracts rather than serving as a second independent source of numerical
 truth.
-
-The same API accepts runtime `TensorView` objects or typed caller-owned
-storage through `TypedTensorView<T>`:
-
-```cpp
-#include <roc/host_validation/typed_comparison.hpp>
-
-TypedTensorView<ExternalHalf> observed(layout, observedStorage);
-TypedTensorView<ExternalHalf> expected(layout, expectedStorage);
-ComparisonResult report = compare(observed, expected, options);
-```
-
-The typed adapter is useful for product scalar wrappers and preserves a
-vectorizable hot path without placing numerical comparison code in the
-product. Pointwise-only comparison and pointwise special-value statistics stay
-caller-specialized because those full-output loops are performance-sensitive.
-Frobenius, ULP, and the remaining detailed programs enter the compiled engine
-through one pair loader. Caller-precision acceptance remains separate from
-double-normalized printable/statistical evidence, so requesting a report cannot
-change pass/fail. The typed adapter is not a second rank-specific tensor
-hierarchy, and it is deliberately not included by `validation.hpp`. hipBLASLt
-and TensileLite now retain only descriptor/type translation, host readback,
-option selection, and formatting/reporting.
 
 This ownership deliberately excludes hipBLASLt's runtime device
 `check_numerics_matrix` facility. That HIP kernel scans device memory for
@@ -350,9 +326,9 @@ validation and remains a separate product/GPU concern.
 The canonical reference-GEMM API is tensor-centric and runtime-typed:
 
 ```cpp
-GemmOperand a(TensorView);
-GemmOperand b(TensorView);
-GemmRequest request(a, b, cView, dView, ScalarType::Float32);
+GemmOperand a(aTensor);
+GemmOperand b(bTensor);
+GemmRequest request(a, b, cTensor, dTensor, ScalarType::Float32);
 
 request.a.computeType = ScalarType::Float8E4M3;  // optional MAC-input quantization
 request.accumulationRounding = AccumulationRounding::FullPrecision;
@@ -425,10 +401,11 @@ request.epilogue.alpha = 2.0
 result = hv.reference_gemm_result(request)
 ```
 
-The Python request retains owning tensors and allocates a fresh output using
+The Python request retains Tensors and allocates a fresh output using
 `output_type` and an optional affine `output_layout`. C may be omitted only
-when beta is exactly zero. C++ requests instead borrow caller-owned input and
-output views for the duration of the synchronous call. The flat Python
+when beta is exactly zero. C++ requests retain shallow Tensor handles, so
+inputs, outputs, aliases, and allocator-backed storage remain alive for the
+synchronous call. The flat Python
 `reference_gemm_result(a, b, c, ...)` overload remains as a compatibility
 wrapper while consumers migrate to the object API.
 
@@ -656,8 +633,8 @@ The NumPy suite independently checks:
 - finite low-precision round trips;
 - the OCP E8M0 no-zero contract;
 - affine layout decoding;
-- lifetime-safe read-only NumPy-backed tensor views, including gapped and
-  negative strides, mutation visibility, and owner retention;
+- owned NumPy conversions with gapped and negative affine strides, source-copy
+  independence, and explicit Tensor clone behavior;
 - deterministic generation, logical index ordering, complex component
   recipes, and structured comparison;
 - pointwise, selected, complex, non-finite, Frobenius, ULP, allclose-search,
@@ -672,12 +649,12 @@ The NumPy suite independently checks:
 - fixed/random N:M pruning, logical compression, packed-value preservation,
   and 2:4 metadata encoding against NumPy.
 
-`TensorView.from_numpy` borrows exact native NumPy bool, integer,
-FP16/FP32/FP64, and complex64/complex128 storage without copying. It retains
-the ndarray owner and normalizes signed strides into the component layout.
-Packed and decoded-only formats such as BF16, FP8, FP6, FP4, E8M0, E4M3, and
-E5M3 continue through the explicit owning/copying conversion path. Mutable
-NumPy-backed views are intentionally not exposed yet.
+`Tensor.from_numpy` copies exact native NumPy bool, integer, FP16/FP32/FP64,
+and complex64/complex128 storage into an owned Tensor while preserving the
+normalized affine shape, strides, and offset. The Tensor does not retain the
+ndarray owner and does not observe later ndarray mutations. Packed and
+decoded-only formats such as BF16, FP8, FP6, FP4, E8M0, E4M3, and E5M3
+continue through the explicit owning conversion path.
 
 ## Standalone tests
 

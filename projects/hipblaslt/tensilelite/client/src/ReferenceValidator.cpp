@@ -351,8 +351,7 @@ namespace TensileLite
                     m_cpuResultBuffer.get())
                     + elementsBeforeData * elementBytes,
                 allocatedBytes);
-            const TensorView resultView(
-                scalarType, layout, resultStorage);
+            const Tensor resultTensor(scalarType, layout, resultStorage);
 
             ComparisonOptions options
                 = validationComparisonOptions(tensor.dataType(), threshold);
@@ -438,13 +437,11 @@ namespace TensileLite
             if(boundsCheck == BoundsCheckMode::NaN
                && validationStride == 1)
             {
-                sentinel.append(
-                    checkUnusedTensorStorage(
-                        resultView,
-                        tensor.totalAllocatedElements(),
-                        SentinelRegion::Inside,
-                        options.maxReportedMismatches),
-                    options.maxReportedMismatches);
+                sentinel.append(checkUnusedTensorStorage(resultTensor,
+                                                         tensor.totalAllocatedElements(),
+                                                         SentinelRegion::Inside,
+                                                         options.maxReportedMismatches),
+                                options.maxReportedMismatches);
             }
             if(elementsAfterData != 0)
             {

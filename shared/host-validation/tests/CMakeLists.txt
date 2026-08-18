@@ -5,6 +5,9 @@ find_package(GTest 1.12.1 QUIET)
 if(NOT GTest_FOUND)
     if(HOST_VALIDATION_ENABLE_FETCH)
         include(FetchContent)
+        # GoogleTest is a test-only implementation detail. Its default install
+        # rules would otherwise contaminate the host-validation package.
+        set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(
             googletest
             URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
@@ -121,6 +124,10 @@ add_test(
         "-DPACKAGE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package"
         "-DPACKAGE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/amd-gpu-layout-package-test"
         "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DTEST_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+        "-DTEST_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
         "-DTEST_CONFIG=$<CONFIG>"
         "-DCTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_amd_gpu_layout_package_test.cmake"

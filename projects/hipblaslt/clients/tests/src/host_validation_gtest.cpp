@@ -1,12 +1,14 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <hipBuffer.hpp>
 #include <hipblaslt/host_validation/GroupedGemmDataInitialization.hpp>
 #include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
 #include <hipblaslt/host_validation/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_validation/HostComparison.hpp>
 #include <hipblaslt/host_validation/MatrixTransformReference.hpp>
 #include <hipblaslt/host_validation/hipblaslt_init.hpp>
+#include <hipblaslt/host_validation/near.hpp>
 
 #include <gtest/gtest.h>
 
@@ -20,13 +22,29 @@
 #include <span>
 #include <vector>
 
+TEST(HostValidationTensorStorage, PooledPinnedAllocatorBacksTensorAliases)
+{
+    using namespace roc::host_validation;
+
+    Tensor tensor(ScalarType::Float32, Shape{2}, HipHostBuffer::tensorAllocator());
+    tensor.storeFrom({1}, 7.0f);
+    Tensor alias = tensor;
+    EXPECT_EQ(alias.storage().data(), tensor.storage().data());
+    EXPECT_EQ(alias.loadAs<float>({1}), 7.0f);
+
+    Tensor clone = tensor.clone(HipHostBuffer::tensorAllocator());
+    EXPECT_NE(clone.storage().data(), tensor.storage().data());
+    clone.storeFrom({1}, 11.0f);
+    EXPECT_EQ(tensor.loadAs<float>({1}), 7.0f);
+    EXPECT_EQ(clone.loadAs<float>({1}), 11.0f);
+}
+
 TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues)
 {
     std::array<std::complex<float>, 4> values{};
-    hipblaslt::host_validation::initialize(
-        std::span<std::complex<float>>(values),
-        hipblaslt_initialization::trig_float,
-        roc::host_validation::GenerationPattern::Sine);
+    hipblaslt::host_validation::initialize(std::span<std::complex<float>>(values),
+                                           hipblaslt_initialization::trig_float,
+                                           roc::host_validation::GenerationPattern::Sine);
 
     for(size_t index = 0; index < values.size(); ++index)
     {
@@ -35,25 +53,24 @@ TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues
     }
 }
 
-TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreams)
+TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreamsAndDefaultSeed)
 {
     std::vector<float> a(5);
     std::vector<float> b(7);
     std::vector<float> c(4);
     std::vector<float> bias(3);
 
-    hipblaslt::host_validation::initializeGroupedGemm(
-        a,
-        static_cast<int64_t>(a.size()),
-        b,
-        static_cast<int64_t>(b.size()),
-        c,
-        static_cast<int64_t>(c.size()),
-        bias,
-        static_cast<int64_t>(bias.size()),
-        hipblaslt_initialization::rand_int);
+    hipblaslt::host_validation::initializeGroupedGemm(a,
+                                                      static_cast<int64_t>(a.size()),
+                                                      b,
+                                                      static_cast<int64_t>(b.size()),
+                                                      c,
+                                                      static_cast<int64_t>(c.size()),
+                                                      bias,
+                                                      static_cast<int64_t>(bias.size()),
+                                                      hipblaslt_initialization::rand_int);
 
-    constexpr uint64_t seed = 69069;
+    constexpr uint64_t seed = hipblaslt::host_validation::defaultInitializationSeed;
     for(size_t index = 0; index < a.size(); ++index)
         EXPECT_EQ(a[index], roc::host_validation::indexedUniformInteger(seed, 0, index, 1, 10));
     for(size_t index = 0; index < b.size(); ++index)
@@ -65,6 +82,79 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreams)
         EXPECT_EQ(c[index], roc::host_validation::indexedUniformInteger(seed, 2, index, 1, 10));
     for(size_t index = 0; index < bias.size(); ++index)
         EXPECT_EQ(bias[index], roc::host_validation::indexedUniformInteger(seed, 3, index, 1, 10));
+}
+
+TEST(HostValidationDataInitializationBridge, GroupedGemmPropagatesCallerSeed)
+{
+    std::vector<float> a(2);
+    std::vector<float> b(2);
+    std::vector<float> c(2);
+    std::vector<float> bias(2);
+    constexpr uint64_t seed = 0x123456789abcdef0ULL;
+
+    hipblaslt::host_validation::initializeGroupedGemm(a,
+                                                      static_cast<int64_t>(a.size()),
+                                                      b,
+                                                      static_cast<int64_t>(b.size()),
+                                                      c,
+                                                      static_cast<int64_t>(c.size()),
+                                                      bias,
+                                                      static_cast<int64_t>(bias.size()),
+                                                      hipblaslt_initialization::rand_int,
+                                                      seed);
+
+    for(size_t index = 0; index < a.size(); ++index)
+        EXPECT_EQ(a[index], roc::host_validation::indexedUniformInteger(seed, 0, index, 1, 10));
+    for(size_t index = 0; index < b.size(); ++index)
+    {
+        const int magnitude = roc::host_validation::indexedUniformInteger(seed, 1, index, 1, 10);
+        EXPECT_EQ(b[index], (index & 1U) == 0 ? -magnitude : magnitude);
+    }
+    for(size_t index = 0; index < c.size(); ++index)
+        EXPECT_EQ(c[index], roc::host_validation::indexedUniformInteger(seed, 2, index, 1, 10));
+    for(size_t index = 0; index < bias.size(); ++index)
+        EXPECT_EQ(bias[index], roc::host_validation::indexedUniformInteger(seed, 3, index, 1, 10));
+}
+
+TEST(HostValidationDataInitializationBridge, GroupedGemmDefinesHplAndLegacySpecialRecipes)
+{
+    std::vector<float> a(4);
+    std::vector<float> b(4);
+    std::vector<float> c(4);
+    std::vector<float> bias(4);
+
+    const auto initialize = [&](hipblaslt_initialization initialization) {
+        hipblaslt::host_validation::initializeGroupedGemm(a,
+                                                          static_cast<int64_t>(a.size()),
+                                                          b,
+                                                          static_cast<int64_t>(b.size()),
+                                                          c,
+                                                          static_cast<int64_t>(c.size()),
+                                                          bias,
+                                                          static_cast<int64_t>(bias.size()),
+                                                          initialization);
+    };
+    const auto expectHplRange = [](const auto& values) {
+        for(const float value : values)
+        {
+            EXPECT_GE(value, -0.5f);
+            EXPECT_LE(value, 0.5f);
+        }
+    };
+
+    initialize(hipblaslt_initialization::hpl);
+    expectHplRange(a);
+    expectHplRange(b);
+    expectHplRange(c);
+    expectHplRange(bias);
+
+    initialize(hipblaslt_initialization::special);
+    for(const float value : a)
+        EXPECT_EQ(value, 65280.0f);
+    for(const float value : b)
+        EXPECT_EQ(value, 0.0000607967376708984375f);
+    expectHplRange(c);
+    expectHplRange(bias);
 }
 
 TEST(HostValidationMatrixTransformBridge, MapsLayoutsAndTransposes)
@@ -114,16 +204,15 @@ TEST(HostValidationMatrixTransformBridge, MapsLayoutsAndTransposes)
     arguments.alpha                  = 2.0;
     arguments.beta                   = -1.0;
 
-    const auto result
-        = hipblaslt::host_validation::referenceMatrixTransform(arguments);
+    const auto result = hipblaslt::host_validation::referenceMatrixTransform(arguments);
     EXPECT_EQ(result.runInfo.elementsComputed, rows * columns * batches);
     EXPECT_TRUE(result.comparison.passed());
 }
 
 TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
 {
-    const std::array<float, 4> expected{1.0f, 2.0f, 3.0f, 4.0f};
-    const std::array<float, 4> observed{1.0f, 2.00009f, 3.0f, 4.0f};
+    const std::array<float, 4>                        expected{1.0f, 2.0f, 3.0f, 4.0f};
+    const std::array<float, 4>                        observed{1.0f, 2.00009f, 3.0f, 4.0f};
     hipblaslt::host_validation::HostComparisonRequest request;
     request.rows                  = 2;
     request.columns               = 1;
@@ -143,8 +232,8 @@ TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
 
 TEST(HostValidationComparisonBridge, ComputesRelativeFrobeniusEvidence)
 {
-    std::array<double, 2>                                          expected{3.0, 4.0};
-    std::array<double, 2>                                          observed{0.0, 4.0};
+    std::array<double, 2>                             expected{3.0, 4.0};
+    std::array<double, 2>                             observed{0.0, 4.0};
     hipblaslt::host_validation::HostComparisonRequest request;
     request.rows                          = 2;
     request.columns                       = 1;
@@ -155,8 +244,7 @@ TEST(HostValidationComparisonBridge, ComputesRelativeFrobeniusEvidence)
     request.observed                      = observed.data();
     request.type                          = HIP_R_64F;
     request.computeRelativeFrobeniusError = true;
-    EXPECT_DOUBLE_EQ(
-        hipblaslt::host_validation::compareHost(request).relativeFrobeniusError, 0.6);
+    EXPECT_DOUBLE_EQ(hipblaslt::host_validation::compareHost(request).relativeFrobeniusError, 0.6);
 }
 
 TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
@@ -178,15 +266,13 @@ TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
     request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Unit;
     EXPECT_TRUE(hipblaslt::host_validation::compareHost(request).comparison.passed());
 
-    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Near;
+    request.pointwise         = hipblaslt::host_validation::HostPointwiseComparison::Near;
     request.absoluteTolerance = 1e-6;
     EXPECT_TRUE(hipblaslt::host_validation::compareHost(request).comparison.passed());
 
     request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Disabled;
     request.requireSpecialValueConsistency = true;
-    EXPECT_EQ(hipblaslt::host_validation::compareHost(request)
-                  .comparison.nonFiniteMismatches,
-              0);
+    EXPECT_EQ(hipblaslt::host_validation::compareHost(request).comparison.nonFiniteMismatches, 0);
 }
 
 TEST(HostValidationComparisonBridge, RunsTheCombinedHostComparisonProgram)
@@ -204,7 +290,7 @@ TEST(HostValidationComparisonBridge, RunsTheCombinedHostComparisonProgram)
     request.expected         = expected.data();
     request.observed         = observed.data();
     request.type             = HIP_R_32F;
-    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Unit;
+    request.pointwise        = hipblaslt::host_validation::HostPointwiseComparison::Unit;
     request.requireSpecialValueConsistency = true;
     request.computeRelativeFrobeniusError  = true;
     request.findAllCloseTolerance          = true;
@@ -236,7 +322,7 @@ TEST(HostValidationComparisonBridge, KeepsReportedUlpNonFinitePolicySeparate)
     request.expected         = &nan;
     request.observed         = &nan;
     request.type             = HIP_R_32F;
-    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Unit;
+    request.pointwise        = hipblaslt::host_validation::HostPointwiseComparison::Unit;
     request.requireSpecialValueConsistency = true;
     request.computeUnitsInLastPlace        = true;
 
@@ -258,6 +344,14 @@ TEST(HostValidationComparisonBridge, EmptyPointwiseRequestsStillValidateTheProdu
     request.pointwise                     = HostPointwiseComparison::Disabled;
     request.computeRelativeFrobeniusError = true;
     EXPECT_NO_THROW(compareHost(request));
+}
+
+TEST(HostValidationTolerancePolicy, Gfx11UsesComputeTypeEpsilon)
+{
+    EXPECT_DOUBLE_EQ(sum_error_tolerance_for_compute_type(HIP_R_32F),
+                     std::numeric_limits<float>::epsilon());
+    EXPECT_DOUBLE_EQ(sum_error_tolerance_for_compute_type(HIP_R_16F),
+                     std::numeric_limits<hipblasLtHalf>::epsilon());
 }
 
 TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
@@ -296,16 +390,13 @@ TEST(HostValidationDataInitializationBridge, DeviceNormalGenerationIsRepeatable)
 
     std::array<float, elements> first{};
     std::array<float, elements> second{};
-    EXPECT_EQ(hipMemcpy(first.data(),
-                        firstDevice,
-                        first.size() * sizeof(float),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
-    EXPECT_EQ(hipMemcpy(second.data(),
-                        secondDevice,
-                        second.size() * sizeof(float),
-                        hipMemcpyDeviceToHost),
-              hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(first.data(), firstDevice, first.size() * sizeof(float), hipMemcpyDeviceToHost),
+        hipSuccess);
+    EXPECT_EQ(
+        hipMemcpy(
+            second.data(), secondDevice, second.size() * sizeof(float), hipMemcpyDeviceToHost),
+        hipSuccess);
     EXPECT_EQ(first, second);
 
     EXPECT_EQ(hipFree(firstDevice), hipSuccess);
@@ -353,8 +444,7 @@ TEST(HostValidationDataInitializationBridge, LegacyRandomHelpersUseComponentReci
     {
         EXPECT_GE(values[index], 0.1f);
         EXPECT_LE(values[index], 1.0f);
-        EXPECT_FLOAT_EQ(values[index] * 10,
-                        std::round(values[index] * 10));
+        EXPECT_FLOAT_EQ(values[index] * 10, std::round(values[index] * 10));
     }
     EXPECT_EQ(values[2], -99);
 
@@ -403,80 +493,62 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
     using namespace hipblaslt::host_validation;
 
     MatrixStorageInitialization exact;
-    exact.role             = MatrixRole::B;
-    exact.initialization   = hipblaslt_initialization::integer_exact;
-    exact.type             = HIP_R_32F;
-    exact.rows             = 2;
-    exact.columns          = 3;
-    exact.leadingDimension = 4;
-    exact.batchStride      = 12;
-    exact.batchCount       = 2;
+    exact.role                          = MatrixRole::B;
+    exact.initialization                = hipblaslt_initialization::integer_exact;
+    exact.type                          = HIP_R_32F;
+    exact.rows                          = 2;
+    exact.columns                       = 3;
+    exact.leadingDimension              = 4;
+    exact.batchStride                   = 12;
+    exact.batchCount                    = 2;
     std::vector<std::byte> exactStorage = generateMatrixStorage(exact);
-    TensorView exactView(
-        ScalarType::Float32,
-        Layout(Shape{2, 3, 2}, {1, 4, 12}),
-        exactStorage);
+    Tensor exactView(ScalarType::Float32, Layout(Shape{2, 3, 2}, {1, 4, 12}), exactStorage);
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 0; row < 2; ++row)
             {
-                const float value
-                    = exactView.loadAs<float>({row, column, batch});
+                const float value = exactView.loadAs<float>({row, column, batch});
                 EXPECT_EQ(value, std::trunc(value));
                 EXPECT_LE(std::abs(value), 2);
                 if(value != 0)
                     EXPECT_EQ(value > 0, ((row ^ column) & 1U) != 0);
             }
-    TensorView exactAllocation(
-        ScalarType::Float32,
-        Layout(Shape{4, 3, 2}, {1, 4, 12}),
-        exactStorage);
+    Tensor exactAllocation(ScalarType::Float32, Layout(Shape{4, 3, 2}, {1, 4, 12}), exactStorage);
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 2; row < 4; ++row)
-                EXPECT_EQ(
-                    exactAllocation.loadAs<float>({row, column, batch}), 0);
+                EXPECT_EQ(exactAllocation.loadAs<float>({row, column, batch}), 0);
 
     MatrixStorageInitialization probe;
-    probe.role             = MatrixRole::B;
-    probe.initialization   = hipblaslt_initialization::fp16_accumulator_probe;
-    probe.type             = HIP_R_16F;
-    probe.rows             = 4;
-    probe.columns          = 2;
-    probe.leadingDimension = 4;
+    probe.role                          = MatrixRole::B;
+    probe.initialization                = hipblaslt_initialization::fp16_accumulator_probe;
+    probe.type                          = HIP_R_16F;
+    probe.rows                          = 4;
+    probe.columns                       = 2;
+    probe.leadingDimension              = 4;
     std::vector<std::byte> probeStorage = generateMatrixStorage(probe);
-    TensorView probeView(
-        ScalarType::Float16,
-        Layout(Shape{4, 2, 1}, {1, 4, 0}),
-        probeStorage);
+    Tensor probeView(ScalarType::Float16, Layout(Shape{4, 2, 1}, {1, 4, 0}), probeStorage);
     for(size_t column = 0; column < 2; ++column)
         for(size_t row = 0; row < 4; ++row)
-            EXPECT_EQ(probeView.loadAs<float>({row, column, 0}),
-                      row % 2 == 0 ? 2 : -2);
+            EXPECT_EQ(probeView.loadAs<float>({row, column, 0}), row % 2 == 0 ? 2 : -2);
 
     MatrixStorageInitialization oneSpecial;
-    oneSpecial.role             = MatrixRole::A;
-    oneSpecial.initialization
-        = hipblaslt_initialization::norm_dist_one_special;
-    oneSpecial.specialValueType = 0;
-    oneSpecial.type             = HIP_R_32F;
-    oneSpecial.rows             = 4;
-    oneSpecial.columns          = 3;
-    oneSpecial.leadingDimension = 4;
-    oneSpecial.batchStride      = 12;
-    oneSpecial.batchCount       = 2;
-    std::vector<std::byte> specialStorage
-        = generateMatrixStorage(oneSpecial);
-    TensorView specialView(
-        ScalarType::Float32,
-        Layout(Shape{4, 3, 2}, {1, 4, 12}),
-        specialStorage);
+    oneSpecial.role                       = MatrixRole::A;
+    oneSpecial.initialization             = hipblaslt_initialization::norm_dist_one_special;
+    oneSpecial.specialValueType           = 0;
+    oneSpecial.type                       = HIP_R_32F;
+    oneSpecial.rows                       = 4;
+    oneSpecial.columns                    = 3;
+    oneSpecial.leadingDimension           = 4;
+    oneSpecial.batchStride                = 12;
+    oneSpecial.batchCount                 = 2;
+    std::vector<std::byte> specialStorage = generateMatrixStorage(oneSpecial);
+    Tensor specialView(ScalarType::Float32, Layout(Shape{4, 3, 2}, {1, 4, 12}), specialStorage);
     size_t infinityCount = 0;
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 0; row < 4; ++row)
-                infinityCount += std::isinf(
-                    specialView.loadAs<float>({row, column, batch}));
+                infinityCount += std::isinf(specialView.loadAs<float>({row, column, batch}));
     EXPECT_EQ(infinityCount, 1);
 }
 
@@ -485,16 +557,15 @@ TEST(HostValidationDataInitializationBridge, HostSideDeviceFillCopiesComponentSt
     using namespace hipblaslt::host_validation;
 
     MatrixStorageInitialization initialization;
-    initialization.role             = MatrixRole::B;
-    initialization.initialization   = hipblaslt_initialization::integer_exact;
-    initialization.type             = HIP_R_32F;
-    initialization.rows             = 2;
-    initialization.columns          = 3;
-    initialization.leadingDimension = 4;
-    initialization.batchStride      = 12;
-    initialization.batchCount       = 2;
-    const std::vector<std::byte> expected
-        = generateMatrixStorage(initialization);
+    initialization.role                   = MatrixRole::B;
+    initialization.initialization         = hipblaslt_initialization::integer_exact;
+    initialization.type                   = HIP_R_32F;
+    initialization.rows                   = 2;
+    initialization.columns                = 3;
+    initialization.leadingDimension       = 4;
+    initialization.batchStride            = 12;
+    initialization.batchCount             = 2;
+    const std::vector<std::byte> expected = generateMatrixStorage(initialization);
 
     void* device = nullptr;
     ASSERT_EQ(hipMalloc(&device, expected.size()), hipSuccess);
@@ -521,10 +592,7 @@ TEST(HostValidationDataInitializationBridge, HostSideDeviceFillCopiesComponentSt
                           initialization.batchStride,
                           initialization.batchCount);
     std::vector<std::byte> observed(expected.size());
-    EXPECT_EQ(hipMemcpy(observed.data(),
-                        device,
-                        observed.size(),
-                        hipMemcpyDeviceToHost),
+    EXPECT_EQ(hipMemcpy(observed.data(), device, observed.size(), hipMemcpyDeviceToHost),
               hipSuccess);
     EXPECT_EQ(observed, expected);
     EXPECT_EQ(hipFree(device), hipSuccess);
@@ -653,15 +721,14 @@ TEST(HostValidationCblasBridge, QuantizesCombinedOperandScaleAndAlphaVector)
                                     HIP_R_8F_E4M3,
                                     HIP_R_32F);
 
-    const float expected =
-        static_cast<float>(hipblaslt_f8(a[0] * scaleA[0] * alphaVector[0]));
+    const float expected = static_cast<float>(hipblaslt_f8(a[0] * scaleA[0] * alphaVector[0]));
     EXPECT_FLOAT_EQ(d[0], expected);
 }
 
 TEST(HostValidationCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
 {
-    const std::array<float, 1> a{0.3333f};
-    const std::array<float, 1> b{3.0f};
+    const std::array<float, 1>   a{0.3333f};
+    const std::array<float, 1>   b{3.0f};
     std::array<hipblasLtHalf, 1> d{hipblasLtHalf(0.0f)};
 
     hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
@@ -699,8 +766,8 @@ TEST(HostValidationCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
 
 TEST(HostValidationCblasBridge, ConvertsFnuzOutputWithComponentCodec)
 {
-    const std::array<float, 1> a{1.3f};
-    const std::array<float, 1> b{1.0f};
+    const std::array<float, 1>       a{1.3f};
+    const std::array<float, 1>       b{1.0f};
     std::array<hipblaslt_f8_fnuz, 1> d{hipblaslt_f8_fnuz(0.0f)};
 
     hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
@@ -775,9 +842,9 @@ TEST(HostValidationCblasBridge, SaturatesRoundedInt8Output)
 
 TEST(HostValidationCblasBridge, ZeroScalarsSuppressNonFiniteInputs)
 {
-    const float nan      = std::numeric_limits<float>::quiet_NaN();
-    const float infinity = std::numeric_limits<float>::infinity();
-    const float finiteC  = 3.0f;
+    const float          nan      = std::numeric_limits<float>::quiet_NaN();
+    const float          infinity = std::numeric_limits<float>::infinity();
+    const float          finiteC  = 3.0f;
     std::array<float, 1> output{};
 
     hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
@@ -926,38 +993,37 @@ TEST(HostValidationCblasBridge, TransposedPaddedScaleUsesLogicalRows)
 TEST(HostValidationCblasBridge, PackedFloat4InputUsesLogicalElementLayout)
 {
     const std::array<hipblaslt_f4x2, 1> a{hipblaslt_f4x2(1.0f, 2.0f)};
-    const std::array<float, 2>           b{3.0f, 4.0f};
-    std::array<float, 1>                 d{};
+    const std::array<float, 2>          b{3.0f, 4.0f};
+    std::array<float, 1>                d{};
 
-    hipblaslt_reference_gemm<float>(
-        HIPBLAS_OP_N,
-        HIPBLAS_OP_N,
-        1,
-        1,
-        2,
-        1.0f,
-        a.data(),
-        1,
-        b.data(),
-        2,
-        0.0f,
-        d.data(),
-        1,
-        d.data(),
-        1,
-        nullptr,
-        nullptr,
-        nullptr,
-        1.0f,
-        false,
-        false,
-        static_cast<hipDataType>(HIP_R_4F_E2M1),
-        HIP_R_32F,
-        HIP_R_32F,
-        HIP_R_32F,
-        HIP_R_32F,
-        static_cast<hipDataType>(HIP_R_4F_E2M1),
-        HIP_R_32F);
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    2,
+                                    1.0f,
+                                    a.data(),
+                                    1,
+                                    b.data(),
+                                    2,
+                                    0.0f,
+                                    d.data(),
+                                    1,
+                                    d.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                    HIP_R_32F);
 
     EXPECT_FLOAT_EQ(d[0], 11.0f);
 }

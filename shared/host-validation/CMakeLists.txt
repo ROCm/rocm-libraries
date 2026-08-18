@@ -36,6 +36,7 @@ option(HOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP
        "Use OpenMP for large AMD GPU physical-layout transforms when available."
        ON)
 
+# Install one public target and its component-specific export file.
 function(
     roc_host_validation_install_component_target
     target_name
@@ -63,7 +64,9 @@ endfunction()
 add_library(host-validation-core INTERFACE)
 add_library(roc::host-validation-core ALIAS host-validation-core)
 
-add_library(host-validation-amd-gpu-layout INTERFACE)
+add_library(host-validation-amd-gpu-layout STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
+)
 add_library(
     roc::host-validation-amd-gpu-layout
     ALIAS host-validation-amd-gpu-layout
@@ -101,14 +104,14 @@ target_sources(host-validation-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/tensor.hpp"
 )
 
-target_compile_features(host-validation-amd-gpu-layout INTERFACE cxx_std_17)
+target_compile_features(host-validation-amd-gpu-layout PUBLIC cxx_std_17)
 target_include_directories(host-validation-amd-gpu-layout
-    INTERFACE
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_sources(host-validation-amd-gpu-layout
-    INTERFACE
+    PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
@@ -116,14 +119,17 @@ target_sources(host-validation-amd-gpu-layout
 )
 set_target_properties(host-validation-amd-gpu-layout
     PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
         VERIFY_INTERFACE_HEADER_SETS ON
+        VISIBILITY_INLINES_HIDDEN ON
 )
 if(HOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP)
     find_package(OpenMP QUIET COMPONENTS CXX)
     if(OpenMP_CXX_FOUND)
         target_link_libraries(
             host-validation-amd-gpu-layout
-            INTERFACE
+            PRIVATE
                 OpenMP::OpenMP_CXX
         )
         set_property(
@@ -168,7 +174,6 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/softmax.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/structured_sparsity.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/typed_comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
 set_target_properties(host-validation
@@ -321,6 +326,8 @@ if(HOST_VALIDATION_BUILD_TESTING)
             "-DTEST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
             "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
             "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+            "-DTEST_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DTEST_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
             "-DTEST_CONFIG=$<CONFIG>"
             "-DCTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package/run_package_component_tests.cmake"

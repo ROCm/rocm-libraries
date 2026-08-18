@@ -39,6 +39,7 @@
 #include <roc/host_validation/generation.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -124,25 +125,22 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         roc::host_validation::GenerationOptions ones;
         ones.real.pattern    = roc::host_validation::GenerationPattern::Constant;
         ones.real.parameter0 = 1.0;
-        roc::host_validation::generate(roc::host_validation::MutableTensorView::fromNative<float>(
-                                           roc::host_validation::Layout::contiguous(
-                                               roc::host_validation::Shape{A_clean.size()}),
-                                           std::span<float>(A_clean)),
-                                       ones);
-        roc::host_validation::generate(
-            roc::host_validation::MutableTensorView::fromNative<float>(
-                roc::host_validation::Layout::contiguous(roc::host_validation::Shape{B_h.size()}),
-                std::span<float>(B_h)),
+        roc::host_validation::Tensor cleanTensor = roc::host_validation::generate(
+            roc::host_validation::ScalarType::Float32,
+            roc::host_validation::Shape{A_clean.size()},
             ones);
+        std::memcpy(A_clean.data(), cleanTensor.storage().data(), cleanTensor.storage().size());
+        roc::host_validation::Tensor bTensor = roc::host_validation::generate(
+            roc::host_validation::ScalarType::Float32,
+            roc::host_validation::Shape{B_h.size()},
+            ones);
+        std::memcpy(B_h.data(), bTensor.storage().data(), bTensor.storage().size());
         std::vector<float>                      A_dirty = A_clean;
         roc::host_validation::GenerationOptions nan;
         nan.real.pattern = roc::host_validation::GenerationPattern::TypeNaN;
-        roc::host_validation::generateAt(roc::host_validation::MutableTensorView::fromNative<float>(
-                                             roc::host_validation::Layout::contiguous(
-                                                 roc::host_validation::Shape{A_dirty.size()}),
-                                             std::span<float>(A_dirty)),
-                                         0,
-                                         nan);
+        roc::host_validation::Tensor dirtyTensor = cleanTensor.clone();
+        roc::host_validation::generateAt(dirtyTensor, 0, nan);
+        std::memcpy(A_dirty.data(), dirtyTensor.storage().data(), dirtyTensor.storage().size());
 
         float *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr;
         CHECK_HIP_ERROR(hipMalloc(&dA, sizeof(float) * M * K));

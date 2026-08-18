@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <roc/host_validation/validation.hpp>
 #include <span>
@@ -104,16 +105,20 @@ int main(int argc, char** argv) {
     StructuredSparsityPattern pattern;
     pattern.axis = 1;
     pattern.fixedPositions = {0, 1};
-    StructuredSparsityProblem problem(
-        TensorView::fromNative<float>(inputLayout, std::span<const float>(pruned)),
-        MutableTensorView::fromNative<float>(inputLayout, std::span<float>(pruned)),
-        MutableTensorView::fromNative<float>(compressedLayout, std::span<float>(compressed)),
-        pattern);
-    problem.twoOfFourMetadata =
-        MutableTensorView::fromNative<uint8_t>(metadataLayout, std::span<uint8_t>(metadata));
+    Tensor prunedTensor = Tensor::fromNative<float>(inputLayout, std::span<const float>(pruned));
+    Tensor compressedTensor =
+        Tensor::fromNative<float>(compressedLayout, std::span<const float>(compressed));
+    Tensor metadataTensor =
+        Tensor::fromNative<uint8_t>(metadataLayout, std::span<const uint8_t>(metadata));
+    StructuredSparsityProblem problem(prunedTensor, prunedTensor, compressedTensor, pattern);
+    problem.twoOfFourMetadata = metadataTensor;
 
     const double componentMilliseconds =
         milliseconds([&] { applyParallel(problem, rows); }, iterations);
+    std::memcpy(pruned.data(), prunedTensor.storage().data(), prunedTensor.storage().size());
+    std::memcpy(compressed.data(), compressedTensor.storage().data(),
+                compressedTensor.storage().size());
+    std::memcpy(metadata.data(), metadataTensor.storage().data(), metadataTensor.storage().size());
 
     std::vector<float> legacyPruned = input;
     std::vector<float> legacyCompressed(rows * columns / 2);

@@ -132,15 +132,15 @@ namespace TensileLite
                    && adapter.operationAccumulatorType() != request.accumulatorType)
                     return false;
 
-                request.accumulatorType = adapter.operationAccumulatorType();
-                request.mathMode  = request.accumulatorType == ScalarType::Float32
-                                            && problem.f32XdlMathOp() == rocisa::DataType::XFloat32
-                                        ? MathMode::XFloat32
-                                        : MathMode::Default;
-                GemmResult result = referenceGemm(request,
-                                                  {
-                                                      .backend = GemmBackend::Canonical,
-                                                      .requireRequestedBackend = true,
+                request.accumulatorType       = adapter.operationAccumulatorType();
+                request.mathMode              = request.accumulatorType == ScalarType::Float32
+                                           && problem.f32XdlMathOp() == rocisa::DataType::XFloat32
+                                                    ? MathMode::XFloat32
+                                                    : MathMode::Default;
+                GemmResult result             = referenceGemm(request,
+                                                              {
+                                                                  .backend = GemmBackend::Canonical,
+                                                                  .requireRequestedBackend = true,
                                                   });
                 result.runInfo.fallbackReason = support.reason;
                 recorder.record(result.runInfo);
@@ -188,6 +188,7 @@ namespace TensileLite
                     referenceEpilogue(*translated.epilogue);
                 if(translated.biasReduction)
                     referenceSum(*translated.biasReduction);
+                translated.copyOutputs();
             }
             return true;
         }

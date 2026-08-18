@@ -5,6 +5,7 @@
 #include <hipblaslt/host_validation/Types.hpp>
 
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -48,13 +49,15 @@ namespace hipblaslt::host_validation
         const Layout outputLayout(Shape{static_cast<size_t>(arguments.rows)},
                                   {static_cast<ptrdiff_t>(arguments.outputStride)});
 
-        return roc::host_validation::referenceSum(ReductionProblem(
-            TensorView(
-                inputType, inputLayout, constStorage(arguments.input, inputType, inputLayout)),
-            MutableTensorView(outputType,
-                              outputLayout,
-                              mutableStorage(arguments.output, outputType, outputLayout)),
+        Tensor output(
+            outputType, outputLayout, mutableStorage(arguments.output, outputType, outputLayout));
+        const ReductionRunInfo run = roc::host_validation::referenceSum(ReductionProblem(
+            Tensor(inputType, inputLayout, constStorage(arguments.input, inputType, inputLayout)),
+            output,
             accumulatorType,
             {1}));
+        if(!output.storage().empty())
+            std::memcpy(arguments.output, output.storage().data(), output.storage().size());
+        return run;
     }
 } // namespace hipblaslt::host_validation

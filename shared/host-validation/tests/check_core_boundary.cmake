@@ -19,6 +19,10 @@ foreach(
         rocisa
         BLAS
         GTest
+        TensorView
+        MutableTensorView
+        TypedTensorView
+        fromExternal
 )
     string(FIND "${core_contents}" "${forbidden}" position)
     if(NOT position EQUAL -1)

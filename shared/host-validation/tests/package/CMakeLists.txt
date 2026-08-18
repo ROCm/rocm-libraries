@@ -28,13 +28,6 @@ add_test(
     COMMAND host-validation-comparison-package-test
 )
 
-add_executable(host-validation-typed-comparison-package-test typed_comparison.cpp)
-target_link_libraries(host-validation-typed-comparison-package-test PRIVATE roc::host-validation)
-add_test(
-    NAME host-validation-typed-comparison-package-consumer
-    COMMAND host-validation-typed-comparison-package-test
-)
-
 add_executable(host-validation-tiled-package-test tiled.cpp)
 target_link_libraries(host-validation-tiled-package-test PRIVATE roc::host-validation-tiled)
 add_test(

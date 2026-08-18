@@ -162,7 +162,7 @@ Value loadTensorValue(std::span<const std::byte> storage, ptrdiff_t logicalOffse
 }
 
 template <typename Value>
-void appendTensorValues(nb::list& result, TensorView tensor) {
+void appendTensorValues(nb::list& result, Tensor tensor) {
     using LoadFunction = Value (*)(std::span<const std::byte>, ptrdiff_t);
     const LoadFunction load = visitScalarType(
         tensor.type(), []<typename Tag>() -> LoadFunction { return &loadTensorValue<Value, Tag>; });
@@ -173,7 +173,7 @@ void appendTensorValues(nb::list& result, TensorView tensor) {
     });
 }
 
-nb::list tensorValues(TensorView tensor) {
+nb::list tensorValues(Tensor tensor) {
     nb::list result;
     const ScalarCategory category = scalarTypeInfo(tensor.type()).category;
     switch (category) {
@@ -195,10 +195,6 @@ nb::list tensorValues(TensorView tensor) {
             break;
     }
     return result;
-}
-
-nb::list tensorValues(const Tensor& tensor) {
-    return tensorValues(tensor.view());
 }
 
 struct NumpyStorageType {
@@ -231,7 +227,7 @@ class ReadOnlyPythonBuffer {
 NumpyStorageType numpyStorageType(nb::handle array) {
     const nb::object dtype = array.attr("dtype");
     if (!nb::cast<bool>(dtype.attr("isnative")))
-        throw nb::type_error("TensorView.from_numpy requires a native-endian NumPy dtype.");
+        throw nb::type_error("Tensor.from_numpy requires a native-endian NumPy dtype.");
 
     const std::string kind = nb::cast<std::string>(dtype.attr("kind"));
     const size_t itemSize = nb::cast<size_t>(dtype.attr("itemsize"));
@@ -265,23 +261,23 @@ NumpyStorageType numpyStorageType(nb::handle array) {
     }
 
     throw nb::type_error(
-        "TensorView.from_numpy supports only exact native NumPy bool, integer, "
+        "Tensor.from_numpy supports only exact native NumPy bool, integer, "
         "float16/32/64, and complex64/128 storage dtypes.");
 }
 
 ptrdiff_t checkedElementDelta(ptrdiff_t stride, size_t elementCount) {
     if (stride == 0 || elementCount == 0) return 0;
     if (!std::in_range<ptrdiff_t>(elementCount))
-        throw std::overflow_error("NumPy TensorView stride extent exceeds ptrdiff_t.");
+        throw std::overflow_error("NumPy Tensor stride extent exceeds ptrdiff_t.");
 
     const ptrdiff_t signedElementCount = static_cast<ptrdiff_t>(elementCount);
     if (stride > 0) {
         if (signedElementCount > std::numeric_limits<ptrdiff_t>::max() / stride)
-            throw std::overflow_error("NumPy TensorView stride extent overflow.");
+            throw std::overflow_error("NumPy Tensor stride extent overflow.");
     } else if (stride == -1) {
         return -signedElementCount;
     } else if (signedElementCount > std::numeric_limits<ptrdiff_t>::min() / stride) {
-        throw std::overflow_error("NumPy TensorView stride extent overflow.");
+        throw std::overflow_error("NumPy Tensor stride extent overflow.");
     }
     return stride * signedElementCount;
 }
@@ -289,35 +285,35 @@ ptrdiff_t checkedElementDelta(ptrdiff_t stride, size_t elementCount) {
 ptrdiff_t checkedElementOffsetAdd(ptrdiff_t left, ptrdiff_t right) {
     if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
         (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
-        throw std::overflow_error("NumPy TensorView element offset overflow.");
+        throw std::overflow_error("NumPy Tensor element offset overflow.");
     return left + right;
 }
 
 size_t checkedStorageBytes(size_t elementCount, size_t itemSize) {
     if (itemSize != 0 && elementCount > std::numeric_limits<size_t>::max() / itemSize)
-        throw std::overflow_error("NumPy TensorView storage byte count overflow.");
+        throw std::overflow_error("NumPy Tensor storage byte count overflow.");
     return elementCount * itemSize;
 }
 
-TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> requestedType) {
+Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType) {
     const nb::object numpyArrayType = nb::module_::import_("numpy").attr("ndarray");
     if (!nb::isinstance(array, numpyArrayType))
-        throw nb::type_error("TensorView.from_numpy requires a NumPy ndarray.");
+        throw nb::type_error("Tensor.from_numpy requires a NumPy ndarray.");
 
     const NumpyStorageType storageType = numpyStorageType(array);
     if (requestedType && *requestedType != storageType.type)
         throw std::invalid_argument(
-            "TensorView.from_numpy scalar_type must exactly match the NumPy storage dtype.");
+            "Tensor.from_numpy scalar_type must exactly match the NumPy storage dtype.");
     const ScalarType type = requestedType.value_or(storageType.type);
 
     const ReadOnlyPythonBuffer buffer(array);
     const Py_buffer& view = buffer.view();
     if (view.ndim < 0 || (view.ndim > 0 && (!view.shape || !view.strides)))
-        throw std::invalid_argument("NumPy TensorView buffer geometry is invalid.");
+        throw std::invalid_argument("NumPy Tensor buffer geometry is invalid.");
     if (view.itemsize <= 0 || static_cast<size_t>(view.itemsize) != storageType.itemSize)
-        throw std::invalid_argument("NumPy TensorView buffer item size does not match its dtype.");
+        throw std::invalid_argument("NumPy Tensor buffer item size does not match its dtype.");
     if (!std::in_range<ptrdiff_t>(storageType.itemSize))
-        throw std::overflow_error("NumPy TensorView item size exceeds ptrdiff_t.");
+        throw std::overflow_error("NumPy Tensor item size exceeds ptrdiff_t.");
     const ptrdiff_t signedItemSize = static_cast<ptrdiff_t>(storageType.itemSize);
 
     std::vector<size_t> tensorDimensions;
@@ -327,14 +323,14 @@ TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> reque
     bool empty = false;
     for (Py_ssize_t dimension = 0; dimension < view.ndim; ++dimension) {
         if (view.shape[dimension] < 0)
-            throw std::invalid_argument("NumPy TensorView extent is negative.");
+            throw std::invalid_argument("NumPy Tensor extent is negative.");
         if (!std::in_range<ptrdiff_t>(view.strides[dimension]))
-            throw std::overflow_error("NumPy TensorView byte stride exceeds ptrdiff_t.");
+            throw std::overflow_error("NumPy Tensor byte stride exceeds ptrdiff_t.");
         const size_t extent = static_cast<size_t>(view.shape[dimension]);
         const ptrdiff_t byteStride = static_cast<ptrdiff_t>(view.strides[dimension]);
         if (byteStride % signedItemSize != 0)
             throw std::invalid_argument(
-                "NumPy TensorView byte strides must be exact multiples of item size.");
+                "NumPy Tensor byte strides must be exact multiples of item size.");
         tensorDimensions.push_back(extent);
         tensorStrides.push_back(byteStride / signedItemSize);
         empty = empty || extent == 0;
@@ -342,12 +338,10 @@ TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> reque
 
     Shape shape(std::move(tensorDimensions));
     if (empty) {
-        return TensorView(
-            type, Layout(std::move(shape), std::move(tensorStrides)),
-            std::span<const std::byte>(reinterpret_cast<const std::byte*>(view.buf), 0));
+        return Tensor(type, Layout(std::move(shape), std::move(tensorStrides)),
+                      std::span<const std::byte>(reinterpret_cast<const std::byte*>(view.buf), 0));
     }
-    if (!view.buf)
-        throw std::invalid_argument("Nonempty NumPy TensorView has a null data pointer.");
+    if (!view.buf) throw std::invalid_argument("Nonempty NumPy Tensor has a null data pointer.");
 
     ptrdiff_t lowerOffset = 0;
     ptrdiff_t upperOffset = 0;
@@ -360,29 +354,29 @@ TensorView tensorViewFromNumpy(nb::object array, std::optional<ScalarType> reque
     }
 
     if (lowerOffset == std::numeric_limits<ptrdiff_t>::min())
-        throw std::overflow_error("NumPy TensorView base offset overflow.");
+        throw std::overflow_error("NumPy Tensor base offset overflow.");
     const ptrdiff_t normalizedOffset = -lowerOffset;
     const ptrdiff_t normalizedUpper = checkedElementOffsetAdd(upperOffset, normalizedOffset);
     if (!std::in_range<size_t>(normalizedOffset) || !std::in_range<size_t>(normalizedUpper))
-        throw std::overflow_error("NumPy TensorView addressed range exceeds size_t.");
+        throw std::overflow_error("NumPy Tensor addressed range exceeds size_t.");
 
     const size_t prefixBytes =
         checkedStorageBytes(static_cast<size_t>(normalizedOffset), storageType.itemSize);
     const size_t normalizedUpperSize = static_cast<size_t>(normalizedUpper);
     if (normalizedUpperSize == std::numeric_limits<size_t>::max())
-        throw std::overflow_error("NumPy TensorView addressed range overflow.");
+        throw std::overflow_error("NumPy Tensor addressed range overflow.");
     const size_t storageBytes = checkedStorageBytes(normalizedUpperSize + 1, storageType.itemSize);
 
     const uintptr_t logicalAddress = reinterpret_cast<uintptr_t>(view.buf);
     if (prefixBytes > logicalAddress)
-        throw std::overflow_error("NumPy TensorView base address underflow.");
+        throw std::overflow_error("NumPy Tensor base address underflow.");
     const uintptr_t storageAddress = logicalAddress - prefixBytes;
     if (storageBytes > std::numeric_limits<uintptr_t>::max() - storageAddress)
-        throw std::overflow_error("NumPy TensorView storage address overflow.");
+        throw std::overflow_error("NumPy Tensor storage address overflow.");
 
-    return TensorView(type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
-                      std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
-                                                 storageBytes));
+    return Tensor(type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
+                  std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
+                                             storageBytes));
 }
 
 Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::bytes rawStorage,
@@ -399,33 +393,31 @@ Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::by
     return Tensor::fromStorage(type, std::move(layout), std::move(storage));
 }
 
-GemmOperand gemmOperandView(const PythonGemmOperand& operand) {
-    GemmOperand result(operand.values.view());
+GemmOperand gemmOperand(const PythonGemmOperand& operand) {
+    GemmOperand result(operand.values);
     result.computeType = operand.computeType;
     result.conjugate = operand.conjugate;
     result.preQuantizationScales.reserve(operand.preQuantizationScales.size());
     for (const PythonVectorBinding& binding : operand.preQuantizationScales) {
-        result.preQuantizationScales.push_back(VectorBinding{binding.values.view(), binding.axis});
+        result.preQuantizationScales.push_back(VectorBinding{binding.values, binding.axis});
     }
     if (operand.blockScale) {
         result.blockScale =
-            BlockScaleBinding{operand.blockScale->values.view(), operand.blockScale->blockSize};
+            BlockScaleBinding{operand.blockScale->values, operand.blockScale->blockSize};
     }
     return result;
 }
 
-GemmEpilogue gemmEpilogueView(const PythonGemmEpilogue& epilogue, ScalarType accumulatorType) {
+GemmEpilogue gemmEpilogue(const PythonGemmEpilogue& epilogue, ScalarType accumulatorType) {
     GemmEpilogue result(accumulatorType);
     result.alpha = epilogue.alpha;
     result.beta = epilogue.beta;
-    if (epilogue.bias)
-        result.bias = VectorBinding{epilogue.bias->values.view(), epilogue.bias->axis};
+    if (epilogue.bias) result.bias = VectorBinding{epilogue.bias->values, epilogue.bias->axis};
     if (epilogue.scaleAlpha) {
-        result.scaleAlpha =
-            VectorBinding{epilogue.scaleAlpha->values.view(), epilogue.scaleAlpha->axis};
+        result.scaleAlpha = VectorBinding{epilogue.scaleAlpha->values, epilogue.scaleAlpha->axis};
     }
-    if (epilogue.scaleA) result.scaleA = epilogue.scaleA->view();
-    if (epilogue.scaleB) result.scaleB = epilogue.scaleB->view();
+    if (epilogue.scaleA) result.scaleA = epilogue.scaleA;
+    if (epilogue.scaleB) result.scaleB = epilogue.scaleB;
     result.outputScale = epilogue.outputScale;
     result.outputConversion = epilogue.outputConversion;
     result.activation = epilogue.activation;
@@ -461,11 +453,11 @@ PythonGemmResult referenceGemmRequestOwned(const PythonGemmRequest& request,
     if (!request.c) zeroC.emplace(request.outputType, outputShape);
     const Tensor& c = request.c ? *request.c : *zeroC;
 
-    GemmRequest nativeRequest(gemmOperandView(request.a), gemmOperandView(request.b), c.view(),
-                              output.mutableView(), request.accumulatorType);
+    GemmRequest nativeRequest(gemmOperand(request.a), gemmOperand(request.b), c, output,
+                              request.accumulatorType);
     nativeRequest.accumulationRounding = request.accumulationRounding;
     nativeRequest.mathMode = request.mathMode;
-    nativeRequest.epilogue = gemmEpilogueView(request.epilogue, request.accumulatorType);
+    nativeRequest.epilogue = gemmEpilogue(request.epilogue, request.accumulatorType);
     nativeRequest.outputSelection = request.outputSelection;
 
     const GemmResult result =
@@ -488,8 +480,8 @@ PythonGemmResult referenceGemmOwned(
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
     Tensor d(outputType, Shape{a.shape()[0], b.shape()[1]});
-    GemmOperand operandA(a.view());
-    GemmOperand operandB(b.view());
+    GemmOperand operandA(a);
+    GemmOperand operandB(b);
     operandA.computeType = computeTypeA;
     operandB.computeType = computeTypeB;
     auto addPreQuantizationScales = [](GemmOperand& operand, const std::vector<Tensor>& scales,
@@ -500,7 +492,7 @@ PythonGemmResult referenceGemmOwned(
                                         " scale/axis counts differ.");
         for (size_t index = 0; index < scales.size(); ++index)
             operand.preQuantizationScales.push_back(
-                VectorBinding{scales[index].view(), axes.empty() ? defaultAxis : axes[index]});
+                VectorBinding{scales[index], axes.empty() ? defaultAxis : axes[index]});
     };
     addPreQuantizationScales(operandA, preQuantizationScalesA, preQuantizationAxesA,
                              MatrixAxis::Row, "A pre-quantization");
@@ -510,11 +502,10 @@ PythonGemmResult referenceGemmOwned(
         if (!blockScaleA || !blockScaleB || blockSizeA == 0 || blockSizeB == 0)
             throw std::invalid_argument(
                 "Python reference_gemm block scales require both tensors and nonzero sizes.");
-        operandA.blockScale = BlockScaleBinding{blockScaleA->view(), blockSizeA};
-        operandB.blockScale = BlockScaleBinding{blockScaleB->view(), blockSizeB};
+        operandA.blockScale = BlockScaleBinding{*blockScaleA, blockSizeA};
+        operandB.blockScale = BlockScaleBinding{*blockScaleB, blockSizeB};
     }
-    GemmRequest request(std::move(operandA), std::move(operandB), c.view(), d.mutableView(),
-                        accumulatorType);
+    GemmRequest request(std::move(operandA), std::move(operandB), c, d, accumulatorType);
     request.accumulationRounding = accumulationRounding;
     request.mathMode = mathMode;
     request.epilogue.alpha = alpha;
@@ -540,9 +531,8 @@ PythonAxpbyResult referenceAxpbyOwned(std::optional<Tensor> x, std::optional<Ten
     if (!x && !y) throw std::invalid_argument("Python reference_axpby requires X or Y.");
     const Shape& shape = x ? x->shape() : y->shape();
     Tensor output(outputType, shape);
-    AxpbyProblem problem(x ? std::optional<TensorView>(x->view()) : std::nullopt,
-                         y ? std::optional<TensorView>(y->view()) : std::nullopt,
-                         output.mutableView(), accumulatorType);
+    AxpbyProblem problem(x ? std::optional<Tensor>(x) : std::nullopt,
+                         y ? std::optional<Tensor>(y) : std::nullopt, output, accumulatorType);
     problem.alpha = alpha;
     problem.beta = beta;
     const AxpbyRunInfo runInfo = referenceAxpby(problem);
@@ -553,7 +543,7 @@ PythonSoftmaxResult referenceSoftmaxOwned(const Tensor& input, ScalarType output
                                           ScalarType accumulatorType, size_t axis) {
     Tensor output(outputType, input.layout());
     const SoftmaxRunInfo runInfo =
-        referenceSoftmax(SoftmaxProblem(input.view(), output.mutableView(), axis, accumulatorType));
+        referenceSoftmax(SoftmaxProblem(input, output, axis, accumulatorType));
     return {.output = std::move(output), .runInfo = runInfo};
 }
 
@@ -573,11 +563,11 @@ PythonLayerNormResult referenceLayerNormOwned(const Tensor& input, ScalarType ou
     Tensor output(outputType, input.layout());
     Tensor mean(statisticsType, Shape(statisticsDimensions));
     Tensor inverseVariance(statisticsType, Shape(std::move(statisticsDimensions)));
-    LayerNormProblem problem(input.view(), output.mutableView(), axis, accumulatorType);
-    problem.mean = mean.mutableView();
-    problem.inverseVariance = inverseVariance.mutableView();
-    if (gamma) problem.gamma = gamma->view();
-    if (beta) problem.beta = beta->view();
+    LayerNormProblem problem(input, output, axis, accumulatorType);
+    problem.mean = mean;
+    problem.inverseVariance = inverseVariance;
+    if (gamma) problem.gamma = gamma;
+    if (beta) problem.beta = beta;
     problem.epsilon = epsilon;
     const LayerNormRunInfo runInfo = referenceLayerNorm(problem);
     return {
@@ -604,13 +594,13 @@ PythonEpilogueResult referenceEpilogueOwned(
     if (auxiliaryOutputType) auxiliaryOutput.emplace(*auxiliaryOutputType, input.shape());
     if (includeAmax) amax.emplace(computeType, Shape{1});
 
-    EpilogueProblem problem(input.view(), output.mutableView(), computeType);
-    if (rawOutput) problem.rawOutput = rawOutput->mutableView();
-    if (auxiliaryOutput) problem.auxiliaryOutput = auxiliaryOutput->mutableView();
-    if (auxiliaryInput) problem.auxiliaryInput = auxiliaryInput->view();
-    if (gateResidual) problem.gateResidual = gateResidual->view();
-    if (amax) problem.amax = amax->mutableView();
-    if (bias) problem.bias = VectorBinding{bias->view(), biasAxis};
+    EpilogueProblem problem(input, output, computeType);
+    if (rawOutput) problem.rawOutput = rawOutput;
+    if (auxiliaryOutput) problem.auxiliaryOutput = auxiliaryOutput;
+    if (auxiliaryInput) problem.auxiliaryInput = auxiliaryInput;
+    if (gateResidual) problem.gateResidual = gateResidual;
+    if (amax) problem.amax = amax;
+    if (bias) problem.bias = VectorBinding{*bias, biasAxis};
     problem.outputScale = outputScale;
     problem.auxiliaryScale = auxiliaryScale;
     problem.outputConversion = outputConversion;
@@ -644,21 +634,18 @@ Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType 
     }
 
     Tensor output(outputType, Shape(std::move(outputDimensions)));
-    referenceSum(
-        ReductionProblem(input.view(), output.mutableView(), accumulatorType, std::move(axes)));
+    referenceSum(ReductionProblem(input, output, accumulatorType, std::move(axes)));
     return output;
 }
 
 Tensor generateOwned(ScalarType type, std::vector<size_t> shape, const GenerationOptions& options) {
-    Tensor output(type, Shape(std::move(shape)));
-    generate(output.mutableView(), options);
-    return output;
+    return generate(type, Shape(std::move(shape)), options);
 }
 
 Tensor referenceMaximumAbsoluteOwned(const Tensor& input, ScalarType outputType,
                                      ScalarType accumulatorType) {
     Tensor output(outputType, Shape{});
-    referenceMaximumAbsolute(input.view(), output.mutableView(), accumulatorType);
+    referenceMaximumAbsolute(input, output, accumulatorType);
     return output;
 }
 
@@ -683,8 +670,7 @@ PythonStructuredSparsityResult applyStructuredSparsityOwned(const Tensor& input,
     Tensor compressed(input.type(), compressedShape);
     Tensor retainedIndices(ScalarType::UInt8, compressedShape);
     std::optional<Tensor> twoOfFourMetadata;
-    StructuredSparsityProblem problem(input.view(), pruned.mutableView(), compressed.mutableView(),
-                                      retainedIndices.mutableView(), pattern);
+    StructuredSparsityProblem problem(input, pruned, compressed, retainedIndices, pattern);
     if (emitTwoOfFourMetadata) {
         if (pattern.groupSize != 4 || pattern.retainedElements != 2)
             throw std::invalid_argument(
@@ -694,7 +680,7 @@ PythonStructuredSparsityResult applyStructuredSparsityOwned(const Tensor& input,
         const size_t sparsityGroups = input.shape()[pattern.axis] / 4;
         metadataDimensions[pattern.axis] = (sparsityGroups + 1) / 2;
         twoOfFourMetadata.emplace(ScalarType::UInt8, Shape(std::move(metadataDimensions)));
-        problem.twoOfFourMetadata = twoOfFourMetadata->mutableView();
+        problem.twoOfFourMetadata = twoOfFourMetadata;
     }
     const StructuredSparsityRunInfo runInfo = applyStructuredSparsity(problem);
     return {
@@ -719,8 +705,8 @@ PythonTwoOfFourMetadataResult encodeTwoOfFourMetadataOwned(const Tensor& retaine
     const size_t sparsityGroups = retainedIndices.shape()[axis] / 2;
     metadataDimensions[axis] = (sparsityGroups + 1) / 2;
     Tensor metadata(ScalarType::UInt8, Shape(std::move(metadataDimensions)));
-    const TwoOfFourMetadataRunInfo runInfo = encodeTwoOfFourMetadata(
-        TwoOfFourMetadataProblem(retainedIndices.view(), metadata.mutableView(), axis));
+    const TwoOfFourMetadataRunInfo runInfo =
+        encodeTwoOfFourMetadata(TwoOfFourMetadataProblem(retainedIndices, metadata, axis));
     return {.metadata = std::move(metadata), .runInfo = runInfo};
 }
 
@@ -886,7 +872,7 @@ NB_MODULE(_roc_host_validation, module) {
         .def(nb::init<std::vector<size_t>>())
         .def_prop_ro("rank", &Shape::rank)
         .def_prop_ro("dimensions", &dimensions)
-        .def_prop_ro("element_count", &Shape::elementCount);
+        .def_prop_ro("element_count", [](const Shape& shape) { return shape.elementCount(); });
 
     nb::class_<Layout>(module, "Layout")
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
@@ -896,26 +882,10 @@ NB_MODULE(_roc_host_validation, module) {
         .def_prop_ro("strides", &strides)
         .def_prop_ro("offset", &Layout::offset);
 
-    nb::class_<TensorView>(module, "TensorView")
-        .def_static("from_numpy", &tensorViewFromNumpy, "array"_a,
-                    "scalar_type"_a = std::optional<ScalarType>{}, nb::keep_alive<0, 1>())
-        .def_prop_ro("type", &TensorView::type)
-        .def_prop_ro("shape", [](const TensorView& tensor) { return dimensions(tensor.shape()); })
-        .def_prop_ro("strides", [](const TensorView& tensor) { return strides(tensor.layout()); })
-        .def_prop_ro("offset", [](const TensorView& tensor) { return tensor.layout().offset(); })
-        .def_prop_ro("size", [](const TensorView& tensor) { return tensor.shape().elementCount(); })
-        .def_prop_ro("storage",
-                     [](const TensorView& tensor) {
-                         const auto storage = tensor.storage();
-                         return nb::bytes(reinterpret_cast<const char*>(storage.data()),
-                                          storage.size());
-                     })
-        .def_prop_ro("values", [](const TensorView& tensor) { return tensorValues(tensor); })
-        .def("to", static_cast<Tensor (TensorView::*)(ScalarType) const>(&TensorView::to),
-             "type"_a);
-
     nb::class_<Tensor>(module, "Tensor")
         .def(nb::init<ScalarType, Shape>())
+        .def_static("from_numpy", &tensorFromNumpy, "array"_a,
+                    "scalar_type"_a = std::optional<ScalarType>{})
         .def_static(
             "from_values",
             [](ScalarType type, std::vector<size_t> shape, const std::vector<double>& values) {
@@ -954,7 +924,7 @@ NB_MODULE(_roc_host_validation, module) {
                                           storage.size());
                      })
         .def_prop_ro("values", [](const Tensor& tensor) { return tensorValues(tensor); })
-        .def("view", &Tensor::view, nb::keep_alive<0, 1>())
+        .def("clone", [](const Tensor& tensor) { return tensor.clone(); })
         .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::to), "type"_a);
 
     nb::class_<PythonVectorBinding>(
@@ -1372,7 +1342,7 @@ NB_MODULE(_roc_host_validation, module) {
     module.def(
         "generate_at",
         [](Tensor& tensor, size_t logicalIndex, const GenerationOptions& options) -> Tensor& {
-            generateAt(tensor.mutableView(), logicalIndex, options);
+            generateAt(tensor, logicalIndex, options);
             return tensor;
         },
         "tensor"_a, "logical_index"_a, "options"_a, nb::rv_policy::reference);
@@ -1383,12 +1353,12 @@ NB_MODULE(_roc_host_validation, module) {
     module.def(
         "compare",
         [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options) {
-            return compare(observed.view(), expected.view(), options);
+            return compare(observed, expected, options);
         },
         "observed"_a, "expected"_a, "options"_a = ComparisonOptions{});
     module.def(
         "compare",
-        [](TensorView observed, TensorView expected, const ComparisonOptions& options) {
+        [](Tensor observed, Tensor expected, const ComparisonOptions& options) {
             return compare(observed, expected, options);
         },
         "observed"_a, "expected"_a, "options"_a = ComparisonOptions{});
@@ -1405,7 +1375,7 @@ NB_MODULE(_roc_host_validation, module) {
         [](const Tensor& observed, const Tensor& expected,
            const std::vector<double>& absoluteCandidates,
            const std::vector<double>& relativeCandidates, const ComparisonOptions& options) {
-            return findAllCloseTolerance(observed.view(), expected.view(),
+            return findAllCloseTolerance(observed, expected,
                                          std::span<const double>(absoluteCandidates),
                                          std::span<const double>(relativeCandidates), options);
         },
@@ -1413,7 +1383,7 @@ NB_MODULE(_roc_host_validation, module) {
         "options"_a = ComparisonOptions{});
     module.def(
         "find_allclose_tolerance",
-        [](TensorView observed, TensorView expected, const std::vector<double>& absoluteCandidates,
+        [](Tensor observed, Tensor expected, const std::vector<double>& absoluteCandidates,
            const std::vector<double>& relativeCandidates, const ComparisonOptions& options) {
             return findAllCloseTolerance(observed, expected,
                                          std::span<const double>(absoluteCandidates),
@@ -1433,14 +1403,14 @@ NB_MODULE(_roc_host_validation, module) {
         "check_unused_tensor_storage",
         [](const Tensor& tensor, size_t allocatedElements, SentinelRegion region,
            size_t maxReportedMismatches) {
-            return checkUnusedTensorStorage(tensor.view(), allocatedElements, region,
+            return checkUnusedTensorStorage(tensor, allocatedElements, region,
                                             maxReportedMismatches);
         },
         "tensor"_a, "allocated_elements"_a, "region"_a = SentinelRegion::Inside,
         "max_reported_mismatches"_a = 10);
     module.def(
         "check_unused_tensor_storage",
-        [](TensorView tensor, size_t allocatedElements, SentinelRegion region,
+        [](Tensor tensor, size_t allocatedElements, SentinelRegion region,
            size_t maxReportedMismatches) {
             return checkUnusedTensorStorage(tensor, allocatedElements, region,
                                             maxReportedMismatches);

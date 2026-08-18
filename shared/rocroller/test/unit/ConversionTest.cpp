@@ -210,12 +210,12 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(gpu_D.data(), d_D.get(), M * N * sizeof(TypeD), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        HostNumerics::HostReferenceProblem referenceProblem(HostNumerics::hostTensorView(descA, A),
-                                                            HostNumerics::hostTensorView(descB, B),
-                                                            HostNumerics::hostTensorView(descC, C));
+        HostNumerics::HostReferenceProblem referenceProblem(HostNumerics::hostTensor(descA, A),
+                                                            HostNumerics::hostTensor(descB, B),
+                                                            HostNumerics::hostTensor(descC, C));
         referenceProblem.beta = 1.0f;
         auto tmp_D            = HostNumerics::convertHostReference<float>(
-            HostNumerics::computeHostReference(referenceProblem).view());
+            HostNumerics::computeHostReference(referenceProblem));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);
@@ -330,12 +330,12 @@ namespace rocRollerTest
         std::vector<TypeAB>                zeroC(M * N, 0.f);
         TensorDescriptor                   referenceDescC(dataTypeAB, {size_t(M), size_t(N)}, "N");
         HostNumerics::HostReferenceProblem referenceProblem(
-            HostNumerics::hostTensorView(descA, A),
-            HostNumerics::hostTensorView(descB, B),
-            HostNumerics::hostTensorView(referenceDescC, zeroC));
+            HostNumerics::hostTensor(descA, A),
+            HostNumerics::hostTensor(descB, B),
+            HostNumerics::hostTensor(referenceDescC, zeroC));
         referenceProblem.beta = 1.0f;
         auto tmp_D            = HostNumerics::convertHostReference<TypeAB>(
-            HostNumerics::computeHostReference(referenceProblem).view());
+            HostNumerics::computeHostReference(referenceProblem));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);

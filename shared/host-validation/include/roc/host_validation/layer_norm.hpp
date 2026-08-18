@@ -10,19 +10,19 @@
 
 namespace roc::host_validation {
 struct LayerNormProblem {
-    LayerNormProblem(TensorView inputValues, MutableTensorView outputValues, size_t normalizedAxis,
+    LayerNormProblem(Tensor inputValues, Tensor outputValues, size_t normalizedAxis,
                      ScalarType accumulator)
         : input(std::move(inputValues)),
           output(std::move(outputValues)),
           axis(normalizedAxis),
           accumulatorType(accumulator) {}
 
-    TensorView input;
-    MutableTensorView output;
-    std::optional<MutableTensorView> mean;
-    std::optional<MutableTensorView> inverseVariance;
-    std::optional<TensorView> gamma;
-    std::optional<TensorView> beta;
+    Tensor input;
+    Tensor output;
+    std::optional<Tensor> mean;
+    std::optional<Tensor> inverseVariance;
+    std::optional<Tensor> gamma;
+    std::optional<Tensor> beta;
     size_t axis;
     ScalarType accumulatorType;
     double epsilon = 1e-5;

@@ -177,11 +177,11 @@ double ulpDistance(double exact, double approximation, int mantissaBits);
 
 double encodedUlpDistance(double exact, double approximation, ScalarType type);
 
-ComparisonResult compare(const TensorView& observed, const TensorView& expected,
+ComparisonResult compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options = {});
 
-std::optional<ComparisonTolerance> findAllCloseTolerance(const TensorView& observed,
-                                                         const TensorView& expected,
+std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
+                                                         const Tensor& expected,
                                                          std::span<const double> absoluteCandidates,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options = {});
@@ -191,7 +191,7 @@ SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte
                                       SentinelRegion region = SentinelRegion::Unspecified,
                                       size_t maxReportedMismatches = 10);
 
-SentinelResult checkUnusedTensorStorage(const TensorView& logicalTensor, size_t allocatedElements,
+SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
                                         SentinelRegion region = SentinelRegion::Inside,
                                         size_t maxReportedMismatches = 10);
 }  // namespace roc::host_validation

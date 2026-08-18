@@ -43,7 +43,22 @@ if(TEST_CONFIG)
         "-DCMAKE_BUILD_TYPE=${TEST_CONFIG}"
     )
 endif()
+if(DEFINED TEST_CXX_FLAGS)
+    list(
+        APPEND
+        _configure_cache_arguments
+        "-DCMAKE_CXX_FLAGS=${TEST_CXX_FLAGS}"
+    )
+endif()
+if(DEFINED TEST_EXE_LINKER_FLAGS)
+    list(
+        APPEND
+        _configure_cache_arguments
+        "-DCMAKE_EXE_LINKER_FLAGS=${TEST_EXE_LINKER_FLAGS}"
+    )
+endif()
 
+# Build one nested producer or consumer with the package-test CPU budget.
 function(_build_project build_dir label)
     # These nested consumer builds run inside the standalone CTest job. Match
     # that job's deliberately small CPU budget instead of multiplying it.
@@ -64,6 +79,7 @@ function(_build_project build_dir label)
     endif()
 endfunction()
 
+# Install one nested producer into its task-owned prefix.
 function(_install_project build_dir install_dir label)
     set(
         _install_command
@@ -86,6 +102,7 @@ function(_install_project build_dir install_dir label)
     endif()
 endfunction()
 
+# Configure, build, and execute one explicit package-component consumer.
 function(
     _run_component
     install_dir
@@ -142,6 +159,7 @@ function(
     endif()
 endfunction()
 
+# Assert that requesting one package component fails with a stable diagnostic.
 function(
     _expect_component_failure
     install_dir
@@ -186,6 +204,7 @@ function(
     endif()
 endfunction()
 
+# Configure, build, and test the compatibility consumer that requests all targets.
 function(_run_legacy_consumer install_dir)
     set(_build_dir "${PACKAGE_WORK_DIR}/legacy-all-components")
     file(REMOVE_RECURSE "${_build_dir}")

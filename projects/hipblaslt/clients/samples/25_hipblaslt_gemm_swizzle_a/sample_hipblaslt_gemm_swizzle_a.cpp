@@ -210,7 +210,7 @@ int main()
         auto convertToFp8 = [](std::span<const hipblasLtHalf> source,
                                std::span<std::byte>           destination) {
             const roc::host_validation::Tensor converted
-                = hipblaslt::host_validation::tensorView(
+                = hipblaslt::host_validation::tensorFromStorage(
                       source.data(),
                       source.size(),
                       roc::host_validation::Layout::contiguous(

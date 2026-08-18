@@ -356,13 +356,13 @@ namespace GEMMDriverTest
 
             // Host result
             HostNumerics::HostReferenceProblem referenceProblem(
-                HostNumerics::hostTensorView(descA, hostA),
-                HostNumerics::hostTensorView(descB, hostB),
-                HostNumerics::hostTensorView(descC, hostC));
+                HostNumerics::hostTensor(descA, hostA),
+                HostNumerics::hostTensor(descB, hostB),
+                HostNumerics::hostTensor(descC, hostC));
             referenceProblem.alpha = alpha;
             referenceProblem.beta  = beta;
             auto h_result          = HostNumerics::convertHostReference<T>(
-                HostNumerics::computeHostReference(referenceProblem).view());
+                HostNumerics::computeHostReference(referenceProblem));
             // Host leaky relu
             for(size_t i = 0; i < M; i++)
             {

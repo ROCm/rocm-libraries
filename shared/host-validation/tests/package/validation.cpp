@@ -18,75 +18,68 @@ int main() {
     const std::array<float, 1> a{2};
     const std::array<float, 1> b{3};
     const std::array<float, 1> c{0};
-    std::array<float, 1> d{};
+    Tensor d(ScalarType::Float32, Shape{1, 1});
 
     GemmRequest problem(
-        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
-                                                  std::span<const float>(a))),
-        GemmOperand(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
-                                                  std::span<const float>(b))),
-        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)),
-        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<float>(d)),
+        GemmOperand(
+            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(a))),
+        GemmOperand(
+            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(b))),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)), d,
         ScalarType::Float32);
     if (!queryGemmSupport(problem)) return 1;
     referenceGemm(problem);
-    if (d[0] != 6) return 1;
+    if (d.loadAs<float>({0, 0}) != 6) return 1;
 
     const std::array<float, 3> reductionInput{-1, 4, -3};
-    std::array<float, 1> maximumAbsolute{};
-    referenceMaximumAbsolute(TensorView::fromNative<float>(Layout::contiguous(Shape{3}),
-                                                           std::span<const float>(reductionInput)),
-                             MutableTensorView::fromNative<float>(
-                                 Layout::contiguous(Shape{}), std::span<float>(maximumAbsolute)),
-                             ScalarType::Float32);
-    if (maximumAbsolute[0] != 4) return 1;
+    Tensor maximumAbsolute(ScalarType::Float32, Shape{});
+    referenceMaximumAbsolute(Tensor::fromNative<float>(Layout::contiguous(Shape{3}),
+                                                       std::span<const float>(reductionInput)),
+                             maximumAbsolute, ScalarType::Float32);
+    if (maximumAbsolute.loadAs<float>({}) != 4) return 1;
 
-    Tensor generated(ScalarType::Float32, Shape{4});
     GenerationOptions generation;
     generation.seed = 17;
     generation.real.pattern = GenerationPattern::CandidateSet;
     generation.real.candidates = {-2.0, 3.0};
-    generate(generated.mutableView(), generation);
+    Tensor generated = generate(ScalarType::Float32, Shape{4}, generation);
     for (size_t index = 0; index < generated.size(); ++index) {
-        const float value = generated.view().loadAs<float>({index});
+        const float value = generated.loadAs<float>({index});
         if (value != -2.0f && value != 3.0f) return 1;
     }
     generation.real.pattern = GenerationPattern::Constant;
     generation.real.parameter0 = 11.0;
-    generateAt(generated.mutableView(), 2, generation);
-    if (generated.view().loadAs<float>({2}) != 11.0f) return 1;
+    generateAt(generated, 2, generation);
+    if (generated.loadAs<float>({2}) != 11.0f) return 1;
 
     Tensor axpbyOutput(ScalarType::Float32, Shape{1});
     AxpbyProblem axpby(
-        TensorView::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(a)),
-        TensorView::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(b)),
-        axpbyOutput.mutableView(), ScalarType::Float32);
+        Tensor::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(a)),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(b)),
+        axpbyOutput, ScalarType::Float32);
     axpby.alpha = 2.0;
     axpby.beta = -1.0;
-    if (referenceAxpby(axpby).elementsComputed != 1 ||
-        axpbyOutput.view().loadAs<float>({0}) != 1.0f)
+    if (referenceAxpby(axpby).elementsComputed != 1 || axpbyOutput.loadAs<float>({0}) != 1.0f)
         return 1;
 
     const std::array<float, 2> softmaxValues{1.0f, 2.0f};
     const Tensor softmaxInput =
         Tensor::fromNativeValues<float>(Shape{1, 2}, std::span<const float>(softmaxValues));
     Tensor softmaxOutput(ScalarType::Float32, Shape{1, 2});
-    const SoftmaxRunInfo softmax = referenceSoftmax(
-        SoftmaxProblem(softmaxInput.view(), softmaxOutput.mutableView(), 1, ScalarType::Float32));
-    if (softmax.slicesComputed != 1 ||
-        std::abs(softmaxOutput.view().loadAs<float>({0, 0}) +
-                 softmaxOutput.view().loadAs<float>({0, 1}) - 1.0f) > 1e-6f)
+    const SoftmaxRunInfo softmax =
+        referenceSoftmax(SoftmaxProblem(softmaxInput, softmaxOutput, 1, ScalarType::Float32));
+    if (softmax.slicesComputed != 1 || std::abs(softmaxOutput.loadAs<float>({0, 0}) +
+                                                softmaxOutput.loadAs<float>({0, 1}) - 1.0f) > 1e-6f)
         return 1;
 
     Tensor layerNormOutput(ScalarType::Float32, Shape{1, 2});
     Tensor layerNormMean(ScalarType::Float32, Shape{1});
     Tensor layerNormInverseVariance(ScalarType::Float32, Shape{1});
-    LayerNormProblem layerNorm(softmaxInput.view(), layerNormOutput.mutableView(), 1,
-                               ScalarType::Float32);
-    layerNorm.mean = layerNormMean.mutableView();
-    layerNorm.inverseVariance = layerNormInverseVariance.mutableView();
+    LayerNormProblem layerNorm(softmaxInput, layerNormOutput, 1, ScalarType::Float32);
+    layerNorm.mean = layerNormMean;
+    layerNorm.inverseVariance = layerNormInverseVariance;
     if (referenceLayerNorm(layerNorm).slicesComputed != 1 ||
-        layerNormMean.view().loadAs<float>({0}) != 1.5f)
+        layerNormMean.loadAs<float>({0}) != 1.5f)
         return 1;
     return 0;
 }

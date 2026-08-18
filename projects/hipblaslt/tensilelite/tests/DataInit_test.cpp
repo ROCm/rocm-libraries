@@ -402,24 +402,33 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     StructuredSparsityPattern pattern;
     pattern.axis = sparseAxis;
     pattern.fixedPositions = {0, 1};
+    Tensor componentPrunedTensor(scalarType,
+                                 layout(denseDescriptor),
+                                 std::as_writable_bytes(std::span<int8_t>(componentPruned)));
+    Tensor componentCompressedTensor(
+        scalarType,
+        layout(compressedDescriptor),
+        std::as_writable_bytes(std::span<int8_t>(componentCompressed)));
+    Tensor componentMetadataTensor(ScalarType::UInt8,
+                                   logicalMetadataLayout,
+                                   std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
     StructuredSparsityProblem componentProblem(
-        TensorView(scalarType,
-                   layout(denseDescriptor),
-                   std::as_bytes(std::span<const int8_t>(original))),
-        MutableTensorView(
-            scalarType,
-            layout(denseDescriptor),
-            std::as_writable_bytes(std::span<int8_t>(componentPruned))),
-        MutableTensorView(
-            scalarType,
-            layout(compressedDescriptor),
-            std::as_writable_bytes(std::span<int8_t>(componentCompressed))),
+        Tensor(
+            scalarType, layout(denseDescriptor), std::as_bytes(std::span<const int8_t>(original))),
+        componentPrunedTensor,
+        componentCompressedTensor,
         pattern);
-    componentProblem.twoOfFourMetadata = MutableTensorView(
-        ScalarType::UInt8,
-        logicalMetadataLayout,
-        std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
+    componentProblem.twoOfFourMetadata = componentMetadataTensor;
     applyStructuredSparsity(componentProblem);
+    std::memcpy(componentPruned.data(),
+                componentPrunedTensor.storage().data(),
+                componentPrunedTensor.storage().size());
+    std::memcpy(componentCompressed.data(),
+                componentCompressedTensor.storage().data(),
+                componentCompressedTensor.storage().size());
+    std::memcpy(componentMetadata.data(),
+                componentMetadataTensor.storage().data(),
+                componentMetadataTensor.storage().size());
 
     EXPECT_EQ(componentPruned, legacyPruned);
     EXPECT_EQ(componentCompressed, legacyCompressed);

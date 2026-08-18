@@ -15,8 +15,10 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace TensileLite::Client::reference_adapter
 {
@@ -42,6 +44,13 @@ namespace TensileLite::Client::reference_adapter
 
     struct TranslatedGemmBatch
     {
+        struct CopyBack
+        {
+            std::span<std::byte>                                 destination;
+            roc::host_validation::Tensor                         source;
+            std::optional<roc::host_validation::OutputSelection> selection;
+        };
+
         roc::host_validation::GemmRequest& gemm()
         {
             return *gemmRequest;
@@ -52,6 +61,8 @@ namespace TensileLite::Client::reference_adapter
             return *gemmRequest;
         }
 
+        void copyOutputs() const;
+
         std::optional<roc::host_validation::Tensor> runtimeScaleA;
         std::optional<roc::host_validation::Tensor> runtimeScaleB;
         std::optional<roc::host_validation::Tensor> intermediate;
@@ -61,6 +72,7 @@ namespace TensileLite::Client::reference_adapter
         std::optional<roc::host_validation::GemmRequest>      gemmRequest;
         std::optional<roc::host_validation::EpilogueProblem>  epilogue;
         std::optional<roc::host_validation::ReductionProblem> biasReduction;
+        std::vector<CopyBack>                                 copyBacks;
     };
 
     class GemmProblemAdapter

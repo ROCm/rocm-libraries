@@ -6,10 +6,13 @@
 // Product-private hipBLASLt adapter.
 
 #include <complex>
+#include <cstdint>
+#include <cstring>
 #include <hip/hip_bfloat16.h>
 #include <hip/library_types.h>
 #include <hipblaslt/hipblaslt-export.h>
 #include <hipblaslt/hipblaslt-types.h>
+#include <optional>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <stdexcept>
@@ -20,9 +23,15 @@ namespace hipblaslt::host_validation
 {
     using namespace ::roc::host_validation;
 
-    inline ScalarType scalarType(hipDataType type)
+    // ScalarType is the conversion hub for host validation. Each external type
+    // system maps to it once; runtime dispatch should not add pairwise
+    // hipDataType-to-C++-type mappings.
+    inline std::optional<ScalarType> tryScalarType(hipDataType type) noexcept
     {
-        switch(type)
+        // hipBLASLt also defines integer-valued extension constants that are not
+        // members of hipDataType (for example HIP_R_8F_E5M3_EXT). Normalize the
+        // discriminant once so enum values and extension values share one table.
+        switch(static_cast<int>(type))
         {
         case HIP_R_8U:
             return ScalarType::UInt8;
@@ -62,12 +71,6 @@ namespace hipblaslt::host_validation
             return ScalarType::Float8E5M2Fnuz;
         case HIP_R_8F_UE8M0:
             return ScalarType::E8M0;
-        default:
-            break;
-        }
-
-        switch(static_cast<int>(type))
-        {
         case HIP_R_6F_E2M3_EXT:
             return ScalarType::Float6E2M3;
         case HIP_R_6F_E3M2_EXT:
@@ -77,73 +80,95 @@ namespace hipblaslt::host_validation
         case HIP_R_8F_E5M3_EXT:
             return ScalarType::E5M3;
         default:
-            throw std::invalid_argument(
-                "hipBLASLt data type has no host-validation scalar mapping.");
+            return std::nullopt;
         }
+    }
+
+    inline ScalarType scalarType(hipDataType type)
+    {
+        if(const auto mapped = tryScalarType(type))
+            return *mapped;
+        throw std::invalid_argument("hipBLASLt data type has no host-validation scalar mapping.");
     }
 
     template <typename T>
     constexpr ScalarType scalarType()
     {
-        if constexpr(std::is_same_v<T, uint8_t>)
-            return ScalarType::UInt8;
-        else if constexpr(std::is_same_v<T, char>)
+        using Type = std::remove_cv_t<T>;
+
+        if constexpr(std::is_same_v<Type, uint8_t> || std::is_same_v<Type, int8_t>
+                     || std::is_same_v<Type, int32_t> || std::is_same_v<Type, float>
+                     || std::is_same_v<Type, double> || std::is_same_v<Type, std::complex<float>>
+                     || std::is_same_v<Type, std::complex<double>>)
+            return nativeScalarType<Type>;
+        else if constexpr(std::is_same_v<Type, char>)
             return std::is_signed_v<char> ? ScalarType::Int8 : ScalarType::UInt8;
-        else if constexpr(std::is_same_v<T, hipblasLtInt8>)
-            return ScalarType::Int8;
-        else if constexpr(std::is_same_v<T, int32_t>)
-            return ScalarType::Int32;
-        else if constexpr(std::is_same_v<T, float>)
-            return ScalarType::Float32;
-        else if constexpr(std::is_same_v<T, double>)
-            return ScalarType::Float64;
-        else if constexpr(std::is_same_v<T, std::complex<float>>)
-            return ScalarType::ComplexFloat32;
-        else if constexpr(std::is_same_v<T, std::complex<double>>)
-            return ScalarType::ComplexFloat64;
-        else if constexpr(std::is_same_v<T, hipblasLtHalf>)
+        else if constexpr(std::is_same_v<Type, hipblasLtHalf>)
             return ScalarType::Float16;
-        else if constexpr(std::is_same_v<T, hip_bfloat16>)
+        else if constexpr(std::is_same_v<Type, hip_bfloat16>)
             return ScalarType::BFloat16;
-        else if constexpr(std::is_same_v<T, hipblaslt_f8>)
+        else if constexpr(std::is_same_v<Type, hipblaslt_f8>)
             return ScalarType::Float8E4M3;
-        else if constexpr(std::is_same_v<T, hipblaslt_bf8>)
+        else if constexpr(std::is_same_v<Type, hipblaslt_bf8>)
             return ScalarType::Float8E5M2;
-        else if constexpr(std::is_same_v<T, hipblaslt_f8_fnuz>)
+        else if constexpr(std::is_same_v<Type, hipblaslt_f8_fnuz>)
             return ScalarType::Float8E4M3Fnuz;
-        else if constexpr(std::is_same_v<T, hipblaslt_bf8_fnuz>)
+        else if constexpr(std::is_same_v<Type, hipblaslt_bf8_fnuz>)
             return ScalarType::Float8E5M2Fnuz;
-        else if constexpr(std::is_same_v<T, hipblaslt_e8>)
+        else if constexpr(std::is_same_v<Type, hipblaslt_e8>)
             return ScalarType::E8M0;
         else
-            static_assert(!sizeof(T), "C++ type has no host-validation scalar mapping.");
+            static_assert(!sizeof(Type), "C++ type has no host-validation scalar mapping.");
     }
 
     template <typename T>
-    TensorView tensorView(const T* data, size_t elements, Layout layout)
+    ::roc::host_validation::Tensor tensorFromStorage(const T* data, size_t elements, Layout layout)
     {
         constexpr ScalarType type = scalarType<T>();
         static_assert(scalarTypeInfo(type).storageBits == sizeof(T) * 8,
                       "External C++ type does not store one scalar per object.");
-        return TensorView(
+        return ::roc::host_validation::Tensor(
             type, std::move(layout), std::as_bytes(std::span<const T>(data, elements)));
     }
 
     template <typename T>
-    MutableTensorView mutableTensorView(T* data, size_t elements, Layout layout)
+    ::roc::host_validation::Tensor tensorFromMutableStorage(T* data, size_t elements, Layout layout)
     {
         constexpr ScalarType type = scalarType<T>();
         static_assert(scalarTypeInfo(type).storageBits == sizeof(T) * 8,
                       "External C++ type does not store one scalar per object.");
-        return MutableTensorView(
+        return ::roc::host_validation::Tensor(
             type, std::move(layout), std::as_writable_bytes(std::span<T>(data, elements)));
     }
 
-    inline MutableTensorView
-        mutableTensorView(void* data, size_t storageBytes, hipDataType type, Layout layout)
+    inline ::roc::host_validation::Tensor
+        tensorFromMutableStorage(void* data, size_t storageBytes, hipDataType type, Layout layout)
     {
-        return MutableTensorView(scalarType(type),
-                                 std::move(layout),
-                                 std::span<std::byte>(static_cast<std::byte*>(data), storageBytes));
+        return ::roc::host_validation::Tensor(
+            scalarType(type),
+            std::move(layout),
+            std::span<std::byte>(static_cast<std::byte*>(data), storageBytes));
+    }
+
+    inline ::roc::host_validation::Tensor
+        tensorFromMutableStorage(void* data, ScalarType type, Layout layout)
+    {
+        const size_t storageBytes = storageBytesForLayout(type, layout);
+        return ::roc::host_validation::Tensor(
+            type,
+            std::move(layout),
+            std::span<std::byte>(static_cast<std::byte*>(data), storageBytes));
+    }
+
+    template <typename T>
+    void copyTensorStorageTo(T* data, size_t elements, const ::roc::host_validation::Tensor& tensor)
+    {
+        const size_t bytes = elements * sizeof(T);
+        if(tensor.storage().size() > bytes)
+            throw std::invalid_argument("Tensor storage exceeds destination capacity.");
+        if(!tensor.storage().empty())
+            std::memcpy(static_cast<void*>(data),
+                        tensor.storage().data(),
+                        tensor.storage().size());
     }
 } // namespace hipblaslt::host_validation

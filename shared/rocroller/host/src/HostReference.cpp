@@ -22,7 +22,7 @@ namespace rocRoller::HostNumerics
             return first * second;
         }
 
-        BlockScaleBinding normalizeBlockScale(TensorView  values,
+        BlockScaleBinding normalizeBlockScale(Tensor      values,
                                               size_t      freeExtent,
                                               size_t      reductionExtent,
                                               size_t      blockSize,
@@ -56,11 +56,11 @@ namespace rocRoller::HostNumerics
         return output.str();
     }
 
-    roc::host_validation::TensorView hostScaleTensorView(DataType                 type,
-                                                         std::span<const uint8_t> values,
-                                                         size_t                   freeExtent,
-                                                         size_t                   reductionExtent,
-                                                         size_t                   blockSize)
+    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
+                                                 std::span<const uint8_t> values,
+                                                 size_t                   freeExtent,
+                                                 size_t                   reductionExtent,
+                                                 size_t                   blockSize)
     {
         using namespace roc::host_validation;
         auto const scalarType = hostScalarType(type);
@@ -72,15 +72,15 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument("rocRoller runtime scale block size must be nonzero.");
         const size_t blockCount
             = reductionExtent / blockSize + static_cast<size_t>(reductionExtent % blockSize != 0);
-        return TensorView(
+        return Tensor(
             scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}), std::as_bytes(values));
     }
 
-    roc::host_validation::TensorView hostScaleTensorView(DataType                 type,
-                                                         std::span<const uint8_t> values,
-                                                         TensorDescriptor const&  dataDescriptor,
-                                                         size_t                   blockedDimension,
-                                                         size_t                   blockSize)
+    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
+                                                 std::span<const uint8_t> values,
+                                                 TensorDescriptor const&  dataDescriptor,
+                                                 size_t                   blockedDimension,
+                                                 size_t                   blockSize)
     {
         using namespace roc::host_validation;
 
@@ -89,36 +89,34 @@ namespace rocRoller::HostNumerics
         if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
             throw std::invalid_argument("rocRoller block scales require a scale data type.");
         if(values.size() == 1)
-            return TensorView(scalarType, Layout(layout.shape(), {0, 0}), std::as_bytes(values));
+            return Tensor(scalarType, Layout(layout.shape(), {0, 0}), std::as_bytes(values));
 
         auto const requiredBytes = storageBytesForLayout(scalarType, layout);
         if(values.size_bytes() != requiredBytes)
             throw std::invalid_argument(
                 "rocRoller block-scale storage does not match its data descriptor.");
-        return TensorView(scalarType, layout, std::as_bytes(values));
+        return Tensor(scalarType, layout, std::as_bytes(values));
     }
 
     HostReferenceProblem
-        makeHostReferenceProblem(GeneratedGEMMInputs const&                      inputs,
-                                 std::optional<roc::host_validation::TensorView> runtimeScaleA,
-                                 std::optional<roc::host_validation::TensorView> runtimeScaleB,
-                                 size_t                                          scaleBlockSize,
-                                 float                                           alpha,
-                                 float                                           beta)
+        makeHostReferenceProblem(GeneratedGEMMInputs const&                  inputs,
+                                 std::optional<roc::host_validation::Tensor> runtimeScaleA,
+                                 std::optional<roc::host_validation::Tensor> runtimeScaleB,
+                                 size_t                                      scaleBlockSize,
+                                 float                                       alpha,
+                                 float                                       beta)
     {
-        HostReferenceProblem result(inputs.a.view(), inputs.b.view(), inputs.c.view());
+        HostReferenceProblem result(inputs.a, inputs.b, inputs.c);
         result.scaleA
             = runtimeScaleA
                   ? std::move(runtimeScaleA)
-                  : (inputs.scaleA
-                         ? std::optional<roc::host_validation::TensorView>(inputs.scaleA->view())
-                         : std::nullopt);
+                  : (inputs.scaleA ? std::optional<roc::host_validation::Tensor>(inputs.scaleA)
+                                   : std::nullopt);
         result.scaleB
             = runtimeScaleB
                   ? std::move(runtimeScaleB)
-                  : (inputs.scaleB
-                         ? std::optional<roc::host_validation::TensorView>(inputs.scaleB->view())
-                         : std::nullopt);
+                  : (inputs.scaleB ? std::optional<roc::host_validation::Tensor>(inputs.scaleB)
+                                   : std::nullopt);
         result.scaleBlockSize = scaleBlockSize;
         result.alpha          = alpha;
         result.beta           = beta;
@@ -180,24 +178,21 @@ namespace rocRoller::HostNumerics
                                                 std::span<const float>(values));
             }
             operandA.blockScale
-                = normalizeBlockScale(problem.scaleA ? *problem.scaleA : unitScaleA->view(),
+                = normalizeBlockScale(problem.scaleA ? *problem.scaleA : *unitScaleA,
                                       rows,
                                       reductionExtent,
                                       problem.scaleBlockSize,
                                       "A");
             operandB.blockScale
-                = normalizeBlockScale(problem.scaleB ? *problem.scaleB : unitScaleB->view(),
+                = normalizeBlockScale(problem.scaleB ? *problem.scaleB : *unitScaleB,
                                       columns,
                                       reductionExtent,
                                       problem.scaleBlockSize,
                                       "B");
         }
 
-        GemmRequest request(std::move(operandA),
-                            std::move(operandB),
-                            problem.c,
-                            output.mutableView(),
-                            ScalarType::Float32);
+        GemmRequest request(
+            std::move(operandA), std::move(operandB), problem.c, output, ScalarType::Float32);
         request.epilogue.alpha = problem.alpha;
         request.epilogue.beta  = problem.beta;
 
@@ -211,9 +206,9 @@ namespace rocRoller::HostNumerics
         return output;
     }
 
-    HostComparisonResult compareHostReference(roc::host_validation::TensorView observed,
-                                              roc::host_validation::TensorView expected,
-                                              AcceptableGEMMError              acceptableError)
+    HostComparisonResult compareHostReference(roc::host_validation::Tensor observed,
+                                              roc::host_validation::Tensor expected,
+                                              AcceptableGEMMError          acceptableError)
     {
         using namespace roc::host_validation;
 

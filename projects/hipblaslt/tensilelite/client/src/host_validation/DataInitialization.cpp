@@ -38,14 +38,13 @@ namespace TensileLite::Client
         using roc::host_validation::GenerationOptions;
         using roc::host_validation::GenerationPattern;
         using roc::host_validation::Layout;
-        using roc::host_validation::MutableTensorView;
         using roc::host_validation::ScalarType;
         using roc::host_validation::Shape;
         using roc::host_validation::StructuredSparsityPattern;
         using roc::host_validation::StructuredSparsityProblem;
         using roc::host_validation::StructuredSparsitySelection;
         using roc::host_validation::StructuredSparsitySliceRange;
-        using roc::host_validation::TensorView;
+        using roc::host_validation::Tensor;
 
         std::optional<ScalarType> generationScalarType(rocisa::DataType type)
         {
@@ -476,8 +475,9 @@ namespace TensileLite::Client
             GenerationOptions adjusted = *options;
             adjusted.real.stream += 2 * key.semanticStream;
             adjusted.imaginary.stream += 2 * key.semanticStream;
-            roc::host_validation::generate(MutableTensorView(*type, std::move(layout), storage),
-                                           adjusted);
+            Tensor generated(*type, std::move(layout), storage);
+            roc::host_validation::generate(generated, adjusted);
+            std::ranges::copy(generated.storage(), storage.begin());
             return true;
         }
     } // namespace
@@ -575,13 +575,9 @@ namespace TensileLite::Client
         options.real.parameter1 = upper;
         options.real.stream     = 2 * key.semanticStream;
 
-        double value = 0;
-        roc::host_validation::generate(
-            MutableTensorView(ScalarType::Float64,
-                              Layout::contiguous(Shape{1}),
-                              {reinterpret_cast<std::byte*>(&value), sizeof(value)}),
-            options);
-        return value;
+        Tensor generated(ScalarType::Float64, Shape{1});
+        roc::host_validation::generate(generated, options);
+        return generated.loadAs<double>({0});
     }
 
     void initCPUSparseInput(PruneSparseMode         mode,
@@ -632,16 +628,12 @@ namespace TensileLite::Client
             tensorMeta,
             dim,
             static_cast<size_t>(metadataLayout));
+        Tensor prunedTensor(scalarType, denseLayout, prunedStorage);
+        Tensor compressedTensor(scalarType, compressedLayout, compressedStorage);
+        Tensor metadataTensor(ScalarType::UInt8, metadataTensorLayout, metadataStorage);
         StructuredSparsityProblem problem(
-            TensorView(scalarType, denseLayout, prunedStorage),
-            MutableTensorView(scalarType, denseLayout, prunedStorage),
-            MutableTensorView(
-                scalarType, compressedLayout, compressedStorage),
-            sparsePattern(mode, dim));
-        problem.twoOfFourMetadata = MutableTensorView(
-            ScalarType::UInt8,
-            metadataTensorLayout,
-            metadataStorage);
+            prunedTensor, prunedTensor, compressedTensor, sparsePattern(mode, dim));
+        problem.twoOfFourMetadata = metadataTensor;
 
         const size_t sliceCount =
             tensor.totalLogicalElements() / tensor.sizes()[dim];
@@ -681,5 +673,8 @@ namespace TensileLite::Client
                     .firstSlice = firstSlice,
                     .sliceCount = endSlice - firstSlice});
         }
+        std::ranges::copy(prunedTensor.storage(), prunedStorage.begin());
+        std::ranges::copy(compressedTensor.storage(), compressedStorage.begin());
+        std::ranges::copy(metadataTensor.storage(), metadataStorage.begin());
     }
 } // namespace TensileLite::Client
