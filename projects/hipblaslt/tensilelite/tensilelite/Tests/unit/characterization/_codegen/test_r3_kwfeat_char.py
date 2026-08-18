@@ -93,7 +93,7 @@ def test_r3_kwfeat_gfx942_helpers_emit():
       - KernelWriterConversion (conversion arm) for GSU>1 kernels
       - KernelWriterBetaOnly  (beta-only arm)   for GSU>1 kernels
     """
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelHelperObjects,
         generateKernelObjectsFromSolutions,
     )

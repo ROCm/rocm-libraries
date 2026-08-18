@@ -48,8 +48,8 @@ Mapping in tensilelite vocabulary:
 import pytest
 
 from rocisa.enum import DataTypeEnum
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Validators.MXScaleFormat import validateMXScaleFormatCombination
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
 # ---------------------------------------------------------------------------

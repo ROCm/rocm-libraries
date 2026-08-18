@@ -8,7 +8,7 @@ Drives the designed LRA-transposed sweep config
 (``data/test_data/_designed/gfx950/lra_tr.yaml``) through the config-driven
 emit harness.
 
-Target missing ranges in Tensile/Components/LraTileAssignment.py:
+Target missing ranges in tensilelite/Components/LraTileAssignment.py:
   144-249  : LraTileAssignmentTransposedMFMA.__call__
              (DataType=b BF16, HasLDSTrB128B16=True, enableLDSTr=True,
               tile01==1 -> isM=False path, wave-offset branch num1DWaves>1)

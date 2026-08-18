@@ -5,7 +5,7 @@
 """R3 -- gfx942 StreamK XCCMapping non-power-of-2 characterization (CPU-only).
 
 Exercises the non-power-of-2 branch in ``XCCMappingOn.__call__``
-(Tensile/Components/StreamK.py lines 78-79) by using
+(tensilelite/Components/StreamK.py lines 78-79) by using
 ``StreamKXCCMapping=3`` (non-power-of-2 divisor):
 
 Target missing range (methodology-A):

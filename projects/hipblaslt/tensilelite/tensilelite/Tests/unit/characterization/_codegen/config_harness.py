@@ -69,9 +69,9 @@ def _toolchain_for(arch):
     ``next(iter(isaInfoMap.keys()))`` deterministically selects it. Uses
     amdclang++; no GPU required. Cached per arch.
     """
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     isa = gfxToIsa(arch)
     if isa is None:
@@ -94,8 +94,8 @@ def _isolated_globals_with_isa(isaInfoMap):
     state afterwards so this harness never leaks into unrelated unit tests
     (same contract as ``codegen_harness._isolated_globals``).
     """
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -113,7 +113,7 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 def _load_config(config_path):
     """Read a Tensile config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
-    from Tensile import LibraryIO
+    from tensilelite import LibraryIO
 
     return LibraryIO.read(str(resolve_tensile_path(config_path)))
 
@@ -129,9 +129,9 @@ def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_s
     ``limit_solutions`` caps the number of fork permutations fed to solution
     generation (keeps the rocisa per-process footprint bounded for big sweeps).
     """
-    from Tensile.BenchmarkProblems import _generateForkedSolutions
-    from Tensile.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
-    from Tensile.Common.Types import makeDebugConfig
+    from tensilelite.BenchmarkProblems import _generateForkedSolutions
+    from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
+    from tensilelite.Common.Types import makeDebugConfig
 
     config = _load_config(config_path)
     benchmarkProblems = config["BenchmarkProblems"]
@@ -195,10 +195,10 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     time (the kernel name is a hash, so the shape is not recoverable from it).
     """
     import rocisa  # noqa: F401  (ensures the singleton module is importable here)
-    from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
     assembler, iim = _toolchain_for(arch)
 
@@ -235,7 +235,7 @@ def _emit_one(kwa, kernel, splitGSU, canonical):
     ``_prepare_kernel`` (sets BaseName), and ``canonicalize_asm`` so the emitted
     text matches the logic-driven harness exactly.
     """
-    from Tensile.TensileCreateLibrary.Run import processKernelSource
+    from tensilelite.TensileCreateLibrary.Run import processKernelSource
 
     ri = _ch._init_rocisa_for(kernel)
     data = ri.getData()
@@ -361,13 +361,13 @@ def _guard_assembler():
     ``codegen_harness`` builds its shared assembler with ``"default"``, which is
     harmless while nothing invokes it but which clang rejects outright
     (``invalid integral value 'default' in '-mcode-object-version=default'``).
-    Build a separate one on Tensile's own default version instead of retargeting
+    Build a separate one on tensilelite's own default version instead of retargeting
     the shared assembler, whose ``code_object_version`` reaches signature codegen
     through ``Solution``.
     """
-    from Tensile.Common.GlobalParameters import globalParameters
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Common.GlobalParameters import globalParameters
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     coVersion = str(globalParameters["CodeObjectVersion"])
     if not coVersion.isdigit():
@@ -435,9 +435,9 @@ def assert_split_multicast_masks(src, base):
 #   python config_harness.py [<config path>]
 #
 # Defaults to the small single-permutation fp32_nt gemm config relative to the
-# Tensile package root.
+# tensilelite package root.
 
-_SMOKE_DEFAULT_CONFIG = "Tensile/Tests/common/gemm/fp32_nt.yaml"
+_SMOKE_DEFAULT_CONFIG = "tensilelite/Tests/common/gemm/fp32_nt.yaml"
 
 
 def _smoke(config_path=_SMOKE_DEFAULT_CONFIG):

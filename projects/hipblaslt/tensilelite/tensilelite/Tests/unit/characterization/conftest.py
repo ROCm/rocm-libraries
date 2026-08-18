@@ -160,7 +160,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     write("")
     write(
         "Policy (single source of truth): "
-        "Tensile/Tests/unit/characterization/README.md "
+        "tensilelite/Tests/unit/characterization/README.md "
         "-- 'Snapshot / golden discipline (governance)'"
     )
     write(bar)

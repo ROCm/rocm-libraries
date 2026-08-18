@@ -41,7 +41,7 @@ Snapshot shape for the public fn: ``{"returned": bool, "valid": <Valid or
 import pytest
 
 from rocisa.enum import DataTypeEnum
-from Tensile.SolutionStructs.Validators.MXScaleFormat import (
+from tensilelite.SolutionStructs.Validators.MXScaleFormat import (
     validateMXScaleFormatCombination,
     _mxMatrixLabel,
     _mxScaleLabel,

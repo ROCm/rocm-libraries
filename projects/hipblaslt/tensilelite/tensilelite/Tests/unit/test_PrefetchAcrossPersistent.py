@@ -15,16 +15,16 @@ from rocisa.code import Module
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
 
-import Tensile.KernelWriter as kw_module
-from Tensile.KernelWriter import KernelWriter
-import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
-from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
-from Tensile.Common.RequiredParameters import getRequiredParametersMin
-from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Contractions import SizeMapping
-from Tensile.SolutionStructs.Solution import (
+import tensilelite.KernelWriter as kw_module
+from tensilelite.KernelWriter import KernelWriter
+import tensilelite.KernelWriterAssembly as kwa_module
+from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
+from tensilelite.Common.GlobalParameters import defaultSolution, globalParameters
+from tensilelite.Common.RequiredParameters import getRequiredParametersMin
+from tensilelite.Common.Types import IsaInfo, IsaVersion, SemanticVersion
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Contractions import SizeMapping
+from tensilelite.SolutionStructs.Solution import (
     Solution,
     _disableUnsupportedRuntimeStaggerU,
     validateParameterTypes,
@@ -1103,7 +1103,7 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
     remap_name,
     expected_transform_levels,
 ):
-    import Tensile.Components.WorkGroupMappingAlgos as wgm_algos
+    import tensilelite.Components.WorkGroupMappingAlgos as wgm_algos
 
     monkeypatch.setattr(
         wgm_algos,

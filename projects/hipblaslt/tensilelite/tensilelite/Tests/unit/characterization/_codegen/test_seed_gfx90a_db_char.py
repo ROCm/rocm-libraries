@@ -11,7 +11,7 @@ DataType=Double codegen surface. Attribution entry ``gfx90a__DB_yaml`` flagged
 ShiftVectorComponents / edge-store handling).
 
 This drives the shipped, gfx90a-dedicated FP64 config
-``Tensile/Tests/common/gemm/f64_gfx90a.yaml`` (BenchmarkProblems[0] is
+``tensilelite/Tests/common/gemm/f64_gfx90a.yaml`` (BenchmarkProblems[0] is
 DataType=d) through the config harness and asserts the emitted kernels are real
 gfx90a AMDGCN assembly, every kernel err==0. No snapshot (P3 records goldens).
 """

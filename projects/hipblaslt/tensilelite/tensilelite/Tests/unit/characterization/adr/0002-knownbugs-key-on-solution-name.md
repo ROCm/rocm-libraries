@@ -33,6 +33,6 @@ This is an intended behavior change, not a pinned bug, so no `Defect:` fix is
 tracked. If the key scheme is ever revised again, flip these goldens and
 supersede this ADR. The `.ambr` edits here were made to match syrupy's amber
 serialization by hand; they must be confirmed byte-identical by running
-`pytest Tensile/Tests/unit/characterization/TensileLogic/test_knownbugs_char.py --snapshot-update`
+`pytest tensilelite/Tests/unit/characterization/TensileLogic/test_knownbugs_char.py --snapshot-update`
 in a build environment (rocisa present) and verifying no further diff, since the
 `-m unit` lane cannot run without the compiled rocisa module.

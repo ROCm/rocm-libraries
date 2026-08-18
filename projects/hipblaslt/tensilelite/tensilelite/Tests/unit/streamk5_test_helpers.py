@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Components.StreamK import StreamKHybrid, streamKVariantClass
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.StreamK import StreamKHybrid, streamKVariantClass
 
 from rocisa.code import Module, RegSet
 

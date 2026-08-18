@@ -31,7 +31,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from Tensile.CustomYamlLoader import (
+from tensilelite.CustomYamlLoader import (
     load_logic_cu_count,
     load_logic_device_names,
     load_logic_gfx_arch,
