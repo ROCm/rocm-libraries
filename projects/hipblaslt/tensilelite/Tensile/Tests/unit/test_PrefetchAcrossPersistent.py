@@ -164,6 +164,11 @@ class _SetupNewTilePapTdmWriter:
             memTokenLdsBuffer1=1,
             staggerUCode=False,
             unrollIdx=0,
+            # Capability/kernel state consumed by ClusterLoadTDM.find()'s
+            # PartialMatch (asmCaps HasTDM + kernel TDMInst==3), mirroring the
+            # real writer.states on a gfx1250 TDM path so the component matches.
+            asmCaps={"HasTDM": True},
+            kernel={"TDMInst": 3},
             waveIdxReleasedAfterStagger=False,
         )
         self.do = {"executeToInitEnd": False}
