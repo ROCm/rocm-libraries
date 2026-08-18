@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/comparison.hpp>
-#include <roc/host_validation/typed_comparison.hpp>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -36,13 +35,14 @@ namespace hipblaslt::host_validation
             {1, static_cast<ptrdiff_t>(leadingDimension), static_cast<ptrdiff_t>(batchStride)});
     }
 
-    inline TensorView comparisonView(const void* data, hipDataType type, const Layout& layout)
+    inline ::roc::host_validation::Tensor
+        comparisonTensor(const void* data, hipDataType type, const Layout& layout)
     {
         const ScalarType scalar       = scalarType(type);
         const size_t     storageBytes = storageBytesForLayout(scalar, layout);
         if(data == nullptr && storageBytes != 0)
             throw std::invalid_argument("hipBLASLt comparison buffer is null.");
-        return TensorView(
+        return ::roc::host_validation::Tensor(
             scalar,
             layout,
             std::span<const std::byte>(static_cast<const std::byte*>(data), storageBytes));
@@ -57,13 +57,17 @@ namespace hipblaslt::host_validation
         constexpr ScalarType scalar = scalarType<T>();
         static_assert(scalarTypeInfo(scalar).storageBits == sizeof(T) * 8,
                       "Typed hipBLASLt comparison requires native scalar storage.");
-        const size_t storageElements = storageBytesForLayout(scalar, layout) / sizeof(T);
+        const size_t storageBytes    = storageBytesForLayout(scalar, layout);
         options.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
         return compare(
-            TypedTensorView<T>(
-                layout, std::span<const T>(static_cast<const T*>(observed), storageElements)),
-            TypedTensorView<T>(
-                layout, std::span<const T>(static_cast<const T*>(expected), storageElements)),
+            ::roc::host_validation::Tensor(
+                scalar,
+                layout,
+                std::span<const std::byte>(static_cast<const std::byte*>(observed), storageBytes)),
+            ::roc::host_validation::Tensor(
+                scalar,
+                layout,
+                std::span<const std::byte>(static_cast<const std::byte*>(expected), storageBytes)),
             options);
     }
 
@@ -107,8 +111,8 @@ namespace hipblaslt::host_validation
             return compareTypedBuffers<hipblasLtInt8>(expected, observed, layout, options);
         default:
             options.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
-            return compare(comparisonView(observed, type, layout),
-                           comparisonView(expected, type, layout),
+            return compare(comparisonTensor(observed, type, layout),
+                           comparisonTensor(expected, type, layout),
                            options);
         }
     }

@@ -6,6 +6,10 @@
 #include <roc/host_validation/amd_gpu_layout/mx.hpp>
 #include <vector>
 
+#ifdef _OPENMP
+#error "The installed AMDGPULayout target must not export OpenMP compile flags."
+#endif
+
 int main() {
     using namespace roc::host_validation::amd_gpu_layout;
 

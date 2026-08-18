@@ -31,6 +31,7 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-export.h>
 #include <hipblaslt/hipblaslt-types.h>
+#include <roc/host_validation/mx.hpp>
 #include <stdint.h>
 
 #include <span>
@@ -50,7 +51,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    float                  min_val         = -1.0f,
                                    float                  max_val         = 1.0f,
                                    std::string_view const scaleInitMethod = "",
-                                   uint32_t               seed            = 1713573849U);
+                                   uint32_t               seed
+                                   = roc::host_validation::MxGenerationProblem::defaultSeed);
 
 // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
 // on gfx950 pad ceil(K/mxBlock) up to a multiple of 8. K-fast layouts need this

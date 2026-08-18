@@ -4713,9 +4713,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
             {
+                // GFX11's 16-bit-input unit-check path historically requires a
+                // near comparison. Type-specific relaxed tolerances are no
+                // longer used; bound ordinary accumulation error by K * epsilon.
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
                 {
-                    tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_gfx11_type(Tc, TiA, To);
+                    tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_compute_type(Tc);
                 }
             }
             if(arg.initialization == hipblaslt_initialization::integer_exact)
@@ -5328,10 +5331,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
             {
+                // See the matching grouped-GEMM path above.
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
                 {
                     hipblaslt_cout << "k = " << K[gemmIdx] << "\n";
-                    tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_gfx11_type(Tc, TiA, To);
+                    tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_compute_type(Tc);
                 }
             }
             if(arg.initialization == hipblaslt_initialization::integer_exact)

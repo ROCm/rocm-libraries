@@ -12,6 +12,8 @@
 #include <vector>
 
 namespace roc::host_validation {
+// Shared pointwise activation selector for GEMM and standalone epilogue
+// descriptors. Consumers provide any activation parameters separately.
 enum class Activation {
     None,
     Absolute,
@@ -29,32 +31,41 @@ enum class Activation {
     Clamp,
 };
 
+// Selects which matrix coordinate indexes a broadcast vector.
 enum class MatrixAxis {
-    Row,
-    Column,
+    Row,     // values[row]
+    Column,  // values[column]
 };
 
+// Selects operand arithmetic applied after input quantization and before
+// multiplication.
 enum class MathMode {
     Default,
-    XFloat32,
+    XFloat32,  // Truncate Float32 operands to the xfloat32 representation.
 };
 
+// Selects the final conversion performed before writing an output tensor.
 enum class OutputConversion {
     Default,
-    SaturatingInt8,
+    SaturatingInt8,  // Round and clamp to [-128, 127].
 };
 
+// Associates a rank-one tensor with its row- or column-broadcasting rule.
 struct VectorBinding {
-    TensorView values;
+    Tensor values;
     MatrixAxis axis = MatrixAxis::Row;
 };
 
+// Storage form used by OutputSelection.
 enum class OutputSelectionKind {
     All,
     Strided,
     Explicit,
 };
 
+// Describes which logical linear output indices an operation should evaluate.
+// Explicit indices are normalized when constructed and validated against the
+// operation's logical element count when consumed.
 class OutputSelection {
    public:
     static OutputSelection all() {
@@ -79,6 +90,8 @@ class OutputSelection {
         return result;
     }
 
+    // Chooses the smallest prime stride at least allocatedElements /
+    // requestedElements. The resulting sample size is approximate.
     static OutputSelection primeStride(size_t logicalElements, size_t allocatedElements,
                                        size_t requestedElements) {
         if (requestedElements == 0 || requestedElements >= logicalElements) return all();
@@ -114,11 +127,7 @@ class OutputSelection {
                 return result;
             }
             case OutputSelectionKind::Explicit:
-                for (size_t index : m_indices) {
-                    if (index >= logicalElements)
-                        throw std::out_of_range(
-                            "Explicit output selection index exceeds output shape.");
-                }
+                validateExplicitIndices(logicalElements);
                 return m_indices;
         }
         throw std::invalid_argument("Invalid output selection kind.");
@@ -132,22 +141,29 @@ class OutputSelection {
                 if (m_first >= logicalElements) return 0;
                 return 1 + (logicalElements - 1 - m_first) / m_stride;
             case OutputSelectionKind::Explicit:
-                for (size_t index : m_indices) {
-                    if (index >= logicalElements)
-                        throw std::out_of_range(
-                            "Explicit output selection index exceeds output shape.");
-                }
+                validateExplicitIndices(logicalElements);
                 return m_indices.size();
         }
         throw std::invalid_argument("Invalid output selection kind.");
     }
 
    private:
+    void validateExplicitIndices(size_t logicalElements) const {
+        // explicitIndices keeps this vector sorted, so its last element is the
+        // only one needed to validate the complete selection.
+        if (!m_indices.empty() && m_indices.back() >= logicalElements)
+            throw std::out_of_range("Explicit output selection index exceeds output shape.");
+    }
+
     static bool isPrime(size_t value) {
         if (value < 2) return false;
         if (value % 2 == 0) return value == 2;
-        for (size_t divisor = 3; divisor <= value / divisor; divisor += 2) {
-            if (value % divisor == 0) return false;
+        if (value % 3 == 0) return value == 3;
+
+        // Every prime greater than three is 6k +/- 1. The quotient condition
+        // is equivalent to divisor * divisor <= value, but cannot overflow.
+        for (size_t divisor = 5; divisor <= value / divisor; divisor += 6) {
+            if (value % divisor == 0 || value % (divisor + 2) == 0) return false;
         }
         return true;
     }

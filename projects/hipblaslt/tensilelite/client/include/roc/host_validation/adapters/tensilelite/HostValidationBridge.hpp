@@ -5,7 +5,6 @@
 
 // Product-private TensileLite adapter.
 
-#include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include <Tensile/Activation.hpp>
@@ -122,22 +121,6 @@ namespace TensileLite::Client
         return defaultComparisonOptions(scalarType, toleranceOverride);
     }
 
-    template <typename T>
-    roc::host_validation::ComparisonResult
-        compareHostBuffersTyped(const void*                                    observed,
-                                const void*                                    expected,
-                                size_t                                         storageElements,
-                                const roc::host_validation::Layout&            layout,
-                                const roc::host_validation::ComparisonOptions& options)
-    {
-        return roc::host_validation::compare(
-            roc::host_validation::TypedTensorView<T>(
-                layout, std::span<const T>(static_cast<const T*>(observed), storageElements)),
-            roc::host_validation::TypedTensorView<T>(
-                layout, std::span<const T>(static_cast<const T*>(expected), storageElements)),
-            options);
-    }
-
     inline roc::host_validation::ComparisonResult
         compareHostBuffers(rocisa::DataType                               type,
                            const void*                                    observed,
@@ -146,46 +129,22 @@ namespace TensileLite::Client
                            const roc::host_validation::Layout&            layout,
                            const roc::host_validation::ComparisonOptions& options)
     {
-        switch(type)
-        {
-        case rocisa::DataType::Float:
-            return compareHostBuffersTyped<float>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::Double:
-            return compareHostBuffersTyped<double>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::ComplexFloat:
-            return compareHostBuffersTyped<std::complex<float>>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::ComplexDouble:
-            return compareHostBuffersTyped<std::complex<double>>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::Half:
-            return compareHostBuffersTyped<Half>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::BFloat16:
-            return compareHostBuffersTyped<BFloat16>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::Float8:
-            return compareHostBuffersTyped<Float8>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::BFloat8:
-            return compareHostBuffersTyped<BFloat8>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::Float8_fnuz:
-            return compareHostBuffersTyped<Float8_fnuz>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::BFloat8_fnuz:
-            return compareHostBuffersTyped<BFloat8_fnuz>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::Int8:
-            return compareHostBuffersTyped<int8_t>(
-                observed, expected, storageElements, layout, options);
-        case rocisa::DataType::Int32:
-            return compareHostBuffersTyped<int32_t>(
-                observed, expected, storageElements, layout, options);
-        default:
-            throw std::invalid_argument("TensileLite output type has no typed comparison adapter.");
-        }
+        const auto   scalarType = toHostValidationScalarType(type);
+        const size_t bytes      = roc::host_validation::storageBytesForLayout(scalarType, layout);
+        if(observed == nullptr && bytes != 0)
+            throw std::invalid_argument("TensileLite observed comparison buffer is null.");
+        if(expected == nullptr && bytes != 0)
+            throw std::invalid_argument("TensileLite expected comparison buffer is null.");
+        (void)storageElements;
+        return roc::host_validation::compare(
+            roc::host_validation::Tensor(
+                scalarType,
+                layout,
+                std::span<const std::byte>(static_cast<const std::byte*>(observed), bytes)),
+            roc::host_validation::Tensor(
+                scalarType,
+                layout,
+                std::span<const std::byte>(static_cast<const std::byte*>(expected), bytes)),
+            options);
     }
 } // namespace TensileLite::Client

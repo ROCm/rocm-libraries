@@ -48,10 +48,10 @@ size_t expectedScaleIndex(const MxGenerationProblem& problem, size_t row, size_t
 }
 
 void checkReference(const MxGenerationProblem& problem, const MxGenerationResult& result) {
-    const TensorView data = result.data.view();
-    const TensorView scales = result.scales.view();
-    const TensorView scaleIndices = result.scaleIndices.view();
-    const TensorView reference = result.reference.view();
+    const Tensor data = result.data;
+    const Tensor scales = result.scales;
+    const Tensor scaleIndices = result.scaleIndices;
+    const Tensor reference = result.reference;
     const size_t rows = problem.shape[0];
     const size_t columns = problem.shape[1];
     const size_t scaleCount = expectedScaleCount(problem);
@@ -198,7 +198,7 @@ int main() {
         if (mode == MxGenerationMode::NaN) {
             for (size_t column = 0; column < problem.shape[1]; ++column)
                 for (size_t row = 0; row < problem.shape[0]; ++row)
-                    require(std::isnan(result.reference.view().loadAs<float>({row, column})),
+                    require(std::isnan(result.reference.loadAs<float>({row, column})),
                             "MX NaN mode produced a finite reference value.");
         }
     }
@@ -215,7 +215,7 @@ int main() {
     explicitScale.scale = MxGenerationRecipe{MxGenerationMode::Ones};
     const MxGenerationResult explicitlyScaled = generateMx(explicitScale);
     for (size_t scaleIndex = 0; scaleIndex < explicitlyScaled.scales.shape()[0]; ++scaleIndex)
-        require(explicitlyScaled.scales.view().loadAs<float>({scaleIndex}) == 1.0f,
+        require(explicitlyScaled.scales.loadAs<float>({scaleIndex}) == 1.0f,
                 "MX explicit unity-scale generation mismatch.");
     checkReference(explicitScale, explicitlyScaled);
 

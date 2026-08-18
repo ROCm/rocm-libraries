@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <roc/host_validation/backends/tiled.hpp>
+#include <roc/host_validation/comparison.hpp>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -13,6 +14,7 @@ namespace {
 using roc::host_validation::GemmRequest;
 using roc::host_validation::GemmRunInfo;
 using roc::host_validation::OutputSelection;
+using roc::host_validation::Tensor;
 using roc::host_validation::TiledGemmBackend;
 
 constexpr float untouchedValue = -12345.0f;
@@ -33,20 +35,36 @@ std::vector<float> makeValues(size_t rows, size_t columns, size_t seed) {
 }
 
 GemmRequest makeProblem(const std::vector<float>& a, const std::vector<float>& b,
-                        const std::vector<float>& c, std::vector<float>& d, size_t rows,
+                        const std::vector<float>& c, roc::host_validation::Tensor d, size_t rows,
                         size_t reductionElements, size_t columns) {
     using namespace roc::host_validation;
 
     return GemmRequest(
-        GemmOperand(TensorView::fromNative<float>(
-            Layout::contiguous(Shape{rows, reductionElements}), std::span<const float>(a))),
-        GemmOperand(TensorView::fromNative<float>(
-            Layout::contiguous(Shape{reductionElements, columns}), std::span<const float>(b))),
-        TensorView::fromNative<float>(Layout::contiguous(Shape{rows, columns}),
-                                      std::span<const float>(c)),
-        MutableTensorView::fromNative<float>(Layout::contiguous(Shape{rows, columns}),
-                                             std::span<float>(d)),
-        ScalarType::Float32);
+        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{rows, reductionElements}),
+                                              std::span<const float>(a))),
+        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{reductionElements, columns}),
+                                              std::span<const float>(b))),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{rows, columns}),
+                                  std::span<const float>(c)),
+        std::move(d), ScalarType::Float32);
+}
+
+roc::host_validation::Tensor makeOutput(size_t rows, size_t columns, float value) {
+    using namespace roc::host_validation;
+    std::vector<float> values(rows * columns, value);
+    return Tensor::fromNativeValues<float>(Shape{rows, columns}, values);
+}
+
+void fillTensor(const roc::host_validation::Tensor& tensor, float value) {
+    std::vector<size_t> indices(tensor.shape().rank(), 0);
+    for (size_t linearIndex = 0; linearIndex < tensor.size(); ++linearIndex) {
+        tensor.storeFrom(indices, value);
+        for (size_t dimension = tensor.shape().rank(); dimension > 0; --dimension) {
+            const size_t index = dimension - 1;
+            if (++indices[index] < tensor.shape()[index]) break;
+            indices[index] = 0;
+        }
+    }
 }
 
 void configureFinalizer(GemmRequest& problem, const std::vector<float>& columnBias) {
@@ -55,8 +73,8 @@ void configureFinalizer(GemmRequest& problem, const std::vector<float>& columnBi
     problem.epilogue.alpha = 1.25;
     problem.epilogue.beta = -0.5;
     problem.epilogue.bias = VectorBinding{
-        TensorView::fromNative<float>(Layout::contiguous(Shape{columnBias.size()}),
-                                      std::span<const float>(columnBias)),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{columnBias.size()}),
+                                  std::span<const float>(columnBias)),
         MatrixAxis::Column,
     };
     problem.epilogue.activation = Activation::Relu;
@@ -68,8 +86,9 @@ struct ParityRunInfo {
 };
 
 ParityRunInfo runParity(GemmRequest& canonicalProblem, GemmRequest& tiledProblem,
-                        const std::vector<float>& canonicalOutput,
-                        const std::vector<float>& tiledOutput, const char* mismatchMessage) {
+                        const roc::host_validation::Tensor& canonicalOutput,
+                        const roc::host_validation::Tensor& tiledOutput,
+                        const char* mismatchMessage) {
     using namespace roc::host_validation;
 
     TiledGemmBackend backend;
@@ -86,21 +105,22 @@ ParityRunInfo runParity(GemmRequest& canonicalProblem, GemmRequest& tiledProblem
                                            &backend);
     require(tiled.runInfo.backendUsed == GemmBackend::Tiled,
             "Tiled backend run information mismatch.");
-    require(tiledOutput == canonicalOutput, mismatchMessage);
+    require(compare(tiledOutput, canonicalOutput).passed(), mismatchMessage);
     return {
         .canonical = canonical.runInfo,
         .tiled = tiled.runInfo,
     };
 }
 
-void requireOnlySelectedOutputsStored(const std::vector<float>& output,
+void requireOnlySelectedOutputsStored(const roc::host_validation::Tensor& output,
                                       const OutputSelection& selection) {
     std::vector<size_t> selected = selection.indices(output.size());
     std::sort(selected.begin(), selected.end());
     selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
     for (size_t index = 0; index < output.size(); ++index) {
         if (!std::binary_search(selected.begin(), selected.end(), index))
-            require(output[index] == untouchedValue,
+            require(output.loadAs<float>({index / output.shape()[1], index % output.shape()[1]}) ==
+                        untouchedValue,
                     "Tiled backend modified an unselected output element.");
     }
 }
@@ -112,21 +132,20 @@ void testFinalizerAndSmallEdgeTile() {
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     const std::array<float, 4> c{1, 1, 1, 1};
     const std::array<float, 2> bias{1, -1000};
-    std::array<float, 4> d{};
+    Tensor d(ScalarType::Float32, Shape{2, 2});
     TiledGemmBackend backend;
 
     GemmRequest problem(
         GemmOperand(
-            TensorView::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
+            Tensor::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
         GemmOperand(
-            TensorView::fromNative<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b))),
-        TensorView::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
-        MutableTensorView::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<float>(d)),
-        ScalarType::Float32);
+            Tensor::fromNative<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b))),
+        Tensor::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
+        d.alias(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
     problem.epilogue.alpha = 2;
     problem.epilogue.beta = 3;
     problem.epilogue.bias = VectorBinding{
-        TensorView::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
         MatrixAxis::Row,
     };
     problem.epilogue.activation = Activation::Relu;
@@ -147,9 +166,11 @@ void testFinalizerAndSmallEdgeTile() {
                                           &backend);
     require(full.runInfo.outputElementsComputed == 4,
             "Full tiled GEMM reported the wrong computed output count.");
-    require(d == std::array<float, 4>{120, 0, 132, 0}, "Tiled backend result mismatch.");
+    const Tensor expected =
+        Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{120, 0, 132, 0});
+    require(compare(d, expected).passed(), "Tiled backend result mismatch.");
 
-    d.fill(untouchedValue);
+    fillTensor(d, untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({0});
     const GemmResult selected = referenceGemm(problem,
                                               {
@@ -159,10 +180,12 @@ void testFinalizerAndSmallEdgeTile() {
                                               &backend);
     require(selected.runInfo.outputElementsComputed == 4,
             "Selected tiled GEMM did not report the clipped tile area.");
-    require(d == std::array<float, 4>{120, untouchedValue, untouchedValue, untouchedValue},
+    require(d.loadAs<float>({0, 0}) == 120 && d.loadAs<float>({0, 1}) == untouchedValue &&
+                d.loadAs<float>({1, 0}) == untouchedValue &&
+                d.loadAs<float>({1, 1}) == untouchedValue,
             "Tiled backend partial output selection mismatch.");
 
-    d.fill(untouchedValue);
+    fillTensor(d, untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({});
     const GemmResult empty = referenceGemm(problem,
                                            {
@@ -172,9 +195,7 @@ void testFinalizerAndSmallEdgeTile() {
                                            &backend);
     require(empty.runInfo.outputElementsComputed == 0,
             "Empty tiled output selection reported computed accumulators.");
-    require(
-        d == std::array<float, 4>{untouchedValue, untouchedValue, untouchedValue, untouchedValue},
-        "Empty tiled output selection modified output.");
+    requireOnlySelectedOutputsStored(d, OutputSelection::explicitIndices({}));
 }
 
 void testExplicitSelectionTilePlan() {
@@ -186,8 +207,8 @@ void testExplicitSelectionTilePlan() {
     const std::vector<float> b = makeValues(reductionElements, columns, 2);
     const std::vector<float> c = makeValues(rows, columns, 3);
     const std::vector<float> bias = makeValues(1, columns, 4);
-    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
-    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::explicitIndices({
         44 * columns + 69,
         2 * columns + 3,
@@ -223,8 +244,8 @@ void testStridedSelectionTilePlan() {
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
     const std::vector<float> c = makeValues(rows, columns, 7);
     const std::vector<float> bias = makeValues(1, columns, 8);
-    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
-    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::strided(3, 509);
 
     GemmRequest canonicalProblem =
@@ -267,8 +288,8 @@ void testBlockScaledSelectionTilePlan() {
         scaleB[column * scaleBlocks + 1] = column % 3 == 0 ? 1.0f : 4.0f;
     }
 
-    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
-    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection =
         OutputSelection::explicitIndices({0, 32 * columns + 32, 32 * columns + 34});
 
@@ -276,13 +297,13 @@ void testBlockScaledSelectionTilePlan() {
         makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
     GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
     const BlockScaleBinding blockScaleA{
-        TensorView::fromNative<float>(Layout::contiguous(Shape{rows, scaleBlocks}),
-                                      std::span<const float>(scaleA)),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{rows, scaleBlocks}),
+                                  std::span<const float>(scaleA)),
         8,
     };
     const BlockScaleBinding blockScaleB{
-        TensorView::fromNative<float>(Layout::contiguous(Shape{columns, scaleBlocks}),
-                                      std::span<const float>(scaleB)),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{columns, scaleBlocks}),
+                                  std::span<const float>(scaleB)),
         8,
     };
     canonicalProblem.a.blockScale = blockScaleA;
@@ -311,8 +332,8 @@ void testFullSelectionParity() {
     const std::vector<float> b = makeValues(reductionElements, columns, 12);
     const std::vector<float> c = makeValues(rows, columns, 13);
     const std::vector<float> bias = makeValues(1, columns, 14);
-    std::vector<float> canonicalOutput(rows * columns, untouchedValue);
-    std::vector<float> tiledOutput(rows * columns, untouchedValue);
+    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
 
     GemmRequest canonicalProblem =
         makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);

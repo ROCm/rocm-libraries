@@ -162,6 +162,10 @@ set(forbidden_patterns
     "#[ \t]*include[ \t]*[<\"]hip[/<\"]"
     "hip::"
     "HIP_[A-Za-z0-9_]*"
+    "TensorView"
+    "MutableTensorView"
+    "TypedTensorView"
+    "fromExternal"
 )
 
 foreach(source IN LISTS component_sources)

@@ -53,7 +53,7 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
                 request, {.backend = backendImplementation->backend()}, backendImplementation);
             if (implementationSupport)
                 return {
-                    .output = request.d.asConst(),
+                    .output = request.d,
                     .runInfo = backendImplementation->run(request),
                 };
             fallbackReason = implementationSupport.reason;
@@ -70,7 +70,7 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
         backend = GemmBackend::Canonical;
     } else if (backend != GemmBackend::Canonical) {
         return {
-            .output = request.d.asConst(),
+            .output = request.d,
             .runInfo = backendImplementation->run(request),
         };
     }
@@ -82,7 +82,7 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
     GemmRunInfo runInfo = detail::runPointwiseGemm(request);
     runInfo.fallbackReason = std::move(fallbackReason);
     return {
-        .output = request.d.asConst(),
+        .output = request.d,
         .runInfo = std::move(runInfo),
     };
 }

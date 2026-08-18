@@ -834,27 +834,27 @@ namespace MatrixMultiplyTest
         TensorDescriptor descC(DataType::Float, {M, N}, "N");
 
         HostNumerics::HostReferenceProblem scaledProblem(
-            HostNumerics::hostTensorView(referenceDescA, A),
-            HostNumerics::hostTensorView(referenceDescB, B),
-            HostNumerics::hostTensorView(descC, C));
-        scaledProblem.scaleA = HostNumerics::hostScaleTensorView(
-            DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize);
-        scaledProblem.scaleB = HostNumerics::hostScaleTensorView(
-            DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize);
+            HostNumerics::hostTensor(referenceDescA, A),
+            HostNumerics::hostTensor(referenceDescB, B),
+            HostNumerics::hostTensor(descC, C));
+        scaledProblem.scaleA
+            = HostNumerics::hostScaleTensor(DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize);
+        scaledProblem.scaleB
+            = HostNumerics::hostScaleTensor(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize);
         scaledProblem.scaleBlockSize = scaleBlockSize;
         scaledProblem.alpha          = alpha;
         auto D                       = HostNumerics::convertHostReference<float>(
-            HostNumerics::computeHostReference(scaledProblem).view());
+            HostNumerics::computeHostReference(scaledProblem));
 
         alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
 
         HostNumerics::HostReferenceProblem unscaledProblem(
-            HostNumerics::hostTensorView(referenceDescA, A),
-            HostNumerics::hostTensorView(referenceDescB, B),
-            HostNumerics::hostTensorView(descC, C));
+            HostNumerics::hostTensor(referenceDescA, A),
+            HostNumerics::hostTensor(referenceDescB, B),
+            HostNumerics::hostTensor(descC, C));
         unscaledProblem.alpha = alpha;
         auto reference        = HostNumerics::convertHostReference<float>(
-            HostNumerics::computeHostReference(unscaledProblem).view());
+            HostNumerics::computeHostReference(unscaledProblem));
 
         double rnorm = relativeNormL2(D, reference);
         Log::info("RNorm is {}", rnorm);

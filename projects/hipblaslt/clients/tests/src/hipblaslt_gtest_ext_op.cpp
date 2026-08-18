@@ -77,14 +77,14 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     using namespace roc::host_validation;
     using namespace hipblaslt::host_validation;
     Tensor expected(ScalarType::Float32, Shape{m, n});
-    referenceSoftmax(
-        SoftmaxProblem(tensorView(input.data(), input.size(), Layout::contiguous(Shape{m, n})),
-                       expected.mutableView(),
-                       1,
-                       ScalarType::Float32));
+    referenceSoftmax(SoftmaxProblem(
+        tensorFromStorage(input.data(), input.size(), Layout::contiguous(Shape{m, n})),
+        expected,
+        1,
+        ScalarType::Float32));
     const ComparisonResult comparison
-        = compare(tensorView(output.data(), output.size(), Layout::contiguous(Shape{m, n})),
-                  expected.view(),
+        = compare(tensorFromStorage(output.data(), output.size(), Layout::contiguous(Shape{m, n})),
+                  expected,
                   nearComparisonOptions(1e-5));
     EXPECT_TRUE(comparison.passed());
 
@@ -108,8 +108,7 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
         input.data(), input.size(), hipblaslt_initialization::hpl);
     hipblaslt::host_validation::initialize(
         gamma.data(), gamma.size(), hipblaslt_initialization::hpl);
-    hipblaslt::host_validation::initialize(
-        beta.data(), beta.size(), hipblaslt_initialization::hpl);
+    hipblaslt::host_validation::initialize(beta.data(), beta.size(), hipblaslt_initialization::hpl);
 
     float* gpuOutput{};
     float* gpuMean{};
@@ -148,53 +147,46 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     err = hipMemcpyDtoH(mean.data(), gpuMean, m * sizeof(float));
     err = hipMemcpyDtoH(invvar.data(), gpuInvvar, m * sizeof(float));
 
-    std::vector<float> referenceOutput(m * n, 0.0f);
-    std::vector<float> referenceMean(m, 0.0f);
-    std::vector<float> referenceInverseVariance(m, 0.0f);
-
     using namespace roc::host_validation;
     using namespace hipblaslt::host_validation;
-    const Layout            tensorLayout     = Layout::contiguous(Shape{m, n});
-    const Layout            statisticsLayout = Layout::contiguous(Shape{m});
-    const Layout            affineLayout     = Layout::contiguous(Shape{n});
-    const MutableTensorView referenceOutputView
-        = mutableTensorView(referenceOutput.data(), referenceOutput.size(), tensorLayout);
-    const MutableTensorView referenceMeanView
-        = mutableTensorView(referenceMean.data(), referenceMean.size(), statisticsLayout);
-    const MutableTensorView referenceInverseVarianceView = mutableTensorView(
-        referenceInverseVariance.data(), referenceInverseVariance.size(), statisticsLayout);
+    const Layout tensorLayout     = Layout::contiguous(Shape{m, n});
+    const Layout statisticsLayout = Layout::contiguous(Shape{m});
+    const Layout affineLayout     = Layout::contiguous(Shape{n});
+    const Tensor referenceOutputTensor(ScalarType::Float32, tensorLayout);
+    const Tensor referenceMeanTensor(ScalarType::Float32, statisticsLayout);
+    const Tensor referenceInverseVarianceTensor(ScalarType::Float32, statisticsLayout);
 
-    LayerNormProblem problem(tensorView(input.data(), input.size(), tensorLayout),
-                             referenceOutputView,
+    LayerNormProblem problem(tensorFromStorage(input.data(), input.size(), tensorLayout),
+                             referenceOutputTensor,
                              1,
                              ScalarType::Float32);
-    problem.mean            = referenceMeanView;
-    problem.inverseVariance = referenceInverseVarianceView;
-    problem.gamma           = tensorView(gamma.data(), gamma.size(), affineLayout);
-    problem.beta            = tensorView(beta.data(), beta.size(), affineLayout);
+    problem.mean            = referenceMeanTensor;
+    problem.inverseVariance = referenceInverseVarianceTensor;
+    problem.gamma           = tensorFromStorage(gamma.data(), gamma.size(), affineLayout);
+    problem.beta            = tensorFromStorage(beta.data(), beta.size(), affineLayout);
     problem.epsilon         = 1e-5;
     referenceLayerNorm(problem);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
     const ComparisonResult  outputComparison
-        = compare(tensorView(output.data(), output.size(), tensorLayout),
-                  referenceOutputView.asConst(),
+        = compare(tensorFromStorage(output.data(), output.size(), tensorLayout),
+                  referenceOutputTensor,
                   comparisonOptions);
     EXPECT_TRUE(outputComparison.passed())
         << "LayerNorm output mismatches: " << outputComparison.mismatches
         << ", max absolute difference: " << outputComparison.maxAbsoluteDifference;
 
     const ComparisonResult meanComparison
-        = compare(tensorView(mean.data(), mean.size(), statisticsLayout),
-                  referenceMeanView.asConst(),
+        = compare(tensorFromStorage(mean.data(), mean.size(), statisticsLayout),
+                  referenceMeanTensor,
                   comparisonOptions);
     EXPECT_TRUE(meanComparison.passed())
         << "LayerNorm mean mismatches: " << meanComparison.mismatches
         << ", max absolute difference: " << meanComparison.maxAbsoluteDifference;
 
     const ComparisonResult inverseVarianceComparison
-        = compare(tensorView(invvar.data(), invvar.size(), statisticsLayout),
-                  referenceInverseVarianceView.asConst(),
+        = compare(tensorFromStorage(invvar.data(), invvar.size(), statisticsLayout),
+                  referenceInverseVarianceTensor,
                   comparisonOptions);
     EXPECT_TRUE(inverseVarianceComparison.passed())
         << "LayerNorm inverse-variance mismatches: " << inverseVarianceComparison.mismatches
@@ -237,13 +229,15 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes);
 
     using namespace roc::host_validation;
-    referenceMaximumAbsolute(hipblaslt::host_validation::tensorView(
-                                 cpuInput.data(),
-                                 cpuInput.size(),
-                                 Layout::contiguous(Shape{numElements})),
-                             hipblaslt::host_validation::mutableTensorView(
-                                 refOutput.data(), refOutput.size(), Layout::contiguous(Shape{})),
-                             ScalarType::Float32);
+    Tensor referenceOutput = hipblaslt::host_validation::tensorFromMutableStorage(
+        refOutput.data(), refOutput.size(), Layout::contiguous(Shape{}));
+    referenceMaximumAbsolute(
+        hipblaslt::host_validation::tensorFromStorage(
+            cpuInput.data(), cpuInput.size(), Layout::contiguous(Shape{numElements})),
+        referenceOutput,
+        ScalarType::Float32);
+    hipblaslt::host_validation::copyTensorStorageTo(
+        refOutput.data(), refOutput.size(), referenceOutput);
 
     EXPECT_NEAR(float(refOutput[0]), float(cpuOutput[0]), 1e-5);
 
@@ -254,7 +248,7 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
 
 TEST_P(ExtOpAMaxTest, amaxSuccess)
 {
-    AMaxTestData    testdata = GetParam();
+    AMaxTestData testdata = GetParam();
 
     if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F)
     {

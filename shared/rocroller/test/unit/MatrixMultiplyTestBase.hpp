@@ -422,23 +422,23 @@ namespace MatrixMultiplyTest
                 float alpha = 1.0f;
 
                 HostNumerics::HostReferenceProblem referenceProblem(
-                    HostNumerics::hostTensorView(
-                        descA,
-                        A,
-                        scaleA ? HostNumerics::DataTypeInterpretation::BlockScaled
-                               : HostNumerics::DataTypeInterpretation::Unscaled),
-                    HostNumerics::hostTensorView(
-                        descB,
-                        B,
-                        scaleB ? HostNumerics::DataTypeInterpretation::BlockScaled
-                               : HostNumerics::DataTypeInterpretation::Unscaled),
-                    HostNumerics::hostTensorView(descD, c_C));
+                    HostNumerics::hostTensor(descA,
+                                             A,
+                                             scaleA
+                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensor(descB,
+                                             B,
+                                             scaleB
+                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensor(descD, c_C));
                 if(scaleA)
                 {
                     ASSERT_TRUE(scaleB);
-                    referenceProblem.scaleA = HostNumerics::hostScaleTensorView(
+                    referenceProblem.scaleA = HostNumerics::hostScaleTensor(
                         scaleTypeA, hostScaleA, descA, 1, scaleBlockSize);
-                    referenceProblem.scaleB = HostNumerics::hostScaleTensorView(
+                    referenceProblem.scaleB = HostNumerics::hostScaleTensor(
                         scaleTypeB, hostScaleB, descB, 0, scaleBlockSize);
                     referenceProblem.scaleBlockSize = scaleBlockSize;
                 }
@@ -448,7 +448,7 @@ namespace MatrixMultiplyTest
                 }
                 referenceProblem.alpha = alpha;
                 auto c_D               = HostNumerics::convertHostReference<TD>(
-                    HostNumerics::computeHostReference(referenceProblem).view());
+                    HostNumerics::computeHostReference(referenceProblem));
 
                 auto tol = gemmAcceptableError<TA, TB, TD>(
                     M, N, K, m_context->targetArchitecture().target());
@@ -681,11 +681,11 @@ namespace MatrixMultiplyTest
                 std::vector<TD> c_C(M * N, TD{});
 
                 HostNumerics::HostReferenceProblem referenceProblem(
-                    HostNumerics::hostTensorView(descA, A),
-                    HostNumerics::hostTensorView(descB, B),
-                    HostNumerics::hostTensorView(descD, c_C));
+                    HostNumerics::hostTensor(descA, A),
+                    HostNumerics::hostTensor(descB, B),
+                    HostNumerics::hostTensor(descD, c_C));
                 auto c_D = HostNumerics::convertHostReference<TD>(
-                    HostNumerics::computeHostReference(referenceProblem).view());
+                    HostNumerics::computeHostReference(referenceProblem));
 
                 auto tol = gemmAcceptableError<TA, TB, TD>(
                     M, N, K, m_context->targetArchitecture().target());
@@ -831,12 +831,12 @@ namespace MatrixMultiplyTest
                             HasHipSuccess(0));
 
                 HostNumerics::HostReferenceProblem referenceProblem(
-                    HostNumerics::hostTensorView(descA, A),
-                    HostNumerics::hostTensorView(descB, B),
-                    HostNumerics::hostTensorView(descC, C));
+                    HostNumerics::hostTensor(descA, A),
+                    HostNumerics::hostTensor(descB, B),
+                    HostNumerics::hostTensor(descC, C));
                 referenceProblem.beta = 1.0f;
                 auto c_D              = HostNumerics::convertHostReference<T>(
-                    HostNumerics::computeHostReference(referenceProblem).view());
+                    HostNumerics::computeHostReference(referenceProblem));
 
                 auto tol = gemmAcceptableError<T, T, T>(
                     M, N, K, m_context->targetArchitecture().target());

@@ -141,13 +141,12 @@ namespace
             options.real.parameter0 = -3;
             options.real.parameter1 = 3;
             options.real.stream     = static_cast<std::uint64_t>(stream);
-            roc::host_validation::generate(
-                hipblaslt::host_validation::mutableTensorView(
-                    ref.data(),
-                    ref.size(),
-                    roc::host_validation::Layout::contiguous(
-                        roc::host_validation::Shape{ref.size()})),
-                options);
+            auto generated          = hipblaslt::host_validation::tensorFromMutableStorage(
+                ref.data(),
+                ref.size(),
+                roc::host_validation::Layout::contiguous(roc::host_validation::Shape{ref.size()}));
+            roc::host_validation::generate(generated, options);
+            hipblaslt::host_validation::copyTensorStorageTo(ref.data(), ref.size(), generated);
 
             auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
             ASSERT_EQ(err, hipSuccess);
