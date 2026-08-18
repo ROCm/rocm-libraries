@@ -724,3 +724,55 @@ class TestExpandBquantSweep:
             quant_group_m=1, quant_group_n=1, quant_group_k=128,
         )
         assert configs[0].name == manual.name
+
+
+# =============================================================================
+# gfx1250 (MI400 / WMMA) default configs
+# =============================================================================
+
+
+from grouped_gemm_bquant_utils import (  # noqa: E402
+    default_fp8_config_gfx1250,
+    default_bf8_config_gfx1250,
+    default_fp8i4_config_gfx1250,
+    default_bf8i4_config_gfx1250,
+)
+
+
+class TestGfx1250Configs:
+
+    def _all(self):
+        return [
+            default_fp8_config_gfx1250(),
+            default_bf8_config_gfx1250(),
+            default_fp8i4_config_gfx1250(),
+            default_bf8i4_config_gfx1250(),
+        ]
+
+    def test_gfx1250_uses_wmma_warp_tile_k_16(self):
+        # gfx1250 must use the WMMA instruction (warp_tile_k=16); the gfx9 fp8/bf8
+        # defaults use warp_tile_k=128 (FlatMM) which is invalid on gfx12.
+        for cfg in self._all():
+            assert cfg.warp_tile_m == 16
+            assert cfg.warp_tile_n == 16
+            assert cfg.warp_tile_k == 16, f"{cfg.name} must use WMMA warp_tile_k=16"
+
+    def test_gfx1250_arch_propagated(self):
+        for cfg in self._all():
+            assert cfg.gfx_arch == "gfx1250"
+
+    def test_gfx1250_names_16x16x16(self):
+        for cfg in self._all():
+            assert "16x16x16" in cfg.name
+
+    def test_gfx1250_pipeline_is_compv3(self):
+        for cfg in self._all():
+            assert cfg.pipeline == "compv3"
+
+    def test_gfx1250_layout_is_rcr(self):
+        for cfg in self._all():
+            assert cfg.layout == "rcr"
+
+    def test_gfx1250_unique_names(self):
+        names = [cfg.name for cfg in self._all()]
+        assert len(names) == len(set(names))

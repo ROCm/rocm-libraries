@@ -77,10 +77,10 @@ int dispatcher_initialize()
     }
     g_gfx_arch = props.gcnArchName;
     if(g_gfx_arch.rfind("gfx950", 0) != 0 && g_gfx_arch.rfind("gfx942", 0) != 0 &&
-       g_gfx_arch.rfind("gfx90a", 0) != 0)
+       g_gfx_arch.rfind("gfx90a", 0) != 0 && g_gfx_arch.rfind("gfx1250", 0) != 0)
     {
         std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << g_gfx_arch
-                  << "' (supported: gfx90a, gfx942, gfx950)\n";
+                  << "' (supported: gfx90a, gfx942, gfx950, gfx1250)\n";
         return -1;
     }
     g_initialized = true;

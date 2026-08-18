@@ -857,3 +857,64 @@ def default_bf8_preshuffleb_config(
         k_block_per_cu=2,
         gfx_arch=gfx_arch,
     )
+
+
+# =============================================================================
+# gfx1250 (MI400 / RDNA WMMA) default configs
+# =============================================================================
+# gfx1250 uses the standard CompV3 pipeline (NOT the gfx950-native eightwaves /
+# FlatMM / preshuffleb paths, which require CK_GFX950_SUPPORT and warp_tile_k=128
+# and TransposeC=True). On gfx1250 the codegen selects the gfx12 WMMA instruction
+# when warp_tile_k=16 (warp_tile_k=32 selects the gfx9-only MFMA path, which
+# silently returns zeros on gfx12). These helpers mirror default_*_compv3_config
+# but pin warp_tile_m=warp_tile_n=warp_tile_k=16 (WMMA) and keep transpose_c=False.
+# The compile path additionally injects -DCK_USE_OCP_FP8 / -DCK_TILE_USE_OCP_FP8
+# for gfx12 archs, so fp8/bf8 use the OCP encoding on gfx1250.
+
+_GFX1250_ARCH = "gfx1250"
+
+
+def default_fp8_compv3_config_gfx1250(
+    quant_group_k: int = 128,
+    bquant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> ABQuantKernelConfig:
+    """fp8 ABQuant CompV3 config for gfx1250 (WMMA warp_tile_k=16, TransposeC=False)."""
+    return ABQuantKernelConfig(
+        variant_key="fp8",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
+        bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
+        preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
+        transpose_c=False,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_bf8_compv3_config_gfx1250(
+    quant_group_k: int = 128,
+    bquant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> ABQuantKernelConfig:
+    """bf8 ABQuant CompV3 config for gfx1250 (WMMA warp_tile_k=16, TransposeC=False)."""
+    return ABQuantKernelConfig(
+        variant_key="bf8",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
+        bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
+        preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
+        transpose_c=False,
+        gfx_arch=gfx_arch,
+    )

@@ -145,10 +145,10 @@ int dispatcher_run_bquant_gemm(const void* A,
         }
         const std::string arch(props.gcnArchName);
         if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
-           arch.rfind("gfx90a", 0) != 0)
+           arch.rfind("gfx90a", 0) != 0 && arch.rfind("gfx1250", 0) != 0)
         {
             std::cerr << "dispatcher_run_bquant_gemm: unsupported GPU architecture '" << arch
-                      << "' (supported: gfx90a, gfx942, gfx950)\n";
+                      << "' (supported: gfx90a, gfx942, gfx950, gfx1250)\n";
             return -1;
         }
     }

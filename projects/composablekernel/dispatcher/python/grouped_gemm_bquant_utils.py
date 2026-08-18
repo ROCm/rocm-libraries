@@ -1214,3 +1214,104 @@ def default_mx_bf16fp4_config(
         quant_group_k=quant_group_k,
         gfx_arch=gfx_arch,
     )
+
+
+# =============================================================================
+# gfx1250 (MI400 / RDNA WMMA) default configs
+# =============================================================================
+# On gfx1250 the quant path uses the gfx12 WMMA instruction, selected by the
+# codegen when warp_tile_k=16 (warp_tile_k=32/128 select the gfx9-only MFMA/FlatMM
+# paths, which silently return zeros on gfx12). These helpers mirror the standard
+# gfx9 compv3 defaults but pin warp_tile_m=warp_tile_n=warp_tile_k=16 (WMMA). The
+# compile path additionally injects -DCK_USE_OCP_FP8 / -DCK_TILE_USE_OCP_FP8 for
+# gfx12 archs, so fp8/bf8 use the OCP encoding on gfx1250.
+
+_GFX1250_ARCH = "gfx1250"
+
+
+def default_fp8_config_gfx1250(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> BQuantKernelConfig:
+    """fp8 BQuant config for gfx1250 (compv3, WMMA warp_tile_k=16)."""
+    return BQuantKernelConfig(
+        variant_key="fp8",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=16, tile_n=64, tile_k=256,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_bf8_config_gfx1250(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> BQuantKernelConfig:
+    """bf8 BQuant config for gfx1250 (compv3, WMMA warp_tile_k=16)."""
+    return BQuantKernelConfig(
+        variant_key="bf8",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=16, tile_n=64, tile_k=256,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_fp8i4_config_gfx1250(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> BQuantKernelConfig:
+    """fp8i4 BQuant config for gfx1250 (compv3, WMMA warp_tile_k=16)."""
+    return BQuantKernelConfig(
+        variant_key="fp8i4",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=16, tile_n=64, tile_k=256,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_bf8i4_config_gfx1250(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> BQuantKernelConfig:
+    """bf8i4 BQuant config for gfx1250 (compv3, WMMA warp_tile_k=16)."""
+    return BQuantKernelConfig(
+        variant_key="bf8i4",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=16, tile_n=64, tile_k=256,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
