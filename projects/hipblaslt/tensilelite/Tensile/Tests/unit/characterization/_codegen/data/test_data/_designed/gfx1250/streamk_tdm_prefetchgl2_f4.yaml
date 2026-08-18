@@ -1,0 +1,99 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# MX-FP4 sibling of streamk_tdm_prefetchgl2.yaml.
+#
+# Same StreamK + wave-separated TDM + PrefetchGL2 corner, but with MX-FP4 input.
+# FP4 halves the bytes per element relative to FP8, so the global-read widths, the
+# LDS layout and the scale-block bookkeeping all differ. Measured, it currently
+# lands on the same pool sizes as FP8 (93/97/101/105 of 106), so this config is not
+# here to widen the budget numbers -- it is here because it is a genuinely different
+# allocation path that could drift away from FP8, and because the GPU test it stands
+# in for (Tensile/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml)
+# regressed alongside the FP8 one and had no unit analogue.
+#
+# Reduced to a single MatrixInstruction (the GPU test sweeps four) because the SGPR
+# count does not vary with MatrixInstruction on this path -- see the sibling config.
+#
+# The fork product below is 2*2*2*2 = 16 solutions and is pinned by
+# _EXPECTED_VARIANTS in test_r3_streamk_tdm_sgpr_budget_gfx1250_char.py.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # MX-FP4 (F4 in, float32 out) TN, Batched, StreamK=3 + TDM + PAP
+  ########################################
+  -
+    - # ProblemType: MX-F4 TN
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - TDMInst: [3]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGL2: [0, 1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [0, 4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [False]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]

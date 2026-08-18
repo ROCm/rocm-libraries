@@ -1,0 +1,30 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipdnn-integration-tests CTest Categories.
+#
+# hipdnn-integration-tests' GTest binaries are categorised by the GTest-filtered
+# categories in test_categories.yaml. This file labels the *pre-registered*
+# (non-GTest) CTest tests that share this project's check targets.
+#
+# These are:
+#   - the generated <project>_test_name_validation meta-test (see
+#     dnn-providers/cmake/Tests.cmake _create_test_name_validation_target_internal)
+#   - hipdnn_bundle_verifier_python_tests (a Python golden-bundle verifier)
+# Without an entry here a pre-registered test carries no labels and is never
+# selected by `ctest -L <tier>`, so it silently drops out of every check target.
+# Label them into the quick tier; the shared parser's tier cascade
+# (quick -> quick, standard, comprehensive, full) then runs them in every
+# cumulative check target.
+#
+# The patterns are exact CTest test names so they match only these pre-registered
+# tests.
+test_categories:
+  quick:
+    description: "Pre-registered CTest meta-checks (test-name validation, bundle verifier)"
+    test_patterns:
+      - "hipdnn-integration-tests_test_name_validation"
+      - "hipdnn_bundle_verifier_python_tests"
+    labels:
+      - "quick"
+      - "pre-commit"

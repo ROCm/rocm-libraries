@@ -422,6 +422,7 @@ install(FILES
 #   *.cpp               -> "stinkytofu/Config/Config.h"
 #   ir/logical/LogicalOpcode.hpp -> "LogicalOpcodes_generated.inc"
 #   ir/asm/StinkyAsmIR.hpp       -> "hardware/gfxIsa.inc"
+#   *.cpp               -> "stinkytofu/Version.h"
 install(FILES
     ${PROJECT_BINARY_DIR}/include/Config/Archs.def
     DESTINATION include/stinkytofu/Config
@@ -446,7 +447,7 @@ install(DIRECTORY ${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa/
 )
 install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
-    DESTINATION include/stinkytofu
+    DESTINATION include/stinkytofu/stinkytofu
 )
 # Tablegen-generated file needed by the Python module when built standalone
 # against an installed stinkytofu.
