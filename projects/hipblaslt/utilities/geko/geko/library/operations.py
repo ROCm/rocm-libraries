@@ -390,9 +390,9 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         sys.path.append(str(hipblaslt_path / "tensilelite"))
 
     try:
-        from Tensile import LibraryIO
-        from Tensile.CustomYamlLoader import load_yaml_stream
-        from Tensile.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite import LibraryIO
+        from tensilelite.CustomYamlLoader import load_yaml_stream
+        from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
         raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     

@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.CustomKernels import supportsUserSgprKernargPreload
-from Tensile.KernelWriterAssembly import KernelWriterAssembly as _KWA
+from tensilelite.CustomKernels import supportsUserSgprKernargPreload
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly as _KWA
 
 pytestmark = pytest.mark.unit
 
