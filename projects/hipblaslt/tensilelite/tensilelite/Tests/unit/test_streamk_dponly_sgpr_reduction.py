@@ -44,12 +44,12 @@ from rocisa.instruction import (
 )
 from rocisa.register import RegisterPool
 
-import Tensile.KernelWriter as kw_module
-import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Common.DataType import DataType
-from Tensile.Components.StreamK import StreamKTwoTileDPFirst
-from Tensile.Components.Subtile.SubtileGREmit import tdmApplyStreamKOffsetSubtile
-from Tensile.Contractions import SizeMapping
+import tensilelite.KernelWriter as kw_module
+import tensilelite.KernelWriterAssembly as kwa_module
+from tensilelite.Common.DataType import DataType
+from tensilelite.Components.StreamK import StreamKTwoTileDPFirst
+from tensilelite.Components.Subtile.SubtileGREmit import tdmApplyStreamKOffsetSubtile
+from tensilelite.Contractions import SizeMapping
 
 # Reuse the established component-level harness helpers rather than reinventing
 # them (see test_segment_interleave_state / cms_validation_base for the in-repo
@@ -422,8 +422,8 @@ def _sk3_gfx1250_params(gfx1250_iim, dp_only):
     AddressWS/AddressFlags/SrdWS/StreamKLocalStart/StreamKLocalEnd, fits under the
     gfx1250 SGPR budget and emits cleanly -- otherwise the non-DP baseline
     overflows (which is exactly the pressure the DP-only reduction relieves)."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -494,11 +494,11 @@ def _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     import shutil
 
     import rocisa
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )

@@ -28,12 +28,12 @@ from rocisa.code import Module, TextBlock
 from rocisa.container import accvgpr, vgpr, sgpr
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Common.Types import DebugConfig
-from Tensile.KernelWriter import CodeModules, StateValues, StateVgprs
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.KernelWriter import KernelWriter
-from Tensile.KernelWriterModules import mapAcctoArchRegs
-from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
+from tensilelite.Common.Types import DebugConfig
+from tensilelite.KernelWriter import CodeModules, StateValues, StateVgprs
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.KernelWriter import KernelWriter
+from tensilelite.KernelWriterModules import mapAcctoArchRegs
+from tensilelite.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,
@@ -51,7 +51,6 @@ from gpu_test_helpers import (
 )
 
 pytestmark = GPU_MARKS
-
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)
@@ -167,7 +166,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     from gpu_test_helpers import _mock_dtype, _create_kernel
     kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group)
 
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
     f32_dtype = _mock_f32_dtype()
     # PackData component lookup matches on real DataType enum values, so use real
     # DataType for DestDataType and ComputeDataType when bf16 dest is requested.
@@ -327,7 +326,7 @@ def _build_kwa(kernel, writer, use_bf16=False):
     KernelWriter.__init__(kw, mock_assembler, debug_config)
 
     # Add KernelWriterAssembly-only attribute
-    from Tensile.KernelWriterAssembly import GlobalReadGprRecord
+    from tensilelite.KernelWriterAssembly import GlobalReadGprRecord
     kw.globalread_gpr_record = GlobalReadGprRecord()
 
     # Wire in real pools from the mock writer
@@ -684,7 +683,6 @@ def _build_prologue(sgprs, num_agprs, mt0, mt1, stride_d=None, use_input_buf=Tru
         ))
 
     return m
-
 
 
 def _compute_reference(cfg, kernel, tileInfoD, size_i, size_j, rng=None):
@@ -1882,7 +1880,7 @@ def _epilogue_lds_bytes(kernel):
 
 def _configure_kwa_epilogue_vectors(kw, kernel):
     """Wire KernelWriterAssembly states for bias-read + ScaleAlphaVec epilogue."""
-    from Tensile.Common import DataDirection
+    from tensilelite.Common import DataDirection
 
     if kernel["ProblemType"]["UseBias"]:
         kw.states.useBias = DataDirection.READ
@@ -1994,7 +1992,7 @@ def _compute_sav_bias_reference(acc_arr, sav_arr, bias_arr, round_mt0, round_mt1
 def _run_storeD_sav_bias(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
                          dump_asm=False, seed=0):
     """Roundtrip: D = alpha * SAV[m] * acc + bias with random SAV (not identically 1)."""
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
 
     if mi_wave_group is None:
         mi_wave_group = [2, 2]

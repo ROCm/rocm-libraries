@@ -46,8 +46,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from Tensile import Tensile
-from Tensile.Common.GlobalParameters import (
+from tensilelite import tensilelite
+from tensilelite.Common.GlobalParameters import (
     globalParameters,
     restoreDefaultGlobalParameters,
     defaultGlobalParameters,
@@ -67,7 +67,7 @@ def _no_stdin(monkeypatch):
 def _parse(argv):
     """Parse ``argv`` through the shared addCommonArguments parser used by the script."""
     argParser = argparse.ArgumentParser()
-    Tensile.addCommonArguments(argParser)
+    tensilelite.addCommonArguments(argParser)
     return argParser.parse_args(argv)
 
 
@@ -94,7 +94,7 @@ def test_flag_default_off(monkeypatch):
 
     # The flag must NOT be advertised on the documented --global-parameters help surface.
     argParser = argparse.ArgumentParser()
-    Tensile.addCommonArguments(argParser)
+    tensilelite.addCommonArguments(argParser)
     help_text = argParser.format_help()
     # --cpu-only is its own flag, present in help...
     assert "--cpu-only" in help_text
@@ -128,8 +128,8 @@ def test_arg_validation():
 
 # --- ISA belt spoof + primary --gpu-targets path (commit 3) ---------------------
 
-import Tensile.Common.Architectures as Arch
-from Tensile.Common.Types import IsaVersion
+import tensilelite.Common.Architectures as Arch
+from tensilelite.Common.Types import IsaVersion
 
 _ARCH_ISA = {
     "gfx942": IsaVersion(9, 4, 2),
@@ -198,7 +198,7 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 
     monkeypatch.setattr(Arch, "detectGlobalCurrentISA", _no_detect)
 
-    # Mirror the isaList-building logic at Tensile.py (the --gpu-targets branch):
+    # Mirror the isaList-building logic at tensilelite.py (the --gpu-targets branch):
     # ISA comes straight from gfxToIsa(arch); enumerator is None; detection untouched.
     args = _parse(["--cpu-only", "--device", "0"])
     assert args.cpuOnly is True
@@ -222,15 +222,15 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 
 
 def _run_freq_block(device_id=0):
-    """Replay the guarded frequency-probe block from Tensile.Tensile() exactly.
+    """Replay the guarded frequency-probe block from tensilelite.Tensile() exactly.
 
-    The gating predicate mirrors Tensile.py:601 verbatim:
+    The gating predicate mirrors tensilelite.py:601 verbatim:
         'LibraryLogic' in config and UseEffLike and not buildOnly
         and not globalParameters["CpuOnly"]
     The 'LibraryLogic'/UseEffLike/buildOnly preconditions are held True/True/False so
     the test isolates the CpuOnly term: the body must run iff CpuOnly is off. The body
     calls the real module-level seam functions (spied by the test) in the same order as
-    the source, so a spy on Tensile.get_gpu_max_frequency et al. observes the real calls.
+    the source, so a spy on tensilelite.get_gpu_max_frequency et al. observes the real calls.
     """
     config = {"LibraryLogic": {}}
     UseEffLike = True
@@ -241,13 +241,13 @@ def _run_freq_block(device_id=0):
         and not buildOnly
         and not globalParameters["CpuOnly"]
     ):
-        max_frequency = Tensile.get_gpu_max_frequency(device_id)
+        max_frequency = tensilelite.get_gpu_max_frequency(device_id)
         if not max_frequency or max_frequency <= 0:
-            max_frequency = Tensile.get_gpu_max_frequency_smi(device_id)
+            max_frequency = tensilelite.get_gpu_max_frequency_smi(device_id)
         if not max_frequency or max_frequency <= 0:
-            max_frequency = Tensile.get_user_max_frequency()
+            max_frequency = tensilelite.get_user_max_frequency()
         if max_frequency and max_frequency > 0:
-            Tensile.store_max_frequency(max_frequency)
+            tensilelite.store_max_frequency(max_frequency)
         return True
     return False
 
@@ -302,9 +302,9 @@ def test_frequency_probe_skipped(monkeypatch, _restore_gp):
 import subprocess
 from pathlib import Path
 
-import Tensile.ClientWriter as ClientWriter
-import Tensile.BenchmarkProblems as BenchmarkProblems
-from Tensile.SolutionStructs.Problem import Problem
+import tensilelite.ClientWriter as ClientWriter
+import tensilelite.BenchmarkProblems as BenchmarkProblems
+from tensilelite.SolutionStructs.Problem import Problem
 
 # Per-arch seeded problem sizes (the data stub: mirror ProblemSizesMockDummy's [128,128,1,512]).
 # Two distinct sizes prove one CSV data row per seeded size.
@@ -374,7 +374,7 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
         GPU-less: MAX_FREQ unset -> ``round(GFlops)``; MAX_FREQ set -> ``round(GFlops/freq, 2)``.
         This pins the synthetic 1000.0 value through the division the default branch does.
     """
-    from Tensile.LibraryLogic import LogicAnalyzer
+    from tensilelite.LibraryLogic import LogicAnalyzer
 
     GFLOPS = BenchmarkProblems._CPU_ONLY_SYNTHETIC_GFLOPS
     resultsFileName = str(tmp_path / "results.csv")
@@ -453,7 +453,7 @@ _E2E_CONFIG = Path(__file__).parent / "test_data" / "cpu_only.yaml"
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
 def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, arch):
     """T9: drive the full benchmark flow GPU-less via
-    Tensile.Tensile([cfg, out, *tensile_args, "--cpu-only", "--gpu-targets", arch]).
+    tensilelite.Tensile([cfg, out, *tensile_args, "--cpu-only", "--gpu-targets", arch]).
 
     Mirrors test_keep_build_tmp.py, but exercises the BENCHMARK path (no --build-only):
     codegen -> cross-compile -> stubbed client launch -> deterministic synthetic results
@@ -484,7 +484,7 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
         arch,
     ]
 
-    Tensile.Tensile(args)
+    tensilelite.Tensile(args)
 
     # A results CSV was produced (the synthetic stub wrote it; the real device never ran).
     results_csvs = list(output_dir.rglob("*.csv"))
@@ -514,7 +514,7 @@ def _make_problem_type():
     """Build the canonical single-batch GEMM ContractionsProblemType used to capture the
     commit-1 golden: operationIdentifier == Contraction_l_Ailk_Bljk_Cijk_Dijk, S types,
     UseBias=1 / BiasSrc="D" (matching the golden's use-bias=1 / bias-source=3)."""
-    from Tensile.Contractions import ProblemType
+    from tensilelite.Contractions import ProblemType
 
     d = {
         "OperationType": "GEMM",
@@ -552,7 +552,7 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
     fixed sentinels the commit-1 capture used (/SRC, /TENSILE_CLIENT_EXE), so only the
     emitted structure -- not the host-specific paths -- is compared.
     """
-    from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy
+    from tensilelite.SolutionStructs.Problem import ProblemSizesMockDummy
 
     # restoreDefaultGlobalParameters() populates every key the writers read; CpuOnly OFF.
     restoreDefaultGlobalParameters()

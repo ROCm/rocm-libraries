@@ -21,14 +21,14 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-import Tensile.BenchmarkProblems as bp
-from Tensile.Common import IsaVersion
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.SolutionStructs.Problem import ProblemType
-from Tensile.SolutionStructs.Solution import Solution
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+import tensilelite.BenchmarkProblems as bp
+from tensilelite.Common import IsaVersion
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.GlobalParameters import assignGlobalParameters, globalParameters
+from tensilelite.SolutionStructs.Problem import ProblemType
+from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 POOL_FILE = os.path.join(os.path.dirname(__file__), "test_data", "solution_pool_gfx950.yaml")
 _POOL_ISA = IsaVersion(9, 5, 0)  # the fixture is a gfx950 GEMM library

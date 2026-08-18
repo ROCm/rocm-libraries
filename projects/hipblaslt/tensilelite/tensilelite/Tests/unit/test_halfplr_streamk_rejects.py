@@ -3,7 +3,7 @@
 """Solution-validation guards for HalfPLR on StreamK (SK3) on gfx1250.
 
 These are the unit-test replacement for the former
-``Tensile/Tests/common/streamk/gfx1250/core/sk_halfplr_reject.yaml`` negative
+``tensilelite/Tests/common/streamk/gfx1250/core/sk_halfplr_reject.yaml`` negative
 config. Instead of round-tripping a benchmark run to inspect ``reject:`` log
 lines, we build a fully-derived gfx1250 StreamK HalfPLR ``Solution`` in-process
 and assert that each incompatible knob is rejected with its exact diagnostic,
@@ -27,8 +27,8 @@ import copy
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 
@@ -46,9 +46,9 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
@@ -60,8 +60,8 @@ def gfx1250_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -71,8 +71,8 @@ def assembler():
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     """Assign process-global parameters for gfx1250; restore after module."""
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -94,8 +94,8 @@ def _gp_gfx1250(gfx1250_iim):
 # sk_halfplr_f8gemm_tdm.yaml). Mirrors the SolutionEdges gfx1250 helper.
 # ---------------------------------------------------------------------------
 def _make_params(gfx1250_iim, mi=None, **overrides):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
