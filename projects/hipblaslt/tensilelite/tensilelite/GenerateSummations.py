@@ -181,7 +181,6 @@ def GenerateSummations(userArgs):
 
         copyfile(localFinalLogic, finalLogic)
 
-
 def _read_benchmark_data(data_file_path):
     def normalized_header(header):
         value = header.strip()
