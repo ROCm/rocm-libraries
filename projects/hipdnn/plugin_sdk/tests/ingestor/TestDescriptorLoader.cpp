@@ -821,7 +821,8 @@ TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
     writeDocuments(installed, makeSetDocuments('1', "test:validated_installed"));
     writeDocuments(dropIn, makeSetDocuments('2', "test:validated_drop_in"));
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>({installed, dropIn});
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(
+        std::vector<std::filesystem::path>{installed, dropIn});
 
     ASSERT_EQ(sets.size(), 2u);
     EXPECT_EQ(sets.front().engine.name, "test:validated_installed");
