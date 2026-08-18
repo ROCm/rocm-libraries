@@ -32,6 +32,10 @@ This module provides:
 - Test suite generator functions for various rocSOLVER routines
 - Common benchmark parameters
 - Size configurations for different test cases
+
+(Note: All the used sizes "n" are even. Relatively better performance is observed when the leading dimension "ld" is 
+not exaclty equal to the size. Based on observations, we are taking ld = n + 1 if n < 4000, and ld = n + 64 otherwise.
+This could be revisited and changed in the future)   
 """
 
 from itertools import chain, repeat
