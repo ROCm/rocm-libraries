@@ -26,6 +26,19 @@ set_target_properties(
             "roc::mxDataGenerator is a temporary empty compatibility target; use ROCHostValidation APIs instead."
 )
 
+option(
+    MXDATAGENERATOR_BUILD_TESTING
+    "Build the temporary mxDataGenerator compatibility-target smoke test."
+    OFF
+)
+if(MXDATAGENERATOR_BUILD_TESTING)
+    add_executable(
+        mxDataGeneratorTests
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/compatibility_target_test.cpp"
+    )
+    target_link_libraries(mxDataGeneratorTests PRIVATE roc::mxDataGenerator)
+endif()
+
 set(mxdatagenerator_install_cmakedir
     "${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator"
 )
