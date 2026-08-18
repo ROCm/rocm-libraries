@@ -4,6 +4,12 @@
 cmake_minimum_required(VERSION 3.25.2)
 set(ROCROLLER_VERSION 1.0.0)
 set(ROCROLLER_SOVERSION 1)
+
+if(WIN32)
+    # Required for CMAKE_MSVC_RUNTIME_LIBRARY, must be set prior the first project() or enable_language()
+    cmake_policy(SET CMP0091 NEW)
+endif()
+
 project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
