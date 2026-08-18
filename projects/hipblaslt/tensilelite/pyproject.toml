@@ -68,28 +68,11 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [project]
-name = "tensile"
-version = "5.0.0"
+name = "tensilelite"
+dynamic = ["version", "dependencies"]
 requires-python = ">=3.10"
 description = "A code generation library for high-performance GEMM and tensor contraction kernels on AMD GPUs."
-license = {text = "MIT"}
-dependencies = [
-    "packaging",
-    "pyyaml",
-    "msgpack",
-    "joblib>=1.4.0",
-    "simplejson",
-    "ujson",
-    "orjson",
-    "yappi",
-    "setuptools",
-    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
-    "cmake",
-    "invoke",
-    "filelock",
-    "numpy",
-    "hip-python",
-]
+license = "MIT"
 
 [project.scripts]
 Tensile = "tensilelite.tensilelite:main"
@@ -99,6 +82,9 @@ TensileGetPath = "tensilelite:PrintTensileRoot"
 TensileBenchmarkCluster = "tensilelite.benchmark_cluster:main"
 TensileRetuneLibrary = "tensilelite.retune_library:main"
 
+[project.optional-dependencies]
+profile = ["yappi"]
+hip-query = ["hip-python"]
 [dependency-groups]
 dev = [
     "rocisa",
@@ -112,14 +98,25 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["tensilelite*"]
+exclude = ["tensilelite.Tests*", "tensilelite.Utilities.archive*"]
 
 [tool.setuptools.package-data]
-tensilelite = ["cmake/*"]
+tensilelite = [
+    "Source/TensileTypes.h",
+    "Source/tensile_bfloat16.h",
+    "Source/tensile_float8_bfloat8.h",
+    "Source/KernelHeader.h",
+    "Source/ReductionTemplate.h",
+    "Source/memory_gfx.h",
+    "CustomKernels/*.s",
+    "tensilelite_logic/known_bugs.yaml",
+    "ductile/config/defaults.yaml",
+]
 
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
