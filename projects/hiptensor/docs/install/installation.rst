@@ -26,12 +26,12 @@ hipTensor is supported on AMD Instinct and Radeon GPUs by ROCm. See the `ROCm co
       :width: 3
       :toc-label: AMD Instinct
 
-   .. selector-option:: Radeon
+   .. selector-option:: AMD Radeon™
       :value: radeon w=compute
       :width: 3
       :toc-label: AMD Radeon
 
-   .. selector-option:: Ryzen
+   .. selector-option:: AMD Ryzen™
       :value: ryzen w=compute
       :width: 3
       :toc-label: AMD Ryzen
