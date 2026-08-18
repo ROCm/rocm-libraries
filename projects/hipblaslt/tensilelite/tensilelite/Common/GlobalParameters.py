@@ -687,7 +687,7 @@ def restoreDefaultGlobalParameters():
     global globalParameters
     global defaultGlobalParameters
     # Can't just assign globalParameters = deepcopy(defaultGlobalParameters) because that would
-    # result in dangling references, specifically in tensilelite.Tensile().
+    # result in dangling references, specifically in tensilelite.tensilelite().
     globalParameters.clear()
     for key, value in deepcopy(defaultGlobalParameters).items():
         globalParameters[key] = value

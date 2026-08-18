@@ -29,7 +29,7 @@ import stat
 from pathlib import Path
 from unittest.mock import Mock, patch, mock_open, MagicMock, call
 
-from tensilelite.TensileBenchmarkClusterScripts import (
+from tensilelite.benchmark_cluster_scripts import (
     ScriptHelper,
     ScriptWriter,
     BenchmarkNodeWriter,
@@ -149,7 +149,7 @@ class TestScriptWriter:
         assert str(writer) == "test\n"
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_dumpToFile_writes_to_file(self, mock_exec, mock_file):
         """ScriptWriter.dumpToFile writes buffer to file."""
         writer = ScriptWriter()
@@ -162,7 +162,7 @@ class TestScriptWriter:
         mock_file().write.assert_called_once_with("#!/bin/bash\necho 'test'\n")
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_dumpToFile_makes_executable(self, mock_exec, mock_file):
         """ScriptWriter.dumpToFile makes file executable."""
         writer = ScriptWriter()
@@ -173,7 +173,7 @@ class TestScriptWriter:
         mock_exec.assert_called_once_with("/output/script.sh")
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_dumpToFile_default_output_dir(self, mock_exec, mock_file):
         """ScriptWriter.dumpToFile uses current dir by default."""
         writer = ScriptWriter()
@@ -184,7 +184,7 @@ class TestScriptWriter:
         mock_file.assert_called_once_with("./script.sh", "w")
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_writeScript_factory_method(self, mock_exec, mock_file):
         """ScriptWriter.writeScript factory method creates script."""
         mock_writer_class = Mock()
@@ -281,7 +281,7 @@ class TestBenchmarkNodeWriter:
         assert "Done!" in content
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_full_script_generation(self, mock_exec, mock_file):
         """BenchmarkNodeWriter generates complete script."""
         buffer = ScriptWriter()
@@ -360,7 +360,7 @@ class TestBenchmarkTaskWriter:
         assert "Done!" in content
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_full_script_generation(self, mock_exec, mock_file):
         """BenchmarkTaskWriter generates complete script."""
         buffer = ScriptWriter()
@@ -443,7 +443,7 @@ class TestBenchmarkJobWriter:
         assert "Done!" in content
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_full_script_generation(self, mock_exec, mock_file):
         """BenchmarkJobWriter generates complete script."""
         buffer = ScriptWriter()
@@ -464,7 +464,7 @@ class TestScriptWriterFactoryMethods:
     """Test suite for ScriptWriter factory methods."""
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_writeBenchmarkNodeScript_creates_file(self, mock_exec, mock_file):
         """ScriptWriter.writeBenchmarkNodeScript creates node script file."""
         ScriptWriter.writeBenchmarkNodeScript("node.sh", "/output")
@@ -473,7 +473,7 @@ class TestScriptWriterFactoryMethods:
         mock_exec.assert_called_once_with("/output/node.sh")
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_writeBenchmarkTaskScript_creates_file(self, mock_exec, mock_file):
         """ScriptWriter.writeBenchmarkTaskScript creates task script file."""
         ScriptWriter.writeBenchmarkTaskScript("task.sh", "/output")
@@ -482,7 +482,7 @@ class TestScriptWriterFactoryMethods:
         mock_exec.assert_called_once_with("/output/task.sh")
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_writeBenchmarkJobScript_creates_file(self, mock_exec, mock_file):
         """ScriptWriter.writeBenchmarkJobScript creates job script file."""
         ScriptWriter.writeBenchmarkJobScript("job.sh", "/output")
@@ -491,7 +491,7 @@ class TestScriptWriterFactoryMethods:
         mock_exec.assert_called_once_with("/output/job.sh")
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_writeBenchmarkNodeScript_content(self, mock_exec, mock_file):
         """ScriptWriter.writeBenchmarkNodeScript writes docker-related content."""
         ScriptWriter.writeBenchmarkNodeScript("node.sh", "/output")
@@ -501,7 +501,7 @@ class TestScriptWriterFactoryMethods:
         assert "usage" in written_content
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_writeBenchmarkTaskScript_content(self, mock_exec, mock_file):
         """ScriptWriter.writeBenchmarkTaskScript writes SLURM srun content."""
         ScriptWriter.writeBenchmarkTaskScript("task.sh", "/output")
@@ -511,7 +511,7 @@ class TestScriptWriterFactoryMethods:
         assert "SLURM" in written_content
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch("tensilelite.TensileBenchmarkClusterScripts.ScriptHelper.makeExecutable")
+    @patch("tensilelite.benchmark_cluster_scripts.ScriptHelper.makeExecutable")
     def test_writeBenchmarkJobScript_content(self, mock_exec, mock_file):
         """ScriptWriter.writeBenchmarkJobScript writes SLURM sbatch content."""
         ScriptWriter.writeBenchmarkJobScript("job.sh", "/output")

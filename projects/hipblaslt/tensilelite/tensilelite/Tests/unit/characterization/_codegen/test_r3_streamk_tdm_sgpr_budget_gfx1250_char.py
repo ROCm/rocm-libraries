@@ -124,7 +124,7 @@ def _emit_with_reg_state(config_path, arch, limit):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )

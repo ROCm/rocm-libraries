@@ -624,7 +624,7 @@ MULTICAST_MARKERS = ("MulticastMask", "multicast mask")
 def _emit(archName):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -724,7 +724,7 @@ def _emit_streamk_srcs(asic_revision):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -879,7 +879,7 @@ def _stub_tensile_pipeline(monkeypatch, captured):
     pipeline is handed. Mirrors the stub set in test_tensile_backend_config.py."""
     import types
 
-    from tensilelite import Tensile as TensileModule
+    from tensilelite import tensilelite as TensileModule
 
     monkeypatch.setattr(
         TensileModule, "validateToolchain", lambda *a: ("cxx", "cc", "bundler")
@@ -926,7 +926,7 @@ def test_tensile_entry_point_applies_the_v0_overrides(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile(
+    TensileModule.tensilelite(
         [config, str(tmp_path / "out"), "--gpu-targets", GFX1250V0]
     )
 
@@ -944,7 +944,7 @@ def test_tensile_entry_point_leaves_v1_capabilities_untouched(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
+    TensileModule.tensilelite([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert CAP_MULTICAST not in info.archCaps
@@ -966,7 +966,7 @@ def test_config_architecture_selects_the_asic_revision(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture=GFX1250V0, ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.tensilelite([config, str(tmp_path / "out")])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert info.archCaps[CAP_MULTICAST] is False
@@ -983,7 +983,7 @@ def test_config_architecture_of_the_shipping_asic_revision_adds_nothing(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture=GFX1250, ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.tensilelite([config, str(tmp_path / "out")])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert CAP_MULTICAST not in info.archCaps
@@ -999,7 +999,7 @@ def test_gpu_targets_overrides_the_config_architecture(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture=GFX1250V0, ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
+    TensileModule.tensilelite([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert CAP_MULTICAST not in info.archCaps
@@ -1016,7 +1016,7 @@ def test_config_architecture_for_an_isa_not_being_built_is_ignored(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture="gfx942", ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.tensilelite([config, str(tmp_path / "out")])
 
     assert captured["archNames"] == []
     assert CAP_MULTICAST not in captured["isaInfoMap"][ISA_GFX1250].archCaps
@@ -1031,7 +1031,7 @@ def test_config_architecture_naming_an_asic_revision_of_another_isa_is_rejected(
     config = _write_min_config(tmp_path, Architecture=GFX1250V0, ISA=[[9, 4, 2]])
 
     with pytest.raises(ValueError) as excinfo:
-        TensileModule.Tensile([config, str(tmp_path / "out")])
+        TensileModule.tensilelite([config, str(tmp_path / "out")])
 
     assert GFX1250V0 in str(excinfo.value)
 
@@ -1047,7 +1047,7 @@ def test_unrecognized_config_architecture_is_rejected(
     config = _write_min_config(tmp_path, Architecture=arch, ISA=[[12, 5, 0]])
 
     with pytest.raises(ValueError) as excinfo:
-        TensileModule.Tensile([config, str(tmp_path / "out")])
+        TensileModule.tensilelite([config, str(tmp_path / "out")])
 
     assert arch in str(excinfo.value)
 
@@ -1062,7 +1062,7 @@ def test_mixed_asic_revisions_in_the_config_architecture_are_rejected(
     )
 
     with pytest.raises(ValueError):
-        TensileModule.Tensile([config, str(tmp_path / "out")])
+        TensileModule.tensilelite([config, str(tmp_path / "out")])
 
 
 def test_tensile_entry_point_records_the_requested_names(
@@ -1075,7 +1075,7 @@ def test_tensile_entry_point_records_the_requested_names(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile(
+    TensileModule.tensilelite(
         [config, str(tmp_path / "out"), "--gpu-targets", GFX1250V0]
     )
 
@@ -1097,7 +1097,7 @@ def test_unknown_gpu_target_is_rejected(
     config = _write_min_config(tmp_path)
 
     with pytest.raises(ValueError, match=target):
-        TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", target])
+        TensileModule.tensilelite([config, str(tmp_path / "out"), "--gpu-targets", target])
 
 
 @pytest.mark.parametrize(
@@ -1122,7 +1122,7 @@ def test_qualified_gpu_targets_stay_accepted(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", target])
+    TensileModule.tensilelite([config, str(tmp_path / "out"), "--gpu-targets", target])
 
     assert captured["archNames"] == [target]
 
@@ -1139,7 +1139,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.tensilelite_create_library.run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1563,7 +1563,7 @@ def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
     and the re-spawn."""
     import types
 
-    from tensilelite import Tensile as TensileModule
+    from tensilelite import tensilelite as TensileModule
 
     captured = {}
     monkeypatch.setattr(
@@ -1628,7 +1628,7 @@ def _generateLogicData(monkeypatch, *architectureNames):
     from unittest.mock import MagicMock
 
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.tensilelite_create_library.run as RunModule
 
     libraries = {}
     parsed = []
