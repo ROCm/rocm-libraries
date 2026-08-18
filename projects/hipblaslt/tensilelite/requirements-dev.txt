@@ -2,3 +2,8 @@
 -r ./requirements-test.txt
 ./rocisa
 memory_profiler
+tox
+invoke
+# nanobind 3.0.0 does not build with clang on Windows; 3.0.1 and later do.
+nanobind>=2.0,!=3.0.0
+scikit-build-core>=0.10
