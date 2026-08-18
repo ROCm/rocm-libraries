@@ -171,6 +171,11 @@ if(BUILD_WITH_HIPBLASLT)
     # don't wait until after Tensile to find hipblaslt if enabled; needed for clients-only build too
     find_package( hipblaslt ${HIPBLASLT_VERSION} REQUIRED CONFIG PATHS ${hipblaslt_path} ${ROCM_PATH})
     message(STATUS "FOUND hipBLASLt, INCLUDE_DIR: ${HIPBLASLT_INCLUDE_DIR}")
+  elseif( HIPBLASLT_PROJECT_VERSION VERSION_LESS HIPBLASLT_VERSION )
+    # The version test find_package() would have applied. HIPBLASLT_PROJECT_VERSION
+    # is the cache variable hipBLASLt sets, and is what its package config
+    # advertises, so the two paths check the same thing.
+    message( FATAL_ERROR "In-tree hipBLASLt is ${HIPBLASLT_PROJECT_VERSION}; rocBLAS requires ${HIPBLASLT_VERSION} or newer" )
   endif()
 endif()
 
