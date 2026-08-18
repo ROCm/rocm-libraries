@@ -557,14 +557,15 @@ _STANDALONE_UKD_ID = "ukd-pointwise-add-f32-b128"
 
 
 def test_standalone_ukd_copied_to_both_arch_shards(built):
-    # LOAD-BEARING: the standalone UKD referenced by the multi-arch pointwise KDP
-    # ([gfx942, gfx950]) ships as its own <name>.ukd.json in BOTH shards, same id,
-    # kpack-form, with per-arch details (different library + sha256), and no arch.
+    # LOAD-BEARING: the wildcard standalone UKD referenced by the multi-arch
+    # pointwise KDP ([gfx942, gfx950]) ships as its own <name>.ukd.json in BOTH
+    # shards, same id, kpack-form, with per-arch details (different library +
+    # sha256), each stamped with the single shard arch.
     u942 = _read(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
     u950 = _read(built["out"] / "gfx950" / _STANDALONE_UKD_FILE)
     assert u942["id"] == u950["id"] == _STANDALONE_UKD_ID
-    # A standalone UKD file carries no arch (its arch follows the referencing KDP).
-    assert "arch" not in u942 and "arch" not in u950
+    # A shipped standalone UKD carries the single shard arch it was emitted for.
+    assert u942["arch"] == ["gfx942"] and u950["arch"] == ["gfx950"]
     ks942, ks950 = u942["kernel_source"], u950["kernel_source"]
     assert ks942["kind"] == ks950["kind"] == "kpack"
     assert ks942["library"] == "kpack/hip_kernel_provider_gfx942.kpack"
@@ -686,14 +687,170 @@ def test_standalone_ukd_id_collides_with_inline(
         _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
 
 
-def test_standalone_ukd_with_arch_field_rejected(
+# --- F. Per-UKD arch ------------------------------------------------------
+def test_per_ukd_arch_filters_standalone(
     tmp_path, main_fixture, hipcc, kpack_python_dir
 ):
-    # A standalone UKD must not carry its own arch (arch comes from the KDP).
+    # A standalone UKD narrowed to gfx942 ships only in the gfx942 shard; the
+    # pointwise KDP still ships in gfx950 on its wildcard inline UKDs alone.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / _STANDALONE_UKD_FILE
     doc = _read(p)
     doc["arch"] = ["gfx942"]
     p.write_text(json.dumps(doc), encoding="utf-8")
-    with pytest.raises(HkpPackError, match="must not carry an 'arch' field"):
+    _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942", "gfx950"])
+    assert (tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
+    assert not (tmp_path / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
+    # The narrowed standalone drops out of gfx950, but its inline UKDs are
+    # wildcard so the KDP itself still ships there.
+    assert (tmp_path / "out" / "gfx950" / "pointwise.kdp.json").exists()
+    kds = _read(tmp_path / "out" / "gfx950" / "pointwise.kdp.json")["kernelDescriptors"]
+    assert _STANDALONE_UKD_ID not in kds
+    # The gfx942 shard keeps the ref, and the shipped file is stamped gfx942.
+    kds942 = _read(tmp_path / "out" / "gfx942" / "pointwise.kdp.json")[
+        "kernelDescriptors"
+    ]
+    assert _STANDALONE_UKD_ID in kds942
+    assert _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)["arch"] == [
+        "gfx942"
+    ]
+
+
+def test_every_shipped_ukd_stamped_with_shard_arch(built):
+    # Every shipped UKD -- each inline UKD object in each *.kdp.json AND every
+    # standalone *.ukd.json -- carries arch == [shard-arch] for its shard.
+    for arch in ARCHES:
+        shard = built["out"] / arch
+        if not shard.is_dir():
+            continue
+        for kdp_path in shard.glob("*.kdp.json"):
+            for ukd in _read(kdp_path)["kernelDescriptors"]:
+                if isinstance(ukd, dict):
+                    assert ukd["arch"] == [arch], (kdp_path.name, ukd.get("id"))
+        for ukd_path in shard.glob("*.ukd.json"):
+            assert _read(ukd_path)["arch"] == [arch], ukd_path.name
+
+
+def test_ukd_arch_not_subset_of_kdp_hard_errors(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # A standalone UKD arch outside the referencing KDP's arch is a hard error
+    # at load, independent of the requested GPU targets.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / _STANDALONE_UKD_FILE
+    doc = _read(p)
+    doc["arch"] = ["gfx90a"]  # pointwise KDP is [gfx942, gfx950]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="is not a subset of KDP"):
+        _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+
+
+def test_ukd_arch_subset_wildcard_combinations_accepted(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # (a) UKD explicit subset of KDP explicit; (b) UKD wildcard + KDP explicit;
+    # (c) KDP wildcard + UKD explicit. Each loads without error and emits the
+    # standalone into the expected shard(s).
+    # (a) explicit subset: b128 -> [gfx942] under pointwise KDP [gfx942, gfx950].
+    src_a = _copy_fixture(tmp_path / "a", main_fixture)
+    p = src_a / _STANDALONE_UKD_FILE
+    doc = _read(p)
+    doc["arch"] = ["gfx942"]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _run(src_a, tmp_path / "a", hipcc, kpack_python_dir, arches=["gfx942", "gfx950"])
+    assert (tmp_path / "a" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
+    assert not (tmp_path / "a" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
+
+    # (b) UKD wildcard (unchanged fixture) under explicit KDP -> ships in both.
+    src_b = _copy_fixture(tmp_path / "b", main_fixture)
+    _run(src_b, tmp_path / "b", hipcc, kpack_python_dir, arches=["gfx942", "gfx950"])
+    assert (tmp_path / "b" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
+    assert (tmp_path / "b" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
+
+    # (c) KDP wildcard + UKD explicit: reference b128 (arch [gfx942]) from the
+    # wildcard KDP; it ships only in gfx942.
+    src_c = _copy_fixture(tmp_path / "c", main_fixture)
+    up = src_c / _STANDALONE_UKD_FILE
+    udoc = _read(up)
+    udoc["arch"] = ["gfx942"]
+    up.write_text(json.dumps(udoc), encoding="utf-8")
+    wp = src_c / "pointwise_wild.kdp.json"
+    wdoc = _read(wp)
+    wdoc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    wp.write_text(json.dumps(wdoc), encoding="utf-8")
+    _run(src_c, tmp_path / "c", hipcc, kpack_python_dir, arches=["gfx942", "gfx90a"])
+    assert (tmp_path / "c" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
+    assert not (tmp_path / "c" / "out" / "gfx90a" / _STANDALONE_UKD_FILE).exists()
+
+
+def test_empty_kdp_dropped_and_generics_pruned(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # Widen copy.kdp to [gfx942, gfx950] but narrow its inline Copy UKD to
+    # [gfx942]. On gfx950 the KDP empties out: it is dropped and its exclusive
+    # generics prune away. On gfx942 the KDP and its whole chain survive.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
+    doc["kernelDescriptors"][0]["arch"] = ["gfx942"]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942", "gfx950"])
+    gone = (
+        "copy.kdp.json",
+        "copy.umd.json",
+        "copy.ued.json",
+        "copy.udd.json",
+        "copy.kmd.json",
+    )
+    files950 = _arch_files(tmp_path / "out" / "gfx950")
+    for name in gone:
+        assert name not in files950, name
+    files942 = _arch_files(tmp_path / "out" / "gfx942")
+    for name in gone:
+        assert name in files942, name
+
+
+def test_wildcard_kdp_narrowed_per_kernel(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # A wildcard KDP survives every arch, but a UKD it references narrowed to
+    # gfx942 ships only there -- the KDP survives gfx90a on its wildcard inline
+    # UKD while the narrowed standalone drops out.
+    src = _copy_fixture(tmp_path, main_fixture)
+    up = src / _STANDALONE_UKD_FILE
+    udoc = _read(up)
+    udoc["arch"] = ["gfx942"]
+    up.write_text(json.dumps(udoc), encoding="utf-8")
+    wp = src / "pointwise_wild.kdp.json"
+    wdoc = _read(wp)
+    wdoc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    wp.write_text(json.dumps(wdoc), encoding="utf-8")
+    _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942", "gfx90a"])
+    assert (tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
+    assert not (tmp_path / "out" / "gfx90a" / _STANDALONE_UKD_FILE).exists()
+    # The wildcard KDP itself survives both shards.
+    assert (tmp_path / "out" / "gfx942" / "pointwise_wild.kdp.json").exists()
+    assert (tmp_path / "out" / "gfx90a" / "pointwise_wild.kdp.json").exists()
+
+
+def test_multi_kdp_subset_violation_hard_errors(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # Two KDPs reference the same standalone with incompatible arches: the UKD
+    # arch is admissible under one referencing KDP but not the other, so the
+    # per-referencing-KDP subset check fires.
+    src = _copy_fixture(tmp_path, main_fixture)
+    # Narrow the standalone to gfx950 (subset of pointwise KDP [gfx942, gfx950]).
+    up = src / _STANDALONE_UKD_FILE
+    udoc = _read(up)
+    udoc["arch"] = ["gfx950"]
+    up.write_text(json.dumps(udoc), encoding="utf-8")
+    # copy.kdp is gfx942-only; make it reference the same standalone. gfx950 is
+    # not a subset of [gfx942], so the check fails against copy.kdp.
+    cp = src / "copy.kdp.json"
+    cdoc = _read(cp)
+    cdoc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    cp.write_text(json.dumps(cdoc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="is not a subset of KDP"):
         _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])

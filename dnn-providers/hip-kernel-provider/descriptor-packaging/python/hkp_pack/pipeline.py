@@ -8,6 +8,7 @@ from .hip_compile import compile_hip_variant
 from .variant import variant_key
 from .descriptors import (
     arch_matches,
+    kdp_survives,
     load_flat_input,
     reachable_generic_ids,
 )
@@ -100,6 +101,7 @@ def _ukd_extra(ukd):
             "metadata",
             "priority",
             "build",
+            "arch",
         )
     }
 
@@ -158,12 +160,15 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
         for entry in new_doc["kernelDescriptors"]:
             if isinstance(entry, str):
                 # A reference to a standalone UKD: compile it once per arch and
-                # keep the string in the KDP; it ships as its own file.
+                # keep the string in the KDP; it ships as its own file. Skip it
+                # in this shard unless its own arch applies here.
+                sdesc = ukd_by_id[entry]
+                if not arch_matches(sdesc.doc, arch):
+                    continue
                 entries.append(entry)
                 new_kds.append(entry)
                 if entry in standalone_ukds:
                     continue
-                sdesc = ukd_by_id[entry]
                 sukd = sdesc.doc
                 where = f"standalone UKD {sdesc.path.name}"
                 vk, source, sentry, build = _compile_ukd_variant(
@@ -185,6 +190,9 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
                 continue
 
             ukd = entry
+            # An inline UKD ships in this shard only when its own arch applies.
+            if not arch_matches(ukd, arch):
+                continue
             where = f"UKD '{ukd.get('id')}' in {kdp.path.name}"
             vk, source, uentry, build = _compile_ukd_variant(
                 ukd, where, flat, arch, hipcc, inter_arch_dir, variant_co
@@ -210,6 +218,11 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
             )
             ukds.append(record)
             entries.append(record)
+        # A KDP whose UKDs all filter out for this arch is dropped from the
+        # shard: no intermediate JSON, no record, and its exclusive generics
+        # prune away with it.
+        if not new_kds:
+            continue
         new_doc["kernelDescriptors"] = new_kds
         (inter_arch_dir / kdp.path.name).write_text(
             json.dumps(new_doc, indent=2) + "\n", encoding="utf-8"
@@ -244,7 +257,7 @@ class PruneResult:
 
 def prune(flat, arch):
     """Compute the surviving KDP and generic Ids for arch (wildcard-aware)."""
-    surviving = [k for k in flat.kdps() if arch_matches(k.doc, arch)]
+    surviving = [k for k in flat.kdps() if kdp_survives(k.doc, flat, arch)]
     return PruneResult(
         surviving_kdp_ids={k.id for k in surviving},
         reachable_generic_ids=reachable_generic_ids(flat, surviving),
@@ -272,6 +285,9 @@ def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256):
         },
     }
     doc.update(ukd.extra)
+    # Every shipped UKD carries the single shard arch, matching the KDP. Set it
+    # after the extra passthrough so a source multi-arch list can't leak through.
+    doc["arch"] = [arch]
     return doc
 
 
@@ -421,7 +437,7 @@ def run_pipeline(
     inter_root = Path(inter_root)
 
     for arch in arches:
-        surviving = [k for k in flat.kdps() if arch_matches(k.doc, arch)]
+        surviving = [k for k in flat.kdps() if kdp_survives(k.doc, flat, arch)]
         out_arch_dir = out_root / arch
         if not surviving:
             log(f"no kernels for {arch}, skipping")

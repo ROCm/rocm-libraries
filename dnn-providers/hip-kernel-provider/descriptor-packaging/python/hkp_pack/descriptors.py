@@ -96,6 +96,38 @@ def arch_matches(kdp_doc, arch):
     return arch in archs
 
 
+def _arch_subset_ok(ukd_arch, kdp_arch):
+    """A UKD's arch is admissible under a referencing KDP's arch.
+
+    An empty list on either side is a wildcard: a wildcard KDP admits any UKD,
+    and a wildcard UKD is admissible under any KDP. Two explicit lists require
+    the UKD's arches to be a subset of the KDP's.
+    """
+    if not ukd_arch or not kdp_arch:
+        return True
+    return set(ukd_arch) <= set(kdp_arch)
+
+
+def kdp_survives(kdp_doc, flat, arch):
+    """Whether a KDP ships in a given arch's shard.
+
+    A KDP ships iff it matches the arch and at least one of its UKD entries
+    (an inline dict or a standalone resolved by id) also applies to that arch.
+    A KDP whose UKDs all filter out for this arch is dropped from the shard.
+    """
+    if not arch_matches(kdp_doc, arch):
+        return False
+    ukd_by_id = flat.ukd_by_id()
+    for entry in kdp_doc.get("kernelDescriptors", []):
+        if isinstance(entry, str):
+            sdesc = ukd_by_id.get(entry)
+            if sdesc is not None and arch_matches(sdesc.doc, arch):
+                return True
+        elif isinstance(entry, dict) and arch_matches(entry, arch):
+            return True
+    return False
+
+
 def validate_hip_build(build, where):
     """A hip UKD's build block is functional; reject anything unusable.
 
@@ -130,6 +162,14 @@ def _validate_ukd_fields(ukd, where):
     if not isinstance(ukd, dict):
         raise HkpPackError(f"{where} is not a JSON object")
     _require(ukd, ["id", "name", "kernel_source", "metadata", "priority"], where)
+    if "arch" in ukd:
+        arch = ukd["arch"]
+        if not isinstance(arch, list) or not all(
+            isinstance(a, str) and a for a in arch
+        ):
+            raise HkpPackError(
+                f"{where} 'arch' must be a list of strings (empty = wildcard)"
+            )
     ks = ukd["kernel_source"]
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
@@ -160,8 +200,9 @@ def _validate_inline_ukd(ukd, kdp_path):
 def _validate_standalone_ukd(desc):
     """A standalone `<name>.ukd.json` is authored in the same hip form as inline.
 
-    It carries no `arch`: a standalone UKD's arch is that of the KDP that
-    references it, so it is emitted once per referencing arch.
+    Its optional `arch` narrows the shards it ships in (empty/omitted = wildcard,
+    applying to every referencing arch) and must be a subset of each referencing
+    KDP's arch, checked in _validate_references.
     """
     doc = desc.doc
     where = f"standalone UKD {desc.path.name}"
@@ -170,11 +211,6 @@ def _validate_standalone_ukd(desc):
         raise HkpPackError(
             f"{where} must be authored in hip form "
             f"(got kind='{doc['kernel_source']['kind']}')"
-        )
-    if "arch" in doc:
-        raise HkpPackError(
-            f"{where} must not carry an 'arch' field; a standalone UKD's arch "
-            "comes from the KDP that references it"
         )
 
 
@@ -254,7 +290,8 @@ def load_flat_input(root, log=print):
 
 def _validate_references(flat):
     ids = {d.id for d in flat.descriptors}
-    ukd_ids = set(flat.ukd_by_id())
+    ukd_by_id = flat.ukd_by_id()
+    ukd_ids = set(ukd_by_id)
     # An inline UKD and a standalone UKD sharing an id would make a by-id KDP
     # reference ambiguous; reject the collision rather than silently pick one.
     for kdp in flat.kdps():
@@ -266,6 +303,7 @@ def _validate_references(flat):
                 )
     for kdp in flat.kdps():
         doc = kdp.doc
+        kdp_arch = doc.get("arch") or []
         refs = list(doc.get("matchers", []))
         refs += [doc.get("engine"), doc.get("dispatch")]
         for ref in refs:
@@ -274,9 +312,18 @@ def _validate_references(flat):
                     f"KDP {kdp.path.name} references unknown descriptor Id '{ref}'"
                 )
         for entry in doc.get("kernelDescriptors", []):
-            if isinstance(entry, str) and entry not in ukd_ids:
+            if isinstance(entry, str):
+                if entry not in ukd_ids:
+                    raise HkpPackError(
+                        f"KDP {kdp.path.name} references unknown UKD Id '{entry}'"
+                    )
+                udoc = ukd_by_id[entry].doc
+            else:
+                udoc = entry
+            if not _arch_subset_ok(udoc.get("arch") or [], kdp_arch):
                 raise HkpPackError(
-                    f"KDP {kdp.path.name} references unknown UKD Id '{entry}'"
+                    f"UKD '{udoc.get('id')}' arch {udoc.get('arch')} is not a "
+                    f"subset of KDP {kdp.path.name} arch {doc.get('arch')}"
                 )
     for ued in flat.by_type("ued"):
         for ref in (ued.doc.get("heuristic"), ued.doc.get("metadata")):
