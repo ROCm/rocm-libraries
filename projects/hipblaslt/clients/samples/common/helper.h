@@ -28,6 +28,7 @@
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
 #include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/generation.hpp>
 
@@ -57,8 +58,6 @@
 
 namespace hipblaslt_sample_detail
 {
-    constexpr std::uint64_t initializationSeed = 69069;
-
     enum class GemmInitializationStream : std::uint64_t
     {
         A          = 0,
@@ -90,7 +89,7 @@ namespace hipblaslt_sample_detail
     void generateUniformInteger(Type* values, size_t elements, std::uint64_t stream)
     {
         roc::host_validation::GenerationOptions options;
-        options.seed            = initializationSeed;
+        options.seed = hipblaslt::host_validation::defaultInitializationSeed;
         options.real.pattern    = roc::host_validation::GenerationPattern::UniformInteger;
         options.real.parameter0 = -3;
         options.real.parameter1 = 3;

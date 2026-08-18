@@ -1153,6 +1153,14 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("parameter0", &MxGenerationRecipe::parameter0)
         .def_rw("parameter1", &MxGenerationRecipe::parameter1);
 
+    nb::enum_<MxScaleGenerationMode>(module, "MxScaleGenerationMode")
+        .value("Derived", MxScaleGenerationMode::Derived)
+        .value("Minimum", MxScaleGenerationMode::Minimum)
+        .value("One", MxScaleGenerationMode::One)
+        .value("Two", MxScaleGenerationMode::Two)
+        .value("Maximum", MxScaleGenerationMode::Maximum)
+        .value("NaN", MxScaleGenerationMode::NaN);
+
     nb::class_<MxGenerationProblem>(module, "MxGenerationProblem")
         .def(nb::init<>())
         .def_rw("data_type", &MxGenerationProblem::dataType)

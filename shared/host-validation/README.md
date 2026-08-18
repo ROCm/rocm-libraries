@@ -468,9 +468,14 @@ problem.leadingDimension = 64;
 problem.blockAxis = 0;
 problem.blockSize = 32;
 problem.data.mode = MxGenerationMode::Bounded;
+problem.scale = MxScaleGenerationMode::Derived;
 
 MxGenerationResult result = generateMx(problem);
 ```
+
+`MxGenerationRecipe` controls only source data values.
+`MxScaleGenerationMode` independently selects derived per-block scales or a
+constant minimum, one, two, maximum, or NaN scale.
 
 The operation is GEMM- and architecture-agnostic. A product adapter identifies
 which tensor axis is block-scaled and may subsequently transform the natural

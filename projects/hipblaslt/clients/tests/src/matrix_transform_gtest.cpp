@@ -32,6 +32,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
 #include <numeric>
 #include <hipblaslt/host_validation/MatrixTransformReference.hpp>
 #include <hipblaslt/host_validation/Types.hpp>
@@ -130,13 +131,11 @@ namespace
             MatrixB = 1,
         };
 
-        static constexpr std::uint64_t initializationSeed = 69069;
-
         void init(DType* buf, size_t len, InitializationStream stream)
         {
             std::vector<DType>                      ref(len);
             roc::host_validation::GenerationOptions options;
-            options.seed            = initializationSeed;
+            options.seed = hipblaslt::host_validation::defaultInitializationSeed;
             options.real.pattern    = roc::host_validation::GenerationPattern::UniformInteger;
             options.real.parameter0 = -3;
             options.real.parameter1 = 3;

@@ -91,6 +91,66 @@ namespace hipblaslt::host_validation
         throw std::invalid_argument("hipBLASLt data type has no host-validation scalar mapping.");
     }
 
+    inline hipDataType hipDataTypeForScalarType(ScalarType type)
+    {
+        // Reverse edge for product adapters that must call a legacy hipDataType
+        // API. E4M3 scale and Float8E4M3 data share one hipDataType
+        // discriminant; the caller's scale/data context restores that meaning.
+        switch(type)
+        {
+        case ScalarType::UInt8:
+            return HIP_R_8U;
+        case ScalarType::Int8:
+            return HIP_R_8I;
+        case ScalarType::UInt16:
+            return HIP_R_16U;
+        case ScalarType::Int16:
+            return HIP_R_16I;
+        case ScalarType::UInt32:
+            return HIP_R_32U;
+        case ScalarType::Int32:
+            return HIP_R_32I;
+        case ScalarType::UInt64:
+            return HIP_R_64U;
+        case ScalarType::Int64:
+            return HIP_R_64I;
+        case ScalarType::Float16:
+            return HIP_R_16F;
+        case ScalarType::BFloat16:
+            return HIP_R_16BF;
+        case ScalarType::Float32:
+            return HIP_R_32F;
+        case ScalarType::Float64:
+            return HIP_R_64F;
+        case ScalarType::ComplexFloat32:
+            return HIP_C_32F;
+        case ScalarType::ComplexFloat64:
+            return HIP_C_64F;
+        case ScalarType::Float8E4M3:
+        case ScalarType::E4M3:
+            return HIP_R_8F_E4M3;
+        case ScalarType::Float8E5M2:
+            return HIP_R_8F_E5M2;
+        case ScalarType::Float8E4M3Fnuz:
+            return HIP_R_8F_E4M3_FNUZ;
+        case ScalarType::Float8E5M2Fnuz:
+            return HIP_R_8F_E5M2_FNUZ;
+        case ScalarType::E8M0:
+            return HIP_R_8F_UE8M0;
+        case ScalarType::Float6E2M3:
+            return static_cast<hipDataType>(HIP_R_6F_E2M3_EXT);
+        case ScalarType::Float6E3M2:
+            return static_cast<hipDataType>(HIP_R_6F_E3M2_EXT);
+        case ScalarType::Float4E2M1:
+            return static_cast<hipDataType>(HIP_R_4F_E2M1_EXT);
+        case ScalarType::E5M3:
+            return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
+        default:
+            throw std::invalid_argument(
+                "Host-validation scalar type has no hipBLASLt data type mapping.");
+        }
+    }
+
     template <typename T>
     constexpr ScalarType scalarType()
     {
