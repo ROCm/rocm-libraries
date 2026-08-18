@@ -84,7 +84,7 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
     std::vector<AutotuneResult> results;
     Error err;
     {
-        nb::gil_scoped_release release;
+        const nb::gil_scoped_release release;
         err = workspaceSize
                   ? g.autotune(rawHandle,
                                cppVariantPack,
