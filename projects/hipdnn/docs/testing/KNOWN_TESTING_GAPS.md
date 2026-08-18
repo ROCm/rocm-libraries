@@ -1,40 +1,42 @@
 # Known Testing Gaps
 
-This document records current limitations in our testing.
+This file lists known limits in current hipDNN testing.
 
-## Integration bundle execution
+## Integration test bundles
 
-- Bundle tests are the preferred authoring format but remain runtime opt-in; checked-in provider CMake and workflows do not enable them. Track current mechanics in the [provider integration guide](../../../../dnn-providers/integration-tests/README.md), [shared categories](../../../../dnn-providers/integration-tests/test_categories.yaml), and provider category files.
+Integration test bundles are off by default. See [Bundles are opt-in at runtime](https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md#bundles-are-opt-in-at-runtime-for-now).
 
 ## Sanitizers and platforms
 
-- Sanitizer builds and test execution are asymmetric. The [ASAN workflow](../../../../.github/workflows/therock-multi-arch-ci-asan.yml) provides opt-in PR and manual builds: PR-triggered sanitizer runs are build-only, while manual dispatch may test where sandbox mapping exists. The [device-ASAN nightly](../../../../.github/workflows/therock-multi-arch-ci-asan-nightly.yml) uses the same external mapping. As verified on 2026-08-17, `gfx94X` has a sandbox test assignment, `gfx950` is build-only, and `gfx125X` lacks a supported ASAN build variant; this external mapping can change.
-- Standalone ASAN has architecture and platform constraints, and Windows host instrumentation is not equivalent to Linux device-ASAN coverage. Some standalone sample and provider convolution cases remain excluded because of upstream failures. [Sanitizer configuration](../../cmake/Sanitizers.cmake), [build guidance](../Building.md#address-sanitizer-build), and test registration remain the sources of truth.
-- TSAN is a Linux build capability, but no hipDNN TSAN CI lane or verified CI test execution is checked in. Release multi-arch PR automation is also not active; its [workflow](../../../../.github/workflows/therock-multi-arch-ci.yml) is manual-only, defaulting to Linux `gfx94X`, `gfx950` and Windows `gfx110X` when inputs are empty.
+- Pull-request runs of the [ASAN workflow](../../../../.github/workflows/therock-multi-arch-ci-asan.yml) build sanitizer binaries but do not run their tests. Manual runs may test when a matching runner is available.
+- The [device-ASAN nightly](../../../../.github/workflows/therock-multi-arch-ci-asan-nightly.yml) uses runner settings managed outside this repository. On 2026-08-17, `gfx94X` had a test runner, `gfx950` was build-only, and `gfx125X` had no supported ASAN build.
+- Standalone ASAN support depends on the OS and GPU. Windows host ASAN does not provide the same coverage as Linux device ASAN. Some sample and provider convolution tests are still excluded because of upstream failures. See [sanitizer configuration](../../cmake/Sanitizers.cmake) and [build guidance](../Building.md#address-sanitizer-build).
+- TSAN builds on Linux, but hipDNN has no verified TSAN CI job.
+- The [release multi-arch workflow](../../../../.github/workflows/therock-multi-arch-ci.yml) is manual only.
 
-## Coverage enforcement
+## Code coverage
 
-- The 80% coverage goal remains aspirational as an acceptance gate. Local [coverage targets](../../CMakeLists.txt) generate reports but do not enforce a threshold; the monorepo [Codecov configuration](../../../../codecov.yml) declares a hipDNN target, but checked-in workflows do not verify upload, required-status, or component-level enforcement. Required GitHub checks are external to this repository.
+The 80% coverage number is a goal, not a merge requirement. Local [coverage targets](../../CMakeLists.txt) create reports but do not enforce a minimum. The repository has a hipDNN [Codecov configuration](../../../../codecov.yml), but checked-in workflows do not prove that uploads or coverage limits are required.
 
-## Tested versus supported architectures
+## Tested GPUs and supported GPUs
 
-- CI build matrices, executed test matrices, and runtime support are not interchangeable. Some configured Linux families are build-only, superbuild runner names do not prove physical GPU execution, and TheRock runner assignment comes from external mutable configuration. Current workflow evidence is in [TheRock CI](../../../../.github/workflows/therock-ci.yml), its [Linux test workflow](../../../../.github/workflows/therock-ci-linux.yml), and the [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
-- No centralized architecture-support contract is checked into this repository. Capability varies by operation, engine, build option, dependency, and runtime heuristic; external provider policy may also exist. Use [hipDNN operation support](../OperationSupport.md) and provider-owned support/configuration documents for narrow claims. Passing CI on one device must not be generalized into a support guarantee.
+- A configured build does not prove that tests ran on a physical GPU. Some Linux targets are build-only, and external runner settings choose the actual hardware. See [TheRock CI](../../../../.github/workflows/therock-ci.yml), [Linux test workflow](../../../../.github/workflows/therock-ci-linux.yml), and [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
+- Passing CI on one GPU does not prove support for every GPU. Support can depend on the operation, engine, build options, libraries, and runtime checks. Use [hipDNN operation support](../OperationSupport.md) and provider documentation for support claims.
 
-## Provider workaround tracking
+## Tracked provider test exceptions
 
-Provider-owned TOML and category files are canonical. This index intentionally does not copy tolerance values or test filters; linked issues provide tracking for known exceptions.
+Provider TOML and category files contain the current skips and tolerances. The issues below track known exceptions.
 
-- **Shared integration harness:** Standard BF16 RMSNorm reference cases are excluded while [issue #10560](https://github.com/ROCm/rocm-libraries/issues/10560) is open.
-- **MIOpen provider:** [MIOPEN_ENGINE.toml](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml) records current tolerance exceptions and architecture-specific skips. Related tracking includes [#6979](https://github.com/ROCm/rocm-libraries/issues/6979), [#8029](https://github.com/ROCm/rocm-libraries/issues/8029), [#8030](https://github.com/ROCm/rocm-libraries/issues/8030), and [#6864](https://github.com/ROCm/rocm-libraries/issues/6864).
-- **hipBLASLt provider:** [HIPBLASLT_ENGINE.toml](../../../../dnn-providers/hipblaslt-provider/config/HIPBLASLT_ENGINE.toml) records the BF16 fused-matmul tolerance exception and gfx12 FP16 MatmulBias skips tracked by [#8033](https://github.com/ROCm/rocm-libraries/issues/8033).
-- **HIP-kernel provider:** [HIP_MLOPS_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml) and [ASM_SDPA_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) record current skips and tolerance exceptions. Disabled provider-mode rocKE Python tests are tracked by [#10497](https://github.com/ROCm/rocm-libraries/issues/10497).
+- **Shared integration tests:** BF16 RMSNorm reference cases are skipped while [#10560](https://github.com/ROCm/rocm-libraries/issues/10560) is open.
+- **MIOpen:** [MIOPEN_ENGINE.toml](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml) contains current tolerances and GPU-specific skips. Related issues: [#6979](https://github.com/ROCm/rocm-libraries/issues/6979), [#8029](https://github.com/ROCm/rocm-libraries/issues/8029), [#8030](https://github.com/ROCm/rocm-libraries/issues/8030), and [#6864](https://github.com/ROCm/rocm-libraries/issues/6864).
+- **hipBLASLt:** [HIPBLASLT_ENGINE.toml](../../../../dnn-providers/hipblaslt-provider/config/HIPBLASLT_ENGINE.toml) contains the BF16 fused-matmul tolerance and gfx12 FP16 MatmulBias skips tracked by [#8033](https://github.com/ROCm/rocm-libraries/issues/8033).
+- **HIP-kernel:** [HIP_MLOPS_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml) and [ASM_SDPA_ENGINE.toml](../../../../dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) contain current skips and tolerances. [#10497](https://github.com/ROCm/rocm-libraries/issues/10497) tracks disabled provider-mode rocKE Python tests.
 
-## Failures, exclusions, and retries
+## Failures, skips, and retries
 
-- Enabled test failures fail their owning workflows; no checked hipDNN lane is explicitly advisory. Whether a workflow status is required for merge is controlled outside the repository and is not verified here.
-- A green workflow means its configured tests passed after declared skips, tolerance overrides, architecture filters, and any allowed retries. It does not mean every registered or supported case ran. Provider exceptions are visible in the configs above. The [auto-retry workflow](../../../../.github/workflows/auto-retry-failed.yml) covers only TheRock CI and two named TheRock nightlies from default-branch configuration; superbuild and other lanes are outside it.
+- An enabled test failure fails its workflow. GitHub settings outside this repository decide whether that workflow blocks a merge.
+- A green workflow means only that its selected tests passed after allowed skips, filters, tolerance changes, and retries. It does not mean every test ran. The [auto-retry workflow](../../../../.github/workflows/auto-retry-failed.yml) covers TheRock CI and two TheRock nightlies, but not superbuild or other jobs.
 
-## Performance regression signal
+## Automated performance checks
 
-- No checked automated hipDNN performance-regression signal runs representative workloads, compares a controlled baseline, attributes regressions, and gates changes. [dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) provides manual workload execution and engine-name/ID/version-attributed timing summaries with an optional plugin path, but lacks complete run/workload provenance and currently excludes CI use. No checked-in policy defines baseline selection, environment pinning, noise/rerun handling, or triage ownership; external lab or team policy remains unverified.
+hipDNN has no automated GPU performance gate. [dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) can run workloads and report engine timing, but it does not save every workload and build detail and is not used by CI. No checked-in policy defines baselines, normal noise, reruns, or who owns regression triage.

@@ -282,7 +282,7 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is the default check. See [Testing Strategy § CI Model and Dated Workflow Snapshot](./testing/TESTING_STRATEGY.md#ci-model-and-dated-workflow-snapshot) for current category semantics.
+> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is the default check. See [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
 
 **Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 

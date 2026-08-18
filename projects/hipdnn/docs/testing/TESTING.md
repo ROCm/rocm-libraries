@@ -5,25 +5,25 @@
 - **Technical Lead:** Brian Harrison
 - **Last Updated:** 2026-08-17
 
-This guide answers the immediate contributor question: “I just made a change. What do I do before I push?”
-For project context, start with the [README](../../README.md), [design overview](../Design.md), and [contribution guide](../../CONTRIBUTING.md).
-Detailed test models and coverage responsibilities live in [Testing Strategy](./TESTING_STRATEGY.md); tracked limitations live in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
+This guide tells contributors which tests to run before pushing a change.
+For general project information, see the [README](../../README.md), [design overview](../Design.md), and [contribution guide](../../CONTRIBUTING.md).
+For detailed test design and ownership, see [Testing Strategy](./TESTING_STRATEGY.md). For current limits, see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
 
 ## Component Overview
 
-hipDNN is a graph-based DNN execution library with Windows and Linux support. The frontend, backend, and plugin separation allows each layer to be unit tested independently, while integration tests validate cross-layer behavior.
+hipDNN runs on Windows and Linux. Its frontend, backend, and plugins can be tested separately, while integration tests check that these parts work together.
 
 hipDNN core includes the backend, frontend, Data SDK, FlatBuffers SDK, Plugin SDK, and Test SDK.
-Core unit and API suites use in-tree test plugins, so core-only changes can be validated without building a production provider.
+Core unit and API tests use test plugins from this repository. You can test core-only changes without building a production provider.
 
-Provider plugins are separate projects under `dnn-providers/`.
-Changes that affect plugin loading, graph execution, operation support, or provider-facing contracts need validation with the affected provider and its integration tests. Prefer the superbuild; an installed standalone-provider workflow is also supported.
-See [Plugin Development](../PluginDevelopment.md) for the plugin boundary and the [provider integration README](../../../../dnn-providers/integration-tests/README.md) for integration mechanics and tiers.
+Production provider plugins live under `dnn-providers/`.
+Changes to plugin loading, graph execution, operation support, or provider-facing behavior must be tested with the affected provider. Prefer the superbuild; you can also test an installed standalone provider.
+See [Plugin Development](../PluginDevelopment.md) for the plugin boundary and the [provider integration README](../../../../dnn-providers/integration-tests/README.md) for provider test setup and categories.
 
 ## Development Workflow
 
-Use the path matching your change. For local pre-push validation, run the applicable component's `standard` label, then widen coverage when risk requires it.
-Build setup, supported presets, target names, and platform prerequisites are owned by [Building hipDNN](../Building.md).
+Choose the path that matches your change. Before pushing, run the affected component's `standard` tests.
+See [Building hipDNN](../Building.md) for setup, presets, targets, and platform requirements.
 
 ### Core-only standalone path
 
@@ -36,13 +36,13 @@ cmake --build build/release
 ctest --test-dir build/release -L standard --output-on-failure
 ```
 
-During iteration, use `ctest -R <regex>` or a direct GoogleTest filter after building to narrow the run.
-Before pushing, return to the complete core `standard` tier.
+While working, use `ctest -R <regex>` or a GoogleTest filter to run only the tests you need.
+Before pushing, run the full core `standard` category.
 
 ### Provider or integration superbuild path
 
-Use this path for provider code, provider-visible contracts, real graph execution, or cross-project integration changes.
-From the repository root, choose the narrowest provider preset that covers the change. Use `hipdnn-providers` for MIOpen plus hipBLASLt, or `hipdnn-providers-all` when HIP-kernel is also affected:
+Use this path for provider changes, provider-facing core changes, real graph execution, or changes that span projects.
+From the repository root, use the smallest preset that includes the affected provider. Use `hipdnn-providers` for MIOpen and hipBLASLt, or `hipdnn-providers-all` when HIP-kernel is also affected:
 
 ```bash
 cmake --preset hipdnn-providers -DROCM_LIBS_ENABLE_ROOT_CTEST=ON
@@ -50,71 +50,69 @@ cmake --build build
 ctest --test-dir build -L standard --output-on-failure
 ```
 
-Root CTest registration requires `ROCM_LIBS_ENABLE_ROOT_CTEST=ON` at configure time.
-Provider-specific presets and other superbuild choices are listed in [Building hipDNN](../Building.md#superbuild).
+Root-level CTest only sees these tests when CMake was configured with `ROCM_LIBS_ENABLE_ROOT_CTEST=ON`.
+See [Building hipDNN](../Building.md#superbuild) for other provider presets.
 
-`ctest` only runs binaries already present in the build tree; it does not compile changed sources or refresh stale test binaries.
-Always build first after a source change.
+`ctest` does not build changed code. Always build before running tests.
 
 Follow [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md) and complete the non-test contribution checks in [CONTRIBUTING](../../CONTRIBUTING.md) before pushing.
 
 ## Unit Testing Strategy
 
-Unit tests should isolate one component and exercise observable behavior, boundaries, and failure paths.
-Keep them deterministic and fast; replace external dependencies with existing fakes or mocks.
-Add a regression test for a defect and prove it fails without the fix.
+Unit tests should test one component and its visible behavior, edge cases, and failures.
+Keep them fast and repeatable. Replace outside dependencies with existing fakes or mocks.
+For a bug fix, add a test that fails before the fix and passes after it.
 
-Place tests beside the component’s existing suite rather than creating a second test structure.
-Use GoogleTest patterns already present in that suite.
-GPU-dependent tests must remain runnable on machines without a device by using the project’s established skip mechanism.
+Put new tests beside the existing tests for that component.
+Follow the GoogleTest patterns already used there.
+Tests that need a GPU must skip cleanly when no device is available.
 
-Do not duplicate naming or parameterization rules here.
-Use [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md) for naming and [Testing Strategy](./TESTING_STRATEGY.md) for detailed layer selection and coverage guidance.
+Use [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md) for test names. Use [Testing Strategy](./TESTING_STRATEGY.md) to choose the right test layer.
 
 ## Integration Testing Strategy
 
-Core black-box tests validate public backend and frontend behavior with controlled in-tree plugins.
-Use them when a change crosses component boundaries but does not require numerical validation by a production provider.
+Core integration tests check the public backend and frontend with controlled test plugins.
+Use them when a change crosses component boundaries but does not need a production provider.
 
-Real-provider integration tests execute graphs through provider plugins and compare results with a reference.
-Use them for operation correctness, provider selection, engine behavior, and device-dependent paths.
-The shared provider integration suite is the normal home for “this graph runs and produces the right result”; provider-local tests cover behavior specific to one provider.
-The `hipdnn_integration_tests` executable is provider-agnostic: each provider runs the shared graph set independently with its own plugin and engine.
+Provider integration tests run graphs through a real provider and compare results with a reference.
+Use them to test operation results, provider and engine selection, and GPU behavior.
+Put shared graph tests in the provider-agnostic suite. Put behavior that belongs to one provider in that provider's own tests.
+Each provider runs the shared `hipdnn_integration_tests` graph set separately with its own plugin and engine.
 
-hipDNN owns routing, API, serialization, and plugin-contract quality.
-Each provider owns its operation correctness and supported-architecture coverage; a core-only pass is not evidence that provider behavior is correct.
-Detailed responsibility and environment matrices belong in [Testing Strategy](./TESTING_STRATEGY.md), while bundle authoring and tier mechanics belong in the [provider integration README](../../../../dnn-providers/integration-tests/README.md).
+hipDNN owns API, graph, routing, serialization, and plugin-lifecycle tests.
+Each provider owns its operation results and supported GPU coverage. Passing core tests does not prove that a provider works correctly.
+See [Testing Strategy](./TESTING_STRATEGY.md) for ownership details and the [provider integration README](../../../../dnn-providers/integration-tests/README.md) for provider test setup.
 
 ## Performance & Benchmarking
 
-hipDNN dispatches graphs to provider engines; it does not own most provider kernels. Performance results must identify the selected provider and engine so regressions can be reduced to hipDNN dispatch, the provider adapter, or the underlying library/kernel layer.
+hipDNN sends graphs to provider engines; providers run most kernels. Every performance result must name the provider and engine so a slowdown can be traced to hipDNN, the provider adapter, or the underlying library.
 
-Use [ROCm dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) for manual graph benchmarks. Select explicit graph inputs or DVC workload pointers under `Workloads/**/*.tar.gz.dvc`, and record the workload revision, GPU architecture, provider/engine identity, plugin version or artifact, and software/build context. Compare results only against a controlled baseline from the same GPU architecture.
+Use [ROCm dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) for manual graph benchmarks. Record the workload revision, graph inputs, GPU, provider, engine, plugin version or artifact, and software build. Compare only with a baseline from the same GPU architecture.
 
-Keep GPU graph-event timing separate from host-submission timing; a graph may dispatch multiple kernels. See [Testing Strategy](./TESTING_STRATEGY.md#performance-and-benchmarking) for timing boundaries and ownership. No checked automated performance-regression gate currently exists; see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#performance-regression-signal).
+Keep GPU execution time separate from host submission time. See [Testing Strategy](./TESTING_STRATEGY.md#performance-and-benchmarking) for details. There is no automated performance gate today; see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md#automated-performance-checks).
 
 ## Pre-submit / CI gates
 
-Use the applicable component's `standard` label as the local pre-push convention. Local checks do not replace CI.
-Choose scope from the two paths above, record the exact commands and outcomes in the pull request, and never mark skipped or unrun checks as passed.
+Run the affected component's `standard` tests before pushing. Local tests do not replace CI.
+Record the commands you ran and their results in the pull request. Do not mark skipped or unrun checks as passed.
 
-Checked-in workflows are the source of truth for requested operating systems, runner labels, build options, static-analysis settings, and test commands. Actual runner assignment, external TheRock configuration, and required GitHub checks must be confirmed from the current workflow run and repository settings.
-Executable workflow details live in [`hipdnn-superbuild-ci.yml`](../../../../.github/workflows/hipdnn-superbuild-ci.yml), and review routing lives in [`CODEOWNERS`](../../../../.github/CODEOWNERS).
-Follow the repository contribution guidance in [CONTRIBUTING](../../CONTRIBUTING.md).
+Workflow files are the source of truth for CI platforms, runners, build options, and test commands. Runner assignments and required GitHub checks may be configured outside this repository, so confirm them in the current workflow run and repository settings.
+See [`hipdnn-superbuild-ci.yml`](../../../../.github/workflows/hipdnn-superbuild-ci.yml) for the superbuild workflow and [`CODEOWNERS`](../../../../.github/CODEOWNERS) for review routing.
+Complete the non-test checks in [CONTRIBUTING](../../CONTRIBUTING.md).
 
-If a required check fails, fix the cause or document a maintainer-approved exception.
-Do not weaken, disable, or skip a test merely to make a gate pass.
-Known differences between intended policy and current enforcement are indexed in [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
+If a required check fails, fix it or document an exception approved by a maintainer.
+Do not disable or skip a test only to make a check pass.
+See [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) for limits in current automation and policy.
 
 ## ASAN/TSAN/sanitizer coverage
 
-Sanitizer runs are risk-based additions to the normal `standard` validation.
-Run ASAN for changes involving ownership, allocation, descriptor lifetime, serialization, plugin loading, or failure cleanup.
-Run TSAN for changes involving threads, shared state, callbacks, logging concurrency, or synchronization.
+Sanitizers are extra checks for risky changes; they do not replace normal `standard` tests.
+Run ASAN for changes involving memory ownership, allocation, object lifetime, serialization, plugin loading, or cleanup after failures.
+Run TSAN for changes involving threads, shared state, callbacks, logging, or synchronization.
 
-ASAN and TSAN are separate, mutually exclusive build configurations.
-TSAN is supported only on Linux and checks host-side races; ASAN support depends on platform and GPU architecture, so some GPU tests are skipped in ASAN builds.
-For ASAN, use [Building hipDNN: Address Sanitizer Build](../Building.md#address-sanitizer-build). For TSAN, configure a standalone Linux build with `-DBUILD_THREAD_SANITIZER=ON`. Build the sanitizer tree, then run its applicable `standard` label.
+ASAN and TSAN use separate build configurations and cannot be enabled together.
+TSAN supports Linux host code only. ASAN support depends on the platform and GPU, so some GPU tests skip under ASAN.
+For ASAN commands, see [Building hipDNN: Address Sanitizer Build](../Building.md#address-sanitizer-build). For TSAN, configure a standalone Linux build with `-DBUILD_THREAD_SANITIZER=ON`. Build first, then run the affected `standard` tests.
 
-A clean sanitizer run supplements functional assertions; it does not prove numerical correctness or replace provider integration coverage.
-See [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) for current sanitizer automation and coverage limitations.
+A clean sanitizer run checks memory or thread safety only. It does not prove numerical correctness or replace provider integration tests.
+See [Known Testing Gaps](./KNOWN_TESTING_GAPS.md) for current sanitizer limits.
