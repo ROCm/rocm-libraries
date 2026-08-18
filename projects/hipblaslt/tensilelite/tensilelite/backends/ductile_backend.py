@@ -31,7 +31,6 @@ from ..ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, 
 from ..ductile.algorithm import GeneticAlgorithm
 
 
-
 def _generate_single_solution_with_groups(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap, silent=False):
     """Generate a single solution from a permutation, handling group_ parameter expansion."""
     from ..BenchmarkProblems import _build_and_validate_solution
