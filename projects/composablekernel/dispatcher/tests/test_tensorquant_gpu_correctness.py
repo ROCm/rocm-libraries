@@ -70,7 +70,7 @@ _GFX_ARCH = _detect_gfx_arch()
 # TensorQuant fp8/bf8 kernels use CK CompV3 pipelines that require native fp8 hardware.
 # gfx90a (MI200 series) lacks native fp8 support and produces incorrect results.
 # Only gfx942 (MI300X) and gfx950 (MI350X) are validated.
-_SUPPORTED_ARCHES = ("gfx942", "gfx950")
+_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 requires_gpu = pytest.mark.skipif(
     not (_has_hipcc() and _GFX_ARCH in _SUPPORTED_ARCHES),

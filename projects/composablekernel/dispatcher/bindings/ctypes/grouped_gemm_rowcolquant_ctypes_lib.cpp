@@ -83,10 +83,12 @@ int dispatcher_initialize()
     // hardware which gfx90a lacks (produces NaN without -DCK_USE_OCP_FP8).
     const std::string arch(props.gcnArchName);
     const std::string compiled_arch(GFX_ARCH);
-    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0)
+    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
+       arch.rfind("gfx1250", 0) != 0)
     {
         std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << arch
-                  << "' (supported: gfx942, gfx950; fp8/bf8 kernels require native FP8 hardware)\n";
+                  << "' (supported: gfx942, gfx950, gfx1250; fp8/bf8 kernels require native FP8 "
+                     "hardware)\n";
         return -1;
     }
     if(arch.rfind(compiled_arch, 0) != 0)

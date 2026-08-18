@@ -620,6 +620,17 @@ def setup_multiple_tensorquant_dispatchers(
 
 def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
     """Return the default fp8 TensorQuant config."""
+    if "gfx12" in gfx_arch:
+        # gfx1250 (RDNA4/WMMA): FlatMM 8-bit path needs warp_tile 16x16x128
+        # (warp_tile_k=16/32 silently zero on gfx12; mirrors the validated
+        # block-scale rowcolquant/tensorquant gfx1250 config). UNVALIDATED here.
+        return TensorQuantKernelConfig(
+            dtype="fp8", layout="rcr", pipeline="compv3", epilogue="cshuffle",
+            scheduler="intrawave", tile_m=16, tile_n=64, tile_k=256,
+            warp_m=1, warp_n=4, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+            pad_m=True, gfx_arch=gfx_arch,
+        )
     return TensorQuantKernelConfig(
         dtype="fp8",
         layout="rcr",
@@ -636,6 +647,17 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelCo
 
 def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
     """Return the default bf8 TensorQuant config."""
+    if "gfx12" in gfx_arch:
+        # gfx1250 (RDNA4/WMMA): FlatMM 8-bit path needs warp_tile 16x16x128
+        # (warp_tile_k=16/32 silently zero on gfx12; mirrors the validated
+        # block-scale rowcolquant/tensorquant gfx1250 config). UNVALIDATED here.
+        return TensorQuantKernelConfig(
+            dtype="bf8", layout="rcr", pipeline="compv3", epilogue="cshuffle",
+            scheduler="intrawave", tile_m=16, tile_n=64, tile_k=256,
+            warp_m=1, warp_n=4, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+            pad_m=True, gfx_arch=gfx_arch,
+        )
     return TensorQuantKernelConfig(
         dtype="bf8",
         layout="rcr",
