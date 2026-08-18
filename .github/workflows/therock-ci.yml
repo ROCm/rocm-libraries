@@ -224,11 +224,18 @@ jobs:
   # Self-references github.run_id for the artifact (this job runs within the same GHA run as the
   # build, no external input needed) -- see therock-dbsync-rocjitsu-prototype.yml for the
   # standalone workflow_dispatch version used for manual/diagnostic runs against a pinned commit.
+  #
+  # needs: therock-ci-linux (not just setup) -- confirmed live (run 32194708858) that without
+  # this, the fetch races ahead of the actual build/upload and fails with "Found no artifacts
+  # matching [...] at s3://...". therock-ci-linux is matrixed per family/project bundle, so
+  # depending on it waits for ALL of its legs (not just gfx942/gfx950's), which is coarser than
+  # ideal but is the only granularity `needs:` supports for a matrixed reusable-workflow job --
+  # mirrors how therock_ci_summary already depends on the whole therock-ci-linux job.
   dbsync-rocjitsu:
     name: "dbsync rocjitsu (${{ matrix.arch }})"
     permissions:
       contents: read
-    needs: setup
+    needs: [setup, therock-ci-linux]
     if: ${{ needs.setup.outputs.miopen_selected == 'true' }}
     strategy:
       fail-fast: false
