@@ -817,7 +817,7 @@ def _warp_tile_k_for(variant_key: str, gfx_arch: str) -> int:
     uses 16x16x32 on gfx942 and is bit-exact there with warp_tile_k=32.
     """
     is_8bit_float = variant_key in ("fp8", "bf8")
-    if "gfx950" in gfx_arch and is_8bit_float:
+    if ("gfx950" in gfx_arch or "gfx12" in gfx_arch) and is_8bit_float:
         return 128
     return 32
 

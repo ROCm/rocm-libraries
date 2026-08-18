@@ -96,7 +96,7 @@ def _coerce_flag_supported(hipcc: str = _DEFAULT_HIPCC) -> bool:
 # Architectures the ABQuant bridge supports. NEVER default to gfx942 silently:
 # the arch must be detected (get_arch) or explicitly supplied, and unknown archs
 # raise (Python) / return an error (C++ runtime check in the ctypes lib).
-_SUPPORTED_ARCHS = ("gfx942", "gfx950")
+_SUPPORTED_ARCHS = ("gfx942", "gfx950", "gfx1250")
 
 
 def _validate_arch(arch: str) -> str:
@@ -933,7 +933,7 @@ def _warp_tile_k_for(variant_key: str, gfx_arch: str, is_flat_mm: bool = False) 
     IsFlatMM=false -> 32 on gfx942, so they must NOT pass is_flat_mm=True.
     """
     is_8bit_float = variant_key in ("fp8", "bf8")
-    if "gfx950" in gfx_arch:
+    if "gfx950" in gfx_arch or "gfx12" in gfx_arch:
         # CK_GFX950_SUPPORT branch: is_8bit_float ? 128 : 32.  IsFlatMM is IGNORED here
         # (the gfx950 M_Warp_Tile==16 else-branch does not depend on IsFlatMM), so fp4
         # preshuffleb stays 32 on gfx950 -- do NOT bump it to 64.
