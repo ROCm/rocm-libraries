@@ -9,7 +9,7 @@ reads only ``BenchmarkProblems[0]``) cannot reach the Half-input /
 DestDataType=Half codegen surface. Attribution entry ``gfx90a__HHS_yaml`` flagged
 15 marginal whole-project lines for the fp16 GlobalWriteBatch packing path.
 
-This drives the shipped fp16 config ``Tensile/Tests/common/gemm/fp16_tn.yaml``
+This drives the shipped fp16 config ``tensilelite/Tests/common/gemm/fp16_tn.yaml``
 (BenchmarkProblems[0] is DataType=h / DestDataType=h / ComputeDataType=s; not
 skipped on gfx90a) through the config harness and asserts the emitted kernels are
 real gfx90a AMDGCN assembly, every kernel err==0. No snapshot (P3 records
@@ -23,7 +23,7 @@ from config_harness import emit_kernels_from_config
 pytestmark = pytest.mark.unit
 
 _ARCH = "gfx90a"
-_SEED = "Tensile/Tests/common/gemm/fp16_tn.yaml"
+_SEED = "tensilelite/Tests/common/gemm/fp16_tn.yaml"
 _LIMIT = 6
 
 
