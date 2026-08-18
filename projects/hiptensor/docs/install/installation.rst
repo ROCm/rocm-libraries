@@ -146,11 +146,6 @@ hipTensor is supported on AMD Instinct and Radeon GPUs by ROCm. See the `ROCm co
          .. selector-option:: AMD Radeon RX 7600 (gfx1102)
             :value: rx-7600 gfx=gfx1102
 
-         .. selector-option:: AMD Radeon PRO W6800 (gfx1030)
-            :value: w6800 gfx=gfx1030
-
-         .. selector-option:: AMD Radeon PRO V620 (gfx1030)
-            :value: v620 gfx=gfx1030
 
       .. selector-dropdown:: Ryzen APU
          :key: gpu
@@ -806,26 +801,6 @@ Install hipTensor on Linux
 
                sudo zypper install amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-devel7.14
 
-      .. selected:: gfx=gfx1030
-
-         .. selected:: os=ubuntu os=debian
-
-            .. code-block:: bash
-
-               sudo apt install amdrocm-hiptensor7.14-gfx1030 amdrocm-hiptensor-dev7.14
-
-         .. selected:: os=rhel os=rocky-linux os=oracle-linux
-
-            .. code-block:: bash
-
-               sudo dnf install amdrocm-hiptensor7.14-gfx1030 amdrocm-hiptensor-devel7.14
-
-         .. selected:: os=sles
-
-            .. code-block:: bash
-
-               sudo zypper install amdrocm-hiptensor7.14-gfx1030 amdrocm-hiptensor-devel7.14
-
       .. selected:: gfx=gfx1151
 
          .. selected:: os=ubuntu os=debian
@@ -1159,28 +1134,6 @@ Uninstall hipTensor
          .. code-block:: bash
 
              sudo zypper remove amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-devel7.14
-
-   .. selected:: gfx=gfx1030
-
-      Use the following command to uninstall hipTensor for your ``gfx1030`` GPU:
-
-      .. selected:: os=ubuntu os=debian
-
-         .. code-block:: bash
-
-             sudo apt autoremove amdrocm-hiptensor7.14-gfx1030 amdrocm-hiptensor-dev7.14
-
-      .. selected:: os=rhel os=rocky-linux os=oracle-linux
-
-         .. code-block:: bash
-
-             sudo dnf remove amdrocm-hiptensor7.14-gfx1030 amdrocm-hiptensor-devel7.14
-
-      .. selected:: os=sles
-
-         .. code-block:: bash
-
-             sudo zypper remove amdrocm-hiptensor7.14-gfx1030 amdrocm-hiptensor-devel7.14
 
    .. selected:: gfx=gfx1151
 
