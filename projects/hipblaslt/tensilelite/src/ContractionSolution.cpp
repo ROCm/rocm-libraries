@@ -4281,10 +4281,10 @@ namespace TensileLite
                 static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
         }
 
-        // AIHPBLAS-4254 P3: coherence mode rejects parallel reduction for the
-        // static two-tile packer. Force tree so query (requiredWorkspaceSize)
-        // and launch (solve) agree, and so grid steering sees a tree-shaped
-        // natural grid. Mirror the gate's staticTwoTilePacking predicate.
+        // Coherence mode rejects parallel reduction for the static two-tile
+        // packer. Force tree so query (requiredWorkspaceSize) and launch
+        // (solve) agree, and so grid steering sees a tree-shaped natural grid.
+        // Mirror the gate's staticTwoTilePacking predicate.
         if(problem.getParams().uniformSummationOrder())
         {
             const bool effectiveDynamic
@@ -4894,11 +4894,11 @@ namespace TensileLite
                 skGrid = cuCount;
             }
 
-            // AIHPBLAS-4254 P0: under coherence + static two-tile packing, snap
-            // the chain output g0 onto an admissible uniform grid, never upward.
-            // Must run before the magic-division guard below so that guard still
-            // validates the final grid (a snap after it can emit out-of-range
-            // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
+            // Under coherence + static two-tile packing, never-upward snap the
+            // chain output g0 onto an admissible uniform grid. Must run before
+            // the magic-division guard below so that guard still validates the
+            // final grid (a snap after it can emit out-of-range itersPerWG).
+            // Same ABI predicate as checkUniformSummationOrder.
             if(problem.getParams().uniformSummationOrder() && tiles > 0 && skGrid > 0)
             {
                 const bool effectiveDynamic

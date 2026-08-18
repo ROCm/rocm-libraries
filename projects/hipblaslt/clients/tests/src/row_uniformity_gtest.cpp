@@ -1658,7 +1658,7 @@ namespace
     }
 
     // =======================================================================
-    // AIHPBLAS-4254 — coherence-mode Stream-K grid steering (P3 + P0)
+    // Coherence-mode Stream-K grid steering (tree reduction + never-upward snap)
     //
     // Host-only: synthesised SK3 solution + gfx950 analytical HipAMDGPU, same
     // pattern as tensilelite CuCount_test (which CI does not build).
