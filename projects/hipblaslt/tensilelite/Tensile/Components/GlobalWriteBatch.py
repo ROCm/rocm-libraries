@@ -55,6 +55,41 @@ from ..KernelWriterModules import hasSequentialValuC
 from math import ceil, log2
 
 
+import os as _os
+
+
+def _plsinStoreGate(name: str, default: bool = False) -> bool:
+    """Read a PLSIN store optimization gate from the environment.
+
+    The proven AITER-style store optimizations (B: address hoist, C: permlane16)
+    are enabled by default on the PLSIN1 fused-full-tile path.  Each can still be
+    turned OFF independently via its env var (set to 0/false/off) for A/B
+    benchmarking and bisection; setting both off reproduces the pre-optimization
+    codegen byte-for-byte.
+
+    Truthy = any value other than {"", "0", "false", "False", "off", "OFF"}.
+    """
+    v = _os.environ.get(name)
+    if v is None:
+        return default
+    return v not in ("", "0", "false", "False", "off", "OFF")
+
+
+# --- AITER-style PLSIN1 BF16 store optimizations (see plsin1_direct_store plan) ---
+# Component B: hoist the redundant per-store `v_add addrDVgpr + lane_group*8` so the
+#   lane-adjusted dwordx4 base is computed once per (addr,N-group) and reused via the
+#   MUBUF immediate offsets 0/64/128/192.  Pure reorder of address arithmetic; the
+#   store data path is unchanged.
+PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
+# Component C: replace `ds_bpermute x4 + s_waitcnt + v_permlane32_swap x2` with the
+#   AITER two-`v_permlane16_swap` shuffle.  Changes the cross-lane assembly AND the
+#   per-lane store row address; correctness must be proven on hardware (norm==0).
+PLSIN_STORE_PERMLANE16 = _plsinStoreGate("PLSIN_STORE_PERMLANE16", default=True)
+# Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
+#   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
+PLSIN_STORE_DIRECT_EPILOGUE = _plsinStoreGate("PLSIN_STORE_DIRECT_EPILOGUE")
+
+
 def _scmpGtU32(writer, src, imm, comment=""):
     """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
     if writer.states.asmCaps["HasSCMPK"]:
@@ -139,6 +174,14 @@ class GlobalWriteBatchWriter:
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
+    # Component B (PLSIN_STORE_HOIST_ADDR): the lane-adjusted dwordx4 base
+    # (addrDVgpr + lane_group*8) is identical for every paired store that shares
+    # the same addrDVgpr and N-group (the M-subtile stride is carried by the MUBUF
+    # immediate offset 0/64/128/192, not by addrDVgpr).  Track the (addrDVgpr
+    # index, blockIdxN) that vgprAddrScratch currently holds so Phase1 recomputes
+    # it only when that key changes.  -1 = invalid / not yet computed.
+    self._subtileHoistedAddrDVgpr = -1
+    self._subtileHoistedAddrBlockN = -1
     self.numBatches = numBatches
 
     # CompactLoopStore: stash the "next batch's first elt rowInc" passed in via
@@ -1638,33 +1681,56 @@ class GlobalWriteBatchWriter:
       # vPermAddr = partner_lane_id * 4  (byte address for ds_permute_b32)
       vPermAddr = self.cvtVgprStruct.vgprPermAddr
       vTmp = self.cvtVgprStruct.vgprBf16Temp  # reuse scratch temp before it's used for mask init
-      module.addComment1("16bit dwordx4 UseSubtileImpl: compute ds_permute partner-lane address")
-      module.add(VAndB32(dst=vgpr(vTmp),     src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="lane_id & (WS-1)"))
-      module.add(VAndB32(dst=vgpr(vPermAddr), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="copy of lane_id"))
-      module.add(VPermlane32SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 32 swap"))
-      module.add(SNop(waitState=0, comment="delay after v_permlane32_swap"))
-      module.add(VPermlane16SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 16 swap"))
-      # Exec mask: lanes where both XOR swaps changed the value (i.e., the 'first' half of each pair)
-      # selects lanes 0-15 and 32-47 within the wave.
-      #
-      # Reuse the batch's own scratch SGPR pair (self.tmpS01) instead of a fresh
-      # checkOutAligned(2,2). The fresh aligned pair used preventOverflow=True and
-      # HARD-FAILED (no valid solution) when the ambient SGPR pool was at the
-      # occupancy-1 ceiling -- notably under PostLoopStoreInNll, whose fused store
-      # raises the whole-kernel SGPR high-water so no free 2-aligned pair remains
-      # here on skewed (non-256x256) tiles. This is a compile-time pool artifact:
-      # the partial-fixup path is emitted into the same kernel as the (runtime-
-      # exclusive) fused store and shares its register file. self.tmpS01 is the
-      # batch-owned lane-mask scratch: it is a laneSGPRC(=2)-wide, 2-aligned pair on
-      # wave64 (this subtile path is wave64-only + non-edge, see isSubtileNonEdge),
-      # and it is dead here (only written per-element later in the store loop), so
-      # borrowing it for this one-shot constant mask adds zero pool pressure and
-      # cannot overflow regardless of PLSIN's ambient footprint.
-      stmp = self.tmpS01
-      module.add(SMovB32(dst=sgpr(stmp), src="0x0000ffff", comment="select lanes 0-15, 32-47"))
-      module.add(SMovB32(dst=sgpr(stmp+1), src="0xffff0000"))
-      module.add(VCndMaskB32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vPermAddr), src2=sgpr(stmp,2), comment="restore original lane_id for selected lanes"))
-      module.add(VLShiftLeftB32(dst=vgpr(vPermAddr), shiftHex=2, src=vgpr(vTmp), comment="partner_lane * 4 = ds_permute byte addr"))
+      # Component C is restricted to the full-tile fused store (no align8 exec mask,
+      # no scalar fallback).  The guarded/edge path keeps the proven ds_bpermute +
+      # align8 machinery, whose mask is derived for that lane layout.  This setup
+      # block runs per globalWriteElements emission, so _fusedFullTileNoGuards()
+      # here matches the store sites emitted from the same call.
+      if PLSIN_STORE_PERMLANE16 and self._fusedFullTileNoGuards():
+        # Component C: the AITER two-`v_permlane16_swap` shuffle needs no ds_bpermute,
+        # so the partner-lane address is dead.  Repurpose the vPermAddr slot to hold
+        # the per-lane-group row-byte delta that compensates the permlane16 lane
+        # reordering.  With permlane16 swap(0<->2),(1<->3), destination lane-group
+        # lg holds:  lg0->sba0 rows0-7, lg1->sba1 rows0-7, lg2->sba0 rows8-15,
+        # lg3->sba1 rows8-15 (sba0 at M-base+0..15, sba1 at M-base+16..31).  So the
+        # dwordx4 must land at effective byte offsets [0,32,16,48] for lg=[0,1,2,3].
+        # addrDVgpr already contributes lane_group*8 bytes, so the extra delta is
+        # [0,24,0,24] = (lg&1)*24 bytes = (lg&1)*12 rows.  vLGDelta (lg*8) is left
+        # untouched below so the scalar/orphan fallback keeps its own addressing.
+        bpeDest = self.parentWriter.states.bpeCexternalGSU1
+        module.addComment1("permlane16 dwordx4: per-lane-group row-byte delta = (lane_group&1)*12 rows")
+        module.add(VAndB32(dst=vgpr(vPermAddr), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="lane_id & (WS-1)"))
+        module.add(VLShiftRightB32(dst=vgpr(vPermAddr), shiftHex=4, src=vgpr(vPermAddr), comment="lane_group = lane_id >> 4"))
+        module.add(VAndB32(dst=vgpr(vPermAddr), src0=1, src1=vgpr(vPermAddr), comment="lane_group & 1"))
+        module.add(VMulLOU32(dst=vgpr(vPermAddr), src0=vgpr(vPermAddr), src1=12*bpeDest, comment="(lane_group&1)*12 rows = permlane16 row-byte delta"))
+      else:
+        module.addComment1("16bit dwordx4 UseSubtileImpl: compute ds_permute partner-lane address")
+        module.add(VAndB32(dst=vgpr(vTmp),     src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="lane_id & (WS-1)"))
+        module.add(VAndB32(dst=vgpr(vPermAddr), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="copy of lane_id"))
+        module.add(VPermlane32SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 32 swap"))
+        module.add(SNop(waitState=0, comment="delay after v_permlane32_swap"))
+        module.add(VPermlane16SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 16 swap"))
+        # Exec mask: lanes where both XOR swaps changed the value (i.e., the 'first' half of each pair)
+        # selects lanes 0-15 and 32-47 within the wave.
+        #
+        # Reuse the batch's own scratch SGPR pair (self.tmpS01) instead of a fresh
+        # checkOutAligned(2,2). The fresh aligned pair used preventOverflow=True and
+        # HARD-FAILED (no valid solution) when the ambient SGPR pool was at the
+        # occupancy-1 ceiling -- notably under PostLoopStoreInNll, whose fused store
+        # raises the whole-kernel SGPR high-water so no free 2-aligned pair remains
+        # here on skewed (non-256x256) tiles. This is a compile-time pool artifact:
+        # the partial-fixup path is emitted into the same kernel as the (runtime-
+        # exclusive) fused store and shares its register file. self.tmpS01 is the
+        # batch-owned lane-mask scratch: it is a laneSGPRC(=2)-wide, 2-aligned pair on
+        # wave64 (this subtile path is wave64-only + non-edge, see isSubtileNonEdge),
+        # and it is dead here (only written per-element later in the store loop), so
+        # borrowing it for this one-shot constant mask adds zero pool pressure and
+        # cannot overflow regardless of PLSIN's ambient footprint.
+        stmp = self.tmpS01
+        module.add(SMovB32(dst=sgpr(stmp), src="0x0000ffff", comment="select lanes 0-15, 32-47"))
+        module.add(SMovB32(dst=sgpr(stmp+1), src="0xffff0000"))
+        module.add(VCndMaskB32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vPermAddr), src2=sgpr(stmp,2), comment="restore original lane_id for selected lanes"))
+        module.add(VLShiftLeftB32(dst=vgpr(vPermAddr), shiftHex=2, src=vgpr(vTmp), comment="partner_lane * 4 = ds_permute byte addr"))
       # Pre-compute lane_group*8 once; reused as the row-byte address correction in every
       # paired dwordx4 store (addrDVgpr encodes lane_group*8 but we need lane_group*16).
       vLGDelta = self.cvtVgprStruct.vgprLaneGroupDelta
@@ -3161,23 +3227,55 @@ class GlobalWriteBatchWriter:
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
                  and not self._fusedFullTileNoGuards())
 
-    module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
-    for k in range(4):
-      module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
-                               comment=f"perm dword {k}"))
+    # Component C (PLSIN_STORE_PERMLANE16): the AITER shuffle assembles the eight
+    # rows with two v_permlane16_swap (Phase2) and needs no LDS round-trip, so the
+    # four ds_bpermute and their s_waitcnt are dropped.  vPermAddr becomes dead.
+    # Restricted to the full-tile fused store (see setup note): the guarded/edge
+    # path keeps ds_bpermute + its align8 mask.
+    self._permlane16Active = PLSIN_STORE_PERMLANE16 and self._fusedFullTileNoGuards()
+    if not self._permlane16Active:
+      module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
+      for k in range(4):
+        module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
+                                 comment=f"perm dword {k}"))
 
     # The ds_bpermute has ~88 cycles of LDS latency.  Overlap SALU/VALU work here:
     #   1. Compute the adjusted D store address (VALU).
     #   2. Compute the exec mask for partial M/N blocks (SALU) — suppresses OOB lanes
     #      at tile boundaries without adding latency to the critical path.
-    if addrScaleShift:
+    # Component B (PLSIN_STORE_HOIST_ADDR): vAddrScratch = (scaled addrDVgpr) +
+    # lane_group*8 is identical for every paired store that shares this addrDVgpr and
+    # N-group -- the per-M-subtile-pair stride is carried by the MUBUF immediate offset
+    # (0/64/128/192) in Phase2, not by addrDVgpr.  So compute it once and reuse.
+    #
+    # Safe ONLY in the full-tile fused store (_fusedFullTileNoGuards): there every
+    # paired store in the N-group is emitted straight-line and unconditionally
+    # executed, so the register is guaranteed live at every reuse.  In the guarded
+    # path a runtime scalar/fallback branch may skip the producer, so we keep the
+    # original per-store recompute there.  Recompute whenever the addrDVgpr register
+    # or the N-group changes.
+    # Component C: under permlane16 the row-byte delta is (lane_group&1)*12 rows,
+    # precomputed into the (otherwise-dead) vPermAddr slot; otherwise it is the
+    # standard lane_group*8 in vLGDelta.
+    vRowDelta = vPermAddr if self._permlane16Active else vLGDelta
+    deltaStr = "(lane_group&1)*12rows" if self._permlane16Active else "lane_group*8"
+    hoistAddr = PLSIN_STORE_HOIST_ADDR and self._fusedFullTileNoGuards()
+    addrAlreadyLive = (hoistAddr
+                       and self._subtileHoistedAddrDVgpr == addrDVgpr
+                       and self._subtileHoistedAddrBlockN == blockIdxN)
+    if addrAlreadyLive:
+      module.addComment1(f"reuse hoisted dwordx4 base in v{vAddrScratch} (addrDVgpr={addrDVgpr}, N={blockIdxN})")
+    elif addrScaleShift:
       module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
                                  src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
-      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vLGDelta),
-                         comment="adjusted D addr = scaled addrDVgpr + lane_group*8"))
+      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vRowDelta),
+                         comment=f"adjusted D addr = scaled addrDVgpr + {deltaStr}"))
     else:
-      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
-                         comment="adjusted D addr = addrDVgpr + lane_group*8"))
+      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vRowDelta),
+                         comment=f"adjusted D addr = addrDVgpr + {deltaStr}"))
+    if hoistAddr:
+      self._subtileHoistedAddrDVgpr = addrDVgpr
+      self._subtileHoistedAddrBlockN = blockIdxN
     if useAlign8:
       self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                mGuardOffset=2, rowScaleShift=1)
@@ -3223,15 +3321,23 @@ class GlobalWriteBatchWriter:
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
                  and not self._fusedFullTileNoGuards())
 
-    if pending_lgkm is None:
-      module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
+    # Component C (PLSIN_STORE_PERMLANE16): AITER two-permlane16 shuffle in place of
+    # the LDS round-trip.  No ds_bpermute was issued in Phase1, so there is no lgkmcnt
+    # to drain; two v_permlane16_swap assemble the eight rows directly.
+    if getattr(self, "_permlane16Active", False):
+      module.addComment1("v_permlane16_swap_b32: AITER cross-lane assembly (no ds_bpermute)")
+      module.add(VPermlane16SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
+      module.add(VPermlane16SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
     else:
-      dscnt = pending_lgkm - 4
-      module.add(SWaitCnt(dscnt=dscnt, comment=f"wait for this pair's 4 ds_bpermute (lgkmcnt={dscnt})"))
+      if pending_lgkm is None:
+        module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
+      else:
+        dscnt = pending_lgkm - 4
+        module.add(SWaitCnt(dscnt=dscnt, comment=f"wait for this pair's 4 ds_bpermute (lgkmcnt={dscnt})"))
 
-    module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
-    module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
-    module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
+      module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
+      module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
+      module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
@@ -3366,6 +3472,10 @@ class GlobalWriteBatchWriter:
     """
     module = Module("16bitSubtileScalarStore")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+    # Component B: an orphan/scalar store changes the addressing context; drop any
+    # hoisted paired-store base so the next paired store recomputes vAddrScratch.
+    self._subtileHoistedAddrDVgpr = -1
+    self._subtileHoistedAddrBlockN = -1
 
     ntd = self.kernel["NonTemporalD"]
     isGlc = bool(ntd & 0x1)
