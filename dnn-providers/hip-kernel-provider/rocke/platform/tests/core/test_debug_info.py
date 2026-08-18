@@ -251,7 +251,9 @@ class TestEmittedDebugMetadata(unittest.TestCase):
             self.ll,
         )
         self.assertIsNotNone(di_file)
-        self.assertEqual(Path(ast.literal_eval(di_file.group(1))), Path(THIS_FILE).parent)
+        self.assertEqual(
+            Path(ast.literal_eval(di_file.group(1))), Path(THIS_FILE).parent
+        )
         for line in re.findall(r"!DILocation\(line: (\d+)", self.ll):
             self.assertGreater(int(line), 0)
 
