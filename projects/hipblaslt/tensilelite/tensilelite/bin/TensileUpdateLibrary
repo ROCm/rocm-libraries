@@ -27,14 +27,14 @@
 # This script only gets called by CMake
 
 try:
-    from Tensile import TensileUpdateLibrary
+    from tensilelite import TensileUpdateLibrary
 except ImportError:
     import os.path
     import sys
     parentdir = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."))
     sys.path.append(parentdir)
 
-    from Tensile import TensileUpdateLibrary
+    from tensilelite import TensileUpdateLibrary
 
 # script run from commandline
 if __name__ == "__main__":

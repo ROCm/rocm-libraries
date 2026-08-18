@@ -88,16 +88,6 @@ from copy import deepcopy
 _SK_USO_BIT = 29
 
 
-
-
-
-
-
-
-
-
-
-
 class StreamKMemoryOrdering(Component):
     """
     Memory-ordering fences and flag accessors for the StreamK partial-tile
@@ -494,14 +484,6 @@ class StreamK(TileProcessingStrategy):
     # launch -- there is no explicit end-of-kernel reset.
 
 
-
-
-
-
-
-
-
-
     def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tPA, tPB, skipLroReset=False):
         """Recompute StreamK tile locals and map tile index to WorkGroup* for the *next* tile.
 
@@ -527,7 +509,6 @@ class StreamK(TileProcessingStrategy):
         else:
             module.add(DefaultWGM(writer, kernel, "WGM"))
         return module
-
 
 
     def computeTotalIters(self, writer, kernel, dstSgpr):
@@ -605,7 +586,6 @@ class StreamK(TileProcessingStrategy):
         module.add(SSubU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr(sTmp+1), comment="2. Local iteration end (SK tile)"))
 
         return module
-
 
 
     def skExtraIters(self, writer, kernel, sSkExtraIters, sTmp):
@@ -2946,10 +2926,6 @@ class StreamKTwoTileDPFirst(StreamK):
     supportsSubtileImpl = True
 
 
-
-
-
-
     def initializePartition(self, writer, kernel):
         module = Module("StreamK static partition")
         skConstsInVgprs = writer.isPersistentConstantsToVgprEnabled(kernel)
@@ -3273,8 +3249,6 @@ class StreamKDynamic(StreamK):
     supportsSubtileImpl = True
 
 
-
-
     def activateWorkItem(self, writer, kernel, tPA, tPB, sWorkItemIdx):
         module = Module("StreamK Dynamic graWorkGroup")
 
@@ -3362,7 +3336,6 @@ class StreamKDynamic(StreamK):
         # writer.sgprPool.checkIn(sTmp)
 
         return module
-
 
 
     def _computeNextTileIdentity(self, writer, kernel, sWorkItemIdx, tPA, tPB):
@@ -3635,7 +3608,7 @@ class StreamKHybrid(StreamK):
     both fragments back-to-back gated by an s_cmp_eq_u32 + s_cbranch on
     that single SGPR.
 
-    Kernel-argument layout (see Tensile/Components/Signature.py SK5 branch
+    Kernel-argument layout (see tensilelite/Components/Signature.py SK5 branch
     and tensilelite/src/ContractionSolution.cpp SK5 branch):
 
         Slot   SK3 (primary, defineSgpr)   SK4 (RegSet alias)
@@ -4040,7 +4013,6 @@ class StreamKHybrid(StreamK):
 
         writer.sgprPool.checkIn(sTmp)
         return mod
-
 
 
     # ------------------------------------------------------------------

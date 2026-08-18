@@ -6,7 +6,7 @@
 This lives inside the ``Tensile`` package (rather than in the tensilelite-root
 ``tasks.py``) so it ships with the installed test artifacts and can be imported
 without pulling in ``invoke`` — see
-``Tensile/Tests/unit/test_rocisa_install_status.py``.
+``tensilelite/Tests/unit/test_rocisa_install_status.py``.
 """
 
 
