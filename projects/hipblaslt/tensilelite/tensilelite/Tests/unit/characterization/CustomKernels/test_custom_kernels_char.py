@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.CustomKernels``: the custom-kernel
+"""Characterization tests for ``tensilelite.CustomKernels``: the custom-kernel
 .s-file config/assembly parsing and validation, driven over crafted .s files in
 a tmp directory."""
 
@@ -11,7 +11,7 @@ import contextlib
 
 import pytest
 
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
     isCustomKernelConfig,
     getAllCustomKernelNames,
     getCustomKernelContents,
@@ -44,7 +44,7 @@ def _isolate_valid_parameters():
     # getCustomKernelConfig does `validParameters.update(newMIValidParameters)`,
     # a permanent global mutation. Snapshot + restore so the roster other suites
     # (ValidParameters/Naming/SolutionClass) snapshot is left untouched.
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.ValidParameters import validParameters
     saved = dict(validParameters)
     try:
         yield
