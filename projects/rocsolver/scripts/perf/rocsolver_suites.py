@@ -43,27 +43,26 @@ COMMON_ARGS = '--iters 7 --perf 1'
 def get_size_configurations(case):
     """
     Get size configurations for normal and batched tests.
-
     Args:
-        case: One of 'small', 'medium', 'large' or 'huge'
-
+        case: a list with one or more of 'small', 'medium', 'large' or 'huge'
     Returns:
         tuple: (sizenormal, sizebatch) lists
     """
-    sizenormal = list(chain(range(2, 64, 8), range(64, 256, 32), range(256, 1024, 64)))
-    sizebatch = list(chain(zip(range(2, 64, 4), repeat(5000)), zip(range(72, 164, 8), repeat(2500))))
-
-    if case == 'medium' or case == 'large' or case == 'huge':
-        sizenormal += list(chain(range(1024, 2048, 64), range(2048, 4096, 128)))
-        sizebatch += list(chain(zip(range(168, 260, 8), repeat(2500)), zip(range(272, 520, 16), repeat(1000))))
-
-    if case == 'large' or case == 'huge':
-        sizenormal += list(chain(range(4096, 8192, 256), range(8192, 12800, 512)))
-        sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
-
-    if case == 'huge':
-        sizenormal += list(chain(range(12800, 23040, 2048), range(23040, 32768, 4096)))
-
+    sizenormal = []
+    sizebatch = []
+    for c in case:
+        if c == 'small':
+            sizenormal += list(chain(range(2, 64, 8), range(64, 256, 32), range(256, 1024, 64)))
+            sizebatch += list(chain(zip(range(2, 64, 4), repeat(5000)), zip(range(72, 164, 8), repeat(2500))))
+        elif c == 'medium':
+            sizenormal += list(chain(range(1024, 2048, 64), range(2048, 4096, 128)))
+            sizebatch += list(chain(zip(range(168, 260, 8), repeat(2500)), zip(range(272, 520, 16), repeat(1000))))
+        elif c == 'large':
+            sizenormal += list(chain(range(4096, 8192, 256), range(8192, 12800, 512)))
+            sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
+        elif c == 'huge': # huge == large for batch cases
+            sizenormal += list(chain(range(12800, 23040, 2048), range(23040, 32768, 4096)))
+            sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
     return sizenormal, sizebatch
 
 

@@ -14,7 +14,7 @@ Calling the script without any arguments
 ```
 ./perfoptim-suite
 ```
-runs the default configuration which executes all available functions with real single and double precision and all the size cases.
+runs the default configuration which executes all available functions with real single and double precision and with small, medium and large size cases.
 
 Options can be passed to the script as arguments to modify its behaviour. The available options are:
 ```
@@ -77,16 +77,16 @@ z -> complex double precision
 (note: several can be selected)
 
 size cases to run
-valid options are: (default is large)
+valid options are: (default is small, medium, large)
 small  -> see definitions in rocsolver_suites.py for included size values
 medium -> see definitions in rocsolver_suites.py for included size values
 large  -> see definitions in rocsolver_suites.py for included size values
 huge   -> see definitions in rocsolver_suites.py for included size values
-(note: select only one as small is a sub-set of medium which is a sub-set of large)
+(note: several can be selected)
 ```
 
-For example, benchmarking `geqrf` with real single and complex precisions on the medium and small size cases would look like this:
+For example, benchmarking `geqrf` with real and complex single precisions on the small and large size cases would look like this:
 ```
-./perfoptim-suite geqrf s c medium
+./perfoptim-suite geqrf s c small large
 ```
 After completion, the results of the benchmark will have been written to `rocsolver_customer01_benchmarks/sgeqrf_benchmarks.csv` and `rocsolver_customer01_benchmarks/cgeqrf_benchmarks.csv` for the real single precision case and the complex single precision case, respectively.

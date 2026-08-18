@@ -93,8 +93,10 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable, lo
         out, err, exitcode = call_rocsolver_bench(bench_executable, bench_args)
         if exitcode != 0:
             sys.exit("rocsolver-bench call failure: {}".format(err))
-#        time = float(out)
-        time=1
+        try:
+            time = float(out)
+        except ValueError:
+            time="n/a"
         # write results
         if local:
             row = {'n': roww['n']}
@@ -134,16 +136,17 @@ if __name__ == '__main__':
     parser.add_argument('-o',
             dest='output_path',
             default=None,
-            help='the output file name for the benchmark results')
+            help='the name of the output file where the benchmark results will be written')
     parser.add_argument('suite',
             choices=SUITES.keys(),
             help='the set of benchmarks to run')
     parser.add_argument('precision',
-            choices=['s', 'd', 'c' , 'z'],
+            choices=['s', 'd', 'c', 'z'],
             help='the precision to use for the benchmarks')
     parser.add_argument('case',
+            nargs='+',
             choices=['small', 'medium', 'large', 'huge'],
-            help='the size case to use for the benchmarks')
+            help='the size cases to use for the benchmarks')
     args = parser.parse_args()
     setup_vprint(args)
 
