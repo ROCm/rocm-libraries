@@ -18,10 +18,6 @@ To prevent hanging, tests will be terminated after 30s and marked as having fail
 
 The timeout value is configurable through the ``HIPTHREADS_TEST_TIMEOUT`` :doc:`environment variable <environment-variables>`.
 
-.. note::
-
-  There is no timeout on Windows. Setting ``HIPTHREADS_TEST_TIMEOUT`` has no effect.
-
 For this variable to take effect, it must be called before lit:
 
 .. code-block:: bash

@@ -33,7 +33,7 @@ On Windows, running the tests requires ``ROCM_PATH`` or ``HIP_PATH`` to point to
      - Value
    * - ``HIPTHREADS_TEST_TIMEOUT``
      - | Sets the number of seconds a single test can run before the runner terminates it.
-       | Fractional seconds are allowed.  Applies on Linux only. Windows ignores the variable and runs each test without a timeout.
+       | Fractional seconds are allowed.
        | Setting to ``0`` disables the timeout.
        | Default: ``30``.
    * - ``ROCM_PATH``

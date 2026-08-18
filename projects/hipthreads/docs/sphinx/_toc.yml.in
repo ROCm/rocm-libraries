@@ -29,6 +29,8 @@ subtrees:
     title: std to hip mapping
   - file: reference/hipThreads-set-test-timeout
     title: Testing timeout
+  - file: reference/limitations
+    title: Limitations
   - file: reference/environment-variables
     title: Environment variables
   - file: reference/cpp_api
