@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import traceback
@@ -22,7 +23,8 @@ def safe(name: str) -> str:
 
 def current_flavor() -> str:
     """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
-    llvm22 otherwise). The golden stores both; the gate compares only this."""
+    llvm22 for 7.2-7.12, llvm23 for 7.13+). The golden stores all of them; the
+    gate compares only this one."""
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -124,6 +126,7 @@ def build_conv(
     pipeline="mem",
     epilogue="default",
     groups=1,
+    vector_size_c=None,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm import (
@@ -148,6 +151,7 @@ def build_conv(
             pipeline=pipeline,
             epilogue=epilogue,
             groups=groups,
+            vector_size_c=vector_size_c,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -254,6 +258,243 @@ def build_fused_moe(phase, tokens, experts, topk, hidden, intermediate, dtype="f
             "silu": build_moe_silu_mul,
             "reduce": build_moe_topk_weighted_reduce,
         }[phase](spec)
+
+    return _build
+
+
+def build_attention_2d(
+    name,
+    arch,
+    *,
+    head_size,
+    block_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=False,
+    **kw,
+):
+    def _build():
+        from kernels.common.attention_unified import _tiled_2d_impl
+
+        SpecCls, _build_fn, _ = _tiled_2d_impl(arch)
+        spec = SpecCls(
+            head_size=head_size,
+            block_size=block_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            use_sinks=False,
+            sliding_window=sliding_window,
+            has_softcap=has_softcap,
+            use_alibi=use_alibi,
+            **kw,
+        )
+        return _build_fn(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_3d(
+    name,
+    arch,
+    *,
+    head_size,
+    block_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    num_segments,
+    sliding_window=0,
+    has_softcap=False,
+):
+    def _build():
+        from kernels import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=head_size,
+            block_size=block_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            use_sinks=False,
+            sliding_window=sliding_window,
+            has_softcap=has_softcap,
+            num_segments=num_segments,
+        )
+        return build_unified_attention_3d_tiled(spec)
+
+    return _build
+
+
+def build_attention_reduce(
+    name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
+):
+    def _build():
+        from kernels import (
+            UnifiedAttentionReduceTiledSpec,
+            build_unified_attention_reduce_tiled,
+        )
+
+        spec = UnifiedAttentionReduceTiledSpec(
+            head_size=head_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            num_segments=num_segments,
+        )
+        return build_unified_attention_reduce_tiled(spec)
+
+    return _build
+
+
+def build_attention_dense(arch, **over):
+    """Dense flash-attn prefill spec (library ``kernels/gfx950/attention_dense``).
+
+    ``over`` patches the shared base spec; a small Sq keeps the IR compact while
+    still exercising the full pipeline (both the default one-CTA-per-q-block grid
+    and the persistent grid-stride grid).
+    """
+
+    def _build():
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense as _build_dense,
+        )
+
+        spec = dict(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=128,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+        )
+        spec.update(over)
+        return _build_dense(AttentionDenseSpec(**spec))
+
+    return _build
+
+
+def _d256_problem():
+    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
+    from kernels.common.attention_unified import UnifiedAttentionProblem
+
+    return UnifiedAttentionProblem(
+        total_q=4096,
+        num_seqs=1,
+        num_query_heads=16,
+        num_kv_heads=2,
+        head_size=256,
+        block_size=16,
+        max_seqlen_q=4096,
+        max_seqlen_k=4096,
+        dtype="bf16",
+        num_cus=120,
+    )
+
+
+@contextlib.contextmanager
+def _pinned_attention_arch(arch):
+    """Pin the *memoized runtime device arch* the D256 fast routes gate on.
+
+    Those routes consult ``_resolve_attention_arch`` -- NOT any per-case argument
+    -- so a non-gfx950 host would otherwise select the FALLBACK spec and the
+    recorded sha would become host-dependent. Two things are pinned, and the
+    second is the load-bearing one:
+
+    * the function is rebound wholesale on its defining module (per its
+      docstring: "Tests that monkeypatch this function replace it wholesale");
+    * ``_RESOLVED_ATTENTION_ARCH``, the process-wide memo the function returns
+      before doing anything else, is set too. The memo is what makes the pin
+      independent of *how* a consumer reached the resolver: the spec builder
+      goes through its ``attention_unified`` module handle today, but a bound
+      import anywhere would freeze the function reference and see only the memo.
+      This harness is installed standalone (``platform/CMakeLists.txt``) and run
+      by ``rocke_installed_golden_test.py`` without the library test tree, so it
+      cannot delegate that invariant to a guard test.
+    """
+    import kernels.common.attention_unified as au
+
+    pin = lambda: arch  # noqa: E731
+    o_fn, o_memo = au._resolve_attention_arch, au._RESOLVED_ATTENTION_ARCH
+    au._resolve_attention_arch = pin
+    au._RESOLVED_ATTENTION_ARCH = arch
+    try:
+        yield
+    finally:
+        au._resolve_attention_arch = o_fn
+        au._RESOLVED_ATTENTION_ARCH = o_memo
+
+
+def build_attention_d256_gfx950(arch):
+    """D256 bf16 prefill *fast* spec: 32x32-transposed + ``use_kq_lds_pad``
+    (slab-granularity K_lds pad) + ``use_softmax_mfma_interleave``.
+
+    The slab pad's async-DMA write and its padded read remap must agree
+    byte-for-byte or numerics silently corrupt, and an addressing drift would pass
+    every other CPU test and fail only on GPU (#9233 review). Raises if the fast
+    spec / pad+interleave is not selected, so this can never pin the fallback.
+    """
+
+    def _build():
+        from kernels import build_unified_attention_2d_tiled
+        from kernels.common.attention_unified import (
+            _d256_gfx950_fast,
+            _tiled_spec_from_problem,
+        )
+
+        problem = _d256_problem()
+        with _pinned_attention_arch(arch):
+            if not _d256_gfx950_fast(problem):
+                raise RuntimeError(
+                    f"D256 fast spec not selected under pinned arch {arch!r}; "
+                    "would pin the fallback (no pad/interleave)"
+                )
+            spec = _tiled_spec_from_problem(problem)
+            if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
+                raise RuntimeError(
+                    "expected pad+interleave in the D256 fast spec; got "
+                    f"pad={spec.use_kq_lds_pad} "
+                    f"interleave={spec.use_softmax_mfma_interleave}"
+                )
+            return build_unified_attention_2d_tiled(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_d256_gfx942(arch):
+    """D256 gfx942 4-warp GQA fast path.
+
+    Mirrors ``build_attention_d256_gfx950`` but pins the *gfx942* cohort: raises
+    if ``_d256_gfx942_fast`` is not selected (so this can never pin the fallback),
+    then lowers the dedicated ``build_gfx942_4warp_gqa`` builder -- the
+    byte-sensitive V wide-load -> ``V_lds`` transpose kernel worth pinning.
+    """
+
+    def _build():
+        from kernels.common.attention_unified import (
+            _d256_gfx942_fast,
+            _tiled_spec_from_problem,
+        )
+        from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+        problem = _d256_problem()
+        with _pinned_attention_arch(arch):
+            if not _d256_gfx942_fast(problem):
+                raise RuntimeError(
+                    f"D256 gfx942 fast route not selected under pinned arch "
+                    f"{arch!r}; would pin the fallback (slow scalar path)"
+                )
+            spec = _tiled_spec_from_problem(problem)
+            return build_gfx942_4warp_gqa(spec, arch=arch)
 
     return _build
 
@@ -580,6 +821,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -616,6 +858,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -633,6 +876,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -650,6 +894,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -667,6 +912,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # gfx90a conv mirrors the gfx942 MFMA path (wave64, 16x16x16 atom). gfx1250
@@ -687,6 +933,47 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
+        ),
+    )
+    # pipeline=basic: single-buffer global-read/compute overlap on gfx950.
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/basic_default",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_basic_a",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="basic",
+            epilogue="default",
+            vector_size_c=1,
+        ),
+    )
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_basic_b",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="basic",
+            epilogue="cshuffle",
         ),
     )
 
@@ -945,6 +1232,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -961,6 +1249,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1014,13 +1303,320 @@ def cases():
             native_int=True,
         ),
     )
+
+    # Attention: 2D tiled (gfx950 wide-K), 3D tiled + reduce (gfx950),
+    # and 2D tiled narrow (gfx942 MFMA-16x16x16 path).
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d128_b64",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d128_b64",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d128_b64_softcap",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_sc",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            has_softcap=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d128_b64_alibi",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_alibi",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            use_alibi=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/3d_fp16_d128_b64",
+        "gfx950",
+        build_attention_3d(
+            "irhash_attn_950_3d_fp16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/3d_bf16_d128_b64",
+        "gfx950",
+        build_attention_3d(
+            "irhash_attn_950_3d_bf16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/reduce_fp16_d128",
+        "gfx950",
+        build_attention_reduce(
+            "irhash_attn_950_reduce_fp16",
+            "gfx950",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/reduce_bf16_d128",
+        "gfx950",
+        build_attention_reduce(
+            "irhash_attn_950_reduce_bf16",
+            "gfx950",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/2d_fp16_d128_b64",
+        "gfx942",
+        build_attention_2d(
+            "irhash_attn_942_2d_fp16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/2d_bf16_d128_b64",
+        "gfx942",
+        build_attention_2d(
+            "irhash_attn_942_2d_bf16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/3d_fp16_d128_b64",
+        "gfx942",
+        build_attention_3d(
+            "irhash_attn_942_3d_fp16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/3d_bf16_d128_b64",
+        "gfx942",
+        build_attention_3d(
+            "irhash_attn_942_3d_bf16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_fp16_d128",
+        "gfx942",
+        build_attention_reduce(
+            "irhash_attn_942_reduce_fp16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_bf16_d128",
+        "gfx942",
+        build_attention_reduce(
+            "irhash_attn_942_reduce_bf16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+
+    # Dense flash-attn prefill (gfx950-only builder). Registered as a table rather
+    # than 18 add() blocks because every case is the same base spec with one or two
+    # overrides; the variant name is the only thing that differs case to case.
+    for _variant, _over in (
+        # --- default (one CTA per q-block/head) grid ---
+        ("default_causal_sq512", {}),
+        ("swa_w128_sq512", {"sliding_window": 128}),
+        ("varlen_sq512", {"varlen": True}),
+        ("lazy_off_sq512", {"lazy_rescale": False}),
+        ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
+        ("bn128_sq512", {"block_n": 128}),
+        ("noncausal_sq512", {"causal": False}),
+        # --- persistent (grid-stride) grid + decode variants ---
+        ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
+        (
+            "persist_qbmaj_sq512",
+            {"persistent": True, "num_persistent": 256, "persist_decode": "qb_major"},
+        ),
+        (
+            "persist_hkvmaj_sq512",
+            {"persistent": True, "num_persistent": 256, "persist_decode": "hkv_major"},
+        ),
+        (
+            "persist_intl_sq512",
+            {"persistent": True, "num_persistent": 256, "interleave": True},
+        ),
+        (
+            "persist_lazy_off_sq512",
+            {"persistent": True, "num_persistent": 256, "lazy_rescale": False},
+        ),
+        (
+            "persist_swa_w128_sq512",
+            {"persistent": True, "num_persistent": 256, "sliding_window": 128},
+        ),
+        # D=64 packed-row DMA loader (2 rows/instr, unpadded LDS) on the persistent
+        # builder -- locks the head_size=64 fix (fp16_h64 above only exercises the
+        # default builder).
+        (
+            "persist_h64_sq512",
+            {"persistent": True, "num_persistent": 256, "head_size": 64},
+        ),
+        # ragged (non-256 seqlen) in-kernel path: on-chip boundary padding. causal
+        # (no key mask), non-causal (ktok<seqlen_kv key mask), D=64, and the
+        # persistent variant -- lock all four ragged codegen shapes.
+        ("ragged_causal_sq500", {"seqlen_q": 500, "seqlen_kv": 500, "ragged": True}),
+        (
+            "ragged_full_sq500",
+            {"seqlen_q": 500, "seqlen_kv": 500, "ragged": True, "causal": False},
+        ),
+        (
+            "ragged_h64_sq500",
+            {"seqlen_q": 500, "seqlen_kv": 500, "ragged": True, "head_size": 64},
+        ),
+        (
+            "persist_ragged_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "ragged": True,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        # paged-KV load path (block_tables indirection). Gates the PAGED DSL through
+        # BOTH the golden (Python lowering byte-stability) and the cpp/python
+        # byte-identity gate. fp16 D128 sliding-window single-seq (the validated
+        # cohort); num_kv_blocks = seqlen_kv / block_size (32 = 512 / 16).
+        (
+            "paged_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+    ):
+        add(
+            "attention_dense",
+            f"attention_dense/gfx950/{_variant}",
+            "gfx950",
+            build_attention_dense("gfx950", **_over),
+        )
+
+    # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
+    # 4-warp GQA V-transpose (gfx942) routes.
+    add(
+        "attention_d256",
+        "attention_d256/gfx950/pad_interleave",
+        "gfx950",
+        build_attention_d256_gfx950("gfx950"),
+    )
+    add(
+        "attention_d256",
+        "attention_d256/gfx942/4warp_gqa",
+        "gfx942",
+        build_attention_d256_gfx942("gfx942"),
+    )
     return out
 
 
-# The golden stores one sub-document per llvm flavor under this key; the gate
-# (check_golden) compares only the flavor the running host autodetects, so the
-# same committed golden is valid on both ROCm < 7.2 (llvm20) and >= 7.2 (llvm22).
-GOLDEN_FLAVORS = ("llvm20", "llvm22")
+# The golden stores one sub-document per llvm flavor under this key, and the
+# gate (check_golden) verifies all of them from any host: the flavor is an
+# argument to lowering, so nothing about the running ROCm vintage limits which
+# sub-documents can be checked. The same committed golden is therefore valid,
+# and verified, on ROCm < 7.2 (llvm20), 7.2-7.12 (llvm22), and 7.13+ (llvm23).
+GOLDEN_FLAVORS = ("llvm20", "llvm22", "llvm23")
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 
@@ -1069,16 +1665,32 @@ def build_golden() -> dict:
 
 
 def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
-    """Compare a fresh run against the golden sub-doc for ``flavor`` (defaults to
-    the host's autodetected flavor). Returns a list of drift strings; empty == OK.
+    """Compare a fresh run against the golden sub-doc(s). Empty list == OK.
+
+    With no ``flavor``, every flavor in :data:`GOLDEN_FLAVORS` is checked, not
+    just the one this host autodetects. Lowering takes the flavor as an
+    argument, so the extra runs cost a few hundred milliseconds -- whereas
+    checking only the host's flavor leaves the other sub-documents unverified
+    by any machine that does not happen to run that ROCm vintage. The llvm23
+    sub-document, for instance, is only reachable on ROCm >= 7.13, so it would
+    otherwise sit in the golden untested.
+
+    Drift strings are prefixed with the flavor when more than one is checked.
     """
-    flavor = flavor or current_flavor()
     doc = json.loads(golden_path.read_text())
-    base = doc.get("flavors", {}).get(flavor)
-    if base is None:
-        have = sorted(doc.get("flavors", {}))
-        return [f"golden has no entry for flavor {flavor!r} (have {have})"]
-    return compare(base, run(flavor=flavor))
+    have = doc.get("flavors", {})
+    wanted = [flavor] if flavor else list(GOLDEN_FLAVORS)
+    errors: list[str] = []
+    for fl in wanted:
+        base = have.get(fl)
+        if base is None:
+            errors.append(
+                f"golden has no entry for flavor {fl!r} (have {sorted(have)})"
+            )
+            continue
+        prefix = "" if len(wanted) == 1 else f"[{fl}] "
+        errors.extend(prefix + e for e in compare(base, run(flavor=fl)))
+    return errors
 
 
 def compare(base, cur):
@@ -1119,13 +1731,14 @@ def main():
     ap.add_argument(
         "--check",
         type=Path,
-        help="compare a fresh run against the golden sub-doc for THIS host's "
-        "autodetected llvm flavor; exit 1 on any drift.",
+        help="compare a fresh run against EVERY golden sub-doc (narrow it with "
+        "--flavor); exit 1 on any drift.",
     )
     ap.add_argument(
         "--flavor",
         choices=GOLDEN_FLAVORS,
-        help="override the autodetected llvm flavor (for --check / --ir-dir).",
+        help="check (or dump) just this llvm flavor instead of all of them; "
+        "for --ir-dir it overrides the autodetected flavor.",
     )
     ap.add_argument("--ir-dir", type=Path)
     ns = ap.parse_args()
@@ -1143,13 +1756,13 @@ def main():
         return
 
     if ns.check:
-        flavor = ns.flavor or current_flavor()
-        errors = check_golden(ns.check, flavor)
+        checked = ns.flavor or ", ".join(GOLDEN_FLAVORS)
+        errors = check_golden(ns.check, ns.flavor)
         if errors:
             for e in errors:
-                print(f"IR DRIFT [{flavor}]: {e}")
+                print(f"IR DRIFT: {e}")
             raise SystemExit(1)
-        print(f"IR parity OK [{flavor}] vs {ns.check}")
+        print(f"IR parity OK [{checked}] vs {ns.check}")
         return
 
     flavor = ns.flavor or current_flavor()

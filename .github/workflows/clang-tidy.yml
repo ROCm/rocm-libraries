@@ -35,6 +35,7 @@ jobs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
       - name: Checkout rocm-libraries
+        timeout-minutes: 30
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github
@@ -123,6 +124,7 @@ jobs:
     runs-on: azure-linux-scale-rocm
     steps:
       - name: Checkout rocm-libraries
+        timeout-minutes: 30
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: ${{ matrix.checkout_paths_str }}
@@ -183,10 +185,14 @@ jobs:
           pip install 'cmake<4' \
             https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz \
             https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 21
-          sudo apt-get install -y clang-tidy-21
+          # Install clang-tidy-23 to match the nightly ROCm/TheRock Clang major (23.0.0);
+          # older clang-tidy cannot parse the Clang-23 HIP headers ('builtin functions
+          # must be directly called'). apt.llvm.org publishes 23 only for noble (not
+          # jammy), which matches the runner's Ubuntu 24.04.
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm23.list
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-23
           cp projects/miopen/requirements.txt     /tmp/requirements.txt
           cp projects/miopen/rbuild.ini           /tmp/rbuild.ini
           cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
@@ -214,10 +220,12 @@ jobs:
             -DMIOPEN_BACKEND=HIP \
             -DBUILD_DEV=ON \
             -DMIOPEN_USE_MLIR=OFF \
-            -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-21 \
+            -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-23 \
             -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps" \
             -DROCM_PATH=/opt/rocm
-          ninja -C build-miopen analyze
+          # -k 0: keep going after failures so clang-tidy analyzes every target and
+          # reports all findings in one run, instead of stopping at the first failure.
+          ninja -C build-miopen -k 0 analyze
 
   clang_tidy_summary:
     name: "clang-tidy summary"

@@ -34,12 +34,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class BiCGStabl
-  * \brief Bi-Conjugate Gradient Stabilized (l) Method
-  * \details
-  * The Bi-Conjugate Gradient Stabilized (l) method is a generalization of BiCGStab for
-  * solving sparse (non) symmetric linear systems \f$Ax=b\f$. It minimizes residuals over
-  * \f$l\f$-dimensional Krylov subspaces. The degree \f$l\f$ can be set with SetOrder().
-  * \cite bicgstabl
+  * \brief Bi-Conjugate Gradient Stabilized (l) method.
   *
   * \tparam OperatorType - can be LocalMatrix or GlobalMatrix
   * \tparam VectorType - can be LocalVector or GlobalVector

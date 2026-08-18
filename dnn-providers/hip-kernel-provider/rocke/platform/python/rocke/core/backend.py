@@ -22,7 +22,12 @@ interchangeable engines:
   - ``"both"``    run both engines and assert they agree, returning the
                   Python result on success and raising a precise diff on
                   mismatch. Use this as a differential gate while the two
-                  engines are being kept in lock-step.
+                  engines are being kept in lock-step. ``both`` NEVER falls
+                  back to Python: if the C++ engine cannot lower the kernel
+                  the call raises (:class:`BackendCoverageGap` for an arch on
+                  the named unported list, the engine's own error otherwise).
+                  Returning the Python result there would report an
+                  uncompared kernel as parity-verified.
 
 Backend selection
 -----------------
@@ -100,6 +105,33 @@ class BackendMismatch(AssertionError):
     Carries a precise, human-readable diff describing which artifact
     (serialized IR or lowered ``.ll``) diverged and where.
     """
+
+
+class BackendCoverageGap(BackendError):
+    """Raised by ``"both"`` mode for a kernel the C++ engine cannot lower yet.
+
+    Distinct from :class:`BackendMismatch` (the engines produced different IR)
+    and from a plain engine error (an unexpected failure): this names a gap we
+    already know about and track in :data:`CPP_UNPORTED_ARCHES`. ``both`` still
+    refuses to return the Python result -- the caller gets an exception, not
+    silently-unverified IR. The test layer turns this into a visible *skip* so
+    the gap is counted in the run summary instead of passing as a green
+    parity check.
+    """
+
+
+# Arches the Python engine lowers but the C++ engine has no ISA backend for.
+# This is the ONE place the gap is named; ``both`` consults it to classify an
+# engine failure as a known gap rather than an unexpected error, and the test
+# layer reports those as skips. Removing an entry here is what "ported" means:
+# the differential lane then holds the arch to full byte-identity.
+#
+# Empty: every arch Python lowers, the C++ engine lowers too, and the
+# differential lane holds all of them to byte-identity. gfx1250 was the last
+# entry and came off when ``LL_BACKEND_GFX1250`` landed in
+# cpp/core/lower_llvm/core.cpp. Do not add an arch here to quiet a divergence
+# on one the engine already supports -- that is a regression, not a gap.
+CPP_UNPORTED_ARCHES: Tuple[str, ...] = ()
 
 
 def resolve_backend(backend: Optional[str] = None) -> str:
@@ -251,9 +283,9 @@ def _lower_via_cpp_engine(
     # contract is backend-INDEPENDENT: backend="cpp" must reject a bad flavor with
     # the same ValueError as backend="python"/"both", not the engine's RuntimeError
     # (which only surfaces once the rocke_engine .so is on the path).
-    from .lower_llvm import LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22
+    from .lower_llvm import LLVM_FLAVORS
 
-    if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+    if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
@@ -297,7 +329,13 @@ def lower_kernel_via_backend(
         genuinely expected.
       - ``"both"``   -> lower with both and assert byte-equality, returning the
         Python result (the differential oracle). A mismatch raises
-        :class:`BackendMismatch`.
+        :class:`BackendMismatch`. There is **no fallback in this mode**: if the
+        C++ engine cannot lower the kernel, the call raises
+        :class:`BackendCoverageGap` for an arch named in
+        :data:`CPP_UNPORTED_ARCHES` and re-raises the engine's own error
+        otherwise. Returning the Python result on engine failure would hand
+        back IR that nothing compared while the caller asked for a comparison,
+        which is exactly the vacuous green this mode exists to prevent.
     """
     chosen = resolve_backend()
 
@@ -320,10 +358,30 @@ def lower_kernel_via_backend(
             _record_fallback(name, f"{type(e).__name__}: {e}")
             return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
 
-    # both: differential gate.
+    # both: differential gate, and the one mode that never falls back. Handing
+    # back ``py_ll`` when the C++ engine failed would report a kernel nothing
+    # compared as parity-verified -- the precise failure this mode exists to
+    # catch -- so every cpp-side failure propagates. A failure on an arch named
+    # in CPP_UNPORTED_ARCHES is re-raised as BackendCoverageGap so the test
+    # layer can count it as a skip; anything else surfaces unchanged, including
+    # ValueError (both engines validate an explicit flavor against the same
+    # table, so one rejecting what the other accepted is a real defect).
     py_ll = python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
     ir_text = serialize(kernel)
-    cpp_ll = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+    try:
+        cpp_ll = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+    except ValueError:
+        raise
+    except BaseException as e:  # noqa: BLE001 -- includes BackendError
+        if _arch in CPP_UNPORTED_ARCHES:
+            raise BackendCoverageGap(
+                f"the C++ engine has no ISA backend for {_arch}, so kernel "
+                f"'{name}' cannot be cross-checked: {type(e).__name__}: {e}. "
+                f"This arch is listed in backend.CPP_UNPORTED_ARCHES; port it "
+                f"to remove the gap. ROCKE_BACKEND=both will not substitute "
+                f"the Python result for an uncompared kernel."
+            ) from e
+        raise
     if py_ll != cpp_ll:
         raise BackendMismatch(
             f"python vs cpp engine disagree for kernel '{name}' on {_arch}:\n"

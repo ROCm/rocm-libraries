@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_SDPA
 
 #include <cmath>
+#include <type_traits>
 
 #include <hip/hip_runtime.h>
 
@@ -61,9 +62,13 @@ struct SdpaFwdTestCase
 // to divide nhead_q for GQA/MQA). These are floors to widen as engines are
 // added, not invariants of the test itself.
 //
-// This suite is the engine-agnostic / GPU-reference vehicle; it is not yet bound
-// to an SDPA-capable ctest target, so it executes nowhere automated until the
-// GPU reference executor lands (#8438), which is where its CI enablement rides.
+// BF16 tolerance is intentionally still 1e-2 after the GPU reference models the
+// provider's P->bf16 RTNE cast before P@V. The remaining delta is provider
+// execution order, FMA/device-math, and tile-level accumulation behavior rather
+// than the previously missing probability-storage cast.
+//
+// This suite is the engine-agnostic / GPU-reference vehicle. Provider projects
+// bind it to concrete SDPA engines through external integration-test targets.
 std::vector<SdpaFwdTestCase> getSdpaFwdTestCases()
 {
     return {
@@ -102,10 +107,17 @@ std::vector<SdpaFwdTestCase> getSdpaFwdTestCases()
     };
 }
 
+constexpr float K_BF16_PROVIDER_TOLERANCE = 1e-2f;
+
 template <typename DataType>
 class SdpaForward : public IntegrationGraphVerificationHarness<DataType, SdpaFwdTestCase>
 {
 public:
+    // The tolerance below models the bf16 provider path (P->bf16 RTNE before P@V).
+    // Add a dtype-aware tolerance before instantiating this suite for other dtypes.
+    static_assert(std::is_same_v<DataType, bfloat16>,
+                  "K_BF16_PROVIDER_TOLERANCE assumes a bf16 provider path");
+
     struct GraphOutputs
     {
         std::shared_ptr<graph::TensorAttributes> o;
@@ -177,10 +189,10 @@ protected:
 
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
-        this->registerValidator(outputs.o, this->getTolerance(graphObj, outputs.o));
+        this->registerValidator(outputs.o, K_BF16_PROVIDER_TOLERANCE);
 
         this->setTestCaseNote(testCase.note);
-        this->synthesis().setGlobalSeed(testCase.seed);
+        this->inputFillRecipes().setGlobalSeed(testCase.seed);
         this->verifyGraph(graphObj);
     }
 };

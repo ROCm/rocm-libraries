@@ -38,53 +38,68 @@
 /*
  * @brief Define the options for the ModuleOptions struct
  * @note This macro is used to define the options for the ModuleOptions struct
- * @note SwPrefetchScratchSgpr: -1 disables SwPrefetchInsertionPass; >=0 runs and uses that scratch.
- *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
- * constructor.
+ * @note EnableSwInstructionPrefetchRelStatic: Tensile `SwInstructionPrefetch` YAML → Gfx1250
+ *        SwInstructionPrefetchRelStaticPass (`s_prefetch_inst_pc_rel 0, null, 31`; no scratch
+ *        SGPR). Mutually exclusive with EnableSwInstructionPrefetchAbs.
+ * @note EnableSwInstructionPrefetchAbs: Tensile `SwInstructionPrefetch` YAML bitmask resolving to
+ *        Absolute (value 2, or Auto(-1) on gfx1250 non-Stream-K) → Gfx1250
+ *        SwInstructionPrefetchAbsStaticPass / SwInstructionPrefetchAbsDynamicPass
+ *        (`s_prefetch_inst`; requires SwInstructionPrefetchAbsBaseSgpr >= 0).
+ *        Mutually exclusive with EnableSwInstructionPrefetchRelStatic.
+ * @note SwInstructionPrefetchAbsBaseSgpr: low index of the reserved 3-SGPR abs-prefetch base
+ *        (even-aligned pair s[base:base+1] + scratch s[base+2]), auto-allocated in Tensile
+ *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K / non-gfx1250).
  */
-#define MODULE_OPTIONS_LIST(X)           \
-    X(DebugLevel, int)                   \
-    X(OptLevel, int)                     \
-    X(TileA0, int)                       \
-    X(TileB0, int)                       \
-    X(TileM0, int)                       \
-    X(NumGRA, uint32_t)                  \
-    X(NumGRB, uint32_t)                  \
-    X(NumGRM, uint32_t)                  \
-    X(wavefrontSize, int)                \
-    X(SubGroup0, int)                    \
-    X(SubGroup1, int)                    \
-    X(WaveGroup0, int)                   \
-    X(WaveGroup1, int)                   \
-    X(VectorWidthA, int)                 \
-    X(VectorWidthB, int)                 \
-    X(GlobalReadVectorWidthA, int)       \
-    X(GlobalReadVectorWidthB, int)       \
-    X(DirectToLdsA, bool)                \
-    X(DirectToLdsB, bool)                \
-    X(UseSgprForGRO, int)                \
-    X(PrintBeforePass, std::string)      \
-    X(PrintAfterPass, std::string)       \
-    X(DebugPass, std::string)            \
-    X(VerifyEach, bool)                  \
-    X(EnableRemarks, bool)               \
-    X(EnableWaitCntInsertion, bool)      \
-    X(EnableLoopCarriedTokenDeps, bool)  \
-    X(EnableESM2, bool)                  \
-    X(VgprMsbMode, int)                  \
-    X(EnableSwPrefetchInsertion, bool)   \
-    X(SwPrefetchScratchSgpr, int)        \
-    X(ClusterBarrier, bool)              \
-    X(PrefetchGlobalRead, int)           \
-    X(PrefetchLocalRead, int)            \
-    X(RemoveInstructions, std::string)   \
-    X(CloneList, std::vector<CloneSpec>) \
-    X(DsReadQueueDepth, int)             \
-    X(DsReadDrainLatency, int)           \
-    X(DsReadPerWmma, int)                \
-    X(GlobalReadQueueDepth, int)         \
-    X(GlobalReadDrainLatency, int)       \
-    X(DsReadOrder, int)
+#define MODULE_OPTIONS_LIST(X)                    \
+    X(DebugLevel, int)                            \
+    X(OptLevel, int)                              \
+    X(TileA0, int)                                \
+    X(TileB0, int)                                \
+    X(TileM0, int)                                \
+    X(NumGRA, uint32_t)                           \
+    X(NumGRB, uint32_t)                           \
+    X(NumGRM, uint32_t)                           \
+    X(wavefrontSize, int)                         \
+    X(SubGroup0, int)                             \
+    X(SubGroup1, int)                             \
+    X(WaveGroup0, int)                            \
+    X(WaveGroup1, int)                            \
+    X(VectorWidthA, int)                          \
+    X(VectorWidthB, int)                          \
+    X(GlobalReadVectorWidthA, int)                \
+    X(GlobalReadVectorWidthB, int)                \
+    X(DirectToLdsA, bool)                         \
+    X(DirectToLdsB, bool)                         \
+    X(UseSgprForGRO, int)                         \
+    X(PrintBeforePass, std::string)               \
+    X(PrintAfterPass, std::string)                \
+    X(DebugPass, std::string)                     \
+    X(PassOrderSnapshotJson, std::string)         \
+    X(VerifyEach, bool)                           \
+    X(EnableRemarks, bool)                        \
+    X(EnableWaitCntInsertion, bool)               \
+    X(EnableLoopCarriedTokenDeps, bool)           \
+    X(EnableESM2, bool)                           \
+    X(EnableESM2TrackValuVsrc, bool)              \
+    X(VgprMsbMode, int)                           \
+    X(RequiresXCntForVolatileVMEM, bool)          \
+    X(EnableSwInstructionPrefetchRelStatic, bool) \
+    X(EnableSwInstructionPrefetchAbs, bool)       \
+    X(SwInstructionPrefetchAbsBaseSgpr, int)      \
+    X(ClusterBarrier, bool)                       \
+    X(TDMLoadWaveSync, bool)                      \
+    X(PrefetchGlobalRead, int)                    \
+    X(PrefetchLocalRead, int)                     \
+    X(RemoveInstructions, std::string)            \
+    X(CloneList, std::vector<CloneSpec>)          \
+    X(DsReadQueueDepth, int)                      \
+    X(DsReadDrainLatency, int)                    \
+    X(DsReadThrottleLatency, int)                 \
+    X(DsReadPerWmma, int)                         \
+    X(GlobalReadQueueDepth, int)                  \
+    X(GlobalReadDrainLatency, int)                \
+    X(DsReadOrder, int)                           \
+    X(ArchName, std::string)
 
 namespace stinkytofu {
 /**

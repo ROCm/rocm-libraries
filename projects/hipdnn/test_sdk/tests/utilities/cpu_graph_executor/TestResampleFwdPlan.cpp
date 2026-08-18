@@ -93,6 +93,26 @@ TEST(TestResampleFwdPlan, ExecuteWritesGeneratedIndex)
     EXPECT_EQ(index.memory().hostData()[3], 15);
 }
 
+TEST(TestResampleFwdGraphBuilder, PreservesOptionalGenerateIndex)
+{
+    auto absentBuilder = createValidResampleFwdGraph();
+    const GraphWrapper absentGraph(absentBuilder.GetBufferPointer(), absentBuilder.GetSize());
+    const auto& absentAttributes = *absentGraph.getNode(0).attributes_as_ResampleFwdAttributes();
+    EXPECT_FALSE(absentAttributes.generate_index().has_value());
+
+    auto falseBuilder = createValidResampleFwdGraph(false);
+    const GraphWrapper falseGraph(falseBuilder.GetBufferPointer(), falseBuilder.GetSize());
+    const auto& falseAttributes = *falseGraph.getNode(0).attributes_as_ResampleFwdAttributes();
+    ASSERT_TRUE(falseAttributes.generate_index().has_value());
+    EXPECT_FALSE(falseAttributes.generate_index().value());
+
+    auto trueBuilder = createValidResampleFwdGraph(true);
+    const GraphWrapper trueGraph(trueBuilder.GetBufferPointer(), trueBuilder.GetSize());
+    const auto& trueAttributes = *trueGraph.getNode(0).attributes_as_ResampleFwdAttributes();
+    ASSERT_TRUE(trueAttributes.generate_index().has_value());
+    EXPECT_TRUE(trueAttributes.generate_index().value());
+}
+
 TEST(TestResampleFwdPlanBuilder, IsApplicable)
 {
     auto builder = createValidResampleFwdGraph();
