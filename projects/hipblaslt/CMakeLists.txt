@@ -151,18 +151,6 @@ else()
     find_package(amd_smi)
 endif()
 
-if(HIPBLASLT_ENABLE_CLIENT)
-    # NOTE: CMake should automatically detect the Fortran compiler via standard CMake search paths.
-    # Unfortunately, TheRock for Windows will not compile without an explicit set here.
-    if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-        set(CMAKE_Fortran_COMPILER  "gfortran")
-    endif()
-    enable_language(Fortran)
-
-    # There is an implicit find_package(BLAS) when finding lapack
-    find_package(LAPACK REQUIRED)
-endif()
-
 if(HIPBLASLT_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
 endif()
@@ -302,7 +290,27 @@ if(_hipblaslt_host_validation_enabled
         "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
     )
     if(NOT EXISTS "${_hipblaslt_host_validation_source}/CMakeLists.txt")
-        find_package(ROCHostValidation CONFIG QUIET)
+        set(_hipblaslt_host_validation_components Operations)
+        if(HIPBLASLT_ENABLE_CLIENT)
+            list(APPEND _hipblaslt_host_validation_components BLAS)
+        endif()
+        if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING)
+            list(APPEND _hipblaslt_host_validation_components Tiled)
+        endif()
+        if(_hipblaslt_mxdatagen_enabled)
+            list(
+                APPEND
+                _hipblaslt_host_validation_components
+                MX
+                AMDGPULayout
+            )
+        endif()
+        find_package(
+            ROCHostValidation
+            CONFIG
+            QUIET
+            COMPONENTS ${_hipblaslt_host_validation_components}
+        )
     endif()
     if(NOT TARGET roc::host-validation
             AND NOT EXISTS

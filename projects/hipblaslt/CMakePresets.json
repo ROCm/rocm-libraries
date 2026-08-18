@@ -92,7 +92,6 @@
       "displayName": "hipblaslt 7.0.0 config",
       "description": "Configuration command used in 7.0.0 builds",
       "cacheVariables": {
-        "CMAKE_Fortran_COMPILER": "gfortran",
         "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
         "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
         "CMAKE_PREFIX_PATH": "/opt/rocm-7.0.0/lib/llvm;/opt/rocm-7.0.0",
@@ -107,8 +106,7 @@
         "ROCM_PATH": "/opt/rocm-7.0.0",
         "CMAKE_BUILD_TYPE": "Release",
         "HIPBLASLT_ENABLE_FETCH": "ON",
-        "CMAKE_INSTALL_LIBDIR": "lib",
-        "BLA_STATIC": "ON"
+        "CMAKE_INSTALL_LIBDIR": "lib"
       }
     },
     {
@@ -116,7 +114,6 @@
       "displayName": "hipblaslt 7.0.2 config",
       "description": "Configuration command used in 7.0.2 builds",
       "cacheVariables": {
-        "CMAKE_Fortran_COMPILER": "gfortran",
         "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
         "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
         "CMAKE_PREFIX_PATH": "/opt/rocm-7.0.2/lib/llvm;/opt/rocm-7.0.2",
@@ -131,8 +128,7 @@
         "ROCM_PATH": "/opt/rocm-7.0.2",
         "CMAKE_BUILD_TYPE": "Release",
         "HIPBLASLT_ENABLE_FETCH": "ON",
-        "CMAKE_INSTALL_LIBDIR": "lib",
-        "BLA_STATIC": "ON"
+        "CMAKE_INSTALL_LIBDIR": "lib"
       }
     }
   ]
