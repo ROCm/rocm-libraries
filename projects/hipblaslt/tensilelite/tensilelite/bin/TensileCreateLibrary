@@ -27,7 +27,7 @@
 # This script only gets called by CMake
 
 try:
-    from tensilelite import TensileCreateLibrary
+    from tensilelite import tensilelite_create_library
 except ImportError:
     import os.path
     import sys
@@ -35,10 +35,10 @@ except ImportError:
     print(parentdir)
     sys.path.append(parentdir)
 
-    from tensilelite import TensileCreateLibrary
+    from tensilelite import tensilelite_create_library
 
 ################################################################################
 # Main
 ################################################################################
 if __name__ == "__main__":
-    TensileCreateLibrary.run()
+    tensilelite_create_library.run()
