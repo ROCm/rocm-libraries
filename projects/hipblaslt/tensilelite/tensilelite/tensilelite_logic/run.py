@@ -62,6 +62,52 @@ from tensilelite.Toolchain.Validators import validateToolchain
 from tensilelite.CustomYamlLoader import load_logic_gfx_arch, archMatch
 
 
+import os
+
+################################################################################
+#
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+################################################################################
+#
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
+
 class Check(NamedTuple):
     OnlyCustomKernels: bool
     All: bool
@@ -219,8 +265,10 @@ def _setup(argv=None):
     if logicPath.is_file() and logicPath.suffix == ".yaml":
         files = [logicPath]
     else:
-        pattern = "**/*.yaml"
-        files = list(logicPath.glob(pattern))
+        logic_filter = getattr(args, "logic_filter", "**/*.yaml")
+        if not isinstance(logic_filter, (str, os.PathLike)):
+            logic_filter = "**/*.yaml"
+        files = list(logicPath.glob(logic_filter))
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
