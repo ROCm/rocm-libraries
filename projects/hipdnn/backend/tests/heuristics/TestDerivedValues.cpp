@@ -11,8 +11,13 @@ class TestDerivedValues : public ::testing::Test
 protected:
     void SetUp() override
     {
-        ctx.bindDeviceVars({{"cu_count", 110.0}, {"arch", 942.0}});
-        ctx.bindQueryVars({{"batch", 16.0}, {"seqlen_q", 2048.0}, {"heads", 32.0}});
+        ctx.bindDeviceVars({{"cu_count", 110.0}});
+        // RFC 0019 §6.1: Dims are positional
+        // Assuming rank-4 tensor: (batch, heads, sequence, head_dim)
+        ctx.bindQueryVars({{"dims[0]", 16.0},    // batch
+                           {"dims[1]", 32.0},    // heads
+                           {"dims[2]", 2048.0}}  // sequence (seqlen_q)
+        );
     }
 
     FeatureExtractionContext ctx;
@@ -22,24 +27,24 @@ protected:
 TEST_F(TestDerivedValues, BasicDerivedValue)
 {
     std::vector<std::pair<std::string, std::string>> derived = {
-        {"num_tiles", "{\"ceil_div\": [\"$q.seqlen_q\", 64]}"}};
+        {"num_tiles", "{\"ceil_div\": [\"$q.dims[2]\", 64]}"}};
 
-    std::vector<std::string> signature = {"$derived.num_tiles", "$q.batch"};
+    std::vector<std::string> signature = {"$derived.num_tiles", "$q.dims[0]"};
 
     FeatureExtractor extractor(signature, derived);
 
     const auto features = extractor.extract(ctx);
     ASSERT_EQ(features.size(), 2);
     EXPECT_DOUBLE_EQ(features[0], 32.0); // ceil(2048 / 64) = 32
-    EXPECT_DOUBLE_EQ(features[1], 16.0); // $q.batch
+    EXPECT_DOUBLE_EQ(features[1], 16.0); // $q.dims[0]
 }
 
 // Test derived value referencing earlier derived value
 TEST_F(TestDerivedValues, ChainedDerivedValues)
 {
     std::vector<std::pair<std::string, std::string>> derived
-        = {{"num_tiles_m", "{\"ceil_div\": [\"$q.seqlen_q\", 64]}"},
-           {"num_tiles_k", "{\"ceil_div\": [\"$q.heads\", 4]}"},
+        = {{"num_tiles_m", "{\"ceil_div\": [\"$q.dims[2]\", 64]}"},
+           {"num_tiles_k", "{\"ceil_div\": [\"$q.dims[1]\", 4]}"},
            {"total_tiles", "{\"*\": [\"$derived.num_tiles_m\", \"$derived.num_tiles_k\"]}"}};
 
     std::vector<std::string> signature
@@ -58,9 +63,9 @@ TEST_F(TestDerivedValues, ChainedDerivedValues)
 TEST_F(TestDerivedValues, KernelIndependentDerivedCached)
 {
     std::vector<std::pair<std::string, std::string>> derived
-        = {{"total_threads", "{\"*\": [\"$q.batch\", \"$q.heads\"]}"}};
+        = {{"total_threads", "{\"*\": [\"$q.dims[0]\", \"$q.dims[1]\"]}"}};
 
-    std::vector<std::string> signature = {"$derived.total_threads", "$q.seqlen_q"};
+    std::vector<std::string> signature = {"$derived.total_threads", "$q.dims[2]"};
 
     FeatureExtractor extractor(signature, derived);
 
@@ -75,9 +80,9 @@ TEST_F(TestDerivedValues, KernelIndependentDerivedCached)
 TEST_F(TestDerivedValues, KernelDependentDerivedReEvaluated)
 {
     std::vector<std::pair<std::string, std::string>> derived
-        = {{"tiles_per_block", "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m\"]}"}};
+        = {{"tiles_per_block", "{\"ceil_div\": [\"$q.dims[2]\", \"$kernel.tile_m\"]}"}};
 
-    std::vector<std::string> signature = {"$derived.tiles_per_block", "$q.batch"};
+    std::vector<std::string> signature = {"$derived.tiles_per_block", "$q.dims[0]"};
 
     FeatureExtractor extractor(signature, derived);
 
@@ -85,7 +90,7 @@ TEST_F(TestDerivedValues, KernelDependentDerivedReEvaluated)
     auto row = extractor.extractSharedRow(ctx);
     ASSERT_EQ(row.size(), 2);
     EXPECT_DOUBLE_EQ(row[0], 0.0);   // Kernel-dependent, not yet evaluated
-    EXPECT_DOUBLE_EQ(row[1], 16.0);  // $q.batch
+    EXPECT_DOUBLE_EQ(row[1], 16.0);  // $q.dims[0]
 
     // Bind kernel vars for candidate 1: tile_m=64
     ctx.bindKernelVars({{"tile_m", 64.0}});
@@ -105,8 +110,8 @@ TEST_F(TestDerivedValues, KernelDependentDerivedReEvaluated)
 TEST_F(TestDerivedValues, MixedDerivedDependencies)
 {
     std::vector<std::pair<std::string, std::string>> derived = {
-        {"total_elems", "{\"*\": [\"$q.batch\", \"$q.seqlen_q\"]}"},  // Independent
-        {"tiles_per_block", "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m\"]}"},  // Dependent
+        {"total_elems", "{\"*\": [\"$q.dims[0]\", \"$q.dims[2]\"]}"},  // Independent
+        {"tiles_per_block", "{\"ceil_div\": [\"$q.dims[2]\", \"$kernel.tile_m\"]}"},  // Dependent
         {"elems_per_tile", "{\"ceil_div\": [\"$derived.total_elems\", \"$derived.tiles_per_block\"]}"} // Mixed
     };
 
@@ -133,7 +138,7 @@ TEST_F(TestDerivedValues, MixedDerivedDependencies)
 TEST_F(TestDerivedValues, EmptyDerivedBlock)
 {
     std::vector<std::pair<std::string, std::string>> derived = {};
-    std::vector<std::string> signature = {"$q.batch", "$q.seqlen_q"};
+    std::vector<std::string> signature = {"$q.dims[0]", "$q.dims[2]"};
 
     FeatureExtractor extractor(signature, derived);
 
@@ -147,7 +152,7 @@ TEST_F(TestDerivedValues, EmptyDerivedBlock)
 TEST_F(TestDerivedValues, ComplexDerivedExpression)
 {
     std::vector<std::pair<std::string, std::string>> derived = {
-        {"score", "{\"if\": [{\">\": [\"$q.batch\", 10]}, {\"*\": [\"$q.batch\", 2]}, \"$q.batch\"]}"}
+        {"score", "{\"if\": [{\">\": [\"$q.dims[0]\", 10]}, {\"*\": [\"$q.dims[0]\", 2]}, \"$q.dims[0]\"]}"}
     };
 
     std::vector<std::string> signature = {"$derived.score"};

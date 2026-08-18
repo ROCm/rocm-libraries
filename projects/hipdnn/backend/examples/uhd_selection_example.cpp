@@ -158,7 +158,7 @@ int main()
     gfx942Config.featuresSignature = {"\"$kernel.tile_m\"", "\"$q.batch\""};
     gfx942Config.featuresHash = FeatureExtractor::computeHash(gfx942Config.featuresSignature);
     gfx942Config.derived = {
-        {"num_tiles", "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m\"]}"}
+        {"num_tiles", "{\"ceil_div\": [\"$q.dims[2]\", \"$kernel.tile_m\"]}"}
     };
     gfx942Config.scoreUnits = "tflops";
     gfx942Config.scoreCalibrated = true;
@@ -174,7 +174,7 @@ int main()
     gfx950Config.featuresSignature = {"\"$kernel.tile_m\"", "\"$q.batch\""};
     gfx950Config.featuresHash = FeatureExtractor::computeHash(gfx950Config.featuresSignature);
     gfx950Config.derived = {
-        {"num_tiles", "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m\"]}"}
+        {"num_tiles", "{\"ceil_div\": [\"$q.dims[2]\", \"$kernel.tile_m\"]}"}
     };
     gfx950Config.scoreUnits = "tflops";
     gfx950Config.scoreCalibrated = true;
@@ -190,7 +190,7 @@ int main()
     defaultConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$q.batch\""};
     defaultConfig.featuresHash = FeatureExtractor::computeHash(defaultConfig.featuresSignature);
     defaultConfig.derived = {
-        {"num_tiles", "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m\"]}"}
+        {"num_tiles", "{\"ceil_div\": [\"$q.dims[2]\", \"$kernel.tile_m\"]}"}
     };
     defaultConfig.scoreUnits = "tflops";
     defaultConfig.scoreCalibrated = false; // Not calibrated across archs
@@ -267,16 +267,18 @@ int main()
         {"arch", testArch}, // DEVICE_ARCH_KEY = "arch" triggers UHD arch resolution
     };
 
+    // RFC 0019 §6.1: Dims are positional ($q.dims[i]), not named
+    // For rank-4 SDPA tensor (batch, heads, sequence, head_dim):
+    //   $q.dims[0] = batch, $q.dims[1] = heads, $q.dims[2] = seqlen_q, $q.dims[3] = head_dim
     FeatureExtractionContext::ValueMap queryVars = {
-        {"batch", 32.0},      // Feature 1 in model
-        {"seqlen_q", 2048.0}, // Used in derived value
-        {"seqlen_k", 2048.0},
-        {"num_heads", 32.0},
-        {"head_dim", 128.0},
+        {"dims[0]", 32.0},    // batch
+        {"dims[1]", 32.0},    // num_heads
+        {"dims[2]", 2048.0},  // seqlen_q (used in derived value)
+        {"dims[3]", 128.0},   // head_dim
     };
 
     std::cout << "  Device: arch=" << testArch << ", cu_count=120, total_mem=32GB" << std::endl;
-    std::cout << "  Query: batch=32, seqlen_q=2048, heads=32, hdim=128" << std::endl;
+    std::cout << "  Query: batch=32, seqlen_q=2048 (dims[2]), heads=32, hdim=128" << std::endl;
     std::cout << std::endl;
 
     // Step 4: Run selection with arch resolution

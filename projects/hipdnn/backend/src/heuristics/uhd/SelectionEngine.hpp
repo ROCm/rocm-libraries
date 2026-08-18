@@ -17,12 +17,14 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
-/// Device-property key holding the GPU architecture (e.g. "gfx942"), bound as
-/// `$device.arch`. Used for the RFC 0019 §9.3 training-coverage check.
+/// Device-property key holding the GPU architecture (e.g. "gfx942"), used for
+/// RFC 0019 §8.3 arch-keyed UHD resolution (not for feature extraction).
 ///
-/// Spelled `arch` to match §7.1/§9.3 and gbdt_model.fbs, which both name
-/// `$device.arch`. The DeviceProperties FlatBuffer field it is populated from is
-/// still `architecture_name`; only the feature-namespace key is shortened.
+/// NOTE: Per RFC 0019 §6.1, architecture is NOT a device feature in the
+/// `$device.*` namespace for feature extraction. It is a KDP property used only
+/// for selecting which arch-keyed UHD to apply. The DeviceProperties FlatBuffer
+/// field is `architecture_name`; this key is shortened to `arch` for the internal
+/// device-vars map that drives arch resolution.
 inline constexpr const char* DEVICE_ARCH_KEY = "arch";
 
 /// @brief Result of scoring a single kernel candidate.

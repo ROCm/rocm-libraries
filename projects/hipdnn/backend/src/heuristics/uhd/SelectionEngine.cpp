@@ -224,10 +224,9 @@ SelectionResult SelectionEngine::select(int64_t engineId,
             // dropping the candidate: NaN compares false against everything, so the
             // sort comparator would find NaN "equivalent" to two values that are not
             // equivalent to each other, breaking strict weak ordering and making
-            // std::sort undefined. NaN reaches here without an exception because
-            // VariableContext::resolveDouble yields quiet_NaN for a string-valued
-            // binding (e.g. a signature referencing $device.arch), and
-            // because ops like pow() propagate it silently.
+            // std::sort undefined. NaN can propagate from ops like pow(), though
+            // string-valued bindings now throw (RFC 0019 §7.2 type-error enforcement)
+            // rather than yielding quiet_NaN.
             if(!std::isfinite(score))
             {
                 sc.scoreValid = false;

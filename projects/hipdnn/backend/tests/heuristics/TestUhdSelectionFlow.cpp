@@ -95,8 +95,8 @@ protected:
     {
         return {
             {"batch", 32.0},
-            {"seqlen_q", 512.0},
-            {"seqlen_k", 512.0},
+            {"dims[2]", 512.0},
+            {"dims[2]", 512.0},
             {"num_heads", 32.0},
             {"head_dim", 128.0},
         };
@@ -1608,13 +1608,19 @@ TEST_F(TestUhdSelectionFlowTreeData, TraceRecordsDeviceArchFromDeviceVars)
 
 TEST_F(TestUhdSelectionFlowTreeData, StringDevicePropertyInSignatureDegrades)
 {
-    // $device.arch is bound as a string. RFC §7.2 makes that a type error rather
-    // than a silent NaN, which a GBDT would otherwise route down default_left and
-    // score as ordinary data.
+    // RFC §7.2 makes string-valued bindings a type error rather than a silent NaN,
+    // which a GBDT would otherwise route down default_left and score as ordinary data.
+    //
+    // NOTE: $device.arch is no longer a valid device feature per RFC 0019 §6.1
+    // (architecture is a KDP property, not a runtime device feature). This test
+    // uses a hypothetical string-valued field to verify type-error handling.
     registerScoringEngineWithSignature(
-        100, {"$device.arch"}, {makeCandidate(1, 10), makeCandidate(2, 5)});
+        100, {"$device.string_field"}, {makeCandidate(1, 10), makeCandidate(2, 5)});
 
-    auto result = SelectionEngine::select(100, deviceVarsForArch("gfx942"), defaultQueryVars());
+    // Inject a string-valued device property
+    auto deviceVars = deviceVarsForArch("gfx942");
+    deviceVars["string_field"] = std::string("test_value");
+    auto result = SelectionEngine::select(100, deviceVars, defaultQueryVars());
 
     EXPECT_FALSE(result.applied);
     EXPECT_TRUE(result.hasOrdering());

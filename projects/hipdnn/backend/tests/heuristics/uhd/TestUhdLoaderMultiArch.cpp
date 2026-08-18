@@ -53,7 +53,7 @@ std::vector<uint8_t> buildUhdWithDerived(const std::string& uhdId,
     // Derived values (RFC 0019 §6.4): num_tiles from problem/kernel params
     std::vector<flatbuffers::Offset<UhdDerivedEntry>> derivedVec;
     auto derivedName = builder.CreateString("num_tiles");
-    auto derivedExpr = builder.CreateString(R"({"ceil_div": ["$q.seqlen_q", "$kernel.tile_m"]})");
+    auto derivedExpr = builder.CreateString(R"({"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]})");
     derivedVec.push_back(CreateUhdDerivedEntry(builder, derivedName, derivedExpr));
     auto derivedOffset = builder.CreateVector(derivedVec);
 
@@ -107,7 +107,7 @@ TEST(TestUhdLoaderMultiArch, LoadGfx942UhdWithDerived)
     // Validate derived values (RFC 0019 §6.4)
     ASSERT_EQ(config->derived.size(), 1);
     EXPECT_EQ(config->derived[0].first, "num_tiles");
-    EXPECT_EQ(config->derived[0].second, R"({"ceil_div": ["$q.seqlen_q", "$kernel.tile_m"]})");
+    EXPECT_EQ(config->derived[0].second, R"({"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]})");
 }
 
 TEST(TestUhdLoaderMultiArch, LoadGfx950UhdWithDifferentTransform)
@@ -218,7 +218,7 @@ TEST(TestUhdLoaderMultiArch, DerivedValuesRoundTrip)
     EXPECT_EQ(name, "num_tiles");
 
     // Expression should be valid JSON
-    EXPECT_EQ(expr, R"({"ceil_div": ["$q.seqlen_q", "$kernel.tile_m"]})");
+    EXPECT_EQ(expr, R"({"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]})");
 
     // Verify it's a JsonLogic expression (has operator as key)
     EXPECT_NE(expr.find("ceil_div"), std::string::npos);
