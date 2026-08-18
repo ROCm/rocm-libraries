@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Toolchain.Source``: the pure code-object
+"""Characterization tests for ``tensilelite.Toolchain.Source``: the pure code-object
 filename computation and ``buildSourceCodeObjectFiles`` orchestration (driven
 with stub compiler/bundler + the helper cache disabled — no real compilation)."""
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Toolchain.Source import (
+from tensilelite.Toolchain.Source import (
     _computeSourceCodeObjectFilename,
     buildSourceCodeObjectFiles,
     makeSourceToolchain,
