@@ -434,7 +434,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def useGlobalParameters(tensile_args):
     from tensilelite import Common
-    from tensilelite import Tensile as tensilelite
+    from tensilelite import run
     import argparse
 
     class gpUpdater:
@@ -443,7 +443,7 @@ def useGlobalParameters(tensile_args):
 
         def __enter__(self):
             argParser = argparse.ArgumentParser()
-            tensilelite.addCommonArguments(argParser)
+            run.addCommonArguments(argParser)
             args = argParser.parse_args(tensile_args)
 
             Common.restoreDefaultGlobalParameters()
@@ -452,7 +452,7 @@ def useGlobalParameters(tensile_args):
             isa = Common.detectGlobalCurrentISA(args.device)
             Common.assignGlobalParameters({}, isa)
 
-            overrideParameters = tensilelite.argUpdatedGlobalParameters(args)
+            overrideParameters = run.argUpdatedGlobalParameters(args)
             for key, value in overrideParameters.items():
                 Common.globalParameters[key] = value
 

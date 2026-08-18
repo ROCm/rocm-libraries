@@ -223,7 +223,7 @@ validate tuning data rather than code, and where each one lives follows from tha
 outside `tensilelite/`, so a unit test that reads it fails on tuning PRs whose diff it cannot see,
 runs only when `tensilelite/` changes, and skips in every lane that installs TensileLite rather than
 checking it out. A check about code uses a fixture; a cross-file fact about the shipped data goes in
-`tensilelite.TensileLogic.ValidCorpusConsistency`, whose `check_corpus_invariants` runs inside
+`tensilelite.logic.ValidCorpusConsistency`, whose `check_corpus_invariants` runs inside
 `TensileLogic --check-all` in every kernel-generating build (see
 [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic)).
 [`test_no_logic_corpus_paths.py`](tensilelite/Tests/unit/test_no_logic_corpus_paths.py) fails any test
@@ -478,7 +478,7 @@ of reaching a customer's model three months earlier in the story. There is no wa
 times that has already happened, because a build that fails on line one of a bad YAML file does not
 generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
 
-Its known-bug list, [`tensilelite/TensileLogic/known_bugs.yaml`](tensilelite/TensileLogic/known_bugs.yaml), is
+Its known-bug list, [`tensilelite/logic/known_bugs.yaml`](tensilelite/logic/known_bugs.yaml), is
 the best-structured quarantine in the component (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc). Entries are keyed on the logic file path plus the solution's `SolutionNameMin`, a

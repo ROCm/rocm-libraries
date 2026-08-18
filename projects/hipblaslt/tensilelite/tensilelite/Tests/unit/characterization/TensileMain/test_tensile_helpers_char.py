@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for tensilelite.Tensile — helper layer.
+# Characterization tests for tensilelite.run — helper layer.
 #
 # ADD-ONLY. tensilelite/Tensile.py's executeStepsInConfig / Tensile() are the top-level
 # build+benchmark orchestrators (BenchmarkProblems / ClientWriter / LibraryLogic
@@ -17,7 +17,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.Tensile")
+M = importlib.import_module("tensilelite.run")
 
 
 # ---------------------------------------------------------------------------
@@ -265,18 +265,10 @@ def test_config_and_test_paths():
     ("TensileROCBLASZGEMM", "rocblas_zgemm.yaml"),
     ("TensileSGEMM5760", "sgemm_5760.yaml"),
 ])
-def test_entry_points_call_tensile(monkeypatch, fn, frag):
+def test_entry_points_call_main(monkeypatch, fn, frag):
     calls = []
-    monkeypatch.setattr(M, "Tensile", lambda argv: calls.append(argv))
+    monkeypatch.setattr(M, "main", lambda argv: calls.append(argv))
     getattr(M, fn)()
     assert len(calls) == 1
     assert frag in calls[0][0]
     assert calls[0][1] == "."
-
-
-def test_main_calls_tensile(monkeypatch):
-    monkeypatch.setattr(M.sys, "argv", ["prog", "cfg.yaml", "out"])
-    calls = []
-    monkeypatch.setattr(M, "Tensile", lambda argv: calls.append(argv))
-    M.main()
-    assert calls == [["cfg.yaml", "out"]]
