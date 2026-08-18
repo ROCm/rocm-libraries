@@ -451,9 +451,11 @@ class SchedulePolicy:
             # region (no MFMA-cycle model; see :class:`WmmaHotLoopInstList`).
             return cls(name="wmma_v1", emit_hints=True, mode="intrawave")
         if pipeline == "wavelet":
-            # WAVELET pipeline — load/math wave specialization.
-            # (WMMA) and math waves
-            # (LDS reads + WMMA). The overlap is architectural on gfx1250 (separate
+            # WAVELET pipeline — load/math wave specialization (gfx1250).
+            # Load waves handle DRAM→LDS (VMEM) and math waves handle
+            # LDS reads + WMMA. Hardware concurrency comes from separate VMEM
+            # and WMMA issue slots on gfx1250; sched_group_barrier hints are
+            # suppressed since the roles are already physically separated.
             return cls(name="wavelet", emit_hints=False, mode="default")
         if pipeline == "basic":
             # CK pipeline_basic: naive single-buffer pipeline with global-read/

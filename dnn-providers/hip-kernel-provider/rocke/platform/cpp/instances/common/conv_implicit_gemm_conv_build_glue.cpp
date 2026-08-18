@@ -583,14 +583,19 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->wavelet_n_math_warps = spec->warp_m * spec->warp_n;
         ctx->wavelet_K_iters
             = (rocke_conv_problem_k_gemm(ctx->p) + ctx->block_k - 1) / ctx->block_k;
-        /* _epi_barriers: cshuffle => 3 (no_alias => 1), else 0. */
+        /* epi_barriers = (no_alias ? 0 : war_barriers) + 1 (RAW), war_barriers=2 for wavelet.
+         * Matches CShuffleEpilogue.compute_barrier_count(no_alias, war_barriers=2). */
         if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
             ctx->wavelet_epi_barriers = spec->cshuffle_no_alias ? 1 : 3;
         else
             ctx->wavelet_epi_barriers = 0;
 
         rocke_value_t* c_nmath = rocke_b_const_i32(b, ctx->wavelet_n_math_warps);
-        ctx->wavelet_is_math = rocke_b_cmp_lt(b, ctx->warp_id, c_nmath);
+        /* warp_id is tid/wave_size — a VGPR. Materialise as a scalar via readfirstlane
+         * so the branch lowers to s_cmp + s_cbranch (uniform), not v_cmpx (exec-masked),
+         * which would make barrier placement inside the branch accidentally legal. */
+        rocke_value_t* warp_id_s = rocke_b_readfirstlane(b, ctx->warp_id);
+        ctx->wavelet_is_math = rocke_b_cmp_lt(b, warp_id_s, c_nmath);
         ctx->wavelet_load_tid = rocke_b_sub(
             b, ctx->tid, rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_block_size(spec)));
     }

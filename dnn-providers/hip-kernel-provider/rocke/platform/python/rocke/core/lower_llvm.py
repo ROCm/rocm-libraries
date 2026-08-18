@@ -398,6 +398,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # LDS barrier (the monolithic s_waitcnt is not selectable there).
     "s.wait.dscnt": "declare void @llvm.amdgcn.s.wait.dscnt(i16)",
     "s.wait.loadcnt": "declare void @llvm.amdgcn.s.wait.loadcnt(i16)",
+    "s.wait.storecnt": "declare void @llvm.amdgcn.s.wait.storecnt(i16)",
+    "s.wait.kmcnt": "declare void @llvm.amdgcn.s.wait.kmcnt(i16)",
+    "s.wait.expcnt": "declare void @llvm.amdgcn.s.wait.expcnt(i16)",
     # gfx1250 (gfx1250) async global<->LDS DMA + its dedicated ASYNC counter.
     # The gfx9 buffer/global load-to-LDS intrinsics are NOT selectable here.
     "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)",
@@ -4082,20 +4085,33 @@ class _Lowerer:
         ec = int(op.attrs.get("expcnt", -1))
         if not self._backend.emits_legacy_s_waitcnt:
             # gfx1250: monolithic s_waitcnt is not selectable; emit the split
-            # wait-counter intrinsics instead so that explicit s_waitcnt(vmcnt=0)
-            # / s_waitcnt(lgkmcnt=0) calls in the wavelet pipeline (and any
-            # other caller) correctly drain VMEM / LDS before dependent reads.
-            # Without this, b.s_waitcnt(vmcnt=0) is a silent no-op on gfx1250,
-            # causing wavelet_store to write registers before the VMEM fetch
-            # completes, producing garbage/NaN in LDS.
+            # wait-counter intrinsics instead. Mapping:
+            #   vmcnt  → loadcnt  (drain pending global loads)
+            #            storecnt (drain pending global stores)
+            #   lgkmcnt → dscnt   (drain pending LDS ops)
+            #             kmcnt   (drain pending scalar memory ops, e.g. s_load)
+            #   expcnt → expcnt   (drain pending exports / VSRC writes)
+            # Without this, b.s_waitcnt(vmcnt=0) only drains loads and silently
+            # leaves stores / scalar-memory ops outstanding.
             if vm >= 0:
                 self._need("s.wait.loadcnt")
                 self._current().emit(
                     f"  call void @llvm.amdgcn.s.wait.loadcnt(i16 {vm})"
                 )
+                self._need("s.wait.storecnt")
+                self._current().emit(
+                    f"  call void @llvm.amdgcn.s.wait.storecnt(i16 {vm})"
+                )
             if lk >= 0:
                 self._need("s.wait.dscnt")
                 self._current().emit(f"  call void @llvm.amdgcn.s.wait.dscnt(i16 {lk})")
+                self._need("s.wait.kmcnt")
+                self._current().emit(f"  call void @llvm.amdgcn.s.wait.kmcnt(i16 {lk})")
+            if ec >= 0:
+                self._need("s.wait.expcnt")
+                self._current().emit(
+                    f"  call void @llvm.amdgcn.s.wait.expcnt(i16 {ec})"
+                )
             return
         # See rocke/_ir.py:s_waitcnt for the encoding contract.
         self._need("s.waitcnt")

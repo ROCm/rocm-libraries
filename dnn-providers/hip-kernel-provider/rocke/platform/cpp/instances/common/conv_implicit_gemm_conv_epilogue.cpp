@@ -370,20 +370,26 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
-                                       rocke_value_t* ir_c_K_pw)
+                                       rocke_value_t* ir_c_K_pw,
+                                       const rocke_mmaop_t* op)
 {
     const rocke_conv_problem_t* p = &spec->problem;
-    const rocke_mfma_atom_t* atom
-        = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
-    /* CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **kwargs)
-     * #8624: max_store_vec = spec.vector_size_c if not None else default 8. */
     int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : 8;
-    rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
+    int _war_barriers = (spec->pipeline && strcmp(spec->pipeline, "wavelet") == 0) ? 2 : 1;
+    rocke_cshuffle_epilogue_t epi;
+    if(op != NULL && op->family != NULL && strcmp(op->family, "wmma") == 0)
+    {
+        epi = rocke_cshuffle_epilogue_from_grid_op(op, grid, max_store_vec);
+    }
+    else
+    {
+        const rocke_mfma_atom_t* atom
+            = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+        epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
+    }
     epi.out_dtype = spec->dtype_d;
-    /* Python _emit_cshuffle_epilogue no longer passes no_alias to from_grid
-     * (removed from _cshuffle_kwargs in the pointwise commit), so the epilogue
-     * always uses no_alias=False (the dataclass default). Match that here. */
-    epi.no_alias = false;
+    epi.no_alias = spec->cshuffle_no_alias;
+    epi.war_barriers = _war_barriers;
 
     if(rocke_conv_problem_is_pointwise(p))
     {
@@ -455,7 +461,7 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
     else if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
     {
         rocke_conv_emit_cshuffle_epilogue(
-            b, spec, final_accs, num_accs, &ctx->grid, ctx->d_rsrc, ctx->ir_c_K_pw);
+            b, spec, final_accs, num_accs, &ctx->grid, ctx->d_rsrc, ctx->ir_c_K_pw, ctx->op);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)

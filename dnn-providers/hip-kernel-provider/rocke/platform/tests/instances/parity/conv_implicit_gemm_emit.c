@@ -115,7 +115,9 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         *arch = "gfx950";
         return 0;
     case 13:
-        /* wavelet pipeline, default epilogue (gfx1250 WMMA). */
+        /* wavelet pipeline, default epilogue (gfx1250 WMMA).
+         * warp_tile_k=32: gfx1250 WMMA requires the 16x16x32 atom.
+         * vector_size_c=1: K=64 auto-derives vec_c=8 which blocks default epilogue. */
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->tile_m = 32;
         spec->tile_n = 32;
@@ -124,15 +126,18 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->warp_n = 1;
         spec->warp_tile_m = 16;
         spec->warp_tile_n = 16;
-        spec->warp_tile_k = 16;
+        spec->warp_tile_k = 32;
         spec->wave_size = 32;
         spec->pipeline = "wavelet";
         spec->epilogue = "default";
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 1;
         spec->num_load_waves = 2;
         *arch = "gfx1250";
         return 0;
     case 14:
-        /* wavelet pipeline, cshuffle epilogue (gfx1250 WMMA). */
+        /* wavelet pipeline, cshuffle epilogue (gfx1250 WMMA).
+         * warp_tile_k=32: gfx1250 WMMA requires the 16x16x32 atom. */
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->tile_m = 32;
         spec->tile_n = 32;
@@ -141,7 +146,7 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->warp_n = 1;
         spec->warp_tile_m = 16;
         spec->warp_tile_n = 16;
-        spec->warp_tile_k = 16;
+        spec->warp_tile_k = 32;
         spec->wave_size = 32;
         spec->pipeline = "wavelet";
         spec->epilogue = "cshuffle";

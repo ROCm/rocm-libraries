@@ -524,7 +524,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
-                                       rocke_value_t* ir_c_K_pw);
+                                       rocke_value_t* ir_c_K_pw,
+                                       const rocke_mmaop_t* op);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

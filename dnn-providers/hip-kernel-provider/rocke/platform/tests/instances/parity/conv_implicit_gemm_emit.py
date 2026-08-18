@@ -247,6 +247,8 @@ def _spec(idx: int):
         )
     if idx == 13:
         # wavelet pipeline, default epilogue (gfx1250 WMMA).
+        # warp_tile_k=32: gfx1250 WMMA requires the 16x16x32 atom.
+        # vector_size_c=1: auto-derives vec_c=8 from K=64 which blocks default epilogue.
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
@@ -258,16 +260,18 @@ def _spec(idx: int):
                 warp_n=1,
                 warp_tile_m=16,
                 warp_tile_n=16,
-                warp_tile_k=16,
+                warp_tile_k=32,
                 wave_size=32,
                 pipeline="wavelet",
                 epilogue="default",
+                vector_size_c=1,
                 num_load_waves=2,
             ),
             "gfx1250",
         )
     if idx == 14:
         # wavelet pipeline, cshuffle epilogue (gfx1250 WMMA).
+        # warp_tile_k=32: gfx1250 WMMA requires the 16x16x32 atom.
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
@@ -279,7 +283,7 @@ def _spec(idx: int):
                 warp_n=1,
                 warp_tile_m=16,
                 warp_tile_n=16,
-                warp_tile_k=16,
+                warp_tile_k=32,
                 wave_size=32,
                 pipeline="wavelet",
                 epilogue="cshuffle",

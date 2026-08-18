@@ -383,6 +383,27 @@ class CShuffleEpilogue:
     # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
     mma_op: Optional["MmaOp"] = None
 
+    @property
+    def barrier_count(self) -> int:
+        """Total number of ``s_barrier`` ops emitted by :meth:`store`.
+
+        Equals ``war_barriers`` (step-0 WAR reuse barriers, elided when
+        ``no_alias=True``) plus 1 (step-2 RAW barrier — always emitted).
+        Use this in place of hand-maintained constants when the load branch
+        of a split-role pipeline must mirror the epilogue barrier count exactly.
+        """
+        return CShuffleEpilogue.compute_barrier_count(self.no_alias, self.war_barriers)
+
+    @staticmethod
+    def compute_barrier_count(no_alias: bool, war_barriers: int) -> int:
+        """Return the number of barriers :meth:`store` will emit.
+
+        This is the canonical formula — call it from K-loop setup code that needs
+        to know the count *before* building the epilogue IR, so both the math
+        branch and the load branch in a split-role pipeline use the same number.
+        """
+        return (0 if no_alias else war_barriers) + 1
+
     @classmethod
     def from_grid_op(
         cls,
@@ -391,6 +412,7 @@ class CShuffleEpilogue:
         grid: WarpGrid,
         max_store_vec: int = 8,
         out_dtype: str = "f16",
+        no_alias: bool = False,
     ) -> "CShuffleEpilogue":
         """Construct for a WMMA (``MmaOp``) accumulator layout.
 
@@ -410,7 +432,9 @@ class CShuffleEpilogue:
             if ok:
                 break
             v //= 2
-        return cls(grid=grid, store_vec=v, out_dtype=out_dtype, mma_op=op)
+        return cls(
+            grid=grid, store_vec=v, out_dtype=out_dtype, mma_op=op, no_alias=no_alias
+        )
 
     @classmethod
     def from_grid(

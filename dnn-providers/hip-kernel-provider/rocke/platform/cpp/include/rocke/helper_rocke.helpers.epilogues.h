@@ -41,6 +41,7 @@
 
 #include <stdbool.h>
 
+#include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_t, rocke_arch_layout_map_coord */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t */
 
@@ -164,14 +165,17 @@ rocke_value_t* rocke_direct_epilogue_bounds_check(rocke_ir_builder_t* b,
 /* ----------------------------------------------------------- CShuffleEpilogue *
  *
  * Python @dataclass(frozen=True) CShuffleEpilogue(atom, grid, store_vec=8,
- *   smem_name_hint="C_smem", out_dtype="f16"). */
+ *   smem_name_hint="C_smem", out_dtype="f16", war_barriers=1, mma_op=None). */
 typedef struct rocke_cshuffle_epilogue
 {
-    const rocke_mfma_atom_t* atom;
+    const rocke_mfma_atom_t* atom; /* MFMA path: non-NULL; WMMA path: NULL */
+    const rocke_mmaop_t* mma_op; /* WMMA path: non-NULL; MFMA path: NULL */
     rocke_warp_grid_t grid;
     int store_vec; /* elements per wide store; default 8 */
     const char* smem_name_hint; /* default "C_smem" */
     const char* out_dtype; /* "f16" (default), "bf16", or "fp32" */
+    /* Number of step-0 WAR reuse barriers (default 1; wavelet uses 2). */
+    int war_barriers;
     /* cshuffle "no-alias" mode: when true the C staging tile gets its own
      * exclusive LDS bytes (not aliased onto A/B) and the step-0 reuse barrier is
      * elided. Default false keeps the aliased/low-LDS behavior (byte-identical). */
@@ -179,16 +183,23 @@ typedef struct rocke_cshuffle_epilogue
 } rocke_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",
- * out_dtype="f16"). */
+ * out_dtype="f16", war_barriers=1). */
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* atom,
                                                        const rocke_warp_grid_t* grid);
 
-/* CShuffleEpilogue.from_grid(atom, grid, max_store_vec=8, out_dtype="f16"):
+/* CShuffleEpilogue.from_grid(atom, grid, max_store_vec=8):
  * pick the widest store_vec that distributes the tile evenly over block_size.
  * For fp32 output store_vec is capped at 4 (= 16 bytes, hw limit). */
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_atom_t* atom,
                                                             const rocke_warp_grid_t* grid,
                                                             int max_store_vec);
+
+/* CShuffleEpilogue.from_grid_op(op, grid, max_store_vec=8): WMMA variant.
+ * Uses op->c_frag_len / op->c_layout() for the LDS scatter in place of the
+ * MFMA-specific atom.lane_to_output. */
+rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid_op(const rocke_mmaop_t* op,
+                                                               const rocke_warp_grid_t* grid,
+                                                               int max_store_vec);
 
 /* CShuffleEpilogue.store(b, accs, addr_fn, d_rsrc, bounds=None).
  * Same acc/bounds/addr_fn contract as the direct store. */

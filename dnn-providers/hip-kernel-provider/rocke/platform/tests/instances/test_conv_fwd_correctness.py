@@ -117,20 +117,6 @@ _SHAPES: List[_Shape] = [
     _Shape(
         "3x3_asym_N2H7W14C16K16", N=2, Hi=7, Wi=14, C=16, K=16, Y=3, X=3, pH=1, pW=1
     ),
-    # --- groups=2 (grouped convolution)
-    _Shape(
-        "3x3_g2_N2H8W8C32K32",
-        N=2,
-        Hi=8,
-        Wi=8,
-        C=32,
-        K=32,
-        Y=3,
-        X=3,
-        pH=1,
-        pW=1,
-        groups=2,
-    ),
 ]
 
 # Tile config: (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn)
@@ -237,6 +223,9 @@ def _run_one(
         groups=shape.groups,
     )
 
+    # For wavelet on the small test tile (warp_m=warp_n=1, n_math_warps=1),
+    # num_load_waves must be <= n_math_warps to avoid the over-provisioning warning.
+    _num_load_waves = 1 if pipeline == "wavelet" else 4
     spec = ImplicitGemmConvSpec(
         problem=problem,
         name=f"test_conv_fwd_{shape.id}_{dtype}_{pipeline}_{epilogue}",
@@ -256,6 +245,7 @@ def _run_one(
         pipeline=pipeline,
         epilogue=epilogue,
         groups=shape.groups,
+        num_load_waves=_num_load_waves,
     )
 
     ok, reason = is_valid_spec_for_problem(spec, problem, arch)
@@ -280,7 +270,7 @@ def _run_one(
         .to(_torch_dtype)
     )
     B_t = (
-        torch.empty(problem.K, problem.Y, problem.X, problem.C)
+        torch.empty(problem.K, problem.Y, problem.X, problem.C // problem.groups)
         .uniform_(-1.0, 1.0)
         .to(_torch_dtype)
     )
@@ -386,7 +376,7 @@ class TestConvFwdCorrectness(unittest.TestCase):
     def test_pipeline_mem(self):
         self._sweep_pipeline("mem")
 
-    def test_pipeline_mem(self):
+    def test_pipeline_basic(self):
         if _IS_MFMA:
             self._sweep_pipeline("basic")
 

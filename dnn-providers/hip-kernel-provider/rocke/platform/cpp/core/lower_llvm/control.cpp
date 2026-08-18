@@ -1016,16 +1016,30 @@ static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
 
     if(L->backend && !L->backend->emits_legacy_s_waitcnt)
     {
-        /* gfx1250: emit split wait intrinsics for each active counter. */
+        /* gfx1250: emit split wait intrinsics. Mapping:
+         *   vmcnt  -> loadcnt (drain pending global loads)
+         *             storecnt (drain pending global stores)
+         *   lgkmcnt -> dscnt  (drain pending LDS ops)
+         *              kmcnt  (drain pending scalar memory ops)
+         *   expcnt -> expcnt  (drain pending exports / VSRC writes) */
         if(vm >= 0)
         {
             rocke_ll_need(L, "s.wait.loadcnt");
             rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.loadcnt(i16 %d)", (int)vm);
+            rocke_ll_need(L, "s.wait.storecnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.storecnt(i16 %d)", (int)vm);
         }
         if(lk >= 0)
         {
             rocke_ll_need(L, "s.wait.dscnt");
             rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.dscnt(i16 %d)", (int)lk);
+            rocke_ll_need(L, "s.wait.kmcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.kmcnt(i16 %d)", (int)lk);
+        }
+        if(ec >= 0)
+        {
+            rocke_ll_need(L, "s.wait.expcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.expcnt(i16 %d)", (int)ec);
         }
         return;
     }
