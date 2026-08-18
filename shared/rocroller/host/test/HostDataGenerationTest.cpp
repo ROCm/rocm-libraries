@@ -315,12 +315,12 @@ namespace
         TensorDescriptor noncontiguousA(DataType::FP4, {3, 8}, "N");
         TensorDescriptor noncontiguousB(DataType::FP4, {8, 5}, "T");
         auto             noncontiguous = generate(noncontiguousA,
-                                                  noncontiguousB,
-                                                  descriptorC,
-                                                  unbounded,
-                                                  DataType::E4M3,
-                                                  DataType::E5M3,
-                                                  4);
+                                      noncontiguousB,
+                                      descriptorC,
+                                      unbounded,
+                                      DataType::E4M3,
+                                      DataType::E5M3,
+                                      4);
         require(noncontiguous.scaleA && noncontiguous.scaleB,
                 "K-strided scaled generation did not return scale tensors.");
         require(noncontiguous.scaleA->layout() == Layout(Shape{3, 2}, {1, 3})
@@ -342,12 +342,12 @@ namespace
         TensorDescriptor fp6B(DataType::FP6, {4, 2}, "N");
         TensorDescriptor fp6C(DataType::Float, {8, 2}, "N");
         auto             fp6 = generate(fp6A,
-                                        fp6B,
-                                        fp6C,
-                                        DataInitialization{DataInitializationMode::Ones},
-                                        DataType::E8M0,
-                                        DataType::E8M0,
-                                        4);
+                            fp6B,
+                            fp6C,
+                            DataInitialization{DataInitializationMode::Ones},
+                            DataType::E8M0,
+                            DataType::E8M0,
+                            4);
         require(fp6.scaleA && fp6.scaleA->type() == ScalarType::E8M0,
                 "E8M0 scale type translation mismatch.");
     }
