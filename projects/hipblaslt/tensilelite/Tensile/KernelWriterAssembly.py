@@ -363,6 +363,70 @@ class KernelWriterAssembly(KernelWriter):
       return "GlobalReadIncs%s"%tc
     return sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
 
+  def rapCheckStoreNeutrality(self, kernel, element, ss, numVgprAvailable, numElementsPerBatch, beta, edge):
+    """Reject the kernel if holding A resident costs the store an extra batch.
+
+    RAP buys fewer LDS transfers by withholding registers the store would
+    otherwise use. That trade is only worth making while the store still fits in
+    the same number of batches; one more batch means recomputed addresses and a
+    waitcnt splitting the C loads from the D stores, which can easily cost more
+    than the transfers saved.
+
+    Rather than model the register budget, add the withheld block back and re-run
+    the same formula: numVgprAvailable is the pool's real state at this point,
+    fragmentation and occupancy limit included, so the counterfactual differs from
+    it by exactly a known constant.
+
+    Only beta-with-no-edge is checked. beta reads C, so it needs the most
+    registers per element of the paths this problem can take, and the emitted size
+    predicates rule the edge variants out.
+    """
+    if not (beta and not edge):
+      return
+    withheld = self.rapStoreWithheldVgprs(kernel)
+    if not withheld or not ss.numVgprsPerElement:
+      return
+    withoutResidency = (numVgprAvailable + withheld) // ss.numVgprsPerElement
+    if withoutResidency <= 0:
+      return
+    batches = ceilDivide(len(element), numElementsPerBatch)
+    batchesWithout = ceilDivide(len(element), withoutResidency)
+    if batches <= batchesWithout:
+      return
+    # Report the K that would still have been neutral, so a tuning run says what
+    # to change rather than just that something overflowed.
+    perKTile = withheld // self.rapResidentKTiles(kernel)
+    spare = numVgprAvailable + withheld - len(element) * ss.numVgprsPerElement
+    neutralKTiles = max(0, spare // perKTile) if perKTile else 0
+    self.states.rapStoreNeutralityMsg = (
+      "ReuseAcrossPersistent withholds %u vgpr, splitting the store into %u batches instead of %u; "
+      "largest store-neutral K is %u but this kernel needs %u"
+      % (withheld, batches, batchesWithout, neutralKTiles * kernel["DepthU"],
+         self.rapResidentKTiles(kernel) * kernel["DepthU"]))
+    self.states.overflowedResources = 9
+
+  def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
+    """Stop this wave's next tensor_load_to_lds if it is the one carrying A.
+
+    Wave-separated TDM aliases a single descriptor set: even waves hold A/MXSA,
+    odd waves hold B/MXSB. Zeroing the enable word on even waves silences A's
+    transfer and leaves B alone. The instruction is still issued and still
+    retires on tensorcnt -- it simply moves nothing -- so the wait bookkeeping is
+    untouched. It has to be re-applied before every load because the descriptor
+    is rebuilt from scratch on each persistent iteration.
+    """
+    module = Module("RAP null %s on even waves" % groupSgprName)
+    if not self.states.rapDropAResidentLoads:
+      return module
+    with self.allocTmpSgpr(1, tag="rapTdmWaveParity") as tmpSgprRes:
+      self._emitTdmWaveParitySCC(module, kernel, tmpSgprRes.idx,
+                                 comment="RAP: wave parity, odd waves carry B/MXSB")
+    # cselect rather than an inverted compare plus cmov: parity is already in SCC
+    # as "odd", and keeping the value on odd / zeroing it on even is one step.
+    module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=sgpr(groupSgprName), src1=0,
+                           comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
+    return module
+
   def isTdmWaveSeparated(self, kernel) -> bool:
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
 
@@ -636,20 +700,28 @@ class KernelWriterAssembly(KernelWriter):
     self.sgprPool.removeFromCheckOut(self.sgprs[name])
     return RegSet("s", "sgpr"+name, self.sgprs[name])
 
+  def _undefDirective(self, name):
+    # RAP's first copy of the compute section holds its UNDEFs back so the peeled
+    # second copy, which follows it in the file, can still see the symbols. The
+    # second copy emits them, which is where they belong: it is the last one.
+    if self.states.rapDeferSgprUndef:
+      return Module("deferred UNDEF sgpr%s" % name)
+    return ValueSet(name="sgpr"+name, value="UNDEF", format = -1)
+
   def undefineSgpr(self, name):
     if name not in self.sgprs:
       # TODO: Remove guard after full TileInfo migration
-      return ValueSet(name="sgpr"+name, value="UNDEF", format = -1)
+      return self._undefDirective(name)
     self.sgprPool.checkIn(self.sgprs[name])
     # undefine a sgpr string twice will cause compiler error.
     # User must not add the UNDEF code module except it is the last one.
-    return ValueSet(name="sgpr"+name, value="UNDEF", format = -1)
+    return self._undefDirective(name)
 
   def setSgprToFreeState(self, name):
     self.sgprPool.addFromCheckOut(self.sgprs[name])
     # undefine a sgpr string twice will cause compiler error.
     # Must call setSgprToInUseState again before calling setSgprToFreeState.
-    return ValueSet(name="sgpr"+name, value="UNDEF", format = -1)
+    return self._undefDirective(name)
 
   def addSgprVarToPool(self, name):
     if name not in self.sgprs.keys() or (name in self.states.freeSgprVarPool):
@@ -1131,6 +1203,8 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
+          # RAP: one buffer set per resident k-tile, matching the grown allocation.
+          numBiFactor *= self.rapResidentKTiles(kernel)
           if self.states.lrvwTileMXSA > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
             for bi in range(0,numBiFactor): # buffer indices
@@ -1266,6 +1340,8 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
           # DirectToVgpr case, we need LoopIters * 2 buffers
           numBiFactor = kernel["LoopIters"] * 2
+        # RAP: one buffer set per resident k-tile, matching the grown allocation.
+        numBiFactor *= self.rapResidentKTiles(kernel)
         if self.states.lrvwTileA > 1:
           moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
@@ -2100,6 +2176,8 @@ class KernelWriterAssembly(KernelWriter):
         msg = "invalid LSU code due to assertion fail"
       elif self.states.overflowedResources == 8:
         msg = "not enough LDS space"
+      elif self.states.overflowedResources == 9:
+        msg = self.states.rapStoreNeutralityMsg
       else:
         msg = "unknown"
 
@@ -2176,7 +2254,7 @@ class KernelWriterAssembly(KernelWriter):
 
       # Only load C buffer address if Beta is used and potentially non-zero
       if kernel["ProblemType"]["UseBeta"]:
-        endCheckLabel = Label(self.labels.getName(f"label_skip_c_buffer_deref_{Batch}"), "")
+        endCheckLabel = Label(self.rapGetName(f"label_skip_c_buffer_deref_{Batch}"), "")
         module.add(BranchIfZero("Beta", kernel["ProblemType"]["ComputeDataType"].toEnum(), tmpSgpr, laneSC, endCheckLabel, \
                        kernel['WavefrontSize']))
 
@@ -2194,7 +2272,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(endCheckLabel)
 
     #handle Batch A/B
-    endCheckLabel = Label(self.labels.getName(f"label_skip_ab_buffer_deref_{Batch}"), "")
+    endCheckLabel = Label(self.rapGetName(f"label_skip_ab_buffer_deref_{Batch}"), "")
     module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(1), comment="check summation size"))
     for i in range(0, self.states.numSgprSizesSum):
       module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("SizesSum+%u"%(i)), src1=sgpr(tmpSgpr), comment="check summation size"))
@@ -2828,17 +2906,20 @@ class KernelWriterAssembly(KernelWriter):
 
       # C regs are not used during initialization so mark them as available -
       # we will claim then just before the start of the unroll loop:
+      # This runs on every persistent iteration, so under RAP the resident A and
+      # MXSA blocks must stay out of it -- lending them here would let the next
+      # tile's setup overwrite the data the whole feature exists to keep.
       if not kernel["UseSubtileImpl"]:
         if self.states.lastValuMXSAB:
-          self.vgprPool.add(0 , \
-              self.states.lastValuMXSAB, "ValuMXSAB") # Add as available
+          mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
+          self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB") # Add as available
           moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
-                              (self.states.mxsa.startVgprValu, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu))
+                              (mxsStart, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu))
 
-        self.vgprPool.add(self.states.a.startVgprValu , \
-            self.states.lastValuAB - self.states.a.startVgprValu , "ValuAB") # Add as available
+        reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
+        self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB") # Add as available
         moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
-                            (self.states.a.startVgprValu, self.states.lastValuAB+self.states.a.startVgprValu))
+                            (reclaimStart, self.states.lastValuAB+self.states.a.startVgprValu))
 
         self.vgprPool.add(self.states.c.startVgprValu, \
           self.states.c.numVgprValu, "ValuC-Block") # Add as available
@@ -3018,7 +3099,7 @@ class KernelWriterAssembly(KernelWriter):
         # Start to search
         module.addComment1("Grouped Gemm:: accumulate numTiles for each gemm")
         module.addComment0("Grouped Gemm:: loop start")
-        label_Loop_gemm_count = Label("Loop_GemmCount", "")
+        label_Loop_gemm_count = Label(self.rapLabel("Loop_GemmCount"), "")
         module.add(label_Loop_gemm_count)
         module.add(SWaitCnt(kmcnt=0))
         # calculate numTiles
@@ -6180,9 +6261,9 @@ class KernelWriterAssembly(KernelWriter):
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
       strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
-      lastIterEnd = Label("LoopEnd%s%s"%(loopChar, strNtab), "")
+      lastIterEnd = Label(self.rapLabel("LoopEnd%s%s"%(loopChar, strNtab)), "")
     else:
-      lastIterEnd = Label("PrefetchGlobalLastIterEnd", "")
+      lastIterEnd = Label(self.rapLabel("PrefetchGlobalLastIterEnd"), "")
 
     # This branch could potentially be very far e.g. > SIMM16
     module.addComment1("after InitC, skip to end of prefetch last iter if numIter==0")
@@ -6217,17 +6298,21 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCBranchSCC0(labelName=skipInitCVmovLabel.getLabelName(), \
           comment="skip v_mov initC (WMMA initC will run in main loop)"))
 
+    # Must mirror the add in defineAndResources exactly; a remove that spans
+    # registers which were never added raises "already unavailable" warnings.
     if self.states.lastValuMXSAB:
-      self.vgprPool.remove(0 , self.states.lastValuMXSAB, "ValuMXSAB")
-      module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(self.states.mxsa.startVgprValu, self.states.lastValuMXSAB))
+      mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
+      self.vgprPool.remove(mxsStart, mxsSize, "ValuMXSAB")
+      module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(mxsStart, self.states.lastValuMXSAB))
 
     self.vgprPool.remove(self.states.c.startVgprValu, self.states.c.numVgprValu, "ValuC")
     module.addComment1("initC: remove ValuC vgpr buffer [%u...%u) from pool"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu))
     numAccvgprs = self.states.totalAgprs
     self.agprPool.remove(0, numAccvgprs, "ValuC")
     module.addComment1("initC: remove acc vgpr buffer [%u...%u) from pool"%(0, numAccvgprs))
-    self.vgprPool.remove(self.states.a.startVgprValu , self.states.lastValuAB - self.states.a.startVgprValu , "ValuAB")
-    module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(self.states.a.startVgprValu , self.states.lastValuAB))
+    reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
+    self.vgprPool.remove(reclaimStart, reclaimSize, "ValuAB")
+    module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(reclaimStart, self.states.lastValuAB))
     numCVgpr = self.states.c.numVgprValu + numAccvgprs
 
     # TBD: optimize MfmaInitCVgprs case when using both VALU and ACC VGPRs (needs to init vgprs and acc separately)
@@ -6518,7 +6603,7 @@ class KernelWriterAssembly(KernelWriter):
 
     skipLabel = None
     if useParityGate:
-      skipLabel = Label(label=f"{labelName}{tc}", comment="")
+      skipLabel = Label(label=self.rapLabel(f"{labelName}{tc}"), comment="")
 
       self._emitTdmWaveParitySCCAuto(imod, kernel, comment="check wave parity",
                                     tmpTag="_applyStaggerTDM_waveIdTmp")
@@ -7784,10 +7869,10 @@ class KernelWriterAssembly(KernelWriter):
     loopChar = self.states.indexChars[ \
         kernel["ProblemType"]["IndicesSummation"][loopIdx]]
     if not tailLoop and not noLabelGen and not beginLabelOnly:
-      module.add(Label("openLoop%s%s%s"%(loopChar, strNta, strNtb), ""))
+      module.add(Label(self.rapLabel("openLoop%s%s%s"%(loopChar, strNta, strNtb)), ""))
     bStrNta = "" if tailLoop else strNta
     bStrNtb = "" if tailLoop else strNtb
-    loopLabelBegin = Label("%sLoopBegin%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb), "", alignment=16 )
+    loopLabelBegin = Label(self.rapLabel("%sLoopBegin%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb)), "", alignment=16 )
     loopLabelEnd = Label("%sLoopEnd%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb), "" )
 
     if beginLabelOnly:
@@ -7814,7 +7899,7 @@ class KernelWriterAssembly(KernelWriter):
               src0=loopCounter, \
               src1=hex(1), \
               comment="LoopCounter%s == 1 (PGR>=2, not Suppress: single-loop -> toPGR1)"%(loopChar) ))
-          toPGR1 = Label.getFormatting(self.labels.getName("toPGR1"))
+          toPGR1 = Label.getFormatting(self.rapGetName("toPGR1"))
           module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
         if kernel["PrefetchGlobalRead"] >= 3:
           # early exit 1 (2<=loopCounter<=PGR-1) to second NGLL (no need GR Inc)
@@ -7824,7 +7909,7 @@ class KernelWriterAssembly(KernelWriter):
               src1=hex(endCounter), \
               comment="LoopCounter%s <= EndCounter"%(loopChar) ))
           remainPgr = endCounter - 1
-          jumpLabel = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
+          jumpLabel = Label(self.rapLabel("NoGlobalLoadLoop_%d"%remainPgr), "")
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
           # early exit 2 (loopCounter==PGR) to first NGLL (need GR Inc)
@@ -7834,7 +7919,7 @@ class KernelWriterAssembly(KernelWriter):
               src1=hex(endCounter), \
               comment="LoopCounter%s <= EndCounter"%(loopChar) ))
           remainPgr = endCounter - 1
-          jumpLabel = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
+          jumpLabel = Label(self.rapLabel("NoGlobalLoadLoop_%d"%remainPgr), "")
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
         else:
@@ -7847,7 +7932,7 @@ class KernelWriterAssembly(KernelWriter):
           jumpLabel = loopLabelEnd
           if kernel["PrefetchGlobalRead"]==2 and (not kernel["SuppressNoLoadLoop"]) and kernel["ExpandPointerSwap"]:
             # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
-            jumpLabel = Label("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb), "" )
+            jumpLabel = Label(self.rapLabel("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb)), "" )
 
         module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                   comment="do not enter Loop%s"%loopChar ))
@@ -7982,10 +8067,10 @@ class KernelWriterAssembly(KernelWriter):
     else: # not tailloop
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][loopIdx]]
-      loopLabelBegin = Label("LoopBegin%s%s%s"%(loopChar, strNta, strNtb), "" )
-      loopLabelEnd = Label("LoopEnd%s%s%s"%(loopChar, strNta, strNtb), "" )
-      loopLabelEndOddExit = Label("LoopEnd%s_oddexit%s%s"%(loopChar, strNta, strNtb), "unroll loop odditer exit" )
-      loopLabelEndEvenExit = Label("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb), "unroll loop eveniter exit" )
+      loopLabelBegin = Label(self.rapLabel("LoopBegin%s%s%s"%(loopChar, strNta, strNtb)), "" )
+      loopLabelEnd = Label(self.rapLabel("LoopEnd%s%s%s"%(loopChar, strNta, strNtb)), "" )
+      loopLabelEndOddExit = Label(self.rapLabel("LoopEnd%s_oddexit%s%s"%(loopChar, strNta, strNtb)), "unroll loop odditer exit" )
+      loopLabelEndEvenExit = Label(self.rapLabel("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb)), "unroll loop eveniter exit" )
       loopCounter = self.loopCounter(kernel, loopIdx)
       module.addComment1("closeLoop loop%s finalLoop=%d tailLoop=%d" % (loopChar, finalLoop, tailLoop))
 
@@ -8630,6 +8715,11 @@ class KernelWriterAssembly(KernelWriter):
       numReadsIterCoalesced = self.states.numReadsIterCoalescedB
     else:
       raise Exception(f"unsupport tc %s{tc}")
+
+    # RAP: A/MXSA are held for the whole K extent, so their buffer index is
+    # absolute (this section's k-tile plus the iteration within it) instead of
+    # wrapping every LoopIters. B/MXSB keep the wrapping index.
+    m = self.rapResidentBufferIdx(kernel, tc, u, m)
 
     numVgprValuPerBlock = int(kernel["MIWaveTile%s"%tc] * ceil(kernel["MIInputPerThread%s"%tc] * tP["bpe"] / self.states.bpr))
 
@@ -9871,11 +9961,11 @@ class KernelWriterAssembly(KernelWriter):
             loopChar = self.states.indexChars[ \
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
             strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
-            lastIterEnd = Label("LoopEnd%s%s"%(loopChar, strNtab), "")
+            lastIterEnd = Label(self.rapLabel("LoopEnd%s%s"%(loopChar, strNtab)), "")
             module.add(SCBranchSCC1(labelName=lastIterEnd.getLabelName(), \
                        comment="skip to unrollLoop end loop%s iter b/c numIter==0" % loopChar))
           else:
-            lastIterEnd = Label("PrefetchGlobalLastIterEnd", "")
+            lastIterEnd = Label(self.rapLabel("PrefetchGlobalLastIterEnd"), "")
             if self.isPrefetchAcrossPersistentEnabled(kernel):
               module.add(SCMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                          comment="discard primed PAP group when current slice skips NLL"))
@@ -10051,7 +10141,7 @@ class KernelWriterAssembly(KernelWriter):
           # Also, we need to decrement loop counter for PGR>=3 and remainPgr>=2 for early exit in NGLL
           module.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1, comment="dec counter%s"%(loopChar)))
 
-        toPGR1 = Label(self.labels.getName("toPGR1"), "")
+        toPGR1 = Label(self.rapGetName("toPGR1"), "")
         if kernel["PrefetchGlobalRead"]-1 > remainPgr >= 2:
           # generate early exit in NGLL (no need for the first NGLL(remainPgr==PGR-1))
           module.add(SCmpEQU32(
@@ -10066,7 +10156,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(toPGR1)
       else:
         suffix = "OptNLL" if isOptNLL else "OrdNLL"
-        toPGR1end = Label(self.labels.getName("toPGR1end_%s"%suffix), "")
+        toPGR1end = Label(self.rapGetName("toPGR1end_%s"%suffix), "")
         if isNotLast:
           module.add(SBranch(labelName=toPGR1end.getLabelName(), comment="Branch to toPGR1end"))
         else:
@@ -10102,7 +10192,7 @@ class KernelWriterAssembly(KernelWriter):
           else:
             if not tailloopInNll:
               # generate PrefetchGlobalLastIterEnd label except for tailloopInNll case
-              module.add(Label("PrefetchGlobalLastIterEnd", ""))
+              module.add(Label(self.rapLabel("PrefetchGlobalLastIterEnd"), ""))
 
     # swap back vgpr pool if any
     def swapBackGprPool(gprPool, savedGprPool, isNotLast):
@@ -11332,6 +11422,7 @@ class KernelWriterAssembly(KernelWriter):
         isIterA = isIterA or kernel.get("_TDMIterateModeB", False)
       tdmAGroup2 = "tdmAGroup2" if isIterA else None
       tdmAGroup3 = "tdmAGroup3" if isIterA else None
+      imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmAGroup0+0"))
       imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
       # TODO: Embed metadata TDM issueLoad here (mirrors non-TDM pattern where globalReadBody(tP["tpsMetadata"])
       # is called after globalReadBody(tP) for the sparse tensor). This would allow _splitTdmLoad in SIA.py
@@ -11416,6 +11507,7 @@ class KernelWriterAssembly(KernelWriter):
               imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
           else:
             imod.middle.add(self.tdmResetTailLdsBuffer(kernel, ldsAddrSgprName))
+        imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmMXSAGroup0+0"))
         imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
       return imod
 
@@ -16103,7 +16195,7 @@ class KernelWriterAssembly(KernelWriter):
     return maxVgprs, occupancy
 
   def refineOccupancy(self, kernel, atomic, element, actPCMaxTempSgpr, \
-                      gwvw, maxVgprs, ss):
+                      gwvw, maxVgprs, ss, beta=False, edge=False):
     # Get estimated numVgprAvailable
     # Use block-aware counting to avoid overestimating with fragmented pools
     # print("Max vgprs =", maxVgprs, self.vgprPool.size(), self.vgprPool.availableBlock(ss.numVgprsPerElement, ss.align))
@@ -16128,7 +16220,7 @@ class KernelWriterAssembly(KernelWriter):
       maxVgprsN, occupancy = self.setOccupancy(kernel)
       if maxVgprs != maxVgprsN:
         #print("refineOccupancy maxVgprs, new", maxVgprsN, "old", maxVgprs)
-        return self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr, gwvw, maxVgprsN, ss)
+        return self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr, gwvw, maxVgprsN, ss, beta, edge)
       # After growing, try block-aware count again; fall back to simple count
       # if the pool is too fragmented for aligned blocks
       numVgprAvailable = self.vgprPool.availableBlockMaxVgpr(maxVgprs, ss.numVgprsPerElement, ss.align)
@@ -16195,6 +16287,8 @@ class KernelWriterAssembly(KernelWriter):
         self.states.overflowedResources = 3
 
     assert numElementsPerBatch > 0, "numElementsPerBatch=0 for %s"%self.states.kernelName
+
+    self.rapCheckStoreNeutrality(kernel, element, ss, numVgprAvailable, numElementsPerBatch, beta, edge)
 
     #numElementsPerBatch=min(2,numElementsPerBatch) # hack to control number of batches
     if atomic and (ss.optSingleColVgpr or ss.optSharedColVgpr):
@@ -16278,7 +16372,7 @@ class KernelWriterAssembly(KernelWriter):
       maxVgprsN, occupancy = self.setOccupancy(kernel)
       if maxVgprs != maxVgprsN:
         #print("refineOccupancy maxVgprs, new", maxVgprsN, "old", maxVgprs)
-        return self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr, gwvw, maxVgprsN, ss)
+        return self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr, gwvw, maxVgprsN, ss, beta, edge)
 
     # # Get true numVgprAvailable
     # numVgprAvailable = self.vgprPool.availableBlock(ss.numVgprsPerElement, ss.align)
@@ -16294,7 +16388,7 @@ class KernelWriterAssembly(KernelWriter):
     maxVgprsN, occupancy = self.setOccupancy(kernel)
     if maxVgprs != maxVgprsN:
       #print("refineOccupancy maxVgprs, new", maxVgprsN, "old", maxVgprs)
-      return self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr, gwvw, maxVgprsN, ss)
+      return self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr, gwvw, maxVgprsN, ss, beta, edge)
     return numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs
 
 
@@ -16364,7 +16458,7 @@ class KernelWriterAssembly(KernelWriter):
       assert activationSetPCStruct, activationEnumStrList and activationLabelList and toActModuleList
       actPCMaxTempSgpr_ = actPCMaxTempSgpr
 
-    numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs = self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr_, gwvw, maxVgprs, ss)
+    numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs = self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr_, gwvw, maxVgprs, ss, beta, edge)
 
     # set atomicW after we potentially resize GWVW
     atomicW = min(gwvw, self.getVectorAtomicWidth(kernel))
@@ -17189,7 +17283,7 @@ class KernelWriterAssembly(KernelWriter):
     # jump to idxPgr=1 label (wait 0)
     loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
     imod.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
-    skipPGRn = Label(self.labels.getName("skipPGR%d_%d"%(kernel["PrefetchGlobalRead"], 1)), "")
+    skipPGRn = Label(self.rapGetName("skipPGR%d_%d"%(kernel["PrefetchGlobalRead"], 1)), "")
     imod.add(SCBranchSCC1(labelName=skipPGRn.getLabelName(), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     return imod
 
@@ -17198,10 +17292,10 @@ class KernelWriterAssembly(KernelWriter):
     PGR = kernel["PrefetchGlobalRead"]
     if idxPgr == 0:
       # first, generate branch to the last idxPgr (= PGR)
-      skipPGRn = Label(self.labels.getName("skipPGR%d_%d"%(PGR, PGR)), "")
+      skipPGRn = Label(self.rapGetName("skipPGR%d_%d"%(PGR, PGR)), "")
       imod.add(SBranch(labelName=skipPGRn.getLabelName(), comment="jump to PGR=%d label"%(PGR)))
     elif idxPgr == 1 or idxPgr == kernel["PrefetchGlobalRead"]:
-      skipPGRn = Label(self.labels.getName("skipPGR%d_%d"%(PGR, idxPgr)), "")
+      skipPGRn = Label(self.rapGetName("skipPGR%d_%d"%(PGR, idxPgr)), "")
       imod.add(skipPGRn)
       if (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
         # early exit case (idxPgr < PGR), need to wait for all prefetch here (vmcnt=0).
@@ -18530,19 +18624,19 @@ class KernelWriterAssembly(KernelWriter):
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
     if numCodePath == 1:
-      module.add(Label("LoopBegin%s_0%s%s"%(loopChar, strNta, strNtb), "" ))
+      module.add(Label(self.rapLabel("LoopBegin%s_0%s%s"%(loopChar, strNta, strNtb)), "" ))
       module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[0]))
-      module.add(SCBranchSCC0(labelName="label_LoopBegin%s_0%s%s"%(loopChar, strNta, strNtb), comment="" ))
-      module.add(Label("LoopEnd%s%s%s"%(loopChar, strNta, strNtb), "" ))
+      module.add(SCBranchSCC0(labelName=self.rapLabel("label_LoopBegin%s_0%s%s"%(loopChar, strNta, strNtb)), comment="" ))
+      module.add(Label(self.rapLabel("LoopEnd%s%s%s"%(loopChar, strNta, strNtb)), "" ))
       return module
 
 
     module.addComment0("SIMD specialized dispatch")
 
     for l in range(numCodePath):
-      loopLabelBegin.append(Label("LoopBegin%s_%u%s%s"%(loopChar, l, strNta, strNtb), "", alignment=16))
-      loopLabelSkipBegin.append(Label("LoopSkipBegin%s_%u%s%s"%(loopChar, l, strNta, strNtb), "" ))
-    loopLabelEnd = Label("LoopEnd%s%s%s"%(loopChar, strNta, strNtb), "" )
+      loopLabelBegin.append(Label(self.rapLabel("LoopBegin%s_%u%s%s"%(loopChar, l, strNta, strNtb)), "", alignment=16))
+      loopLabelSkipBegin.append(Label(self.rapLabel("LoopSkipBegin%s_%u%s%s"%(loopChar, l, strNta, strNtb)), "" ))
+    loopLabelEnd = Label(self.rapLabel("LoopEnd%s%s%s"%(loopChar, strNta, strNtb)), "" )
 
     tmpSgpr = self.sgprPool.checkOut(1, tag="simdSpecDispatch_tmpSgpr")
     numbits = 1 if numCodePath == 2 else 2

@@ -601,6 +601,23 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
+        if state.get('ReuseAcrossPersistent', 0):
+            # A lives in VGPRs for the whole persistent loop, so the kernel is only
+            # correct for problems where every tile a workgroup visits reads the
+            # same A, and where the resident block covers exactly the K extent.
+            #   M == MacroTile0     - one M-tile only, and no masked store in M. A
+            #                         half-filled tile would take the edge path,
+            #                         which v0 does not budget registers for.
+            #   N % MacroTile1 == 0 - no edge tile in N either.
+            #   K == kTiles * DepthU- the resident registers are indexed by a
+            #                         codegen-time k-tile number, so a different K
+            #                         would read the wrong set.
+            rv += [cls('SizeEqual', index=0, value=state['MacroTile0'])]
+            rv += [cls('SizeMultiple', index=1, value=state['MacroTile1'])]
+            rv += [cls('SizeEqual',
+                       index=state['ProblemType']['NumIndicesC'],
+                       value=state['_RAPNumResidentKTiles'] * state['DepthU'])]
+
         return rv
 
     @classmethod

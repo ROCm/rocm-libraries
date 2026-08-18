@@ -1996,6 +1996,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
       state["PrefetchAcrossPersistent"] = 0
+      state["ReuseAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False
 
     if not state["BufferStore"]:
@@ -3147,6 +3148,93 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Current LDSTrInst implementation does not support 1LDSBuffer=0")
       return
 
+  @staticmethod
+  def rapMaxResidentKTiles(state, problemType, isa, isaInfoMap, packedC0, packedC1):
+    """Most k-tiles ReuseAcrossPersistent can hold without splitting the store.
+
+    RAP buys fewer LDS transfers by withholding registers the store would otherwise
+    use as scratch. The store writes E elements per thread at V registers each, so
+    it keeps to a single batch while the registers it can still reach cover E*V;
+    what is left over is slack RAP may spend, R registers per resident k-tile.
+
+    The real quantities live in KernelWriterAssembly's register pool, far past
+    derivation, so every term is rebuilt from state here. Measured against the two
+    audited gfx1250 configs, whose true bounds (largest k that clears
+    rapCheckStoreNeutrality) are 8 for MacroTile 64x256 and 3 for 64x512:
+
+        ValuC 128, E  64, V 4, R 68 -> (1024 - 128 - 256 - 40) / 68 -> 8
+        ValuC 256, E 128, V 4, R 68 -> (1024 - 256 - 512 - 40) / 68 -> 3
+
+    Returns None when the store cannot be priced, which leaves the caller at the
+    PrefetchGlobalRead + 1 the emit-once sections supply for free -- what shipped
+    before this model existed, and still guarded at codegen.
+    """
+    # Each of these adds a term to AsmStoreState.numVgprsPerElement. Under-counting
+    # V over-counts k, and an over-counted k only surfaces at codegen as a kernel
+    # the store guard throws away, so decline to raise rather than guess.
+    if (problemType.get("UseE", False)
+        or problemType.get("Gradient", False)
+        or problemType.get("UseScaleAlphaVec", 0)
+        or problemType.get("UseScaleAB", "") == "Vector"
+        or problemType.get("UseGateResidual", False)
+        or problemType.get("UseBias", 0)
+        or state.get("GroupLoadStore", False)):
+      return None
+
+    bpr = 4  # KernelWriter.bpr; not imported here because KernelWriter imports us
+    bpeCinternal = bpr * problemType["ComputeDataType"].numRegisters()
+    bpeCexternal = bpr * problemType["DestDataType"].numRegisters()
+    if state["GlobalSplitU"] > 0 and state.get("_GlobalAccumulation") \
+       and state["_GlobalAccumulation"] != 'PartialsBuffer':
+      bpeCexternal = bpeCinternal
+
+    valuC = int(state["ThreadTile0"] * state["ThreadTile1"] * bpeCinternal // bpr)
+    gwvw = state["StoreVectorWidth"]
+    if gwvw <= 0 or valuC <= 0 or valuC % gwvw:
+      return None
+    elementsPerThread = valuC // gwvw
+
+    # optSingleColVgpr shares one address vgpr across the batch, so the store needs
+    # no per-element address register. Mirrors AsmStoreState's beta, non-edge,
+    # non-atomic branch -- the only store path the RAP size predicates allow.
+    optSingleColVgpr = (state["BufferStore"] and not packedC0 and not packedC1
+                        and not problemType["UseInitialStridesCD"])
+    vgprsPerAddr = 0 if optSingleColVgpr else (1 if state["BufferStore"] else 2)
+    # serializedStore is unconditionally set on this allocation path, so ValuC is
+    # checked out of the pool per element rather than pre-staged.
+    vgprsPerElement = int(bpeCinternal // bpr) * gwvw + vgprsPerAddr \
+                      + int(math.ceil((bpeCexternal / bpr) * gwvw))
+    if state.get("_GlobalAccumulation") == "MultipleBufferSingleKernel":
+      vgprsPerElement += vgprsPerAddr  # addrGSUSyncVgprs
+
+    # One buffer set per resident k-tile: a ValuA block plus its MX scale block,
+    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic. The MX
+    # TileSpan halving is deliberately not modelled: leaving it out overstates R,
+    # which understates k, and only the understating direction is safe here.
+    numVgprBuffer = state["LoopIters"] if state["ClusterLocalRead"] \
+                    else state["PrefetchLocalRead"] + 1
+    macA = problemType.get("MacDataTypeA") or problemType["DataType"]
+    bpeA = bpr * macA.numRegisters()
+    residentPerKTile = numVgprBuffer * (
+        int(state["MIWaveTileA"] * state["MIInputPerThreadA"] * bpeA // bpr)
+        + (int(state["MIWaveTileMXSA"] * state["MIInputPerThreadMXSA"] // bpr)
+           if problemType["MXBlockA"] else 0))
+    if residentPerKTile <= 0:
+      return None
+
+    # Everything live at the store that is neither ValuC nor resident, plus the
+    # two-register pad inside the withheld block, plus the fragmentation lost when
+    # that block is lent back to the store. Measured 24+2+14 and 28+2+10 on the two
+    # audited configs -- exactly 40 both times. Anything in 29..52 reproduces both
+    # bounds, so there is roughly a fifth of a k-tile of margin either side.
+    storeOverhead = 40
+    slack = (isaInfoMap[isa].regCaps["MaxVgpr"] - valuC
+             - elementsPerThread * vgprsPerElement - storeOverhead)
+    if slack < residentPerKTile:
+      return None
+    return slack // residentPerKTile
+
+  ########################################
   @staticmethod
   def depthUIteration(
       state,
@@ -6151,6 +6239,74 @@ class Solution(collections.abc.Mapping):
     # change negative ExtraLatencyForLR to 0 for non DirectToVgpr
     if state["ExtraLatencyForLR"] < 0 and not (state["DirectToVgprA"] or state["DirectToVgprB"]):
       state["ExtraLatencyForLR"] = 0
+
+    # ReuseAcrossPersistent holds A (and its MX scales) for the whole K extent in
+    # VGPRs across persistent iterations, so every tile after the first reuses
+    # them instead of reloading. That is only sound when every tile a workgroup
+    # visits reads the same A. The solution-independent half of that contract is
+    # checked here; the problem-size half (single M-tile, no N edge, exact K) is
+    # enforced by the runtime predicates emitted in
+    # Contractions.ProblemPredicate.CompoundPredicates.
+    if state["ReuseAcrossPersistent"]:
+      if not state.get("PrefetchAcrossPersistent", 0):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires PrefetchAcrossPersistent")
+        return
+      if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires StreamK = 3 and StreamKForceDPOnly = 1")
+        return
+      # Even waves move A/MXSA and odd waves move B/MXSB through one aliased
+      # descriptor set, which is what lets RAP silence A's transfers per parity.
+      if not (state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires wave-separated TDM (TDMInst = 3 and NumWaves > 1)")
+        return
+      if state["InnerUnroll"] != 1:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
+        return
+      if not state["NoTailLoop"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires NoTailLoop (AssertSummationElementMultiple % DepthU == 0)")
+        return
+      if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with DirectToVgpr on A")
+        return
+      if state["ExpandPointerSwap"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires ExpandPointerSwap = 0")
+        return
+      if state.get("UseSubtileImpl", False):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not implemented for the subtile path")
+        return
+      # The A-side local-read pack buffers are sized from numVgprBufferPackA,
+      # which RAP does not grow, so the resident buffer sets would alias each
+      # other's pack registers. UnrollMajorLDSA is what suppresses that path.
+      if not state["UnrollMajorLDSA"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires UnrollMajorLDSA (the A local-read pack path is not supported)")
+        return
+      # Each resident k-tile needs its own statically numbered register set, so it
+      # can only live in a code section that is emitted once. The NGLL and NLL
+      # sections supply PrefetchGlobalRead of them and the unroll loop shell
+      # supplies the rest, one body copy per k-tile, so the count is free. What
+      # actually bounds it is the store, which rapMaxResidentKTiles models and
+      # rapCheckStoreNeutrality then checks against the real register pool.
+      #
+      # The floor is the PrefetchGlobalRead + 1 the sections supply anyway: the
+      # model only ever raises. A model that guessed low would merely leave K on the
+      # table, but one that guessed below the floor would take away a k that works
+      # today, and the codegen guard already covers the case where even the floor
+      # does not fit.
+      import os
+      kMax = Solution.rapMaxResidentKTiles(
+          state, problemType, isa, isaInfoMap, packedC0, packedC1)
+      derived = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
+      state["_RAPNumResidentKTiles"] = int(os.environ.get("TENSILE_RAP_KTILES", derived))
+      # The emit-once sections are max(1, k - PGR) body copies plus the PGR
+      # NGLL/NLL sections, so there are never fewer than PGR + 1 of them. A
+      # smaller k would leave two sections owning the same k-tile while each
+      # still computed a k-tile's worth of MFMAs, so the kernel would consume
+      # more of K than its SizeEqual(K) predicate advertises.
+      if state["_RAPNumResidentKTiles"] < state["PrefetchGlobalRead"] + 1:
+        reject(state, printRejectionReason,
+               "ReuseAcrossPersistent needs at least PrefetchGlobalRead + 1 resident k-tiles, got %u"
+               % state["_RAPNumResidentKTiles"])
+        return
 
   ########################################
   @ staticmethod
