@@ -28,22 +28,28 @@ _REVISION_PROBE_SRC = _TENSILELITE_ROOT / "tools" / "gpu_revision_probe.cpp"
 
 
 def detect_gpu_arch():
-    """Return the first supported gfx arch present on this host, or None.
+    """First non-gfx000 gfx arch rocm_agent_enumerator reports, or None.
 
-    Delegates to the canonical host enumeration in Tensile.Common.Architectures
-    (detectHostGfxArchs) so this shares the toolchain's device-enumerator
-    selection and gfxToIsa / SUPPORTED_ISA normalization instead of a bespoke
-    rocm_agent_enumerator parse.
-
-    Imported lazily on purpose: Architectures pulls in rocisa at import time, so
-    keeping it out of this module's load lets the packaged unit tests import this
-    module (and mock detect_gpu_arch) without rocisa present. A real build/probe
-    call runs where rocisa is installed.
+    Kept rocisa-free (no Tensile.Common import) so the invoke build path never
+    pulls in rocisa just to probe the arch.
     """
-    from Tensile.Common.Architectures import detectHostGfxArchs
+    try:
+        result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
+        if result.returncode == 0:
+            target = next((line.strip() for line in result.stdout.splitlines() if line.startswith("gfx") and line.strip() != "gfx000"), None)
+            if target:
+                return target
+    except FileNotFoundError:
+        print("Error: 'rocm_agent_enumerator' command not found. Please install ROCm.", file=sys.stderr)
 
-    archs = detectHostGfxArchs()
-    return archs[0] if archs else None
+    except subprocess.TimeoutExpired:
+        print("Error: GPU detection timed out. Hardware might be unresponsive.", file=sys.stderr)
+
+    except Exception as e:
+        print(f"An unexpected error occurred during GPU detection: {e}", file=sys.stderr)
+
+    print(f"Failed to detect a valid GPU architecture (gfx target not found).", file=sys.stderr)
+    return None
 
 
 def _revision_to_gpu_target(base_arch, asic_revision):

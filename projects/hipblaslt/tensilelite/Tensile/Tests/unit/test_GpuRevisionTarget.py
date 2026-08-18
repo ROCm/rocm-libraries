@@ -218,45 +218,37 @@ class TestTargetsIncludeGfx1250:
 
 @_needs_hipblaslt_tasks
 class TestGfx1250RevisionOption:
-    """What reaches CMake. Every gfx1250 build states a revision, including the
-    shipping one: the cache variable is sticky across incremental builds, so an
-    unset value would keep a directory once configured for v0 building v0."""
+    """What reaches CMake. A gfx1250 build ships both revisions' trees by
+    default and lets the runtime pick by asicRevision, so the build machine no
+    longer decides anything and is never probed. The option is emitted even when
+    its value is empty: the CMake cache variable is sticky across incremental
+    builds, so an unset one would keep a directory once pinned to v0 building
+    only v0."""
 
-    def test_a_v0_machine_pins_v0(self):
-        with mock.patch.object(hipblaslt_tasks, "_detect_gfx1250_revision", return_value=GFX1250V0):
-            assert hipblaslt_tasks._gfx1250_revision_option("gfx1250", None) == f"{REVISION_OPT}=v0"
+    def test_the_default_builds_both_trees(self):
+        assert hipblaslt_tasks._gfx1250_revision_option("gfx1250", None) == f"{REVISION_OPT}="
 
-    @pytest.mark.parametrize("probed", ["gfx1250", None, "gfx942"])
-    def test_anything_but_a_v0_part_pins_v1(self, probed):
-        # The probe returns None (no hipcc/device) or the host's own arch when
-        # it is not gfx1250; only a positive v0 result may select v0.
-        with mock.patch.object(hipblaslt_tasks, "_detect_gfx1250_revision", return_value=probed):
-            assert hipblaslt_tasks._gfx1250_revision_option("gfx1250", None) == f"{REVISION_OPT}=v1"
+    def test_the_default_does_not_look_at_the_local_gpu(self):
+        # The build is machine-independent by construction: nothing here may
+        # reach for a device, or two CI runners produce different packages.
+        assert not hasattr(hipblaslt_tasks, "_detect_gfx1250_revision")
 
-    def test_a_build_without_gfx1250_never_probes(self):
-        with mock.patch.object(hipblaslt_tasks, "_detect_gfx1250_revision") as probe:
-            assert hipblaslt_tasks._gfx1250_revision_option("gfx942", None) is None
-            probe.assert_not_called()
+    def test_a_build_without_gfx1250_emits_nothing(self):
+        assert hipblaslt_tasks._gfx1250_revision_option("gfx942", None) is None
 
     @pytest.mark.parametrize("pinned", ["v0", "v1"])
-    def test_an_explicit_revision_wins_and_never_probes(self, pinned):
-        # CI and packaging pin the revision so the same command is reproducible
-        # across machines.
-        with mock.patch.object(hipblaslt_tasks, "_detect_gfx1250_revision") as probe:
-            assert hipblaslt_tasks._gfx1250_revision_option("gfx1250", pinned) == f"{REVISION_OPT}={pinned}"
-            probe.assert_not_called()
+    def test_an_explicit_revision_prunes_to_one_tree(self, pinned):
+        assert hipblaslt_tasks._gfx1250_revision_option("gfx1250", pinned) == f"{REVISION_OPT}={pinned}"
 
     def test_an_explicit_revision_applies_even_without_gfx1250_targets(self):
         # Cross-building: the caller decides, so a target list naming no gfx1250
         # still emits the option (to keep the cache from going stale).
-        with mock.patch.object(hipblaslt_tasks, "_detect_gfx1250_revision") as probe:
-            assert hipblaslt_tasks._gfx1250_revision_option("gfx942", "v0") == f"{REVISION_OPT}=v0"
-            probe.assert_not_called()
+        assert hipblaslt_tasks._gfx1250_revision_option("gfx942", "v0") == f"{REVISION_OPT}=v0"
 
     @pytest.mark.parametrize("bogus", ["0", "v2", "V0", "gfx1250v0"])
     def test_an_unrecognized_revision_is_rejected(self, bogus):
         # Anything else reaches CMake as a comparison matching neither branch,
-        # which would quietly build v1.
+        # which would quietly build the wrong set of trees.
         with pytest.raises(SystemExit) as exit_info:
             hipblaslt_tasks._gfx1250_revision_option("gfx1250", bogus)
         assert exit_info.value.code == 2
@@ -264,18 +256,17 @@ class TestGfx1250RevisionOption:
 
 @_needs_hipblaslt_tasks
 class TestTheBuildSaysWhichRevisionItChose:
-    """The log line is the only record of a decision the machine made silently;
-    the failure it guards against is a v1 library on v0 silicon."""
+    """The log line is the only record of which trees an install actually got;
+    the failure it guards against is a v0 part finding no library of its own."""
 
-    def _option(self, capsys, architecture, pinned, probed=None):
-        with mock.patch.object(hipblaslt_tasks, "_detect_gfx1250_revision", return_value=probed):
-            hipblaslt_tasks._gfx1250_revision_option(architecture, pinned)
+    def _option(self, capsys, architecture, pinned):
+        hipblaslt_tasks._gfx1250_revision_option(architecture, pinned)
         return capsys.readouterr().out
 
-    def test_a_probed_v0_says_it_was_probed(self, capsys):
-        out = self._option(capsys, "gfx1250", None, probed=GFX1250V0)
-        assert "gfx1250 ASIC revision: v0" in out
-        assert "probed this machine, which reported a v0 part" in out
+    def test_the_default_says_both_and_who_decides(self, capsys):
+        out = self._option(capsys, "gfx1250", None)
+        assert "gfx1250 ASIC revision: both" in out
+        assert "runtime selects by asicRevision" in out
 
     def test_a_pinned_revision_says_it_was_pinned(self, capsys):
         out = self._option(capsys, "gfx1250", "v1")
@@ -283,83 +274,20 @@ class TestTheBuildSaysWhichRevisionItChose:
         assert "pinned by --gfx1250-revision" in out
         assert "no gfx1250" not in out  # that caveat is for gfx1250-free builds
 
-    def test_a_probed_non_v0_part_says_what_it_saw(self, capsys):
-        # "a v1 part" would state a guess as fact for any unseen revision.
-        out = self._option(capsys, "gfx1250", None, probed=GFX1250)
-        assert "gfx1250 ASIC revision: v1" in out
-        assert "reported gfx1250 silicon that is not a v0 part" in out
-
-    def test_a_probe_of_another_arch_is_not_a_confirmation(self, capsys):
-        # The ordinary cross-compile / CI case: -a all on a host that is not
-        # gfx1250. It resolves to v1 while confirming nothing.
-        out = self._option(capsys, "gfx1250", None, probed="gfx942")
-        assert "gfx1250 ASIC revision: v1" in out
-        assert "gfx942" in out
-        assert "confirms nothing" in out
-        assert "probed this machine" not in out
+    def test_pinning_v1_does_not_read_as_the_default(self, capsys):
+        # Pruning to the shipping tree leaves v0 silicon with no library of its
+        # own, so it must not be reported the same way the both-trees default is.
+        out = self._option(capsys, "gfx1250", "v1")
+        assert "both" not in out
+        assert "asicRevision" not in out
 
     def test_a_pinned_revision_without_gfx1250_targets_says_so(self, capsys):
         out = self._option(capsys, "gfx942", "v0")
         assert "gfx1250 ASIC revision: v0" in out
         assert "these targets contain no gfx1250" in out
 
-    def test_a_failed_probe_says_it_is_guessing(self, capsys):
-        # The dangerous outcome: v0 silicon gets a v1 library. Must not read
-        # like a confirmed v1.
-        out = self._option(capsys, "gfx1250", None, probed=None)
-        assert "gfx1250 ASIC revision: v1" in out
-        assert "could not probe this machine" in out
-        assert "--gfx1250-revision v0" in out
-
     def test_a_build_that_cannot_produce_gfx1250_says_nothing(self, capsys):
         assert "ASIC revision" not in self._option(capsys, "gfx942", None)
-
-
-@_needs_hipblaslt_tasks
-class TestDetectGfx1250Revision:
-    """Loading tensilelite's probe by path; it only runs for real on a gfx1250
-    host, the machine the unit suite is least likely to run on."""
-
-    def _stub_tensilelite(self, tmp_path, body):
-        probe = tmp_path / "tensilelite" / "tasks.py"
-        probe.parent.mkdir(parents=True)
-        probe.write_text(body)
-        return tmp_path
-
-    def test_the_result_and_build_dir_pass_through(self, monkeypatch, tmp_path):
-        # The build dir must reach the probe, or it compiles into the source
-        # tree and fails on a read-only checkout.
-        monkeypatch.setattr(hipblaslt_tasks, "ROOT_PATH", self._stub_tensilelite(
-            tmp_path,
-            "def detect_gpu_revision_target(build_dir=None, device_id=0):\n"
-            "    return build_dir or 'gfx1250v0'\n",
-        ))
-        assert hipblaslt_tasks._detect_gfx1250_revision() == GFX1250V0
-        assert hipblaslt_tasks._detect_gfx1250_revision("/tmp/somewhere") == "/tmp/somewhere"
-
-    def test_a_missing_probe_is_not_fatal(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(hipblaslt_tasks, "ROOT_PATH", tmp_path)
-        assert hipblaslt_tasks._detect_gfx1250_revision() is None
-
-    def test_a_broken_probe_is_not_fatal(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(hipblaslt_tasks, "ROOT_PATH", self._stub_tensilelite(
-            tmp_path, "raise RuntimeError('no ROCm here')\n"))
-        assert hipblaslt_tasks._detect_gfx1250_revision() is None
-
-    def test_the_probe_leaves_no_trace_behind(self, monkeypatch, tmp_path):
-        # tensilelite's tasks.py adds its own dir to sys.path, where it would
-        # shadow this module for any later `import tasks`.
-        monkeypatch.setattr(hipblaslt_tasks, "ROOT_PATH", self._stub_tensilelite(
-            tmp_path,
-            "import sys\n"
-            "sys.path.insert(0, 'sentinel-entry')\n"
-            "def detect_gpu_revision_target(build_dir=None, device_id=0):\n"
-            "    return 'gfx1250'\n",
-        ))
-        before = list(sys.path)
-        hipblaslt_tasks._detect_gfx1250_revision()
-        assert sys.path == before
-        assert "_tensilelite_tasks" not in sys.modules
 
 
 @_needs_hipblaslt_tasks

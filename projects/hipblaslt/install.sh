@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -g, --debug               Debug build"
             echo "  -k, --relwithdebinfo      RelWithDebInfo build"
             echo "  -a, --architecture <arch>  GPU target(s)"
-            echo "  --gfx1250-revision <rev>  gfx1250 ASIC revision, 'v0' or 'v1' (default: probe this machine, v1 if it is not a v0 part)"
+            echo "  --gfx1250-revision <rev>  build only one gfx1250 ASIC-revision tree, 'v0' or 'v1' (default: build both; runtime selects by asicRevision)"
             echo "  -n, --client-only         Build without Tensile"
             echo "  -j <N>                    Parallel jobs (caps both cmake and Tensile kernel generation)"
             echo "  -l, --logic <path>        Tensile logic path"
