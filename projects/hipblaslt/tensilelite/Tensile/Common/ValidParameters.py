@@ -380,7 +380,7 @@ validParameters = { # we need to make sure this matches develop
     #  1: enable (forced; no MaxLDS fallback, so a kernel whose 3 buffers do not
     #     fit is rejected by the usual LDS size check)
     # Silently downgraded to 0 without TDM on both A and B, for
-    # PrefetchGlobalRead!=2, and for StreamK.
+    # PrefetchGlobalRead!=2, and for PrefetchAcrossPersistent=1.
     # 1LDSBuffer never competes with this: TDM already resolves 1LDSBuffer==-1 to 0
     # and rejects 1LDSBuffer==1 with PGR2.
     "TDMPlusLdsBuf": [-1,0,1],
