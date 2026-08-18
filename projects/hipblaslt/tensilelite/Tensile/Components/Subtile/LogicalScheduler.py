@@ -3480,14 +3480,121 @@ class LogicalScheduler:
         em_list[:] = new_head + tail
         return True
 
+    @staticmethod
+    def _atomize_load_instructions(instructions) -> list:
+        """Split a GR module's instructions into atoms that each end at a buffer_load.
+
+        Every DTL load is preceded by its own m0 setup (s_add_u32/s_mov_b32 m0), and
+        m0 must still hold that value when the load issues, so the setup and its load
+        travel together. Instructions trailing the last load form a final atom.
+        """
+        atoms, cur = [], []
+        for inst in instructions:
+            cur.append(inst)
+            if type(inst).__name__.startswith('BufferLoad'):
+                atoms.append(cur)
+                cur = []
+        if cur:
+            atoms.append(cur)
+        return atoms
+
+    @staticmethod
+    def _deal_filler_across_atoms(atoms, filler) -> list:
+        """Emit atoms with filler dealt out evenly into the gap after each atom.
+
+        Filler order is preserved, which is what keeps initC legal: its zero-source
+        writes still precede the MFMAs that read them.
+        """
+        if not atoms:
+            return list(filler)
+        out, taken, n = [], 0, len(atoms)
+        for i, atom in enumerate(atoms, start=1):
+            out.extend(atom)
+            target = (i * len(filler)) // n
+            out.extend(filler[taken:target])
+            taken = target
+        out.extend(filler[taken:])
+        return out
+
+    def _interleavePreloopInitCPerLoad(self, em_list, cover_modules) -> bool:
+        """Path 4 per-load: deal initC out one instruction group per buffer_load.
+
+        Fast path becomes
+          [m0;load A0] initC.. [m0;load A1] initC.. … [m0;load B7] initC..
+          -> cover(LRA,…) -> GR(SA,SB) -> GRInc -> wait_gr
+
+        Only initC feeds the interleave. The LRA cover masks and restores ``exec``
+        around its permlane swap, and a DTL buffer_load issued inside that window
+        would drop the inactive lanes, so cover stays after every load.
+
+        The K<DepthU guard branches over all of these loads, so it cannot reach the
+        dealt-out initC; the caller emits a contiguous copy out of line (see
+        ``_preloopSplitInitCInstructions`` / ``_preloopColdInitCOutOfLine``).
+        """
+        init_idx = next((i for i, em in enumerate(em_list)
+                         if em.opType == 'inline'
+                         and getattr(em.source, 'label', None) == 'initC_overlap'), None)
+        wait_idx = next((i for i, em in enumerate(em_list) if em.opType == 'wait_gr'), None)
+        if init_idx is None or wait_idx is None:
+            return False
+
+        init_em = em_list.pop(init_idx)
+        if init_idx < wait_idx:
+            wait_idx -= 1
+
+        head, tail = em_list[:wait_idx], em_list[wait_idx:]
+        prefix, mt0_gr, gr_incs = [], {}, []
+        for em in head:
+            if em.opType == 'gr' and em.source is not None:
+                mt0_gr[em.source.tensor] = em
+            elif em.opType == 'gr_inc':
+                gr_incs.append(em)
+            else:
+                prefix.append(em)
+
+        data_gr = [mt0_gr[t] for t in ('A', 'B') if t in mt0_gr]
+        atoms = [atom for em in data_gr
+                 for atom in self._atomize_load_instructions(em.instructions)]
+        if not atoms or not init_em.instructions:
+            head.insert(min(len(head), self._mt0_preloop_gr_end(head)), init_em)
+            em_list[:] = head + tail
+            return False
+
+        new_id = max((em.moduleId for em in em_list), default=-1) + 1
+        woven = EmittedModule(
+            moduleId=new_id,
+            instructions=self._deal_filler_across_atoms(atoms, init_em.instructions),
+            before=None,
+            source=init_em.source)
+        new_id += 1
+
+        new_head = list(prefix)
+        new_head.append(woven)
+        new_head.append(EmittedModule(moduleId=new_id,
+                                      instructions=list(cover_modules),
+                                      before=None,
+                                      source=None))
+        for tensor in ('SA', 'SB'):
+            if tensor in mt0_gr:
+                new_head.append(mt0_gr[tensor])
+        new_head.extend(gr_incs)
+
+        em_list[:] = new_head + tail
+        self._preloopSplitInitCInstructions = list(init_em.instructions)
+        self._preloopColdInitCOutOfLine = True
+        return True
+
     def _injectPreloopPipelinedCover(self, em_list, cover_modules) -> bool:
         """Legacy alias — Path 4b coarse split (cover only, initC after full GR batch)."""
         return self._injectPreloopFineCover(em_list, cover_modules)
 
-    def _splicePreloopCoverModules(self, em_list, cover_modules, pipelined=False) -> bool:
+    def _splicePreloopCoverModules(self, em_list, cover_modules, pipelined=False,
+                                   perLoad=False) -> bool:
         """Insert deferred cover modules (LRA trio + extensions) into preloop."""
         if not cover_modules:
             return False
+        if perLoad and self._interleavePreloopInitCPerLoad(em_list, cover_modules):
+            return True
         if pipelined:
             return self._injectPreloopFineCover(em_list, cover_modules)
         drain_idx = next((i for i, em in enumerate(em_list)
@@ -4376,11 +4483,9 @@ class LogicalScheduler:
 
         skipGRLabel = Label("SkipPreloopGR", "")
         skipGRForTail = (not kernel["NoTailLoop"]) and self.config.pgr >= 1
-        if skipGRForTail:
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                 comment="K < DepthU? skip prefetch GR to initC"))
-            module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
-                                    comment="K < DepthU: skip prefetch GR, still run initC"))
+        # The entry guard is emitted lower down (just before the PRELOOP body), because
+        # its branch form depends on whether the tail-only initC lands inline or out of
+        # line, which is only known after the cover splice runs below.
 
         # ── Pre-loop cover / Change A: defer LDS read-address setup ──
         # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
@@ -4392,13 +4497,21 @@ class LogicalScheduler:
         # the address math is front-loaded into the shadow. The preloop is emitted
         # unscheduled (schedule=False), so the sequential list splice lands them in order.
         # TENSILE_PRELOOP_COVER_INTERLEAVE widens this from PLSIN1-only (Change A) to
-        # every subtile PGR>=1 kernel; see _preloopCoverInterleaveEligible. On PGR>=1
-        # it also pipelines the splice into
-        #   GR(A) -> initC -> GR(B) -> cover -> GR(SA,SB) -> GRInc -> wait_gr
+        # every subtile PGR>=1 kernel; see _preloopCoverInterleaveEligible. On PGR>=1:
+        #   level 1: GR(A) -> initC[0] -> GR(B) -> initC[1] -> cover -> GR(SA,SB)
+        #   level 2: initC dealt out per individual buffer_load across all of A/B,
+        #            then cover -> GR(SA,SB)
         # so initC joins the LRA math inside the A/B prefetch shadow.
-        from Tensile.Common.Utilities import preloopCoverInterleaveEnabled
+        from Tensile.Common.Utilities import (preloopCoverInterleaveEnabled,
+                                              preloopCoverInterleaveLevel)
         _coverFlag = preloopCoverInterleaveEnabled()
         _pipelinedCover = _coverFlag and self.config.pgr >= 1
+        # Per-load dealing hides initC inside a single merged module, which would
+        # starve the PAP next-tile replay (make_subtile_pap_module stops at the first
+        # non-gr module), so keep it to non-PAP kernels.
+        _perLoadCover = (_pipelinedCover
+                         and preloopCoverInterleaveLevel() >= 2
+                         and not kernel.get("PrefetchAcrossPersistent"))
         _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
         _coverDeferred = getattr(writer, "_deferredPreloopCoverModules", None)
         _coverModules = None
@@ -4413,7 +4526,8 @@ class LogicalScheduler:
                 and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
             em_list = self._preloop_emitted[0][0]
             if self._splicePreloopCoverModules(em_list, _coverModules,
-                                               pipelined=_pipelinedCover):
+                                               pipelined=_pipelinedCover,
+                                               perLoad=_perLoadCover):
                 self._coverDeferredIntoPreloop = True
                 self._lraDeferredIntoPreloop = True
 
@@ -4467,6 +4581,8 @@ class LogicalScheduler:
         # Operate on a copy so self._preloop_emitted (read by PAP and the
         # per-unroll copies) stays untouched.
         preloop_emitted = copy.deepcopy(self._preloop_emitted)
+        # Out-of-line tail-only initC, emitted after every exit path (see below).
+        coldInitC = None
         if not kernel["NoTailLoop"]:
             em_list = preloop_emitted[0][0]
             init_idx = next((i for i, em in enumerate(em_list)
@@ -4474,6 +4590,7 @@ class LogicalScheduler:
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
             splitInitC = getattr(self, "_preloopSplitInitCInstructions", None)
+            outOfLine = getattr(self, "_preloopColdInitCOutOfLine", False)
 
             def makeTailGuard():
                 # After initC, jump to the tail loop when K < DepthU. Under PLSIN the
@@ -4490,7 +4607,14 @@ class LogicalScheduler:
                                   comment="K < DepthU? initC done, run tail only"),
                         jump]
 
-            if splitInitC and skipGRForTail:
+            if splitInitC and skipGRForTail and outOfLine:
+                # initC is dealt out per load, so the K<DepthU guard (which branches
+                # over every load) cannot reach it. Its private contiguous copy goes
+                # out of line past all exit paths and falls through to SkipToEnd,
+                # leaving the fast path a pure fall-through with no added branch.
+                coldInitC = ([skipGRLabel]
+                             + [copy.deepcopy(inst) for inst in splitInitC])
+            elif splitInitC and skipGRForTail:
                 # initC chunks straddle the prefetch loads the guard branches over,
                 # so give that path a private contiguous copy after the MT0 region
                 # and branch the fast path around it.
@@ -4518,6 +4642,18 @@ class LogicalScheduler:
                     em_list.insert(init_idx, EmittedModule(
                         moduleId=next_id,
                         instructions=[skipGRLabel]))
+
+        if skipGRForTail:
+            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                 comment="K < DepthU? skip prefetch GR to initC"))
+            if coldInitC is not None:
+                # Target sits past the mainloop/NGLL/NLL bodies, well outside simm16.
+                module.add(writer.longBranchScc1(
+                    skipGRLabel, posNeg=1,
+                    comment="K < DepthU: skip prefetch GR to out-of-line initC (long)"))
+            else:
+                module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
+                                        comment="K < DepthU: skip prefetch GR, still run initC"))
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   preloop_emitted, schedule=False))
 
@@ -4627,6 +4763,14 @@ class LogicalScheduler:
                 else:
                     module.add(SBranch(labelName=endLabel.getLabelName(),
                                        comment="skip other exit paths"))
+
+        if coldInitC is not None:
+            # Unreachable by fall-through from the last NLL body, then falls straight
+            # into endLabel (== the tail-loop continuation the guard used to jump to).
+            module.add(SBranch(labelName=endLabel.getLabelName(),
+                               comment="skip the out-of-line tail-only initC"))
+            for inst in coldInitC:
+                module.add(inst)
 
         module.add(endLabel)
 

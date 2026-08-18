@@ -111,6 +111,21 @@ def preloopCoverInterleaveEnabled() -> bool:
     """
     return os.environ.get("TENSILE_PRELOOP_COVER_INTERLEAVE", "0") != "0"
 
+
+def preloopCoverInterleaveLevel() -> int:
+    """Granularity of the preloop cover-interleave prototype.
+
+    0 = off (stock emission), 1 = cover + initC spliced between the MT0 GR batches,
+    2 = initC dealt out per individual buffer_load across the whole A/B prefetch.
+    Unparseable values fall back to the boolean gate so a stray string still enables
+    the level-1 behaviour rather than silently disabling the prototype.
+    """
+    raw = os.environ.get("TENSILE_PRELOOP_COVER_INTERLEAVE", "0")
+    try:
+        return int(raw)
+    except ValueError:
+        return 1 if raw != "0" else 0
+
 # Global
 _global_ti = rocIsa.getInstance()
 
