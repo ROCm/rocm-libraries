@@ -72,7 +72,7 @@ def _make_isa_info_map(arch: str = "gfx942"):
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     isa = gfxToIsa(arch)
     info_map = makeIsaInfoMap([isa], clang)
-    info_map[isa].asmCaps["SupportedISA"] = True
+    info_map[isa].asmCaps.update({"SupportedISA": True, "HasMFMA": True})
     return isa, info_map
 
 
