@@ -50,7 +50,16 @@ def test_install_binds_the_actual_cmake_client_output(tmp_path):
     expected = tmp_path / "build/tensilelite/client" / executable
     assert tasks._built_client_path(tmp_path / "build") == expected
 
+def test_install_derives_build_version_from_selected_rocm_root(tmp_path):
+    version_file = tmp_path / ".info" / "version"
+    version_file.parent.mkdir()
+    version_file.write_text("7.2.4\n", encoding="utf-8")
 
+    assert tasks._rocm_base_version(tmp_path) == "7.2.4"
+
+def test_install_rejects_rocm_root_without_version_metadata(tmp_path):
+    with pytest.raises(tasks.Exit, match="no readable version metadata"):
+        tasks._rocm_base_version(tmp_path)
 def test_rocisa_install_uses_the_invoking_python_and_selected_rocm_compilers(
     tmp_path, monkeypatch
 ):
@@ -149,6 +158,8 @@ def test_install_uses_one_selected_rocm_root_and_binds_the_built_client(
 ):
     rocm_root = (tmp_path / "rocm").resolve()
     rocm_root.mkdir()
+    (rocm_root / ".info").mkdir()
+    (rocm_root / ".info" / "version").write_text("7.2.4\n", encoding="utf-8")
     build_dir = tmp_path / "build"
     client = tasks._built_client_path(build_dir)
     client.parent.mkdir(parents=True)
@@ -196,6 +207,7 @@ def test_install_uses_one_selected_rocm_root_and_binds_the_built_client(
         str(_SOURCE_ROOT),
     ]
     assert calls[3][2]["env"]["ROCM_PATH"] == str(rocm_root)
+    assert calls[3][2]["env"]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
     assert shlex.split(calls[4][1]) == [
         str(Path(sys.executable).absolute()),
         "-m",
@@ -203,6 +215,7 @@ def test_install_uses_one_selected_rocm_root_and_binds_the_built_client(
         "--client",
         str(client),
     ]
+    assert calls[4][2]["env"]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")
@@ -212,6 +225,8 @@ def test_install_rejects_an_invalid_built_client(
 ):
     rocm_root = (tmp_path / "rocm").resolve()
     rocm_root.mkdir()
+    (rocm_root / ".info").mkdir()
+    (rocm_root / ".info" / "version").write_text("7.2.4\n", encoding="utf-8")
     if create_non_executable:
         client = tasks._built_client_path(tmp_path / "build")
         client.parent.mkdir(parents=True)
