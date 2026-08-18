@@ -577,10 +577,10 @@ def _pap_solution_config(**overrides):
     return config
 
 
-def _pap_solution(**overrides):
+def _pap_solution(*, rocm_version=SemanticVersion(6, 4, 0), **overrides):
     assembler = SimpleNamespace(
         code_object_version="default",
-        rocm_version=SemanticVersion(6, 4, 0),
+        rocm_version=rocm_version,
     )
     return Solution(
         _pap_solution_config(**overrides),
@@ -708,7 +708,24 @@ def test_pap_is_valid_solution_parameter():
 def test_solution_validation_accepts_minimal_pap_tdm_contract():
     assert _pap_solution()["Valid"] is True
 
+@pytest.mark.parametrize(
+    "rocm_version, expected_preload",
+    [
+        pytest.param(SemanticVersion(6, 0, 32649), False, id="rocm_6_before_floor"),
+        pytest.param(SemanticVersion(6, 0, 32650), True, id="rocm_6_at_floor"),
+        pytest.param(SemanticVersion(7, 1, 25424), True, id="rocm_7_low_build"),
+    ],
+)
+def test_solution_applies_preload_gate_from_assembler_version(
+    rocm_version, expected_preload
+):
+    solution = _pap_solution(
+        rocm_version=rocm_version,
+        PreloadKernArgs=True,
+    )
 
+    assert solution["Valid"] is True
+    assert solution["PreloadKernArgs"] is expected_preload
 @pytest.mark.parametrize(
     "overrides, reason",
     [
