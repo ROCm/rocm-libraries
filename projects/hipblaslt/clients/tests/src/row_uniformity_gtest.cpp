@@ -1464,6 +1464,14 @@ namespace
         tensile.setWorkspaceSize(workspaceBytes);
         tensile.setParams().setUniformSummationOrder(true);
         tensile.setParams().setSmCountTarget(problem.smCountTarget);
+        if(problem.useBias)
+        {
+            // useBias=1: bias length along M (matches EPILOGUE_BIAS on NN GEMM).
+            tensile.setUseBias(1);
+            tensile.setBias(rocisa::DataType::Float,
+                            static_cast<size_t>(problem.m),
+                            /*stride=*/1);
+        }
         return tensile;
     }
 
@@ -1557,139 +1565,174 @@ namespace
             int        enumeratedCount = 0;
             const auto candidates      = harness.candidateAlgos(enumeratedCount, 256);
 
-            int         streamKCandidates = 0;
-            int         admitted          = 0;
-            int         refusedParallel   = 0;
-            std::string firstAdmitted;
+                int         streamKCandidates   = 0;
+                int         admitted            = 0;
+                int         admittedParallel    = 0;
+                int         refusedParallel     = 0;
+                std::string firstAdmitted;
 
-            for(const auto& candidate : candidates)
-            {
-                std::string reason;
-                auto        solution = solutionForAlgo(candidate, reason);
-                if(!solution)
-                    continue;
-
-                const StreamKResolution resolved
-                    = resolveStreamK(*solution, tensile, *hardware);
-                if(!resolved.streamK)
-                    continue;
-                ++streamKCandidates;
-
-                const std::string name = harness.solutionName(candidate);
-
-                // A parallel-reduction resolution stays refused: its
-                // post-kernel reduction is a separate, unaudited order. This is
-                // the free negative companion -- the same shape reaches it when
-                // the CU budget is left unset.
-                if(resolved.staticPacking && !resolved.tree)
+                for(const auto& candidate : candidates)
                 {
-                    EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
-                              HIPBLAS_STATUS_INVALID_VALUE)
-                        << name << " resolves to parallel reduction and must still be refused";
-                    ++refusedParallel;
-                    continue;
+                    std::string reason;
+                    auto        solution = solutionForAlgo(candidate, reason);
+                    if(!solution)
+                        continue;
+
+                    const StreamKResolution resolved
+                        = resolveStreamK(*solution, tensile, *hardware);
+                    if(!resolved.streamK)
+                        continue;
+                    ++streamKCandidates;
+
+                    const std::string name = harness.solutionName(candidate);
+
+                    // Parallel reduction: admit when the shared helper would
+                    // (F = grid/tiles >= 2 and grid % tiles == 0 under static
+                    // two-tile packing). Otherwise still refuse.
+                    if(resolved.staticPacking && !resolved.tree)
+                    {
+                        const bool admitParallel
+                            = resolved.tiles != 0 && resolved.grid % resolved.tiles == 0
+                              && (resolved.grid / resolved.tiles) >= 2;
+                        if(admitParallel)
+                        {
+                            EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
+                                      HIPBLAS_STATUS_SUCCESS)
+                                << name
+                                << " resolves to row-uniform parallel reduction and must be "
+                                   "honored";
+                            EXPECT_EQ(harness.firstNonUniformRowOfLastRun(), -1)
+                                << name << " parallel launch must keep identical D rows";
+                            ++admittedParallel;
+                            continue;
+                        }
+
+                        EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
+                                  HIPBLAS_STATUS_INVALID_VALUE)
+                            << name
+                            << " resolves to parallel reduction that is not row-uniform and "
+                               "must still be refused";
+                        ++refusedParallel;
+                        continue;
+                    }
+
+                    if(!resolved.newlyAdmitted)
+                        continue;
+
+                    // The split is only one of the gate's clauses. Consulting the
+                    // selection-time predicate for the rest -- the accumulation
+                    // mode, the effective GSU, whether the StaggerU clamp reaches
+                    // this kernel -- is what makes the success assertion below an
+                    // assertion about the split and not about the whole gate.
+                    if(!solution->uniformSummationOrderSupported(tensile, *hardware))
+                        continue;
+
+                    // Pin the resolution, not just the outcome: asserting only
+                    // success would let a future threshold change degrade this case
+                    // into a duplicate of the pre-existing one with no signal.
+                    //
+                    // Clause 2 is grid = F * tiles with F >= 2 and skTiles == tiles.
+                    // That admits two K-splits:
+                    //   even: extraIters == 0 and I % skItersPerWG == 0 (F divides I)
+                    //   leftover: extraIters != 0, admitted only when the kernel
+                    //     redistributes extras within each tile. Intra-tile chunk
+                    //     lengths may still differ when I % F != 0; that is the
+                    //     leftover regime, not the even-split one.
+                    EXPECT_EQ(resolved.grid % resolved.tiles, 0u)
+                        << name << ": clause 2 requires the grid to be a multiple of the tile count";
+                    EXPECT_NE(resolved.grid, resolved.tiles)
+                        << name << ": a grid equal to the tile count is the pre-existing regime";
+                    EXPECT_EQ(resolved.split.skTiles, resolved.tiles);
+                    EXPECT_NE(resolved.split.skItersPerWG, resolved.itersPerTile);
+                    ASSERT_NE(resolved.split.skItersPerWG, 0u);
+
+                    const bool leftoverSplit = resolved.split.extraIters != 0u;
+                    if(leftoverSplit)
+                    {
+                        EXPECT_TRUE(resolved.perTileExtraIters)
+                            << name << ": leftover extraIters=" << resolved.split.extraIters
+                            << " (itersPerTile%skItersPerWG="
+                            << (resolved.itersPerTile % resolved.split.skItersPerWG)
+                            << ") is admitted only with per-tile extra-iters; do not "
+                               "classify it as the even K-split";
+                    }
+                    else
+                    {
+                        EXPECT_EQ(resolved.split.extraIters, 0u);
+                        EXPECT_EQ(resolved.itersPerTile % resolved.split.skItersPerWG, 0u);
+                    }
+
+                    if(admitted == 0)
+                    {
+                        firstAdmitted = name;
+                        RecordProperty("tiles", static_cast<int>(resolved.tiles));
+                        RecordProperty("iters_per_tile", static_cast<int>(resolved.itersPerTile));
+                        RecordProperty("sk_grid", static_cast<int>(resolved.grid));
+                        RecordProperty("grid_over_tiles",
+                                       static_cast<int>(resolved.grid / resolved.tiles));
+                        RecordProperty("sk_tiles", static_cast<int>(resolved.split.skTiles));
+                        RecordProperty("sk_iters_per_wg",
+                                       static_cast<int>(resolved.split.skItersPerWG));
+                        RecordProperty("extra_iters",
+                                       static_cast<int>(resolved.split.extraIters));
+                        RecordProperty("leftover_split", leftoverSplit ? 1 : 0);
+                    }
+                    ++admitted;
+
+                    EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS)
+                        << name << " has a row-uniform StreamK split (tiles=" << resolved.tiles
+                        << " itersPerTile=" << resolved.itersPerTile << " grid=" << resolved.grid
+                        << " skTiles=" << resolved.split.skTiles
+                        << " skItersPerWG=" << resolved.split.skItersPerWG
+                        << " extraIters=" << resolved.split.extraIters
+                        << (leftoverSplit ? ", leftover per-tile extra-iters" : ", even K-split")
+                        << ") and must be admitted rather than refused";
+
+                    const int64_t badRow = harness.firstNonUniformRowOfLastRun();
+                    EXPECT_EQ(badRow, -1)
+                        << "Row " << badRow << " of D differs bitwise from row 0 for " << name;
                 }
 
-                if(!resolved.newlyAdmitted)
-                    continue;
+                RecordProperty("arch", gpuArchName());
+                RecordProperty("algos_enumerated", enumeratedCount);
+                RecordProperty("candidates_tried", static_cast<int>(candidates.size()));
+                RecordProperty("streamk_candidates", streamKCandidates);
+                RecordProperty("newly_admitted", admitted);
+                RecordProperty("admitted_parallel", admittedParallel);
+                RecordProperty("refused_parallel", refusedParallel);
 
-                // The split is only one of the gate's clauses. Consulting the
-                // selection-time predicate for the rest -- the accumulation
-                // mode, the effective GSU, whether the StaggerU clamp reaches
-                // this kernel -- is what makes the success assertion below an
-                // assertion about the split and not about the whole gate.
-                if(!solution->uniformSummationOrderSupported(tensile, *hardware))
-                    continue;
-
-                // Pin the resolution, not just the outcome: asserting only
-                // success would let a future threshold change degrade this case
-                // into a duplicate of the pre-existing one with no signal.
-                //
-                // Clause 2 is grid = F * tiles with F >= 2 and skTiles == tiles.
-                // That admits two K-splits:
-                //   even: extraIters == 0 and I % skItersPerWG == 0 (F divides I)
-                //   leftover: extraIters != 0, admitted only when the kernel
-                //     redistributes extras within each tile. Intra-tile chunk
-                //     lengths may still differ when I % F != 0; that is the
-                //     leftover regime, not the even-split one.
-                EXPECT_EQ(resolved.grid % resolved.tiles, 0u)
-                    << name << ": clause 2 requires the grid to be a multiple of the tile count";
-                EXPECT_NE(resolved.grid, resolved.tiles)
-                    << name << ": a grid equal to the tile count is the pre-existing regime";
-                EXPECT_EQ(resolved.split.skTiles, resolved.tiles);
-                EXPECT_NE(resolved.split.skItersPerWG, resolved.itersPerTile);
-                ASSERT_NE(resolved.split.skItersPerWG, 0u);
-
-                const bool leftoverSplit = resolved.split.extraIters != 0u;
-                if(leftoverSplit)
+                if(admitted == 0 && admittedParallel == 0 && refusedParallel == 0)
                 {
-                    EXPECT_TRUE(resolved.perTileExtraIters)
-                        << name << ": leftover extraIters=" << resolved.split.extraIters
-                        << " (itersPerTile%skItersPerWG="
-                        << (resolved.itersPerTile % resolved.split.skItersPerWG)
-                        << ") is admitted only with per-tile extra-iters; do not "
-                           "classify it as the even K-split";
-                }
-                else
-                {
-                    EXPECT_EQ(resolved.split.extraIters, 0u);
-                    EXPECT_EQ(resolved.itersPerTile % resolved.split.skItersPerWG, 0u);
+                    const std::string arch      = gpuArchName();
+                    const std::string processor = arch.substr(0, arch.find(':'));
+                    // Fail-closed where the library is known to witness this shape:
+                    //   gfx950 + no-bias  (Math CI / local MI355X)
+                    //   gfx942 + Bias     (GridBased exact-size entry, report 09)
+                    // Elsewhere skip: gfx942 without Bias finds zero Stream-K
+                    // candidates; gfx1201 has no Stream-K solutions at all.
+                    const bool expectWitness
+                        = (processor.rfind("gfx950", 0) == 0 && !problem.useBias)
+                          || (processor.rfind("gfx942", 0) == 0 && problem.useBias);
+                    const std::string detail
+                        = std::string("No candidate resolved into either the newly admitted "
+                                      "StreamK split regime, an admitted parallel reduction, or "
+                                      "a refused parallel reduction, so this run witnessed "
+                                      "neither. arch=")
+                          + arch + " problem=" + std::to_string(problem.m) + "x"
+                          + std::to_string(problem.n) + "x" + std::to_string(problem.k)
+                          + " smCountTarget=" + std::to_string(problem.smCountTarget)
+                          + " useBias=" + (problem.useBias ? "1" : "0")
+                          + " algos_enumerated=" + std::to_string(enumeratedCount)
+                          + " candidates_tried=" + std::to_string(candidates.size())
+                          + " streamk_candidates=" + std::to_string(streamKCandidates);
+                    if(expectWitness)
+                        FAIL() << detail;
+                    GTEST_SKIP() << detail;
                 }
 
-                if(admitted == 0)
-                {
-                    firstAdmitted = name;
-                    RecordProperty("tiles", static_cast<int>(resolved.tiles));
-                    RecordProperty("iters_per_tile", static_cast<int>(resolved.itersPerTile));
-                    RecordProperty("sk_grid", static_cast<int>(resolved.grid));
-                    RecordProperty("grid_over_tiles",
-                                   static_cast<int>(resolved.grid / resolved.tiles));
-                    RecordProperty("sk_tiles", static_cast<int>(resolved.split.skTiles));
-                    RecordProperty("sk_iters_per_wg",
-                                   static_cast<int>(resolved.split.skItersPerWG));
-                    RecordProperty("extra_iters",
-                                   static_cast<int>(resolved.split.extraIters));
-                    RecordProperty("leftover_split", leftoverSplit ? 1 : 0);
-                }
-                ++admitted;
-
-                EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS)
-                    << name << " has a row-uniform StreamK split (tiles=" << resolved.tiles
-                    << " itersPerTile=" << resolved.itersPerTile << " grid=" << resolved.grid
-                    << " skTiles=" << resolved.split.skTiles
-                    << " skItersPerWG=" << resolved.split.skItersPerWG
-                    << " extraIters=" << resolved.split.extraIters
-                    << (leftoverSplit ? ", leftover per-tile extra-iters" : ", even K-split")
-                    << ") and must be admitted rather than refused";
-
-                const int64_t badRow = harness.firstNonUniformRowOfLastRun();
-                EXPECT_EQ(badRow, -1)
-                    << "Row " << badRow << " of D differs bitwise from row 0 for " << name;
+                RecordProperty("first_admitted_solution", firstAdmitted);
             }
-
-            RecordProperty("arch", gpuArchName());
-            RecordProperty("algos_enumerated", enumeratedCount);
-            RecordProperty("candidates_tried", static_cast<int>(candidates.size()));
-            RecordProperty("streamk_candidates", streamKCandidates);
-            RecordProperty("newly_admitted", admitted);
-            RecordProperty("refused_parallel", refusedParallel);
-
-            if(admitted == 0 && refusedParallel == 0)
-                GTEST_SKIP()
-                    << "No candidate resolved into either the newly admitted StreamK split "
-                       "regime or a parallel reduction, so this run witnessed neither. Which "
-                       "regime a shape reaches depends on the tuned solutions and the CU count, "
-                       "so an architecture whose library has no StreamK solution for it skips "
-                       "rather than fails. arch="
-                    << gpuArchName() << " problem=" << problem.m << "x" << problem.n << "x"
-                    << problem.k << " smCountTarget=" << problem.smCountTarget
-                    << " algos_enumerated=" << enumeratedCount
-                    << " candidates_tried=" << candidates.size()
-                    << " streamk_candidates=" << streamKCandidates;
-
-            RecordProperty("first_admitted_solution", firstAdmitted);
-        }
-    };
+        };
 
     // An 80-CU budget through the public HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET
     // attribute. This is the configuration report 09 identified as reaching
@@ -1706,6 +1749,24 @@ namespace
     TEST_F(RowUniformityClauseTwo_pre_checkin, SplitRegime_4096x32x10240_AllCUs)
     {
         checkNewlyAdmittedSplit({4096, 32, 10240, HIP_R_16BF, 0});
+    }
+
+    // gfx942 GridBased exact-size entry for this shape lives in a Bias library.
+    // Without the epilogue the sweep finds zero Stream-K candidates on MI300X
+    // Math CI; with Bias + SM_COUNT_TARGET=80 the newly admitted all-partial
+    // regime is selected.
+    TEST_F(RowUniformityClauseTwo_pre_checkin, SplitRegime_4096x32x10240_SmCount80_Bias)
+    {
+        Problem problem{4096, 32, 10240, HIP_R_16BF, 80, /*useBias=*/true};
+        checkNewlyAdmittedSplit(problem);
+    }
+
+    // Same Bias shape with the full CU count: on a stock MI300X (~304 CU) the
+    // resolution flips to parallel and must still be refused under coherence.
+    TEST_F(RowUniformityClauseTwo_pre_checkin, SplitRegime_4096x32x10240_AllCUs_Bias)
+    {
+        Problem problem{4096, 32, 10240, HIP_R_16BF, 0, /*useBias=*/true};
+        checkNewlyAdmittedSplit(problem);
     }
 
     // =======================================================================
