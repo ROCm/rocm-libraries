@@ -107,8 +107,8 @@ namespace rocRoller::Client::GEMMClient
                  rocRoller::Client::GEMMClient::ProblemParameters const& problemParams,
                  GPUArchitecture const&                                  arch)
     {
-        const bool   hasScales = generatedInputs.scaleA || generatedInputs.scaleB
-                                 || !hostScaleA.empty() || !hostScaleB.empty();
+        const bool hasScales = generatedInputs.scaleA || generatedInputs.scaleB
+                               || !hostScaleA.empty() || !hostScaleB.empty();
         const size_t scaleBlockSize
             = hasScales ? (problemParams.types.scaleBlockSize > 0
                                ? static_cast<size_t>(problemParams.types.scaleBlockSize)
@@ -265,8 +265,8 @@ namespace rocRoller::Client::GEMMClient
                 sizes[0] /= packing;
                 preTileSize[0] /= packing;
             }
-            hostBForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
-                hostB, sizes, {}, preTileSize);
+            hostBForKernel
+                = roc::host_validation::amd_gpu_layout::preSwizzle(hostB, sizes, {}, preTileSize);
         }
 
         // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
@@ -1295,7 +1295,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--workgroup_cluster_size_z", &SolutionParameters::workgroupClusterSizeZ));
 
     template <typename T, typename U>
-    std::string getSolutionParameterArgumentName(U T::* member_ptr)
+    std::string getSolutionParameterArgumentName(U T::*member_ptr)
     {
         std::optional<std::string> found_name;
 
