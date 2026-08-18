@@ -176,6 +176,10 @@ namespace TensileLite
 
         split.skTiles      = skTiles;
         split.skItersPerWG = static_cast<uint32_t>(skTiles * itersPerTile / skGrid);
+        // Global leftover under the historical first-E mapping. The device may
+        // redistribute these extras within each tile when
+        // InternalArgsSupport::perTileExtraIters is set and skGrid % skTiles == 0
+        // (AIHPBLAS-4253); the packed value itself is unchanged.
         split.extraIters   = static_cast<uint32_t>(static_cast<size_t>(skTiles) * itersPerTile
                                                  - static_cast<size_t>(split.skItersPerWG)
                                                        * skGrid);
@@ -184,32 +188,84 @@ namespace TensileLite
 
     bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
                                       size_t                    tiles,
-                                      size_t                    itersPerTile)
+                                      size_t                    itersPerTile,
+                                      size_t                    skGrid,
+                                      bool                      perTileExtraIters)
     {
         // A tile's fold signature is the ordered list of chunk lengths whose
         // partials are summed to produce it, and two tiles are bitwise equal
         // for identical inputs exactly when their signatures match. Every tile
-        // in the launch must therefore share one signature. Three ways that
-        // happens:
+        // in the launch must therefore share one signature. Ways that happens:
         //
         //  skTiles == 0        force-DP-only, so every tile is whole.
         //  skItersPerWG == I   every StreamK chunk is one whole tile;
         //                      equivalent to tiles % grid == 0.
-        //  skTiles == tiles && I % skItersPerWG == 0
+        //  skTiles == tiles && I % skItersPerWG == 0 && extraIters == 0
         //                      no data-parallel region, and every tile is cut
         //                      into I/skItersPerWG equal chunks at identical
         //                      offsets; equivalent to tiles | grid and
         //                      (grid/tiles) | I.
+        //  AIHPBLAS-4253: skTiles == tiles && grid % tiles == 0 with a kernel
+        //                      that redistributes extras within each tile.
+        //                      extraIters may be nonzero; fold signatures still
+        //                      match because each tile gets the same intra-tile
+        //                      remainder pattern.
         //
-        // extraIters != 0 means chunks come in two lengths, so the chunk
-        // lattice has no single period and tile boundaries interleave with it
-        // irregularly. skItersPerWG != 0 is not implied by the rest: tiles == 0
-        // is reachable from the grouped-GEMM callers and would otherwise leave
+        // Without the capability bit, extraIters != 0 means chunks come in two
+        // lengths under the global first-E mapping, so the chunk lattice has no
+        // single period. skItersPerWG != 0 is not implied by the rest: tiles ==
+        // 0 is reachable from the grouped-GEMM callers and would otherwise leave
         // I % skItersPerWG undefined.
-        return split.skTiles == 0
-               || (split.extraIters == 0 && split.skItersPerWG != 0
-                   && (split.skItersPerWG == itersPerTile
-                       || (split.skTiles == tiles && itersPerTile % split.skItersPerWG == 0)));
+        if(split.skTiles == 0)
+            return true;
+
+        if(split.skItersPerWG != 0 && split.extraIters == 0
+           && (split.skItersPerWG == itersPerTile
+               || (split.skTiles == tiles && itersPerTile % split.skItersPerWG == 0)))
+            return true;
+
+        if(perTileExtraIters && split.skTiles == tiles && tiles != 0 && skGrid % tiles == 0
+           && split.skItersPerWG != 0)
+            return true;
+
+        return false;
+    }
+
+    StreamKWorkgroupIterRange streamKWorkgroupIterRange(
+        size_t w, size_t tiles, size_t itersPerTile, size_t skGrid, bool perTileExtraIters)
+    {
+        StreamKWorkgroupIterRange range;
+        if(skGrid == 0 || tiles == 0)
+            return range;
+
+        const size_t totalIters = tiles * itersPerTile;
+        const size_t W          = totalIters / skGrid;
+        const size_t E          = totalIters - W * skGrid;
+
+        if(perTileExtraIters && skGrid % tiles == 0)
+        {
+            const size_t F    = skGrid / tiles;
+            const size_t q    = w / F;
+            const size_t s    = w % F;
+            const size_t remI = itersPerTile % F;
+            const size_t base = itersPerTile / F;
+            range.start       = q * itersPerTile + s * base + std::min(s, remI);
+            range.end = range.start + base + (s < remI ? size_t{1} : size_t{0});
+            return range;
+        }
+
+        // Historical global first-E mapping.
+        if(w < E)
+        {
+            range.start = w * (W + 1);
+            range.end   = range.start + (W + 1);
+        }
+        else
+        {
+            range.start = E * (W + 1) + (w - E) * W;
+            range.end   = range.start + W;
+        }
+        return range;
     }
 
     enum class KERNELARGTYPE
@@ -4571,13 +4627,19 @@ namespace TensileLite
                                          pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
                                          sizeMapping.streamKForceDPOnly != 0);
 
-                if(!streamKStaticSplitRowUniform(split, tiles, itersPerTile))
+                if(!streamKStaticSplitRowUniform(split,
+                                                 tiles,
+                                                 itersPerTile,
+                                                 sk.grid,
+                                                 internalArgsSupport.perTileExtraIters))
                     reject("the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
                            + " itersPerTile=" + std::to_string(itersPerTile)
                            + " grid=" + std::to_string(sk.grid)
                            + " skTiles=" + std::to_string(split.skTiles)
                            + " skItersPerWG=" + std::to_string(split.skItersPerWG)
-                           + " extraIters=" + std::to_string(split.extraIters));
+                           + " extraIters=" + std::to_string(split.extraIters)
+                           + " perTileExtraIters="
+                           + (internalArgsSupport.perTileExtraIters ? "1" : "0"));
             }
             else if(tiles % sk.grid != 0)
             {

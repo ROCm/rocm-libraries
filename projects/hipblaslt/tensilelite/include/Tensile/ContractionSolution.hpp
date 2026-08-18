@@ -231,8 +231,10 @@ namespace TensileLite
      * a flat iteration space of tiles*itersPerTile, a data-parallel prefix of
      * (tiles - skTiles) whole tiles, and a StreamK region cut into skGrid
      * chunks. extraIters is the leftover skTiles*itersPerTile -
-     * SKItersPerWG*skGrid; workgroups below it get a chunk one iteration
-     * longer than the rest (StreamK.py skExtraIters).
+     * SKItersPerWG*skGrid under the historical global first-E mapping;
+     * kernels with InternalArgsSupport::perTileExtraIters may redistribute
+     * those extras within each tile when skGrid % skTiles == 0
+     * (AIHPBLAS-4253 / StreamK.py skAssignIters).
      */
     struct StreamKStaticSplit
     {
@@ -270,13 +272,38 @@ namespace TensileLite
      * is insensitive to how tile indices map to (m-tile, n-tile) -- WGM,
      * SpaceFillingAlgo and XCC swizzling do not enter into it.
      *
-     * @param split        The split streamKStaticSplit() produced.
-     * @param tiles        The same batch-inclusive tile count fed to it.
-     * @param itersPerTile The same clamped iterations per tile fed to it.
+     * @param split             The split streamKStaticSplit() produced.
+     * @param tiles             The same batch-inclusive tile count fed to it.
+     * @param itersPerTile      The same clamped iterations per tile fed to it.
+     * @param skGrid            The resolved StreamK grid packed into the split.
+     * @param perTileExtraIters True when the selected kernel implements
+     *                          AIHPBLAS-4253 per-tile extra-iters distribution
+     *                          (InternalArgsSupport::perTileExtraIters).
      */
     TENSILELITEHOST_EXPORT bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
                                                             size_t                    tiles,
-                                                            size_t itersPerTile);
+                                                            size_t                    itersPerTile,
+                                                            size_t                    skGrid            = 0,
+                                                            bool                      perTileExtraIters = false);
+
+    /**
+     * Iteration range [start, end) assigned to workgroup w under the static
+     * two-tile StreamK mapping. When perTileExtraIters is true and
+     * skGrid % tiles == 0, extras are distributed within each tile
+     * (AIHPBLAS-4253); otherwise the historical global first-E mapping is used.
+     */
+    struct StreamKWorkgroupIterRange
+    {
+        size_t start = 0;
+        size_t end   = 0;
+    };
+
+    TENSILELITEHOST_EXPORT StreamKWorkgroupIterRange streamKWorkgroupIterRange(
+        size_t w,
+        size_t tiles,
+        size_t itersPerTile,
+        size_t skGrid,
+        bool   perTileExtraIters);
 
     /**
      * Thrown when a launch requests uniform summation order but the resolved
@@ -670,12 +697,17 @@ namespace TensileLite
 
         struct InternalArgsSupport
         {
-            int  version          = 0;
-            bool gsu              = true;
-            bool wgm              = true;
-            bool staggerU         = true;
-            bool useUniversalArgs = true;
-            bool useSFC           = false;
+            int  version            = 0;
+            bool gsu                = true;
+            bool wgm                = true;
+            bool staggerU           = true;
+            // AIHPBLAS-4253: kernel distributes Stream-K extra iters within each
+            // tile when skGrid % skTiles == 0. Older/custom kernels leave this
+            // false; newly generated StreamK 3 / SK5 set it true. 4254 grid
+            // steering will consult the same bit.
+            bool perTileExtraIters  = false;
+            bool useUniversalArgs   = true;
+            bool useSFC             = false;
         };
 
         struct ProblemType
