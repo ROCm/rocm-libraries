@@ -182,8 +182,9 @@ TEST(TestIngestorGenericEngine, GetDetailsAdvertisesTheBenchmarkingKnobOutOfBand
 }
 
 /// A UED naming no knobs of its own still gets the out-of-band prepend: the
-/// advertisement is unconditional, not contingent on the engine declaring anything
-/// (plan §4 "The frontend sees this engine as exhaustive-capable").
+/// advertisement does not depend on the engine declaring anything, only on the handle
+/// being able to supply a stream (plan §4 "The frontend sees this engine as
+/// exhaustive-capable").
 TEST(TestIngestorGenericEngine, GetDetailsAdvertisesExactlyTheBenchmarkingKnobWhenNoneAreDeclared)
 {
     const ScopedTestSymbols symbols;
@@ -215,6 +216,105 @@ TEST(TestIngestorGenericEngine, ConstructingAnEngineWithNoDeclaredKnobsNeverThro
     const StubDeviceResolver resolver;
 
     EXPECT_NO_THROW((StubEngine(makeEngineWithKnobs({}), makeStubStateManager(), resolver)));
+}
+
+/// The mirror of the case above: benchmarking times kernels on handle.getStream(), so
+/// an engine whose handle cannot supply one must not advertise the knob. Without this,
+/// such an engine would claim supportsExhaustive to the frontend, get primed, and only
+/// then fail at plan-build time with no stream to time on. The partner types are local
+/// to this case because the shared StubContext/StubDeviceResolver are bound to
+/// StubHandle, which now has a stream.
+namespace
+{
+
+struct StreamlessContext
+{
+    void setExecutionSettings(const StubSettings& settings)
+    {
+        _settings = settings;
+    }
+
+    const StubSettings& executionSettings() const
+    {
+        return _settings;
+    }
+
+    void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<StreamlessStubHandle>> plan)
+    {
+        _plan = std::move(plan);
+    }
+
+private:
+    StubSettings _settings;
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan<StreamlessStubHandle>> _plan;
+};
+
+class StreamlessDeviceResolver : public IDeviceResolver<StreamlessStubHandle>
+{
+public:
+    DeviceId deviceId(const StreamlessStubHandle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
+    {
+        return _properties;
+    }
+
+private:
+    DeviceProperties _properties = testDeviceProperties();
+};
+
+/// The one-kernel pack makeStubStateManager() builds, on the streamless handle.
+std::unique_ptr<KernelIngestorStateManager<StreamlessStubHandle>> makeStreamlessStateManager()
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.name = "test schema";
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
+
+    static constexpr const char* STREAMLESS_DISPATCH = "hipdnn.kernel_ingestor.test.dispatch";
+    ensureNoopDispatchRegistered<StreamlessStubHandle>(STREAMLESS_DISPATCH);
+
+    return std::make_unique<KernelIngestorStateManager<StreamlessStubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", STREAMLESS_DISPATCH}},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GRAPH_MATCH_SYMBOL);
+}
+
+} // namespace
+
+TEST(TestIngestorGenericEngine, AStreamlessHandleNeverAdvertisesTheBenchmarkingKnob)
+{
+    const ScopedTestSymbols symbols;
+    const StreamlessDeviceResolver resolver;
+    const GenericEngine<StreamlessStubHandle, StubSettings, StreamlessContext> engine(
+        makeEngineWithKnobs({BLOCK_SIZE}), makeStreamlessStateManager(), resolver);
+
+    StreamlessStubHandle handle;
+    const TestGraph graph(makeGraphId(0x67));
+    hipdnnPluginConstData_t details{};
+
+    engine.getDetails(handle, graph, details);
+
+    ASSERT_NE(details.ptr, nullptr);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
+                                                                                     details.size);
+    ASSERT_TRUE(wrapper.isValid());
+    ASSERT_EQ(wrapper.knobCount(), 1U);
+    EXPECT_EQ(wrapper.getKnobByName(BLOCK_SIZE).knobId(), BLOCK_SIZE);
 }
 
 TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)

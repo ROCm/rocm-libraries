@@ -629,7 +629,31 @@ private:
     const IKernelDispatchHandler<THandle>* _previous = nullptr;
 };
 
+/// Models a real provider handle, which always carries a stream: both shipped handles
+/// (hip-kernel-provider's and MIOpen's) expose getStream(), and GenericEngine only
+/// advertises the benchmarking knob for handles that do. A handle deliberately lacking
+/// it is StreamlessStubHandle, below.
 struct StubHandle
+{
+    void storeEngineDetailsDetachedBuffer(const void* /*ptr*/,
+                                          std::unique_ptr<flatbuffers::DetachedBuffer> buffer)
+    {
+        _buffers.push_back(std::move(buffer));
+    }
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    hipStream_t getStream() const
+    {
+        return nullptr;
+    }
+
+private:
+    std::vector<std::unique_ptr<flatbuffers::DetachedBuffer>> _buffers;
+};
+
+/// A handle without getStream(), for pinning that an engine on such a handle neither
+/// advertises the benchmarking knob nor claims exhaustive support.
+struct StreamlessStubHandle
 {
     void storeEngineDetailsDetachedBuffer(const void* /*ptr*/,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer)

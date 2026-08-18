@@ -22,9 +22,12 @@ static constexpr const char* FORCE_BENCHMARKING_ENV_NAME = "HIPDNN_FORCE_BENCHMA
 /// Reads and parses HIPDNN_FORCE_BENCHMARKING per call (never cached), following
 /// hipdnn_data_sdk::logging::detail::stringToSeverity()'s shape: normalize with
 /// toLower(trim(...)) and match a literal set. Unset, empty, whitespace-only, or any
-/// unrecognized value returns std::nullopt. Only an unset variable is silent -- it is
-/// the default state, not a mistake; every other rejected value, whitespace-only
-/// included, logs a WARN naming the variable and the value the caller actually set.
+/// unrecognized value returns std::nullopt.
+///
+/// Unset and empty are silent, and are the same thing here: getEnv() yields "" for
+/// both, so the two cannot be told apart. Every value that survives that check and
+/// still fails to parse -- whitespace-only included -- logs a WARN naming the variable
+/// and the value, since a caller who set something meant something by it.
 inline std::optional<bool> benchmarkingOverrideFromEnv()
 {
     const auto raw = hipdnn_data_sdk::utilities::getEnv(FORCE_BENCHMARKING_ENV_NAME);

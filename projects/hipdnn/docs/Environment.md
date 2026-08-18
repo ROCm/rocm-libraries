@@ -137,7 +137,7 @@ A process-wide override for the `global.benchmarking` knob, independent of any e
 | `1`, `true`, `on`, `yes`, `enable`, `enabled` | Force benchmarking **on**, regardless of the knob |
 | `0`, `false`, `off`, `no`, `disable`, `disabled` | Force benchmarking **off**, overriding the knob and autotune's EXHAUSTIVE priming |
 
-Values are case-insensitive and tolerant of surrounding whitespace (`ON`, ` On `, `TRUE`, `Off` all resolve). Any value not in the tables above -- including empty or whitespace-only -- is ignored with a warning and treated as unset, never as on.
+Values are case-insensitive and tolerant of surrounding whitespace (`ON`, ` On `, `TRUE`, `Off` all resolve). Any value not in the table above is ignored and treated as unset, never as on. An unrecognized value logs a warning naming the variable and the value; setting the variable to the empty string is indistinguishable from leaving it unset and is silently ignored.
 
 This is an **override**, not a one-way switch: it can force benchmarking on just as readily as it can force it off, in either direction, over whatever the knob or `Graph::autotune()`'s EXHAUSTIVE mode requested. It needs no autotune call and no knob setting to take effect -- setting it to `1` benchmarks a plain `hipdnnExecute()` with no other configuration.
 
@@ -154,6 +154,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - With benchmarking on, the first `execute()` of a plan is slower by design: it is a priming run that samples every knob-filtered candidate kernel before caching the winner for the plan's life. This is not a regression.
 - A process-wide variable reaches every provider at once, with no per-provider or per-engine granularity -- a leaked value from one test or shell silently changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` can quietly defeat `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans itself.
+- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is re-computed in place once per sample. The winner runs last, so the final contents are correct, but an in-place graph sees its buffer written many times before that.
 
 ### Logging Variables
 

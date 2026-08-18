@@ -219,10 +219,16 @@ public:
         }
         else
         {
+            // Unreachable in practice: GenericEngine::getDetails() only advertises the
+            // benchmarking knob when THandle has getStream(), so a caller cannot set the
+            // knob on such an engine and benchmarkingEnabled cannot become true. Kept as
+            // a named failure rather than an assumption, and actionable if a provider
+            // reaches it by setting the flag through some other route.
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                         "engine '" + _engine.name
-                                            + "' cannot benchmark: THandle has no "
-                                              "'hipStream_t getStream() const' method");
+                                            + "' cannot benchmark: add "
+                                              "'hipStream_t getStream() const' to this "
+                                              "provider's handle type to enable it");
         }
     }
 

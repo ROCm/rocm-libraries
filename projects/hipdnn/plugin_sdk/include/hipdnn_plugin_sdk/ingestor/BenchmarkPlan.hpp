@@ -28,8 +28,10 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Timing constants, not knobs: Part 1 fixes the mechanism, and the Phase 2 GPU run
-/// only revisits these two values if timing proves unstable at this granularity.
+/// Timing constants, not knobs: Part 1 fixes the mechanism. These are starting values,
+/// not measured ones -- the gfx942 run confirmed sampling executes and selects, but did
+/// not measure per-candidate variance, so whether this many iterations makes a pointwise
+/// kernel's timing stable is still open (plan §9 uncertainty 1).
 constexpr int BENCHMARK_WARMUP_RUNS = 1;
 constexpr int BENCHMARK_ITERATIONS = 5;
 
@@ -128,6 +130,11 @@ public:
         return _workspaceBytes;
     }
 
+    /// Sampling runs candidates against the caller's real buffers, so a candidate that
+    /// fails mid-loop can leave a partial result behind. What makes that safe is that
+    /// this function always ends with the delegated execute below, which overwrites the
+    /// output with the winner's. Never add an early return between resolveChosen() and
+    /// that delegation.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     void execute(const THandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -142,6 +149,12 @@ private:
     /// Resolves _chosen on the first call under the mutex; every later call returns the
     /// cached winner without re-sampling. Two threads racing the first execute() see one
     /// sampling pass, not two.
+    ///
+    /// The lock is held across the whole sweep, so a second thread executing with
+    /// different buffers blocks until sampling finishes rather than proceeding in
+    /// parallel. That is the deliberate trade for sampling exactly once: a
+    /// double-checked lock here would let two threads sample concurrently, against each
+    /// other's buffers. Only the first execute() pays it.
     size_t resolveChosen(const THandle& handle,
                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                          uint32_t numDeviceBuffers,
