@@ -879,11 +879,13 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # Rename the private library's public C entry points to their _impl form by
     # force-including the redefinition header into every private source. The
     # header is pure preprocessor #defines and is guarded by
-    # MIOPEN_BUILDING_PRIVATE, so it is safe across C++, HIP and assembled
-    # kernel sources and the MIOpen source tree stays untouched.
+    # MIOPEN_BUILDING_PRIVATE, so the MIOpen source tree stays untouched. The
+    # option is restricted to CXX and the path is quoted, so neither a checkout
+    # path containing a space nor the generated .S sources added under
+    # MIOPEN_INCBIN can be handed a C++ header.
     target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOPEN_BUILDING_PRIVATE)
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
-        "SHELL:-include ${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h")
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
 
     # Public wrapper library. src/private/wrapper.cpp defines extern "C"
     # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
@@ -894,17 +896,33 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # symbols against libMIOpen_private.so.
     add_library(MIOpen ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
+
+    # Deliberately excludes src/include: the wrapper must see only the public
+    # header and its own _impl declarations. Without that restriction a stub
+    # could include an internal C++ header and re-couple the public shim to
+    # types that are supposed to live behind libMIOpen_private.so.
+    # CMAKE_BINARY_DIR/include holds the generated export.h and is listed here
+    # rather than relied on from miopen_generate_export_header() further down,
+    # so the target is complete at its point of definition even in a superbuild
+    # where PROJECT_BINARY_DIR and CMAKE_BINARY_DIR differ.
     target_include_directories(MIOpen PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_BINARY_DIR}/include
-        ${PROJECT_SOURCE_DIR}/src/include)
-    rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
+        ${CMAKE_BINARY_DIR}/include)
+
+    # The wrapper's only dependency is the private library, so every symbol it
+    # references must resolve at link time. This turns "new API added, stub
+    # written, rename #define forgotten" from a runtime failure into a link
+    # error -- the exported symbol set is unchanged in that case, so the
+    # public-ABI gate cannot catch it.
     if(NOT WIN32 AND NOT APPLE)
-        set_target_properties(MIOpen PROPERTIES
-            CXX_VISIBILITY_PRESET hidden
-            VISIBILITY_INLINES_HIDDEN 1)
-        target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
+        target_link_options(MIOpen PRIVATE "LINKER:--no-undefined")
     endif()
+
+    # 5,800 lines of hand-maintained forwarding code is the part of this change
+    # most in need of automated checking, and clang_tidy_check() below runs
+    # against the implementation target only.
+    clang_tidy_check(MIOpen)
 
     # The generated public export header (miopen_generate_export_header below)
     # keys MIOPEN_EXPORT off <target>_EXPORTS. It targets MIOpen (the wrapper),
@@ -926,7 +944,12 @@ if(TARGET inline_rocrand_header)
     add_dependencies(${_MIOPEN_IMPL_TARGET} inline_rocrand_header)
 endif()
 
-rocm_set_soversion(${_MIOPEN_IMPL_TARGET} ${MIOpen_SOVERSION})
+# Both halves of the split must carry the same SOVERSION; iterating the install
+# list keeps them from drifting. Flag-off the list is just MIOpen, so this is
+# identical to the pre-split single call.
+foreach(_miopen_target IN LISTS _MIOPEN_INSTALL_TARGETS)
+    rocm_set_soversion(${_miopen_target} ${MIOpen_SOVERSION})
+endforeach()
 
 clang_tidy_check(${_MIOPEN_IMPL_TARGET})
 
@@ -1075,10 +1098,14 @@ endif()
 target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(${_MIOPEN_IMPL_TARGET} INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
+# Symbol visibility must match across the split, so apply it to every installed
+# library rather than keeping a second copy in the wrapper block above.
 if(NOT WIN32 AND NOT APPLE)
-    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE "-Wl,--exclude-libs,ALL")
-    set_target_properties(${_MIOPEN_IMPL_TARGET} PROPERTIES CXX_VISIBILITY_PRESET hidden)
-    set_target_properties(${_MIOPEN_IMPL_TARGET} PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+    foreach(_miopen_target IN LISTS _MIOPEN_INSTALL_TARGETS)
+        target_link_libraries(${_miopen_target} PRIVATE "-Wl,--exclude-libs,ALL")
+        set_target_properties(${_miopen_target} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+        set_target_properties(${_miopen_target} PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+    endforeach()
 endif()
 #######################################
 if(MIOPEN_ENABLE_SQLITE)

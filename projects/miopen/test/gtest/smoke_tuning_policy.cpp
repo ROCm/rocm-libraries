@@ -105,8 +105,12 @@ TEST_F(CPU_TuningPolicy_NONE, TestGetApiLogged)
     // Under the public/private split the logged function name is the renamed
     // private entry point (miopenGetTuningPolicy_impl), since MIOPEN_LOG_FUNCTION
     // runs inside the _impl definition. Accept either the public name or its
-    // _impl form.
-    EXPECT_THAT(output, testing::ContainsRegex(" miopenGetTuningPolicy(_impl)?\\("));
+    // _impl form. Spelled with HasSubstr rather than a regex: gtest's built-in
+    // regex engine (used wherever POSIX REs are unavailable, notably Windows)
+    // supports neither grouping nor alternation.
+    EXPECT_THAT(output,
+                testing::AnyOf(testing::HasSubstr(" miopenGetTuningPolicy("),
+                               testing::HasSubstr(" miopenGetTuningPolicy_impl(")));
 }
 
 TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
@@ -125,7 +129,9 @@ TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
         ASSERT_EQ(status, miopenStatusSuccess);
         std::string output = testing::internal::GetCapturedStderr();
         // Accept the renamed _impl form under the public/private split (see above).
-        EXPECT_THAT(output, testing::ContainsRegex(" miopenSetTuningPolicy(_impl)?\\("));
+        EXPECT_THAT(output,
+                    testing::AnyOf(testing::HasSubstr(" miopenSetTuningPolicy("),
+                                   testing::HasSubstr(" miopenSetTuningPolicy_impl(")));
     }
 
     status = miopenSetTuningPolicy(&handle, original_policy);

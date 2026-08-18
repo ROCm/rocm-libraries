@@ -8,9 +8,8 @@
 # GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
 # no-CK UBSan debug build, gtest binary naming convention validation, the
 # public/private split wrapper build (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON), and the
-# flag-off byte-equivalence gate (RFC 0001): a MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF
-# build must keep libMIOpen.so's public ABI identical to the pre-wrapper
-# baseline.
+# flag-off public-ABI gate: a MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF build must keep
+# libMIOpen.so's exported public C API identical to the pre-wrapper baseline.
 
 name: "Component CI: MIOpen"
 
@@ -94,6 +93,11 @@ jobs:
           # as well so a real consumer links against the wrapper, proving the split
           # still satisfies both the public C API and the internal C++ symbols the
           # tests use.
+          #
+          # Coverage caveat: MLIR and ComposableKernel are OFF here to keep the job
+          # within its time budget, so the TUs those backends add are not compiled
+          # under the rename. The flag-on rename is only proven over the default
+          # solver set; a CK/MLIR-specific TU could still break it.
           - name: MIOpen Flag-On Wrapper Build-Only
             job_id: flag-on-build
             cmake_extra_flags: >-
@@ -107,13 +111,14 @@ jobs:
               -DGPU_TARGETS="gfx942"
             build_target: --target MIOpen --target miopen_gtest
 
-          # Flag-off byte-equivalence gate (RFC 0001, ALMIOPEN-2341). Builds the
-          # default (MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF) single libMIOpen.so and
-          # asserts its public ABI matches the committed pre-wrapper baseline
-          # (SONAME, exported public C API symbol set, no _impl leakage, no
-          # dependency on libMIOpen_private).
-          - name: MIOpen Flag-Off Byte-Equivalence
-            job_id: byte-equivalence
+          # Flag-off public-ABI gate. Builds the default
+          # (MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF) single libMIOpen.so and asserts its
+          # public ABI matches the committed pre-wrapper baseline: SONAME, exported
+          # public C API symbol set, no _impl leakage, no dependency on
+          # libMIOpen_private. This is a symbol-level check, not byte equivalence --
+          # signatures, struct layout and behaviour are outside its reach.
+          - name: MIOpen Flag-Off Public ABI
+            job_id: public-abi
             cmake_extra_flags: >-
               -DCMAKE_BUILD_TYPE=release
               -DBUILD_DEV=OFF
@@ -190,15 +195,15 @@ jobs:
       - name: Build
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
 
-      - name: Flag-off byte-equivalence check
-        if: matrix.job_id == 'byte-equivalence'
+      - name: Flag-off public-ABI check
+        if: matrix.job_id == 'public-abi'
         run: |
           lib=$(find build -name 'libMIOpen.so.1.0' | head -1)
           test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/"; exit 1; }
           echo "Checking $lib against committed baseline"
-          projects/miopen/script/check_byte_equivalence.sh check \
+          python3 projects/miopen/script/check_public_abi.py check \
             "$lib" \
-            projects/miopen/test/byte_equivalence/public_symbols.baseline
+            --baseline projects/miopen/test/public_abi/public_symbols.baseline
 
       # Asserts the flag-on wrapper's exported public C API set equals the
       # committed baseline minus the committed excluded set (experimental
@@ -210,11 +215,26 @@ jobs:
         run: |
           lib=$(find build -name 'libMIOpen.so.1.0' -not -name 'libMIOpen_private*' | head -1)
           test -n "$lib" || { echo "wrapper libMIOpen.so.1.0 not found under build/"; exit 1; }
-          echo "Checking wrapper $lib against baseline − excluded"
-          projects/miopen/script/check_byte_equivalence.sh check-wrapper \
+          private=$(find build -name 'libMIOpen_private.so.1.0' | head -1)
+          test -n "$private" || { echo "libMIOpen_private.so.1.0 not found under build/"; exit 1; }
+          echo "Checking wrapper $lib against baseline minus excluded"
+          python3 projects/miopen/script/check_public_abi.py check-wrapper \
             "$lib" \
-            projects/miopen/test/byte_equivalence/public_symbols.baseline \
-            projects/miopen/test/byte_equivalence/wrapper_excluded_symbols.txt
+            --baseline projects/miopen/test/public_abi/public_symbols.baseline \
+            --excluded projects/miopen/test/public_abi/wrapper_excluded_symbols.txt \
+            --private-lib "$private" \
+            --public-header projects/miopen/include/miopen/miopen.h
+
+      # The symbol-set check above proves the wrapper's symbol table partitions
+      # correctly; it says nothing about whether the forwarding stubs pass their
+      # arguments through correctly. The CPU_* gtests are the only part of the
+      # suite that can run on this GPU-less runner, so they are the one piece of
+      # behavioural coverage available for a flag-on binary. They also exercise
+      # the _impl branch of the relaxed assertions in smoke_tuning_policy.cpp,
+      # which no other job reaches.
+      - name: Run CPU gtests against the flag-on wrapper
+        if: matrix.job_id == 'flag-on-build'
+        run: ./build/bin/miopen_gtest --gtest_filter='CPU_*'
 
       - name: Configure Tuna Fin
         if: matrix.job_id == 'tuna-fin-build'
