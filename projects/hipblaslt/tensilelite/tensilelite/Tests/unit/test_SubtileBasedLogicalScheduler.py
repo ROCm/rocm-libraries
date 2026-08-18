@@ -15,10 +15,10 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 import pytest
-from Tensile.Components.Subtile.Kernel import (
+from tensilelite.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
     LogicalScheduler,
     MFMATileRange,
@@ -298,7 +298,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from rocisa import rocIsa
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
-    from Tensile.Common.RegisterPool import allocTmpGpr
+    from tensilelite.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
     import shutil
@@ -2344,7 +2344,7 @@ class TestInstructionEmitterPerUidK:
         assert cfg.numUnroll == {'A': 1, 'B': 1, 'SA': 1, 'SB': 1}
         assert cfg.lrA.k < cfg.numSubIterK  # LR steps per subIterK; emit spans full range
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         emitter = InstructionEmitter(
             writer=MagicMock(), kernel={}, config=cfg,
             tileInfoA=MagicMock(subtileShape=[1, 1]),
@@ -2361,7 +2361,7 @@ class TestInstructionEmitterPerUidK:
         assert cfg.numSubIterK == 4
         assert cfg.numUnroll == {'A': 2, 'B': 2, 'SA': 1, 'SB': 1}
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         emitter = InstructionEmitter(
             writer=MagicMock(), kernel={}, config=cfg,
             tileInfoA=MagicMock(subtileShape=[1, 1]),
@@ -2825,7 +2825,7 @@ class TestIntegration:
 
     def test_populate_instructions_256x256_fp4(self):
         """Full pipeline: emit → populate_instructions → instructionSchedule."""
-        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        from tensilelite.Components.Subtile.InstructionScheduler import instructionSchedule
 
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
@@ -3410,8 +3410,8 @@ class TestIntegration:
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.
 # Also calls the instruction scheduler to verify the emitted modules are valid input and to show the final instruction counts.
 # Example usage:
-#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 320 --mt1 320 --du 64 --pgr 1 --wg 2x2 --partition-size 10x2
-#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 256 --mt1 256 --du 256 --dtype fp4 --pgr 2 --wg 2x2 --partition-size 8x4
+#   PYTHONPATH=. python tensilelite/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 320 --mt1 320 --du 64 --pgr 1 --wg 2x2 --partition-size 10x2
+#   PYTHONPATH=. python tensilelite/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 256 --mt1 256 --du 256 --dtype fp4 --pgr 2 --wg 2x2 --partition-size 8x4
 if __name__ == "__main__":
     import sys
     import io
@@ -3732,7 +3732,7 @@ class TestBuildNll:
                         assert src.mtIteration == 0, \
                             f"NLL should only have LR(n=0), got mt={src.mtIteration}"
                     if em.opType == 'wait_gr':
-                        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
+                        from tensilelite.Components.Subtile.LogicalScheduler import WaitGROp
                         if isinstance(src, WaitGROp) and src.wait_gr_counts:
                             cnts = src.wait_gr_counts
                             slot_has_lr = any(
@@ -4102,7 +4102,7 @@ class _InitCTileInfo:
 
 
 def _zero_range(writer, firstReg, totalRegs, isAgpr):
-    from Tensile.Components.Subtile.Kernel import _zeroRegRange
+    from tensilelite.Components.Subtile.Kernel import _zeroRegRange
     module = Module()
     _zeroRegRange(module, writer, _InitCTileInfo([]), firstReg, totalRegs, isAgpr)
     return str(module)
@@ -4169,7 +4169,7 @@ class TestInitCInitVgprTilesToZero:
     """initVgprTilesToZero: no scratch needed, uses D self-reuse."""
 
     def test_single_range_uses_mfma(self):
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         dtile = _InitCTileInfo([_InitCTile(0, 96, pool=w.agprPool)])
 
@@ -4178,7 +4178,7 @@ class TestInitCInitVgprTilesToZero:
 
     def test_split_pool_groups(self):
         """A range split across agpr + vgpr pools emits MFMAs for both groups."""
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         vgpr_pool = object()
         dtile = _InitCTileInfo([
@@ -4191,7 +4191,7 @@ class TestInitCInitVgprTilesToZero:
         assert src.count("initD: [") == 4, f"expected 4 matrix ops across 2 groups:\n{src[:600]}"
 
     def test_empty_tiles_is_noop(self):
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         src = str(initVgprTilesToZero(w, {}, _InitCTileInfo([])))
         assert "initD: [" not in src
