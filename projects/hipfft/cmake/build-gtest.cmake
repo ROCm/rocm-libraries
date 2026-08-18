@@ -42,6 +42,7 @@ if( NOT TARGET googletest )
     CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${_gtest_prefix}
     BUILD_BYPRODUCTS ${_gtest_lib} ${_gtest_main_lib}
     DOWNLOAD_NO_PROGRESS YES
+    DOWNLOAD_EXTRACT_TIMESTAMP YES
   )
 endif()
 
