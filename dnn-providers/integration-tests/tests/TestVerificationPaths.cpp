@@ -41,7 +41,7 @@ std::filesystem::path batchNormSweepRoot()
 
 void verifyGoldenComparison(
     hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors,
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>&
         goldenOutputs,
     float tolerance)
 {

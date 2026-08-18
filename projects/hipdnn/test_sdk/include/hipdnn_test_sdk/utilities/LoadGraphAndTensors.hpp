@@ -23,7 +23,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensorFromFileAndAttributes(
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> tensorFromFileAndAttributes(
     const std::filesystem::path& filepath,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes)
 {
@@ -33,10 +33,22 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensorFromFileAndAtt
     return tensor;
 }
 
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedTensorFromFileAndAttributes(
+    const std::filesystem::path& filepath,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes,
+    std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> offset)
+{
+    auto tensor = hipdnn_test_sdk::detail::createRaggedTensorFromAttributeAndOffset(
+        attributes, std::move(offset));
+    hipdnn_test_sdk::detail::fillTensorFromFile(*tensor, filepath);
+
+    return tensor;
+}
+
 struct GraphAndTensorMap
 {
     flatbuffers::DetachedBuffer graphBuffer;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
     std::vector<int64_t> outputTensorUids;
 
     const hipdnn_flatbuffers_sdk::data_objects::Graph& graph() const
@@ -62,10 +74,10 @@ struct GraphAndTensorMap
         return deviceBuffers;
     }
 
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>
         extractAndClearOutputTensorData()
     {
-        std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
+        std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>
             outputTensorMap;
 
         auto tensorAttributeMap = createGraphWrapper().getTensorMap();
@@ -77,7 +89,7 @@ struct GraphAndTensorMap
             auto zeroedTensorPtr = std::visit(
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
-                    auto tensorPtr = std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>(
+                    auto tensorPtr = std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>(
                         new hipdnn_data_sdk::utilities::Tensor<DataType>(
                             outputTensorPtr->dims(), outputTensorPtr->strides()));
                     tensorPtr->fillTensorWithValue(0.f);
@@ -94,7 +106,7 @@ struct GraphAndTensorMap
     }
 
     bool validateTensors(
-        std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
+        std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>&
             referenceTensors,
         float absTolerance,
         float relTolerance)
@@ -189,17 +201,35 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
 
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
 
     if(graph->tensors() == nullptr || graph->tensors()->empty())
     {
         throw std::runtime_error("Graph needs to include at least one tensor");
     }
+
+    std::vector<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> raggedTensors;
+
     for(auto attributes : *graph->tensors())
     {
+        if(attributes->ragged_offset_tensor_uid().has_value())
+        {
+            raggedTensors.push_back(attributes);
+            continue;
+        }
+
         auto tensorPath
             = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
         tensorMap[attributes->uid()] = tensorFromFileAndAttributes(tensorPath, *attributes);
+    }
+
+    for(auto attributes : raggedTensors)
+    {
+        auto raggedOffsetId = attributes->ragged_offset_tensor_uid().value();
+        auto tensorPath
+            = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
+        tensorMap[attributes->uid()]
+            = raggedTensorFromFileAndAttributes(tensorPath, *attributes, tensorMap[raggedOffsetId]);
     }
 
     return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};

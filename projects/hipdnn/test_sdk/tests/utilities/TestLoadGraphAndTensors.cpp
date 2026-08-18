@@ -271,7 +271,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 
     auto res = loadGraphAndTensors(filepath);
 
-    std::unordered_map<int64_t, std::unique_ptr<ITensor>> savedTensorOutputs;
+    std::unordered_map<int64_t, std::shared_ptr<ITensor>> savedTensorOutputs;
 
     // Save tensor data
     for(auto id : res.outputTensorUids)
@@ -279,7 +279,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
         const auto& tensor = res.tensorMap.at(id);
         const size_t bytesInTensor = tensor->elementSpace() * tensor->elementSize();
         auto& savedTensor = savedTensorOutputs[id]
-            = std::unique_ptr<ITensor>(new Tensor<float>(tensor->dims(), tensor->strides()));
+            = std::shared_ptr<ITensor>(new Tensor<float>(tensor->dims(), tensor->strides()));
         savedTensor->fillWithData(tensor->rawHostData(), bytesInTensor);
     }
 

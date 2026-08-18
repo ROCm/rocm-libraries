@@ -33,7 +33,7 @@ namespace hipdnn_integration_tests::bundle
 // output). Each set is a distinct allocation so engine and reference never write
 // the same buffers.
 using OutputTensors
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+    = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 namespace detail
 {

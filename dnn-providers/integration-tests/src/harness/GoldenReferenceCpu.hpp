@@ -39,7 +39,7 @@ class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::
 protected:
     hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
     std::optional<hipdnn_integration_tests::BundleMetadata> _bundleMetadata;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>
         _referenceOutputTensors;
 
     // NOLINTNEXTLINE(readability-identifier-naming)

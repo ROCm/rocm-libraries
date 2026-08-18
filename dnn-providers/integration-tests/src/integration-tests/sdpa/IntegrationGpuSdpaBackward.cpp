@@ -121,12 +121,12 @@ protected:
         this->registerValidator(outputs.dk, this->getTolerance(graphObj, outputs.dk));
         this->registerValidator(outputs.dv, this->getTolerance(graphObj, outputs.dv));
 
-        this->inputFillRecipes().setGlobalSeed(_seed);
+        this->inputFillRecipes().setGlobalSeed(SEED);
         this->verifyGraph(graphObj);
     }
 
 private:
-    static constexpr unsigned int _seed = 0;
+    static constexpr unsigned int SEED = 0;
 };
 
 using IntegrationGpuSdpaBwdBfp16 = SdpaBackward<bfloat16>;
