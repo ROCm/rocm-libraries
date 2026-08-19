@@ -19,8 +19,8 @@
  * signature used by the dispatcher's registry backend.
  *
  * Memory model: host-pointer (this library owns hipMalloc/hipMemcpy/hipFree).
- * For grouped GEMM, all problem groups share A, B, AQ, BQ, C in a flat host buffer;
- * the caller specifies per-group M/N/K and the library packs them into the device.
+ * Each call launches a single problem (num_groups=1). The "grouped" in the name refers
+ * to the QuantGroupedGemmHostArgs kernel contract, not multi-group batching by this ABI.
  */
 
 #include <hip/hip_runtime.h>
@@ -59,6 +59,8 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
         }                                                                                      \
     }
 
+// g_ref_count is process-global but scoped to this .so image: each kernel variant
+// is compiled into its own .so, so there is no cross-kernel symbol aliasing.
 static std::atomic<int> g_ref_count{0};
 
 extern "C" {

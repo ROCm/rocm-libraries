@@ -22,6 +22,8 @@
  * RowColQuant which uses per-row A scales and per-column B scales.
  *
  * Memory model: host-pointer (this library owns hipMalloc/hipMemcpy/hipFree).
+ * Each call launches a single problem (num_groups=1). The "grouped" in the name refers
+ * to the QuantGroupedGemmHostArgs kernel contract, not multi-group batching by this ABI.
  */
 
 #include <hip/hip_runtime.h>
@@ -60,6 +62,8 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
         }                                                                                      \
     }
 
+// g_ref_count is process-global but scoped to this .so image: each kernel variant
+// is compiled into its own .so, so there is no cross-kernel symbol aliasing.
 static std::atomic<int> g_ref_count{0};
 
 extern "C" {
