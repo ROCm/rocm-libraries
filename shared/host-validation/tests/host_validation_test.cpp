@@ -388,12 +388,9 @@ void testReferenceEpilogue() {
     Tensor auxiliary(ScalarType::BFloat16, Shape{2, 2});
     Tensor amax(ScalarType::Float32, Shape{1});
 
-    EpilogueProblem problem(
+    EpilogueRequest problem(
         Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(input)),
-        output, ScalarType::Float32);
-    problem.rawOutput = rawOutput;
-    problem.auxiliaryOutput = auxiliary;
-    problem.amax = amax;
+        output, rawOutput, auxiliary, amax, ScalarType::Float32);
     problem.bias = VectorBinding{
         Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
         MatrixAxis::Row,
@@ -421,7 +418,7 @@ void testReferenceEpilogue() {
     const std::array<float, 4> gradientInput{10, 20, 30, 40};
     const std::array<float, 4> activationInput{-1, 1, 2, -2};
     Tensor gradientOutput(ScalarType::Float32, Shape{2, 2});
-    EpilogueProblem gradient(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+    EpilogueRequest gradient(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
                                                        std::span<const float>(gradientInput)),
                              gradientOutput, ScalarType::Float32);
     gradient.auxiliaryInput = Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
@@ -436,7 +433,7 @@ void testReferenceEpilogue() {
 
     const std::array<float, 4> gate{0.5f, 2.0f, -1.0f, 0.25f};
     Tensor gatedOutput(ScalarType::Float32, Shape{2, 2});
-    EpilogueProblem gated(
+    EpilogueRequest gated(
         Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(input)),
         gatedOutput, ScalarType::Float32);
     gated.gateResidual =
@@ -450,7 +447,7 @@ void testReferenceEpilogue() {
 
     const std::array<float, 4> int8Input{-200.0f, -128.5f, 126.5f, 300.0f};
     Tensor int8Output(ScalarType::Int8, Shape{2, 2});
-    EpilogueProblem saturatingInt8(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+    EpilogueRequest saturatingInt8(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
                                                              std::span<const float>(int8Input)),
                                    int8Output, ScalarType::Float32);
     saturatingInt8.outputConversion = OutputConversion::SaturatingInt8;
@@ -459,6 +456,99 @@ void testReferenceEpilogue() {
                                     Shape{2, 2}, std::array<int8_t, 4>{-128, -128, 126, 127}))
                 .passed(),
             "Reference epilogue Int8 saturation mismatch.");
+
+    const Tensor ownedInput =
+        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(input));
+    EpilogueProblem ownedProblem(ownedInput, ScalarType::Float16, ScalarType::Float32);
+    ownedProblem.rawOutputType = ScalarType::Float32;
+    ownedProblem.auxiliaryOutputType = ScalarType::BFloat16;
+    ownedProblem.amaxType = ScalarType::Float32;
+    ownedProblem.bias = problem.bias;
+    ownedProblem.outputScale = 2.0;
+    ownedProblem.auxiliaryScale = 3.0;
+    ownedProblem.activation = Activation::Relu;
+    ownedProblem.outputSelection = OutputSelection::explicitIndices({1, 2});
+
+    size_t allocatorCalls = 0;
+    const TensorStorageAllocator nonzeroAllocator = [&allocatorCalls](size_t bytes) {
+        ++allocatorCalls;
+        TensorStorage storage = TensorStorage::allocate(bytes);
+        std::fill(storage.mutableBytes().begin(), storage.mutableBytes().end(), std::byte{0xa5});
+        return storage;
+    };
+    const EpilogueResult owned = referenceEpilogue(ownedProblem, nonzeroAllocator);
+    require(allocatorCalls == 4 && owned.output.layout() == Layout::contiguous(Shape{2, 2}) &&
+                owned.rawOutput && owned.auxiliaryOutput && owned.amax &&
+                owned.runInfo.outputElementsWritten == 2 &&
+                owned.runInfo.rawOutputElementsWritten == 2 &&
+                owned.runInfo.auxiliaryOutputElementsWritten == 2 &&
+                owned.runInfo.amaxElementsWritten == 1,
+            "Owning reference epilogue result contract mismatch.");
+    require(owned.output.loadAs<float>({0, 0}) == 0 && owned.output.loadAs<float>({0, 1}) == 4 &&
+                owned.output.loadAs<float>({1, 0}) == 10 &&
+                owned.output.loadAs<float>({1, 1}) == 0 &&
+                owned.rawOutput->loadAs<float>({0, 0}) == 0 &&
+                owned.rawOutput->loadAs<float>({1, 1}) == 0 &&
+                owned.auxiliaryOutput->loadAs<float>({0, 0}) == 0 &&
+                owned.auxiliaryOutput->loadAs<float>({1, 1}) == 0 &&
+                owned.amax->loadAs<float>({0}) == 5,
+            "Owning reference epilogue retained allocator-dependent unselected values.");
+
+    EpilogueProblem emptySelection = ownedProblem;
+    emptySelection.outputSelection = OutputSelection::strided(4, 1);
+    const EpilogueResult empty = referenceEpilogue(emptySelection);
+    require(empty.runInfo.outputElementsWritten == 0 &&
+                empty.runInfo.rawOutputElementsWritten == 0 &&
+                empty.runInfo.auxiliaryOutputElementsWritten == 0 &&
+                empty.runInfo.amaxElementsWritten == 1 && empty.output.loadAs<float>({0, 0}) == 0 &&
+                empty.rawOutput && empty.rawOutput->loadAs<float>({0, 0}) == 0 &&
+                empty.auxiliaryOutput && empty.auxiliaryOutput->loadAs<float>({0, 0}) == 0 &&
+                empty.amax && empty.amax->loadAs<float>({0}) == 0,
+            "Owning reference epilogue empty selection was not zero initialized.");
+
+    EpilogueProblem invalidProblem(ownedInput, ScalarType::E8M0, ScalarType::Float32);
+    bool rejectedBeforeAllocation = false;
+    try {
+        (void)referenceEpilogue(invalidProblem, nonzeroAllocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 4,
+            "Owning reference epilogue allocated before validating output type.");
+
+    TensorStorage overlappingStorage = TensorStorage::allocate(ownedInput.storage().size());
+    size_t overlappingAllocatorCalls = 0;
+    const TensorStorageAllocator overlappingAllocator = [&overlappingStorage,
+                                                         &overlappingAllocatorCalls](size_t) {
+        ++overlappingAllocatorCalls;
+        return overlappingStorage;
+    };
+    bool rejectedOverlap = false;
+    try {
+        (void)referenceEpilogue(ownedProblem, overlappingAllocator);
+    } catch (const std::invalid_argument&) {
+        rejectedOverlap = true;
+    }
+    require(rejectedOverlap && overlappingAllocatorCalls == 4,
+            "Owning reference epilogue accepted overlapping allocator results.");
+
+    Tensor preservedOutput =
+        Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
+    Tensor preservedRaw = preservedOutput.clone();
+    Tensor preservedAuxiliary = preservedOutput.clone();
+    Tensor accumulatedAmax = Tensor::fromNativeValues<float>(Shape{1}, std::array<float, 1>{100});
+    EpilogueRequest preserved(ownedInput, preservedOutput, preservedRaw, preservedAuxiliary,
+                              accumulatedAmax, ScalarType::Float32);
+    preserved.outputSelection = OutputSelection::explicitIndices({0, 3});
+    preserved.accumulateAmax = true;
+    const EpilogueRunInfo preservedRun = referenceEpilogue(preserved);
+    require(preservedRun.outputElementsWritten == 2 &&
+                preservedOutput.loadAs<float>({0, 1}) == -99 &&
+                preservedOutput.loadAs<float>({1, 0}) == -99 &&
+                preservedRaw.loadAs<float>({0, 1}) == -99 &&
+                preservedAuxiliary.loadAs<float>({1, 0}) == -99 &&
+                accumulatedAmax.loadAs<float>({0}) == 100,
+            "Explicit reference epilogue did not preserve unselected or accumulated state.");
 }
 
 void testReferenceReduction() {
