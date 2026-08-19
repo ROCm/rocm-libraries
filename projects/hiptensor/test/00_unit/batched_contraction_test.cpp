@@ -28,21 +28,14 @@
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
 
-// A mode shared by both contraction inputs and the output is a batch dimension,
-// which the current M/N/K normalized layout cannot express. hiptensorCreate*
-// must reject such descriptors with HIPTENSOR_STATUS_NOT_SUPPORTED rather than
-// silently producing a wrong result. See ROCm/ROCm#6559.
-
 namespace
 {
-    // 'b' is the shared batch mode; 'm','n','k' are the usual free/contracted modes.
     constexpr int32_t bMode = 'b';
     constexpr int32_t mMode = 'm';
     constexpr int32_t nMode = 'n';
     constexpr int32_t kMode = 'k';
 } // namespace
 
-// D[b,m,n] = sum_k A[b,m,k] * B[b,k,n] -- 'b' shared by A, B and D.
 TEST(BatchedContractionTest, BinaryBatchedReturnsNotSupported)
 {
     hiptensorHandle_t handle{};
@@ -86,7 +79,6 @@ TEST(BatchedContractionTest, BinaryBatchedReturnsNotSupported)
     hiptensorDestroy(handle);
 }
 
-// Non-batched control D[m,n] = sum_k A[m,k] * B[k,n] must still be accepted.
 TEST(BatchedContractionTest, BinaryNonBatchedIsSupported)
 {
     hiptensorHandle_t handle{};
@@ -132,7 +124,6 @@ TEST(BatchedContractionTest, BinaryNonBatchedIsSupported)
     hiptensorDestroy(handle);
 }
 
-// E[b,m,n] = alpha * A[b,m,k] * B[b,k,n] * C[b,m,n] + ... -- 'b' shared by A, B and E.
 TEST(BatchedContractionTest, TrinaryBatchedReturnsNotSupported)
 {
     hiptensorHandle_t handle{};
