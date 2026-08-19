@@ -256,8 +256,8 @@ def test_rewrite_kpack_form_and_provenance(built):
     # metadata / priority preserved.
     assert ukd["metadata"] == {"dtype": "FLOAT", "block_size": 64}
     assert ukd["priority"] == 0
-    # An authored top-level field the tool does not model (version) survives the
-    # rewrite onto both the shipped KDP and its inline UKD.
+    # The KDP file and each inline UKD carry their own version, both surviving
+    # the rewrite.
     assert kdp["version"] == "0.1"
     assert ukd["version"] == "0.1"
 
@@ -534,6 +534,34 @@ def test_determinism_same_variant_twice(
     )
     a, b = _shas(tmp_path / "out1"), _shas(tmp_path / "out2")
     assert a and a == b
+
+
+@pytest.mark.quick
+def test_fuse_cuid_pinned_after_authored_flags():
+    # The pinned -fuse-cuid=none is appended after the authored build flags, so
+    # clang's last-flag-wins keeps it regardless of what the author wrote.
+    from pathlib import Path
+
+    from hkp_pack.hip_compile import _hipcc_command
+
+    build = {"flags": ["-fuse-cuid=random", "-O3"]}
+    cmd = _hipcc_command("hipcc", Path("src.cpp"), "gfx942", build, Path("out.co"))
+    assert cmd.count("-fuse-cuid=none") == 1
+    assert cmd.index("-fuse-cuid=none") > cmd.index("-fuse-cuid=random")
+
+
+@pytest.mark.quick
+def test_neg_authored_fuse_cuid_flag(tmp_path, main_fixture, hipcc, kpack_python_dir):
+    # An authored -fuse-cuid flag is reserved and rejected at load.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["kernelDescriptors"][0]["kernel_source"]["build"]["flags"] = [
+        "-fuse-cuid=random"
+    ]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="invalid build"):
+        _run(src, tmp_path, hipcc, kpack_python_dir)
 
 
 # --- Non-descriptor .json warn/skip (C-007) --------------------------------
@@ -865,3 +893,197 @@ def test_multi_kdp_subset_violation_hard_errors(
     cp.write_text(json.dumps(cdoc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="is not a subset of KDP"):
         _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+
+
+# --- G. Global id uniqueness -------------------------
+@pytest.mark.quick
+def test_neg_duplicate_standalone_ukd_ids(tmp_path, main_fixture):
+    # Two standalone .ukd.json files sharing an id are rejected globally.
+    src = _copy_fixture(tmp_path, main_fixture)
+    dup = _read(src / _STANDALONE_UKD_FILE)
+    (src / "dup.ukd.json").write_text(json.dumps(dup), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="duplicate"):
+        load_flat_input(src)
+
+
+@pytest.mark.quick
+def test_neg_duplicate_kdp_ids(tmp_path, main_fixture):
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["id"] = "kdp-pointwise"  # already the id of pointwise.kdp.json
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="duplicate"):
+        load_flat_input(src)
+
+
+@pytest.mark.quick
+def test_neg_duplicate_generic_ids(tmp_path, main_fixture):
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kmd.json"
+    doc = _read(p)
+    doc["id"] = "kmd-pointwise"  # already the id of pointwise.kmd.json
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="duplicate"):
+        load_flat_input(src)
+
+
+@pytest.mark.quick
+def test_neg_cross_type_id_reuse_rejected(tmp_path, main_fixture):
+    # An id reused across two descriptor # types (here a UED taking a KMD's id)
+    # is rejected at pack time.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.ued.json"
+    doc = _read(p)
+    doc["id"] = "kmd-pointwise"  # a KMD id, different type
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="duplicate"):
+        load_flat_input(src)
+
+
+# --- H. Version enforcement --------------------------
+@pytest.mark.quick
+def test_neg_file_backed_missing_version(tmp_path, main_fixture):
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kmd.json"
+    doc = _read(p)
+    del doc["version"]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="missing required field 'version'"):
+        load_flat_input(src)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("bad", ["1", "1.x", "1.2.3"])
+def test_neg_malformed_version(tmp_path, main_fixture, bad):
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kmd.json"
+    doc = _read(p)
+    doc["version"] = bad
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="invalid version"):
+        load_flat_input(src)
+
+
+@pytest.mark.quick
+def test_neg_inline_ukd_missing_version(tmp_path, main_fixture):
+    # An inline UKD carries its own version; omitting it is an error.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    del doc["kernelDescriptors"][0]["version"]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="missing required field 'version'"):
+        load_flat_input(src)
+
+
+# --- I. UED scoped name ------------------------------
+@pytest.mark.quick
+def test_neg_ued_name_not_scoped(tmp_path, main_fixture):
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.ued.json"
+    doc = _read(p)
+    doc["name"] = "Pointwise engine"  # unscoped
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="scoped"):
+        load_flat_input(src)
+
+
+@pytest.mark.quick
+def test_scoped_ued_name_loads_clean(main_fixture):
+    # The renamed fixture UED (test_fixture:pointwise) validates without error.
+    flat = load_flat_input(main_fixture)
+    ued = next(d for d in flat.by_type("ued") if d.id == "ued-pointwise")
+    assert ued.doc["name"] == "test_fixture:pointwise"
+
+
+# --- J. Provenance protection ------------------------
+def test_authored_provenance_cannot_hijack(
+    tmp_path, main_fixture, hipcc, kpack_python_dir
+):
+    # An authored top-level 'provenance' is dropped; the shipped block is the
+    # generated traceability record, not the authored value.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / _STANDALONE_UKD_FILE
+    doc = _read(p)
+    doc["provenance"] = "HIJACKED"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _run(src, tmp_path, hipcc, kpack_python_dir, arches=["gfx942"])
+    prov = _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)["provenance"]
+    assert prov != "HIJACKED"
+    assert prov["origin_kind"] == "hip"
+    assert prov["source"] == "PointwiseAdd.cpp"
+    assert prov["entry"] == "PointwiseAdd"
+
+
+# --- K. Drop diagnostics + arch warning --------------
+@pytest.mark.quick
+def test_orphan_standalone_ukd_warns(tmp_path, main_fixture):
+    # A standalone .ukd.json no KDP references is a non-fatal warning at load.
+    src = _copy_fixture(tmp_path, main_fixture)
+    orphan = _read(src / _STANDALONE_UKD_FILE)
+    orphan["id"] = "ukd-orphan"
+    (src / "orphan.ukd.json").write_text(json.dumps(orphan), encoding="utf-8")
+    logs = []
+    load_flat_input(src, log=logs.append)
+    assert any("orphan.ukd.json" in m and "not referenced" in m for m in logs)
+
+
+def test_empty_pruned_kdp_is_logged(tmp_path, main_fixture, hipcc, kpack_python_dir):
+    # A KDP whose only UKD filters out for an arch is dropped with a log line.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
+    doc["kernelDescriptors"][0]["arch"] = ["gfx942"]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    logs = []
+    run_pipeline(
+        source_root=src,
+        arches=["gfx950"],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        kpack_python_dir=kpack_python_dir,
+        inter_root=tmp_path / "inter",
+        log=logs.append,
+    )
+    assert any("copy.kdp.json" in m and "filtered out for gfx950" in m for m in logs)
+
+
+@pytest.mark.quick
+def test_nonbare_arch_warning_boundaries():
+    # Real bare gfx names (6-7 chars, alphanumeric) do NOT warn; feature-suffixed
+    # or over-long/garbage arches DO. Locks the false-positive-free boundary.
+    from hkp_pack.descriptors import _warn_nonbare_arch
+
+    for good in ("gfx90a", "gfx942", "gfx1100", "gfx1201"):
+        logs = []
+        _warn_nonbare_arch([good], "where", logs.append)
+        assert logs == [], good
+    for bad in ("gfx942:xnack-", "gfx12345", "gfx942xnack"):
+        logs = []
+        _warn_nonbare_arch([bad], "where", logs.append)
+        assert len(logs) == 1, bad
+
+
+def test_nonbare_arch_warns_but_packs(tmp_path, main_fixture, hipcc, kpack_python_dir):
+    # A KDP with a feature-suffixed arch warns and does not match the bare
+    # requested arch, but the pack still proceeds on the other surviving KDPs.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["arch"] = ["gfx942:xnack-"]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    logs = []
+    results = run_pipeline(
+        source_root=src,
+        arches=["gfx942"],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        kpack_python_dir=kpack_python_dir,
+        inter_root=tmp_path / "inter",
+        log=logs.append,
+    )
+    assert any("gfx942:xnack-" in m and "not a bare gfx name" in m for m in logs)
+    assert set(results) == {"gfx942"}
+    assert (tmp_path / "out" / "gfx942").is_dir()
