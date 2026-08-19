@@ -285,33 +285,10 @@ error; see [Plugin-Supplied Engine Names](#plugin-supplied-engine-names).
 
 ### Frontend Implementation
 
-The frontend accepts both names and IDs:
-
-```cpp
-// Frontend API extension
-namespace hipdnn_frontend::graph {
-
-class Graph : public INode
-{
-public:
-    // Existing API - accepts int64_t
-    void set_preferred_engine_id_ext(std::optional<int64_t> engineId)
-
-    // New overload - accepts string name
-    void set_preferred_engine_id_ext(const std::optional<std::string> engineName) {
-        int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(*engineName);
-
-        // Log for debugging
-        HIPDNN_LOG_DEBUG("Engine name '{}' mapped to ID: 0x{:016X}",
-                        engineName, engineId);
-
-        // Forward to the int64_t version
-        setPreferredEngine(engineId);
-    }
-};
-
-} // namespace hipdnn_frontend::graph
-```
+The frontend accepts both names and IDs: `Graph::set_preferred_engine_id_ext` is overloaded on
+`std::optional<int64_t>` and `const std::string&`, and the name overload resolves through
+`engineNameOrIdToId` so a hexadecimal ID spelling reaches the engine it displays under. See
+`Graph.hpp` for the signatures and the resolution timing they guarantee.
 
 ### Backend Duplicate Detection
 

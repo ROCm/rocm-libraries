@@ -805,9 +805,9 @@ private:
     /// Resolve an engine ID to the display name to report for it.
     ///
     /// The name comes from the plugin manager, which records it once when the
-    /// engine is admitted, so this is a map lookup rather than a descriptor
-    /// build. The manager is shared by every handle, which is why the answer
-    /// does not depend on which one is passed.
+    /// engine is admitted, so this reads a cached index rather than building a
+    /// descriptor. The manager is shared by every handle, which is why the
+    /// answer does not depend on which one is passed.
     ///
     /// A null handle, an ID no loaded engine carries, or a backend too old to
     /// export the entry point all fall back to the static registry, and to the

@@ -142,7 +142,7 @@ Engines built into the hipDNN tree are registered as follows:
 ### Benefits
 
 - **Deterministic**: Same name always produces same ID
-- **No Collisions**: Hash algorithm minimizes collision risk
+- **Collision-resistant**: Hash algorithm minimizes collision risk
 - **Human-Readable**: Debug logs can show meaningful engine names
 - **Forward Compatible**: New engines can be used without registry updates
 

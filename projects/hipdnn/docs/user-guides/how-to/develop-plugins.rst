@@ -170,14 +170,14 @@ Add a static ``getEngineName`` member to your container type. The plugin SDK det
           return HIPDNN_PLUGIN_STATUS_SUCCESS;
       }
 
-      return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+      return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
   }
 
 The status contract is:
 
-- ``HIPDNN_PLUGIN_STATUS_SUCCESS``: ``*name`` points at a NUL-terminated name for the engine.
-- ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE``: the plugin provides this engine but supplies no name for it.
-- ``HIPDNN_PLUGIN_STATUS_BAD_PARAM``: ``name`` is ``NULL``, or the plugin doesn't provide this engine at all.
+- ``HIPDNN_PLUGIN_STATUS_SUCCESS``: ``*name`` points at a NUL-terminated name for the engine. A ``NULL`` or empty ``*name`` alongside this status leaves the engine unnamed, exactly as ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` would.
+- ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE``: the plugin supplies no name for this engine. Report this for an ``engineId`` you don't recognize too — it is the only penalty-free decline.
+- ``HIPDNN_PLUGIN_STATUS_BAD_PARAM``: ``name`` is ``NULL``. hipDNN never passes ``NULL``, so reaching this is a defect.
 
 Other requirements:
 
@@ -188,7 +188,7 @@ Other requirements:
 
 ``getEngineName`` is optional. The entry point is emitted whether or not your container defines the member; when the member is absent, it reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.
 
-Detection is by exact signature, so a near-miss reads as opting out: the engine falls back to a hex ID and the plugin logs ``API not applicable: [hipdnnEnginePluginGetEngineName]`` at INFO, followed by a warning that the plugin's engines are identified by ID because its container supplies no name for any of them. To have the compiler confirm the member is seen, assert the trait the SDK uses:
+Detection is by callability, so a member the SDK cannot call reads as opting out and the engine falls back to a hex ID. To have the compiler confirm the member is seen, assert the trait the SDK uses:
 
 .. code:: cpp
 

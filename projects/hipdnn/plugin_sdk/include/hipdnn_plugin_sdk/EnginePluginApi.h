@@ -397,7 +397,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * @param[out] name Receives a NUL-terminated string owned by the plugin. Must
  *                  remain valid for the lifetime of the loaded library. On any
  *                  status other than HIPDNN_PLUGIN_STATUS_SUCCESS the value is
- *                  unspecified and the host must not read it.
+ *                  unspecified and the host must not read it. NULL or empty
+ *                  alongside SUCCESS leaves the engine unnamed, exactly as
+ *                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE would.
  * @return HIPDNN_PLUGIN_STATUS_SUCCESS on success;
  *         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if this plugin supplies no name for
  *         engine_id — the generated default for containers that do not implement

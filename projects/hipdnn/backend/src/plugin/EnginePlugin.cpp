@@ -185,6 +185,8 @@ std::optional<std::string> EnginePlugin::getEngineName(int64_t engineId) const
                                   + "), Error: " + std::string(getLastErrorString()));
     }
 
+    // A name the host cannot use is the same as no name, and an empty one would
+    // hash to a value the engine's ID cannot match anyway.
     if(name == nullptr || *name == '\0')
     {
         return std::nullopt;

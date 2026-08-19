@@ -831,7 +831,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t 
  * @param[in]     handle         A valid hipDNN handle.
  * @param[in]     engineId       Engine ID to resolve.
  * @param[out]    engineName     Buffer for the engine name, or `nullptr` to query size.
- * @param[in,out] engineNameLen  Pointer to buffer size; updated with required size.
+ * @param[in,out] engineNameLen  On the size query, receives the required size. On the fill
+ *                               call, supplies the buffer size and is left unchanged.
  *
  * @retval HIPDNN_STATUS_SUCCESS                  Success.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle or null `engineNameLen`.

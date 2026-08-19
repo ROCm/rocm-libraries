@@ -119,7 +119,7 @@ Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. Whe
 
 Each entry accepts any spelling `hipdnn_list_engines` prints an engine under: the name it declares, or — for an engine that declares none — its ID in `0x`-prefixed hexadecimal. A decimal ID is also accepted. A registered name is resolved as a name even if it reads as a number.
 
-Entries that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next plugin.
+Entries that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next policy.
 
 **Example:**
 ```bash

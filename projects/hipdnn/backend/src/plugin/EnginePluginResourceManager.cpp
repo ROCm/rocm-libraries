@@ -217,7 +217,9 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
     });
 
     // Built from the sorted vector, so it agrees with the enumeration. Admission
-    // ties each name to its own hash, so distinct engines cannot collide here.
+    // ties each declared name to its own hash, so declared names cannot collide
+    // here; an unnamed engine is keyed by a rendering of its ID, which is unique
+    // for the same reason.
     auto& idsByName = _cachedEngineIdsByName.emplace();
     idsByName.reserve(infos.size());
     for(const auto& info : infos)
