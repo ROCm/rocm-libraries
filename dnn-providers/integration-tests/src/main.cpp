@@ -360,15 +360,15 @@ int main(int argc, char** argv) noexcept
                           << "  bundle data dir: " << dataDir
                           << (dataDirFound ? " (exists)" : " (MISSING)") << "\n";
 
-                constexpr int maxSuitesToList = 10;
-                for(int i = 0; i < suiteCount && i < maxSuitesToList; ++i)
+                constexpr int MAX_SUITES_TO_LIST = 10;
+                for(int i = 0; i < suiteCount && i < MAX_SUITES_TO_LIST; ++i)
                 {
                     std::cerr << "  registered suite: " << unitTest->GetTestSuite(i)->name()
                               << "\n";
                 }
-                if(suiteCount > maxSuitesToList)
+                if(suiteCount > MAX_SUITES_TO_LIST)
                 {
-                    std::cerr << "  ... and " << (suiteCount - maxSuitesToList)
+                    std::cerr << "  ... and " << (suiteCount - MAX_SUITES_TO_LIST)
                               << " more suite(s)\n";
                 }
 
