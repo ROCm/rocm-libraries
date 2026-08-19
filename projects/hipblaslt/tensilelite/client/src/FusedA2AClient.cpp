@@ -13,6 +13,8 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "ClientProblemFactory.hpp"
+#include <array>
+
 #include "FusedA2ACounterSentinel.hpp"
 #include "FusedA2AKernArg.hpp"
 #include "SolutionIterator.hpp"
@@ -54,7 +56,7 @@ namespace TensileLite
             {
                 std::cerr << "[fused-a2a] ERROR: world size W=" << W
                           << " is out of range; the kernarg segment reserves exactly "
-                          << FUSED_A2A_MAX_RANKS << " peer_ptr slots.\n"
+                          << FUSED_A2A_MAX_RANKS << " peer groups.\n"
                           << "  require: 1 <= W <= " << FUSED_A2A_MAX_RANKS
                           << ". Refusing to launch." << std::endl;
                 return -1;
@@ -203,8 +205,9 @@ namespace TensileLite
             // emitComputeFlagAddr's *4 stride and the DRAIN poll's j*4.
             const size_t flagBytes = (size_t)W * sizeof(uint32_t);
             // counter[dst_rank][token-tile], then counter2[dst_rank] at word index
-            // W*tokenTiles, then counter3 at W*tokenTiles + W, then a guard tail
-            // (FusedA2ACounterSentinel.hpp). Only counterBytes is memset per launch.
+            // W*tokenTiles, then counter3 at W*tokenTiles + W, then the SDMA cursor
+            // pairs, then a guard tail (FusedA2ACounterSentinel.hpp). Only
+            // counterBytes is memset per launch.
             const size_t counterBytes      = fusedA2ACounterPayloadBytes((uint32_t)W, tokenTiles);
             const size_t counterAllocBytes = fusedA2ACounterAllocBytes((uint32_t)W, tokenTiles);
             const size_t aBytes            = problem->a().totalAllocatedBytes();
@@ -332,8 +335,14 @@ namespace TensileLite
             }
 
             // --- Per-device fresh allocation. ---
+            // Bytes reserved ahead of recv for the flag array. The ABI passes flag
+            // and recv as independent pointers; carving both from one allocation is
+            // this client's choice, not a layout the kernel knows about.
+            constexpr size_t kFlagBytes = 4096;
+            static_assert(FUSED_A2A_MAX_RANKS * sizeof(uint32_t) <= kFlagBytes,
+                          "flag array must fit ahead of recv in the shared allocation");
             std::vector<void*> peer(W, nullptr), counter(W, nullptr);
-            // Views into peer[d]: flag at offset 0, recv at FUSED_A2A_PEER_RECV_OFFSET.
+            // Views into peer[d]: flag first, recv past kFlagBytes.
             std::vector<void*> recv(W, nullptr), flag(W, nullptr);
             std::vector<void*> wA(W, nullptr), xB(W, nullptr), cC(W, nullptr), outD(W, nullptr);
 
@@ -346,11 +355,11 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipSetDevice(d));
                 // Fine-grained: written by remote peers, must bypass stale L2.
                 HIP_CHECK_EXC(hipExtMallocWithFlags(
-                    &peer[d], FUSED_A2A_PEER_RECV_OFFSET + recvBytes, hipDeviceMallocFinegrained));
+                    &peer[d], kFlagBytes + recvBytes, hipDeviceMallocFinegrained));
                 flag[d] = peer[d];
-                recv[d] = (char*)peer[d] + FUSED_A2A_PEER_RECV_OFFSET;
+                recv[d] = (char*)peer[d] + kFlagBytes;
                 // Zero the unused flag-array padding once, up to the recv offset.
-                HIP_CHECK_EXC(hipMemset(peer[d], 0, FUSED_A2A_PEER_RECV_OFFSET));
+                HIP_CHECK_EXC(hipMemset(peer[d], 0, kFlagBytes));
                 // Local (not remotely written): plain device memory.
                 HIP_CHECK_EXC(hipMalloc(&counter[d], counterAllocBytes));
                 // Arm the guard tail. Sits past counterBytes, so the per-launch
@@ -396,8 +405,7 @@ namespace TensileLite
             // One ring per (device, peer), created AFTER P2P enable so peer pages are
             // already mapped. The self entry (j == d) is a loopback queue, which gives
             // this card's own flag slot a real producer.
-            std::vector<void*>                         sdmaHandles(W, nullptr);
-            std::vector<std::unique_ptr<SdmaQueueSet>> sdmaSets(W);
+            std::vector<std::vector<std::unique_ptr<SdmaQueue>>> sdmaQueues(W);
             {
                 std::vector<uint32_t> nodes(W);
                 for(int j = 0; j < W; j++)
@@ -405,8 +413,9 @@ namespace TensileLite
                 for(int d = 0; d < W; d++)
                 {
                     HIP_CHECK_EXC(hipSetDevice(d));
-                    sdmaSets[d]    = std::make_unique<SdmaQueueSet>(nodes[d], nodes);
-                    sdmaHandles[d] = sdmaSets[d]->deviceHandles();
+                    for(int j = 0; j < W; j++)
+                        sdmaQueues[d].push_back(std::make_unique<SdmaQueue>(
+                            nodes[d], sdmaSelectEngine(nodes[d], nodes[j])));
                 }
             }
             std::cout << "[fused-a2a] created " << W << " SDMA queues per device (one per peer)\n";
@@ -493,6 +502,21 @@ namespace TensileLite
             int                              firstFailIt    = -1;
             bool                             anyHipError    = false;
             bool guardFail = false; // counter guard tail corrupted (see below)
+            bool wptrFail  = false; // an engine write pointer went backwards (see below)
+
+            // Per-queue engine write pointer, carried across iterations. Must
+            // never go backwards; the engine would read the difference as ~4 GB
+            // of packets that were never written.
+            std::vector<std::vector<uint64_t>> prevWptr(W);
+            if(validate)
+            {
+                for(int d = 0; d < W; d++)
+                {
+                    prevWptr[d].resize(sdmaQueues[d].size());
+                    for(size_t q = 0; q < prevWptr[d].size(); q++)
+                        prevWptr[d][q] = *sdmaQueues[d][q]->queueResource().Queue_write_ptr_aql;
+                }
+            }
 
             // Built once: appendFusedSegment must not run twice on the same args.
             std::vector<std::vector<KernelInvocation>> perDeviceKernels(W);
@@ -521,12 +545,21 @@ namespace TensileLite
 
                 KernelInvocation& gemm       = kernels.front();
                 size_t            beforeSize = gemm.args.size();
+                // One group per peer, flattened here so the packer needs no hsakmt type.
+                std::vector<FusedA2APeerFields> peers;
+                for(size_t j = 0; j < sdmaQueues[d].size(); j++)
+                {
+                    const HsaQueueResource& r = sdmaQueues[d][j]->queueResource();
+                    peers.push_back({j < flag.size() ? flag[j] : nullptr,
+                                     j < recv.size() ? recv[j] : nullptr,
+                                     sdmaQueues[d][j]->ringBase(),
+                                     (void*)r.Queue_read_ptr_aql,
+                                     (void*)r.Queue_write_ptr_aql,
+                                     (void*)r.Queue_DoorBell_aql});
+                }
                 appendFusedSegment(gemm.args,
-                                   peer,
+                                   peers,
                                    counter[d],
-                                   // SDMA offload args: this device's W-element
-                                   // SdmaQueueDeviceHandle array (one queue per peer).
-                                   sdmaHandles[d],
                                    (uint32_t)d, // my_rank
                                    (uint32_t)W,
                                    (uint32_t)drain,
@@ -631,6 +664,44 @@ namespace TensileLite
                                   << "-byte payload" << std::endl;
                         guardFail = true;
                         ok        = false;
+                    }
+                }
+
+                if(validate)
+                {
+                    for(int d = 0; d < W; d++)
+                    {
+                        for(size_t q = 0; q < prevWptr[d].size(); q++)
+                        {
+                            const uint64_t now
+                                = *sdmaQueues[d][q]->queueResource().Queue_write_ptr_aql;
+                            const uint64_t was = prevWptr[d][q];
+                            if(now < was)
+                            {
+                                std::cerr
+                                    << "[fused-a2a] WPTR WENT BACKWARDS iter=" << it
+                                    << " device=" << d << " queue=" << q << ": " << was << " -> "
+                                    << now << " -- a producer reserved from a cursor behind the "
+                                       "hardware write pointer; the engine now sees ~"
+                                    << ((was - now) >> 20) << " MB of packets that were never "
+                                       "written"
+                                    << std::endl;
+                                wptrFail = true;
+                                ok       = false;
+                            }
+                            else if((now - was) % 4 != 0)
+                            {
+                                std::cerr << "[fused-a2a] WPTR NOT DWORD-ALIGNED iter=" << it
+                                          << " device=" << d << " queue=" << q << ": " << was
+                                          << " -> " << now << " (delta " << (now - was)
+                                          << ") -- packets and wrap padding are whole dwords, so "
+                                             "this is a torn or garbage publish"
+                                          << std::endl;
+                                wptrFail = true;
+                                ok       = false;
+                            }
+                            prevWptr[d][q] = now;
+                        }
                     }
                 }
 
@@ -874,14 +945,16 @@ namespace TensileLite
             }
 
             std::cout << "[fused-a2a] overall " << (raceFail ? "FAILED" : "PASSED") << std::endl;
-            // Exit codes: 2 = a kernel returned a HIP error in some iteration, or a
-            //     counter guard tail came back corrupted -- both are hard runtime
-            //     faults rather than numeric disagreement;
+            // Exit codes: 2 = a kernel returned a HIP error in some iteration, a
+            //     counter guard tail came back corrupted, or an engine write
+            //     pointer went backwards -- all hard runtime faults rather than
+            //     numeric disagreement;
             // 3 = all kernels ran but some iteration failed numeric validation
             //     (only reachable when validate=1);
-            // 0 = every iteration passed (validate=1: dual-segment numeric check;
-            //     validate=0: clean exit on all iterations).
-            if(anyHipError || guardFail)
+            // 0 = every iteration passed (validate=1: dual-segment numeric check
+            //     plus the write-pointer invariant; validate=0: clean exit on
+            //     all iterations).
+            if(anyHipError || guardFail || wptrFail)
                 return 2;
             return raceFail ? 3 : 0;
 #else

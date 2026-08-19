@@ -159,7 +159,7 @@ class SdmaPacketEmitter:
 
     def emitBuildAtomicPacket(self, module, pktS, dstAddrS):
         """Build the 8 ATOMIC ADD_RTN_32 dwords into pktS[0:8]: raise
-        peer_ptr[p][myRank] by 1.  dstAddrS is a 2-SGPR pointer to the flag
+        peer_flagPtr[p][myRank] by 1.  dstAddrS is a 2-SGPR pointer to the flag
         slot, which the caller strides by 4 because this ADD_RTN_32 writes
         4 bytes.
 

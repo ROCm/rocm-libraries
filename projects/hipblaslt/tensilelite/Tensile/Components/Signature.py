@@ -37,18 +37,10 @@ from dataclasses import dataclass, field
 # defineSgpr, not counted in numSgprToLoad. The fusion logic runs solely in the
 # D-store epilogue, which reads each arg on demand by absolute byte offset into
 # a scratch SGPR freed right after use. A WG maps to a single dst_rank, so it
-# reads exactly one peer_ptr; flag and recv are two offsets inside that block.
+# reads exactly one peer group.
 #
 # The slot count is a COMPILE-TIME constant, independent of the runtime W.
 FUSED_A2A_MAX_RANKS = 8
-
-# Byte offset of recv inside a peer block. Mirrored in client/include/FusedA2AKernArg.hpp.
-FUSED_A2A_PEER_RECV_OFFSET = 4096
-if FUSED_A2A_MAX_RANKS * 4 > FUSED_A2A_PEER_RECV_OFFSET:
-    raise ValueError(
-        "the flag array (FUSED_A2A_MAX_RANKS*4 = %d bytes) overlaps recv at "
-        "FUSED_A2A_PEER_RECV_OFFSET=%d; raise the offset before raising the rank bound."
-        % (FUSED_A2A_MAX_RANKS * 4, FUSED_A2A_PEER_RECV_OFFSET))
 
 # The bound below is the wave32 arm's 31, not the wave64 arm's 63: neither this
 # constant nor its C++ twin (client/include/FusedA2AKernArg.hpp) knows the wave
@@ -67,26 +59,29 @@ if FUSED_A2A_MAX_RANKS > 31:
         "client/include/FusedA2AKernArg.hpp to match."
         % (FUSED_A2A_MAX_RANKS, 31))
 
+from .SdmaRingEmitter import FUSED_A2A_PEER_FIELDS, PEER_GROUP_BYTES
+
 # (argName, byteSize) in addArg() order. Both the offset map and the segment
 # size derive from this one list, so an arg added to the segment cannot reach
 # only one of them:
-#   peer_ptr_j       per-peer block base, incl. self; flag at offset 0, recv at
-#                    FUSED_A2A_PEER_RECV_OFFSET
+#   peer_<j>_<f>     peer j's pointers, incl. self; field order and group stride
+#                    come from SdmaRingEmitter
 #   counter_ptr      this device's counter base
-#   FusedSdmaQueues  device pointer to the W-element SdmaQueueDeviceHandle array
-#                    (SdmaQueueSet::deviceHandles), consumed by the SDMA
-#                    ring/packet emitters
 #   FusedDrain       runtime drain flag (NOT a compile-time gate)
 #   FusedAM          A2A feature-row count (first AM rows PUSH, rest local)
+#
+# One group per peer, so a work-group computes one base and reaches every
+# pointer it needs for that peer by immediate offset.
 _FUSED_A2A_SEGMENT_ARGS = (
-    [("peer_ptr_%u" % j, 8) for j in range(FUSED_A2A_MAX_RANKS)]
-    + [("counter_ptr", 8), ("FusedSdmaQueues", 8),
+    [("peer_%u_%s" % (j, f), 8)
+     for j in range(FUSED_A2A_MAX_RANKS) for f in FUSED_A2A_PEER_FIELDS]
+    + [("counter_ptr", 8),
        ("FusedMyRank", 4), ("FusedW", 4), ("FusedDrain", 4), ("FusedAM", 4)])
 
 def fusedA2AKernArgLayout():
     """Return {argName: intra-segment byte offset} for the fused-A2A segment.
 
-    The offsets are relative to the segment base (peer_ptr_0 == 0). Order and
+    The offsets are relative to the segment base (peer_0_flagPtr == 0). Order and
     sizes MUST match the addArg() sequence in SignatureDefault.__call__.
     """
     layout = {}
@@ -97,6 +92,9 @@ def fusedA2AKernArgLayout():
     return layout
 
 FUSED_A2A_SEGMENT_BYTES = sum(size for _, size in _FUSED_A2A_SEGMENT_ARGS)
+
+assert all(fusedA2AKernArgLayout()["peer_%u_%s" % (j, FUSED_A2A_PEER_FIELDS[0])] == j * PEER_GROUP_BYTES
+           for j in range(FUSED_A2A_MAX_RANKS)), "peer groups must be contiguous from the segment base"
 
 @dataclass
 class UserArgumentsInfo:
@@ -420,9 +418,10 @@ class SignatureDefault(Signature):
         if kernel["FusedGemmA2A"]:
             fusedBase = signature.offset
             for j in range(FUSED_A2A_MAX_RANKS):
-                signature.addArg("peer_ptr_%u" % j, SVK.SIG_GLOBALBUFFER, "void", "generic")
+                for f in FUSED_A2A_PEER_FIELDS:
+                    signature.addArg("peer_%u_%s" % (j, f),
+                                     SVK.SIG_GLOBALBUFFER, "void", "generic")
             signature.addArg("counter_ptr",     SVK.SIG_GLOBALBUFFER, "void", "generic")
-            signature.addArg("FusedSdmaQueues", SVK.SIG_GLOBALBUFFER, "void", "generic")
             signature.addArg("FusedMyRank",       SVK.SIG_VALUE, "u32")
             signature.addArg("FusedW",            SVK.SIG_VALUE, "u32")
             signature.addArg("FusedDrain",        SVK.SIG_VALUE, "u32")

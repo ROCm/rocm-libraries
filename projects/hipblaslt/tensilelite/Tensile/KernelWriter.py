@@ -9484,6 +9484,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # ceil(N / MT1), needed by both the counter3 address and the handshake's
       # counter index; latched so the two do not each recompute it.
       self.defineSgpr("FusedTokenTiles", 1)
+      # Offset of this WG's peer group within the kernarg segment. Every pointer
+      # the epilogue needs for that peer is an immediate off it, so the SDMA
+      # emitters do no address arithmetic of their own.
+      self.defineSgpr("FusedPeerGroupPtr", 1)
 
     # Calculate numSgpr preload
     self.states.preloadGuard = []

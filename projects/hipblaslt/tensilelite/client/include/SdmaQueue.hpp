@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Host-side SDMA queue management for the fused GEMM+AllToAll SDMA offload
-// route: allocates the ring, creates the KFD SDMA queue, and exports the
-// device-visible handle(s) that the GPU assembly reads to fill packets and
-// ring the doorbell.
+// route: allocates the ring, creates the KFD SDMA queue, and exports the ring
+// base and HsaQueueResource that the kernarg packer reads.
 //
 // Header-only, and therefore hsakmt-DEPENDENT: including it requires the
 // hsakmt/hsa headers on the include path. Only TUs in tensilelite-client-common
@@ -37,35 +36,6 @@ namespace TensileLite
         // BYTE counts; wrap happens only when indexing into the ring
         // (index % SDMA_QUEUE_SIZE).
         constexpr uint32_t SDMA_QUEUE_SIZE = 256 * 1024;
-
-        // Device-visible handle. THE FIELD LAYOUT IS A CONTRACT: the GPU
-        // assembly reads these by fixed offset (SdmaRingEmitter.py OFF_*, 0
-        // through 48), so field order and type must not change.
-        //
-        // The first six fields are pointers into producer-SHARED memory. The
-        // seventh, cachedHwReadIndex, is a VALUE and a per-producer PRIVATE
-        // cache seed (the hardware read pointer at construction), not shared
-        // state: each producer copies it into its own local and mutates that
-        // copy, never writing back to this memory.
-        struct SdmaQueueDeviceHandle
-        {
-            // Producer-shared pointers; plain uint64_t* (not hsakmt's
-            // HSAuint64*) so the layout is stated in fixed-width types --
-            // same layout, since HSAuint64 is itself a uint64_t typedef.
-            uint32_t* queueBuf; // ring base (Uncached)
-            uint64_t* rptr; // hardware read pointer (byte count)
-            uint64_t* wptr; // hardware write pointer (byte count)
-            uint64_t* doorbell; // doorbell (byte count)
-            uint64_t* cachedWptr; // software producer cursor (shared, uncached)
-            uint64_t* committedWptr; // software committed cursor (shared, uncached)
-
-            uint64_t cachedHwReadIndex; // per-producer private cache seed, see above
-        };
-
-        static_assert(sizeof(SdmaQueueDeviceHandle) == 7 * sizeof(uint64_t),
-                      "SdmaQueueDeviceHandle must be exactly 7 x 8 bytes -- "
-                      "GlobalWriteBatch.py strides the handle array by that value, "
-                      "and SdmaRingEmitter.py reads the fields at OFF_* 0..48");
 
         // A NAMED namespace, not an anonymous one: the state below must be one
         // object per PROCESS, and an anonymous namespace in a header gives each
@@ -279,34 +249,6 @@ namespace TensileLite
                                                  SDMA_QUEUE_SIZE,
                                                  nullptr,
                                                  &queue_));
-
-                    // Software cursors in uncached device memory (shared producer state).
-                    CHK_HIP(hipExtMallocWithFlags(
-                        (void**)&cachedWptr_, sizeof(uint64_t), hipDeviceMallocUncached));
-                    CHK_HIP(hipExtMallocWithFlags(
-                        (void**)&committedWptr_, sizeof(uint64_t), hipDeviceMallocUncached));
-
-                    // Seed the cursors to the current HARDWARE write pointer so the
-                    // first reserved index is contiguous with whatever the queue was
-                    // created at.
-                    const uint64_t hwWptr = (uint64_t) * (queue_.Queue_write_ptr_aql);
-                    const uint64_t hwRptr = (uint64_t) * (queue_.Queue_read_ptr_aql);
-
-                    hostHandle_ = SdmaQueueDeviceHandle{
-                        /*queueBuf*/ static_cast<uint32_t*>(queueBuffer_),
-                        /*rptr*/ (uint64_t*)queue_.Queue_read_ptr_aql,
-                        /*wptr*/ (uint64_t*)queue_.Queue_write_ptr_aql,
-                        /*doorbell*/ (uint64_t*)queue_.Queue_DoorBell_aql,
-                        /*cachedWptr*/ cachedWptr_,
-                        /*committedWptr*/ committedWptr_,
-                        // Per-producer private cache seed, see the struct above.
-                        /*cachedHwReadIndex*/ hwRptr,
-                    };
-
-                    CHK_HIP(
-                        hipMemcpy(cachedWptr_, &hwWptr, sizeof(uint64_t), hipMemcpyHostToDevice));
-                    CHK_HIP(hipMemcpy(
-                        committedWptr_, &hwWptr, sizeof(uint64_t), hipMemcpyHostToDevice));
                 }
                 catch(...)
                 {
@@ -323,12 +265,15 @@ namespace TensileLite
             SdmaQueue(const SdmaQueue&)            = delete;
             SdmaQueue& operator=(const SdmaQueue&) = delete;
 
-            // Host-visible copy of this queue's device handle. SdmaQueueSet packs
-            // these into the contiguous device array the kernel indexes by rank;
-            // the GPU is the only consumer, so no per-queue device copy is kept.
-            const SdmaQueueDeviceHandle& hostHandle() const
+            // Not part of HsaQueueResource: we pass it INTO hsaKmtCreateQueueExt.
+            void* ringBase() const
             {
-                return hostHandle_;
+                return queueBuffer_;
+            }
+
+            const HsaQueueResource& queueResource() const
+            {
+                return queue_;
             }
 
         private:
@@ -341,16 +286,6 @@ namespace TensileLite
                     (void)hsaKmtDestroyQueue(queue_.QueueId);
                     queue_.QueueId = 0;
                 }
-                if(cachedWptr_)
-                {
-                    (void)hipFree(cachedWptr_);
-                    cachedWptr_ = nullptr;
-                }
-                if(committedWptr_)
-                {
-                    (void)hipFree(committedWptr_);
-                    committedWptr_ = nullptr;
-                }
                 if(queueBuffer_)
                 {
                     (void)hsaKmtUnmapMemoryToGPU(queueBuffer_);
@@ -361,67 +296,6 @@ namespace TensileLite
 
             void*            queueBuffer_ = nullptr; // ring (Uncached)
             HsaQueueResource queue_{}; // KFD queue resource
-
-            uint64_t*             cachedWptr_    = nullptr; // uncached device mem
-            uint64_t*             committedWptr_ = nullptr; // uncached device mem
-            SdmaQueueDeviceHandle hostHandle_{}; // host copy
-        };
-
-        // A set of W queues for one local device -- one queue per peer. The W
-        // device handles are packed contiguously into a single device array so
-        // a kernel can index them by destination rank.
-        class SdmaQueueSet
-        {
-        public:
-            // localNode is this device's KFD node; targetNodes[j] is peer j's
-            // KFD node (use localNode for a loopback/self entry). One queue is
-            // created per target, with its engine chosen by sdmaSelectEngine().
-            SdmaQueueSet(uint32_t localNode, const std::vector<uint32_t>& targetNodes)
-            {
-                detail::ensureHsaKfd();
-
-                std::vector<SdmaQueueDeviceHandle> handles;
-                handles.reserve(targetNodes.size());
-                for(uint32_t dstNode : targetNodes)
-                {
-                    uint32_t engine = sdmaSelectEngine(localNode, dstNode);
-                    queues_.emplace_back(std::make_unique<SdmaQueue>(localNode, engine));
-                    handles.push_back(queues_.back()->hostHandle());
-                }
-
-                const size_t bytes = handles.size() * sizeof(SdmaQueueDeviceHandle);
-
-                // Adopt before the copy, not after: dHandles_ is a member, so a
-                // throwing CHK_HIP below unwinds through its destructor.
-                SdmaQueueDeviceHandle* raw = nullptr;
-                CHK_HIP(hipMalloc(&raw, bytes));
-                dHandles_.reset(raw);
-                CHK_HIP(hipMemcpy(dHandles_.get(), handles.data(), bytes, hipMemcpyHostToDevice));
-            }
-
-            SdmaQueueSet(const SdmaQueueSet&)            = delete;
-            SdmaQueueSet& operator=(const SdmaQueueSet&) = delete;
-
-            // Device pointer to the W-element SdmaQueueDeviceHandle array.
-            SdmaQueueDeviceHandle* deviceHandles() const
-            {
-                return dHandles_.get();
-            }
-
-        private:
-            struct HipFreeDeleter
-            {
-                void operator()(SdmaQueueDeviceHandle* p) const
-                {
-                    (void)hipFree(p);
-                }
-            };
-
-            // Owner-only: nothing reads this after the constructor, but every
-            // pointer in dHandles_ aims at a resource these queues free on
-            // destruction. Localizing it would hand the GPU a dangling array.
-            std::vector<std::unique_ptr<SdmaQueue>>                queues_;
-            std::unique_ptr<SdmaQueueDeviceHandle, HipFreeDeleter> dHandles_;
         };
 
     } // namespace Client

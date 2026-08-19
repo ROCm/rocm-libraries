@@ -377,49 +377,28 @@ namespace rocisa
 
     struct AtomicReadWriteInstruction : public ReadWriteInstruction
     {
-        std::shared_ptr<Container> dst;
-        std::shared_ptr<Container> srcs;
+        std::shared_ptr<Container>   dst;
+        std::shared_ptr<Container>   base;
+        InstructionInput             soffset;
+        std::optional<SMEMModifiers> smem;
 
         AtomicReadWriteInstruction(InstType                          instType,
                                    const std::shared_ptr<Container>& dst,
-                                   const std::shared_ptr<Container>& srcs,
+                                   const std::shared_ptr<Container>& base,
+                                   const InstructionInput&           soffset = 0,
+                                   std::optional<SMEMModifiers>      smem    = std::nullopt,
                                    const std::string&                comment = "")
             : ReadWriteInstruction(instType, RWType::RW_TYPE1, comment)
             , dst(dst)
-            , srcs(srcs)
+            , base(base)
+            , soffset(soffset)
+            , smem(smem)
         {
         }
 
         AtomicReadWriteInstruction(const AtomicReadWriteInstruction& other)
             : ReadWriteInstruction(other)
             , dst(other.dst ? other.dst->clone() : nullptr)
-            , srcs(other.srcs ? other.srcs->clone() : nullptr)
-        {
-        }
-    };
-
-    struct SMemAtomicIncInstruction : public AtomicReadWriteInstruction
-    {
-        std::shared_ptr<Container>   base;
-        InstructionInput             soffset;
-        std::optional<SMEMModifiers> smem;
-
-        SMemAtomicIncInstruction(InstType                          instType,
-                                 const std::shared_ptr<Container>& dst,
-                                 const std::shared_ptr<Container>& base,
-                                 const InstructionInput&           soffset,
-                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
-                                 const std::string&                comment = "")
-            : AtomicReadWriteInstruction(instType, dst, nullptr, comment)
-            , base(base)
-            , soffset(soffset)
-            , smem(smem)
-        {
-            instStr = "s_atomic_inc";
-        }
-
-        SMemAtomicIncInstruction(const SMemAtomicIncInstruction& other)
-            : AtomicReadWriteInstruction(other)
             , base(other.base ? other.base->clone() : nullptr)
             , soffset(copyInstructionInput(other.soffset))
             , smem(other.smem)
@@ -441,136 +420,7 @@ namespace rocisa
             return {base, soffset};
         }
 
-        std::string getArgStr() const
-        {
-            return dst->toString() + ", " + base->toString() + ", " + InstructionInputToString(soffset);
-        }
-
-        std::string toString() const override
-        {
-            auto        newInstStr = preStr();
-            std::string kStr       = newInstStr + " " + getArgStr();
-            if(smem)
-            {
-                kStr += smem->toString();
-            }
-            return formatWithComment(kStr);
-        }
-    };
-
-    struct SMemAtomicDecInstruction : public AtomicReadWriteInstruction
-    {
-        std::shared_ptr<Container>   base;
-        std::optional<SMEMModifiers> smem;
-
-        SMemAtomicDecInstruction(InstType                          instType,
-                                 const std::shared_ptr<Container>& dst,
-                                 const std::shared_ptr<Container>& base,
-                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
-                                 const std::string&                comment = "")
-            : AtomicReadWriteInstruction(instType, dst, nullptr, comment)
-            , base(base)
-            , smem(smem)
-        {
-            instStr = "s_atomic_dec";
-        }
-
-        SMemAtomicDecInstruction(const SMemAtomicDecInstruction& other)
-            : AtomicReadWriteInstruction(other)
-            , base(other.base ? other.base->clone() : nullptr)
-            , smem(other.smem)
-        {
-        }
-
-        std::vector<InstructionInput> getParams() const override
-        {
-            return {dst, base};
-        }
-
-        std::vector<InstructionInput> getDstParams() const override
-        {
-            return {dst};
-        }
-
-        std::vector<InstructionInput> getSrcParams() const override
-        {
-            return {base};
-        }
-
-        std::string getArgStr() const
-        {
-            return dst->toString() + ", " + base->toString();
-        }
-
-        std::string toString() const override
-        {
-            auto        newInstStr = preStr();
-            std::string kStr       = newInstStr + " " + getArgStr();
-            if(smem)
-            {
-                kStr += smem->toString();
-            }
-            return formatWithComment(kStr);
-        }
-    };
-
-    // Scalar compare-and-swap. `dst` is ONE register group that is both the
-    // data source and the return: DATA[63:0] is the swap value, DATA[127:64]
-    // the compare value, and the pre-op memory value is written back over
-    // DATA[63:0] (CDNA4 ISA, S_ATOMIC_CMPSWAP_X2). It is therefore listed as
-    // both a dst and a src param, unlike the inc/dec forms whose dst is purely
-    // a return.
-    //
-    // GLC means something different here than on a scalar store: on a store it
-    // forces the write past the K$ and L2, on an atomic it selects return of
-    // the pre-op value (ISA 8.2.2). An atomic has no bit left with which to ask
-    // for a coherence scope, so whether it serializes against other
-    // workgroups is not answerable from the encoding -- measured separately on
-    // gfx950 before this was used.
-    struct SMemAtomicCmpswapInstruction : public AtomicReadWriteInstruction
-    {
-        std::shared_ptr<Container>   base;
-        InstructionInput             soffset;
-        std::optional<SMEMModifiers> smem;
-
-        SMemAtomicCmpswapInstruction(InstType                          instType,
-                                     const std::shared_ptr<Container>& dst,
-                                     const std::shared_ptr<Container>& base,
-                                     const InstructionInput&           soffset,
-                                     std::optional<SMEMModifiers>      smem    = std::nullopt,
-                                     const std::string&                comment = "")
-            : AtomicReadWriteInstruction(instType, dst, nullptr, comment)
-            , base(base)
-            , soffset(soffset)
-            , smem(smem)
-        {
-            instStr = "s_atomic_cmpswap";
-        }
-
-        SMemAtomicCmpswapInstruction(const SMemAtomicCmpswapInstruction& other)
-            : AtomicReadWriteInstruction(other)
-            , base(other.base ? other.base->clone() : nullptr)
-            , soffset(copyInstructionInput(other.soffset))
-            , smem(other.smem)
-        {
-        }
-
-        std::vector<InstructionInput> getParams() const override
-        {
-            return {dst, base, soffset};
-        }
-
-        std::vector<InstructionInput> getDstParams() const override
-        {
-            return {dst};
-        }
-
-        std::vector<InstructionInput> getSrcParams() const override
-        {
-            return {dst, base, soffset};
-        }
-
-        std::string getArgStr() const
+        virtual std::string getArgStr() const
         {
             return dst->toString() + ", " + base->toString() + ", "
                    + InstructionInputToString(soffset);
@@ -578,13 +428,57 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        newInstStr = preStr();
-            std::string kStr       = newInstStr + " " + getArgStr();
+            std::string kStr = preStr() + " " + getArgStr();
             if(smem)
             {
                 kStr += smem->toString();
             }
             return formatWithComment(kStr);
+        }
+    };
+
+    struct SMemAtomicIncInstruction : public AtomicReadWriteInstruction
+    {
+        using AtomicReadWriteInstruction::AtomicReadWriteInstruction;
+
+        SMemAtomicIncInstruction(InstType                          instType,
+                                 const std::shared_ptr<Container>& dst,
+                                 const std::shared_ptr<Container>& base,
+                                 const InstructionInput&           soffset,
+                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
+                                 const std::string&                comment = "")
+            : AtomicReadWriteInstruction(instType, dst, base, soffset, smem, comment)
+        {
+            instStr = "s_atomic_inc";
+        }
+    };
+
+    // No soffset operand, unlike the other scalar atomics.
+    struct SMemAtomicDecInstruction : public AtomicReadWriteInstruction
+    {
+        SMemAtomicDecInstruction(InstType                          instType,
+                                 const std::shared_ptr<Container>& dst,
+                                 const std::shared_ptr<Container>& base,
+                                 std::optional<SMEMModifiers>      smem    = std::nullopt,
+                                 const std::string&                comment = "")
+            : AtomicReadWriteInstruction(instType, dst, base, 0, smem, comment)
+        {
+            instStr = "s_atomic_dec";
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, base};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {base};
+        }
+
+        std::string getArgStr() const override
+        {
+            return dst->toString() + ", " + base->toString();
         }
     };
 
@@ -2466,51 +2360,6 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> dst;
     };
 
-    struct GlobalAtomicCmpswapB64 : public GLOBALStoreInstruction
-    {
-        GlobalAtomicCmpswapB64(const std::shared_ptr<RegisterContainer>& dst,
-                               const std::shared_ptr<RegisterContainer>& vaddr,
-                               const std::shared_ptr<RegisterContainer>& data,
-                               const std::shared_ptr<RegisterContainer>& saddr,
-                               std::optional<GLOBALModifiers>            modifier = std::nullopt,
-                               const std::string&                        comment  = "")
-            : GLOBALStoreInstruction(InstType::INST_B64, vaddr, data, saddr, modifier, comment)
-            , dst(dst)
-        {
-            setInst("global_atomic_cmpswap");
-        }
-
-        GlobalAtomicCmpswapB64(const GlobalAtomicCmpswapB64& other)
-            : GLOBALStoreInstruction(other)
-            , dst(other.dst ? other.dst->clone2() : nullptr)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<GlobalAtomicCmpswapB64>(*this);
-        }
-
-        std::vector<InstructionInput> getDstParams() const override
-        {
-            return {dst};
-        }
-
-        std::string getArgStr() const override
-        {
-            return dst->toString() + ", " + vaddr->toString() + ", " + srcData->toString() + ", "
-                   + saddr->toString();
-        }
-
-        std::string typeConvert() const override
-        {
-            return kernel().isaVersion[0] < 11 ? "_x2" : "_b64";
-        }
-
-    private:
-        std::shared_ptr<RegisterContainer> dst;
-    };
-
     struct GlobalStoreB8 : public GLOBALStoreInstruction
     {
         GlobalStoreB8(const std::shared_ptr<RegisterContainer>& vaddr,
@@ -3791,24 +3640,25 @@ namespace rocisa
         }
     };
 
-    // 64-bit scalar CAS. SDATA is FOUR dwords and must be 4-aligned (ISA 8.4,
-    // "a multiple of four for larger fetches"); the assembler rejects an
-    // unaligned group outright. The mnemonic carries its own _x2 -- preStr()
-    // emits instStr verbatim, so instType only feeds register-width accounting.
-    struct SAtomicCmpswapX2 : public SMemAtomicCmpswapInstruction
+    struct SAtomicCmpswapX2 : public AtomicReadWriteInstruction
     {
         SAtomicCmpswapX2(const std::shared_ptr<Container>& dst,
                          const std::shared_ptr<Container>& base,
                          const InstructionInput&           soffset,
                          std::optional<SMEMModifiers>      smem    = std::nullopt,
                          const std::string&                comment = "")
-            : SMemAtomicCmpswapInstruction(InstType::INST_B128, dst, base, soffset, smem, comment)
+            : AtomicReadWriteInstruction(InstType::INST_B128, dst, base, soffset, smem, comment)
         {
             instStr = "s_atomic_cmpswap_x2";
         }
 
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {dst, base, soffset};
+        }
+
         SAtomicCmpswapX2(const SAtomicCmpswapX2& other)
-            : SMemAtomicCmpswapInstruction(other)
+            : AtomicReadWriteInstruction(other)
         {
         }
 
@@ -3836,6 +3686,34 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SAtomicDec>(*this);
+        }
+    };
+
+    struct SAtomicUmaxX2 : public AtomicReadWriteInstruction
+    {
+        SAtomicUmaxX2(const std::shared_ptr<Container>& dst,
+                      const std::shared_ptr<Container>& base,
+                      const InstructionInput&           soffset,
+                      std::optional<SMEMModifiers>      smem    = std::nullopt,
+                      const std::string&                comment = "")
+            : AtomicReadWriteInstruction(InstType::INST_B64, dst, base, soffset, smem, comment)
+        {
+            instStr = "s_atomic_umax_x2";
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {dst, base, soffset};
+        }
+
+        SAtomicUmaxX2(const SAtomicUmaxX2& other)
+            : AtomicReadWriteInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAtomicUmaxX2>(*this);
         }
     };
 

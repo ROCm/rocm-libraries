@@ -255,11 +255,17 @@ void mem_inst(nb::module_ m_mem)
         .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SMEMModifiers>,
                       const std::string&>(),
              nb::arg("instType"),
              nb::arg("dst"),
-             nb::arg("srcs"),
-             nb::arg("comment") = "");
+             nb::arg("base"),
+             nb::arg("soffset")  = 0,
+             nb::arg("smem")     = std::nullopt,
+             nb::arg("comment")  = "")
+        .def("getParams", &rocisa::AtomicReadWriteInstruction::getParams)
+        .def("__str__", &rocisa::AtomicReadWriteInstruction::toString);
 
     nb::class_<rocisa::SMemAtomicIncInstruction, rocisa::AtomicReadWriteInstruction>(
         m_mem, "SMemAtomicIncInstruction")
@@ -292,23 +298,6 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("comment") = "")
         .def("getParams", &rocisa::SMemAtomicDecInstruction::getParams)
         .def("__str__", &rocisa::SMemAtomicDecInstruction::toString);
-
-    nb::class_<rocisa::SMemAtomicCmpswapInstruction, rocisa::AtomicReadWriteInstruction>(
-        m_mem, "SMemAtomicCmpswapInstruction")
-        .def(nb::init<rocisa::InstType,
-                      const std::shared_ptr<rocisa::Container>&,
-                      const std::shared_ptr<rocisa::Container>&,
-                      const InstructionInput&,
-                      std::optional<rocisa::SMEMModifiers>,
-                      const std::string&>(),
-             nb::arg("instType"),
-             nb::arg("dst"),
-             nb::arg("base"),
-             nb::arg("soffset"),
-             nb::arg("smem")    = std::nullopt,
-             nb::arg("comment") = "")
-        .def("getParams", &rocisa::SMemAtomicCmpswapInstruction::getParams)
-        .def("__str__", &rocisa::SMemAtomicCmpswapInstruction::toString);
 
     nb::class_<rocisa::SMemLoadInstruction, rocisa::GlobalReadInstruction>(m_mem,
                                                                            "SMemLoadInstruction")
@@ -1424,25 +1413,6 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::GlobalAtomicAddU32(self);
         });
 
-    nb::class_<rocisa::GlobalAtomicCmpswapB64, rocisa::GLOBALStoreInstruction>(
-        m_mem, "GlobalAtomicCmpswapB64")
-        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::shared_ptr<rocisa::RegisterContainer>&,
-                      std::optional<rocisa::GLOBALModifiers>,
-                      const std::string&>(),
-             nb::arg("dst"),
-             nb::arg("vaddr"),
-             nb::arg("data"),
-             nb::arg("saddr"),
-             nb::arg("modifier") = std::nullopt,
-             nb::arg("comment")  = "")
-        .def("__str__", &rocisa::GlobalAtomicCmpswapB64::toString)
-        .def("__deepcopy__", [](const rocisa::GlobalAtomicCmpswapB64& self, const nb::dict&) {
-            return new rocisa::GlobalAtomicCmpswapB64(self);
-        });
-
     nb::class_<rocisa::DSLoadU8, rocisa::DSLoadInstruction>(m_mem, "DSLoadU8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -1867,7 +1837,7 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::SAtomicInc(self);
         });
 
-    nb::class_<rocisa::SAtomicCmpswapX2, rocisa::SMemAtomicCmpswapInstruction>(m_mem,
+    nb::class_<rocisa::SAtomicCmpswapX2, rocisa::AtomicReadWriteInstruction>(m_mem,
                                                                                "SAtomicCmpswapX2")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -1894,6 +1864,21 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::SAtomicDec& self, nb::dict&) {
             return new rocisa::SAtomicDec(self);
+        });
+
+    nb::class_<rocisa::SAtomicUmaxX2, rocisa::AtomicReadWriteInstruction>(m_mem, "SAtomicUmaxX2")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SMEMModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("base"),
+             nb::arg("soffset"),
+             nb::arg("smem")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SAtomicUmaxX2& self, nb::dict&) {
+            return new rocisa::SAtomicUmaxX2(self);
         });
 
     nb::class_<rocisa::SLoadB32, rocisa::SMemLoadInstruction>(m_mem, "SLoadB32")

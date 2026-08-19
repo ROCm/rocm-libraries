@@ -4,13 +4,13 @@
 from rocisa.container import sgpr, SMEMModifiers
 from rocisa.code import Label
 from rocisa.instruction import (
-    SMovB32, SMovB64, SLoadB64, SLoadB256,
+    SMovB32, SMovB64, SLoadB64, SLoadB128,
     SAddU32, SAddCU32, SSubU32, SSubBU32,
     SAndB32, SLShiftRightB32,
     SCmpEQU32, SCmpEQU64, SCmpLeU32, SCmpLtU32,
     SCBranchSCC0, SCBranchSCC1, SBranch,
     SWaitCnt, SSleep,
-    SStoreB32, SStoreB64, SStoreB128, SAtomicCmpswapX2,
+    SStoreB32, SStoreB64, SStoreB128, SAtomicCmpswapX2, SAtomicUmaxX2,
 )
 
 
@@ -20,32 +20,55 @@ from rocisa.instruction import (
 SDMA_QUEUE_SIZE = 256 * 1024
 assert (SDMA_QUEUE_SIZE & (SDMA_QUEUE_SIZE - 1)) == 0, "ring size must be a power of two"
 
-# Byte offsets of every SdmaQueueDeviceHandle field (contract: the static_asserts
-# in client/include/SdmaQueue.hpp lock these).
-OFF_queueBuf         = 0    # ring base (uint32_t*, dword-addressed)
-OFF_rptr             = 8    # hardware read pointer  (SYSTEM-scope read)
-OFF_wptr             = 16   # hardware write pointer (AGENT-scope write)
-OFF_doorbell         = 24   # doorbell               (SYSTEM-scope write)
-OFF_cachedWptr       = 32   # producer reservation cursor (AGENT-scope CAS)
-OFF_committedWptr    = 40   # commit-serialization cursor (AGENT-scope)
-OFF_cachedHwReadIndex = 48  # per-producer private cache SEED (value, never stored back)
+# One kernarg group per peer: everything a work-group needs for the peer it
+# talks to, so the group base is computed once and every field is an immediate
+# offset off it. Signature.py builds the segment slots from this same tuple, so
+# the offsets below cannot drift from the layout.
+FUSED_A2A_PEER_FIELDS = ("flagPtr", "recvPtr", "queueBuf", "rptr", "wptr", "doorbell")
+PEER_GROUP_BYTES      = len(FUSED_A2A_PEER_FIELDS) * 8
 
+OFF_flagPtr  = 8 * FUSED_A2A_PEER_FIELDS.index("flagPtr")   # flag array, indexed by source rank
+OFF_recvPtr  = 8 * FUSED_A2A_PEER_FIELDS.index("recvPtr")   # recv buffer
+OFF_queueBuf = 8 * FUSED_A2A_PEER_FIELDS.index("queueBuf")  # ring base
+OFF_rptr     = 8 * FUSED_A2A_PEER_FIELDS.index("rptr")      # hardware read pointer
+OFF_wptr     = 8 * FUSED_A2A_PEER_FIELDS.index("wptr")      # hardware write pointer
+OFF_doorbell = 8 * FUSED_A2A_PEER_FIELDS.index("doorbell")
+
+assert OFF_doorbell == OFF_wptr + 8, "submitPacket's x4 load needs wptr then doorbell"
+assert OFF_recvPtr == OFF_flagPtr + 8, "the SDMA loader's x4 needs flagPtr then recvPtr"
+
+# Cursor pair, in this device's counter buffer; the caller passes the base of
+# its queue's pair (fusedA2ACounterCursorOffset in FusedA2ACounterSentinel.hpp).
+CUR_cachedWptr    = 0  # producer reservation cursor (CAS target)
+CUR_committedWptr = 8  # commit-serialization cursor
+CURSOR_PAIR_BYTES = 16
 
 class SdmaRingEmitter:
     """Packet-independent SDMA ring producer, emitted as rocisa Modules.
 
     Persistent per-producer state lives in caller-owned SGPRs:
-      * handleBase (2 SGPRs): pointer to this peer's SdmaQueueDeviceHandle.
+      * peerGroup (1 SGPR): this peer's group offset, rank*PEER_GROUP_BYTES,
+        used as the SOFFSET of every peer-group load.
+      * cursorBase (2 SGPRs): this peer's cursor pair. 2-ALIGNED, and the pair
+        must be 8-byte aligned in memory for the 64-bit atomics.
       * cachedHwReadIdx (2 SGPRs): the private room-check cache. The caller
-        seeds it ONCE from handle+48 at setup; this emitter reads and refreshes
-        it in-register and NEVER stores it back to memory (see the note in
-        client/include/SdmaQueue.hpp).
+        seeds it ONCE at setup with emitRefreshCache(); this emitter refreshes
+        it in-register and NEVER stores it back to memory.
     """
 
-    def __init__(self, queueSize: int = SDMA_QUEUE_SIZE):
+    def __init__(self, queueSize: int = SDMA_QUEUE_SIZE, groupImm: int = 0):
         assert (queueSize & (queueSize - 1)) == 0, "ring size must be a power of two"
         self.queueSize = queueSize
         self.ringMask  = queueSize - 1
+        # Segment base, folded into every peer-group load's immediate.
+        self.groupImm  = groupImm
+
+    def _peerLoad(self, cls, dst, peerGroupS, fieldOff, comment):
+        """SLoad of one peer-group field: KernArgAddress + peerGroup + immediate."""
+        imm = self.groupImm + fieldOff
+        assert imm != 0, "peer-group load immediate must be nonzero"
+        return cls(dst=dst, base=sgpr("KernArgAddress", 2), soffset=sgpr(peerGroupS),
+                   smem=SMEMModifiers(offset=imm), comment=comment)
 
     # ---- room check -------------------------------------------------------
 
@@ -71,8 +94,10 @@ class SdmaRingEmitter:
                              comment="SCC = diff < queueSize? (room)"))
         module.add(noRoom)
 
-    def _emitRefreshCache(self, module, w, handleBaseS, cachedHwReadIdxS):
+    def emitRefreshCache(self, module, w, peerGroupS, cachedHwReadIdxS):
         """cachedHwReadIdx = *rptr, re-read past the caches with glc.
+
+        Also how the caller seeds the cache at setup.
 
         Emits only s_load and s_waitcnt, neither of which writes SCC, so a room
         check on either side of this keeps its answer.
@@ -81,8 +106,8 @@ class SdmaRingEmitter:
         so there is nothing to relay.
         """
         rptrPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_cw_rptrPtr", preventOverflow=False)
-        module.add(SLoadB64(dst=sgpr(rptrPtrS, 2), base=sgpr(handleBaseS, 2),
-                            soffset=hex(OFF_rptr), comment="load rptr pointer"))
+        module.add(self._peerLoad(SLoadB64, sgpr(rptrPtrS, 2), peerGroupS, OFF_rptr,
+                                  "load rptr pointer"))
         module.add(SWaitCnt(kmcnt=0, comment="wait rptr pointer load"))
         module.add(SLoadB64(dst=sgpr(cachedHwReadIdxS, 2), base=sgpr(rptrPtrS, 2),
                             soffset=hex(0), smem=SMEMModifiers(glc=True),
@@ -90,9 +115,41 @@ class SdmaRingEmitter:
         module.add(SWaitCnt(kmcnt=0, comment="wait rptr load"))
         w.sgprPool.checkIn(rptrPtrS)
 
+    # ---- cursor lazy-init --------------------------------------------------
+
+    def emitLazyInitCursors(self, module, w, peerGroupS, cursorBaseS):
+        """Raise both cursors to at least the hardware write pointer.
+
+        MUST be emitted before the reserve loop: once a producer has reserved
+        from a cursor that is too low, the damage is done.
+
+        No glc -- nothing here wants the pre-op value. The trailing s_waitcnt is
+        not optional: the reserve loop reads the same cursor, and SMEM ops are
+        not ordered against each other without it.
+        """
+        wptrPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_wptrPtr", preventOverflow=False)
+        hwWptrS  = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_hwWptr", preventOverflow=False)
+        module.add(self._peerLoad(SLoadB64, sgpr(wptrPtrS, 2), peerGroupS, OFF_wptr,
+                                  "load wptr pointer"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait wptr pointer load"))
+        module.add(SLoadB64(dst=sgpr(hwWptrS, 2), base=sgpr(wptrPtrS, 2),
+                            soffset=hex(0), smem=SMEMModifiers(glc=True),
+                            comment="hwWptr = *wptr (glc: past the caches)"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait hwWptr load"))
+        # Non-returning, so hwWptrS survives the first and feeds the second.
+        module.add(SAtomicUmaxX2(dst=sgpr(hwWptrS, 2), base=sgpr(cursorBaseS, 2),
+                                 soffset=hex(CUR_cachedWptr),
+                                 comment="cachedWptr = max(cachedWptr, hwWptr)"))
+        module.add(SAtomicUmaxX2(dst=sgpr(hwWptrS, 2), base=sgpr(cursorBaseS, 2),
+                                 soffset=hex(CUR_committedWptr),
+                                 comment="committedWptr = max(committedWptr, hwWptr)"))
+        module.add(SWaitCnt(kmcnt=0, comment="cursors raised before anyone reserves"))
+        w.sgprPool.checkIn(hwWptrS)
+        w.sgprPool.checkIn(wptrPtrS)
+
     # ---- ReserveQueueSpace (CAS, NOT fetch_add) ----------------------------
 
-    def emitReserveQueueSpace(self, module, w, handleBaseS, cachedHwReadIdxS,
+    def emitReserveQueueSpace(self, module, w, peerGroupS, cursorBaseS, cachedHwReadIdxS,
                               sizeInBytes, outCurS, outOffsetS):
         """Reserve `sizeInBytes` in the ring via a compare-exchange loop and
         compute the wrap-padding. outCurS (2 SGPRs) = reserved base index,
@@ -112,11 +169,6 @@ class SdmaRingEmitter:
         noPadLabel = Label(w.labels.getNameInc("sdma_reserve_nopad"), "ReserveQueueSpace: no wrap padding")
         doneLabel  = Label(w.labels.getNameInc("sdma_reserve_done"),  "ReserveQueueSpace: reserved")
 
-        cachedWptrPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_rsv_cwPtr", preventOverflow=False)
-        module.add(SLoadB64(dst=sgpr(cachedWptrPtrS, 2), base=sgpr(handleBaseS, 2),
-                            soffset=hex(OFF_cachedWptr), comment="load cachedWptr pointer"))
-        module.add(SWaitCnt(kmcnt=0, comment="wait cachedWptr pointer load"))
-
         wrapS   = w.sgprPool.checkOut(1, tag="sdma_rsv_wrap", preventOverflow=False)
         tmpPair = w.sgprPool.checkOutAligned(2, 2, tag="sdma_rsv_tmp", preventOverflow=False)
 
@@ -131,8 +183,8 @@ class SdmaRingEmitter:
 
         # Seed the compare slot with the current value (see the docstring on why
         # a possibly-stale seed is safe here).
-        module.add(SLoadB64(dst=sgpr(casDataS + 2, 2), base=sgpr(cachedWptrPtrS, 2),
-                            soffset=hex(0), smem=SMEMModifiers(glc=True),
+        module.add(SLoadB64(dst=sgpr(casDataS + 2, 2), base=sgpr(cursorBaseS, 2),
+                            soffset=hex(CUR_cachedWptr), smem=SMEMModifiers(glc=True),
                             comment="seed cur = cachedWptr (hint; the CAS self-corrects)"))
         module.add(SWaitCnt(kmcnt=0, comment="wait cachedWptr seed"))
 
@@ -170,11 +222,9 @@ class SdmaRingEmitter:
         self._emitRoomCheck(module, w, cachedHwReadIdxS, newIdxS, tmpPair,
                             "new - cachedHwReadIndex")
         module.add(SCBranchSCC1(labelName=haveRoomLabel.getLabelName(), comment="room via cached index"))
-        # ⚠ THE REFRESH IS ALMOST NEVER EXERCISED end to end: it runs only when
-        # the room check fails, i.e. when the SDMA engine has fallen a whole
-        # ring behind. A passing validation run is therefore NOT evidence about
-        # these instructions.
-        self._emitRefreshCache(module, w, handleBaseS, cachedHwReadIdxS)
+        # ⚠ Reached only when the engine is genuinely a ring behind, so a
+        # passing validation run is NOT evidence about these instructions.
+        self.emitRefreshCache(module, w, peerGroupS, cachedHwReadIdxS)
         self._emitRoomCheck(module, w, cachedHwReadIdxS, newIdxS, tmpPair,
                             "new - refreshed rptr")
         module.add(SCBranchSCC0(labelName=loopLabel.getLabelName(), comment="still full -> retry"))
@@ -191,7 +241,7 @@ class SdmaRingEmitter:
         # instruction's own source registers, which that section explicitly
         # permits for an atomic returning its pre-op value.
         module.add(SAtomicCmpswapX2(
-            dst=sgpr(casDataS, 4), base=sgpr(cachedWptrPtrS, 2), soffset=hex(0),
+            dst=sgpr(casDataS, 4), base=sgpr(cursorBaseS, 2), soffset=hex(CUR_cachedWptr),
             smem=SMEMModifiers(glc=True),
             comment="CAS cachedWptr cur->new (glc = return pre-op)"))
         module.add(SWaitCnt(kmcnt=0, comment="wait CAS return"))
@@ -210,13 +260,12 @@ class SdmaRingEmitter:
         module.add(doneLabel)
 
         w.sgprPool.checkIn(casDataS)
-        w.sgprPool.checkIn(cachedWptrPtrS)
         w.sgprPool.checkIn(wrapS)
         w.sgprPool.checkIn(tmpPair)
 
     # ---- placePacket -------------------------------------------------------
 
-    def emitPlacePacket(self, module, w, handleBaseS, packetDwordsS, numDwords,
+    def emitPlacePacket(self, module, w, peerGroupS, packetDwordsS, numDwords,
                         pendingWptrS, offsetS):
         """Write `offsetS` bytes of zero-padding (NOPs) then `numDwords` packet
         dwords into the ring, all with s_store...glc. Advances pendingWptrS
@@ -235,8 +284,8 @@ class SdmaRingEmitter:
         only serialize the submit.
         """
         queueBufPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_pp_qbuf", preventOverflow=False)
-        module.add(SLoadB64(dst=sgpr(queueBufPtrS, 2), base=sgpr(handleBaseS, 2),
-                            soffset=hex(OFF_queueBuf), comment="load queueBuf pointer"))
+        module.add(self._peerLoad(SLoadB64, sgpr(queueBufPtrS, 2), peerGroupS, OFF_queueBuf,
+                                  "load queueBuf pointer"))
         module.add(SWaitCnt(kmcnt=0, comment="wait queueBuf pointer load"))
 
         wrapS   = w.sgprPool.checkOut(1, tag="sdma_pp_wrap", preventOverflow=False)
@@ -345,7 +394,7 @@ class SdmaRingEmitter:
 
     # ---- submitPacket ------------------------------------------------------
 
-    def emitSubmitPacket(self, module, w, handleBaseS, baseS, pendingWptrS):
+    def emitSubmitPacket(self, module, w, peerGroupS, cursorBaseS, baseS, pendingWptrS):
         """Serialize this producer's commit behind earlier reservations, then
         publish the packet.
 
@@ -372,21 +421,15 @@ class SdmaRingEmitter:
         two packets against one reservation. That is a caller obligation;
         nothing here detects it.
         """
-        # Every pointer this function needs lies in one 32-byte run of the
-        # handle -- wptr at 16 through committedWptr at 40 -- so one load gets
-        # all of them: [0:1] wptr, [2:3] doorbell, [6:7] committedWptr, with
-        # [4:5] the cachedWptr pointer that is not used here. x8 SDATA wants a
-        # multiple of four. Doing it once also keeps a load out of the publish
-        # sequence below, where it would sit between the wptr store and the
-        # doorbell it is meant to precede.
-        ptrsS = w.sgprPool.checkOutAligned(8, 4, tag="sdma_sp_ptrs", preventOverflow=False)
-        module.add(SLoadB256(dst=sgpr(ptrsS, 8), base=sgpr(handleBaseS, 2),
-                             soffset=hex(OFF_wptr),
-                             comment="load wptr / doorbell / committedWptr pointers"))
+        # wptr and doorbell are adjacent, so one x4 gets both. 4-ALIGNED for
+        # the x4 SDATA. Fetched here, not in the publish sequence below, where
+        # a load would sit between the wptr store and the doorbell.
+        ptrsS = w.sgprPool.checkOutAligned(4, 4, tag="sdma_sp_ptrs", preventOverflow=False)
+        module.add(self._peerLoad(SLoadB128, sgpr(ptrsS, 4), peerGroupS, OFF_wptr,
+                                  "load wptr / doorbell pointers"))
         module.add(SWaitCnt(kmcnt=0, comment="wait handle pointer load"))
-        wptrPtrS = ptrsS + (OFF_wptr          - OFF_wptr) // 4
-        dbPtrS   = ptrsS + (OFF_doorbell      - OFF_wptr) // 4
-        commPtrS = ptrsS + (OFF_committedWptr - OFF_wptr) // 4
+        wptrPtrS = ptrsS + (OFF_wptr     - OFF_wptr) // 4
+        dbPtrS   = ptrsS + (OFF_doorbell - OFF_wptr) // 4
 
         # --- (1) spin: committedWptr == base ---
         # 2-ALIGNED: this pair is the x2 destination of the poll below.
@@ -396,8 +439,8 @@ class SdmaRingEmitter:
         module.add(spinLabel)
         module.add(SSleep(simm16=1, comment="submitPacket: backoff between polls (must stay INSIDE the spin body)"))
         # glc, so this is a poll and not one value read many times.
-        module.add(SLoadB64(dst=sgpr(pollS, 2), base=sgpr(commPtrS, 2),
-                            soffset=hex(0), smem=SMEMModifiers(glc=True),
+        module.add(SLoadB64(dst=sgpr(pollS, 2), base=sgpr(cursorBaseS, 2),
+                            soffset=hex(CUR_committedWptr), smem=SMEMModifiers(glc=True),
                             comment="poll committedWptr"))
         module.add(SWaitCnt(kmcnt=0, comment="wait committedWptr load"))
         module.add(SCmpEQU64(src0=sgpr(pollS, 2), src1=sgpr(baseS, 2),
@@ -427,7 +470,8 @@ class SdmaRingEmitter:
 
         # --- (2c) store committedWptr = pending -> unblocks next producer ---
         module.add(SStoreB64(
-            src=sgpr(pendingWptrS, 2), base=sgpr(commPtrS, 2), soffset=hex(0),
+            src=sgpr(pendingWptrS, 2), base=sgpr(cursorBaseS, 2),
+            soffset=hex(CUR_committedWptr),
             smem=SMEMModifiers(glc=True, isStore=True),
             comment="store committedWptr = pending"))
         module.add(SWaitCnt(kmcnt=0, comment="wait committedWptr store issued"))
