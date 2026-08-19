@@ -25,9 +25,9 @@ namespace rocRoller::HostNumerics
         using roc::host_validation::GenerationRecipeSettings;
         using roc::host_validation::Layout;
         using roc::host_validation::IndexOrder;
-        using roc::host_validation::MxGenerationMode;
+        using roc::host_validation::MxDataRecipe;
         using roc::host_validation::MxGenerationProblem;
-        using roc::host_validation::MxGenerationRecipe;
+        using roc::host_validation::MxScaleGenerationMode;
         using roc::host_validation::ScalarType;
         using roc::host_validation::Shape;
         using roc::host_validation::Tensor;
@@ -212,45 +212,52 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument("Unknown rocRoller data initialization mode.");
         }
 
-        MxGenerationRecipe mxGenerationRecipe(DataInitialization const& initialization,
-                                              float                     minimum,
-                                              float                     maximum)
+        MxDataRecipe mxGenerationRecipe(DataInitialization const& initialization,
+                                        float                     minimum,
+                                        float                     maximum)
         {
-            MxGenerationRecipe recipe;
             switch(initialization.mode)
             {
             case DataInitializationMode::Bounded:
-                recipe.mode       = MxGenerationMode::Bounded;
-                recipe.parameter0 = minimum;
-                recipe.parameter1 = maximum;
-                break;
+                return MxDataRecipe::bounded({.lower = minimum, .upper = maximum});
             case DataInitializationMode::BoundedAlternatingSign:
-                recipe.mode       = MxGenerationMode::BoundedAlternatingSign;
-                recipe.parameter0 = minimum;
-                recipe.parameter1 = maximum;
-                break;
+                return MxDataRecipe::boundedAlternatingSign(
+                    {.maximumMagnitude = std::max(std::abs(minimum), std::abs(maximum))});
             case DataInitializationMode::Unbounded:
-                recipe.mode = MxGenerationMode::Unbounded;
-                break;
+                return MxDataRecipe::unbounded();
             case DataInitializationMode::Identity:
-                recipe.mode = MxGenerationMode::Identity;
-                break;
+                return MxDataRecipe::identity();
             case DataInitializationMode::Ones:
-                recipe.mode = MxGenerationMode::Ones;
-                break;
+                return MxDataRecipe::constant(1.0);
             case DataInitializationMode::Zeros:
-                recipe.mode = MxGenerationMode::Zeros;
-                break;
+                return MxDataRecipe::constant(0.0);
             case DataInitializationMode::TrigonometricFromFloat:
-                recipe.mode = MxGenerationMode::Trigonometric;
-                break;
+                return MxDataRecipe::trigonometric();
             case DataInitializationMode::NormalFromFloat:
-                recipe.mode       = MxGenerationMode::Normal;
-                recipe.parameter0 = initialization.normalMean;
-                recipe.parameter1 = initialization.normalStandardDeviation;
-                break;
+                return MxDataRecipe::normal(
+                    {.mean              = initialization.normalMean,
+                     .standardDeviation = initialization.normalStandardDeviation});
             }
-            return recipe;
+            throw std::invalid_argument("Unknown rocRoller MX data initialization mode.");
+        }
+
+        MxScaleGenerationMode mxScaleGenerationMode(DataInitializationMode mode)
+        {
+            switch(mode)
+            {
+            case DataInitializationMode::Identity:
+            case DataInitializationMode::Ones:
+                return MxScaleGenerationMode::One;
+            case DataInitializationMode::Zeros:
+                return MxScaleGenerationMode::Minimum;
+            case DataInitializationMode::Bounded:
+            case DataInitializationMode::BoundedAlternatingSign:
+            case DataInitializationMode::Unbounded:
+            case DataInitializationMode::TrigonometricFromFloat:
+            case DataInitializationMode::NormalFromFloat:
+                return MxScaleGenerationMode::Derived;
+            }
+            throw std::invalid_argument("Unknown rocRoller MX scale initialization mode.");
         }
 
         Tensor generateUnscaledF8(TensorDescriptor const&   descriptor,
@@ -355,6 +362,7 @@ namespace rocRoller::HostNumerics
             problem.blockAxis = blockedDimension == contiguousDimension ? 0 : 1;
             problem.blockSize = scaleBlockSize;
             problem.data      = mxGenerationRecipe(initialization, minimum, maximum);
+            problem.scale     = mxScaleGenerationMode(initialization.mode);
             problem.seed      = seed;
 
             auto   result      = roc::host_validation::generateMx(problem);
