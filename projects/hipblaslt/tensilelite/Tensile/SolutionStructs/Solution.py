@@ -3125,10 +3125,36 @@ class Solution(collections.abc.Mapping):
         # postMainLoopBarrierCheckAndReset is gated on _StinkyTofuOptLevel==3,
         # which only SIA=4 derives, so at SIA=0 the rebuild never runs at all.
         #
+        # The mechanism is not inferred from the silicon failure alone, it is
+        # visible at codegen. Generating this arm on two trees that differ only
+        # in KernelWriter.py -- HEAD, and HEAD with the whole-tree barrier
+        # rebuild 4d9145fb2dc and its follow-up 0e0b4c342fd backed out -- emits
+        # assembly that is NOT byte-identical. Both trees emit the same eight
+        # barriers, which is exactly why a count cannot see this; what moves is
+        # one of them. Before the rebuild the LDS0 barrier sits AFTER
+        # "s_cbranch_scc1 label_TdmDealiasedFillAEnd", inside the wave-parity
+        # region and immediately ahead of the tensor_load_to_lds it guards, so
+        # only the waves that fall through ever execute it. After the rebuild it
+        # is hoisted ahead of that branch, past the whole ds_read run, carrying
+        # the comment "(ahead of a wave-divergent branch)". Reproduced at
+        # MT64x512, DepthU 256, PGRA=PGRB=2, ScheduleIterAlg=4.
+        #
+        # A parity-guarded barrier count of 0 for "all equal arms" does NOT
+        # contradict that, and is not evidence the rebuild is irrelevant here.
+        # Such a count is read off a corpus generated with this very reject in
+        # place, so equal_f6 is absent from it; the equal arms that are present
+        # -- f0, f2 and f5 -- really are byte-identical across the two trees and
+        # really do read 0. Generate equal_f6 with the reject disabled and the
+        # same counter reports 1 on the pre-rebuild tree and 0 with the rebuild.
+        #
         # A divergent pair is exempt on purpose: divergentPairUnsupportedReason
         # admits ScheduleIterAlg=4, whose _ScheduleIterAlg is 0, so its unrolled
         # loop and its relocated fill are scheduled exactly as they are at
-        # SIA=0.
+        # SIA=0. That equivalence covers scheduling only. SIA=4 still derives
+        # _StinkyTofuOptLevel=3, so the barrier rebuild does run for a divergent
+        # pair, and on the pre-rebuild tree each divergent f6 arm carries three
+        # parity-guarded barriers. Those arms are sound here because the
+        # whole-tree rebuild is in the tree, not because the pass skips them.
         decoupled, blkA, blkB = decouplePgrBlocks(state)
         if not (decoupled and blkA != blkB) and state["ScheduleIterAlg"] == 4:
           reject(state, printRejectionReason,
