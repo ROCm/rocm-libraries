@@ -322,9 +322,9 @@ def test_post_processor_removes_depthu_when_in_all_mi_groups(monkeypatch) -> Non
     from geko.config_generator.fork_params.post_processor import BasePostProcessor
     from geko.schemas import GemmType
 
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
 
-    gt = GemmType.from_tensile("N", "N", "H", "H", "S")
+    gt = GemmType.from_tensilelite("N", "N", "H", "H", "S")
     cfg = {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
         "ARCH": "gfx950",
@@ -404,9 +404,9 @@ def test_post_processor_preserves_depthu_when_not_in_all_groups(monkeypatch) -> 
     from geko.config_generator.fork_params.post_processor import BasePostProcessor
     from geko.schemas import GemmType
 
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
 
-    gt = GemmType.from_tensile("N", "N", "H", "H", "S")
+    gt = GemmType.from_tensilelite("N", "N", "H", "H", "S")
     cfg = {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
         "ARCH": "gfx950",
