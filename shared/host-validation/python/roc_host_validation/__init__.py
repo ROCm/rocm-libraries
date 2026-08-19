@@ -117,7 +117,131 @@ def to_numpy(tensor, dtype=None) -> np.ndarray:
     return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
 
 
-def reference_gemm(*args, **kwargs):
-    """Run reference GEMM and return only its owning output tensor."""
+_native_reference_gemm_result = reference_gemm_result  # noqa: F405
 
-    return reference_gemm_result(*args, **kwargs).output  # noqa: F405
+
+def _reference_gemm_flat(
+    a,
+    b,
+    c,
+    output_type,
+    accumulator_type,
+    alpha=1.0,
+    beta=0.0,
+    compute_type_a=None,
+    compute_type_b=None,
+    math_mode=MathMode.Default,  # noqa: F405
+    activation=Activation.None_,  # noqa: F405
+    activation_parameter0=0.0,
+    activation_parameter1=0.0,
+    output_selection=None,
+    backend=GemmBackend.Pointwise,  # noqa: F405
+    block_scale_a=None,
+    block_scale_b=None,
+    block_size_a=0,
+    block_size_b=0,
+    pre_quantization_scales_a=None,
+    pre_quantization_axes_a=None,
+    pre_quantization_scales_b=None,
+    pre_quantization_axes_b=None,
+    output_scale=1.0,
+    output_conversion=OutputConversion.Default,  # noqa: F405
+    accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
+):
+    """Compatibility flat GEMM call translated into native descriptor objects."""
+
+    operand_a = GemmOperand(a)  # noqa: F405
+    operand_b = GemmOperand(b)  # noqa: F405
+    operand_a.compute_type = compute_type_a
+    operand_b.compute_type = compute_type_b
+
+    def add_pre_quantization_scales(operand, scales, axes, default_axis, name):
+        scales = [] if scales is None else list(scales)
+        axes = [] if axes is None else list(axes)
+        if axes and len(axes) != len(scales):
+            raise ValueError(f"Python reference_gemm {name} scale/axis counts differ.")
+        operand.pre_quantization_scales = [
+            VectorBinding(  # noqa: F405
+                scale,
+                default_axis if not axes else axes[index],
+            )
+            for index, scale in enumerate(scales)
+        ]
+
+    add_pre_quantization_scales(
+        operand_a,
+        pre_quantization_scales_a,
+        pre_quantization_axes_a,
+        MatrixAxis.Row,  # noqa: F405
+        "A pre-quantization",
+    )
+    add_pre_quantization_scales(
+        operand_b,
+        pre_quantization_scales_b,
+        pre_quantization_axes_b,
+        MatrixAxis.Column,  # noqa: F405
+        "B pre-quantization",
+    )
+
+    if block_scale_a is not None or block_scale_b is not None:
+        if (
+            block_scale_a is None
+            or block_scale_b is None
+            or block_size_a == 0
+            or block_size_b == 0
+        ):
+            raise ValueError(
+                "Python reference_gemm block scales require both tensors and "
+                "nonzero sizes."
+            )
+        operand_a.block_scale = BlockScaleBinding(  # noqa: F405
+            block_scale_a, block_size_a
+        )
+        operand_b.block_scale = BlockScaleBinding(  # noqa: F405
+            block_scale_b, block_size_b
+        )
+
+    problem = GemmProblem(  # noqa: F405
+        operand_a,
+        operand_b,
+        c,
+        output_type,
+        accumulator_type,
+    )
+    problem.accumulation_rounding = accumulation_rounding
+    problem.math_mode = math_mode
+    problem.epilogue.alpha = alpha
+    problem.epilogue.beta = beta
+    problem.epilogue.output_scale = output_scale
+    problem.epilogue.output_conversion = output_conversion
+    problem.epilogue.activation = activation
+    problem.epilogue.activation_parameter0 = activation_parameter0
+    problem.epilogue.activation_parameter1 = activation_parameter1
+
+    output = GemmOutputOptions()  # noqa: F405
+    output.selection = (
+        OutputSelection.all()  # noqa: F405
+        if output_selection is None
+        else output_selection
+    )
+    execution = GemmExecution(  # noqa: F405
+        backend,
+        backend == GemmBackend.Blocked,  # noqa: F405
+    )
+    return _native_reference_gemm_result(problem, output, execution)
+
+
+def reference_gemm_result(*args, **kwargs):
+    """Run a native GEMM request/problem or translate the flat compatibility form."""
+
+    if args and isinstance(args[0], (GemmProblem, GemmRequest)):  # noqa: F405
+        return _native_reference_gemm_result(*args, **kwargs)
+    if "problem" in kwargs or "request" in kwargs:
+        return _native_reference_gemm_result(*args, **kwargs)
+    return _reference_gemm_flat(*args, **kwargs)
+
+
+def reference_gemm(*args, **kwargs):
+    """Run reference GEMM and return only its output tensor."""
+
+    return reference_gemm_result(*args, **kwargs).output
