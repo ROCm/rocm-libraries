@@ -8,15 +8,15 @@ The writing must help a busy engineer understand the change without first readin
 
 ## Reader model
 
-Write for a high-school senior who:
+Write for a technically literate engineer at roughly an undergraduate level who:
 
-- has written novice Python and C++;
-- understands functions, classes, lists, dictionaries, pointers, files, exceptions, tests, and command-line tools;
-- has not seen rocm-libraries or the changed code;
-- may not know GPU terminology, ROCm conventions, math-library or kernel concepts, acronyms, or processes; and
-- will stop reading if the explanation is vague, inflated, or unnecessarily long.
+- understands common programming concepts in Python or C++;
+- has not worked in rocm-libraries or the changed component;
+- may not know GPU terminology, ROCm conventions, math-library concepts, project-specific acronyms, or internal processes;
+- expects unfamiliar terms to be explained when they matter to the change; and
+- values concrete evidence and a coherent technical argument over either jargon or oversimplification.
 
-An experienced engineer should still find the text precise. Plain language must not remove important technical facts.
+Use the tone and sentence structure of well-edited technical reporting in a major newspaper: accessible, precise, and natural. An experienced engineer should still find the description useful, while an engineer new to the domain should be able to follow it without opening the diff.
 
 ## Priority order
 
