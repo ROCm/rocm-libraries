@@ -5710,6 +5710,40 @@ _4WGQA_LOG2E = 1.4426950408889634
 _4WGQA_LEAN_HEAD_SIZE = 256
 
 
+def _online_softmax_rescale(
+    b, Sm, m_old, l_old, *, NKEYT, CPL, NKpv, BPL, sc, ninf, zf, bperm, dtype, exp
+):
+    """Shared online-softmax reduction/rescale for the natural-QK 4-warp bodies.
+
+    Given the masked score tiles ``Sm`` and the running ``(m_old, l_old)``, emit
+    the per-tile max (cross-lane via ``bperm``), the ``alpha`` rescale, the
+    probability tile ``P`` / running sum ``l_new``, and the packed ``Bp`` PV
+    operand. ``exp`` selects the exponential (``b.exp2`` or ``b.exp2_fast``); the
+    op sequence is otherwise identical to the previously inlined copies, so
+    emitted IR is byte-identical per caller. The mask build and the memory/PV
+    schedule stay in each body -- those are what legitimately diverge.
+    """
+    local = ninf
+    for kt in range(NKEYT):
+        for i in range(CPL):
+            local = b.fmax(local, b.fmul(Sm[kt][i], sc))
+    m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
+    alpha = exp(b.fsub(m_old, m_new))
+    P = [[None] * CPL for _ in range(NKEYT)]
+    lsum = zf
+    for kt in range(NKEYT):
+        for i in range(CPL):
+            p = exp(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
+            lsum = b.fadd(lsum, p)
+            P[kt][i] = b.cast_f32_to(p, dtype)
+    l_new = b.fadd(b.fmul(l_old, alpha), b.fadd(lsum, bperm(lsum)))
+    Bp = [
+        b.vec_pack([P[kk // 4][(kk % 4) * 4 + j] for j in range(BPL)], dtype)
+        for kk in range(NKpv)
+    ]
+    return m_new, alpha, l_new, Bp
+
+
 def _build_gfx942_4warp_gqa_lean(
     spec: UnifiedAttention2DTiledSpec,
     *,
@@ -5890,24 +5924,22 @@ def _build_gfx942_4warp_gqa_lean(
                 Sm[kt][i] = b.select(
                     b.lor(m_causal, m_varlen), ninf, b.vec_extract(S_T[kt], i)
                 )
-        local = ninf
-        for kt in range(NKEYT):
-            for i in range(CPL):
-                local = b.fmax(local, b.fmul(Sm[kt][i], sc))
-        m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
-        alpha = b.exp2_fast(b.fsub(m_old, m_new))
-        P = [[None] * CPL for _ in range(NKEYT)]
-        lsum = zf
-        for kt in range(NKEYT):
-            for i in range(CPL):
-                p = b.exp2_fast(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
-                lsum = b.fadd(lsum, p)
-                P[kt][i] = b.cast_f32_to(p, dtype)
-        l_new = b.fadd(b.fmul(l_old, alpha), b.fadd(lsum, bperm(lsum)))
-        Bp = [
-            b.vec_pack([P[kk // 4][(kk % 4) * 4 + j] for j in range(BPL)], dtype)
-            for kk in range(NKpv)
-        ]
+        m_new, alpha, l_new, Bp = _online_softmax_rescale(
+            b,
+            Sm,
+            m_old,
+            l_old,
+            NKEYT=NKEYT,
+            CPL=CPL,
+            NKpv=NKpv,
+            BPL=BPL,
+            sc=sc,
+            ninf=ninf,
+            zf=zf,
+            bperm=bperm,
+            dtype=dtype,
+            exp=b.exp2_fast,
+        )
         newaccs = []
         for nt in range(NDdim):
             pv = at.zero_acc(b)
@@ -6321,24 +6353,22 @@ def build_gfx942_4warp_gqa(
                     Sm[kt][i] = b.select(mask_cond, ninf, raw)
                 else:
                     Sm[kt][i] = raw
-        local = ninf
-        for kt in range(NKEYT):
-            for i in range(CPL):
-                local = b.fmax(local, b.fmul(Sm[kt][i], sc))
-        m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
-        alpha = b.exp2(b.fsub(m_old, m_new))
-        P = [[None] * CPL for _ in range(NKEYT)]
-        lsum = zf
-        for kt in range(NKEYT):
-            for i in range(CPL):
-                p = b.exp2(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
-                lsum = b.fadd(lsum, p)
-                P[kt][i] = b.cast_f32_to(p, dtype)
-        l_new = b.fadd(b.fmul(l_old, alpha), b.fadd(lsum, bperm(lsum)))
-        Bp = [
-            b.vec_pack([P[kk // 4][(kk % 4) * 4 + j] for j in range(BPL)], dtype)
-            for kk in range(NKpv)
-        ]
+        m_new, alpha, l_new, Bp = _online_softmax_rescale(
+            b,
+            Sm,
+            m_old,
+            l_old,
+            NKEYT=NKEYT,
+            CPL=CPL,
+            NKpv=NKpv,
+            BPL=BPL,
+            sc=sc,
+            ninf=ninf,
+            zf=zf,
+            bperm=bperm,
+            dtype=dtype,
+            exp=b.exp2,
+        )
         # In-place rescale-then-accumulate (HD128_PIPE / D128 sliding-window path only):
         # fold acc *= alpha, then MFMA-accumulate PV directly into acc, dropping the separate
         # `pv` accumulator (~64 VGPR) so the D128 kernel stays spill-free at the gfx942
