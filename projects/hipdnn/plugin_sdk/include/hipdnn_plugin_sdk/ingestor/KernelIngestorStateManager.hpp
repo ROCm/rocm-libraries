@@ -27,6 +27,7 @@
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -70,6 +71,27 @@ public:
     /// How many (graph, device) catalogs to retain; eviction costs a rematch, never a
     /// wrong answer.
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
+
+    /// When to start warning that the winner cache has grown unexpectedly large.
+    ///
+    /// The winner cache is **unbounded and never evicts** -- deliberately not an
+    /// `LruCache`, despite `_catalogCache` sitting right beside it. The catalog cache's
+    /// own justification above is why: evicting a catalog costs a rematch, CPU work over
+    /// descriptors. Evicting a *winner* costs either a full device benchmark sweep or a
+    /// silent fall back to the heuristic front -- a quality regression whose trigger is
+    /// how many unrelated graphs happened to pass through since. Same program, same
+    /// input, different kernel.
+    ///
+    /// Unbounded is safe because entries are created only by benchmarking, which is
+    /// opt-in and costs candidates x (warmup + iterations) device executions each: they
+    /// cannot accumulate by accident, because the GPU time dwarfs the memory.
+    ///
+    /// So this is a tripwire, not a cap. Passing it does not evict, refuse, or change
+    /// behaviour -- it logs once, so pathological growth is visible rather than silent. A
+    /// hard cap was rejected: silently ceasing to cache new graphs is its own confusing
+    /// failure mode. The number is far above any plausible honest working set for a
+    /// process that had to benchmark its way to each entry.
+    static constexpr size_t WINNER_CACHE_WARNING_THRESHOLD = 4096;
 
     /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
     /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
@@ -169,7 +191,19 @@ public:
         return sortedCatalog(context).entries;
     }
 
-    /// The ranked catalog and the state matching bound, from one lookup.
+    /// The ordered catalog and the state matching bound, from one lookup.
+    ///
+    /// The catalog needs an order; there are two sources for one. A benchmarked record
+    /// covering the whole catalog supplies a **measured** order, and is preferred --
+    /// `rank()` is then never called, which is the point: a caller who paid for a
+    /// benchmark sweep should not go on paying the heuristic's cost forever after.
+    /// Otherwise `rank()` supplies a **heuristic** order, exactly as before.
+    ///
+    /// This is Check 1. Check 2 lives at the plan-building lookup site and asks the same
+    /// coverage question of the knob-filtered candidates -- different set, different
+    /// moment, same predicate. Check 1 failing does not preclude Check 2 passing: a
+    /// partial record still orders heuristically here, and a knob filter may still narrow
+    /// the candidates down to kernels the record does cover.
     Catalog sortedCatalog(const MatchContext& context) const
     {
         Catalog catalog = catalogFor(context);
@@ -178,7 +212,10 @@ public:
             return catalog;
         }
 
-        catalog.entries = _heuristic->rank(catalog, context);
+        if(!orderFromWinnerRecord(catalog, context))
+        {
+            catalog.entries = _heuristic->rank(catalog, context);
+        }
         catalog.isSorted = true;
 
         if(const auto key = cacheKey(context); key.has_value())
@@ -188,6 +225,55 @@ public:
         }
 
         return catalog;
+    }
+
+    /// Records @p record under @p key, replacing any earlier ranking for it.
+    ///
+    /// Replacement rather than insert-if-absent: a later sweep is the one that measured
+    /// the current candidate set, and the coverage gate only ever re-benchmarks to widen
+    /// what a record covers. Preferring the older, narrower ranking would defeat that.
+    void recordWinner(const WinnerKey& key, WinnerRecord record) const
+    {
+        if(record.empty())
+        {
+            // An all-unusable sweep has no ranking to record, and storing an empty
+            // record would read as a covered hit for the empty candidate set.
+            return;
+        }
+
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        _winnerCache[key] = std::move(record);
+
+        if(_winnerCache.size() > WINNER_CACHE_WARNING_THRESHOLD && !_winnerCacheGrowthWarned)
+        {
+            _winnerCacheGrowthWarned = true;
+            HIPDNN_PLUGIN_LOG_WARN(
+                "ingestor: winner cache holds "
+                << _winnerCache.size() << " entries, past the soft threshold of "
+                << WINNER_CACHE_WARNING_THRESHOLD
+                << "; it does not evict, so this is reported once rather than acted on");
+        }
+    }
+
+    /// The ranking recorded for @p key, or nullopt. Returns a copy: the caller walks it
+    /// outside the lock, and a reference would outlive the guard.
+    std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        const auto found = _winnerCache.find(key);
+        if(found == _winnerCache.end())
+        {
+            return std::nullopt;
+        }
+        return found->second;
+    }
+
+    /// How many rankings are held. For tests and diagnostics; the cache never evicts, so
+    /// this only grows.
+    size_t winnerCacheSize() const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        return _winnerCache.size();
     }
 
     /// Resolves how to size and launch @p kernel.
@@ -559,6 +645,43 @@ private:
         return true;
     }
 
+    /// Check 1: if a record covers the whole catalog, reorder @p catalog by it and
+    /// return true, having consulted no heuristic. Returns false to mean "no measured
+    /// order available" -- the caller then ranks as it always has.
+    ///
+    /// Coverage is required, not merely a hit. A record measuring only some of the
+    /// catalog cannot order the rest, and interleaving measured entries with unmeasured
+    /// ones would invent a ranking nobody took.
+    bool orderFromWinnerRecord(Catalog& catalog, const MatchContext& context) const
+    {
+        if(catalog.entries.empty())
+        {
+            return false;
+        }
+
+        const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
+        const auto record = winnerFor(key);
+        if(!record.has_value() || !recordCovers(*record, catalog.entries))
+        {
+            return false;
+        }
+
+        auto ordered = orderByRecord(*record, catalog.entries);
+        if(ordered.size() != catalog.entries.size())
+        {
+            // Covered by kernel id, but some entry's pack or dispatch has moved since it
+            // was measured. Ordering by a record that no longer describes these kernels
+            // would be worse than ranking them, so decline the whole record.
+            return false;
+        }
+
+        catalog.entries = std::move(ordered);
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << catalog.entries.size()
+                                                    << " catalog entries from a benchmarked "
+                                                       "record; heuristic ranking skipped");
+        return true;
+    }
+
     MetadataSchema _schema;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
@@ -569,6 +692,15 @@ private:
     std::shared_ptr<IKernelHeuristic> _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
+
+    /// Unbounded, never evicted, under its own mutex -- see
+    /// WINNER_CACHE_WARNING_THRESHOLD for why this is not an LruCache. Separate from
+    /// _catalogCache's lock because the two are consulted at different moments and a
+    /// shared lock would serialize benchmarking write-back against ordinary catalog
+    /// lookups.
+    mutable std::unordered_map<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
+    mutable std::mutex _winnerCacheMutex;
+    mutable bool _winnerCacheGrowthWarned = false;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor
