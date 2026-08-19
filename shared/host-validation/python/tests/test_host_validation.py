@@ -692,6 +692,18 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(result.run_info.mean_elements_written, 4)
         self.assertEqual(result.run_info.inverse_variance_elements_written, 4)
 
+        padded_input = hv.Tensor.from_storage(
+            hv.ScalarType.Float32,
+            [2, 2],
+            np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
+            strides=[3, 1],
+        )
+        contiguous = hv.reference_layer_norm(padded_input, axis=1)
+        self.assertEqual(contiguous.output.strides, [2, 1])
+        self.assertEqual(contiguous.output.offset, 0)
+        self.assertEqual(contiguous.mean.strides, [1])
+        self.assertEqual(contiguous.inverse_variance.strides, [1])
+
     def test_numpy_tensor_owns_an_independent_copy(self):
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
         view = hv.Tensor.from_numpy(values)
