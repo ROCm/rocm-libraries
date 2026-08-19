@@ -118,6 +118,7 @@ the matching doc first.
 | LDS / bank conflicts | [lds-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/lds-optimization-rocke.md) |
 | Prefetch / async DRAM→LDS | [prefetch-data-load-rocke.md](platform/dsl_docs/optimization/utilities/skills/prefetch-data-load-rocke.md) |
 | ISA / occupancy / resource inspection | [isa-inspection-rocke.md](platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md) |
+| Step a HIP-lowered kernel line-by-line (rocgdb) | [rocgdb-stepping-rocke.md](platform/dsl_docs/optimization/utilities/skills/rocgdb-stepping-rocke.md) |
 | Capture a kernel trace (rocprof) | [capture-kernel-trace-rocke.md](platform/dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md) |
 | Analyze a kernel trace (ATT) | [kernel-trace-analysis.md](platform/dsl_docs/optimization/utilities/skills/kernel-trace-analysis.md) |
 | Launch / benchmark harness | [kernel-launch-guide.md](platform/dsl_docs/optimization/utilities/skills/kernel-launch-guide.md) |
