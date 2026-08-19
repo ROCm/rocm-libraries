@@ -42,7 +42,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          # Numeric 0 is falsy in GitHub Actions expressions, so a bare
+          # `cond && 0 || 1` always collapses to 1 regardless of `cond`. Quoting
+          # both branches as non-empty strings ('0'/'1') keeps them truthy so the
+          # && / || short-circuiting actually works; actions/checkout parses this
+          # input as a string either way.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       # The authoritative CI guard against blanket `.ambr` golden regeneration
       # (AIHPBLAS-3876/AIHPBLAS-3867 "Lock the net"). Runs first and needs no
