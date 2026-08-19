@@ -4,7 +4,10 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 outputs:
   therock-ref:
     description: "TheRock commit hash to use"
-    value: "48ec94d7e3b52731c228f31457087f73b136c9b4" # 2026-08-17
+    # TEMPORARY (do not merge): points at TheRock PR ROCm/TheRock#7502's branch
+    # to validate the new tensilelite ctest stage end to end before either PR
+    # merges. Revert to a pinned commit before this PR leaves draft.
+    value: "users/todavis/AIHPBLAS-4410-therock-tensilelite-ctest"
   baseline-run-id:
     description: "TheRock workflow run ID for prebuilt stage artifacts"
     value: "32050763862" # Updated by assistant-librarian[bot] on submodule bumps
