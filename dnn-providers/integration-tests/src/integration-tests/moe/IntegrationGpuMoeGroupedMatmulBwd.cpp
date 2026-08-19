@@ -1,6 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+// Every case here reports SKIPPED today: no provider registers an engine for
+// MoeGroupedMatmulBwd, so the harness skips with "No engine supports this graph".
+// That is expected, not an unwired suite -- the first provider engine to land is
+// exercised the moment it registers, and --fail-on-unsupported turns the skip into
+// a hard failure. Numerical coverage lives with the CPU reference in
+// hipdnn_test_sdk_tests.
+
 #include <hip/hip_runtime.h>
 
 #include <ostream>

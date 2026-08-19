@@ -207,11 +207,6 @@ private:
         {
             throw std::runtime_error(prefix + "expert count (dweight.dims[0]) must be positive");
         }
-        // Unlike forward (which permits FirstTokenOffset row count to be any
-        // multiple of the expert count, cycling group % expertCount across
-        // batches), this schema has no batching: group count must equal the
-        // expert count exactly. This mirrors
-        // MoeGroupedMatmulBwdOperationDescriptor::finalize()'s validation.
         if(firstTokenOffset.dims()[0] != expertCount)
         {
             throw std::runtime_error(prefix
