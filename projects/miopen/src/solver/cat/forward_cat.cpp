@@ -104,10 +104,24 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
     size_t max_inner_size =
         (x_dim_size_max * stride * data_size + sizeof(short4) - 1) / sizeof(short4);
 
+    // HIP hardware limit for Y-grid dimension (2^16 - 1).
+    constexpr size_t max_grid_y = 65535;
+
     size_t xlocalsize = std::min(max_inner_size, local_size);
     size_t ylocalsize = std::max(static_cast<int>(local_size / xlocalsize), 1);
     size_t zlocalsize = 1;
     size_t ygridsize  = AlignUp(outer_size, ylocalsize);
+
+    // outer_size=65536 would produce ygridsize=65536 when ylocalsize=1, exceeding the
+    // hardware Y-grid limit and causing a GPU page fault on multi-XCD targets (e.g. gfx1250).
+    // Scale ylocalsize up so ygridsize stays within the limit; the kernel's
+    // `if(gid >= outer_size) return;` guard handles any over-coverage.
+    if(ygridsize > max_grid_y)
+    {
+        ylocalsize = AlignUp(outer_size, max_grid_y) / max_grid_y;
+        ygridsize  = AlignUp(outer_size, ylocalsize);
+    }
+
     size_t xgridsize =
         std::max(static_cast<int>(numCu * 8 / (ygridsize / ylocalsize)), 1) * xlocalsize;
     xgridsize        = std::min(xgridsize, AlignUp(max_inner_size, xlocalsize));

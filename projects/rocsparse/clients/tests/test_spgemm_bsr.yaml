@@ -40,6 +40,30 @@ Definitions:
     - { alpha:  -0.5, beta:  -0.2, alphai:  1.0, betai: 1.9 }
 
 Tests:
+# Coverage: dense block-rows to exercise the higher nnz-per-row group kernels
+# (groups 3-7) in rocsparse_bsrgemm_calc via the generic SpGEMM BSR path.
+# Small block_dim with a wide block matrix and tunedavg fill produces
+# hundreds of non-zero blocks per output block-row.
+- name: spgemm_mult_bsr_dense
+  category: pre_checkin
+  function: spgemm_bsr
+  indextype: *i64i32
+  precision: *single_double_precisions
+  M: [64]
+  N: [512, 800, 1400]
+  K: [512, 900]
+  block_dim: [2, 3]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+
 # Quick
 - name: spgemm_mult_bsr
   category: quick

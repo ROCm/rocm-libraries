@@ -632,6 +632,42 @@ __device__ __host__ inline rocblas_bfloat16 rocblas_max_nan(rocblas_bfloat16 x, 
 
 #undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
 
+// RAII class to set and restore pointer mode.
+class rocblas_pointer_mode_saver
+{
+public:
+    // Constructor saves original mode and sets mode to new_mode.
+    // Throws rocblas_status exception for a bad handle, which is expected
+    // to be caught in _impl functions.
+    rocblas_pointer_mode_saver(rocblas_handle& handle, rocblas_pointer_mode new_mode)
+        : handle_(handle)
+    {
+        rocblas_status status = rocblas_get_pointer_mode(handle_, &old_mode_);
+        if(status != rocblas_status_success)
+            throw status;
+
+        status = rocblas_set_pointer_mode(handle_, new_mode);
+        if(status != rocblas_status_success)
+            throw status;
+    }
+
+    // Destructor restores original mode.
+    ~rocblas_pointer_mode_saver()
+    {
+        rocblas_set_pointer_mode(handle_, old_mode_);
+    }
+
+    // Non-copyable and non-movable.
+    rocblas_pointer_mode_saver(const rocblas_pointer_mode_saver&) = delete;
+    rocblas_pointer_mode_saver(rocblas_pointer_mode_saver&&) = delete;
+    rocblas_pointer_mode_saver& operator=(const rocblas_pointer_mode_saver&) = delete;
+    rocblas_pointer_mode_saver& operator=(rocblas_pointer_mode_saver&&) = delete;
+
+private:
+    rocblas_handle& handle_;
+    rocblas_pointer_mode old_mode_;
+};
+
 #ifdef ROCSOLVER_LIBRARY
 ROCSOLVER_END_NAMESPACE
 #endif

@@ -29,8 +29,8 @@ SOFTWARE.
 #include "rppdefs.h"
 
 // sets descriptor dimensions and strides for descriptor used for fog augmentation
-inline void set_fog_mask_descriptor(RpptDescPtr descPtr, Rpp32s batchSize, Rpp32s maxHeight, Rpp32s maxWidth, Rpp32s numChannels)
-{
+inline void set_fog_mask_descriptor(RpptDescPtr descPtr, Rpp32s batchSize, Rpp32s maxHeight,
+                                    Rpp32s maxWidth, Rpp32s numChannels) {
     descPtr->numDims = 4;
     descPtr->offsetInBytes = 0;
     descPtr->dataType = RpptDataType::F32;
@@ -39,7 +39,7 @@ inline void set_fog_mask_descriptor(RpptDescPtr descPtr, Rpp32s batchSize, Rpp32
     descPtr->h = maxHeight;
     descPtr->w = maxWidth;
     descPtr->c = numChannels;
-    descPtr->strides = {descPtr->c * descPtr->w * descPtr->h,  1, descPtr->w, 1};
+    descPtr->strides = {descPtr->c * descPtr->w * descPtr->h, 1, descPtr->w, 1};
 }
 
 #endif /* API_HELPERS_HPP */

@@ -91,4 +91,3 @@ The script automatically:
 **Note:** After generating reference outputs, remember to set `DEBUG_MODE` back to `0` for normal test runs.
 
 Constants in the script (`TJPF_*`, `TJFLAG_*`, …) must match the installed `turbojpeg.h` or decompression can misbehave or crash.
-

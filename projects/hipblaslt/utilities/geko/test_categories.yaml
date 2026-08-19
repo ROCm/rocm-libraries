@@ -1,0 +1,77 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# GEKO Test Categories Configuration
+#
+# NOTE: GEKO is a pytest-based component. This file is intended for external
+# pytest category runners (for example TheRock's pytest_runner.py), mirroring
+# the category model used by tensilelite/test_categories.yaml.
+#
+# test_paths are relative to this component root
+# (projects/hipblaslt/utilities/geko/).
+
+test_categories:
+  quick:
+    description: "Fast host-only sanity checks (skip slow and bin/geko subprocess tests)"
+    test_paths:
+      - "tests"
+    exclude_markers:
+      - "slow"
+      - "geko_bin"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation (same slice as quick; stable and host-only)"
+    test_paths:
+      - "tests"
+    exclude_markers:
+      - "slow"
+      - "geko_bin"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  coverage:
+    description: "Coverage gate for GEKO Python package (>=80%)"
+    test_paths:
+      - "tests"
+    labels:
+      - "coverage"
+      - "pr"
+      - "quality-gate"
+    # Use this category in a runner mode that executes tox in this directory:
+    #   tox -e coverage
+    # If the runner invokes pytest directly, mirror tox coverage flags and keep
+    # fail-under at 80 to match pyproject/tox policy.
+
+  comprehensive:
+    description: "Extended run including slow integration tests"
+    test_paths:
+      - "tests"
+    exclude_markers:
+      - "geko_bin"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete suite including slow and bin/geko subprocess smoke tests"
+    test_paths:
+      - "tests"
+    labels:
+      - "full"
+      - "all"
+
+execution_settings:
+  parallel_workers: 4
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    coverage: 3600
+    comprehensive: 7200
+    full: 10800

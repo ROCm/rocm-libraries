@@ -184,6 +184,54 @@ function hipblasGetAtomicsModeFortran(handle, atomics_mode) &
         hipblasGetAtomicsMode(handle, atomics_mode)
 end function hipblasGetAtomicsModeFortran
 
+function hipblasSetBatchAlphaStrideFortran(handle, alpha_stride) &
+    bind(c, name='hipblasSetBatchAlphaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchAlphaStrideFortran
+    type(c_ptr), value :: handle
+    integer(c_int64_t), value :: alpha_stride
+            hipblasSetBatchAlphaStrideFortran = &
+        hipblasSetBatchAlphaStride(handle, alpha_stride)
+end function hipblasSetBatchAlphaStrideFortran
+
+function hipblasGetBatchAlphaStrideFortran(handle, alpha_stride) &
+    bind(c, name='hipblasGetBatchAlphaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchAlphaStrideFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: alpha_stride
+            hipblasGetBatchAlphaStrideFortran = &
+        hipblasGetBatchAlphaStride(handle, alpha_stride)
+end function hipblasGetBatchAlphaStrideFortran
+
+function hipblasSetBatchBetaStrideFortran(handle, beta_stride) &
+    bind(c, name='hipblasSetBatchBetaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchBetaStrideFortran
+    type(c_ptr), value :: handle
+    integer(c_int64_t), value :: beta_stride
+            hipblasSetBatchBetaStrideFortran = &
+        hipblasSetBatchBetaStride(handle, beta_stride)
+end function hipblasSetBatchBetaStrideFortran
+
+function hipblasGetBatchBetaStrideFortran(handle, beta_stride) &
+    bind(c, name='hipblasGetBatchBetaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchBetaStrideFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: beta_stride
+            hipblasGetBatchBetaStrideFortran = &
+        hipblasGetBatchBetaStride(handle, beta_stride)
+end function hipblasGetBatchBetaStrideFortran
+
 !--------!
 ! blas 1 !
 !--------!
@@ -11628,6 +11676,67 @@ function hipblasZgemmBatchedFortran(handle, transA, transB, m, n, k, alpha, &
                             A, lda, B, ldb, beta, C, ldc, batch_count)
 end function hipblasZgemmBatchedFortran
 
+! gemmGroupedBatched
+function hipblasSgemmGroupedBatchedFortran(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                           alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                           Carray, ldc_array, group_count, group_size) &
+    bind(c, name='hipblasSgemmGroupedBatchedFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgemmGroupedBatchedFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: transA_array
+    type(c_ptr), value :: transB_array
+    type(c_ptr), value :: m_array
+    type(c_ptr), value :: n_array
+    type(c_ptr), value :: k_array
+    type(c_ptr), value :: alpha_array
+    type(c_ptr), value :: Aarray
+    type(c_ptr), value :: lda_array
+    type(c_ptr), value :: Barray
+    type(c_ptr), value :: ldb_array
+    type(c_ptr), value :: beta_array
+    type(c_ptr), value :: Carray
+    type(c_ptr), value :: ldc_array
+    integer(c_int), value :: group_count
+    type(c_ptr), value :: group_size
+            hipblasSgemmGroupedBatchedFortran = &
+        hipblasSgemmGroupedBatched(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                   alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                   Carray, ldc_array, group_count, group_size)
+end function hipblasSgemmGroupedBatchedFortran
+
+function hipblasDgemmGroupedBatchedFortran(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                           alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                           Carray, ldc_array, group_count, group_size) &
+    bind(c, name='hipblasDgemmGroupedBatchedFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgemmGroupedBatchedFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: transA_array
+    type(c_ptr), value :: transB_array
+    type(c_ptr), value :: m_array
+    type(c_ptr), value :: n_array
+    type(c_ptr), value :: k_array
+    type(c_ptr), value :: alpha_array
+    type(c_ptr), value :: Aarray
+    type(c_ptr), value :: lda_array
+    type(c_ptr), value :: Barray
+    type(c_ptr), value :: ldb_array
+    type(c_ptr), value :: beta_array
+    type(c_ptr), value :: Carray
+    type(c_ptr), value :: ldc_array
+    integer(c_int), value :: group_count
+    type(c_ptr), value :: group_size
+            hipblasDgemmGroupedBatchedFortran = &
+        hipblasDgemmGroupedBatched(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                   alpha_array, Aarray, lda_array, Barray, ldb_array, beta_array, &
+                                   Carray, ldc_array, group_count, group_size)
+end function hipblasDgemmGroupedBatchedFortran
+
 ! gemmStridedBatched
 function hipblasHgemmStridedBatchedFortran(handle, transA, transB, m, n, k, alpha, &
                                             A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count) &
@@ -12566,6 +12675,87 @@ function hipblasGemmBatchedExWithFlagsFortran(handle, transA, transB, m, n, k, a
                                 a, a_type, lda, b, b_type, ldb, beta, c, c_type, ldc, &
                                 batch_count, compute_type, algo, flags)
 end function hipblasGemmBatchedExWithFlagsFortran
+
+function hipblasGemmGroupedBatchedExFortran(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                            alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                            ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                            ldd_array, group_count, group_size, compute_type, algo) &
+    bind(c, name='hipblasGemmGroupedBatchedExFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGemmGroupedBatchedExFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: transA_array
+    type(c_ptr), value :: transB_array
+    type(c_ptr), value :: m_array
+    type(c_ptr), value :: n_array
+    type(c_ptr), value :: k_array
+    type(c_ptr), value :: alpha_array
+    type(c_ptr), value :: Aarray
+    integer(kind(HIP_R_16F)), value :: a_type
+    type(c_ptr), value :: lda_array
+    type(c_ptr), value :: Barray
+    integer(kind(HIP_R_16F)), value :: b_type
+    type(c_ptr), value :: ldb_array
+    type(c_ptr), value :: beta_array
+    type(c_ptr), value :: Carray
+    integer(kind(HIP_R_16F)), value :: c_type
+    type(c_ptr), value :: ldc_array
+    type(c_ptr), value :: Darray
+    integer(kind(HIP_R_16F)), value :: d_type
+    type(c_ptr), value :: ldd_array
+    integer(c_int), value :: group_count
+    type(c_ptr), value :: group_size
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
+    integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
+            hipblasGemmGroupedBatchedExFortran = &
+        hipblasGemmGroupedBatchedEx(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                    alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                    ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                    ldd_array, group_count, group_size, compute_type, algo)
+end function hipblasGemmGroupedBatchedExFortran
+
+function hipblasGemmGroupedBatchedExWithFlagsFortran(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                                     alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                                     ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                                     ldd_array, group_count, group_size, compute_type, algo, flags) &
+    bind(c, name='hipblasGemmGroupedBatchedExWithFlagsFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGemmGroupedBatchedExWithFlagsFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: transA_array
+    type(c_ptr), value :: transB_array
+    type(c_ptr), value :: m_array
+    type(c_ptr), value :: n_array
+    type(c_ptr), value :: k_array
+    type(c_ptr), value :: alpha_array
+    type(c_ptr), value :: Aarray
+    integer(kind(HIP_R_16F)), value :: a_type
+    type(c_ptr), value :: lda_array
+    type(c_ptr), value :: Barray
+    integer(kind(HIP_R_16F)), value :: b_type
+    type(c_ptr), value :: ldb_array
+    type(c_ptr), value :: beta_array
+    type(c_ptr), value :: Carray
+    integer(kind(HIP_R_16F)), value :: c_type
+    type(c_ptr), value :: ldc_array
+    type(c_ptr), value :: Darray
+    integer(kind(HIP_R_16F)), value :: d_type
+    type(c_ptr), value :: ldd_array
+    integer(c_int), value :: group_count
+    type(c_ptr), value :: group_size
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
+    integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
+    integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
+            hipblasGemmGroupedBatchedExWithFlagsFortran = &
+        hipblasGemmGroupedBatchedExWithFlags(handle, transA_array, transB_array, m_array, n_array, k_array, &
+                                             alpha_array, Aarray, a_type, lda_array, Barray, b_type, &
+                                             ldb_array, beta_array, Carray, c_type, ldc_array, Darray, d_type, &
+                                             ldd_array, group_count, group_size, compute_type, algo, flags)
+end function hipblasGemmGroupedBatchedExWithFlagsFortran
 
 function hipblasGemmStridedBatchedExWithFlagsFortran(handle, transA, transB, m, n, k, alpha, a, a_type, lda, stride_a, &
                                             b, b_type, ldb, stride_b, beta, c, c_type, ldc, stride_c, &

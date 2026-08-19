@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,8 @@ namespace rocsparse
                                                  int64_t                   n,
                                                  int64_t                   k,
                                                  int64_t                   nnz,
+                                                 int64_t                   batch_count,
+                                                 int64_t                   offsets_batch_stride_A,
                                                  const rocsparse_mat_descr descr,
                                                  const void*               csc_val,
                                                  const void*               csc_col_ptr,
@@ -164,6 +166,8 @@ rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle          handle,
                                            int64_t                   n,
                                            int64_t                   k,
                                            int64_t                   nnz,
+                                           int64_t                   batch_count,
+                                           int64_t                   offsets_batch_stride_A,
                                            const rocsparse_mat_descr descr,
                                            rocsparse_datatype        csc_val_datatype,
                                            const void*               csc_val,
@@ -171,13 +175,47 @@ rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle          handle,
                                            const void*               csc_col_ptr,
                                            rocsparse_indextype       csc_row_ind_indextype,
                                            const void*               csc_row_ind,
-                                           void*                     temp_buffer)
+                                           const rocsparse::spmm_default_alg_info* alg_info,
+                                           void*                                   temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    // A non-transposed CSC multiply is delegated to csrmm as a transposed
+    // multiply (and vice versa); the load-balanced kernels only apply to the
+    // non-transposed csrmm path. Build the profile from the column-pointer array
+    // (length k+1, acting as the effective CSR row pointer) and select with the
+    // flipped operation, mirroring the CSR analysis stage.
+    if(alg == rocsparse_csrmm_alg_default && alg_info != nullptr && alg_info->profile != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::compute_line_nnz_profile(
+            handle, csc_col_ptr_indextype, k, nnz, csc_col_ptr, *alg_info->profile));
+        const rocsparse_operation effective_trans_A = (trans_A == rocsparse_operation_none)
+                                                          ? rocsparse_operation_transpose
+                                                          : rocsparse_operation_none;
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmm_select_default_alg(effective_trans_A,
+                                                alg_info->is_batched,
+                                                handle->properties.multiProcessorCount,
+                                                *alg_info->profile,
+                                                alg));
+    }
+
     rocsparse::cscmm_analysis_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis_find(
         &f, csc_col_ptr_indextype, csc_row_ind_indextype, csc_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(f(
-        handle, trans_A, alg, m, n, k, nnz, descr, csc_val, csc_col_ptr, csc_row_ind, temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(f(handle,
+                                trans_A,
+                                alg,
+                                m,
+                                n,
+                                k,
+                                nnz,
+                                batch_count,
+                                offsets_batch_stride_A,
+                                descr,
+                                csc_val,
+                                csc_col_ptr,
+                                csc_row_ind,
+                                temp_buffer));
     return rocsparse_status_success;
 }

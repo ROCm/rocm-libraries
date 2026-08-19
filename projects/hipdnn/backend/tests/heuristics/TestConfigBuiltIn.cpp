@@ -20,6 +20,7 @@
 #include "heuristics/config/ConfigBuiltIn.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -29,12 +30,14 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -46,10 +49,18 @@ using hipdnn_data_sdk::utilities::engineNameToId;
 
 namespace
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 
-const int64_t MIOPEN_ENGINE_ID = engineNameToId("MIOPEN_ENGINE");
-const int64_t MIOPEN_DETERMINISTIC_ID = engineNameToId("MIOPEN_ENGINE_DETERMINISTIC");
-const int64_t CUSTOM_ENGINE_ID = engineNameToId("Plugin1::CustomEngine");
+constexpr const char* MIOPEN_ENGINE_NAME = "MIOPEN_ENGINE";
+constexpr const char* MIOPEN_DETERMINISTIC_ENGINE_NAME = "MIOPEN_ENGINE_DETERMINISTIC";
+constexpr const char* CUSTOM_ENGINE_NAME = "Plugin1::CustomEngine";
+
+const int64_t MIOPEN_ENGINE_ID = engineNameToId(MIOPEN_ENGINE_NAME);
+const int64_t MIOPEN_DETERMINISTIC_ID = engineNameToId(MIOPEN_DETERMINISTIC_ENGINE_NAME);
+const int64_t CUSTOM_ENGINE_ID = engineNameToId(CUSTOM_ENGINE_NAME);
 
 const int64_t CONFIG_POLICY_ID
     = hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config");
@@ -103,6 +114,73 @@ std::vector<uint8_t> buildConvFwdGraphBuffer(const std::vector<int64_t>& xDims,
                              fb::DataType::FLOAT,
                              fb::NodeAttributes::ConvolutionFwdAttributes,
                              convAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
+/// Build a serialized Graph with two same-priority ConvolutionFwd nodes. The
+/// first node intentionally has different tensor shapes from the common test
+/// override while the second node matches it.
+std::vector<uint8_t> buildTwoConvFwdGraphBuffer()
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t X0_UID = 1;
+    constexpr int64_t W0_UID = 2;
+    constexpr int64_t Y0_UID = 3;
+    constexpr int64_t X1_UID = 4;
+    constexpr int64_t W1_UID = 5;
+    constexpr int64_t Y1_UID = 6;
+
+    const std::vector<int64_t> firstXDims{9, 3, 4, 4};
+    const std::vector<int64_t> firstXStrides{48, 16, 4, 1};
+    const std::vector<int64_t> firstWDims{8, 3, 1, 1};
+    const std::vector<int64_t> firstWStrides{3, 1, 1, 1};
+    const std::vector<int64_t> secondXDims{1, 3, 4, 4};
+    const std::vector<int64_t> secondXStrides{48, 16, 4, 1};
+    const std::vector<int64_t> secondWDims{2, 3, 1, 1};
+    const std::vector<int64_t> secondWStrides{3, 1, 1, 1};
+
+    const std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        fb::CreateTensorAttributesDirect(
+            builder, X0_UID, "x0", fb::DataType::FLOAT, &firstXStrides, &firstXDims),
+        fb::CreateTensorAttributesDirect(
+            builder, W0_UID, "w0", fb::DataType::FLOAT, &firstWStrides, &firstWDims),
+        fb::CreateTensorAttributesDirect(
+            builder, Y0_UID, "y0", fb::DataType::FLOAT, nullptr, nullptr),
+        fb::CreateTensorAttributesDirect(
+            builder, X1_UID, "x1", fb::DataType::FLOAT, &secondXStrides, &secondXDims),
+        fb::CreateTensorAttributesDirect(
+            builder, W1_UID, "w1", fb::DataType::FLOAT, &secondWStrides, &secondWDims),
+        fb::CreateTensorAttributesDirect(
+            builder, Y1_UID, "y1", fb::DataType::FLOAT, nullptr, nullptr),
+    };
+
+    auto firstConvAttrs = fb::CreateConvolutionFwdAttributesDirect(builder, X0_UID, W0_UID, Y0_UID);
+    auto secondConvAttrs
+        = fb::CreateConvolutionFwdAttributesDirect(builder, X1_UID, W1_UID, Y1_UID);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "conv0",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::ConvolutionFwdAttributes,
+                             firstConvAttrs.Union()),
+        fb::CreateNodeDirect(builder,
+                             "conv1",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::ConvolutionFwdAttributes,
+                             secondConvAttrs.Union())};
 
     auto graphOffset = fb::CreateGraphDirect(builder,
                                              nullptr,
@@ -206,6 +284,244 @@ std::vector<uint8_t> buildConvWrwGraphBuffer(const std::vector<int64_t>& xDims,
     return {data, data + builder.GetSize()};
 }
 
+std::vector<uint8_t> buildPointwiseBinaryGraphBuffer(fb::PointwiseMode mode)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t X_UID = 1;
+    constexpr int64_t Y_UID = 2;
+    constexpr int64_t OUT_UID = 3;
+    const std::vector<int64_t> dims{1, 3, 4, 4};
+    const std::vector<int64_t> strides{48, 16, 4, 1};
+
+    const std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        fb::CreateTensorAttributesDirect(builder, X_UID, "x", fb::DataType::FLOAT, &strides, &dims),
+        fb::CreateTensorAttributesDirect(builder, Y_UID, "y", fb::DataType::FLOAT, &strides, &dims),
+        fb::CreateTensorAttributesDirect(
+            builder, OUT_UID, "out", fb::DataType::FLOAT, nullptr, nullptr),
+    };
+
+    auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
+                                                        mode,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        X_UID,
+                                                        Y_UID,
+                                                        ::flatbuffers::nullopt,
+                                                        OUT_UID);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             config_op::POINTWISE,
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::PointwiseAttributes,
+                             pointwiseAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
+std::vector<uint8_t> buildPointwiseBinaryGraphBufferWithoutSecondInputTensor()
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t X_UID = 1;
+    constexpr int64_t MISSING_Y_UID = 2;
+    constexpr int64_t OUT_UID = 3;
+    const std::vector<int64_t> dims{1, 3, 4, 4};
+    const std::vector<int64_t> strides{48, 16, 4, 1};
+
+    const std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        fb::CreateTensorAttributesDirect(builder, X_UID, "x", fb::DataType::FLOAT, &strides, &dims),
+        fb::CreateTensorAttributesDirect(
+            builder, OUT_UID, "out", fb::DataType::FLOAT, nullptr, nullptr),
+    };
+
+    auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
+                                                        fb::PointwiseMode::ADD,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        X_UID,
+                                                        MISSING_Y_UID,
+                                                        ::flatbuffers::nullopt,
+                                                        OUT_UID);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             config_op::POINTWISE,
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::PointwiseAttributes,
+                             pointwiseAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
+std::vector<uint8_t> buildPointwiseThenConvGraphBuffer()
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t PW_X_UID = 1;
+    constexpr int64_t PW_Y_UID = 2;
+    constexpr int64_t PW_OUT_UID = 3;
+    constexpr int64_t CONV_X_UID = 4;
+    constexpr int64_t CONV_W_UID = 5;
+    constexpr int64_t CONV_Y_UID = 6;
+
+    const std::vector<int64_t> pointwiseDims{1, 3, 4, 4};
+    const std::vector<int64_t> pointwiseStrides{48, 16, 4, 1};
+    const std::vector<int64_t> convXDims{1, 3, 4, 4};
+    const std::vector<int64_t> convWDims{2, 3, 1, 1};
+    const std::vector<int64_t> convXStrides{48, 16, 4, 1};
+    const std::vector<int64_t> convWStrides{3, 1, 1, 1};
+
+    const std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        fb::CreateTensorAttributesDirect(
+            builder, PW_X_UID, "pw_x", fb::DataType::FLOAT, &pointwiseStrides, &pointwiseDims),
+        fb::CreateTensorAttributesDirect(
+            builder, PW_Y_UID, "pw_y", fb::DataType::FLOAT, &pointwiseStrides, &pointwiseDims),
+        fb::CreateTensorAttributesDirect(
+            builder, PW_OUT_UID, "pw_out", fb::DataType::FLOAT, nullptr, nullptr),
+        fb::CreateTensorAttributesDirect(
+            builder, CONV_X_UID, "conv_x", fb::DataType::FLOAT, &convXStrides, &convXDims),
+        fb::CreateTensorAttributesDirect(
+            builder, CONV_W_UID, "conv_w", fb::DataType::FLOAT, &convWStrides, &convWDims),
+        fb::CreateTensorAttributesDirect(
+            builder, CONV_Y_UID, "conv_y", fb::DataType::FLOAT, nullptr, nullptr),
+    };
+
+    auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
+                                                        fb::PointwiseMode::ADD,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        ::flatbuffers::nullopt,
+                                                        PW_X_UID,
+                                                        PW_Y_UID,
+                                                        ::flatbuffers::nullopt,
+                                                        PW_OUT_UID);
+    auto convAttrs
+        = fb::CreateConvolutionFwdAttributesDirect(builder, CONV_X_UID, CONV_W_UID, CONV_Y_UID);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             config_op::POINTWISE,
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::PointwiseAttributes,
+                             pointwiseAttrs.Union()),
+        fb::CreateNodeDirect(builder,
+                             "conv",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::ConvolutionFwdAttributes,
+                             convAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
+std::vector<uint8_t> buildBatchnormTrainingGraphBuffer(bool includePeerStatTensor)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t X_UID = 1;
+    constexpr int64_t SCALE_UID = 2;
+    constexpr int64_t BIAS_UID = 3;
+    constexpr int64_t EPSILON_UID = 4;
+    constexpr int64_t PEER_STAT_UID = 5;
+    constexpr int64_t Y_UID = 6;
+
+    const std::vector<int64_t> xDims{1, 3, 4, 4};
+    const std::vector<int64_t> xStrides{48, 16, 4, 1};
+    const std::vector<int64_t> channelDims{3};
+    const std::vector<int64_t> channelStrides{1};
+    const std::vector<int64_t> scalarDims{1};
+    const std::vector<int64_t> scalarStrides{1};
+    const std::vector<int64_t> peerStats{PEER_STAT_UID};
+
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        fb::CreateTensorAttributesDirect(
+            builder, X_UID, "x", fb::DataType::FLOAT, &xStrides, &xDims),
+        fb::CreateTensorAttributesDirect(
+            builder, SCALE_UID, "scale", fb::DataType::FLOAT, &channelStrides, &channelDims),
+        fb::CreateTensorAttributesDirect(
+            builder, BIAS_UID, "bias", fb::DataType::FLOAT, &channelStrides, &channelDims),
+        fb::CreateTensorAttributesDirect(
+            builder, EPSILON_UID, "epsilon", fb::DataType::FLOAT, &scalarStrides, &scalarDims),
+        fb::CreateTensorAttributesDirect(
+            builder, Y_UID, "y", fb::DataType::FLOAT, nullptr, nullptr),
+    };
+    if(includePeerStatTensor)
+    {
+        tensors.push_back(fb::CreateTensorAttributesDirect(builder,
+                                                           PEER_STAT_UID,
+                                                           "peer_stat",
+                                                           fb::DataType::FLOAT,
+                                                           &channelStrides,
+                                                           &channelDims));
+    }
+
+    auto batchnormAttrs = fb::CreateBatchnormAttributesDirect(builder,
+                                                              X_UID,
+                                                              SCALE_UID,
+                                                              BIAS_UID,
+                                                              EPSILON_UID,
+                                                              &peerStats,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              Y_UID);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "batchnorm",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::BatchnormAttributes,
+                             batchnormAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
 /// RAII temp directory + JSON file. Returns a path that can be assigned to
 /// HIPDNN_HEUR_CONFIG_PATH; the directory is removed on destruction.
 class TempJsonOverrideFile
@@ -236,6 +552,28 @@ private:
     hipdnn_test_sdk::utilities::ScopedDirectory _dir;
     std::filesystem::path _path;
 };
+nlohmann::json makeRuleTensor(std::vector<int64_t> dim)
+{
+    return {{config_json::DIM, std::move(dim)}};
+}
+
+nlohmann::json makeNamedRuleTensor(const char* tensorId, std::vector<int64_t> dim)
+{
+    auto tensor = makeRuleTensor(std::move(dim));
+    tensor[config_json::TENSOR_ID] = tensorId;
+    return tensor;
+}
+
+nlohmann::json makeOverrideConfig(std::initializer_list<nlohmann::json> rules)
+{
+    auto overrides = nlohmann::json::array();
+    for(const auto& rule : rules)
+    {
+        overrides.push_back(rule);
+    }
+    return {{config_json::VERSION, hipdnn_data_sdk::detail::autotune_config::version::CURRENT},
+            {config_json::ENGINE_OVERRIDES, std::move(overrides)}};
+}
 
 constexpr const char* DETERMINISTIC_RULE_JSON = R"({
   "engine_overrides": [
@@ -535,6 +873,60 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFront)
     EXPECT_EQ(sorted[2], CUSTOM_ENGINE_ID);
 }
 
+TEST_F(TestConfigBuiltIn, FinalizeLegacyRuleWithoutTensorIdsUsesPositionalFallback)
+{
+    constexpr const char* JSON = R"({
+      "engine_overrides": [
+        {
+          "op": "conv_fprop",
+          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+          "tensors": [
+            { "dim": [1, 3, 4, 4] },
+            { "dim": [2, 3, 1, 1] }
+          ]
+        }
+      ]
+    })";
+    const TempJsonOverrideFile json(JSON);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES));
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+}
+
+TEST_F(TestConfigBuiltIn, FinalizeTriesLaterSamePriorityNodeAfterFirstMiss)
+{
+    constexpr const char* JSON = R"({
+      "engine_overrides": [
+        {
+          "op": "conv_fprop",
+          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+          "tensors": [
+            { "tensor_id": "x_tensor_uid", "dim": [1, 3, 4, 4] },
+            { "tensor_id": "w_tensor_uid", "dim": [2, 3, 1, 1] }
+          ]
+        }
+      ]
+    })";
+    const TempJsonOverrideFile json(JSON);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildTwoConvFwdGraphBuffer());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+}
+
 TEST_F(TestConfigBuiltIn, FinalizeRereadsEnvOnEachInvocation)
 {
     // loadFromEnv must not be process-cached: pointing the env at a different
@@ -637,6 +1029,118 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFrontWrwNode)
     const auto sorted = _plugin->getSortedEngineIds(_desc);
     ASSERT_EQ(sorted.size(), 3u);
     EXPECT_EQ(sorted[0], MIOPEN_DETERMINISTIC_ID);
+}
+
+TEST_F(TestConfigBuiltIn, FinalizePointwiseCriteriaPreventsModeOvermatch)
+{
+    const TempJsonOverrideFile json(
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::POINTWISE},
+                 {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::IN_0, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::IN_1, {1, 3, 4, 4})})}},
+            })
+            .dump(2));
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildPointwiseBinaryGraphBuffer(fb::PointwiseMode::ADD));
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_FALSE(sorted.empty());
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildPointwiseBinaryGraphBuffer(fb::PointwiseMode::MUL));
+    EXPECT_FALSE(_plugin->finalize(_desc));
+}
+
+TEST_F(TestConfigBuiltIn, FinalizeUsesConstructedPriorityToPreferConvOverEarlierPointwise)
+{
+    const TempJsonOverrideFile json(
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::POINTWISE},
+                 {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::IN_0, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::IN_1, {1, 3, 4, 4})})}},
+                {{config_json::OP, config_op::CONV_FPROP},
+                 {config_json::ENGINE_NAME, CUSTOM_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::X, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::W, {2, 3, 1, 1})})}},
+            })
+            .dump(2));
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID, CUSTOM_ENGINE_ID});
+    setSerializedGraph(buildPointwiseThenConvGraphBuffer());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted.front(), CUSTOM_ENGINE_ID);
+}
+
+TEST_F(TestConfigBuiltIn, FinalizeRejectsMissingOptionalTensorUidWhenPresent)
+{
+    const TempJsonOverrideFile json(
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::POINTWISE},
+                 {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::IN_0, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::IN_1, {1, 3, 4, 4})})}},
+            })
+            .dump(2));
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildPointwiseBinaryGraphBufferWithoutSecondInputTensor());
+
+    EXPECT_FALSE(_plugin->finalize(_desc));
+}
+
+TEST_F(TestConfigBuiltIn, FinalizeBatchnormPeerStatsDoNotParticipateInMatching)
+{
+    const TempJsonOverrideFile json(
+        makeOverrideConfig(
+            {
+                {{config_json::OP, config_op::BATCHNORM_TRAINING},
+                 {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                 {config_json::TENSORS,
+                  nlohmann::json::array({makeNamedRuleTensor(config_tensor::X, {1, 3, 4, 4}),
+                                         makeNamedRuleTensor(config_tensor::SCALE, {3}),
+                                         makeNamedRuleTensor(config_tensor::BIAS, {3}),
+                                         makeNamedRuleTensor(config_tensor::EPSILON, {1})})}},
+            })
+            .dump(2));
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildBatchnormTrainingGraphBuffer(true));
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_FALSE(sorted.empty());
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildBatchnormTrainingGraphBuffer(false));
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_FALSE(sorted.empty());
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
 }
 
 // ========== Logging callback / getLastErrorString ABI shape ==========

@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// ALMIOPEN-2034 acceptance criterion #1: a v9-only translation unit that
-// includes ONLY the cuDNN-compatibility shim umbrella header must compile and
+// A v9-only translation unit that includes ONLY the cuDNN-compatibility shim
+// umbrella header must compile and
 // link. This TU is gated behind HIPDNN_ENABLE_CUDNN_COMPATIBILITY in the
 // frontend tests CMakeLists, so it is only built when the shim is enabled.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>

@@ -51,7 +51,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -151,7 +151,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3_2lds(
         typename GridwiseGemm::Argument karg,
@@ -1440,7 +1440,16 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout
+                        << "Unsupported! stride_overflow is set but LargeTensors is not enabled!"
+                        << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                        << std::endl;
+                }
                 return false;
+            }
         }
 
         // check device
@@ -2022,6 +2031,10 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
 
         // clang-format off
         str << "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3";
+
+        if(get_warp_size() != 64) {
+            str << "_WmmaPorted";
+        }
 
         if constexpr(DirectLoad) {
             str << "_DirectLoad";

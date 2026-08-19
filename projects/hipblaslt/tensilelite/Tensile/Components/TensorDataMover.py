@@ -4,7 +4,7 @@ from ..Common import INDEX_CHARS
 from typing import Mapping, Optional
 from rocisa.code import Module
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
-    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
+    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
@@ -116,7 +116,7 @@ class TensorDataMoverLoad(TensorDataMover):
             #TODO: support stagger U
         return mod
 
-    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str, dstGroup0: str = None) -> Module:
+    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str, dstGroup0: str = None, waveIdxSgpr: int | str = "WaveIdx") -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
         tIdx: int = tp["idx"]
@@ -161,7 +161,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
             #add wave offset
-            mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), f"wCompId = fTid // wavelen({wavelen}) // 2)"))
+            mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), f"wCompId = fTid // wavelen({wavelen}) // 2)"))
             if ("MXS" in tc):
                 mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit
@@ -259,14 +259,12 @@ class TensorDataMoverLoad(TensorDataMover):
 
     @staticmethod
     def dataSizeShift(dtype: DataType, isMetadata: bool = False) -> int:
-        if isMetadata or dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4() or dtype.is6bitFloat():
+        # TDM data_size is log2(element bytes), max 3 (8B).
+        numBytes = dtype.numBytes()
+        if isMetadata or numBytes <= 1:
             return 0
-        if dtype.isBFloat16() or dtype.isHalf():
-            return 1
-        if dtype.isSingle():
-            return 2
-        if dtype.isDouble():
-            return 3
+        if numBytes <= 8:
+            return int(log2(numBytes))
         raise AssertionError(f"unsupported dtype for TDM data_size: {dtype}")
 
     def setDataType(self, dtype: DataType, group1: str | int, isMetadata: bool = False) -> Module:

@@ -20,14 +20,49 @@ define_property(GLOBAL PROPERTY KERNELEMBEDDING_KERNEL_FILES)
 
 # Function to mark kernel source files for embedding in the single source file
 function(add_kernels_for_embedding)
-    foreach(KERNEL_FILE IN LISTS ARGV)
-        set_property(GLOBAL APPEND PROPERTY KERNELEMBEDDING_KERNEL_FILES ${KERNEL_FILE})
+    set(options "")
+    set(oneValueArgs TARGET)
+    set(multiValueArgs FILES)
+    cmake_parse_arguments(PARSE_ARGV 0 ADD_KERNELS "${options}" "${oneValueArgs}" "${multiValueArgs}")
+
+    # Validation checks
+    if(NOT ADD_KERNELS_TARGET)
+        message(FATAL_ERROR "add_kernels_for_embedding called without a TARGET!")
+    endif()
+    if(NOT TARGET ${ADD_KERNELS_TARGET})
+        message(FATAL_ERROR "add_kernels_for_embedding: The target ${ADD_KERNELS_TARGET} does not exist yet.
+                Please make sure to call add_kernels_for_embedding after the target is created.")
+    endif()
+    if(NOT ADD_KERNELS_FILES)
+        message(FATAL_ERROR "add_kernels_for_embedding called without any FILES!")
+    endif()
+
+    # Add kernel file paths to the target property
+    foreach(KERNEL_FILE IN LISTS ADD_KERNELS_FILES)
+        set_property(TARGET ${ADD_KERNELS_TARGET} APPEND PROPERTY KERNELEMBEDDING_KERNEL_FILES ${KERNEL_FILE})
     endforeach()
 endfunction()
 
 # Function to embed kernel sources as C++ strings at configure time
-function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OUTPUT_INCS_HPP)
-    get_property(KERNEL_FILES GLOBAL PROPERTY KERNELEMBEDDING_KERNEL_FILES)
+function(embed_kernel_sources)
+    set(options "")
+    set(oneValueArgs TARGET OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OUTPUT_INCS_HPP)
+    set(multiValueArgs "")
+    cmake_parse_arguments(PARSE_ARGV 0 EMBED_KERNELS "${options}" "${oneValueArgs}" "${multiValueArgs}")
+
+    # Validation checks
+    if(NOT EMBED_KERNELS_TARGET)
+        message(FATAL_ERROR "embed_kernel_sources called without a TARGET!")
+    endif()
+    if(NOT TARGET ${EMBED_KERNELS_TARGET})
+        message(FATAL_ERROR "embed_kernel_sources: The target ${EMBED_KERNELS_TARGET} does not exist yet.
+                Please make sure to call embed_kernel_sources after the target is created.")
+    endif()
+    if(NOT EMBED_KERNELS_OUTPUT_SRCS_CPP OR NOT EMBED_KERNELS_OUTPUT_SRCS_HPP OR NOT EMBED_KERNELS_OUTPUT_INCS_CPP OR NOT EMBED_KERNELS_OUTPUT_INCS_HPP)
+        message(FATAL_ERROR "embed_kernel_sources called without all output file arguments specified.")
+    endif()
+
+    get_target_property(KERNEL_FILES ${EMBED_KERNELS_TARGET} KERNELEMBEDDING_KERNEL_FILES)
     set(KERNEL_DECLARATIONS "")
     set(KERNEL_DEFINITIONS "")
     set(KERNEL_MAP_ENTRIES "")
@@ -36,7 +71,7 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
     set(HEADER_MAP_ENTRIES "")
     set(HEADER_FILENAMES "")
 
-    foreach(KERNEL_FILE ${KERNEL_FILES})
+    foreach(KERNEL_FILE IN LISTS KERNEL_FILES)
         file(READ ${KERNEL_FILE} KERNEL_CONTENT)
         # Setting this property ensures that the kernels will get properly re-inlined as they are modified.
         # The drawback is that CMake is going to reconfigure every time a kernel is modified.
@@ -46,7 +81,7 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
         get_filename_component(KERNEL_NAME ${KERNEL_FILE} NAME_WE)
         get_filename_component(KERNEL_FILENAME ${KERNEL_FILE} NAME)
         get_filename_component(KERNEL_EXT ${KERNEL_FILE} EXT)
-        string(TOUPPER ${KERNEL_NAME} KERNEL_VAR_NAME)
+        string(TOUPPER "${EMBED_KERNELS_TARGET}_${KERNEL_NAME}" KERNEL_VAR_NAME)
 
         # Check if this is a header file
         if(KERNEL_EXT STREQUAL ".h" OR KERNEL_EXT STREQUAL ".hpp")
@@ -80,24 +115,24 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
     # Generate kernel source files
     configure_file(
         ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_sources.hpp.in
-        ${OUTPUT_SRCS_HPP}
+        ${EMBED_KERNELS_OUTPUT_SRCS_HPP}
         @ONLY
     )
     configure_file(
         ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_sources.cpp.in
-        ${OUTPUT_SRCS_CPP}
+        ${EMBED_KERNELS_OUTPUT_SRCS_CPP}
         @ONLY
     )
 
     # Generate kernel include files
     configure_file(
         ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_includes.hpp.in
-        ${OUTPUT_INCS_HPP}
+        ${EMBED_KERNELS_OUTPUT_INCS_HPP}
         @ONLY
     )
     configure_file(
         ${PROJECT_SOURCE_DIR}/src/cmake/templates/kernel_includes.cpp.in
-        ${OUTPUT_INCS_CPP}
+        ${EMBED_KERNELS_OUTPUT_INCS_CPP}
         @ONLY
     )
 

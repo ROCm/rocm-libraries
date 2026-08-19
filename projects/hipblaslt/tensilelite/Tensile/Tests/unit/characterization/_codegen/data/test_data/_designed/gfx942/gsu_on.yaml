@@ -1,0 +1,68 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 — GSUOn arm characterization for gfx942 (add-only, CPU-only).
+#
+# The existing gsu.yaml exercises GSUOff (GlobalSplitU=1) but all GSU>1 forks
+# are filtered during solution derivation for the BBS+Bias+Activation ProblemType.
+# This config uses a simpler float32 NN ProblemType that the solution derivation
+# accepts with GlobalSplitU>1, routing through:
+#
+#   GSUOn.graWorkGroup        (lines 316-370)   — WGM + WGMRR branches
+#   GSUOn.computeLoadSrd      (lines 372-429)   — missing 388-461
+#   GSUOn.graIncrements       (lines 431-517)   — missing 441-517 (globalReadIncsUseVgpr=True)
+#   GSUOn.calculateLoopNumIterGsu (lines 558-588) — missing 558-588
+#
+# Key design choices:
+#   - DataType s/s/s (float32): works with MI16x16x4 on gfx942, no Bias/Activation
+#     constraints that reject GSU>1
+#   - GlobalSplitU: [2, 8] — exercises GSU>gsuThreshold (atomic_dec reduction path)
+#   - GlobalSplitUAlgorithm: [MultipleBuffer, SingleBuffer] — different _GlobalAccumulation
+#   - GlobalSplitUWorkGroupMappingRoundRobin: [False, True] — lines 354-357
+#   - GlobalSplitUCoalesced: [False, True] — variant flag
+#
+# ForkParameters cartesian product:
+#   3 (GSU) x 2 (Algorithm) x 2 (WGMRR) x 2 (Coalesced) = 24 forks -> ~2 unique kernels
+#
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+
+BenchmarkProblems:
+  ########################################
+  # NN float32 (no Bias/Activation) — accepts GlobalSplitU>1 on gfx942
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32]
+        - GlobalSplitU: [2, 4, 8]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "SingleBuffer"]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False, True]
+        - GlobalSplitUCoalesced: [False, True]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [0]
+        - TransposeLDS: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

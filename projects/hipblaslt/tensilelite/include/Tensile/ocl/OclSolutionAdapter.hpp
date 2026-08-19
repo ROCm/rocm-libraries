@@ -27,13 +27,11 @@
 #ifndef OCL_SOLUTION_ADAPTER_HPP
 #define OCL_SOLUTION_ADAPTER_HPP
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/ocl/OclFwd.hpp>
 
 #include <mutex>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -100,7 +98,5 @@ namespace TensileLite
 
     } // namespace ocl
 } // namespace TensileLite
-
-TENSILE_HIDDEN_END
 
 #endif //OCL_SOLUTION_ADAPTER_HPP

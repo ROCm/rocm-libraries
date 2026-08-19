@@ -984,9 +984,6 @@ bool ConvHipImplicitGemmForwardV4R4Xdlops::IsApplicable(const ExecutionContext& 
     if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
 
-    if(problem.GetConv().attribute.deterministic)
-        return false;
-
     if(!ctx.use_hip_kernels)
         return false;
 

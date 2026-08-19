@@ -2,6 +2,12 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.4.1 for ROCm 7.14
+
+### Added
+
+* Introduced a new API: hipBLASLt-ext::isSolutionSupported(). This API is used by new hipBLASLt integration from rocBLAS to check if a given solution is supported for a certain GPU and Problem Type. 
+
 ## hipBLASLt 1.4.0
 
 ### Added
@@ -20,15 +26,22 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   and persistent-grid sizing — useful when another kernel (e.g. RCCL)
   is co-running on the device or when a persistent grid should be sized
   for a known CU budget. (This is a hint, not a CU reservation.)
-* `HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT` extension attribute
-  (`int32_t` boolean, default `0`) and matching C++ ext methods
-  `hipblaslt_ext::GemmPreference::setDynPersistentTileEnabled()` /
-  `getDynPersistentTileEnabled()`. Opts the matmul in to the hipBLASLt
-  dynamic persistent tile (work-stealing StreamK) scheduler. Exposed
-  via the `ext` API (no analogue in the base cuBLAS / cuBLASLt API).
-* `hipblaslt-bench` `--sm_count_target` and `--dyn_persistent_tile` CLI
-  options that forward the values into the matmul descriptor before
-  launch.
+* `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` and matching ext API
+  (`setStreamKTileSchedulingMode()` / `getStreamKTileSchedulingMode()`) accept
+  the tri-state `hipblasLtStreamKTileSchedulingMode_t` enum (OFF=0 static SK3,
+  ON=1 dynamic SK4, AUTO=2 origami heuristic). Invalid values return
+  `HIPBLAS_STATUS_INVALID_VALUE`. `hipblaslt-bench` `--streamk_tile_scheduling`
+  and `--sm_count_target` forward into the matmul descriptor
+  (see `clients/bench/README.md`).
+
+### Changed
+
+* StreamK=5 tile scheduling default is now `OFF` (`0`, static SK3 sub-path)
+  instead of `AUTO` (`2`). Set `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` (or
+  `hipblasLtSetSmCountTarget`) to a positive value to engage the origami
+  hybrid-mode heuristic per launch even when the mode is `OFF`; use
+  `HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO` (`2`) to always delegate to the
+  heuristic regardless of `sm_count_target`.
 
 ## hipBLASLt 1.3.0
 

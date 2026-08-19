@@ -25,12 +25,12 @@ SOFTWARE.
 #ifndef GUARD_RPP_RETURNS_HPP
 #define GUARD_RPP_RETURNS_HPP
 
-#define RPP_RETURNS(...) \
-    ->decltype(__VA_ARGS__) { return __VA_ARGS__; }
-
-#define RPP_BODY_RETURNS(...) \
-    {                            \
-        return __VA_ARGS__;      \
+#define RPP_RETURNS(...)      \
+    ->decltype(__VA_ARGS__) { \
+        return __VA_ARGS__;   \
     }
 
-#endif    // GUARD_RPP_RETURNS_HPP
+#define RPP_BODY_RETURNS(...) \
+    { return __VA_ARGS__; }
+
+#endif  // GUARD_RPP_RETURNS_HPP

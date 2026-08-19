@@ -26,9 +26,7 @@
 
 #pragma once
 
-#ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
-#endif
 
 // comment out following macro to disable FP8/BF8 types
 #define TENSILE_USE_FP8_BF8

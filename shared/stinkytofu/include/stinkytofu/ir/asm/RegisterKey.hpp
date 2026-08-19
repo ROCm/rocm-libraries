@@ -22,27 +22,53 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
-/// Per-DWORD register key used to track individual register components
-/// across definitions and uses.
+
+/// Sub-DWORD lane: NONE = full DWORD, LOW/HIGH = True16 halves.
+/// Values mirror HighBitSel (RegHalfKeyer casts directly). Pre-RA scaffolding.
+enum class RegHalf : int8_t {
+    NONE = -1,
+    LOW = 0,
+    HIGH = 1,
+};
+
+inline const char* halfName(RegHalf h) {
+    switch (h) {
+        case RegHalf::NONE:
+            return "NONE";
+        case RegHalf::LOW:
+            return "LOW";
+        case RegHalf::HIGH:
+            return "HIGH";
+    }
+    STINKY_UNREACHABLE("invalid RegHalf value");
+}
+
+/// Per-DWORD register key for tracking defs/uses; `half` extends to True16
+/// sub-DWORD halves.
 struct RegKey {
     RegType type;
     unsigned idx;
+    RegHalf half = RegHalf::NONE;
 
     bool operator==(const RegKey& o) const noexcept {
-        return type == o.type && idx == o.idx;
+        return type == o.type && idx == o.idx && half == o.half;
     }
 };
 
 struct RegKeyHash {
     size_t operator()(const RegKey& k) const noexcept {
         size_t h = std::hash<int>{}(static_cast<int>(k.type));
-        h ^= std::hash<unsigned>{}(k.idx) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        auto combine = [&](size_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
+        combine(std::hash<unsigned>{}(k.idx));
+        combine(std::hash<int>{}(static_cast<int>(k.half)));
         return h;
     }
 };

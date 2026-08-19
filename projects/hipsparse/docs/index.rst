@@ -44,7 +44,7 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 
     * :doc:`Exported functions <./reference/api>`
     * :doc:`hipSPARSE data types <./reference/types>`
-    * :doc:`hipSPARSE precision support <./reference/precision>`
+    * :doc:`hipSPARSE precision support <./reference/data-type-support>`
     * :doc:`Sparse auxiliary functions <./reference/auxiliary>`
     * :doc:`Sparse level 1 functions <./reference/level1>`
     * :doc:`Sparse level 2 functions <./reference/level2>`

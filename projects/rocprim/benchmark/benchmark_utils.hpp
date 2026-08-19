@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "primbench.hpp"
+
 #include "../common/utils.hpp"
 #include "../common/utils_custom_type.hpp"
 #include "../common/utils_data_generation.hpp"

@@ -105,22 +105,45 @@ struct CKArgs
     {
         (void)alpha;
         (void)beta;
+        if(miopen::solver::IsLargeTensorCKInstance(conv_ptr))
+        {
+            return conv_ptr->MakeArgumentPointer(in,
+                                                 w,
+                                                 {},
+                                                 out,
+                                                 input,
+                                                 in_strides,
+                                                 weight,
+                                                 wei_strides,
+                                                 {},
+                                                 {},
+                                                 output,
+                                                 out_strides,
+                                                 strides,
+                                                 dilation,
+                                                 lPadding,
+                                                 rPadding,
+                                                 {},
+                                                 {},
+                                                 {});
+        }
+        const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(in,
                                              w,
                                              {},
                                              out,
-                                             input,
-                                             in_strides,
-                                             weight,
-                                             wei_strides,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
                                              {},
                                              {},
-                                             output,
-                                             out_strides,
-                                             strides,
-                                             dilation,
-                                             lPadding,
-                                             rPadding,
+                                             a.out_l,
+                                             a.out_s,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              {},
                                              {},
                                              {});
@@ -142,28 +165,60 @@ struct CKArgs
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
-    int G;
-    int N;
-    int K1;
-    int C1;
-    int K;
-    int C;
-    int Hi;
-    int Wi;
-    int Ho;
-    int Wo;
-    int Y;
-    int X;
-    std::array<ck::index_t, 5> input;
-    std::array<ck::index_t, 5> in_strides;
-    std::array<ck::index_t, 5> output;
-    std::array<ck::index_t, 5> out_strides;
-    std::array<ck::index_t, 5> weight;
-    std::array<ck::index_t, 5> wei_strides;
-    std::array<ck::index_t, 2> strides;
-    std::array<ck::index_t, 2> dilation;
-    std::array<ck::index_t, 2> lPadding;
-    std::array<ck::index_t, 2> rPadding;
+    // Length / stride arrays are stored as int64 (and dim members likewise) so
+    // the NCHW stride builder above (e.g. Hi*Wi*G*C) does not silently overflow
+    // on tensors whose contiguous stride exceeds INT_MAX. MakeArgPtr dispatches
+    // at the conv_ptr level: large-tensor CK instances bind the long_index_t
+    // MakeArgumentPointer overload directly; non-large-tensor instances go
+    // through NarrowedArrays() and bind the int32 overload they were registered
+    // for. See implicitgemm_ck_util.hpp::IsLargeTensorCKInstance.
+    int64_t G;
+    int64_t N;
+    int64_t K1;
+    int64_t C1;
+    int64_t K;
+    int64_t C;
+    int64_t Hi;
+    int64_t Wi;
+    int64_t Ho;
+    int64_t Wo;
+    int64_t Y;
+    int64_t X;
+    std::array<ck::long_index_t, 5> input;
+    std::array<ck::long_index_t, 5> in_strides;
+    std::array<ck::long_index_t, 5> output;
+    std::array<ck::long_index_t, 5> out_strides;
+    std::array<ck::long_index_t, 5> weight;
+    std::array<ck::long_index_t, 5> wei_strides;
+    std::array<ck::long_index_t, 2> strides;
+    std::array<ck::long_index_t, 2> dilation;
+    std::array<ck::long_index_t, 2> lPadding;
+    std::array<ck::long_index_t, 2> rPadding;
+
+    // Lazy-populate the narrowed bundle. Only invoked from MakeArgPtr's
+    // !IsLargeTensorCKInstance(conv_ptr) branch, which the IsCKArgsSupported
+    // filter (implicitgemm_ck_util.hpp:481-483) only admits when the problem
+    // already fits int32 -- so ToCKIndexArray's overflow assert cannot trip.
+    // Mutable + member-owned so CK's MakeArgumentPointer, which captures
+    // references into the arrays, sees memory that outlives the returned
+    // arg_ptr (stack-local arrays previously caused ASAN stack-use-after-scope
+    // -- see commit 23059ecb41b).
+    const NarrowedCKArrays2D& NarrowedArrays() const
+    {
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
+                                                            in_strides,
+                                                            output,
+                                                            out_strides,
+                                                            weight,
+                                                            wei_strides,
+                                                            strides,
+                                                            dilation,
+                                                            lPadding,
+                                                            rPadding);
+        return narrowed;
+    }
+
+    mutable NarrowedCKArrays2D narrowed;
 };
 
 template <typename DataType>

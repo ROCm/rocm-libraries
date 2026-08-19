@@ -142,7 +142,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         SwapGlobalReadOrder: GRA needs GRIncB (not GRIncA). Pass.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "LRA0": [[0]],
             "LRB0": [[1]],
@@ -166,7 +166,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         GRA loads B so needs GRIncB. GRIncB last at 5, GRA at 4.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "LRA0": [[0]],
             "LRB0": [[1]],
@@ -324,7 +324,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         Both valid. Pass.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "LRA0": [[0]],
             "LRB0": [[1]],

@@ -279,6 +279,21 @@ void cvt_inst(nb::module_ m_inst)
             return new rocisa::VCvtSRF32toBF8(self);
         });
 
+    nb::class_<rocisa::VCvtScaleSRPkF32toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtScaleSRPkF32toFP8")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("scale"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCvtScaleSRPkF32toFP8& self, const nb::dict&) {
+            return new rocisa::VCvtScaleSRPkF32toFP8(self);
+    });
+
     nb::class_<rocisa::VCvtScalePkFP8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtScalePkFP8toF16")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -477,5 +492,39 @@ void cvt_inst(nb::module_ m_inst)
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtPkF32toFP16& self, nb::dict&) {
             return new rocisa::VCvtPkF32toFP16(self);
+        });
+
+    nb::class_<rocisa::VCvtScalePk8F32toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtScalePk8F32toFP8")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("scale"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCvtScalePk8F32toFP8& self, nb::dict&) {
+            return new rocisa::VCvtScalePk8F32toFP8(self);
+        });
+
+    nb::class_<rocisa::VCvtScalePk8F32toBF8, rocisa::VCvtInstruction>(m_inst, "VCvtScalePk8F32toBF8")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("scale"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCvtScalePk8F32toBF8& self, nb::dict&) {
+            return new rocisa::VCvtScalePk8F32toBF8(self);
         });
 }

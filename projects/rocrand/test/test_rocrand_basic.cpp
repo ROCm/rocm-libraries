@@ -19,6 +19,8 @@
 // THE SOFTWARE.
 
 #include <stdio.h>
+#include <string>
+
 #include <gtest/gtest.h>
 
 #include <hip/hip_runtime.h>
@@ -27,7 +29,8 @@
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
 
-class rocrand_basic_tests : public ::testing::TestWithParam<rocrand_rng_type> { };
+class rocrand_basic_tests : public ::testing::TestWithParam<rocrand_rng_type>
+{};
 
 TEST(rocrand_basic_tests, rocrand_get_version_test)
 {
@@ -84,6 +87,18 @@ TEST_P(rocrand_basic_tests, rocrand_initialize_generator_test)
     ROCRAND_CHECK(rocrand_destroy_generator(g));
 }
 
+// The default INSTANTIATE_TEST_SUITE_P naming uses the parameter's plain index
+// in rng_types, which shifts whenever a generator is added to or removed from
+// the array. Give the case targeted by test filters (e.g. test_categories.yaml)
+// a fixed, type-derived name so those filters stay valid across reordering.
 INSTANTIATE_TEST_SUITE_P(rocrand_basic_tests,
-                        rocrand_basic_tests,
-                        ::testing::ValuesIn(rng_types));
+                         rocrand_basic_tests,
+                         ::testing::ValuesIn(rng_types),
+                         [](const ::testing::TestParamInfo<rocrand_rng_type>& info)
+                         {
+                             if(info.param == ROCRAND_RNG_QUASI_SOBOL32)
+                             {
+                                 return std::string("Sobol32");
+                             }
+                             return std::to_string(info.index);
+                         });

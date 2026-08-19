@@ -29,11 +29,14 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+struct StinkyInstruction;
+
 // Enum for selecting high or low 16 bits in True16 instructions
 enum class HighBitSel : int { NONE = -1, LOW = 0, HIGH = 1 };
 
@@ -66,6 +69,9 @@ STINKYTOFU_EXPORT std::string matrixScaleFmtToStr(MatrixScaleFmt fmt);
 
 // Parse assembly string to MatrixScaleFmt enum.
 STINKYTOFU_EXPORT MatrixScaleFmt parseMatrixScaleFmt(std::string_view s);
+
+// Parse MX scale-select assembly string.
+STINKYTOFU_EXPORT int parseMatrixScaleSel(std::string_view s);
 
 enum class MUBUFScope : uint8_t {
     SCOPE_NONE = 0,
@@ -177,6 +183,17 @@ inline TemporalHint parseTemporalHint(std::string_view th) {
     return TemporalHint::TH_NONE;
 }
 
+enum class NonVolatile : uint8_t { NV_NONE = 0, NV = 1 };
+
+inline std::string_view toString(NonVolatile nv) {
+    return nv == NonVolatile::NV ? "nv" : "";
+}
+
+// Inverse of toString(): assembly token -> enum.
+inline NonVolatile parseNonVolatile(std::string_view nv) {
+    return nv == "nv" ? NonVolatile::NV : NonVolatile::NV_NONE;
+}
+
 // 9-bit DPP permutation control selector (matches the hardware dpp_ctrl field).
 // Three encoding shapes:
 //   singleton     — the named value IS the encoding   (e.g. ROW_MIRROR = 0x140)
@@ -285,6 +302,7 @@ struct Modifier {
         VCC,
         SWAITCNT_DATA,
         SWAITTENSORCNT_DATA,
+        SWAITASYNCCNT_DATA,
         SWAITSTORECNT_DATA,
         SDELAYALU_DATA,
         SWAITALU_DATA,
@@ -293,6 +311,9 @@ struct Modifier {
         COMMENT,
         MATRIX_FMT,
         MEM_TOKEN,
+        WMMA_POOL_INDEX,
+        CALL_TARGETS,
+        EXEC_GROUP,
     };
 
     Modifier(Type type) : type(type) {}
@@ -354,7 +375,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::FLAT;
 
     FLATModifiers(int offset12 = 0, bool glc = false, bool slc = false, bool lds = false,
-                  bool isStore = false, bool hasGLCModifier = false, bool hasSC0Modifier = false)
+                  bool isStore = false, bool hasGLCModifier = false, bool hasSC0Modifier = false,
+                  MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                  TemporalHint th = TemporalHint::TH_NONE)
         : TypedModifier<FLATModifiers>(),
           offset12(offset12),
           glc(glc),
@@ -362,7 +385,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
           lds(lds),
           isStore(isStore),
           hasGLCModifier(hasGLCModifier),
-          hasSC0Modifier(hasSC0Modifier) {}
+          hasSC0Modifier(hasSC0Modifier),
+          scope(scope),
+          th(th) {}
 
     int offset12;
     uint32_t glc : 1;
@@ -371,6 +396,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     uint32_t isStore : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    // gfx12+ FLAT cache hints; default-NONE values are not emitted.
+    MUBUFScope scope;
+    TemporalHint th;
 };
 
 // Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
@@ -395,7 +423,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     MUBUFModifiers(bool offen = false, int offset12 = 0, bool glc = false, bool slc = false,
                    bool nt = false, bool lds = false, bool isStore = false,
                    bool hasMUBUFConst = false, bool hasGLCModifier = false,
-                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                   TemporalHint th = TemporalHint::TH_NONE, NonVolatile nv = NonVolatile::NV_NONE)
         : TypedModifier<MUBUFModifiers>(),
           offset12(offset12),
           offen(offen),
@@ -407,7 +436,9 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
           hasMUBUFConst(hasMUBUFConst),
           hasGLCModifier(hasGLCModifier),
           hasSC0Modifier(hasSC0Modifier),
-          scope(scope) {}
+          scope(scope),
+          th(th),
+          nv(nv) {}
 
     int offset12;
     uint32_t offen : 1;
@@ -420,6 +451,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
     MUBUFScope scope;
+    TemporalHint th;
+    NonVolatile nv;
 };
 
 // Carries just the cache scope token for SOPP-format memory fences such as
@@ -764,12 +797,33 @@ struct LabelData : public TypedModifier<LabelData> {
     uint16_t alignment;
 };
 
+/// Producer-authored names of callable bodies this `s_swappc_b64` may enter.
+/// Does not affect assembly text and must not be interpreted as CFG edges
+/// (unlike `LabelData` on direct branches / annotated `s_setpc_b64`).
+struct CallTargetData : public TypedModifier<CallTargetData> {
+    static constexpr Modifier::Type Type = Modifier::Type::CALL_TARGETS;
+
+    explicit CallTargetData(std::vector<std::string> callees = {})
+        : TypedModifier<CallTargetData>(), callees(std::move(callees)) {}
+
+    std::vector<std::string> callees;
+};
+
 struct SWaitTensorCntData : public TypedModifier<SWaitTensorCntData> {
     static constexpr Modifier::Type Type = Modifier::Type::SWAITTENSORCNT_DATA;
 
     SWaitTensorCntData(int8_t tlcnt = -1) : TypedModifier<SWaitTensorCntData>(), tlcnt(tlcnt) {}
 
     int8_t tlcnt;
+};
+
+struct SWaitAsyncCntData : public TypedModifier<SWaitAsyncCntData> {
+    static constexpr Modifier::Type Type = Modifier::Type::SWAITASYNCCNT_DATA;
+
+    SWaitAsyncCntData(int8_t asynccnt = -1)
+        : TypedModifier<SWaitAsyncCntData>(), asynccnt(asynccnt) {}
+
+    int8_t asynccnt;
 };
 
 struct SWaitStoreCntData : public TypedModifier<SWaitStoreCntData> {
@@ -920,6 +974,27 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
         return validFields & (1 << field);
     }
 
+    // Clear a single field (sets it back to "unused" / no-wait).
+    void clearField(Field field) {
+        validFields &= ~(1 << field);
+        switch (field) {
+                // clang-format off
+            case VA_VDST:  fieldsValue.va_vdst  = 0; break;
+            case VA_SDST:  fieldsValue.va_sdst  = 0; break;
+            case VA_SSRC:  fieldsValue.va_ssrc  = 0; break;
+            case HOLD_CNT: fieldsValue.hold_cnt = 0; break;
+            case VM_VSRC:  fieldsValue.vm_vsrc  = 0; break;
+            case VA_VCC:   fieldsValue.va_vcc   = 0; break;
+            case SA_SDST:  fieldsValue.sa_sdst  = 0; break;
+            default: break;  // clang-format on
+        }
+    }
+
+    // True when no field is currently valid (instruction is a no-op).
+    bool empty() const {
+        return validFields == 0;
+    }
+
    private:
     HwValue fieldsValue;
     uint8_t validFields;  // Bitmask indicating which fields are valid (not -1)
@@ -962,6 +1037,8 @@ struct MFMAModifiers : public TypedModifier<MFMAModifiers> {
 // instructions, the per-matrix scale numeric format (scaleFmtA/scaleFmtB).
 // Used both for assembly emission (matrix_a_fmt:..., matrix_a_scale_fmt:...)
 // and as the match key for cost-override entries in *_Instructions.def.
+// MX scale-select (matrix_a_scale:N / matrix_b_scale:N): which MX scale
+// slot the WMMA reads (0 = default lower half-wave, 1 = partner upper half-wave).
 struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
 
@@ -969,6 +1046,8 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     MatrixFmt fmtB = MatrixFmt::NONE;
     MatrixScaleFmt scaleFmtA = MatrixScaleFmt::NONE;
     MatrixScaleFmt scaleFmtB = MatrixScaleFmt::NONE;
+    int scaleSelA = 0;
+    int scaleSelB = 0;
 
     MatrixFmtModifiers() : TypedModifier<MatrixFmtModifiers>() {}
     MatrixFmtModifiers(MatrixFmt a, MatrixFmt b)
@@ -980,9 +1059,15 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     bool isMXMFMA() const {
         return scaleFmtA != MatrixScaleFmt::NONE;
     }
-    // True when no format info is set (instance carries nothing useful).
+    // Must check all fields, to avoid a false "empty":
+    // e.g. v_wmma_scale_f32_32x16x128_f4 carries no fmtA/fmtB but is not really
+    // empty — it still sets scaleFmtA/scaleFmtB. Checking fmtA/fmtB alone would
+    // drop its matrix_*_scale_fmt. Likewise a non-zero scale-select (matrix_*_scale:1)
+    // is meaningful on its own and must not be treated as empty.
     bool empty() const {
-        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE;
+        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE &&
+               scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE &&
+               scaleSelA == 0 && scaleSelB == 0;
     }
 };
 
@@ -1001,6 +1086,28 @@ struct MemTokenData : public TypedModifier<MemTokenData> {
 
     MemTokenData(const std::vector<int>& tokens = {})
         : TypedModifier<MemTokenData>(), tokens(tokens) {}
+};
+
+/// Buffer pool index for WMMA instructions in double/triple/N-buffered GEMM kernels.
+/// Set by TensileLite during rocisa → StinkyTofu conversion. Consumed by
+/// StinkyWmmaVgprReorderPass to group wmma instructions into pools without heuristics.
+struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
+    static constexpr Modifier::Type Type = Modifier::Type::WMMA_POOL_INDEX;
+
+    uint32_t poolIndex = 0;
+
+    explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
+};
+
+/// Holds raw (non-owning) pointers to the original instructions grouped into an
+/// ExecMaskGroup pseudo-instruction by collapseExecMaskedRegions().
+struct ExecGroupData : public TypedModifier<ExecGroupData> {
+    static constexpr Modifier::Type Type = Modifier::Type::EXEC_GROUP;
+
+    std::vector<StinkyInstruction*> children;
+
+    explicit ExecGroupData(std::vector<StinkyInstruction*> children)
+        : TypedModifier<ExecGroupData>(), children(std::move(children)) {}
 };
 
 }  // namespace stinkytofu

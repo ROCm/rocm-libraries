@@ -35,7 +35,7 @@
 #include <tuple>
 #include <vector>
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <Tensile/SolutionLibrary_fwd.hpp>
 #include <Tensile/Tensile_fwd.hpp>
 
@@ -75,7 +75,6 @@
 /**
  * @brief Primary namespace for Tensile host code.
  */
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -91,7 +90,7 @@ namespace TensileLite
  * be solved including the type of problem, all sizes and strides, but not
  * including actual pointers to data.
  */
-    class TENSILE_API Problem
+    class TENSILELITEHOST_EXPORT Problem
     {
     public:
         virtual ~Problem();
@@ -103,7 +102,7 @@ namespace TensileLite
  * Base class for problem inputs. This stores the actual pointers to the
  * data.
  */
-    class TENSILE_API ProblemInputs
+    class TENSILELITEHOST_EXPORT ProblemInputs
     {
     public:
         virtual ~ProblemInputs();
@@ -119,7 +118,7 @@ namespace TensileLite
  * Describes a single kernel invocation including kernel name, launch
  * bounds, and arguments.
  */
-    struct TENSILE_API KernelInvocation
+    struct TENSILELITEHOST_EXPORT KernelInvocation
     {
     public:
         std::string kernelName;
@@ -146,7 +145,7 @@ namespace TensileLite
  * \ingroup Hardware
  * Abstract base class for describing hardware capabilities and properties.
  */
-    class TENSILE_API Hardware
+    class TENSILELITEHOST_EXPORT Hardware
     {
     public:
         Hardware();
@@ -163,7 +162,7 @@ namespace TensileLite
  * Generally encapsulates a single kernel or set of kernels that can be
  * used to solve a particular problem.
  */
-    class TENSILE_API Solution
+    class TENSILELITEHOST_EXPORT Solution
     {
     public:
         virtual ~Solution();
@@ -178,7 +177,7 @@ namespace TensileLite
  * Base class for objects capable of launching kernels based on
  * KernelArguments objects.
  */
-    class TENSILE_API SolutionAdapter
+    class TENSILELITEHOST_EXPORT SolutionAdapter
     {
     public:
         virtual ~SolutionAdapter();
@@ -186,28 +185,25 @@ namespace TensileLite
         virtual std::string name() const = 0;
     };
 
-#ifdef TENSILE_DEFAULT_SERIALIZATION
     /**
  * Interface for deserializing a library file.
  */
     enum class LazyLoadingInit;
 
-    TENSILE_API std::map<int, std::string> LoadLibraryMapping(std::string const& filename);
+    TENSILELITEHOST_EXPORT std::map<int, std::string> LoadLibraryMapping(std::string const& filename);
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    TENSILE_API std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+    TENSILELITEHOST_EXPORT std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
                 LoadLibraryFile(std::string const& filename);
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    TENSILE_API std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+    TENSILELITEHOST_EXPORT std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
                 LoadLibraryFilePreload(std::string const&                  filename,
                                        const std::vector<LazyLoadingInit>& preload);
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LoadLibraryData(std::vector<uint8_t> const& data);
-#endif
 } // namespace TensileLite
-TENSILE_HIDDEN_END
 
 /** @} */

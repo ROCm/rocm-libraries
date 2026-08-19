@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,9 +31,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -136,6 +134,8 @@ namespace TensileLite
                                         rhs.biasSrc(),
                                         lhs.useE(),
                                         rhs.useE(),
+                                        lhs.useGateResidual(),
+                                        rhs.useGateResidual(),
                                         lhs.useScaleAB(),
                                         rhs.useScaleAB(),
                                         lhs.useScaleCD(),
@@ -157,7 +157,11 @@ namespace TensileLite
                                         lhs.mxTypeA(),
                                         rhs.mxTypeA(),
                                         lhs.mxTypeB(),
-                                        rhs.mxTypeB());
+                                        rhs.mxTypeB(),
+                                        lhs.getParams().smCountTarget(),
+                                        rhs.getParams().smCountTarget(),
+                                        lhs.getParams().streamKTileSchedulingMode(),
+                                        rhs.getParams().streamKTileSchedulingMode());
         }
     };
 } // namespace TensileLite
@@ -191,6 +195,7 @@ namespace std
                                              problem.useBias(),
                                              problem.biasSrc(),
                                              problem.useE(),
+                                             problem.useGateResidual(),
                                              problem.useScaleAB(),
                                              problem.useScaleCD(),
                                              problem.useScaleAlphaVec(),
@@ -201,7 +206,9 @@ namespace std
                                              problem.mxBlockA(),
                                              problem.mxBlockB(),
                                              problem.mxTypeA(),
-                                             problem.mxTypeB());
+                                             problem.mxTypeB(),
+                                             problem.getParams().smCountTarget(),
+                                             problem.getParams().streamKTileSchedulingMode());
         }
     };
 
@@ -237,6 +244,7 @@ namespace std
                                                   problem.useBias(),
                                                   problem.biasSrc(),
                                                   problem.useE(),
+                                                  problem.useGateResidual(),
                                                   problem.useScaleAB(),
                                                   problem.useScaleCD(),
                                                   problem.useScaleAlphaVec(),
@@ -255,4 +263,3 @@ namespace std
 
 } // namespace std
 
-TENSILE_HIDDEN_END

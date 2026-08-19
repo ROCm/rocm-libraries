@@ -64,6 +64,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#if defined(__linux__)
+// Used by getMinKernelSizeToGwEnd() to parse .co ELF symbol tables. <elf.h>
+// is glibc-only, so the whole ELF code path is Linux-gated.
+#include <cstring> // std::memcmp / std::strcmp
+#include <elf.h>
+#include <limits> // std::numeric_limits<> sentinel
+#endif
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -236,6 +243,7 @@ namespace TensileLite
                 ("init-c",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for C")
                 ("init-d",                   po::value<InitMode>()->default_value(InitMode::Zero), "Initialization for D")
                 ("init-e",                   po::value<InitMode>()->default_value(InitMode::Zero), "Initialization for E")
+                ("init-gate",                po::value<InitMode>()->default_value(InitMode::Random),  "Initialization for gate residual")
                 ("init-alpha",               po::value<InitMode>()->default_value(InitMode::Two), "Initialization for alpha")
                 ("init-beta",                po::value<InitMode>()->default_value(InitMode::Two), "Initialization for beta")
                 ("init-bias",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for bias")
@@ -269,6 +277,7 @@ namespace TensileLite
                 ("print-tensor-d",                  po::value<bool>()->default_value(false), "Print tensor D.")
                 ("print-tensor-ref",                po::value<bool>()->default_value(false), "Print reference tensor D.")
                 ("print-tensor-bias",               po::value<bool>()->default_value(false), "Print tensor Bias.")
+                ("print-tensor-gate",               po::value<bool>()->default_value(false), "Print tensor GateResidual.")
                 ("print-tensor-scale-alpha-vec",    po::value<bool>()->default_value(false), "Print tensor ScaleAlphaVec.")
                 ("print-tensor-amaxd",              po::value<bool>()->default_value(false), "Print tensor AmaxD value from both CPU and GPU.")
 
@@ -332,6 +341,10 @@ namespace TensileLite
                                                                                   "(prev_dim_stride*prev_dim_size)"
                                                                                   "specifying once applies to all problem sizes, "
                                                                                   "otherwise specify once per problem size.")
+                ("gate-strides",             vector_default_empty<std::string>(), "Unspecified means default stride "
+                                                                                  "(prev_dim_stride*prev_dim_size)"
+                                                                                  "specifying once applies to all problem sizes, "
+                                                                                  "otherwise specify once per problem size.")
                 ("problem-start-idx",        po::value<int>()->default_value(0),  "First problem to run")
                 ("num-problems",             po::value<int>()->default_value(-1), "Number of problems to run")
 
@@ -367,14 +380,32 @@ namespace TensileLite
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
+                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setStreamKTileSchedulingMode(value); accepts {0=OFF (static), 1=ON (dynamic per-XCD work-queue), 2=AUTO (heuristic)}. Use [0, 1] in sweep YAMLs to deterministically exercise both SK5 sub-paths in one run. Use [2] (or `--streamk-hybrid-mode 2` to override a YAML default of [0]) to run the AUTO heuristic end-to-end on a real problem.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
                 ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
+                ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
+                ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")
+                ("icache-rotate-copies",      po::value<int>()->default_value(0),
+                    "Number of EXTRA hipModule_t copies of each --code-object file to load and "
+                    "rotate per launch (I-cache cold-miss test). "
+                    "0 = disabled, no extra copies (default). "
+                    "N (>0) = load N extra copies (total = N+1 modules including the original). "
+                    "-1 = auto: extras = max(inputArr.size()-1, cache-overflow term). "
+                    "First term aligns with DataInit's rotating buffer cycle; "
+                    "second term targets overflowing L1 I-cache: "
+                    "Linux uses --icache-rotate-size*2*1024 / min(kernel_start->label_GW_End "
+                    "across all --code-object); non-Linux uses --icache-rotate-size directly.")
+                ("icache-rotate-size",        po::value<int>()->default_value(64),
+                    "Cache budget (in KB) for the cache-overflow term of --icache-rotate-copies=-1. "
+                    "Linux: effective bytes = N * 2 * 1024 (default 64 -> 128KB, ~2x typical L1 "
+                    "I-cache); larger -> more copies loaded for the same per-kernel hot-path size. "
+                    "Non-Linux: used directly as the extras count (no ELF parsing).")
                 ("use-e",                     po::value<bool>()->default_value(false), "Use E.")
                 ("use-gradient",              po::value<bool>()->default_value(false), "Use gradient.")
                 ("use-user-args",             po::value<bool>()->default_value(false), "Use user argument structure as kernel input.")
@@ -516,6 +547,7 @@ namespace TensileLite
             DUMP_OPT("init-c", InitMode);
             DUMP_OPT("init-d", InitMode);
             DUMP_OPT("init-e", InitMode);
+            DUMP_OPT("init-gate", InitMode);
             DUMP_OPT("init-alpha", InitMode);
             DUMP_OPT("init-beta", InitMode);
             DUMP_OPT("init-bias", InitMode);
@@ -570,6 +602,7 @@ namespace TensileLite
             DUMP_VECVEC("d-strides");
             DUMP_VECVEC("e-strides");
             DUMP_VECVEC("bias-strides");
+            DUMP_VECVEC("gate-strides");
             DUMP_OPT("problem-start-idx", int);
             DUMP_OPT("num-problems", int);
             DUMP_OPT("solution-start-idx", int);
@@ -608,12 +641,15 @@ namespace TensileLite
                 }
             }
             DUMP_VEC("activation-enum-args", ActivationType);
+            DUMP_VEC("streamk-hybrid-mode", int);
             DUMP_OPT("use-bias", int);
             DUMP_OPT("bias-source", int);
             DUMP_OPT("use-scaleAB", std::string);
             DUMP_OPT("use-scaleCD", bool);
             DUMP_OPT("use-scaleAlphaVec", int);
             DUMP_VEC("bias-type-args", rocisa::DataType);
+            DUMP_OPT("use-gate-residual", bool);
+            DUMP_VEC("gate-type-args", rocisa::DataType);
             DUMP_VEC("factor-dim-args", int);
             DUMP_VEC("icache-flush-args", bool);
             DUMP_OPT("use-e", bool);
@@ -621,6 +657,8 @@ namespace TensileLite
             DUMP_OPT("use-user-args", bool);
             DUMP_OPT("rotating-buffer-size", int32_t);
             DUMP_OPT("rotating-buffer-mode", int32_t);
+            DUMP_OPT("icache-rotate-copies", int);
+            DUMP_OPT("icache-rotate-size", int);
             DUMP_OPT("output-amaxD", bool);
             DUMP_OPT("timing-instrumentation", bool);
 #undef DUMP_OPT
@@ -862,6 +900,8 @@ namespace TensileLite
             parse_arg_ints(args, "e-strides");
             parse_arg_ints(args, "bias-strides");
             parse_bias_type_args(args, "bias-type-args");
+            parse_arg_ints(args, "gate-strides");
+            parse_bias_type_args(args, "gate-type-args");
             parse_activation_int(args, "activation-type");
             parse_activation_enum_args(args, "activation-enum-args");
             parse_arg_double(args, "activation-additional-args");
@@ -870,6 +910,119 @@ namespace TensileLite
             parse_arg_ints_map(args, "prob-sol-map");
             return args;
         }
+
+#if defined(__linux__)
+        // Parse the AMDGPU ELF code object at `coPath` and return the smallest
+        // distance (in bytes) from any FUNC/GLOBAL kernel-entry symbol to its
+        // corresponding `label_GW_End` LOCAL symbol. This is a Tensile-specific
+        // proxy for "I-cache hot-path size of the smallest kernel": label_GW_End
+        // marks the first global-write-epilogue exit, which roughly bounds the
+        // code that a launch executes through during the main compute path.
+        //
+        // Returns 0 when the file can't be opened, isn't ELF64, parsing fails,
+        // or no FUNC+GLOBAL / label_GW_End symbol pairing is found.
+        //
+        // Linux-only (uses <elf.h>). Non-Linux build paths use the raw
+        // --icache-rotate-size value instead.
+        std::uintmax_t getMinKernelSizeToGwEnd(std::string const& coPath)
+        {
+            std::ifstream f(coPath, std::ios::binary);
+            if(!f)
+                return 0;
+
+            Elf64_Ehdr eh{};
+            f.read(reinterpret_cast<char*>(&eh), sizeof(eh));
+            if(!f
+               || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
+               || eh.e_ident[EI_CLASS] != ELFCLASS64)
+                return 0;
+
+            // Read all section headers.
+            std::vector<Elf64_Shdr> shdrs(eh.e_shnum);
+            f.seekg(eh.e_shoff);
+            f.read(reinterpret_cast<char*>(shdrs.data()),
+                   static_cast<std::streamsize>(eh.e_shnum * sizeof(Elf64_Shdr)));
+            if(!f)
+                return 0;
+
+            // Find .symtab and its linked string table (sh_link).
+            Elf64_Shdr const* symSh = nullptr;
+            for(auto const& sh : shdrs)
+                if(sh.sh_type == SHT_SYMTAB)
+                {
+                    symSh = &sh;
+                    break;
+                }
+            if(!symSh
+               || symSh->sh_link >= shdrs.size()
+               || symSh->sh_size == 0
+               || symSh->sh_size % sizeof(Elf64_Sym) != 0)
+                return 0;
+
+            auto const& strSh = shdrs[symSh->sh_link];
+
+            // Read string table.
+            std::vector<char> strs(strSh.sh_size);
+            f.seekg(strSh.sh_offset);
+            f.read(strs.data(), static_cast<std::streamsize>(strSh.sh_size));
+            if(!f)
+                return 0;
+
+            // Read symbol table.
+            auto const             symCount = symSh->sh_size / sizeof(Elf64_Sym);
+            std::vector<Elf64_Sym> syms(symCount);
+            f.seekg(symSh->sh_offset);
+            f.read(reinterpret_cast<char*>(syms.data()),
+                   static_cast<std::streamsize>(symSh->sh_size));
+            if(!f)
+                return 0;
+
+            // Collect kernel entry addresses (FUNC + GLOBAL) and label_GW_End
+            // addresses (we match by name; some toolchains emit different binds).
+            std::vector<std::uint64_t> kernelStarts;
+            std::vector<std::uint64_t> gwEndAddrs;
+            for(auto const& s : syms)
+            {
+                if(s.st_name >= strs.size())
+                    continue;
+                char const*   name = &strs[s.st_name];
+                unsigned char type = ELF64_ST_TYPE(s.st_info);
+                unsigned char bind = ELF64_ST_BIND(s.st_info);
+
+                if(type == STT_FUNC && bind == STB_GLOBAL)
+                    kernelStarts.push_back(s.st_value);
+                else if(std::strcmp(name, "label_GW_End") == 0)
+                    gwEndAddrs.push_back(s.st_value);
+            }
+
+            if(kernelStarts.empty() || gwEndAddrs.empty())
+                return 0;
+
+            std::sort(kernelStarts.begin(), kernelStarts.end());
+
+            // For each label_GW_End, the owning kernel is the one with the
+            // largest start address <= this end address.
+            std::uintmax_t minSize = std::numeric_limits<std::uintmax_t>::max();
+            for(auto end : gwEndAddrs)
+            {
+                auto it = std::upper_bound(kernelStarts.begin(),
+                                           kernelStarts.end(),
+                                           end);
+                if(it == kernelStarts.begin())
+                    continue;
+                std::uint64_t start = *(it - 1);
+                if(end <= start)
+                    continue;
+                auto sz = static_cast<std::uintmax_t>(end - start);
+                if(sz < minSize)
+                    minSize = sz;
+            }
+
+            return (minSize == std::numeric_limits<std::uintmax_t>::max())
+                       ? std::uintmax_t{0}
+                       : minSize;
+        }
+#endif // defined(__linux__)
 
     } // namespace Client
 } // namespace TensileLite
@@ -895,6 +1048,9 @@ int main(int argc, const char* argv[])
 
     ClientProblemFactory problemFactory(args);
 
+    initTimingBuffer();
+    calibrateTimingOverhead();
+
     std::shared_ptr<Hardware> hardware;
     hipStream_t              stream;
     {
@@ -918,6 +1074,26 @@ int main(int argc, const char* argv[])
     {
         ScopedTimer timer("code_object_loading");
         LoadCodeObjects(args, adapter);
+    }
+
+    // I-cache rotation: load N extra independent hipModule_t copies of every
+    // --code-object so each launch can use a different copy (different device PC).
+    // --icache-rotate-copies=0 (default) = no extra copies, no rotation.
+    // --icache-rotate-copies=N (N>0)     = load N extras (total = N+1 modules).
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+        {
+            ScopedTimer timer("icache_rotate_extra_copies_loading");
+            auto const& filenames = args["code-object"].as<std::vector<std::string>>();
+            for(auto const& filename : filenames)
+                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(filename,
+                                                                    icacheRotateCopies));
+            std::cout << "Loaded " << icacheRotateCopies
+                      << " extra rotation copies of each --code-object for I-cache test"
+                      << " (total = " << (icacheRotateCopies + 1) << " modules)"
+                      << std::endl;
+        }
     }
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().stop();
@@ -1060,6 +1236,10 @@ int main(int argc, const char* argv[])
         {
             benchmarkTimer->setIFlushTimeUs(icacheFlush ? flushTimeMs * 1000 : 0.f);
 
+            // I-cache rotation counter: rotationLaunchIdx
+            // for scope across all problem / iterations, accumulate continuously
+            // to avoid starting from copy 0 for each problem
+            size_t rotationLaunchIdx = 0;
             for(int problemIdx = firstProblemIdx; problemIdx <= lastProblemIdx; problemIdx++)
             {
                 auto problem = problems[problemIdx].get();
@@ -1090,6 +1270,95 @@ int main(int argc, const char* argv[])
                         maxRotatingBufferNum, problem, inputs, stream);
                     static_cast<void>(hipDeviceSynchronize());
                 }
+
+                // I-cache rotation auto-load: when --icache-rotate-copies=-1,
+                // pick the larger of two extra-copy counts:
+                //   1) inputArr.size() - 1
+                //      Aligns the code rotation cycle with DataInit's actual
+                //      data buffer rotation cycle (inputArr.size() = 1 original
+                //      + rotatingNum extras).
+                //   2) Cache-overflow term targeting ~128KB of L1 I-cache.
+                //      On Linux: parse each .co's ELF symbol table to find the
+                //      smallest kernel hot-path size K (kernel_start ->
+                //      label_GW_End), then load (128KB / K) - 1 extras so the
+                //      total rotated code (~128KB) overflows typical L1 I-cache.
+                //      On non-Linux: <elf.h> is unavailable; fall back to
+                //      args["icache-rotate-size"] as the raw extras count.
+                // Use adapter.numRotationModules()==1 as the "not yet loaded"
+                // guard so the load only fires on the first problem; subsequent
+                // problems reuse the same N.
+                {
+                    int icacheArg = args["icache-rotate-copies"].as<int>();
+                    if(icacheArg == -1 && adapter.numRotationModules() == 1)
+                    {
+                        auto const& filenames
+                            = args["code-object"].as<std::vector<std::string>>();
+
+                        // Term 1: align with data rotation cycle.
+                        int extrasFromDataInit = static_cast<int>(inputArr.size()) - 1;
+
+                        // Term 2: cache-overflow term.
+#if defined(__linux__)
+                        // K = min(kernel_start -> label_GW_End) across all .co.
+                        std::uintmax_t K = 0;
+                        for(auto const& filename : filenames)
+                        {
+                            std::uintmax_t sz = getMinKernelSizeToGwEnd(filename);
+                            if(sz > 0 && (K == 0 || sz < K))
+                                K = sz;
+                        }
+                        // kCacheBudgetBytes = icache-rotate-size * 2 * 1024.
+                        // Default icache-rotate-size=64 -> 128 KB
+                        // Loosely targets ~2x typical L1 I-cache.
+                        int rotateSizeKB = args["icache-rotate-size"].as<int>();
+                        if(rotateSizeKB < 0)
+                            rotateSizeKB = 0;
+                        std::uintmax_t kCacheBudgetBytes = std::uintmax_t(rotateSizeKB) * 2 * 1024;
+                        int extrasFromCache = 0;
+                        if(K == 0)
+                        {
+                            std::cerr << "[icache-rotate] warning: no label_GW_End "
+                                    << "found in any --code-object; cache-based "
+                                    << "term contributes 0" << std::endl;
+                        }
+                        else if(kCacheBudgetBytes > K)
+                        {
+                            extrasFromCache = static_cast<int>(kCacheBudgetBytes / K - 1);
+                        }
+#else
+                        // <elf.h> unavailable on this platform; use the raw
+                        // --icache-rotate-size value as the extras count.
+                        int extrasFromCache
+                            = static_cast<int>(args["icache-rotate-size"].as<int>());
+#endif
+
+                        int extras = std::max(extrasFromDataInit, extrasFromCache);
+                        if(extras > 0)
+                        {
+                            ScopedTimer timer("icache_rotate_extra_copies_loading");
+                            for(auto const& filename : filenames)
+                                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
+                                    filename, extras));
+                        }
+#if defined(__linux__)
+                        std::cout << "[icache-rotate] auto extras = max("
+                                  << extrasFromDataInit << " from inputArr.size()-1, "
+                                  << extrasFromCache << " from "
+                                  << kCacheBudgetBytes << "/" << K << ") = "
+                                  << extras
+                                  << " (total = " << (extras + 1) << " modules)"
+                                  << std::endl;
+#else
+                        std::cout << "[icache-rotate] auto extras = max("
+                                  << extrasFromDataInit << " from inputArr.size()-1, "
+                                  << extrasFromCache << " from --icache-rotate-size) = "
+                                  << extras
+                                  << " (total = " << (extras + 1) << " modules)"
+                                  << std::endl;
+#endif
+                    }
+                }
+
                 // The first per-solution iteration must re-upload inputs so that
                 // the upload happens after preSolution() and can read the picked
                 // solution's problemType.mxScaleFormat to pick the correct host
@@ -1153,6 +1422,15 @@ int main(int argc, const char* argv[])
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
 
+                                // I-cache rotation counter: increments per launchKernels call
+                                // and selects which hipModule_t copy services the next launch.
+                                // numRotationModules()==1 → no rotation (always copy 0).
+                                int  nRotationModules = adapter.numRotationModules();
+                                auto rotateAndSelect  = [&]() {
+                                    adapter.selectRotationCopy(
+                                        (int)(rotationLaunchIdx++ % (size_t)nRotationModules));
+                                };
+
                                 if(warmupInvocations > 0)
                                 {
                                     {
@@ -1189,6 +1467,7 @@ int main(int argc, const char* argv[])
                                 TimingEvents ProfilerStartEvents(1, warmupEventCount);
                                 TimingEvents ProfilerStopEvents(1, warmupEventCount);
                                 listeners.preProfiler();
+                                rotateAndSelect();
                                 HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
                                                                     stream,
                                                                     ProfilerStartEvents[0],
@@ -1209,22 +1488,26 @@ int main(int argc, const char* argv[])
                                             TimingEvents startEvents(enq, eventCount);
                                             TimingEvents stopEvents(enq, eventCount);
 
-                                            listeners.preEnqueues(stream);
-
-                                            for(int j = 0; j < enq; j++)
                                             {
-                                                size_t kIdx = ((i * enq) + j) % kernels.size();
-                                                HIP_CHECK_EXC(adapter.launchKernels(
-                                                    kernels[kIdx], stream, nullptr, nullptr));
+                                                ScopedTimer kernelTimer("gpu_kernel_execution");
+                                                listeners.preEnqueues(stream);
 
-                                                if(icacheFlush)
+                                                for(int j = 0; j < enq; j++)
                                                 {
-                                                    hipLaunchKernelGGL(
-                                                        flush_icache, flushGridSize, 64, 0, stream);
-                                                }
-                                            }
+                                                    size_t kIdx = ((i * enq) + j) % kernels.size();
+                                                    rotateAndSelect();
+                                                    HIP_CHECK_EXC(adapter.launchKernels(
+                                                        kernels[kIdx], stream, nullptr, nullptr));
 
-                                            listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                    if(icacheFlush)
+                                                    {
+                                                        hipLaunchKernelGGL(
+                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                    }
+                                                }
+
+                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                            }
                                             listeners.validateEnqueues(inputs, startEvents, stopEvents);
                                         }
 
@@ -1273,8 +1556,17 @@ int main(int argc, const char* argv[])
         listeners.finalizeReport();
     }
 
-    // Flush all buffered timing records to stderr
-    flushTimingBuffer();
+    // Flush all buffered timing records to stderr.
+    // Timed with raw chrono instead of ScopedTimer because ScopedTimer pushes
+    // its record into the buffer on destruction — after flushTimingBuffer()
+    // has already drained and cleared it, so the record would be lost.
+    {
+        auto flushStart = TimingClock::now();
+        flushTimingBuffer();
+        auto flushMs = std::chrono::duration<double, std::milli>(
+            TimingClock::now() - flushStart).count();
+        std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+    }
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);

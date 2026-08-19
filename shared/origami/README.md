@@ -153,6 +153,7 @@ int main() {
 | gfx1151 | Radeon 8060S/8050S/8040S iGPU | ✔️ | |
 | gfx1152 | Radeon 860M/840M iGPU | ✔️ | |
 | gfx1153 | TBA | ✔️ | |
+| gfx1200 | Radeon RX 9060 (XT) | ✔️ | |
 | gfx1201 | Radeon RX 9070 (XT/GRE), Radeon AI PRO R9700 (D/S) | ✔️ | |
 | gfx1250 | TBA | ✔️ | |
 
@@ -252,7 +253,6 @@ cmake --install build/
 | `ORIGAMI_BUILD_SHARED_LIBS` | Build shared libraries | `ON` (standalone), `OFF` (as part of rocm-libraries) |
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
-| `ORIGAMI_ENABLE_INSTALL` | Configure origami installation | `ON` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
 
 

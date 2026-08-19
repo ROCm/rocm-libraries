@@ -6,11 +6,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <initializer_list>
+#include <optional>
 #include <string>
 
 namespace asm_sdpa_engine
@@ -40,12 +42,17 @@ inline bool
 // Shared by SdpaFwdPlanBuilder and SdpaBwdPlanBuilder. The CSV `mask` column
 // stores these ordinals directly, so the integer values are part of the
 // dispatch contract and must not be reordered.
+// Mask types for AITER ASM (.co) kernel dispatch.
+// Ordinals match AITER's asm_mask_type() return values (mha_bwd.cu / mha_fwd.cu)
+// and the CSV `mask` column — do not reorder.
+// Note: SLIDING_WINDOW (3) is distinct from AITER's mask_enum::window_generic (also
+// ordinal 3), which maps to -1 (unsupported) and falls back to CK kernels.
 enum class MaskType : int
 {
     NO_MASK = 0,
     TOP_LEFT_CAUSAL = 1,
     BOTTOM_RIGHT_CAUSAL = 2,
-    WINDOW_GENERIC = 3
+    SLIDING_WINDOW = 3
 };
 
 // Classify the mask requested by an SDPA (forward or backward) attribute set.
@@ -111,7 +118,33 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
                    ? MaskType::BOTTOM_RIGHT_CAUSAL
                    : MaskType::TOP_LEFT_CAUSAL;
     }
-    return MaskType::WINDOW_GENERIC; // anything else is a sliding window
+    return MaskType::SLIDING_WINDOW; // anything else is a sliding window
+}
+
+// =============================================================================
+// Sliding-window mask coordinate transformation
+// =============================================================================
+//
+// Converts raw window sizes (left_bound, right_bound from the hipDNN graph)
+// into the precomputed mask coordinates (mask_y, mask_x) that the AITER ASM
+// DQDKDV kernel expects in its argument struct.
+//
+// AITER reference: ck_tile_shim.h::compute_mask_coordinates()
+// Called only for mask type 3 (SLIDING_WINDOW); mask types 0-2 bake mask
+// behavior into the kernel binary and ignore mask_x/mask_y.
+//
+// Negative window sizes (including -1) are treated as unbounded: replaced with
+// seqLen-1 on the corresponding axis, matching AITER's semantics.
+inline std::pair<int32_t, int32_t> computeMaskCoordinates(
+    int32_t leftSize, int32_t rightSize, int32_t seqLenQ, int32_t seqLenK, bool isTopLeft)
+{
+    const int32_t leftDefault = isTopLeft ? seqLenQ - 1 : seqLenK - 1;
+    const int32_t rightDefault = isTopLeft ? seqLenK - 1 : seqLenQ - 1;
+    leftSize = leftSize < 0 ? leftDefault : leftSize;
+    rightSize = rightSize < 0 ? rightDefault : rightSize;
+    const int32_t xOff = isTopLeft ? 0 : seqLenK - seqLenQ;
+    const int32_t yOff = isTopLeft ? 0 : seqLenQ - seqLenK;
+    return {1 + leftSize + yOff, 1 + rightSize + xOff}; // {mask_y, mask_x}
 }
 
 // =============================================================================
@@ -138,22 +171,21 @@ inline bool byteStrideFitsU32(const char* name, int64_t elements, int64_t elemen
 }
 
 // =============================================================================
-// Per-launch post-check
+// HIP device string query with error handling
 // =============================================================================
 //
-// Surfaces async launch faults that hipModuleLaunchKernel itself returned
-// success for. Without this, a memory-access fault inside the ASM kernel would
-// propagate silently to the next stage. Throws
-// HipdnnPluginException(INTERNAL_ERROR) on async error so the caller's API
-// status reflects the actual root cause.
-inline void throwOnLaunchPostError(const char* stage)
+// Query the HIP device string for the stream, logging `logPrefix` on failure.
+// Returns std::nullopt when the HIP runtime throws.
+inline std::optional<std::string> tryGetDeviceString(hipStream_t stream, const char* logPrefix)
 {
-    const hipError_t err = hipPeekAtLastError();
-    if(err != hipSuccess)
+    try
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            std::string(stage) + ": post-launch error: " + hipGetErrorString(err));
+        return hip_kernel_provider_common::getDeviceString(stream);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR(logPrefix << e.what());
+        return std::nullopt;
     }
 }
 

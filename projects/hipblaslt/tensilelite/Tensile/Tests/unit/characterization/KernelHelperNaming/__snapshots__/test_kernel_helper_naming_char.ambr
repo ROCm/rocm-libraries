@@ -1,0 +1,56 @@
+# serializer version: 1
+# name: test_activation_enum_header_names
+  1
+# ---
+# name: test_activation_function_names
+  1
+# ---
+# name: test_beta_only_kernel_names_default
+  0
+# ---
+# name: test_beta_only_kernel_names_gsu
+  2
+# ---
+# name: test_conversion_kernel_names_real
+  6
+# ---
+# name: test_conversion_kernel_names_single_buffer
+  6
+# ---
+# name: test_kernel_helper_enum
+  dict({
+    'ActivationEnumHeader': 2,
+    'ActivationFunction': 3,
+    'All': 5,
+    'BetaOnly': 0,
+    'Conversion': 1,
+    'Reduction': 4,
+  })
+# ---
+# name: test_kernel_object_name_callables
+  list([
+    tuple(
+      1,
+      'conversionKernelNames',
+    ),
+    tuple(
+      2,
+      'activationEnumHeaderNames',
+    ),
+    tuple(
+      3,
+      'activationFunctionNames',
+    ),
+    tuple(
+      4,
+      'reductionKernelNames',
+    ),
+    tuple(
+      0,
+      'betaOnlyKernelNames',
+    ),
+  ])
+# ---
+# name: test_reduction_kernel_names_default
+  0
+# ---

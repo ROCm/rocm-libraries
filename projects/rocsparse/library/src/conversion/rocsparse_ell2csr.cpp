@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -332,7 +332,7 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
     {
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToDevice, stream));
 
             // Adjust nnz according to index base
@@ -341,9 +341,9 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
         }
         else
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToHost, stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToHost, stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
             // Adjust nnz according to index base
             *csr_nnz -= csr_descr->base;
@@ -353,14 +353,14 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
     {
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToDevice, stream));
         }
         else
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToHost, stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToHost, stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         }
     }
     // Free rocprim buffer, if allocated

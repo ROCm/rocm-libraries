@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,11 +55,13 @@ namespace TensileLite
             m_printTensorD             = args["print-tensor-d"].as<bool>();
             m_printTensorRef           = args["print-tensor-ref"].as<bool>();
             m_printTensorBias          = args["print-tensor-bias"].as<bool>();
+            m_printTensorGate          = args["print-tensor-gate"].as<bool>();
             m_printTensorScaleAlphaVec = args["print-tensor-scale-alpha-vec"].as<bool>();
             m_printTensorAmaxD         = args["print-tensor-amaxd"].as<bool>();
 
             m_printAny = m_printTensorA || m_printTensorB || m_printTensorC || m_printTensorD
-                         || m_printTensorRef || m_printTensorBias || m_printTensorAmaxD;
+                         || m_printTensorRef || m_printTensorBias || m_printTensorGate
+                         || m_printTensorAmaxD;
 
             m_enabled = m_elementsToValidate != 0 || m_printAny;
         }
@@ -130,19 +132,15 @@ namespace TensileLite
             m_errorInSolution   = false;
             m_executedSolution  = false;
 
-            // MXFP4/MXFP8 data can depend on the selected solution (e.g. MI-based preSwizzle when
-            // enabled). prepareCPUInputs runs in preProblem before preSolution, so the initial
-            // SolveCPU may not match GPU inputs refreshed in DataInitialization::preSolution.
-            // Re-run the CPU reference after that refresh (CPU "current" buffers are synced there
-            // when the MX path runs).
+            // Re-run CPU reference after DataInitialization refreshes MX inputs.
             if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
                || solution == nullptr)
                 return;
 
             if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                // Must mirror DataInitialization::preSolution's gate.
-                if(!isMXProblemExceptF6(*gemm))
+                // Match DataInitialization MX gate.
+                if(!isMXProblem(*gemm))
                     return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
                 SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
@@ -466,6 +464,12 @@ namespace TensileLite
                     resPtr = result.bias;
                 }
                 break;
+                case ContractionProblemGemm::TENSOR::GATE_RESIDUAL:
+                {
+                    refPtr = reference.gateResidual;
+                    resPtr = result.gateResidual;
+                }
+                break;
                 case ContractionProblemGemm::TENSOR::SCALEA:
                 {
                     refPtr = reference.scaleA;
@@ -586,6 +590,9 @@ namespace TensileLite
             if(m_printTensorBias)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.bias().totalAllocatedBytes());
+            if(m_printTensorGate)
+                requiredBufferSize
+                    = std::max(requiredBufferSize, problem.gateResidual().totalAllocatedBytes());
             if(m_printTensorScaleAlphaVec)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.scaleAlphaVec().totalAllocatedBytes());
@@ -703,6 +710,18 @@ namespace TensileLite
                                       m_cpuResultBuffer.get(),
                                       problem.bias(),
                                       result.bias);
+            }
+            if(m_printTensorGate)
+            {
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
+                                        result.gateResidual,
+                                        problem.gateResidual().totalAllocatedBytes(),
+                                        hipMemcpyDeviceToHost));
+                m_reporter->logTensor(LogLevel::Verbose,
+                                      "gateResidual",
+                                      m_cpuResultBuffer.get(),
+                                      problem.gateResidual(),
+                                      result.gateResidual);
             }
             if(m_printTensorScaleAlphaVec)
             {

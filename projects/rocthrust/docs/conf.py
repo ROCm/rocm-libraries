@@ -13,6 +13,17 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
     version_number = match[1]
 left_nav_title = f"rocThrust {version_number} Documentation"
 
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/rocthrust/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+
 # for PDF output on Read the Docs
 project = "rocThrust Documentation"
 author = "Advanced Micro Devices, Inc."
@@ -22,9 +33,7 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
-extensions = ["rocm_docs", "rocm_docs.doxygen"]
-html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+extensions = ["rocm_docs", "rocm_docs.doxygen", "sphinxcontrib.datatemplates"]
 
 external_projects_current_project = "rocthrust"
 
@@ -34,4 +43,12 @@ doxygen_project = {
     "path": "doxygen/xml",
 }
 
-cpp_id_attributes = ["__device__", "__host__", "THRUST_HOST_DEVICE", "THRUST_HOST", "THRUST_DEVICE", "THRUST_SUPPRESS_DEPRECATED_PUSH", "THRUST_CONSTEXPR_SINCE_CXX23"]
+cpp_id_attributes = [
+    "__device__",
+    "__host__",
+    "THRUST_HOST_DEVICE",
+    "THRUST_HOST",
+    "THRUST_DEVICE",
+    "THRUST_SUPPRESS_DEPRECATED_PUSH",
+    "THRUST_CONSTEXPR_SINCE_CXX23",
+]

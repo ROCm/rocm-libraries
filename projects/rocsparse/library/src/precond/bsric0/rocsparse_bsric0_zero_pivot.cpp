@@ -50,9 +50,9 @@ try
         position));
 
     rocsparse_int pos;
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&pos, position, sizeof(rocsparse_int), hipMemcpyDefault, handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        &pos, position, sizeof(rocsparse_int), hipMemcpyDefault, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
     if(pos != -1)
     {
         return rocsparse_status_zero_pivot;

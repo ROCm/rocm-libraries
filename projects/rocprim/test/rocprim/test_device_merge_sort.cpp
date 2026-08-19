@@ -202,9 +202,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            test_utils::MemCheck memcheck;
+
             in_place = !in_place;
 
             // Generate data
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
             std::vector<key_type> input = test_utils::get_random_data_wrapped<key_type>(
                 size,
                 -100,
@@ -214,6 +217,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             common::device_ptr<key_type> d_input;
             common::device_ptr<key_type> d_output_alloc;
 
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, in_place ? 0 : size)
             if(!d_input.resize_with_memory_check(size)
                || !d_output_alloc.resize_with_memory_check(in_place ? 0 : size))
             {
@@ -228,6 +233,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             compare_function compare_op;
 
             // Calculate expected results on host
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
             std::vector<key_type> expected(input);
             std::stable_sort(expected.begin(), expected.end(), compare_op);
 
@@ -251,7 +257,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
             // allocate temporary storage
             common::device_ptr<void> d_temp_storage;
-
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
             if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
             {
                 std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
@@ -283,6 +289,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
             const auto output = d_output.load();
 
             // Check if output values are as expected
@@ -339,8 +346,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-        auto sizes = test_utils::get_sizes(seed_value);
 
         for(size_t size : test_utils::get_sizes(seed_value))
         {

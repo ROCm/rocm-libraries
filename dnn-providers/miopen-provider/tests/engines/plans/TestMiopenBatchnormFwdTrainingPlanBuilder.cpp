@@ -47,6 +47,22 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForVali
     EXPECT_TRUE(applicable);
 }
 
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
+       IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*withMeanVariance=*/true,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+
+    EXPECT_FALSE(applicable);
+}
+
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForValidTwoNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();

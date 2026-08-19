@@ -65,7 +65,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2,6]
         - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"] #MultipleBufferSingleKernel
         - StoreRemapVectorWidth: [-1,0]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
         - MbskPrefetchMethod: [-1,1]
 
       BenchmarkJoinParameters:

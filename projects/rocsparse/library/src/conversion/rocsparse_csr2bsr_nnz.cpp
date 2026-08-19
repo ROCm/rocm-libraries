@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -94,7 +94,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
             }
             else
             {
@@ -178,11 +179,11 @@ namespace rocsparse
             I start = 0;
             I end   = 0;
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &end, &csr_row_ptr[m], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &start, &csr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             const I nnz = (end - start);
             ROCSPARSE_CHECKARG_ARRAY(6, nnz, csr_col_ind);
@@ -233,7 +234,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
             }
             else
             {
@@ -259,11 +261,11 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
         I start = 0;
         I end   = 0;
 
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &end, &csr_row_ptr[m], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &start, &csr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
         const I nnz = (end - start);
 
@@ -302,11 +304,11 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
 
             I start = 0;
             I end   = 0;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &end, &bsr_row_ptr[mb], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &start, &bsr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             *bsr_nnz = end - start;
         }
@@ -440,11 +442,11 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     {
         I start = 0;
         I end   = 0;
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &end, &bsr_row_ptr[mb], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &start, &bsr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
         *bsr_nnz = end - start;
     }

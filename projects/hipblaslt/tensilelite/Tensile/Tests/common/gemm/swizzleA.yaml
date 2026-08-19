@@ -18,7 +18,6 @@ GlobalParameters:
   DataInitTypeBias: 13
   DataInitTypeScaleAlphaVec: 12
   BoundsCheck: 2
-  #MaxFileName: 256
 
 BenchmarkProblems:
   ########################################
@@ -84,7 +83,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -93,7 +92,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -165,7 +164,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -174,7 +173,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -236,7 +235,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -245,7 +244,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -307,7 +306,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -316,7 +315,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [16]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -380,7 +379,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -389,7 +388,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -452,7 +451,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -461,7 +460,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

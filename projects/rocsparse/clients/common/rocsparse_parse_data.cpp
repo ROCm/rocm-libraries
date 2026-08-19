@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_parse_data.hpp"
+#include "rocsparse-debugging.h"
 #include "rocsparse_clients_matrices_dir.hpp"
 #include "rocsparse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
@@ -333,8 +334,21 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
                           << " [ --data <path> | --yaml <path> ] [--matrices-dir <path>] [-I "
                              "<path>] <options> ...\n"
                           << std::endl;
+#ifdef ROCSPARSE_DEBUG
 
                 std::cout << "" << std::endl;
+                std::cout << "Rocsparse HIP debug testing options:" << std::endl;
+                std::cout << "--test-hip-debug      enable rocsparse HIP debug testing."
+                          << std::endl;
+                std::cout
+                    << "--test-hip-debug-full enable rocsparse hip debug testing, as opposed to "
+                       "'--test-hip-debug' all checks regarding results must be consistent"
+                    << std::endl;
+                std::cout << "--test-hip-debug-o    output filename for HIP debug report."
+                          << std::endl;
+
+#endif
+
                 std::cout << "Rocsparse reproducibility options:" << std::endl;
                 std::cout << "--r          enable rocsparse reproducibility testing" << std::endl;
                 std::cout << "--r-niter    set the number of "

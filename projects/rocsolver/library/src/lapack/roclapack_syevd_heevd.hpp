@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,12 +43,12 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 /** Helper to calculate workspace sizes **/
-template <bool BATCHED, typename T, typename S>
+template <bool BATCHED, typename T, typename S, typename I>
 void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
                                          const rocblas_evect evect,
                                          const rocblas_fill uplo,
-                                         const rocblas_int n,
-                                         const rocblas_int batch_count,
+                                         const I n,
+                                         const I batch_count,
                                          size_t* size_scalars,
                                          size_t* size_work1,
                                          size_t* size_work2,
@@ -125,17 +125,17 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
 }
 
 /** Argument checking **/
-template <typename T, typename S>
+template <typename T, typename S, typename I>
 rocblas_status rocsolver_syevd_heevd_argCheck(rocblas_handle handle,
                                               const rocblas_evect evect,
                                               const rocblas_fill uplo,
-                                              const rocblas_int n,
+                                              const I n,
                                               T A,
-                                              const rocblas_int lda,
+                                              const I lda,
                                               S* D,
                                               S* E,
-                                              rocblas_int* info,
-                                              const rocblas_int batch_count = 1)
+                                              I* info,
+                                              const I batch_count = 1)
 {
     // order is important for unit tests:
 
@@ -159,12 +159,12 @@ rocblas_status rocsolver_syevd_heevd_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename S>
+template <bool BATCHED, bool STRIDED, typename T, typename S, typename I>
 void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
                                          const rocblas_evect evect,
                                          const rocblas_fill uplo,
-                                         const rocblas_int n,
-                                         const rocblas_int batch_count,
+                                         const I n,
+                                         const I batch_count,
                                          size_t* size_scalars,
                                          size_t* size_work1,
                                          size_t* size_work2,
@@ -244,27 +244,29 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename S, typename W>
+template <bool BATCHED, bool STRIDED, typename T, typename S, typename W, typename I>
 rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               const rocblas_evect evect,
                                               const rocblas_fill uplo,
-                                              const rocblas_int n,
+                                              const I n,
                                               W A,
-                                              const rocblas_int shiftA,
-                                              const rocblas_int lda,
+                                              const rocblas_stride shiftA,
+                                              const I lda,
                                               const rocblas_stride strideA,
                                               S* D,
                                               const rocblas_stride strideD,
                                               S* E,
                                               const rocblas_stride strideE,
-                                              rocblas_int* info,
-                                              const rocblas_int batch_count,
+                                              // info encodes O(n^2) submatrix row/col positions on
+                                              // failure, so it is typed I (64-bit on the _64 path).
+                                              I* info,
+                                              const I batch_count,
                                               T* scalars,
                                               void* work1,
                                               void* work2,
                                               void* work3,
                                               S* tmpz,
-                                              rocblas_int* splits,
+                                              I* splits,
                                               T* tmptau_W,
                                               T* tau,
                                               T** workArr)
@@ -312,7 +314,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     rocsolver_alg_mode sterf_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &sterf_mode));
 
-    rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+    I blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
 
@@ -341,14 +343,14 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
     {
         // only in hybrid mode, compute eigenvalues using sterf
-        rocsolver_sterf_template<S>(handle, n, D, 0, strideD, E, 0, strideE, info, batch_count,
-                                    (rocblas_int*)work1);
+        rocsolver_sterf_template<S>(handle, n, D, (I)0, strideD, E, (I)0, strideE, info,
+                                    batch_count, (I*)work1);
     }
     else
     {
         // for performance reasons, we use stedc to compute eigenvalues even if the eigenvectors are ignored
         constexpr bool ISBATCHED = BATCHED || STRIDED;
-        const rocblas_int ldw = n;
+        const I ldw = n;
         const rocblas_stride strideW = n * n;
 
         rocsolver_stedc_template<false, ISBATCHED, T>(
@@ -364,7 +366,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 (T*)work1, (T*)work3, workArr);
 
             // copy matrix product into A
-            const rocblas_int copyblocks = (n - 1) / BS2 + 1;
+            const I copyblocks = (n - 1) / BS2 + 1;
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocks, copyblocks, batch_count),
                                     dim3(BS2, BS2), 0, stream, n, n, tmptau_W, 0, ldw, strideW, A,
                                     shiftA, lda, strideA);
@@ -374,28 +376,30 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     return rocblas_status_success;
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename S, typename W>
+template <bool BATCHED, bool STRIDED, typename T, typename S, typename W, typename I>
 rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               const rocblas_evect evect,
                                               const rocblas_fill uplo,
-                                              const rocblas_int n,
+                                              const I n,
                                               W A,
-                                              const rocblas_int shiftA,
-                                              const rocblas_int lda,
+                                              const rocblas_stride shiftA,
+                                              const I lda,
                                               const rocblas_stride strideA,
                                               S* D,
                                               const rocblas_stride strideD,
                                               S* E,
                                               const rocblas_stride strideE,
-                                              rocblas_int* info,
-                                              const rocblas_int batch_count,
+                                              // info encodes O(n^2) submatrix row/col positions on
+                                              // failure, so it is typed I (64-bit on the _64 path).
+                                              I* info,
+                                              const I batch_count,
                                               T* scalars,
                                               void* work1,
                                               void* work2,
                                               void* work3,
                                               void* work4,
                                               S* tmpz,
-                                              rocblas_int* splits,
+                                              I* splits,
                                               T* tmptau_W,
                                               T* tau,
                                               T** workArr,
@@ -447,7 +451,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     rocsolver_alg_mode sterf_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &sterf_mode));
 
-    rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+    I blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
 
@@ -476,14 +480,14 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
     {
         // only in hybrid mode, compute eigenvalues using sterf
-        rocsolver_sterf_template<S>(handle, n, D, 0, strideD, E, 0, strideE, info, batch_count,
-                                    (rocblas_int*)work1);
+        rocsolver_sterf_template<S>(handle, n, D, (I)0, strideD, E, (I)0, strideE, info,
+                                    batch_count, (I*)work1);
     }
     else
     {
         // for performance reasons, we use stedc to compute eigenvalues even if the eigenvectors are ignored
         constexpr bool ISBATCHED = BATCHED || STRIDED;
-        const rocblas_int ldw = n;
+        const I ldw = n;
         const rocblas_stride strideW = n * n;
 
         rocsolver_stedc_template<false, ISBATCHED, T>(
@@ -499,7 +503,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 splits, work4, (T*)work1, (T*)work3, workArr, optim_mem);
 
             // copy matrix product into A
-            const rocblas_int copyblocks = (n - 1) / BS2 + 1;
+            const I copyblocks = (n - 1) / BS2 + 1;
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocks, copyblocks, batch_count),
                                     dim3(BS2, BS2), 0, stream, n, n, tmptau_W, 0, ldw, strideW, A,
                                     shiftA, lda, strideA);

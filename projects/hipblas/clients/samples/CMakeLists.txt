@@ -90,7 +90,11 @@ foreach( exe IN LISTS hipblas-example-executables)
 
   target_include_directories( ${exe} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include> )
 
-  target_compile_options( ${exe} PRIVATE -mf16c -DHIPBLAS_BFLOAT16_CLASS )
+  target_compile_options( ${exe} PRIVATE -DHIPBLAS_BFLOAT16_CLASS )
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    target_compile_options( ${exe} PRIVATE -mf16c )
+  endif()
+
   target_compile_definitions( ${exe} PRIVATE HIPBLAS_NO_DEPRECATED_WARNINGS )
 
   target_link_libraries( ${exe} PRIVATE roc::hipblas )

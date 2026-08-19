@@ -1,0 +1,87 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R7 ShiftVectorComponents full-sweep characterization config for gfx942.
+#
+# Target: Tensile/Components/ShiftVectorComponents.py
+# Primary target ranges: 47-200 (VALU edge shift), 552-784 (MFMA AllThread).
+# Secondary coverage: 208-546 (MFMA dispatch + PartialThread).
+#
+# Strategy (MFMA PartialThread path):
+#   Two validated gfx942 fp32 MFMA shapes with AssertFree0ElementMultiple=1.
+#
+#   Shape 1: [16,16,4,1,1,2,3,2,2]  (from fp32_nt.yaml)
+#     -> MI=[16,16,4,1], MIWaveTile=[2,3], MIWaveGroup=[2,2]
+#     -> VWA auto-selects to 2, GRVWA auto-selects to 4
+#     -> GuaranteeNoPartialA = (1%4 == 0) = False
+#     -> glvw=4, r in {1,2,3}: three shift arms in PartialThread body
+#
+#   Shape 2: [32,32,2,1,1,2,1,2,2]
+#     -> MI=[32,32,2,1], MIWaveTile=[2,1], MIWaveGroup=[2,2]
+#     -> Different matrixInstM/N exercise different numThreadInCoal values
+#     -> VWA auto-selects, glvw=GRVWA may differ from shape 1
+#
+#   SourceSwap=[0,1] for shape 1 varies conThInProcDim (lines 290-303):
+#     SourceSwap=0: conThInProcDim=False for A, True for B
+#     SourceSwap=1: conThInProcDim=True for A, False for B
+#   Covering both orientations of the numThreadInCoal/numContOutCoal computation.
+#
+# Dead-code evidence (P5-ceiling, not targetable):
+#   Lines 552-784 (ShiftVectorComponentsMFMAAllThread): dispatch at line 237
+#     requires glvw > allContOutCoal * numThreadInCoal.
+#     For shape 1, SourceSwap=0, isA=True: conThInProcDim=False,
+#       numThreadInCoal = WS//matN = 64//16 = 4, numContOutCoal = MIOutputVW*VWA = 4*2 = 8
+#       threshold = 32. glvwAlimit = 16. glvw=4 <= 16 < 32. AllThread never fires.
+#   Line 122 (VALU path): see R4 dead-code analysis.
+#
+# Permutations: (shape1 x SourceSwap=[0,1]) + (shape2 x SourceSwap=0) = 3 kernels.
+# With limit=8, all 3 emit.
+#
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # fp32 NT, two gfx942 MFMA shapes, AssertFree0ElementMultiple=1
+  # Shape 1 [16,16,4,1,1,2,3,2,2] validated by Tensile/Tests/common/gemm/fp32_nt.yaml
+  # Shape 2 [32,32,2,1,1,2,1,2,2] (fp32 M=32 variant)
+  # VWA=-1: auto-select; AssertFree0=1: edge shift for A
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 3, 2, 2]
+          - [32, 32, 2, 1, 1, 2, 1, 2, 2]
+        - SourceSwap: [False, True]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - GlobalSplitU: [1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255, 255, 1, 255]

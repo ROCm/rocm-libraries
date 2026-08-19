@@ -33,9 +33,8 @@
 #include <vector>
 
 #include <Tensile/DataTypes.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     template <typename T>
@@ -132,7 +131,7 @@ namespace TensileLite
         std::vector<T> m_vec_data;
     };
 
-    class TENSILE_API KernelArguments
+    class TENSILELITEHOST_EXPORT KernelArguments
     {
     public:
         KernelArguments(bool log = true);
@@ -237,8 +236,8 @@ namespace TensileLite
         bool m_log;
     };
 
-    TENSILE_API KernelArguments::const_iterator begin(KernelArguments const&);
-    TENSILE_API KernelArguments::const_iterator end(KernelArguments const&);
+    TENSILELITEHOST_EXPORT KernelArguments::const_iterator begin(KernelArguments const&);
+    TENSILELITEHOST_EXPORT KernelArguments::const_iterator end(KernelArguments const&);
 
     inline void KernelArguments::append(std::string const&     name,
                                         ConstantVariant const& value,
@@ -738,6 +737,20 @@ namespace TensileLite
             counter += sizeof(value);
         }
 
+        void alignTo(size_t alignment)
+        {
+            size_t extraElements = counter % alignment;
+            size_t padding       = (alignment - extraElements) % alignment;
+            counter += padding;
+        }
+
+        template <typename T>
+        inline void appendAligned(std::string const& name, T value)
+        {
+            alignTo(alignof(T));
+            append(name, value);
+        }
+
         template <typename T>
         inline void appendUnbound(std::string const& name)
         {
@@ -753,4 +766,3 @@ namespace TensileLite
         size_t counter = 0;
     };
 } // namespace TensileLite
-TENSILE_HIDDEN_END

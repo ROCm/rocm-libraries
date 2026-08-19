@@ -54,8 +54,8 @@ subtrees:
     - entries:
       - file: doxygen/html/modules
         title: Modules
-      - file: reference/datatypes.rst
-        title: Datatypes
+      - file: reference/data_type_support.rst
+        title: Precision support
       - file: reference/env_variables.rst
         title: Environment variables
 

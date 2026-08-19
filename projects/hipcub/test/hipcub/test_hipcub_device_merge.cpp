@@ -104,7 +104,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto sizes : get_sizes())
+    for(auto sizes : test_common_utils::TempDisablement::filter_sizes(get_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
@@ -258,7 +258,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto sizes : get_sizes())
+    for(auto sizes : test_common_utils::TempDisablement::filter_sizes(get_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
@@ -478,7 +478,7 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
 
     hipStream_t stream = 0; // default
 
-    for(auto sizes : get_large_sizes())
+    for(auto sizes : test_common_utils::TempDisablement::filter_sizes(get_large_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {

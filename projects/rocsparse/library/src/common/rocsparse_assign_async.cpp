@@ -23,6 +23,7 @@
 
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_indextype_utils.hpp"
 
 namespace rocsparse
 {
@@ -103,7 +104,7 @@ rocsparse_status rocsparse::assign_max_async(int64_t             n,
         return rocsparse_status_success;
     }
     // LCOV_EXCL_START
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented,
                                                "unsupported indextype: rocsparse_indextype_u16");

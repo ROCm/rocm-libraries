@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ rocsparse_status rocsparse::check_matrix_coo_core(rocsparse_handle       handle,
     rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(ptr);
     ptr += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
 
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(d_data_status, 0, sizeof(int), handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_data_status, 0, sizeof(int), handle->stream));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_coo_device<256>),
                                        dim3((nnz - 1) / 256 + 1),
@@ -72,12 +72,12 @@ rocsparse_status rocsparse::check_matrix_coo_core(rocsparse_handle       handle,
                                        storage,
                                        d_data_status);
 
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(data_status,
-                                       d_data_status,
-                                       sizeof(rocsparse_data_status),
-                                       hipMemcpyDeviceToHost,
-                                       handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
+                                                 d_data_status,
+                                                 sizeof(rocsparse_data_status),
+                                                 hipMemcpyDeviceToHost,
+                                                 handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     if(*data_status != rocsparse_data_status_success)
     {

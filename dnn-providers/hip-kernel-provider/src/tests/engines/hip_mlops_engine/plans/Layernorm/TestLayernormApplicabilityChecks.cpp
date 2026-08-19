@@ -130,7 +130,7 @@ flatbuffers::FlatBufferBuilder createInvalidTypeLayernormFpropGraph(
 }
 } // anonymous namespace
 
-TEST(TestLayernormValidator, MismatchIOTypes)
+TEST(TestLayernormValidator, ValidDifferentIOTypes)
 {
     auto builder = createInvalidTypeLayernormFpropGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -139,6 +139,49 @@ TEST(TestLayernormValidator, MismatchIOTypes)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_LayernormAttributes();
+
+    LayernormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+}
+
+TEST(TestLayernormValidator, MismatchAffineTypes)
+{
+    auto builder = createInvalidTypeLayernormFpropGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_LayernormAttributes();
+
+    LayernormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestLayernormValidator, MismatchStatsTypes)
+{
+    auto builder = createInvalidTypeLayernormFpropGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -462,88 +505,3 @@ TEST(TestLayernormValidator, InvalidNormalization)
     EXPECT_THROW(validator.checkTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
-
-/*
-TEST(TestBatchnormValidator, MismatchAffineShapes)
-{
-    std::vector<int64_t> dims{1, 3, 224, 224};
-    std::vector<int64_t> strides{150528, 50176, 224, 1};
-
-    std::vector<int64_t> scaleDims{1, 3, 4, 4};
-    std::vector<int64_t> scaleStrides{48, 16, 4, 1};
-
-    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
-        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
-
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         scaleDims,
-                                                         scaleStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
-
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-
-    const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
-
-    const auto& activNode = graph.getNode(1);
-    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
-
-    // Data type of io tensors should match, expect exception when this isn't the case
-    BatchnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST(TestBatchnormValidator, MismatchStatShapes)
-{
-    std::vector<int64_t> meanDims{1, 3, 4, 4};
-    std::vector<int64_t> meanStrides{48, 16, 4, 1};
-
-    std::vector<int64_t> dims{1, 3, 224, 224};
-    std::vector<int64_t> strides{150528, 50176, 224, 1};
-
-    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
-        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
-
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         meanDims,
-                                                         meanStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
-
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-
-    const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
-
-    const auto& activNode = graph.getNode(1);
-    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
-
-    // Data type of io tensors should match, expect exception when this isn't the case
-    BatchnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
-}*/

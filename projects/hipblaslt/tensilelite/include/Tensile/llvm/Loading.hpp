@@ -28,9 +28,7 @@
 
 #include <Tensile/Tensile.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -44,4 +42,3 @@ namespace TensileLite
         LLVMLoadLibraryData(std::vector<uint8_t> const& data, std::string filename = "");
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

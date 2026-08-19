@@ -14,16 +14,16 @@ from rocm_docs import ROCmDocs
 # We need to add the location of the rocrand Python module to the PATH
 # in order to build the documentation of that module
 docs_dir_path = pathlib.Path(__file__).parent
-python_dir_path = docs_dir_path.parent / 'python' / 'rocrand'
+python_dir_path = docs_dir_path.parent / "python" / "rocrand"
 sys.path.append(str(python_dir_path))
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'rocm_setup_version\( VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r"rocm_setup_version\( VERSION\s+\"?([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
 left_nav_title = f"rocRAND {version_number} Documentation"
-shutil.copy2('../library/src/fortran/README.md', './fortran-api-reference.md')
+shutil.copy2("../library/src/fortran/README.md", "./fortran-api-reference.md")
 
 # for PDF output on Read the Docs
 project = "rocRAND Documentation"
@@ -50,3 +50,5 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
 suppress_warnings = ["etoc.toctree"]
 
 cpp_id_attributes = ["__forceinline__", "__device__", "__host__", "ROCRANDAPI"]
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

@@ -114,7 +114,7 @@ namespace TensileLite
         TensorDescriptor scaleC("scaleC");
         TensorDescriptor scaleD("scaleD");
         TensorDescriptor scaleAlphaVec("scaleAlphaVec");
-
+        TensorDescriptor gate("gate");
         TensorOps nop;
 
         ContractionProblemGemm problem(a,
@@ -231,7 +231,7 @@ namespace TensileLite
         TensorDescriptor scaleC("scaleC");
         TensorDescriptor scaleD("scaleD");
         TensorDescriptor scaleAlphaVec("scaleAlphaVec");
-
+        TensorDescriptor gate("gate");
         return ContractionProblemGemm(a,
                                       b,
                                       c,
@@ -544,7 +544,7 @@ namespace TensileLite
         TensorDescriptor scaleC("scaleC");
         TensorDescriptor scaleD("scaleD");
         TensorDescriptor scaleAlphaVec("scaleAlphaVec");
-
+        TensorDescriptor gate("gate");
         return ContractionProblemGemm(a,
                                       b,
                                       c,
@@ -586,6 +586,7 @@ namespace TensileLite
         gemm.m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]       = TensorDescriptor("mx-a");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]       = TensorDescriptor("mx-b");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL]   = TensorDescriptor("gate");
         return gemm;
     }
 
@@ -604,7 +605,8 @@ namespace TensileLite
                                                    BatchIndices const&     batchIndices,
                                                    BoundIndices const&     boundIndices,
                                                    double                  beta,
-                                                   size_t                  workspaceSize)
+                                                   size_t                  workspaceSize,
+                                                   TensorDescriptor const& gate)
         : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT)
         , m_freeIndices(freeIndices)
         , m_batchIndices(batchIndices)
@@ -626,6 +628,7 @@ namespace TensileLite
         m_tensors[ContractionProblemGemm::TENSOR::SCALEC]        = scaleC;
         m_tensors[ContractionProblemGemm::TENSOR::SCALED]        = scaleD;
         m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] = scaleAlphaVec;
+        m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL] = gate;
         m_tensors[ContractionProblemGemm::TENSOR::D].setAsOutput(true); // Set d as output
         m_betaRestriction = toScalarValueEnum(
             m_beta); // Set enum using beta to potentially allow for faster solutions
@@ -653,7 +656,8 @@ namespace TensileLite
                                                    TensorOps const&        bOps,
                                                    TensorOps const&        cOps,
                                                    TensorOps const&        dOps,
-                                                   size_t                  workspaceSize)
+                                                   size_t                  workspaceSize,
+                                                   TensorDescriptor const& gate)
         : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT)
         , m_freeIndices(freeIndices)
         , m_batchIndices(batchIndices)
@@ -676,6 +680,7 @@ namespace TensileLite
         m_tensors[ContractionProblemGemm::TENSOR::SCALEC]        = scaleC;
         m_tensors[ContractionProblemGemm::TENSOR::SCALED]        = scaleD;
         m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] = scaleAlphaVec;
+        m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL] = gate;
         m_tensors[ContractionProblemGemm::TENSOR::D].setAsOutput(true); // Set d as output
         m_betaRestriction = toScalarValueEnum(
             m_beta); // Set enum using beta to potentially allow for faster solutions
@@ -684,7 +689,7 @@ namespace TensileLite
         calcArithmeticIntensity();
     }
 	
-    void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride, bool padScaleTensor)
+    void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride, bool padScaleTensorFreeDim)
     {
         m_mxBlockA = mxBlockA;
         m_mxTypeA = mxTypeA;
@@ -693,7 +698,7 @@ namespace TensileLite
         {
             std::vector<size_t> saSizes = m_tensors[ContractionProblemGemm::TENSOR::A].sizes();
             auto boundIdx = m_boundIndices[0].a;
-            if (padScaleTensor)
+            if (padScaleTensorFreeDim)
             {
                 saSizes[boundIdx] = RoundUpToMultiple(
                     CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), (size_t)8);
@@ -702,14 +707,17 @@ namespace TensileLite
             }
             else
             {
-                saSizes[boundIdx] = CeilDivide(saSizes[boundIdx], (size_t)mxBlockA);
+                // gfx1250 padding
+                size_t dimk = 128 / mxBlockA;
+                saSizes[boundIdx] = RoundUpToMultiple(
+                    CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), dimk);
             }
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
     }
 
-    void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride, bool padScaleTensor)
+    void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride, bool padScaleTensorFreeDim)
     {
         m_mxBlockB = mxBlockB;
         m_mxTypeB = mxTypeB;
@@ -718,7 +726,7 @@ namespace TensileLite
         {
             std::vector<size_t> sbSizes = m_tensors[ContractionProblemGemm::TENSOR::B].sizes();
             auto boundIdx = m_boundIndices[0].b;
-            if (padScaleTensor)
+            if (padScaleTensorFreeDim)
             {
                 sbSizes[boundIdx] = RoundUpToMultiple(
                     CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), (size_t)8);
@@ -727,7 +735,10 @@ namespace TensileLite
             }
             else
             {
-                sbSizes[boundIdx] = CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB);
+                // gfx1250 padding
+                size_t dimk = 128 / mxBlockB;
+                sbSizes[boundIdx] = RoundUpToMultiple(
+                    CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), dimk);
             }
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
@@ -1531,6 +1542,9 @@ namespace TensileLite
            << "B: " << bTensor << ",\n"
            << "C: " << cTensor << ",\n"
            << "D: " << dTensor << "\n";
+        if(m_useGateResidual)
+            rv << "GateResidual: " << m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL]
+               << "\n";
         return rv.str();
     }
 
@@ -1557,7 +1571,9 @@ namespace TensileLite
         TensorOps const&               aOps,
         TensorOps const&               bOps,
         TensorOps const&               cOps,
-        TensorOps const&               dOps)
+        TensorOps const&               dOps,
+        bool                                 useGateResidual,
+        std::vector<rocisa::DataType> const& gateResidualDataTypeWhiteList)
     {
 
         // Tensor descriptors for a, b
@@ -1642,14 +1658,16 @@ namespace TensileLite
         TensileLite::TensorDescriptor scaleC("scaleC");
         TensileLite::TensorDescriptor scaleD("scaleD");
         TensileLite::TensorDescriptor scaleAlpha{"scaleAlpha"};
+        TensileLite::TensorDescriptor gate{"gate"};
         TensorOps                     nop;
 
         // The ContractionProblemGemm
         TensileLite::ContractionProblemGemm problem{
             a,          b,         c,          d,          e,
             bias,       scaleA,    scaleB,     scaleC,     scaleD,
-            scaleAlpha, freeIndex, batchIndex, boundIndex, beta,
-            aOps,       bOps,      cOps,       dOps,       maxWorkspaceBytes};
+            scaleAlpha, freeIndex, batchIndex, boundIndex,
+            beta,       aOps,      bOps,       cOps,       dOps,
+            maxWorkspaceBytes};
 
         problem.setComputeInputTypeA(typeComputeInputA);
         problem.setComputeInputTypeB(typeComputeInputB);
@@ -1677,12 +1695,23 @@ namespace TensileLite
             problem.setBias(biasType, 1, 0, useGradient, biasSrc);
             problem.setParams().setBiasEnum(rocisa::DataType::None);
         }
+
+        // set gate residual mode
+        if(useGateResidual)
+        {
+            problem.setUseGateResidual(true);
+            auto const& d = problem.d();
+            // Use first whitelisted type if provided, otherwise default to A's datatype (DataType::None)
+            rocisa::DataType gateType = gateResidualDataTypeWhiteList[0];
+            problem.setGateResidual(gateType, d.sizes(), d.strides());
+        }
+
         // Add problem predicates for CEqualsD
         problem.setCEqualsD(false);
         return problem;
     }
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                 stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                 stream,
                                          ContractionProblemGemm const& contraction)
     {
         return stream << contraction.description();
@@ -1725,7 +1754,7 @@ namespace TensileLite
         return stream >> bound.a >> comma >> bound.b;
     }
 
-    TENSILE_API ProblemInputs::~ProblemInputs() = default;
+    TENSILELITEHOST_EXPORT ProblemInputs::~ProblemInputs() = default;
     ContractionInputs::ContractionInputs()      = default;
     ContractionInputs::~ContractionInputs()     = default;
 

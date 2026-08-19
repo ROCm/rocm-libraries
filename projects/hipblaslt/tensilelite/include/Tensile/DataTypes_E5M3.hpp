@@ -28,9 +28,7 @@
 
 #include <hip/hip_fp16.h>          // __half_raw
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
@@ -372,4 +370,3 @@ HIP_DEVICE static float cast_to_f32_from_uf8(uint8_t v) {
 
 }
 
-TENSILE_HIDDEN_END
