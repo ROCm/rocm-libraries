@@ -182,11 +182,13 @@ Migrated so far (all builder-layer spec_fns in
 - `_spec_gfx942_fp16_flash` — owned by `attention_gfx942_dense_pipe`.
 - `_spec_gfx942_bf16_flash` — ORPHAN (no dispatch candidate yet; routed via the
   generic `unified_2d`). Needs a future `gfx942_bf16` engine.
-- `_spec_gfx942_generic` — the gfx942 narrow (non-flash) 2D residual. ORPHAN.
-- `_spec_gfx950_generic` — gfx950 combo / single-batch schedule + the D256
-  gfx950 fast-route override folded in (kept behind the `_kau.` module handle
-  for test-steering). The 2D `_spec_field_names` guards are gone -- the per-arch
-  split replaced them.
+- `_spec_generic_2d_non_gfx950` — the non-flash 2D residual for EVERY non-gfx950
+  arch (gfx942, gfx1201, gfx1151, ...), built from the shared
+  `_base_2d_generic_fields` only. ORPHAN.
+- `_spec_gfx950_generic` — the shared `_base_2d_generic_fields` plus the
+  gfx950-only schedule tail + the D256 gfx950 fast-route override folded in (kept
+  behind the `_kau.` module handle for test-steering). The 2D `_spec_field_names`
+  guards are gone -- the per-arch split replaced them.
 - `_spec_generic_3d` — the shared gfx942/gfx950 3D split-KV fallthrough (one
   function; the `_gfx942_3d_*` helpers self-gate, so no arch split).
 

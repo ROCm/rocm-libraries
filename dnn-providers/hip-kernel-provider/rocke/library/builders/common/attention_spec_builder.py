@@ -196,22 +196,19 @@ def _spec_gfx942_bf16_flash(problem: UnifiedAttentionProblem):
     )
 
 
-def _spec_gfx942_generic(problem: UnifiedAttentionProblem):
-    """gfx942 narrow (non-flash) 2D geometry -- the residual fallthrough cohort.
+def _base_2d_generic_fields(problem: UnifiedAttentionProblem) -> dict:
+    """The 2D generic (non-flash fallthrough) spec fields shared by EVERY arch's
+    generic builder.
 
-    Self-contained per-engine spec builder (GEMM ``spec_fn`` pattern). Extracted
-    from the shared fallthrough of ``_tiled_spec_from_problem`` for gfx942, which
-    reaches this path only when neither gfx942 flash gate fires. The combo /
-    transposed / single-batch schedule helpers all hard-gate to gfx950, so on
-    gfx942 they evaluate to their off values -- this function keeps the same calls
-    (byte-identical result) and omits the gfx950-only spec fields (the gfx942 spec
-    class does not declare ``use_v_double_buffer`` / ``use_sched_barrier`` /
-    ``use_softmax_mfma_interleave`` / ``softmax_interleave_mode``), which is what
-    the old ``_spec_field_names`` guards did indirectly. Geometry stays in the
-    builder layer; dispatcher identity + C++ parity unchanged.
+    This is the block that was copy-pasted into both the non-gfx950 and gfx950
+    generic builders. Extracting it keeps the two from drifting. The gfx950-only
+    schedule fields (``use_v_double_buffer`` / ``use_sched_barrier`` /
+    ``use_softmax_mfma_interleave`` / ``softmax_interleave_mode`` /
+    ``use_k_single_buffer``) and the D256 fast-route override are NOT here -- they
+    are the arch-unique tail that lives in ``_spec_gfx950_generic``. Every field
+    below is declared by all the 2D spec classes, so splatting this dict is
+    byte-identical to the inline construction it replaces.
     """
-    arch = _resolve_attention_arch()
-    UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
     combo = _enable_combo_2d(problem)
     combo_no_sw = combo and problem.sliding_window == 0
     subflags = _enable_transposed_subflags(problem)
@@ -219,7 +216,7 @@ def _spec_gfx942_generic(problem: UnifiedAttentionProblem):
     skip_legacy_qreg = combo or subflags
     _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
     mask_opts = (combo_no_sw and not _bias_active) or subflags
-    return UnifiedAttention2DTiledSpec(
+    return dict(
         head_size=problem.head_size,
         block_size=problem.block_size,
         num_query_heads=problem.num_query_heads,
@@ -257,6 +254,27 @@ def _spec_gfx942_generic(problem: UnifiedAttentionProblem):
     )
 
 
+def _spec_generic_2d_non_gfx950(problem: UnifiedAttentionProblem):
+    """Generic (non-flash) 2D geometry for every NON-gfx950 arch.
+
+    Self-contained per-engine spec builder (GEMM ``spec_fn`` pattern) for the
+    ``else`` branch of ``_tiled_spec_from_problem``: it serves gfx942 AND the
+    other non-gfx950 arches (gfx1201, gfx1151, ...), which is why it is not named
+    for gfx942 alone. It builds only the shared ``_base_2d_generic_fields`` -- the
+    gfx950-only schedule fields are omitted deliberately: their helpers hard-gate
+    to gfx950 (so they would evaluate off here anyway) AND the fields default to
+    off in the spec classes that declare them, so leaving them unset is
+    byte-identical to the old ``_spec_field_names``-guarded fallthrough on every
+    arch this branch serves. (If a future schedule predicate ever fires off
+    gfx950, this branch would need its own handling -- today it does not.)
+    Geometry stays in the builder layer; dispatcher identity + C++ parity
+    unchanged.
+    """
+    arch = _kau._resolve_attention_arch()
+    UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
+    return UnifiedAttention2DTiledSpec(**_base_2d_generic_fields(problem))
+
+
 def _spec_gfx950_generic(problem: UnifiedAttentionProblem):
     """gfx950 generic 2D geometry -- combo / single-batch schedule + D256 override.
 
@@ -271,15 +289,8 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem):
     steers it. Geometry stays in the builder layer; dispatcher identity + C++
     parity unchanged.
     """
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
-    combo = _enable_combo_2d(problem)
-    combo_no_sw = combo and problem.sliding_window == 0
-    subflags = _enable_transposed_subflags(problem)
-    scalar_state = combo or subflags
-    skip_legacy_qreg = combo or subflags
-    _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
-    mask_opts = (combo_no_sw and not _bias_active) or subflags
     # gfx950 schedule fields: set directly (no _spec_field_names guard -- the
     # gfx950 spec class always declares them). v_double_buffer / sched_barrier
     # take the helper's value unconditionally; interleave + k_single_buffer stay
@@ -294,41 +305,9 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem):
         _schedule_fields["softmax_interleave_mode"] = 1
     if _enable_k_single_buffer(problem):
         _schedule_fields["use_k_single_buffer"] = True
+    # Shared base fields + the gfx950-only schedule tail (disjoint keys).
     _spec = UnifiedAttention2DTiledSpec(
-        head_size=problem.head_size,
-        block_size=problem.block_size,
-        num_query_heads=problem.num_query_heads,
-        num_kv_heads=problem.num_kv_heads,
-        dtype=problem.dtype,
-        use_sinks=problem.use_sinks,
-        sliding_window=problem.sliding_window,
-        has_softcap=problem.softcap > 0,
-        use_alibi=problem.use_alibi,
-        use_qq_bias=problem.use_qq_bias,
-        num_seqs=problem.num_seqs,
-        num_warps=_select_2d_num_warps(problem),
-        waves_per_eu=_select_2d_waves_per_eu(problem),
-        kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size=_select_2d_tile_size(problem),
-        block_m_per_warp=_select_2d_block_m_per_warp(problem),
-        use_mfma_32x32=_enable_mfma_32x32(problem),
-        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
-        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
-        use_transposed_scalar_state=scalar_state,
-        use_transposed_mask_once=mask_opts,
-        use_transposed_mask_limit=mask_opts,
-        use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
-        use_early_v_schedule=_enable_early_v_schedule(problem),
-        use_fast_paged_kv_desc=(
-            combo_no_sw
-            and not problem.use_fp8
-            and problem.num_query_heads == 64
-            and problem.num_kv_heads == 8
-            and _select_2d_tile_size(problem) == 64
-        ),
-        use_register_pv=_enable_register_pv(problem),
-        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
-        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        **_base_2d_generic_fields(problem),
         **_schedule_fields,
     )
     if _kau._d256_gfx950_fast(problem):
@@ -374,14 +353,14 @@ def _tiled_spec_from_problem(
         return _spec_gfx942_bf16_flash(problem)
     if _enable_gfx942_fp16_flash(problem) and not _kau._gfx942_4warp_fast(problem):
         return _spec_gfx942_fp16_flash(problem)
-    # Generic (non-flash) fallthrough, split per-arch. The combo / single-batch
+    # Generic (non-flash) fallthrough, split by arch. The combo / single-batch
     # schedule / D256 machinery is gfx950-only (its predicates hard-gate to
-    # gfx950), so gfx950 and gfx942 get dedicated spec builders instead of one
-    # shared block with ``_spec_field_names`` guards. Both are byte-identical to
-    # the prior guarded fallthrough for their arch (see the two functions above).
+    # gfx950), so gfx950 gets its own builder and EVERY OTHER arch (gfx942,
+    # gfx1201, gfx1151, ...) shares the base-only builder. Both are byte-identical
+    # to the prior guarded fallthrough for the arches they serve (see above).
     if arch == "gfx950":
         return _spec_gfx950_generic(problem)
-    return _spec_gfx942_generic(problem)
+    return _spec_generic_2d_non_gfx950(problem)
 
 
 def _spec_generic_3d(problem: UnifiedAttentionProblem):
@@ -394,7 +373,7 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem):
     (unlike the 2D generic cohort). Geometry stays in the builder layer;
     dispatcher identity + C++ parity unchanged.
     """
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
     tile_size_override = _gfx942_3d_tile_size_override(problem)
     return UnifiedAttention3DTiledSpec(

@@ -419,7 +419,7 @@ _COHORTS = [
     _Cohort(
         name="gfx942_generic",
         arch="gfx942",
-        spec_fn=lambda p: bld._spec_gfx942_generic(p),
+        spec_fn=lambda p: bld._spec_generic_2d_non_gfx950(p),
         # Generic = the fallthrough: reached when neither gfx942 flash gate fires.
         gate=lambda p: not _enable_gfx942_bf16_flash(p)
         and not _enable_gfx942_fp16_flash(p),
@@ -454,9 +454,7 @@ _COHORTS = [
         gate=lambda p: True,
         # Cover the sub-paths: plain narrow, combo (64x8 d128), D256, and SW.
         problems=[
-            lambda: _problem(
-                num_query_heads=16, num_kv_heads=16, dtype="fp16"
-            ),
+            lambda: _problem(num_query_heads=16, num_kv_heads=16, dtype="fp16"),
             lambda: _problem(num_query_heads=64, num_kv_heads=8, dtype="bf16"),
             lambda: _problem(
                 num_query_heads=64,
