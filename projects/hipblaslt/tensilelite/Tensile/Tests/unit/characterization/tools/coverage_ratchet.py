@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -76,8 +77,17 @@ def remediation(paths: list[str]) -> str:
     Emitted with one ``--allow-lower`` per regressed file so a failing CI log
     can be copy-pasted without also becoming a blanket "regenerate everything":
     the command it prints can only lower the files named in it.
+
+    Each path is shell-quoted and passed as ``--allow-lower=<value>`` rather
+    than ``--allow-lower <value>``: a path with a space would otherwise split
+    into two shell arguments, a path starting with ``-`` would otherwise be
+    read as another option, and quoting alone stops shell metacharacters (for
+    example ``$(...)``) in a path from being interpreted when this command is
+    copy-pasted, all of which coverage.py and git happily allow in a filename.
     """
-    named = "".join(f" \\\n        --allow-lower {path}" for path in paths)
+    named = "".join(
+        f" \\\n        --allow-lower={shlex.quote(path)}" for path in paths
+    )
     return (
         "If these drops are intentional, review them and update the baseline with:\n"
         "    tox -e coverage-unit            # regenerate coverage.json, then\n"
@@ -145,6 +155,7 @@ def ratchet_floors(
     existing: dict[str, float],
     current: dict[str, float],
     allow_lower: Iterable[str] = (),
+    tolerance: float = 0.0,
 ) -> tuple[dict[str, float], list[tuple[str, float, float]]]:
     """Return ``(new_floors, refused)`` for an ``update``.
 
@@ -154,6 +165,12 @@ def ratchet_floors(
     That is what makes ``update`` a ratchet rather than a snapshot of whichever
     coverage run happened to be on disk: raising one file's floor can no longer
     quietly lower another's.
+
+    A drop no bigger than ``tolerance`` is held at the existing floor without
+    being added to ``refused``. This keeps the command ``check`` prints in sync
+    with what ``update`` actually demands: ``check`` only names files whose drop
+    exceeds the same tolerance, so an unnamed in-tolerance wobble must not force
+    a second, separate authorization here.
 
     Percentages are rounded to the precision the baseline is written at before
     being compared, so a difference too small to appear in the file is not
@@ -170,6 +187,8 @@ def ratchet_floors(
         )
         if base_pct is None or cur_pct >= base_pct or path in allow_lower:
             floors[path] = cur_pct
+        elif cur_pct >= base_pct - tolerance:
+            floors[path] = base_pct
         else:
             floors[path] = base_pct
             refused.append((path, base_pct, cur_pct))
@@ -269,7 +288,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         if baseline_path.is_file()
         else {}
     )
-    floors, refused = ratchet_floors(existing, current, allow_lower)
+    floors, refused = ratchet_floors(existing, current, allow_lower, tolerance)
 
     if refused:
         print(
