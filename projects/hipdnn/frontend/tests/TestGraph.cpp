@@ -8252,20 +8252,16 @@ TEST_F(TestGraph, AddAllEnginesRejectsAfterCreateExecutionPlans)
 {
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
-    auto result = graph.add_all_engines(_handle);
+    auto result = graph.add_all_engines();
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
-TEST_F(TestGraph, LegacyEngineCollectionOverloadsForwardWithoutAHandle)
+TEST_F(TestGraph, LegacyEngineConfigsOverloadForwardsWithoutAHandle)
 {
-    // The handle-free forms kept for callers written against the earlier signatures.
-    // Reaching the same guards as the handle-taking forms is what says the forwarding
-    // is in place; the names they collect are the null-handle resolution the
+    // The handle-free form kept for callers written against the earlier signature.
+    // Reaching the same guard as the handle-taking form is what says the forwarding
+    // is in place; the names it collects are the null-handle resolution the
     // plan-name tests cover.
-    hipdnn_frontend::GraphTestUtils compiled;
-    compiled.injectDummyCompiledPlan();
-    EXPECT_EQ(compiled.add_all_engines().code, ErrorCode::INVALID_VALUE);
-
     hipdnn_frontend::GraphTestUtils unbuilt;
     std::vector<EngineConfigInfo> configs;
     EXPECT_EQ(unbuilt.get_engine_configs(configs).code, ErrorCode::INVALID_VALUE);

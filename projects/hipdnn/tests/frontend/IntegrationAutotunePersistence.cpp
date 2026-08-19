@@ -52,7 +52,7 @@ TEST_F(IntegrationAutotunePersistence, ConfigFileRoundTrip)
         ConvGraphBundle bundle;
         createBuiltConvGraph("autotune_persistence_test_conv", bundle);
 
-        auto result = bundle.graph->add_all_engines(_handle);
+        auto result = bundle.graph->add_all_engines();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         int64_t maxWs = 0;

@@ -174,7 +174,7 @@ TEST_P(IntegrationAutotuneConfigRoundTrip, EngineSelectionRoundTripsThroughConfi
         std::optional<hipdnn_test_sdk::utilities::GraphTensorBundle> bundle;
         buildGraphAndBundle(testCase.op, graph, bundle);
 
-        auto result = graph->add_all_engines(_handle);
+        auto result = graph->add_all_engines();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         int64_t maxWorkspaceSize = 0;

@@ -130,7 +130,7 @@ static void demonstrateStandardAutotune(hipdnnHandle_t handle,
     auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
-    HIPDNN_FE_CHECK(state.graph->add_all_engines(handle));
+    HIPDNN_FE_CHECK(state.graph->add_all_engines());
 
     // Allocate workspace for the largest engine
     int64_t maxWs = 0;
@@ -194,7 +194,7 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
     auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
-    HIPDNN_FE_CHECK(state.graph->add_all_engines(handle));
+    HIPDNN_FE_CHECK(state.graph->add_all_engines());
 
     int64_t maxWs = 0;
     HIPDNN_FE_CHECK(state.graph->get_estimated_max_workspace_size(maxWs));
@@ -283,7 +283,7 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
 /// takes a workspaceSize parameter. This compiles and benchmarks all candidates,
 /// then filters out any plan whose actual (compiled) workspace exceeds the limit:
 ///
-///   graph->add_all_engines(handle);
+///   graph->add_all_engines();
 ///   int64_t maxWs = 0;
 ///   graph->get_estimated_max_workspace_size(maxWs);
 ///   Workspace workspace(maxWs);
@@ -391,7 +391,7 @@ static void demonstrateSaveToConfigFile(hipdnnHandle_t handle,
     auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
-    HIPDNN_FE_CHECK(state.graph->add_all_engines(handle));
+    HIPDNN_FE_CHECK(state.graph->add_all_engines());
 
     int64_t maxWs = 0;
     HIPDNN_FE_CHECK(state.graph->get_estimated_max_workspace_size(maxWs));

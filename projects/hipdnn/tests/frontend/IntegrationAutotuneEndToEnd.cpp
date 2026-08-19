@@ -37,7 +37,7 @@ protected:
         ConvGraphBundle bundle;
         createBuiltConvGraph("autotune_strategy_smoke_conv", bundle);
 
-        auto result = bundle.graph->add_all_engines(_handle);
+        auto result = bundle.graph->add_all_engines();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         int64_t maxWs = 0;
@@ -97,7 +97,7 @@ TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStableMaxEqualsWindow)
     ConvGraphBundle bundle;
     createBuiltConvGraph("autotune_max_equals_window_conv", bundle);
 
-    auto result = bundle.graph->add_all_engines(_handle);
+    auto result = bundle.graph->add_all_engines();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     int64_t maxWs = 0;

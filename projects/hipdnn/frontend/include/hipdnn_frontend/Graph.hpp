@@ -3704,14 +3704,11 @@ public:
      * add_engine_configs(). Equivalent to discovering all engines and
      * adding them all for autotuning.
      *
-     * @param handle Handle the engine-name query goes through, as for
-     *               get_engine_configs()
      * @param modes Heuristic modes for engine ranking
      * @return ErrorCode::OK on success
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error add_all_engines(hipdnnHandle_t handle,
-                          const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
     {
         if(!_compiledPlans.empty())
         {
@@ -3721,24 +3718,8 @@ public:
         }
 
         std::vector<EngineConfigInfo> configs;
-        HIPDNN_CHECK_ERROR(get_engine_configs(handle, configs, modes));
+        HIPDNN_CHECK_ERROR(get_engine_configs(nullptr, configs, modes));
         return add_engine_configs(configs);
-    }
-
-    /**
-     * @brief Add all available engines without a handle
-     *
-     * The legacy form of add_all_engines(). Collects the same plan specs; only the
-     * engine names carried alongside them differ, as described on the handle-free
-     * get_engine_configs().
-     *
-     * @param modes Heuristic modes for engine ranking
-     * @return ErrorCode::OK on success
-     */
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
-    {
-        return add_all_engines(nullptr, modes);
     }
 
     // --- Autotune: Workspace Query ---
@@ -3878,7 +3859,7 @@ public:
      * @code{.cpp}
      * // Workflow 1: Plan-spec path (add_engine_*() -> autotune)
      * graph.build_operation_graph(handle);
-     * graph.add_all_engines(handle);
+     * graph.add_all_engines();
      * int64_t maxWs;
      * graph.get_estimated_max_workspace_size(maxWs);
      * void* workspace;

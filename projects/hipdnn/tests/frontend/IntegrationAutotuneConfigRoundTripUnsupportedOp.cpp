@@ -109,7 +109,7 @@ TEST_F(IntegrationAutotuneConfigRoundTripUnsupportedOp, UnsupportedOpWritesNoCon
     std::optional<hipdnn_test_sdk::utilities::GraphTensorBundle> bundle;
     buildUnsupportedGraphAndBundle(_handle, graph, bundle);
 
-    auto result = graph->add_all_engines(_handle);
+    auto result = graph->add_all_engines();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     int64_t maxWs = 0;
