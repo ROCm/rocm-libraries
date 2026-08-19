@@ -17,8 +17,7 @@
 # implementation.
 # Operations, MX, and AMDGPULayout require OpenMP CXX only when their installed
 # targets were built with OpenMP support; Blocked and BLAS inherit the Operations
-# requirement. A lookup without COMPONENTS preserves the historical behavior
-# by loading every component present in the installation.
+# requirement. Consumers request the components they use explicitly.
 
 set(
     ROCHostValidation_BLAS_BUILD_PROVIDER
@@ -118,22 +117,14 @@ set(
     _ROCHostValidation_requested_components
     "${ROCHostValidation_FIND_COMPONENTS}"
 )
-set(_ROCHostValidation_legacy_all_components OFF)
 if(NOT _ROCHostValidation_requested_components)
-    set(_ROCHostValidation_legacy_all_components ON)
+    set(ROCHostValidation_FOUND FALSE)
     set(
-        _ROCHostValidation_requested_components
-        Core
-        Operations
-        Blocked
-        AMDGPULayout
+        ROCHostValidation_NOT_FOUND_MESSAGE
+        "ROCHostValidation requires at least one explicit COMPONENTS entry. "
+        "Supported components: Core, Operations, Blocked, BLAS, MX, AMDGPULayout."
     )
-    if(ROCHostValidation_BLAS_AVAILABLE)
-        list(APPEND _ROCHostValidation_requested_components BLAS)
-    endif()
-    if(ROCHostValidation_MX_AVAILABLE)
-        list(APPEND _ROCHostValidation_requested_components MX)
-    endif()
+    return()
 endif()
 list(REMOVE_DUPLICATES _ROCHostValidation_requested_components)
 
@@ -143,10 +134,9 @@ set(_ROCHostValidation_components_to_load)
 foreach(_ROCHostValidation_component
         IN LISTS _ROCHostValidation_requested_components)
     if(NOT _ROCHostValidation_component
-       IN_LIST ROCHostValidation_SUPPORTED_COMPONENTS)
+        IN_LIST ROCHostValidation_SUPPORTED_COMPONENTS)
         set(ROCHostValidation_${_ROCHostValidation_component}_FOUND FALSE)
-        if(_ROCHostValidation_legacy_all_components
-           OR ROCHostValidation_FIND_REQUIRED_${_ROCHostValidation_component})
+        if(ROCHostValidation_FIND_REQUIRED_${_ROCHostValidation_component})
             string(
                 CONCAT
                 _ROCHostValidation_unsupported_message
@@ -394,8 +384,7 @@ endforeach()
 
 foreach(_ROCHostValidation_component
         IN LISTS _ROCHostValidation_supported_requests)
-    if(_ROCHostValidation_legacy_all_components
-       OR ROCHostValidation_FIND_REQUIRED_${_ROCHostValidation_component})
+    if(ROCHostValidation_FIND_REQUIRED_${_ROCHostValidation_component})
         if(NOT ROCHostValidation_${_ROCHostValidation_component}_FOUND)
             string(
                 CONCAT

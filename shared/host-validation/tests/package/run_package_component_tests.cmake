@@ -204,51 +204,38 @@ function(
     endif()
 endfunction()
 
-# Configure, build, and test the compatibility consumer that requests all targets.
-function(_run_legacy_consumer install_dir)
-    set(_build_dir "${PACKAGE_WORK_DIR}/legacy-all-components")
+# Assert that a package lookup without explicit components is rejected.
+function(_expect_no_components_failure install_dir)
+    set(_build_dir "${PACKAGE_WORK_DIR}/no-components")
     file(REMOVE_RECURSE "${_build_dir}")
-    set(
-        _configure_command
-        "${CMAKE_COMMAND}"
-        -S "${PACKAGE_SOURCE_DIR}"
-        -B "${_build_dir}"
-        ${_generator_arguments}
-        ${_configure_cache_arguments}
-        "-DCMAKE_PREFIX_PATH=${install_dir}"
-    )
     execute_process(
-        COMMAND ${_configure_command}
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -S "${PACKAGE_SOURCE_DIR}/no_components"
+            -B "${_build_dir}"
+            ${_generator_arguments}
+            ${_configure_cache_arguments}
+            "-DCMAKE_PREFIX_PATH=${install_dir}"
         RESULT_VARIABLE _configure_result
         OUTPUT_VARIABLE _configure_output
         ERROR_VARIABLE _configure_error
     )
-    if(NOT _configure_result EQUAL 0)
+    if(_configure_result EQUAL 0)
         message(FATAL_ERROR
-            "Legacy package consumer configure failed.\n"
-            "${_configure_output}\n${_configure_error}"
+            "Package lookup without components unexpectedly succeeded."
         )
     endif()
-
-    _build_project("${_build_dir}" "Legacy package consumer")
-
-    set(
-        _test_command
-        "${CTEST_COMMAND}" --test-dir "${_build_dir}" --output-on-failure
+    set(_combined_output "${_configure_output}\n${_configure_error}")
+    string(
+        FIND
+        "${_combined_output}"
+        "requires at least one explicit COMPONENTS entry"
+        _message_position
     )
-    if(TEST_CONFIG)
-        list(APPEND _test_command --build-config "${TEST_CONFIG}")
-    endif()
-    execute_process(
-        COMMAND ${_test_command}
-        RESULT_VARIABLE _test_result
-        OUTPUT_VARIABLE _test_output
-        ERROR_VARIABLE _test_error
-    )
-    if(NOT _test_result EQUAL 0)
+    if(_message_position EQUAL -1)
         message(FATAL_ERROR
-            "Legacy package consumer tests failed.\n"
-            "${_test_output}\n${_test_error}"
+            "Package lookup without components failed without the expected diagnostic.\n"
+            "${_combined_output}"
         )
     endif()
 endfunction()
@@ -357,61 +344,60 @@ _expect_component_failure(
     NotAComponent
     "does not support component \"NotAComponent\""
 )
-_run_legacy_consumer("${_full_install_dir}")
+_expect_no_components_failure("${_full_install_dir}")
 
-# Exercise the temporary source-build compatibility functions from a parent
-# directory, matching the current integration pattern without depending on any
-# product-specific consumer.
-set(_source_compat_build_dir "${PACKAGE_WORK_DIR}/source-compat-producer")
-set(_source_compat_install_dir "${PACKAGE_WORK_DIR}/source-compat-install")
+# Exercise the supported add_subdirectory build from a parent project without
+# depending on any product-specific consumer.
+set(_source_build_dir "${PACKAGE_WORK_DIR}/source-producer")
+set(_source_install_dir "${PACKAGE_WORK_DIR}/source-install")
 set(
-    _source_compat_configure_command
+    _source_configure_command
     "${CMAKE_COMMAND}"
     -S "${PACKAGE_SOURCE_DIR}/source_build"
-    -B "${_source_compat_build_dir}"
+    -B "${_source_build_dir}"
     ${_generator_arguments}
     ${_configure_cache_arguments}
     "-DROCHostValidation_SOURCE_DIR=${COMPONENT_SOURCE_DIR}"
     "-DCMAKE_MODULE_PATH=${PACKAGE_SOURCE_DIR}/aliased-blas"
 )
 execute_process(
-    COMMAND ${_source_compat_configure_command}
-    RESULT_VARIABLE _source_compat_configure_result
-    OUTPUT_VARIABLE _source_compat_configure_output
-    ERROR_VARIABLE _source_compat_configure_error
+    COMMAND ${_source_configure_command}
+    RESULT_VARIABLE _source_configure_result
+    OUTPUT_VARIABLE _source_configure_output
+    ERROR_VARIABLE _source_configure_error
 )
-if(NOT _source_compat_configure_result EQUAL 0)
+if(NOT _source_configure_result EQUAL 0)
     message(FATAL_ERROR
-        "Source-build compatibility configure failed.\n"
-        "${_source_compat_configure_output}\n"
-        "${_source_compat_configure_error}"
+        "Source build configure failed.\n"
+        "${_source_configure_output}\n"
+        "${_source_configure_error}"
     )
 endif()
 _build_project(
-    "${_source_compat_build_dir}"
-    "Source-build compatibility producer"
+    "${_source_build_dir}"
+    "Source producer"
 )
 _install_project(
-    "${_source_compat_build_dir}"
-    "${_source_compat_install_dir}"
-    "Source-build compatibility producer"
+    "${_source_build_dir}"
+    "${_source_install_dir}"
+    "Source producer"
 )
 file(
     GLOB_RECURSE
-    _source_compat_blas_target_files
-    "${_source_compat_install_dir}/*ROCHostValidationBLASTargets.cmake"
+    _source_blas_target_files
+    "${_source_install_dir}/*ROCHostValidationBLASTargets.cmake"
 )
-if(_source_compat_blas_target_files)
+if(_source_blas_target_files)
     _run_component(
-        "${_source_compat_install_dir}"
-        source-compat-blas
+        "${_source_install_dir}"
+        source-blas
         BLAS
         "Core,Operations,BLAS"
     )
 endif()
 _run_component(
-    "${_source_compat_install_dir}"
-    source-compat-mx
+    "${_source_install_dir}"
+    source-mx
     MX
     "Core,MX"
 )
