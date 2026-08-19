@@ -1,0 +1,25 @@
+# serializer version: 1
+# name: test_streamk_pap_cluster_multicast_gfx1250_golden[cs2_ck2]
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg4Lo4AeQN5N68uL5_sGeg4t12mOnnP5NHLihkuwk6qvI=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgyd34NPKnNai9vTiZi-HzKQjFV3csokJ60uxcGBQeJLU=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_streamk_pap_cluster_multicast_gfx1250_golden[cs4_ck1]
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg2a0OwCiPvM4cNZhbw9Pj4gAWoSIeA6jnzB-4EzIYF-0=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgKGN9poypgaQiocXZb0n0Diwto9knjq3965ce67ZSS44=',
+      'err': 0,
+    }),
+  ])
+# ---
