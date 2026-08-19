@@ -335,34 +335,53 @@ int main(int argc, char** argv) noexcept
         // it is default-constructed to false. So test_to_run_count() is
         // unconditionally 0 before RUN_ALL_TESTS(), no matter how many tests
         // were registered, and checking it earlier fails every engine-driven run.
-        if(::testing::UnitTest::GetInstance()->test_to_run_count() == 0
+        const auto* unitTest = ::testing::UnitTest::GetInstance();
+        if(unitTest->test_to_run_count() == 0
            && hipdnn_integration_tests::TestConfig::get().allowBundles())
         {
             const auto dataDir = hipdnn_integration_tests::bundle::resolveDataDir();
             const bool dataDirFound = std::filesystem::exists(dataDir);
-            if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
+
+            // A run that named an engine, or one whose bundle data is actually
+            // present, is expected to select something. A local build with
+            // neither is allowed to run empty.
+            if(hipdnn_integration_tests::TestConfig::get().hasEngineName() || dataDirFound)
             {
-                std::cerr << "Error: zero tests ran. --test-engine was specified but no test "
-                             "matched --gtest_filter. Bundle data directory "
-                          << dataDir << (dataDirFound ? " exists." : " does NOT exist.") << "\n";
-                static_cast<void>(hipStreamDestroy(stream));
-                return 1;
-            }
-            if(dataDirFound)
-            {
-                std::cerr << "Error: zero tests ran (bundles are enabled and the data "
-                             "directory exists but no test matched --gtest_filter).\n";
+                // Print the counts, not a guess: "0 registered" is a build or
+                // discovery problem, "N registered, 0 selected" is a filter
+                // problem. They have different fixes and these numbers are the
+                // only way to tell them apart from a CI log.
+                const int suiteCount = unitTest->total_test_suite_count();
+                std::cerr << "Error: zero tests ran.\n"
+                          << "  registered:      " << unitTest->total_test_count() << " test(s) in "
+                          << suiteCount << " suite(s)\n"
+                          << "  selected:        0 (nothing matched --gtest_filter)\n"
+                          << "  gtest_filter:    " << GTEST_FLAG_GET(filter) << "\n"
+                          << "  bundle data dir: " << dataDir
+                          << (dataDirFound ? " (exists)" : " (MISSING)") << "\n";
+
+                constexpr int maxSuitesToList = 10;
+                for(int i = 0; i < suiteCount && i < maxSuitesToList; ++i)
+                {
+                    std::cerr << "  registered suite: " << unitTest->GetTestSuite(i)->name()
+                              << "\n";
+                }
+                if(suiteCount > maxSuitesToList)
+                {
+                    std::cerr << "  ... and " << (suiteCount - maxSuitesToList)
+                              << " more suite(s)\n";
+                }
+
                 static_cast<void>(hipStreamDestroy(stream));
                 return 1;
             }
         }
 
         {
-            const auto* unit = ::testing::UnitTest::GetInstance();
-            const int total = unit->test_to_run_count();
-            const int passed = unit->successful_test_count();
-            const int skip = unit->skipped_test_count();
-            const int failed = unit->failed_test_count();
+            const int total = unitTest->test_to_run_count();
+            const int passed = unitTest->successful_test_count();
+            const int skip = unitTest->skipped_test_count();
+            const int failed = unitTest->failed_test_count();
             const double pct = total > 0 ? 100.0 * passed / total : 0.0;
 
             std::cerr << "\n==== TEST COVERAGE SUMMARY ====\n"
