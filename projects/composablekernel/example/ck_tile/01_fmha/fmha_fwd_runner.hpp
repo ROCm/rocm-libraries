@@ -1014,23 +1014,30 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     else if(qscale.type == quant_scale_enum::perhead)
     {
-        // Neighbouring entries differ so a wrong head index changes the answer.
-        // Mantissa is never a power of two so a truncated V scale fails loudly; the
-        // exponent span stays narrow to avoid peaked-softmax P-quantization drift.
+        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
+        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
+        float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
+
+        float qkv_max = 3.f;
+
+        // A descale is dequantized_max/dtype_max, so these are anchored on qkv_max/dtype_max
+        // like the other granularities. Neighbouring entries differ; no mantissa is a power
+        // of two.
         constexpr int kCycle = 8;
-        auto fill_perhead    = [](auto& t, int phase) {
+        auto fill_perhead    = [](auto& t, int e_top, int phase) {
             const auto lens = t.get_lengths();
             t.ForEach([&](auto& self, auto i) {
                 const int flat   = static_cast<int>(i[0] * lens[1] + i[1]);
                 const int step   = (flat + phase) % kCycle;
                 const float mant = 1.f + static_cast<float>(2 * step + 1) / 16.f;
-                self(i)          = std::ldexp(mant, step % 2 - 1);
+                self(i)          = std::ldexp(mant, e_top + step % 2 - 1);
             });
         };
+        auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
 
-        fill_perhead(q_descale_host, 0);
-        fill_perhead(k_descale_host, 3);
-        fill_perhead(v_descale_host, 5);
+        fill_perhead(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
+        fill_perhead(k_descale_host, top_exp(qkv_max / k_dtype_max), 3);
+        fill_perhead(v_descale_host, top_exp(qkv_max / v_dtype_max), 5);
     }
 
     iota_shuffle(block_table_host.begin(), block_table_host.end(), 0, random_engine);

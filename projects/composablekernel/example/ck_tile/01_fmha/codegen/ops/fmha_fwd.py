@@ -405,10 +405,10 @@ class FmhaFwdApiTrait:
             else:
                 assert False
         elif self.pipeline_tag == "qr_tdm":
-            if self.dpad == "t":
+            # fp8 runs a K=128 WMMA, which is wrong on a padded head dim.
+            if self.dpad == "t" and not self.dtype.startswith("fp8"):
                 return "a.hdim_q % 8 == 0"
-            else:
-                return f"a.hdim_q % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+            return f"a.hdim_q % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
@@ -426,10 +426,9 @@ class FmhaFwdApiTrait:
             else:
                 assert False
         elif self.pipeline_tag == "qr_tdm":
-            if self.dvpad == "t":
+            if self.dvpad == "t" and not self.dtype.startswith("fp8"):
                 return "a.hdim_v % 8 == 0"
-            else:
-                return f"a.hdim_v % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+            return f"a.hdim_v % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
