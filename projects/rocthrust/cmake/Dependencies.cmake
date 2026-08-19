@@ -61,7 +61,7 @@ endfunction()
 # This function fetches repository "repo_name" using the method specified by "method".
 # The result is stored in the parent scope version of "repo_path".
 # It does not build the repo.
-function(fetch_dep method repo_name repo_path download_branch)
+function(fetch_dep method repo_name repo_path package_min_ver_variable download_branch)
   set(method_value ${${method}})
 
   # Since the monorepo is large, we want to avoid downloading the whole thing if possible.
@@ -105,13 +105,13 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 
   if(${method_value} STREQUAL "PACKAGE")
-    message(STATUS "Searching for ${repo_name} package")
+    message(STATUS "Searching for ${repo_name} package version ${${package_min_ver_variable}}")
 
     # Add default install location for WIN32 and non-WIN32 as hint
-    find_package(${repo_name} ${MIN_ROCPRIM_PACKAGE_VERSION} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/rocprim")
+    find_package(${repo_name} ${${package_min_ver_variable}} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/${repo_name}")
 
     if(NOT ${${repo_name}_FOUND})
-      message(STATUS "No existing ${repo_name} package meeting the minimum version requirement (${MIN_ROCPRIM_PACKAGE_VERSION}) was found. Falling back to downloading it.")
+      message(STATUS "No existing ${repo_name} package meeting the minimum version requirement (${${package_min_ver_variable}}) was found. Falling back to downloading it.")
       # update local and parent variable values
       set(${method} "DOWNLOAD" PARENT_SCOPE)
       set(method_value "DOWNLOAD")
@@ -244,8 +244,8 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-if(${LINK_HIP_DEVICE_LIBS})
-  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
+if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
+  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH MIN_ROCPRIM_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
 
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
     # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
@@ -429,7 +429,7 @@ if(BUILD_BENCHMARK)
   endif()
 
   # rocRAND (https://github.com/ROCm/rocm-libraries)
-  fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH ROCM_DEP_RELEASE_BRANCH)
+  fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH MIN_ROCRAND_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
 
   # If we downloaded rocRAND or it are pulling it from the monorepo, we need to build it.
   # The path to the repo will is stored in ${ROCRAND_PATH}.
