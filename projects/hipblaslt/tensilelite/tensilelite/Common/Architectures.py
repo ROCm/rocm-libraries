@@ -348,12 +348,11 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     return archList[deviceId] if (len(archList) > 0 and process.returncode == 0) else process.returncode
 
 
-def detectGlobalCurrentISA(deviceId: int, enumerator: str):
+def detectGlobalCurrentISA(deviceId: int, enumerator: str | tuple[str, ...]):
     """Returns the ISA version for a given device.
 
     Given an integer ID for a device, the ISA version tuple
-    of the form (X, Y, Z) is computed using first amdgpu-arch.
-    If amdgpu-arch fails, rocm_agent_enumerator is used.
+    of the form (X, Y, Z) is computed using each enumerator in order.
 
     Args:
         deviceID: an integer indicating the device to inspect.
@@ -361,21 +360,23 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     Raises:
         Exception if both tools fail to detect ISA.
     """
-    result = _detectGlobalCurrentISA(enumerator, deviceId)
-    if not isinstance(result, IsaVersion):
-        raise Exception("Failed to detect currect ISA")
-    return result
+    enumerators = (enumerator,) if isinstance(enumerator, str) else enumerator
+    for tool in enumerators:
+        result = _detectGlobalCurrentISA(tool, deviceId)
+        if isinstance(result, IsaVersion):
+            return result
+    raise Exception("Failed to detect currect ISA")
 
 
 def detectHostGfxArchs() -> List[str]:
     """Enumerate the supported GPU architectures physically present on this host.
 
-    Reuses the same device-enumeration tool selection as the rest of the
-    toolchain (``ToolchainDefaults.DEVICE_ENUMERATOR`` -> ``rocm_agent_enumerator``
-    or ``amdgpu-arch``) and the canonical ``gfxToIsa``/``isaToGfx`` maps. Each
-    enumerated line is normalized through ``gfxToIsa`` (which strips ``:xnack±``
-    and other suffixes) and filtered to ``SUPPORTED_ISA``, so CPU agents
-    (``gfx000``) and unsupported devices are dropped.
+    Reuses the same ordered device-enumerator selection as the rest of the
+    toolchain (``offload-arch`` followed by compatibility fallbacks) and the
+    canonical ``gfxToIsa``/``isaToGfx`` maps. Each enumerated line is normalized
+    through ``gfxToIsa`` (which strips ``:xnack±`` and other suffixes) and
+    filtered to ``SUPPORTED_ISA``, so CPU agents (``gfx000``) and unsupported
+    devices are dropped.
 
     Returns:
         A de-duplicated list of canonical gfx names (e.g. ``["gfx950"]``).
@@ -385,31 +386,33 @@ def detectHostGfxArchs() -> List[str]:
     # Lazy import: keep this module free of a load-time dependency on the
     # Toolchain package (which imports Common.Utilities) and avoid any import cycle.
     try:
-        from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
+        from tensilelite.Toolchain.Validators import deviceEnumeratorCandidates
     except Exception:
         return []
 
-    tool = ToolchainDefaults.DEVICE_ENUMERATOR
     try:
-        toolPath = validateToolchain(tool)
+        tool_paths = deviceEnumeratorCandidates()
     except (FileNotFoundError, ValueError):
         return []
 
-    try:
-        process = run([toolPath], stdout=PIPE, stderr=PIPE)
-    except OSError:
-        return []
-    if process.returncode:
-        return []
+    for tool_path in tool_paths:
+        try:
+            process = run([tool_path], stdout=PIPE, stderr=PIPE)
+        except OSError:
+            continue
+        if process.returncode:
+            continue
 
-    archs: List[str] = []
-    for line in process.stdout.decode(errors="replace").splitlines():
-        isa = gfxToIsa(line.strip())
-        if isa is not None and isa in SUPPORTED_ISA:
-            gfx = isaToGfx(isa)
-            if gfx not in archs:
-                archs.append(gfx)
-    return archs
+        archs: List[str] = []
+        for line in process.stdout.decode(errors="replace").splitlines():
+            isa = gfxToIsa(line.strip())
+            if isa is not None and isa in SUPPORTED_ISA:
+                gfx = isaToGfx(isa)
+                if gfx not in archs:
+                    archs.append(gfx)
+        if archs:
+            return archs
+    return []
 
 
 def hostHasArch(arch: str) -> bool:
