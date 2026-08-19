@@ -224,7 +224,7 @@ struct TileDistrEncCalc
 
     static constexpr auto get_cwarp_dstr_encoding()
     {
-        if constexpr(kUseLegacyGfx11Wmma)
+        if constexpr(kUseLegacyGfx11Wmma && SFactor == 1)
         {
             using MSubDims = sequence<MmaOp::kCMBlocks,
                                       MmaOp::kCMNumAccess,
