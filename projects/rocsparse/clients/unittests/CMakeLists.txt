@@ -158,6 +158,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # in librocsparse (already coverage-instrumented) is counted. They link
   # roc::rocsparse directly, so they need no compile-in library TUs.
   unit_test_internal_util_checkmatrix.cpp
+  #10149: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_conversion_bsr.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_extra_geam.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
