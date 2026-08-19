@@ -3,10 +3,9 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for the ``tensilelite`` package ``__init__``: the
-version constant, ``ROOT_PATH``, and ``PrintTensileRoot``."""
+"""Characterization tests for the ROCm-coupled package boundary."""
 
-import os
+from importlib.metadata import version
 
 import pytest
 
@@ -15,16 +14,17 @@ import tensilelite
 pytestmark = pytest.mark.unit
 
 
-def test_version(snapshot):
-    assert tensilelite.__version__ == snapshot
+def test_distribution_version():
+    assert tensilelite.__version__ == version("tensilelite")
+    assert "+rocm" in tensilelite.__version__
 
 
-def test_root_path():
-    # The absolute path is env-specific, so only pin that it is absolute.
-    assert os.path.isabs(tensilelite.ROOT_PATH)
+def test_generator_version_is_independent():
+    assert tensilelite.GENERATOR_VERSION == "5.0.0"
+    assert tensilelite.__version__.startswith(tensilelite.GENERATOR_VERSION + "+rocm")
 
 
-def test_print_tensile_root(capsys):
-    tensilelite.PrintTensileRoot()
-    out = capsys.readouterr().out
-    assert out == tensilelite.ROOT_PATH  # printed with end='' (no newline)
+def test_runtime_details_are_not_public():
+    assert not hasattr(tensilelite, "RUNTIME")
+    assert not hasattr(tensilelite, "RuntimeInfo")
+    assert not hasattr(tensilelite, "TENSILELITE_CLIENT_PATH")

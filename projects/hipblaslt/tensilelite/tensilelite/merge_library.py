@@ -30,7 +30,7 @@ import argparse
 from copy import deepcopy
 from typing import Any
 
-from . import __version__
+from . import GENERATOR_VERSION as __version__
 from . import LibraryIO
 from .SolutionStructs.Naming import getSolutionNameMin
 from .SolutionStructs.Naming import getKernelNameMin

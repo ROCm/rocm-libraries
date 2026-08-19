@@ -27,7 +27,7 @@ from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
-from . import __version__
+from . import GENERATOR_VERSION as __version__
 from .Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
 from .Common.TimingInstrumentation import timing_context
