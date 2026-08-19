@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25.2)
-project(ROCHostValidationSourceBuildCompatibility LANGUAGES CXX)
+project(ROCHostValidationSourceBuild LANGUAGES CXX)
 
 if(NOT DEFINED ROCHostValidation_SOURCE_DIR)
     message(FATAL_ERROR "ROCHostValidation_SOURCE_DIR is required.")
@@ -10,7 +10,8 @@ endif()
 
 set(HOST_VALIDATION_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(HOST_VALIDATION_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
-set(HOST_VALIDATION_BUILD_BLAS_BACKEND OFF CACHE BOOL "" FORCE)
+set(HOST_VALIDATION_BUILD_BLAS_BACKEND ON CACHE BOOL "" FORCE)
+list(PREPEND CMAKE_MODULE_PATH "${ROCHostValidation_SOURCE_DIR}/cmake")
 add_subdirectory("${ROCHostValidation_SOURCE_DIR}" host-validation)
 
 foreach(required_target
@@ -26,30 +27,8 @@ foreach(required_target
     endif()
 endforeach()
 
-if(NOT COMMAND roc_host_validation_enable_mx_backend)
+if(NOT TARGET roc::host-validation-blas)
     message(FATAL_ERROR
-        "roc_host_validation_enable_mx_backend is not available."
+        "Source build did not define roc::host-validation-blas."
     )
-endif()
-roc_host_validation_enable_mx_backend()
-
-if(NOT COMMAND roc_host_validation_enable_blas_backend)
-    message(FATAL_ERROR
-        "roc_host_validation_enable_blas_backend is not available."
-    )
-endif()
-list(PREPEND CMAKE_MODULE_PATH "${ROCHostValidation_SOURCE_DIR}/cmake")
-find_package(CBLAS QUIET MODULE)
-if(CBLAS_FOUND)
-    roc_host_validation_enable_blas_backend()
-    if(NOT TARGET roc::host-validation-blas)
-        message(FATAL_ERROR
-            "roc_host_validation_enable_blas_backend did not define its target."
-        )
-    endif()
-    if(NOT TARGET CBLAS::CBLAS)
-        message(FATAL_ERROR
-            "The source-build BLAS backend did not define CBLAS::CBLAS."
-        )
-    endif()
 endif()

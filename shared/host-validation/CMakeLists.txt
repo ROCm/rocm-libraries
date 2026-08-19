@@ -206,8 +206,8 @@ set_target_properties(host-validation-blocked
         VISIBILITY_INLINES_HIDDEN ON
 )
 
-# Add the optional BLAS-backed GEMM implementation to the current build.
-function(roc_host_validation_enable_blas_backend)
+# Define the optional BLAS-backed GEMM implementation.
+function(_roc_host_validation_add_blas_backend)
     if(TARGET host-validation-blas)
         return()
     endif()
@@ -254,11 +254,11 @@ function(roc_host_validation_enable_blas_backend)
 endfunction()
 
 if(HOST_VALIDATION_BUILD_BLAS_BACKEND)
-    roc_host_validation_enable_blas_backend()
+    _roc_host_validation_add_blas_backend()
 endif()
 
-# Add the MX generation implementation to the current build.
-function(roc_host_validation_enable_mx_backend)
+# Define the required MX generation implementation.
+function(_roc_host_validation_add_mx_backend)
     if(TARGET host-validation-mx)
         return()
     endif()
@@ -304,7 +304,7 @@ endfunction()
 # MX scalar/layout types are part of Core, and the compiled MX generator has no
 # mandatory external dependency. Define it consistently in every source build
 # so MX support cannot become an untested configuration variant.
-roc_host_validation_enable_mx_backend()
+_roc_host_validation_add_mx_backend()
 
 if(HOST_VALIDATION_BUILD_TESTING)
     enable_testing()
@@ -485,11 +485,6 @@ function(roc_host_validation_finalize_package)
         "${_host_validation_binary_dir}/ROCHostValidationConfig.cmake"
         INSTALL_DESTINATION "${_host_validation_install_cmakedir}"
     )
-    configure_file(
-        "${_host_validation_source_dir}/cmake/ROCHostValidationTargets.cmake.in"
-        "${_host_validation_binary_dir}/ROCHostValidationTargets.cmake"
-        @ONLY
-    )
     write_basic_package_version_file(
         "${_host_validation_binary_dir}/ROCHostValidationConfigVersion.cmake"
         VERSION "${_host_validation_version}"
@@ -506,7 +501,6 @@ install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfigVersion.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationTargets.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCBLAS.cmake"
     DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
     COMPONENT devel

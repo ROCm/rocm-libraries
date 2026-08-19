@@ -287,7 +287,12 @@ if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation)
         "${CMAKE_CURRENT_SOURCE_DIR}/../host-validation"
     )
     if(NOT EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
-        find_package(ROCHostValidation CONFIG QUIET)
+        find_package(
+            ROCHostValidation
+            CONFIG
+            QUIET
+            COMPONENTS Operations BLAS MX AMDGPULayout
+        )
     endif()
     if(NOT TARGET roc::host-validation
        AND NOT EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
@@ -324,13 +329,9 @@ if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation)
 endif()
 
 if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-mx)
-    if(COMMAND roc_host_validation_enable_mx_backend)
-        roc_host_validation_enable_mx_backend()
-    else()
-        message(FATAL_ERROR
-            "rocRoller host numerics require the optional roc::host-validation-mx target."
-        )
-    endif()
+    message(FATAL_ERROR
+        "rocRoller host numerics require the roc::host-validation-mx target."
+    )
 endif()
 
 if(_rocroller_needs_host_numerics
@@ -341,14 +342,10 @@ if(_rocroller_needs_host_numerics
 endif()
 
 if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-blas)
-    if(COMMAND roc_host_validation_enable_blas_backend)
-        roc_host_validation_enable_blas_backend()
-    else()
-        message(FATAL_ERROR
-            "rocRoller host numerics require the optional roc::host-validation-blas target. "
-            "Install ROCHostValidation with its BLAS backend or include shared/host-validation."
-        )
-    endif()
+    message(FATAL_ERROR
+        "rocRoller host numerics require the roc::host-validation-blas target. "
+        "Install ROCHostValidation with its BLAS component or include shared/host-validation."
+    )
 endif()
 
 if(_rocroller_needs_host_numerics)
