@@ -56,35 +56,49 @@ def _report_xcc_failure(filepath: Path, solution: dict, detail: str) -> None:
 def _cu_count_from_path(filepath: Path) -> int:
     """Extract CU count from any path component matching *_Ncu (e.g. gfx942_38cu -> 38)."""
     for part in filepath.parts:
-        match = re.search(r"_(\d+)cu$", part, re.IGNORECASE)
+        # Suffix-literal case mutations are equivalent while IGNORECASE is active.
+        match = re.search(r"_(\d+)cu$", part, re.IGNORECASE)  # pragma: no mutate
         if match:
             return int(match.group(1))
     return 0
 
 
-def _validateWorkGroupMappingXCC(solution: dict, filepath: Path) -> bool:
+def _validateWorkGroupMappingXCC(solution: dict, filepath: Path, report: bool = True) -> bool:
+    """Validate a solution's WorkGroupMappingXCC against the directory CU count.
+
+    When ``report`` is False the check is side-effect-free: it neither prints nor
+    touches the module-global per-file failure counter. Use that when
+    re-validating a documented known bug (which is expected to still fail), so a
+    still-failing known bug does not bump the dedup counter and swallow the first
+    *real* XCC failure's detailed message later in the same file.
+    """
     try:
         cu_count = _cu_count_from_path(filepath)
         if cu_count <= 0:
             return True  # Not a CU-variant directory; skip this check
 
-        xcc = solution.get("WorkGroupMappingXCC", -1)
-        if xcc == -1:
+        xcc_minus_one = "WorkGroupMappingXCC" not in solution or solution["WorkGroupMappingXCC"] == -1
+        if xcc_minus_one:
             return True
 
+        xcc = solution["WorkGroupMappingXCC"]
         if xcc <= 0:
-            _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC must be -1 or positive (WorkGroupMappingXCC={xcc})")
+            if report:
+                _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC must be -1 or positive (WorkGroupMappingXCC={xcc})")
             return False
 
         if (xcc & (xcc - 1)) != 0:
-            _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC must be -1 or a power of two (WorkGroupMappingXCC={xcc})")
+            if report:
+                _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC must be -1 or a power of two (WorkGroupMappingXCC={xcc})")
             return False
 
         if cu_count % xcc != 0:
-            _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC={xcc} must divide CU count {cu_count}")
+            if report:
+                _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC={xcc} must divide CU count {cu_count}")
             return False
 
         return True
     except Exception as e:
-        print(f"Error: ValidWorkGroupMappingXCC failed: {e} (file: {filepath})")
+        if report:
+            print(f"Error: ValidWorkGroupMappingXCC failed: {e} (file: {filepath})")
         return False

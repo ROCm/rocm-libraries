@@ -30,15 +30,15 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename S>
+template <typename T, typename S, typename I>
 rocblas_status rocsolver_stedc_impl(rocblas_handle handle,
                                     const rocblas_evect evect,
-                                    const rocblas_int n,
+                                    const I n,
                                     S* D,
                                     S* E,
                                     T* C,
-                                    const rocblas_int ldc,
-                                    rocblas_int* info)
+                                    const I ldc,
+                                    I* info)
 try
 {
     ROCSOLVER_ENTER_TOP("stedc", "--evect", evect, "-n", n, "--ldc", ldc);

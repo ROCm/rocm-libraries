@@ -34,15 +34,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class FCG
-  * \brief Flexible Conjugate Gradient Method
-  * \details
-  * The Flexible Conjugate Gradient method is an iterative method for solving sparse
-  * symmetric positive definite linear systems \f$Ax=b\f$. It is similar to the Conjugate
-  * Gradient method with the only difference, that it allows the preconditioner
-  * \f$M^{-1}\f$ to be not a constant operator. This can be especially helpful if the
-  * operation \f$M^{-1}x\f$ is the result of another iterative process and not a constant
-  * operator.
-  * \cite fcg
+  * \brief Flexible Conjugate Gradient method with variable preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix or GlobalMatrix
   * \tparam VectorType - can be LocalVector or GlobalVector

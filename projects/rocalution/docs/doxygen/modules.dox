@@ -36,3 +36,7 @@
 /** \defgroup backend_module Backend Module
   * This module contains al backend related functions.
   */
+
+/** \defgroup parallel_module Parallel Manager Module
+  * This module contains the MPI parallel manager class.
+  */

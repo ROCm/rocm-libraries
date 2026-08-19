@@ -32,6 +32,7 @@
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_common.h"
 #include "rocsparse_coosm.hpp"
+#include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_sptrsm_descr.hpp"
 
@@ -428,8 +429,49 @@ namespace rocsparse
             break;
         }
 
-        case rocsparse_format_coo_aos:
         case rocsparse_format_csc:
+        {
+#ifndef ROCSPARSE_WITH_CSC_TRSM
+            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
+            // descriptor is built on the stack (no allocation, nothing to free).
+            const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
+            const rocsparse_operation trans_csr = (operation == rocsparse_operation_none)
+                                                      ? rocsparse_operation_transpose
+                                                      : rocsparse_operation_none;
+            _rocsparse_mat_descr      descr_csr;
+            rocsparse::build_csr_descr_from_csc(*A->descr, descr_csr);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
+                                                             trans_csr,
+                                                             X_operation,
+                                                             A->cols,
+                                                             Y->cols,
+                                                             A->nnz,
+                                                             alpha_datatype,
+                                                             alpha,
+                                                             &descr_csr,
+                                                             A->data_type,
+                                                             A->const_val_data,
+                                                             A->col_type,
+                                                             A->const_col_data,
+                                                             A->row_type,
+                                                             A->const_row_data,
+                                                             Y->data_type,
+                                                             Y->values,
+                                                             Y->ld,
+                                                             Y->order,
+                                                             A->info,
+                                                             rocsparse_solve_policy_auto,
+                                                             csrsm_info,
+                                                             csrsm_buffer,
+                                                             force_conj));
+            break;
+#endif
+        }
+
+        case rocsparse_format_coo_aos:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
@@ -549,8 +591,49 @@ namespace rocsparse
             break;
         }
 
-        case rocsparse_format_coo_aos:
         case rocsparse_format_csc:
+        {
+#ifndef ROCSPARSE_WITH_CSC_TRSM
+            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
+            // descriptor is built on the stack (no allocation, nothing to free).
+            const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
+            const rocsparse_operation trans_csr = (operation == rocsparse_operation_none)
+                                                      ? rocsparse_operation_transpose
+                                                      : rocsparse_operation_none;
+            _rocsparse_mat_descr      descr_csr;
+            rocsparse::build_csr_descr_from_csc(*A->descr, descr_csr);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
+                                                             trans_csr,
+                                                             X_operation,
+                                                             A->cols,
+                                                             Y->cols,
+                                                             A->nnz,
+                                                             alpha_datatype,
+                                                             alpha,
+                                                             &descr_csr,
+                                                             A->data_type,
+                                                             A->const_val_data,
+                                                             A->col_type,
+                                                             A->const_col_data,
+                                                             A->row_type,
+                                                             A->const_row_data,
+                                                             Y->data_type,
+                                                             sptrsm_buffer,
+                                                             Y->cols,
+                                                             rocsparse_order_row,
+                                                             A->info,
+                                                             rocsparse_solve_policy_auto,
+                                                             csrsm_info,
+                                                             csrsm_buffer,
+                                                             force_conj));
+            break;
+#endif
+        }
+
+        case rocsparse_format_coo_aos:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
@@ -694,8 +777,49 @@ namespace rocsparse
             break;
         }
 
-        case rocsparse_format_coo_aos:
         case rocsparse_format_csc:
+        {
+#ifndef ROCSPARSE_WITH_CSC_TRSM
+            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
+            // descriptor is built on the stack (no allocation, nothing to free).
+            const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
+            const rocsparse_operation trans_csr = (operation == rocsparse_operation_none)
+                                                      ? rocsparse_operation_transpose
+                                                      : rocsparse_operation_none;
+            _rocsparse_mat_descr      descr_csr;
+            rocsparse::build_csr_descr_from_csc(*A->descr, descr_csr);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
+                                                             trans_csr,
+                                                             X_operation,
+                                                             A->cols,
+                                                             Y->cols,
+                                                             A->nnz,
+                                                             alpha_datatype,
+                                                             alpha,
+                                                             &descr_csr,
+                                                             A->data_type,
+                                                             A->const_val_data,
+                                                             A->col_type,
+                                                             A->const_col_data,
+                                                             A->row_type,
+                                                             A->const_row_data,
+                                                             Y->data_type,
+                                                             Y->values,
+                                                             Y->ld,
+                                                             Y->order,
+                                                             A->info,
+                                                             rocsparse_solve_policy_auto,
+                                                             csrsm_info,
+                                                             csrsm_buffer,
+                                                             force_conj));
+            break;
+#endif
+        }
+
+        case rocsparse_format_coo_aos:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
@@ -816,8 +940,49 @@ namespace rocsparse
             break;
         }
 
-        case rocsparse_format_coo_aos:
         case rocsparse_format_csc:
+        {
+#ifndef ROCSPARSE_WITH_CSC_TRSM
+            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
+            // descriptor is built on the stack (no allocation, nothing to free).
+            const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
+            const rocsparse_operation trans_csr = (operation == rocsparse_operation_none)
+                                                      ? rocsparse_operation_transpose
+                                                      : rocsparse_operation_none;
+            _rocsparse_mat_descr      descr_csr;
+            rocsparse::build_csr_descr_from_csc(*A->descr, descr_csr);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
+                                                             trans_csr,
+                                                             X_operation,
+                                                             A->cols,
+                                                             Y->cols,
+                                                             A->nnz,
+                                                             alpha_datatype,
+                                                             alpha,
+                                                             &descr_csr,
+                                                             A->data_type,
+                                                             A->const_val_data,
+                                                             A->col_type,
+                                                             A->const_col_data,
+                                                             A->row_type,
+                                                             A->const_row_data,
+                                                             Y->data_type,
+                                                             sptrsm_buffer,
+                                                             Y->cols,
+                                                             rocsparse_order_row,
+                                                             A->info,
+                                                             rocsparse_solve_policy_auto,
+                                                             csrsm_info,
+                                                             csrsm_buffer,
+                                                             force_conj));
+            break;
+#endif
+        }
+
+        case rocsparse_format_coo_aos:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
@@ -969,6 +1134,60 @@ namespace rocsparse
         }
 
         case rocsparse_format_csc:
+        {
+#ifndef ROCSPARSE_WITH_CSC_TRSM
+            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            // CSC: use transposed operation for buffer sizing (matches solve-time allocation)
+            const rocsparse_operation trans_csr_buf = (operation == rocsparse_operation_none)
+                                                          ? rocsparse_operation_transpose
+                                                          : rocsparse_operation_conjugate_transpose;
+            // The CSR descriptor is built on the stack (no allocation, nothing to free).
+            _rocsparse_mat_descr descr_csr;
+            rocsparse::build_csr_descr_from_csc(*A->descr, descr_csr);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_buffer_size(handle,
+                                                                   trans_csr_buf,
+                                                                   operation_X,
+                                                                   A->cols,
+                                                                   nrhs,
+                                                                   A->nnz,
+                                                                   alpha_datatype,
+                                                                   &descr_csr,
+                                                                   A->data_type,
+                                                                   A->const_val_data,
+                                                                   A->col_type,
+                                                                   A->const_col_data,
+                                                                   A->row_type,
+                                                                   A->const_row_data,
+                                                                   sptrsm_descr->get_Y_datatype(),
+                                                                   sptrsm_descr->get_Y_order(),
+                                                                   A->info,
+                                                                   rocsparse_solve_policy_auto,
+                                                                   buffer_size_in_bytes));
+
+            switch(sptrsm_case)
+            {
+            case rocsparse::sptrsm_case::NT_NT:
+            case rocsparse::sptrsm_case::T_NT:
+            {
+                *buffer_size_in_bytes
+                    += ((rocsparse::datatype_sizeof(sptrsm_descr->get_X_datatype()) * nrhs * n - 1)
+                            / 256
+                        + 1)
+                       * 256;
+                break;
+            }
+            case rocsparse::sptrsm_case::T_T:
+            case rocsparse::sptrsm_case::NT_T:
+            {
+                break;
+            }
+            }
+            return rocsparse_status_success;
+#endif
+        }
+
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
@@ -1212,8 +1431,80 @@ namespace rocsparse
                 return rocsparse_status_success;
             }
 
-            case rocsparse_format_coo_aos:
             case rocsparse_format_csc:
+            {
+#ifndef ROCSPARSE_WITH_CSC_TRSM
+                // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+                // CSC stored as A^T in CSR: swap col_ptr<->row_ptr, row_ind<->col_ind,
+                // invert fill_mode, and map the operation accordingly.
+                rocsparse_csrsm_info csrsm_info{};
+                switch(analysis_policy)
+                {
+                case rocsparse_analysis_policy_reuse:
+                {
+                    sptrsm_descr->set_shared_csrsm_info(A->info->get_shared_csrsm_info());
+                    csrsm_info = sptrsm_descr->get_csrsm_info();
+                    break;
+                }
+                case rocsparse_analysis_policy_force:
+                {
+                    csrsm_info = nullptr;
+                    break;
+                }
+                }
+
+                const rocsparse_operation trans_csr = (operation == rocsparse_operation_none)
+                                                          ? rocsparse_operation_transpose
+                                                          : rocsparse_operation_none;
+
+                // The CSR descriptor is built on the stack (no allocation, nothing to free).
+                _rocsparse_mat_descr descr_csr;
+                rocsparse::build_csr_descr_from_csc(*A->descr, descr_csr);
+
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
+                                                                    trans_csr,
+                                                                    X_operation,
+                                                                    A->cols,
+                                                                    Y->cols,
+                                                                    A->nnz,
+                                                                    alpha_datatype,
+                                                                    alpha,
+                                                                    &descr_csr,
+                                                                    A->data_type,
+                                                                    A->const_val_data,
+                                                                    A->col_type,
+                                                                    A->const_col_data,
+                                                                    A->row_type,
+                                                                    A->const_row_data,
+                                                                    Y->data_type,
+                                                                    Y->values,
+                                                                    Y->ld,
+                                                                    A->info,
+                                                                    analysis_policy,
+                                                                    rocsparse_solve_policy_auto,
+                                                                    &csrsm_info,
+                                                                    csrsm_buffer));
+
+                switch(analysis_policy)
+                {
+                case rocsparse_analysis_policy_reuse:
+                {
+                    break;
+                }
+                case rocsparse_analysis_policy_force:
+                {
+                    sptrsm_descr->set_csrsm_info(csrsm_info);
+                    break;
+                }
+                }
+                sptrsm_descr->set_stage(rocsparse_sptrsm_stage_analysis);
+                return rocsparse_status_success;
+#endif
+            }
+
+            case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:

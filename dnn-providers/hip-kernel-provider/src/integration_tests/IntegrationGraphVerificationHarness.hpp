@@ -164,6 +164,12 @@ protected:
         return _stream;
     }
 
+    // Exposed to subclasses driving Graph staging calls directly (build_operation_graph,
+    // create_execution_plans, get_ranked_engine_ids, etc.), not only via verifyGraph().
+    hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
+    int _deviceId = 0;
+
 private:
     void executeGpuGraph(hipdnnHandle_t handle,
                          hipdnn_frontend::graph::Graph& graph,
@@ -203,18 +209,15 @@ private:
             return false;
         }
 
-        cpuBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
-        gpuBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
+        cpuBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+        gpuBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;
     }
 
-    hipdnnHandle_t _handle = nullptr;
-    hipStream_t _stream = nullptr;
-    int _deviceId = 0;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;

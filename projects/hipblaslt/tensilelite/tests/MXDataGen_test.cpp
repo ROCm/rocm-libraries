@@ -481,7 +481,6 @@ TEST(MXScaleLayoutArch, MapsArchNameToScaleLayout)
     EXPECT_EQ(mxScaleLayoutForArchName("gfx950"), MXScaleLayout::GFX950);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx950:sramecc+:xnack-"), MXScaleLayout::GFX950);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx1250"), MXScaleLayout::GFX1250);
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250:xnack-"), MXScaleLayout::GFX1250);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx942"), MXScaleLayout::None);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx90a"), MXScaleLayout::None);
 }

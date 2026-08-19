@@ -255,4 +255,3 @@ BenchmarkProblems:
           - Exact: [256, 257, 1, 2048] #edge-n
         - ActivationArgs:
           - [Enum: none]
-

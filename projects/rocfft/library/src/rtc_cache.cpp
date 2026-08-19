@@ -530,10 +530,11 @@ static std::string gpu_arch_strip_flags(const std::string gpu_arch_with_flags)
     return gpu_arch_with_flags.substr(0, gpu_arch_with_flags.find(':'));
 }
 
-static std::vector<char> cached_compile_impl(const std::string&          kernel_name,
-                                             const std::string&          gpu_arch,
-                                             kernel_src_gen_t            generate_src,
-                                             const std::array<char, 32>& generator_sum)
+static std::vector<char> cached_compile_impl(const std::string&                kernel_name,
+                                             const std::string&                gpu_arch,
+                                             kernel_src_gen_t                  generate_src,
+                                             const std::array<char, 32>&       generator_sum,
+                                             const std::optional<std::string>& forced_rtc_helper)
 {
     // check cache first
     std::vector<char> code;
@@ -603,7 +604,7 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
             semaphore_guard guard(subprocess_semaphore.get());
 
             compile_begin = std::chrono::steady_clock::now();
-            code          = compile_subprocess(kernel_src, gpu_arch);
+            code          = compile_subprocess(kernel_src, gpu_arch, forced_rtc_helper);
             break;
         }
         catch(std::exception&)
@@ -652,7 +653,7 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
                     semaphore_guard guard(subprocess_semaphore.get());
 
                     compile_begin = std::chrono::steady_clock::now();
-                    code          = compile_subprocess(kernel_src, gpu_arch);
+                    code          = compile_subprocess(kernel_src, gpu_arch, forced_rtc_helper);
                 }
                 catch(std::exception&)
                 {
@@ -705,10 +706,11 @@ struct PendingCompileCleanup
     const RTCCache::pending_key& key;
 };
 
-std::vector<char> RTCCache::cached_compile(const std::string&          kernel_name,
-                                           const std::string&          gpu_arch_with_flags,
-                                           kernel_src_gen_t            generate_src,
-                                           const std::array<char, 32>& generator_sum)
+std::vector<char> RTCCache::cached_compile(const std::string&                kernel_name,
+                                           const std::string&                gpu_arch_with_flags,
+                                           kernel_src_gen_t                  generate_src,
+                                           const std::array<char, 32>&       generator_sum,
+                                           const std::optional<std::string>& forced_rtc_helper)
 {
 #ifdef ADDRESS_SANITIZER
     // The address sanitizer is reported to work better when we include xnack+, so don't strip this
@@ -741,8 +743,8 @@ std::vector<char> RTCCache::cached_compile(const std::string&          kernel_na
             auto compile = [=](std::promise<std::vector<char>> compile_promise) {
                 try
                 {
-                    compile_promise.set_value(
-                        cached_compile_impl(kernel_name, gpu_arch, generate_src, generator_sum));
+                    compile_promise.set_value(cached_compile_impl(
+                        kernel_name, gpu_arch, generate_src, generator_sum, forced_rtc_helper));
                 }
                 catch(std::exception e)
                 {
@@ -766,7 +768,8 @@ std::vector<char> RTCCache::cached_compile(const std::string&          kernel_na
     {
         // no cache?  just directly compile
         std::promise<std::vector<char>> p;
-        p.set_value(cached_compile_impl(kernel_name, gpu_arch, generate_src, generator_sum));
+        p.set_value(cached_compile_impl(
+            kernel_name, gpu_arch, generate_src, generator_sum, forced_rtc_helper));
         result = p.get_future();
     }
     return result.get();

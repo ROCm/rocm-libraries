@@ -1,0 +1,19 @@
+---
+TRANSA: "N"
+TRANSB: "N"
+DataType: "B"
+DestDataType: "B"
+ComputeDataType: "S"
+ARCH: "gfx950"
+
+StreamK: true
+GA: false
+MACROTILE_OPT: false
+SIZE_OPTION: 0
+ONE_SIZE_PER_CONFIG: true
+CLUSTER: 0
+MI_FILTER: 2
+
+Sizes:
+  - [128, 128, 1, 128]
+  - [256, 256, 1, 256]

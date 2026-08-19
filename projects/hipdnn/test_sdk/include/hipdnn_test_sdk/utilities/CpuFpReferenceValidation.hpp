@@ -35,6 +35,7 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {
@@ -106,6 +107,7 @@ public:
     CpuIntReferenceValidation() = default;
     ~CpuIntReferenceValidation() override = default;
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {

@@ -105,6 +105,19 @@ add_executable(hipblaslt-bench-extop-amax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src
 target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
 target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API)
 
+# CU-contention cotenant helper (clients/scripts/cotenant). A standalone HIP
+# binary, compiled as CXX so it picks up GPU_TARGETS via hip::device like the
+# other clients (the project does not enable the HIP language). POSIX-only
+# (unistd.h, pause(), usleep(), getpid()), so it is not built on Windows.
+if(NOT WIN32)
+    add_executable(hipblaslt-cotenant-kernel "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip")
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip"
+        PROPERTIES LANGUAGE CXX)
+    target_link_libraries(hipblaslt-cotenant-kernel PRIVATE hip::device)
+    target_compile_features(hipblaslt-cotenant-kernel PRIVATE cxx_std_17)
+endif()
+
 if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
     add_executable(hipblaslt-sequence "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_sequence.cpp")
@@ -168,3 +181,8 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/hipblaslt_gentest.py" "${CMAKE
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_common.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_common.yaml" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_template.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_template.yaml" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/bench/sequence.yaml" "${CMAKE_CURRENT_BINARY_DIR}/sequence.yaml" COPYONLY)
+if(NOT WIN32)
+    # Place the launcher next to the built kernel so it auto-finds the binary in
+    # the build tree (matching the installed bin/ layout) without --binary.
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-cotenant" COPYONLY)
+endif()

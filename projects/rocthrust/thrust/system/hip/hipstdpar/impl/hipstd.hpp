@@ -167,6 +167,8 @@ inline constexpr
   unsupported_iterator_category() noexcept
 {}
 
+void __maybe_bind_globals(); // Forward declaration, defined in global_interposition.hpp
+
 namespace detail
 {
 

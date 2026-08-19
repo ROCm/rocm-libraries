@@ -3,7 +3,21 @@
 Documentation for hipFFT is available at
 [https://rocm.docs.amd.com/projects/hipFFT/en/latest/](https://rocm.docs.amd.com/projects/hipFFT/en/latest/).
 
-## Since last release (ROCm 7.14)
+## (Unreleased) hipFFT 1.0.26
+
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
+### Changed
+
+* Modified the rocFFT backend's implementation details of hipFFT so that cuFFT backend's
+  behavior is matched for single-process, multi-device plans configured via
+  `hipfftMakePlan{2,3}d` and `hipfftMakePlanMany`, with respect to data distribution
+  within descriptors. Behaviors are now aligned for unbatched multi-dimensional transforms
+  (in-place only) and all batched transforms (in-place and out-of-place).
+  Multi-device, unbatched one-dimensional transforms remain unimplemented pending
+  further analyses of the exact behavior(s) to be matched.
 
 ## hipFFT 1.0.24 for ROCm 7.14
 

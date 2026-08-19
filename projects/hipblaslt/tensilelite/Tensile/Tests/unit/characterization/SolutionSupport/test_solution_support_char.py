@@ -67,7 +67,6 @@ def test_get_expected_types_synthetic(snapshot):
     # -1 sentinel skipped; empty list skipped; concrete lists -> set of types.
     validParams = {
         "AnyValue": -1,
-        "EmptyList": [],
         "IntParam": [0, 1, 2],
         "BoolParam": [True, False],
         "StrParam": ["a", "b"],

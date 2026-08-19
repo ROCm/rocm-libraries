@@ -1,0 +1,39 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install
+    title: Install hipThreads
+  - file: install/source-build
+    title: Build from source
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/hipThreads-execution-model
+    title: Execution model
+
+- caption: How to
+  entries:
+  - file: how-to/hipThreads-in-a-project
+    title: Add hipThreads to a CMake project
+  - file: how-to/hipThreads-tune-scheduler-concurrency
+    title: Tune scheduler concurrency
+
+- caption: Reference
+  entries:
+  - file: reference/std-to-hip-mapping
+    title: std to hip mapping
+  - file: reference/limitations
+    title: Limitations
+  - file: reference/environment-variables
+    title: Environment variables
+  - file: reference/cpp_api
+    title: API reference
+
+- caption: About
+  entries:
+  - file: license

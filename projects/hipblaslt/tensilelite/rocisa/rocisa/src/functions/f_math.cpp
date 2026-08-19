@@ -34,6 +34,8 @@ namespace rocisa
         int, int, int, int, std::optional<ContinuousRegister>, bool, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivideAndRemainder<int, std::string>(
         int, int, std::string, int, std::optional<ContinuousRegister>, bool, const std::string&);
+    template std::shared_ptr<Module> vectorStaticDivideAndRemainder<std::string, int>(
+        std::string, int, int, int, std::optional<ContinuousRegister>, bool, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivide<int, int>(
         int, int, int, std::optional<ContinuousRegister>, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivide<int, std::string>(
@@ -113,8 +115,10 @@ namespace rocisa
     ExplicitInstantiation(int,         int,         int,         int)
     #undef ExplicitInstantiation
     // template of scalarStaticRemainder
-    template std::shared_ptr<Module> scalarStaticRemainder<int, int>(
+    template std::shared_ptr<Module> scalarStaticRemainder<int, int, int>(
         int, int, int, int, std::optional<ContinuousRegister>, const std::string&);
+    template std::shared_ptr<Module> scalarStaticRemainder<int, int, std::string>(
+        int, int, std::string, int, std::optional<ContinuousRegister>, const std::string&);
     // template of scalarUInt32DivideAndRemainder
     #define ExplicitInstantiation(QREG, DREG, DIVREG, RREG) \
         template std::shared_ptr<Module> scalarUInt32DivideAndRemainder<QREG, DREG, DIVREG, RREG>( \
@@ -361,6 +365,22 @@ void math_func(nb::module_ m)
           nb::arg("tmpVgprRes")  = std::nullopt,
           nb::arg("doRemainder") = true,
           nb::arg("comment")     = "");
+    m.def("vectorStaticDivideAndRemainder",
+          nb::overload_cast<std::string,
+                            int,
+                            int,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            bool,
+                            const std::string&>(
+              &rocisa::vectorStaticDivideAndRemainder<std::string, int>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpVgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
     m.def("vectorStaticDivide",
           nb::overload_cast<int,
                             int,
@@ -553,6 +573,19 @@ void math_func(nb::module_ m)
                             int,
                             std::optional<rocisa::ContinuousRegister>,
                             const std::string&>(&rocisa::scalarStaticRemainder<int, int, int>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes") = std::nullopt,
+          nb::arg("comment")    = "");
+    m.def("scalarStaticRemainder",
+          nb::overload_cast<int,
+                            int,
+                            std::string,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            const std::string&>(&rocisa::scalarStaticRemainder<int, int, std::string>),
           nb::arg("qReg"),
           nb::arg("rReg"),
           nb::arg("dReg"),

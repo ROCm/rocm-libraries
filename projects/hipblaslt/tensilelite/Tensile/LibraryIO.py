@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,8 +35,10 @@ from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
-from typing import IO, NamedTuple, List, Dict, Optional
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
+from typing import IO, NamedTuple, List, Dict, Optional, Any
+from Tensile.Common.GlobalParameters import defaultSolution
+from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
+from copy import deepcopy
 import io
 import os
 import sys
@@ -79,6 +81,9 @@ except ImportError:
 
 # Custom YAML loader that preserves int type for 0 and 1 (doesn't auto-convert to bool)
 # This allows type validation to catch int-vs-bool mismatches in YAML files.
+# It derives from CSafeLoader/SafeLoader and so is safe, but bandit's B506 check only
+# recognises those two names, hence the bare nosec marker at its call sites. Never spell
+# that marker out with its leading hash here, or bandit parses this comment too (SEC-00404).
 class StrictTypeLoader(yamlLoader):
     """YAML loader that does NOT auto-convert 0/1 to False/True.
 
@@ -242,7 +247,7 @@ def write(filename_noExt, data, format="yaml"):
 
 def writeYAML(filename, data, **kwargs):
     """Writes data to file in YAML format."""
-    # set default kwags for yaml dump
+    # set default kwargs for yaml dump
     if "explicit_start" not in kwargs:
         kwargs["explicit_start"] = True
     if "explicit_end" not in kwargs:
@@ -270,8 +275,8 @@ def writeMsgPack(filename, data):
     except FileNotFoundError:
         pass
 
-def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs]) -> None:
-    """Write the YAML header (version, problem sizes, bias/activation args)."""
+def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], gateTypeArgs: Optional[GateTypeArgs] = None) -> None:
+    """Write the YAML header (version, problem sizes, bias/activation/gate args)."""
     f.write("- MinimumRequiredVersion: {}\n".format(__version__))
     f.write("- ProblemSizes:\n")
     if problemSizes:
@@ -286,6 +291,8 @@ def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], bias
         f.write("- ActivationArgs:\n")
         for setting in activationArgs.settingList:
             f.write("  - [Enum: %s]\n"%(setting.activationEnum))
+    if gateTypeArgs:
+        f.write("- GateTypeArgs: [{}]\n".format([gtype.value for gtype in gateTypeArgs.gateTypes]))
 
 def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
     """Find the character offset where solution entries begin, skipping the header."""
@@ -300,7 +307,7 @@ def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
                 if key not in headerKeys:
                     return pos
 
-def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], solutions: list, cache: bool = False) -> None:
+def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], solutions: list, gateTypeArgs: Optional[GateTypeArgs] = None, cache: bool = False) -> None:
     """Writes solution YAML file."""
 
     if cache:
@@ -308,7 +315,7 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
         with timing_context("python_wsol_prepare"):
             with timing_context("python_wsol_prepare_cache"):
                 newHeader = io.StringIO()
-                _writeSolutionsHeader(newHeader, problemSizes, biasTypeArgs, activationArgs)
+                _writeSolutionsHeader(newHeader, problemSizes, biasTypeArgs, activationArgs, gateTypeArgs)
                 newHeader = newHeader.getvalue()
                 headerKeys = {line[2:].split(":")[0].strip()
                               for line in newHeader.splitlines() if line.startswith("- ")}
@@ -341,7 +348,7 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
                 solutionStates.append(solutionState)
     with open(filename, "w") as f:
         with timing_context("python_wsol_header"):
-            _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs)
+            _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs, gateTypeArgs)
         with timing_context("python_wsol_dump"):
             fast_yaml_dump(solutionStates, f)
 
@@ -362,7 +369,7 @@ def read(filename, customizedLoader=False):
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
-        data = yaml.load(f, StrictTypeLoader)
+        data = yaml.load(f, StrictTypeLoader)  # nosec B506
     return data
 
 
@@ -421,7 +428,8 @@ def parseSolutionsData(
         solutionStartIdxInData += 1
     if (len(data) > solutionStartIdxInData) and "ActivationArgs" in data[solutionStartIdxInData]:
         solutionStartIdxInData += 1
-
+    if (len(data) > solutionStartIdxInData) and "GateTypeArgs" in data[solutionStartIdxInData]:
+        solutionStartIdxInData += 1
     solutions = []
     for i in range(solutionStartIdxInData, len(data)):
         solutionState = data[i]
@@ -499,6 +507,98 @@ def parseLibraryLogicFile(
            )
 
 
+def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
+    """Attach runtime ``Library`` fields for dict-format library logic.
+
+    Mirrors :func:`parseLibraryLogicList` (``FreeSize`` / ``Prediction`` vs
+    ``Matching`` + ``Library`` for matching modes). Dict logic on disk uses
+    top-level ``Equality``, ``GridBased``, or ``Range``; those are rewritten to
+    ``LibraryType`` ``Matching`` with the original mode in ``Library["distance"]``
+    (the in-memory shape ``MasterSolutionLibrary.FromOriginalState`` expects).
+    ``FreeSize`` and ``Prediction`` keep their top-level type and get a reduced
+    ``Library`` shape. Other ``LibraryType`` values (e.g. ``MLPClassification``)
+    are left unchanged (mutates *data* in place).
+
+    Args:
+        data: Root mapping loaded from dict-format library logic.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    libraryType = data["LibraryType"]
+    if libraryType in ("FreeSize", "Prediction"):
+        data["Library"] = {}
+        data["Library"]["indexOrder"] = None
+        data["Library"]["table"] = [0, len(data["Solutions"])]
+        data["Library"]["distance"] = None
+    elif libraryType in ("Equality", "GridBased", "Range"):
+        data["LibraryType"] = "Matching"
+        data["Library"] = {}
+        data["Library"]["indexOrder"] = data["IndexOrder"]
+        data["Library"]["table"] = data["ExactLogic"]
+        data["Library"]["distance"] = libraryType
+
+
+def reorderSolutionsParams(data: Dict[str, Any]) -> None:
+    """Reorder solution dict keys after list-to-dict conversion.
+
+    Moves ``SolutionIndex``, ``KernelNameMin``, and ``SolutionNameMin`` to the
+    top of each entry in ``data["Solutions"]``. Used when migrating legacy
+    list-format logic to dict format and after :func:`reorderSolutionDictForDictMerge`.
+
+    Args:
+        data: Dict-format library logic data (mutated in place). Must contain
+            a ``"Solutions"`` list of per-kernel mappings.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    keys = ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
+    sols = data.get("Solutions")
+    if not sols:
+        return
+    for solIdx in range(len(sols)):
+        vals: Dict[str, Any] = {}
+        for key in keys:
+            if key in sols[solIdx]:
+                vals[key] = sols[solIdx].pop(key)
+        sols[solIdx] = {**vals, **sols[solIdx]}
+
+
+def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Lay out one solution dict for dict-format library logic YAML.
+
+    Sorts top-level keys (and sorts ``InternalSupportParams`` when it is a
+    dict), then applies :func:`reorderSolutionsParams` so the three naming
+    fields lead each solution block, matching merge output.
+
+    Args:
+        state: One solution entry after library-logic serialization.
+
+    Returns:
+        New mapping with reordered keys (does not mutate *state*).
+
+    Raises:
+        None.
+    """
+    out: Dict[str, Any] = {}
+    for key in sorted(state.keys()):
+        value = state[key]
+        if key == "InternalSupportParams" and isinstance(value, dict):
+            out[key] = dict(sorted(value.items()))
+        else:
+            out[key] = value
+    bundle = {"Solutions": [out]}
+    reorderSolutionsParams(bundle)
+    return bundle["Solutions"][0]
+
+
 def parseLibraryLogicData(
         data,
         srcFile,
@@ -514,8 +614,10 @@ def parseLibraryLogicData(
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
 
-    if isinstance(data, List):
+    if isinstance(data, list):
         data = parseLibraryLogicList(data, srcFile)
+    elif isinstance(data, dict):
+        prepareLibraryLogicDict(data)
 
     if "CUCount" not in data:
         data["CUCount"] = None
@@ -546,9 +648,28 @@ def parseLibraryLogicData(
         srcFile=srcFile,
         raiseOnTypeMismatch=False,
     )
+    # Per-file defaults: fill missing solution keys from this first, then defaultSolution.
+    libDefaults: dict[str, Any] = (
+        dict(data["DefaultSolution"])
+        if isinstance(data.get("DefaultSolution"), dict)
+        else {}
+    )
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
+        # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
+        for key, val in libDefaults.items():
+            if key not in solutionState:
+                solutionState[key] = val
+        for key, val in defaultSolution.items():
+            if key not in solutionState:
+                solutionState[key] = val
+
+        if "KernelLanguage" not in solutionState.keys():
+            solutionState["KernelLanguage"] = defaultSolution["KernelLanguage"]
+        if "CustomKernelName" not in solutionState.keys():
+            solutionState["CustomKernelName"] = defaultSolution["CustomKernelName"]
+
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
         solutionState["CUCount"] = data["CUCount"]
@@ -624,20 +745,28 @@ def parseLibraryLogicList(data, srcFile="?"):
     rv = {}
     rv["MinimumRequiredVersion"] = data[0]["MinimumRequiredVersion"]
     rv["ScheduleName"] = data[1]
-    rv["DeviceNames"] = data[3]
-    rv["ProblemType"] = data[4]
-    rv["Solutions"] = data[5]
 
-    if type(data[2]) is dict:
+    if isinstance(data[2], dict):
         rv["ArchitectureName"] = data[2]["Architecture"]
         rv["CUCount"] = data[2]["CUCount"]
     else:
         rv["ArchitectureName"] = data[2]
         rv["CUCount"] = None
 
-    # TODOBEN: figure out what to do with these...
+    rv["DeviceNames"] = data[3]
+    rv["ProblemType"] = data[4]
+
+    if len(data) > 12 and data[12]:
+        rv["DefaultSolution"] = data[12]
+    else:
+        rv["DefaultSolution"] = dict(sorted(defaultSolution.items()))
+
+    rv["Solutions"] = data[5]
+    rv["IndexOrder"] = data[6]
     rv["ExactLogic"] = data[7]
     rv["RangeLogic"] = data[8]
+    # Tile-selection logic (list index 9); usually None in matching-table files.
+    rv["TileSelectionIndices"] = data[9] if len(data) > 9 else None
 
     # optional fields
     if len(data) > 10 and data[10]:
@@ -650,14 +779,8 @@ def parseLibraryLogicList(data, srcFile="?"):
     else:
         printExit("Library logic file {} is missing required field matching property." \
                 .format(srcFile))
-    if libraryType == "FreeSize":
-        rv["LibraryType"] = "FreeSize"
-        rv["Library"] = {}
-        rv["Library"]["indexOrder"] = None
-        rv["Library"]["table"] = [0, len(data[5])]
-        rv["Library"]["distance"] = None
-    elif libraryType == "Prediction":
-        rv["LibraryType"] = "Prediction"
+    if libraryType in ("FreeSize", "Prediction"):
+        rv["LibraryType"] = libraryType
         rv["Library"] = {}
         rv["Library"]["indexOrder"] = None
         rv["Library"]["table"] = [0, len(data[5])]
@@ -674,21 +797,45 @@ def parseLibraryLogicList(data, srcFile="?"):
 
 def rawLibraryLogic(data):
     """Returns a tuple of the data in a library logic file."""
-    versionString = data[0]
-    scheduleName = data[1]
-    architectureName = data[2]
-    deviceNames = data[3]
-    problemTypeState = data[4]
-    solutionStates = data[5]
-    indexOrder = data[6]
-    exactLogic = data[7]
-    rangeLogic = data[8]
-    otherFields = []
+    if isinstance(data, dict):
+        versionString = {"MinimumRequiredVersion": data.get("MinimumRequiredVersion")}
+        scheduleName = data.get("ScheduleName")
 
-    dataLength = len(data)
-    if dataLength > 9:
-        for idx in range(9, dataLength):
-            otherFields.append(data[idx])
+        architectureName = data.get("ArchitectureName")
+        cuCount = data.get("CUCount")
+        if cuCount is not None:
+            architectureName = {"Architecture": architectureName, "CUCount": cuCount}
+
+        deviceNames = data.get("DeviceNames")
+        problemTypeState = data.get("ProblemType")
+        solutionStates = data.get("Solutions")
+        indexOrder = data.get("IndexOrder")
+        exactLogic = data.get("ExactLogic")
+        rangeLogic = data.get("RangeLogic")
+
+        # Preserve legacy optional-field ordering (list format indexes 9..12).
+        otherFields = [
+            data.get("TileSelectionIndices"),
+            data.get("PerfMetric"),
+            data.get("LibraryType"),
+            data.get("DefaultSolution"),
+        ]
+    else:
+        versionString = data[0]
+        scheduleName = data[1]
+        architectureName = data[2]
+        deviceNames = data[3]
+        problemTypeState = data[4]
+        solutionStates = data[5]
+        indexOrder = data[6]
+        exactLogic = data[7]
+        rangeLogic = data[8]
+        otherFields = []
+
+        dataLength = len(data)
+        if dataLength > 9:
+            for idx in range(9, dataLength):
+                otherFields.append(data[idx])
 
     return (versionString, scheduleName, architectureName, deviceNames,\
             problemTypeState, solutionStates, indexOrder, exactLogic, rangeLogic, otherFields)
@@ -717,106 +864,113 @@ def getCUCount() -> int:
 
     return int(CU)
 
-def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
-    """Creates the data for a library logic file suitable for writing to YAML."""
+def createLibraryLogic(
+    schedulePrefix: str,
+    architectureName: str,
+    deviceNames: list[str],
+    libraryType: str,
+    logicTuple: tuple[Any, ...],
+) -> dict[str, Any]:
+    """Build dict-format library logic data for YAML output.
+
+    Emits the root mapping written for YAML (``ProblemType``, ``Solutions``,
+    ``ExactLogic``, etc.) including sorted ``ProblemType`` keys and merge-aligned
+    solution key layout. ``DefaultSolution`` is a sorted snapshot of
+    ``defaultSolution`` at write time; any solution field equal to that snapshot
+    is omitted from per-solution dicts so defaults live only under
+    ``DefaultSolution``.
+
+    Args:
+        schedulePrefix: Schedule name string (e.g. ``"tensilelite"``).
+        architectureName: Lowercase GPU architecture tag (e.g. ``"gfx950"``).
+        deviceNames: ROCm / Tensile device name strings for this logic file.
+        libraryType: Library tuning mode (e.g. ``"GridBased"``, ``"Equality"``).
+        logicTuple: ``(problemType, solutions, indexOrder, exactLogic, rangeLogic,
+            optional tileSelectionSolutions, optional tileSelectionIndices,
+            perfMetric, ...)`` as produced by the analysis pipeline.
+
+    Returns:
+        Root dict suitable for :func:`writeYAML`.
+
+    Raises:
+        None.
+    """
     problemType = logicTuple[0]
-    solutions = logicTuple[1]
-    indexOrder = logicTuple[2]
-    exactLogic = logicTuple[3]
-    rangeLogic = logicTuple[4]
+    solutions   = logicTuple[1]
+    indexOrder  = logicTuple[2]
+    exactLogic  = logicTuple[3]
+    rangeLogic  = logicTuple[4]
 
-    tileSelection = False
-    if len(logicTuple) > 5 and logicTuple[5]:
-        tileSelection = True
+    tileSelectionSolutions = logicTuple[5] if len(logicTuple) > 5 else None
+    tileSelectionIndices = logicTuple[6] if len(logicTuple) > 6 else None
+    tileSelection = tileSelectionIndices is not None
+    tileSelectionLogic = (
+        {"TileSelectionIndices": tileSelectionIndices} if tileSelection else None
+    )
+    CUCount = getCUCount()
 
-    data = []
-    # Tensile version
-    data.append({"MinimumRequiredVersion": __version__})
-    # schedule name
-    data.append(schedulePrefix)  # change from Tensile to vega10
-    # schedule architecture name and get CU count
-    CUCount=getCUCount()
-    data.append({"Architecture": architectureName, "CUCount": CUCount} if architectureName=="gfx942" and CUCount and CUCount!=304 else architectureName)
-    # schedule device names
-    data.append(deviceNames)
-    # problem type
-    problemTypeState = problemType.state
-    problemTypeState["DataType"] = \
-            problemTypeState["DataType"].value
-    problemTypeState["MacDataTypeA"] = \
-            problemTypeState["MacDataTypeA"].value
-    problemTypeState["MacDataTypeB"] = \
-            problemTypeState["MacDataTypeB"].value
-    problemTypeState["DataTypeA"] = \
-            problemTypeState["DataTypeA"].value
-    problemTypeState["DataTypeB"] = \
-            problemTypeState["DataTypeB"].value
-    problemTypeState["DataTypeE"] = \
-            problemTypeState["DataTypeE"].value
-    problemTypeState["DataTypeAmaxD"] = \
-            problemTypeState["DataTypeAmaxD"].value
-    problemTypeState["DestDataType"] = \
-            problemTypeState["DestDataType"].value
-    problemTypeState["ComputeDataType"] = \
-            problemTypeState["ComputeDataType"].value
-    problemTypeState["BiasDataTypeList"] = \
-            [btype.value for btype in problemTypeState["BiasDataTypeList"]]
-    problemTypeState["ActivationComputeDataType"] = \
-            problemTypeState["ActivationComputeDataType"].value
-    problemTypeState["ActivationType"] = \
-            problemTypeState["ActivationType"].value
-    problemTypeState["F32XdlMathOp"] = \
-            problemTypeState["F32XdlMathOp"].value
-    if "DataTypeMetadata" in problemTypeState:
-        problemTypeState["DataTypeMetadata"] = \
-                problemTypeState["DataTypeMetadata"].value
-    if "DataTypeMXSA" in problemTypeState:
-        problemTypeState["DataTypeMXSA"] = \
-                problemTypeState["DataTypeMXSA"].value
-    if "DataTypeMXSB" in problemTypeState:
-        problemTypeState["DataTypeMXSB"] = \
-                problemTypeState["DataTypeMXSB"].value
-    data.append(problemTypeState)
-    # solutions
-    solutionList = []
+    fileDefaultSolution = dict(sorted(defaultSolution.items()))
+
+    # Avoid mutating the caller-owned ProblemType object while serializing.
+    problemTypeState = deepcopy(problemType.state)
+    for field in ("DataType", "MacDataTypeA", "MacDataTypeB", "DataTypeA", "DataTypeB",
+                  "DataTypeE", "DataTypeAmaxD", "DestDataType", "ComputeDataType",
+                  "ActivationComputeDataType", "ActivationType", "F32XdlMathOp"):
+        problemTypeState[field] = problemTypeState[field].value
+    problemTypeState["BiasDataTypeList"] = [b.value for b in problemTypeState["BiasDataTypeList"]]
+    if "GateResidualDataTypeList" in problemTypeState:
+        problemTypeState["GateResidualDataTypeList"] = [
+            b.value for b in problemTypeState["GateResidualDataTypeList"]
+        ]
+    for opt in ("DataTypeMetadata", "DataTypeMXSA", "DataTypeMXSB"):
+        if opt in problemTypeState:
+            problemTypeState[opt] = problemTypeState[opt].value
+
+    def _removeDefaultVals(params: Dict[str, Any]) -> None:
+        for k in list(params.keys()):
+            if k in fileDefaultSolution and params[k] == fileDefaultSolution[k]:
+                del params[k]
+
+    solutionList: list[Dict[str, Any]] = []
     for solution in solutions:
         solutionState = solution.getAttributes()
-        del solutionState["ProblemType"]
+        _removeDefaultVals(solutionState)
         isa = solutionState["ISA"]
         solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+        if "ProblemType" in solutionState:
+            del solutionState["ProblemType"]
         solutionList.append(solutionState)
 
-    if tileSelection:
-        tileSolutions = logicTuple[5]
-        for solution in tileSolutions:
+    if tileSelectionSolutions:
+        for solution in tileSelectionSolutions:
             solutionState = solution.getAttributes()
-            del solutionState["ProblemType"]
+            _removeDefaultVals(solutionState)
+            if "ProblemType" in solutionState:
+                del solutionState["ProblemType"]
             solutionList.append(solutionState)
 
-    data.append(solutionList)
-    # index order
-    data.append(indexOrder)
+    exactLogicList = [[list(k), v] for k, v in exactLogic.items()] if exactLogic else None
+    perfMetric = logicTuple[7]
 
-    # exactLogic
-    exactLogicList = []
-    if exactLogic:
-        for key in exactLogic:
-            exactLogicList.append([list(key), exactLogic[key]])
-        data.append(exactLogicList)
-    else:
-        data.append(None)
-
-    # rangeLogic
-    data.append(rangeLogic)
-
-    if tileSelection:
-        tileSelectionLogic = {}
-        tileSelectionIndices = logicTuple[6]
-        tileSelectionLogic["TileSelectionIndices"] = tileSelectionIndices
-        data.append(tileSelectionLogic)
-    else:
-        data.append(None)
-
-    data.append(logicTuple[7]) # PerfMetric
-    data.append(libraryType) # LibraryType
+    problemTypeForDict = dict(sorted(problemTypeState.items()))
+    solutionsForDict = [
+        reorderSolutionDictForDictMerge(dict(s)) for s in solutionList
+    ]
+    cuCount = CUCount if architectureName == "gfx942" and CUCount and CUCount != 304 else None
+    data: dict[str, Any] = {
+        "MinimumRequiredVersion": __version__,
+        "ScheduleName": schedulePrefix,
+        "ArchitectureName": architectureName,
+        "CUCount": cuCount,
+        "DeviceNames": deviceNames,
+        "ProblemType": problemTypeForDict,
+        "DefaultSolution": fileDefaultSolution,
+        "Solutions": solutionsForDict,
+        "IndexOrder": indexOrder,
+        "ExactLogic": exactLogicList,
+        "RangeLogic": rangeLogic,
+        "TileSelectionIndices": tileSelectionLogic,
+        "PerfMetric": perfMetric,
+        "LibraryType": libraryType,
+    }
     return data

@@ -1,0 +1,42 @@
+---
+
+# ============================================================
+# REQUIRED FIELDS — must be provided by the user
+# ============================================================
+
+# Matrix transpose options: 'T' or 'N'
+TRANSA: 'N'
+TRANSB: 'N'
+
+# Data types.  Valid: H/B/I8/S/D/C/Z/F8/F8B8/B8F8/X/X1
+DataType: "B"
+DestDataType: "B"
+ComputeDataType: "S"
+
+# Hardware target. Valid: gfx950, gfx942, gfx942_80cu, gfx942_38cu, gfx942_20cu, gfx942_228cu
+ARCH: "gfx950"
+
+# Sizes as [M, N, B, K] lists (required when SIZE_OPTION=0, the default)
+Sizes:
+    - [1024, 1024, 1, 1024]
+    - [4096, 4096, 1, 4096]
+
+# ============================================================
+# OPTIONAL FIELDS — defaults shown below
+# ============================================================
+
+# StreamK: True            # True=StreamK (default), False=DataParallel
+# GA: True                 # True=Ductile/GA tuning, False=exhaustive
+# MACROTILE_OPT: False     # Origami MT tuning (GA only)
+# MT_DU: None              # Fixed [MT0, MT1, DU] for MACROTILE_OPT
+# USE_HEURISTICS: False    # Refined heuristic param lists per size
+# SIZE_OPTION: 0           # 0=size list, 1=grid
+# ONE_SIZE_PER_CONFIG: True # One size per output config file
+# CMS: True                # CMS optimization
+# CMS_PRIORITY: True       # Prioritize CMS tiles
+# MI_FILTER: 2             # MI filtering aggressiveness (0=none, 1=moderate, 2=aggressive)
+# EPILOGUES: True          # Include epilogues in tuning
+# CLUSTER: 0               # 0=all-in-one, 1=cluster by top MI
+# MAX_NUM_KERNELS_PER_CONFIG: 180000000  # Kernel cap per config (non-GA only; ignored in GA mode)
+
+# GRID_DENSITY: 4          # Grid density 1-5 (only for SIZE_OPTION=1)

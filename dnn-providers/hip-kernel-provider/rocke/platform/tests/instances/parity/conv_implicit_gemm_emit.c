@@ -94,6 +94,38 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->chiplet_chunk_size = 64;
         *arch = "gfx950";
         return 0;
+    case 10:
+        /* cshuffle with cshuffle_no_alias=True (idx 2 shape). */
+        spec->problem = rocke_conv_problem_default(16, 112, 112, 128, 128, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->cshuffle_no_alias = true;
+        *arch = "gfx950";
+        return 0;
+    case 11:
+        /* basic pipeline, default epilogue. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        *arch = "gfx950";
+        return 0;
+    case 12:
+        /* basic pipeline, cshuffle epilogue. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
+    case 13:
+        /* Grouped conv: groups=4, C=64->cpg=16, K=64->kpg=16. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        *arch = "gfx950";
+        return 0;
+    case 14:
+        /* Cardinality-grouped conv: groups=32, C=256->cpg=8, K=256->kpg=8. */
+        spec->problem = rocke_conv_problem_make(2, 8, 8, 256, 256, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 32;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

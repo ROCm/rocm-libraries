@@ -337,13 +337,14 @@ typedef enum rocblaslt_matrix_layout_attribute_
     ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET
     = 1, /**< stride between consecutive matrices in a batch expressed in terms
             of matrix elements. */
-    ROCBLASLT_MATRIX_LAYOUT_TYPE  = 2,
-    ROCBLASLT_MATRIX_LAYOUT_ORDER = 3,
-    ROCBLASLT_MATRIX_LAYOUT_ROWS  = 4,
-    ROCBLASLT_MATRIX_LAYOUT_COLS  = 5,
-    ROCBLASLT_MATRIX_LAYOUT_LD    = 6,
+    ROCBLASLT_MATRIX_LAYOUT_TYPE       = 2,
+    ROCBLASLT_MATRIX_LAYOUT_ORDER      = 3,
+    ROCBLASLT_MATRIX_LAYOUT_ROWS       = 4,
+    ROCBLASLT_MATRIX_LAYOUT_COLS       = 5,
+    ROCBLASLT_MATRIX_LAYOUT_LD         = 6,
     ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
-    ROCBLASLT_MATRIX_LAYOUT_MAX   = 8
+    ROCBLASLT_MATRIX_LAYOUT_OFFSET     = 8,
+    ROCBLASLT_MATRIX_LAYOUT_MAX        = 9
 } rocblaslt_matrix_layout_attribute;
 
 typedef enum
@@ -523,6 +524,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_a;
     size_t             col_stride_a;
     size_t             batch_stride_a;
+    int64_t            batch_offset_a;
 
     hipDataType        b_type;
     const void*        B;
@@ -530,6 +532,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_b;
     size_t             col_stride_b;
     size_t             batch_stride_b;
+    int64_t            batch_offset_b;
 
     const void* beta;
 
@@ -539,6 +542,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_c;
     size_t             col_stride_c;
     size_t             batch_stride_c;
+    int64_t            batch_offset_c;
 
     hipDataType  d_type;
     void*        D;
@@ -546,6 +550,7 @@ struct RocblasltContractionProblem
     size_t       row_stride_d;
     size_t       col_stride_d;
     size_t       batch_stride_d;
+    int64_t      batch_offset_d;
 
     void*        E;
     void* const* batch_E;
@@ -612,22 +617,26 @@ struct RocblasltContractionProblem
                                 const void* const*     batch_A,
                                 int64_t                ld_a,
                                 int64_t                batch_stride_a,
+                                int64_t                batch_offset_a,
                                 hipDataType            b_type,
                                 const void*            B,
                                 const void* const*     batch_B,
                                 int64_t                ld_b,
                                 int64_t                batch_stride_b,
+                                int64_t                batch_offset_b,
                                 const void*            beta,
                                 hipDataType            c_type,
                                 const void*            C,
                                 const void* const*     batch_C,
                                 int64_t                ld_c,
                                 int64_t                batch_stride_c,
+                                int64_t                batch_offset_c,
                                 hipDataType            d_type,
                                 void*                  D,
                                 void* const*           batch_D,
                                 int64_t                ld_d,
                                 int64_t                batch_stride_d,
+                                int64_t                batch_offset_d,
                                 void*                  E,
                                 void* const*           batch_E,
                                 int64_t                ld_e,

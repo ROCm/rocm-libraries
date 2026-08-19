@@ -8,11 +8,15 @@
 Install rocALUTION
 ********************************
 
+.. _linux-installation:
+
 You can install rocALUTION as part of the AMD ROCm software stack on Linux,
 or build it from source. Install ROCm before you build or use rocALUTION.
 
 When you install rocALUTION through ROCm, you get a single-node, accelerator-enabled library.
 If you need a different configuration, such as multi-node or distributed execution, build rocALUTION from source.
+
+.. _windows-installation:
 
 Prerequisites
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

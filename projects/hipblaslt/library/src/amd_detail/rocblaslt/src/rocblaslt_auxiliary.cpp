@@ -367,8 +367,9 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
 {
     int8_t      dummy;
     const void* dummy_ptr = &dummy;
-    int64_t     m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
-        batch_stride_d, batch_stride_e;
+    int64_t     m, n, k, lda, ldb, ldc, ldd, lde;
+    int64_t     batch_stride_a, batch_stride_b, batch_stride_c, batch_stride_d, batch_stride_e;
+    int64_t     batch_offset_a, batch_offset_b, batch_offset_c, batch_offset_d;
     int32_t    bias_stride = matmul_descr->bias_stride;
     hipDataType            bias_type;
     hipDataType            aux_type;
@@ -396,15 +397,19 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                                            a_type,
                                                            lda,
                                                            batch_stride_a,
+                                                           batch_offset_a,
                                                            b_type,
                                                            ldb,
                                                            batch_stride_b,
+                                                           batch_offset_b,
                                                            c_type,
                                                            ldc,
                                                            batch_stride_c,
+                                                           batch_offset_c,
                                                            d_type,
                                                            ldd,
                                                            batch_stride_d,
+                                                           batch_offset_d,
                                                            lde,
                                                            batch_stride_e,
                                                            bias,
@@ -460,22 +465,26 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         nullptr,
                                         lda,
                                         batch_stride_a,
+                                        batch_offset_a,
                                         b_type,
                                         nullptr,
                                         nullptr,
                                         ldb,
                                         batch_stride_b,
+                                        batch_offset_b,
                                         beta,
                                         c_type,
                                         nullptr,
                                         nullptr,
                                         ldc,
                                         batch_stride_c,
+                                        batch_offset_c,
                                         d_type,
                                         nullptr,
                                         nullptr,
                                         ldd,
                                         batch_stride_d,
+                                        batch_offset_d,
                                         e,
                                         nullptr,
                                         lde,
@@ -634,7 +643,7 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed
  * to all subsequent library function calls that involve the matrix.
- * It should be destroyed at the end using rocblaslt_matrix_layout_destory().
+ * It should be destroyed at the end using rocblaslt_matrix_layout_destroy().
  *******************************************************************************/
 rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDescr,
                                                 hipDataType              valueType,
@@ -682,7 +691,7 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
 /********************************************************************************
  * \brief destroy matrix descriptor
  *******************************************************************************/
-rocblaslt_status rocblaslt_matrix_layout_destory(const rocblaslt_matrix_layout matDescr)
+rocblaslt_status rocblaslt_matrix_layout_destroy(const rocblaslt_matrix_layout matDescr)
 {
     if(matDescr == nullptr)
     {
@@ -804,8 +813,17 @@ rocblaslt_status rocblaslt_matrix_layout_set_attribute(rocblaslt_matrix_layout  
                 {
                     log_error(__func__, "invalid buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
-                }                 
-                break;                
+                }
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
+                if(sizeof(int64_t) <= sizeInBytes)
+                    memcpy(&matLayout->batch_offset, buf, sizeof(int64_t));
+                else
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             default:
                 log_error(__func__, "invalid attribute", attr);
                 return rocblaslt_status_invalid_value;
@@ -892,6 +910,16 @@ rocblaslt_status rocblaslt_matrix_layout_get_attribute(rocblaslt_matrix_layout  
                 }
                 memcpy(buf, &matLayout->batch_mode, sizeof(int32_t));                         
                 break;                
+            case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int64_t);
+                if(sizeInBytes < sizeof(int64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->batch_offset, sizeof(int64_t));
+                break;
             default:
                 log_error(__func__, "invalid attribute", attr);
                 return rocblaslt_status_invalid_value;

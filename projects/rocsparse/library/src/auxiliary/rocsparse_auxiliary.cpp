@@ -577,11 +577,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, handle);
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
-    *handle = new _rocsparse_handle(static_cast<hipStream_t>(0));
-#else
     *handle = new _rocsparse_handle();
-#endif
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -1433,6 +1429,19 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_bsrmv_info(dest_bsrmv_info, src_bsrmv_info));
     }
 
+    rocsparse_coomv_info src_coomv_info  = src->get_coomv_info();
+    rocsparse_coomv_info dest_coomv_info = dest->get_coomv_info();
+    if(src_coomv_info != nullptr)
+    {
+        if(dest_coomv_info == nullptr)
+        {
+            dest_coomv_info = new _rocsparse_coomv_info();
+            dest->set_coomv_info(dest_coomv_info);
+        }
+
+        dest_coomv_info->max_nnz_per_row = src_coomv_info->max_nnz_per_row;
+    }
+
     if(src->csrgemm_info != nullptr)
     {
         if(dest->csrgemm_info == nullptr)
@@ -1855,7 +1864,6 @@ catch(...)
 // LCOV_EXCL_STOP
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1876,7 +1884,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -1924,7 +1931,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
 }
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1947,7 +1953,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -4043,8 +4048,9 @@ try
     ROCSPARSE_CHECKARG(
         3, csr_val, descr->nnz > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
+    // The row pointer is being reassigned, so the cached line-length profile
+    // (used by the default SpMM/SpMV algorithm selection) is now stale.
+    descr->line_profile.known = false;
 
     descr->row_data = csr_row_ptr;
     descr->col_data = csr_col_ind;
@@ -4083,8 +4089,9 @@ try
     ROCSPARSE_CHECKARG(
         3, csc_val, descr->nnz > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
+    // The column pointer is being reassigned, so the cached line-length profile
+    // (used by the default SpMM/SpMV algorithm selection) is now stale.
+    descr->line_profile.known = false;
 
     descr->row_data = csc_row_ind;
     descr->col_data = csc_col_ptr;
@@ -4150,9 +4157,6 @@ try
     ROCSPARSE_CHECKARG(
         3, bsr_val, descr->nnz > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
-
     descr->row_data = bsr_row_ptr;
     descr->col_data = bsr_col_ind;
     descr->val_data = bsr_val;
@@ -4191,9 +4195,6 @@ try
                        bell_val,
                        brows * descr->ell_cols > 0 && bell_val == nullptr,
                        rocsparse_status_invalid_pointer);
-
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
 
     descr->col_data = bell_col_ind;
     descr->val_data = bell_val;
@@ -4629,6 +4630,34 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_ell_set_strided_batch sets the ELL sparse matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_ell_set_strided_batch(rocsparse_spmat_descr descr,
+                                                 rocsparse_int         batch_count,
+                                                 int64_t               batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
+
+    descr->batch_count  = batch_count;
+    descr->batch_stride = batch_stride;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_spmat_get_attribute gets the sparse matrix attribute.
  *******************************************************************************/
 rocsparse_status rocsparse_spmat_get_attribute(rocsparse_const_spmat_descr descr,
@@ -4818,6 +4847,54 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_dnvec_descr_create_scalar creates a descriptor for a single
+ * scalar, recording whether the scalar lives in host or device memory. It is a
+ * convenience wrapper meant to feed scalar arguments (e.g. the scaling factor of
+ * rocsparse_spmat_scale) as a self-describing dense vector descriptor.
+ *
+ * Gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
+ *******************************************************************************/
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
+rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
+                                                     rocsparse_dnvec_descr* descr,
+                                                     rocsparse_pointer_mode pointer_mode,
+                                                     rocsparse_datatype     data_type,
+                                                     const void*            const_values,
+                                                     void*                  values,
+                                                     rocsparse_error*       p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // p_error is reserved for forward compatibility and is not populated yet.
+    (void)p_error;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_ENUM(2, pointer_mode);
+    ROCSPARSE_CHECKARG_ENUM(3, data_type);
+    ROCSPARSE_CHECKARG_POINTER(4, const_values);
+    ROCSPARSE_CHECKARG(
+        5, values, (values != nullptr && values != const_values), rocsparse_status_invalid_pointer);
+
+    static constexpr int64_t size        = 1;
+    static constexpr int64_t batch_count = 1;
+    static constexpr int64_t inc         = 1;
+    static constexpr int64_t batch_dist  = 0;
+    descr[0]                             = new _rocsparse_dnvec_descr(
+        batch_count, size, data_type, const_values, values, inc, batch_dist);
+    descr[0]->pointer_mode = pointer_mode;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+#endif /* ROCSPARSE_WITH_SPMAT_SCALE */
 
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.
