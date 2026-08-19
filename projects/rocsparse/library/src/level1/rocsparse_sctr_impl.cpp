@@ -68,7 +68,14 @@ rocsparse_status rocsparse::sctr_template(rocsparse_handle     handle,
     hipStream_t stream = handle->stream;
 
 #define SCTR_DIM 512
-    dim3 sctr_blocks((nnz - 1) / SCTR_DIM + 1);
+    // Clamp the grid dimension against the device limit; the kernel uses a
+    // grid-stride loop so any grid size covers the full range of nnz.
+    int64_t num_blocks = (nnz - 1) / SCTR_DIM + 1;
+    if(num_blocks > handle->properties.maxGridSize[0])
+    {
+        num_blocks = handle->properties.maxGridSize[0];
+    }
+    dim3 sctr_blocks(num_blocks);
     dim3 sctr_threads(SCTR_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sctr_kernel<SCTR_DIM, I, T>),
