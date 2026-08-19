@@ -4,18 +4,18 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <roc/host_validation/backends/tiled.hpp>
+#include <roc/host_validation/backends/blocked.hpp>
 #include <roc/host_validation/comparison.hpp>
 #include <span>
 #include <stdexcept>
 #include <vector>
 
 namespace {
+using roc::host_validation::BlockedGemmBackend;
 using roc::host_validation::GemmRequest;
 using roc::host_validation::GemmRunInfo;
 using roc::host_validation::OutputSelection;
 using roc::host_validation::Tensor;
-using roc::host_validation::TiledGemmBackend;
 
 constexpr float untouchedValue = -12345.0f;
 
@@ -81,34 +81,34 @@ void configureFinalizer(GemmRequest& problem, const std::vector<float>& columnBi
 }
 
 struct ParityRunInfo {
-    GemmRunInfo canonical;
-    GemmRunInfo tiled;
+    GemmRunInfo pointwise;
+    GemmRunInfo blocked;
 };
 
-ParityRunInfo runParity(GemmRequest& canonicalProblem, GemmRequest& tiledProblem,
-                        const roc::host_validation::Tensor& canonicalOutput,
-                        const roc::host_validation::Tensor& tiledOutput,
+ParityRunInfo runParity(GemmRequest& pointwiseProblem, GemmRequest& blockedProblem,
+                        const roc::host_validation::Tensor& pointwiseOutput,
+                        const roc::host_validation::Tensor& blockedOutput,
                         const char* mismatchMessage) {
     using namespace roc::host_validation;
 
-    TiledGemmBackend backend;
-    const GemmResult canonical =
-        referenceGemm(canonicalProblem, {
-                                            .backend = GemmBackend::Canonical,
+    BlockedGemmBackend backend;
+    const GemmResult pointwise =
+        referenceGemm(pointwiseProblem, {
+                                            .backend = GemmBackend::Pointwise,
                                             .requireRequestedBackend = true,
                                         });
-    const GemmResult tiled = referenceGemm(tiledProblem,
-                                           {
-                                               .backend = GemmBackend::Tiled,
-                                               .requireRequestedBackend = true,
-                                           },
-                                           &backend);
-    require(tiled.runInfo.backendUsed == GemmBackend::Tiled,
-            "Tiled backend run information mismatch.");
-    require(compare(tiledOutput, canonicalOutput).passed(), mismatchMessage);
+    const GemmResult blocked = referenceGemm(blockedProblem,
+                                             {
+                                                 .backend = GemmBackend::Blocked,
+                                                 .requireRequestedBackend = true,
+                                             },
+                                             &backend);
+    require(blocked.runInfo.backendUsed == GemmBackend::Blocked,
+            "Blocked backend run information mismatch.");
+    require(compare(blockedOutput, pointwiseOutput).passed(), mismatchMessage);
     return {
-        .canonical = canonical.runInfo,
-        .tiled = tiled.runInfo,
+        .pointwise = pointwise.runInfo,
+        .blocked = blocked.runInfo,
     };
 }
 
@@ -121,11 +121,11 @@ void requireOnlySelectedOutputsStored(const roc::host_validation::Tensor& output
         if (!std::binary_search(selected.begin(), selected.end(), index))
             require(output.loadAs<float>({index / output.shape()[1], index % output.shape()[1]}) ==
                         untouchedValue,
-                    "Tiled backend modified an unselected output element.");
+                    "Blocked backend modified an unselected output element.");
     }
 }
 
-void testFinalizerAndSmallEdgeTile() {
+void testFinalizerAndSmallEdgeBlock() {
     using namespace roc::host_validation;
 
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
@@ -133,7 +133,7 @@ void testFinalizerAndSmallEdgeTile() {
     const std::array<float, 4> c{1, 1, 1, 1};
     const std::array<float, 2> bias{1, -1000};
     Tensor d(ScalarType::Float32, Shape{2, 2});
-    TiledGemmBackend backend;
+    BlockedGemmBackend backend;
 
     GemmRequest problem(
         GemmOperand(
@@ -152,53 +152,54 @@ void testFinalizerAndSmallEdgeTile() {
 
     require(queryGemmSupport(problem,
                              {
-                                 .backend = GemmBackend::Tiled,
+                                 .backend = GemmBackend::Blocked,
                                  .requireRequestedBackend = true,
                              },
                              &backend)
                 .supported,
-            "Tiled backend unexpectedly rejected the test GEMM.");
+            "Blocked backend unexpectedly rejected the test GEMM.");
     const GemmResult full = referenceGemm(problem,
                                           {
-                                              .backend = GemmBackend::Tiled,
+                                              .backend = GemmBackend::Blocked,
                                               .requireRequestedBackend = true,
                                           },
                                           &backend);
-    require(full.runInfo.outputElementsComputed == 4,
-            "Full tiled GEMM reported the wrong computed output count.");
+    require(full.runInfo.outputElementsWritten == 4 && full.runInfo.outputElementsCovered == 4,
+            "Full blocked GEMM reported the wrong output counts.");
     const Tensor expected =
         Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{120, 0, 132, 0});
-    require(compare(d, expected).passed(), "Tiled backend result mismatch.");
+    require(compare(d, expected).passed(), "Blocked backend result mismatch.");
 
     fillTensor(d, untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({0});
     const GemmResult selected = referenceGemm(problem,
                                               {
-                                                  .backend = GemmBackend::Tiled,
+                                                  .backend = GemmBackend::Blocked,
                                                   .requireRequestedBackend = true,
                                               },
                                               &backend);
-    require(selected.runInfo.outputElementsComputed == 4,
-            "Selected tiled GEMM did not report the clipped tile area.");
+    require(
+        selected.runInfo.outputElementsWritten == 1 && selected.runInfo.outputElementsCovered == 4,
+        "Selected blocked GEMM reported the wrong write or coverage count.");
     require(d.loadAs<float>({0, 0}) == 120 && d.loadAs<float>({0, 1}) == untouchedValue &&
                 d.loadAs<float>({1, 0}) == untouchedValue &&
                 d.loadAs<float>({1, 1}) == untouchedValue,
-            "Tiled backend partial output selection mismatch.");
+            "Blocked backend partial output selection mismatch.");
 
     fillTensor(d, untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({});
     const GemmResult empty = referenceGemm(problem,
                                            {
-                                               .backend = GemmBackend::Tiled,
+                                               .backend = GemmBackend::Blocked,
                                                .requireRequestedBackend = true,
                                            },
                                            &backend);
-    require(empty.runInfo.outputElementsComputed == 0,
-            "Empty tiled output selection reported computed accumulators.");
+    require(empty.runInfo.outputElementsWritten == 0 && empty.runInfo.outputElementsCovered == 0,
+            "Empty blocked output selection reported output work.");
     requireOnlySelectedOutputsStored(d, OutputSelection::explicitIndices({}));
 }
 
-void testExplicitSelectionTilePlan() {
+void testExplicitSelectionBlockPlan() {
     constexpr size_t rows = 45;
     constexpr size_t reductionElements = 16;
     constexpr size_t columns = 70;
@@ -207,8 +208,8 @@ void testExplicitSelectionTilePlan() {
     const std::vector<float> b = makeValues(reductionElements, columns, 2);
     const std::vector<float> c = makeValues(rows, columns, 3);
     const std::vector<float> bias = makeValues(1, columns, 4);
-    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
-    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::explicitIndices({
         44 * columns + 69,
         2 * columns + 3,
@@ -217,25 +218,26 @@ void testExplicitSelectionTilePlan() {
         2 * columns + 3,
     });
 
-    GemmRequest canonicalProblem =
-        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
-    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
-    canonicalProblem.outputSelection = selection;
-    tiledProblem.outputSelection = selection;
-    configureFinalizer(canonicalProblem, bias);
-    configureFinalizer(tiledProblem, bias);
+    GemmRequest pointwiseProblem =
+        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
+    GemmRequest blockedProblem =
+        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+    pointwiseProblem.outputSelection = selection;
+    blockedProblem.outputSelection = selection;
+    configureFinalizer(pointwiseProblem, bias);
+    configureFinalizer(blockedProblem, bias);
 
     const ParityRunInfo run =
-        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
-                  "Explicit tiled selection differs from the canonical reference.");
-    require(run.canonical.outputElementsComputed == 4,
-            "Canonical explicit selection count changed unexpectedly.");
-    require(run.tiled.outputElementsComputed == 1518,
-            "Explicit tiled selection did not count each unique edge-aware tile once.");
-    requireOnlySelectedOutputsStored(tiledOutput, selection);
+        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
+                  "Explicit blocked selection differs from the pointwise reference.");
+    require(run.pointwise.outputElementsWritten == 4 && run.pointwise.outputElementsCovered == 4,
+            "Pointwise explicit selection counts changed unexpectedly.");
+    require(run.blocked.outputElementsWritten == 4 && run.blocked.outputElementsCovered == 1518,
+            "Explicit blocked selection reported the wrong output counts.");
+    requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
 
-void testStridedSelectionTilePlan() {
+void testStridedSelectionBlockPlan() {
     constexpr size_t rows = 39;
     constexpr size_t reductionElements = 11;
     constexpr size_t columns = 67;
@@ -244,29 +246,30 @@ void testStridedSelectionTilePlan() {
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
     const std::vector<float> c = makeValues(rows, columns, 7);
     const std::vector<float> bias = makeValues(1, columns, 8);
-    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
-    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::strided(3, 509);
 
-    GemmRequest canonicalProblem =
-        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
-    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
-    canonicalProblem.outputSelection = selection;
-    tiledProblem.outputSelection = selection;
-    configureFinalizer(canonicalProblem, bias);
-    configureFinalizer(tiledProblem, bias);
+    GemmRequest pointwiseProblem =
+        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
+    GemmRequest blockedProblem =
+        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+    pointwiseProblem.outputSelection = selection;
+    blockedProblem.outputSelection = selection;
+    configureFinalizer(pointwiseProblem, bias);
+    configureFinalizer(blockedProblem, bias);
 
     const ParityRunInfo run =
-        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
-                  "Strided tiled selection differs from the canonical reference.");
-    require(run.canonical.outputElementsComputed == 6,
-            "Canonical strided selection count changed unexpectedly.");
-    require(run.tiled.outputElementsComputed == 2272,
-            "Strided tiled selection reported the wrong executed tile area.");
-    requireOnlySelectedOutputsStored(tiledOutput, selection);
+        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
+                  "Strided blocked selection differs from the pointwise reference.");
+    require(run.pointwise.outputElementsWritten == 6 && run.pointwise.outputElementsCovered == 6,
+            "Pointwise strided selection counts changed unexpectedly.");
+    require(run.blocked.outputElementsWritten == 6 && run.blocked.outputElementsCovered == 2272,
+            "Strided blocked selection reported the wrong output counts.");
+    requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
 
-void testBlockScaledSelectionTilePlan() {
+void testBlockScaledSelectionBlockPlan() {
     using namespace roc::host_validation;
 
     constexpr size_t rows = 33;
@@ -288,14 +291,15 @@ void testBlockScaledSelectionTilePlan() {
         scaleB[column * scaleBlocks + 1] = column % 3 == 0 ? 1.0f : 4.0f;
     }
 
-    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
-    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection =
         OutputSelection::explicitIndices({0, 32 * columns + 32, 32 * columns + 34});
 
-    GemmRequest canonicalProblem =
-        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
-    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
+    GemmRequest pointwiseProblem =
+        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
+    GemmRequest blockedProblem =
+        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
     const BlockScaleBinding blockScaleA{
         Tensor::fromNative<float>(Layout::contiguous(Shape{rows, scaleBlocks}),
                                   std::span<const float>(scaleA)),
@@ -306,21 +310,21 @@ void testBlockScaledSelectionTilePlan() {
                                   std::span<const float>(scaleB)),
         8,
     };
-    canonicalProblem.a.blockScale = blockScaleA;
-    canonicalProblem.b.blockScale = blockScaleB;
-    tiledProblem.a.blockScale = blockScaleA;
-    tiledProblem.b.blockScale = blockScaleB;
-    canonicalProblem.outputSelection = selection;
-    tiledProblem.outputSelection = selection;
+    pointwiseProblem.a.blockScale = blockScaleA;
+    pointwiseProblem.b.blockScale = blockScaleB;
+    blockedProblem.a.blockScale = blockScaleA;
+    blockedProblem.b.blockScale = blockScaleB;
+    pointwiseProblem.outputSelection = selection;
+    blockedProblem.outputSelection = selection;
 
     const ParityRunInfo run =
-        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
-                  "Block-scaled tiled selection differs from the canonical reference.");
-    require(run.canonical.outputElementsComputed == 3,
-            "Canonical block-scaled selection count changed unexpectedly.");
-    require(run.tiled.outputElementsComputed == 1027,
-            "Block-scaled tiled selection reported the wrong executed tile area.");
-    requireOnlySelectedOutputsStored(tiledOutput, selection);
+        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
+                  "Block-scaled blocked selection differs from the pointwise reference.");
+    require(run.pointwise.outputElementsWritten == 3 && run.pointwise.outputElementsCovered == 3,
+            "Pointwise block-scaled selection counts changed unexpectedly.");
+    require(run.blocked.outputElementsWritten == 3 && run.blocked.outputElementsCovered == 1027,
+            "Block-scaled blocked selection reported the wrong output counts.");
+    requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
 
 void testFullSelectionParity() {
@@ -332,30 +336,33 @@ void testFullSelectionParity() {
     const std::vector<float> b = makeValues(reductionElements, columns, 12);
     const std::vector<float> c = makeValues(rows, columns, 13);
     const std::vector<float> bias = makeValues(1, columns, 14);
-    Tensor canonicalOutput = makeOutput(rows, columns, untouchedValue);
-    Tensor tiledOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
 
-    GemmRequest canonicalProblem =
-        makeProblem(a, b, c, canonicalOutput, rows, reductionElements, columns);
-    GemmRequest tiledProblem = makeProblem(a, b, c, tiledOutput, rows, reductionElements, columns);
-    configureFinalizer(canonicalProblem, bias);
-    configureFinalizer(tiledProblem, bias);
+    GemmRequest pointwiseProblem =
+        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
+    GemmRequest blockedProblem =
+        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+    configureFinalizer(pointwiseProblem, bias);
+    configureFinalizer(blockedProblem, bias);
 
     const ParityRunInfo run =
-        runParity(canonicalProblem, tiledProblem, canonicalOutput, tiledOutput,
-                  "Full tiled selection differs from the canonical reference.");
-    require(run.canonical.outputElementsComputed == rows * columns,
-            "Canonical full selection count changed unexpectedly.");
-    require(run.tiled.outputElementsComputed == rows * columns,
-            "Full tiled selection did not preserve complete-output accounting.");
+        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
+                  "Full blocked selection differs from the pointwise reference.");
+    require(run.pointwise.outputElementsWritten == rows * columns &&
+                run.pointwise.outputElementsCovered == rows * columns,
+            "Pointwise full selection counts changed unexpectedly.");
+    require(run.blocked.outputElementsWritten == rows * columns &&
+                run.blocked.outputElementsCovered == rows * columns,
+            "Full blocked selection did not preserve complete-output accounting.");
 }
 }  // namespace
 
 int main() {
-    testFinalizerAndSmallEdgeTile();
-    testExplicitSelectionTilePlan();
-    testStridedSelectionTilePlan();
-    testBlockScaledSelectionTilePlan();
+    testFinalizerAndSmallEdgeBlock();
+    testExplicitSelectionBlockPlan();
+    testStridedSelectionBlockPlan();
+    testBlockScaledSelectionBlockPlan();
     testFullSelectionParity();
     return 0;
 }

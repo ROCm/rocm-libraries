@@ -30,9 +30,27 @@ if(TARGET OpenMP::OpenMP_CXX)
 endif()
 add_test(NAME host-validation-tests COMMAND host-validation-tests)
 
-add_executable(host-validation-tiled-tests tiled_backend_test.cpp)
-target_link_libraries(host-validation-tiled-tests PRIVATE roc::host-validation-tiled)
-add_test(NAME host-validation-tiled-tests COMMAND host-validation-tiled-tests)
+add_executable(host-validation-generation-recipe-tests generation_recipe_test.cpp)
+target_link_libraries(
+    host-validation-generation-recipe-tests
+    PRIVATE
+        roc::host-validation
+)
+if(TARGET OpenMP::OpenMP_CXX)
+    target_link_libraries(
+        host-validation-generation-recipe-tests
+        PRIVATE
+            OpenMP::OpenMP_CXX
+    )
+endif()
+add_test(
+    NAME host-validation-generation-recipe-tests
+    COMMAND host-validation-generation-recipe-tests
+)
+
+add_executable(host-validation-blocked-tests blocked_backend_test.cpp)
+target_link_libraries(host-validation-blocked-tests PRIVATE roc::host-validation-blocked)
+add_test(NAME host-validation-blocked-tests COMMAND host-validation-blocked-tests)
 
 add_executable(host-validation-core-tests tensor_core_test.cpp)
 target_link_libraries(host-validation-core-tests PRIVATE roc::host-validation-core)
@@ -134,7 +152,7 @@ add_test(
     NAME host-validation-core-boundary
     COMMAND
         "${CMAKE_COMMAND}"
-        "-DCORE_HEADER=${CMAKE_CURRENT_SOURCE_DIR}/../include/roc/host_validation/tensor.hpp"
+        "-DCORE_INCLUDE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../include/roc/host_validation"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_core_boundary.cmake"
 )
 

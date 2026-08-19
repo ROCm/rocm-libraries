@@ -43,6 +43,7 @@
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
+#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
 #include <roc/host_validation/validation.hpp>
 
 /*
@@ -152,21 +153,21 @@ namespace
     };
 
     template <typename T>
-    void generateValues(std::vector<T>&                             destination,
-                        roc::host_validation::GenerationPatternSpec pattern,
-                        InitializationStream                        stream)
+    void generateValues(std::vector<T>&                                   destination,
+                        roc::host_validation::GenerationRecipe::Component component,
+                        InitializationStream                              stream)
     {
         using namespace roc::host_validation;
         static_assert(std::is_trivially_copyable_v<T>);
 
-        pattern.stream = static_cast<uint64_t>(stream);
-        GenerationOptions options;
-        options.seed = 42;
-        options.real = std::move(pattern);
+        const auto recipe
+            = GenerationRecipe::realOnly(std::move(component),
+                                         tensilelite_adapter::settingsForLegacyGenerationStream(
+                                             42, static_cast<uint64_t>(stream)));
 
         Tensor generated(toHostValidationScalarType(TypeTraits<T>::value),
                          Shape{destination.size()});
-        generate(generated, options);
+        generate(generated, recipe);
         const std::span<std::byte> destinationBytes
             = std::as_writable_bytes(std::span<T>(destination));
         if(generated.storage().size() != destinationBytes.size())
@@ -430,10 +431,9 @@ int runGemm(size_t             m,
         // Drawing from the entire grid (not just the powers of two near zero)
         // exercises the MX-scale path with values whose products span more of
         // the FP4 range, while still being exactly representable.
-        roc::host_validation::GenerationPatternSpec fp4Pattern;
-        fp4Pattern.pattern = roc::host_validation::GenerationPattern::CandidateSet;
-        fp4Pattern.candidates
-            = {-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0};
+        const auto fp4Values = roc::host_validation::GenerationRecipe::candidateSet(
+            {.values
+             = {-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0}});
         // Pack 2 logical FP4 values per byte (Float4x2). When the logical
         // element count is odd, the second slot of the last byte has no
         // element behind it — it's padding. We must still initialize that
@@ -446,7 +446,7 @@ int runGemm(size_t             m,
                                   InitializationStream initializationStream) {
             const size_t       storagePerBatch = (numLogical + 1) / 2;
             std::vector<float> logicalValues(numLogical * batchCount);
-            generateValues(logicalValues, fp4Pattern, initializationStream);
+            generateValues(logicalValues, fp4Values, initializationStream);
             for(size_t batch = 0; batch < batchCount; ++batch)
             {
                 auto packed = roc::host_validation::Tensor::fromValues(
@@ -482,18 +482,17 @@ int runGemm(size_t             m,
                       // Values representable in storage but not on the compute-input grid -
                       // for storage=Half/compute=F8N, values like 0.7 that Half holds
                       // exactly but F8N rounds to 0.625 or 0.75.
-                      roc::host_validation::GenerationPatternSpec pattern;
-                      pattern.pattern    = roc::host_validation::GenerationPattern::UniformReal;
-                      pattern.parameter0 = -1.0;
-                      pattern.parameter1 = 1.0;
-                      generateValues(vec, std::move(pattern), initializationStream);
+                      generateValues(vec,
+                                     roc::host_validation::GenerationRecipe::uniformReal(
+                                         {.lower = -1.0, .upper = 1.0}),
+                                     initializationStream);
                   }
                   else
                   {
-                      roc::host_validation::GenerationPatternSpec pattern;
-                      pattern.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
-                      pattern.candidates = {-1.0, 1.0};
-                      generateValues(vec, std::move(pattern), initializationStream);
+                      generateValues(vec,
+                                     roc::host_validation::GenerationRecipe::candidateSet(
+                                         {.values = {-1.0, 1.0}}),
+                                     initializationStream);
                   }
               };
 
@@ -502,10 +501,9 @@ int runGemm(size_t             m,
         initOperand(a, quantizesA, InitializationStream::OperandA);
         initOperand(b, quantizesB, InitializationStream::OperandB);
     }
-    roc::host_validation::GenerationPatternSpec binaryPattern;
-    binaryPattern.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
-    binaryPattern.candidates = {-1.0, 1.0};
-    generateValues(c, binaryPattern, InitializationStream::MatrixC);
+    const auto binaryValues
+        = roc::host_validation::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+    generateValues(c, binaryValues, InitializationStream::MatrixC);
 
     // Optional feature buffers — typed as AccumulateT so the slow path's
     // GetValue(alphaType, ...) reads the correct byte width.
@@ -515,7 +513,7 @@ int runGemm(size_t             m,
     if(useBias)
     {
         biasVec.resize(m * batchCount);
-        generateValues(biasVec, binaryPattern, InitializationStream::Bias);
+        generateValues(biasVec, binaryValues, InitializationStream::Bias);
         contraction.setUseBias(1);
         contraction.setBias(accumDtypeEnum, m, m);
     }
@@ -524,27 +522,28 @@ int runGemm(size_t             m,
     {
         size_t scaleAlphaVecLen = (factorDim == 0) ? m : n;
         scaleAlphaVecBuf.resize(scaleAlphaVecLen);
-        generateValues(scaleAlphaVecBuf, binaryPattern, InitializationStream::ScaleAlpha);
+        generateValues(scaleAlphaVecBuf, binaryValues, InitializationStream::ScaleAlpha);
         contraction.setUseScaleAlphaVec(1);
         contraction.setScaleAlphaVec(accumDtypeEnum, scaleAlphaVecLen, factorDim);
     }
 
-    std::vector<AccumulateT>                    scaleABuf;
-    std::vector<AccumulateT>                    scaleBBuf;
-    roc::host_validation::GenerationPatternSpec scalePattern;
-    scalePattern.pattern = roc::host_validation::GenerationPattern::CandidateSet;
+    std::vector<AccumulateT> scaleABuf;
+    std::vector<AccumulateT> scaleBBuf;
+    std::vector<double>      scaleCandidates;
     for(int magnitude = 2; magnitude <= 100; ++magnitude)
     {
-        scalePattern.candidates.push_back(-magnitude);
-        scalePattern.candidates.push_back(magnitude);
+        scaleCandidates.push_back(-magnitude);
+        scaleCandidates.push_back(magnitude);
     }
+    const auto scaleValues = roc::host_validation::GenerationRecipe::candidateSet(
+        {.values = std::move(scaleCandidates)});
 
     if(useScaleAB == "Scalar")
     {
         scaleABuf.resize(1);
         scaleBBuf.resize(1);
-        generateValues(scaleABuf, scalePattern, InitializationStream::ScaleA);
-        generateValues(scaleBBuf, scalePattern, InitializationStream::ScaleB);
+        generateValues(scaleABuf, scaleValues, InitializationStream::ScaleA);
+        generateValues(scaleBBuf, scaleValues, InitializationStream::ScaleB);
         // setUseScaleAB must be called before setScaleA/setScaleB,
         // because setScaleA/B silently skips tensor registration when
         // m_useScaleAB is still empty.
@@ -557,8 +556,8 @@ int runGemm(size_t             m,
     {
         scaleABuf.resize(m);
         scaleBBuf.resize(n);
-        generateValues(scaleABuf, scalePattern, InitializationStream::ScaleA);
-        generateValues(scaleBBuf, scalePattern, InitializationStream::ScaleB);
+        generateValues(scaleABuf, scaleValues, InitializationStream::ScaleA);
+        generateValues(scaleBBuf, scaleValues, InitializationStream::ScaleB);
         contraction.setUseScaleAB("Vector");
         contraction.setScaleA(accumDtypeEnum, m);
         contraction.setScaleB(accumDtypeEnum, n);
@@ -605,14 +604,12 @@ int runGemm(size_t             m,
             auto fillScale = [](std::vector<E8>& values, uint64_t stream) {
                 roc::host_validation::Tensor generated(roc::host_validation::ScalarType::E8M0,
                                                        roc::host_validation::Shape{values.size()});
-                roc::host_validation::GenerationOptions options;
-                options.seed = 42;
-                options.real.pattern
-                    = roc::host_validation::GenerationPattern::RandomEncodedExponent;
-                options.real.parameter0 = 0;
-                options.real.parameter1 = 7;
-                options.real.stream     = stream;
-                roc::host_validation::generate(generated, options);
+                const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
+                    roc::host_validation::GenerationRecipe::randomEncodedExponent(
+                        {.lowerUnbiasedExponent = 0, .upperUnbiasedExponent = 7}),
+                    roc::host_validation::tensilelite_adapter::settingsForLegacyGenerationStream(
+                        42, stream));
+                roc::host_validation::generate(generated, recipe);
                 std::memcpy(values.data(), generated.storage().data(), generated.storage().size());
             };
             fillScale(mxsa, 0);
@@ -645,17 +642,17 @@ int runGemm(size_t             m,
     constexpr int elementsToValidate = -1;
     const bool    executed
         = tryFastPath
-              ? TensileLite::Client::tryRuntimeTiledGemm(contraction, inputs, elementsToValidate)
-              : TensileLite::Client::tryRuntimeCanonicalGemm(
+              ? TensileLite::Client::tryRuntimeBlockedGemm(contraction, inputs, elementsToValidate)
+              : TensileLite::Client::tryRuntimePointwiseGemm(
                     contraction, inputs, elementsToValidate);
     if(!executed)
     {
         if(tryFastPath)
             throw std::runtime_error(
-                "--tryFastPath requires execution by the tiled CPU GEMM backend, "
+                "--tryFastPath requires execution by the blocked CPU GEMM backend, "
                 "but the normalized request is unsupported.");
         throw std::runtime_error("The normalized request is unsupported by the "
-                                 "canonical CPU GEMM backend.");
+                                 "pointwise CPU GEMM backend.");
     }
 
     auto                                      end      = std::chrono::high_resolution_clock::now();
@@ -931,7 +928,7 @@ int main(int argc, char* argv[])
         po::value<bool>()->default_value(false),
         "Perturb D before validation (negative-test hook)")("tryFastPath",
                                                             po::value<bool>()->default_value(false),
-                                                            "Require tiled reference execution")(
+                                                            "Require blocked reference execution")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(

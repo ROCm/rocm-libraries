@@ -19,6 +19,19 @@
 
 namespace roc::host_validation {
 namespace detail {
+inline void validateComparisonOptions(const ComparisonOptions& options) {
+    if (options.selection.stride == 0)
+        throw std::invalid_argument("Comparison selection stride must be non-zero.");
+    if (options.relativeFrobeniusTolerance && !options.computeFrobenius)
+        throw std::invalid_argument("A relative Frobenius tolerance requires Frobenius evidence.");
+    if (options.maximumUlpTolerance && !options.computeUlp)
+        throw std::invalid_argument("A maximum ULP tolerance requires ULP evidence.");
+    if (options.computeUlp && !options.ulpType)
+        throw std::invalid_argument("ULP evidence requires an explicit scalar type.");
+    if (options.ulpType && !isConcreteScalarType(*options.ulpType))
+        throw std::invalid_argument("ULP scalar type must be a concrete scalar type.");
+}
+
 inline bool pointwiseOnlyComparison(const ComparisonOptions& options) {
     return options.pointwise && !options.computePointwiseStatistics && !options.computeFrobenius &&
            !options.computeUlp && !options.relativeFrobeniusTolerance &&
@@ -180,21 +193,7 @@ inline bool pointwiseStatisticsOnlyComparison(const ComparisonOptions& options) 
 
 inline void coordinatesForLinearIndex(size_t logicalIndex, const Shape& shape,
                                       ComparisonIndexOrder order, std::span<size_t> coordinates) {
-    if (coordinates.size() != shape.rank())
-        throw std::invalid_argument("Comparison coordinate rank mismatch.");
-
-    if (order == ComparisonIndexOrder::FirstDimensionFastest) {
-        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
-            coordinates[dimension] = logicalIndex % shape[dimension];
-            logicalIndex /= shape[dimension];
-        }
-    } else {
-        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-            const size_t index = dimension - 1;
-            coordinates[index] = logicalIndex % shape[index];
-            logicalIndex /= shape[index];
-        }
-    }
+    shape.coordinates(logicalIndex, order, coordinates);
 }
 
 inline bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
@@ -319,26 +318,6 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
         logicalIndex += selection.stride;
     }
 }
-
-struct ComparisonPair {
-    // Evidence is normalized for statistics and reporting. pointwiseClose is
-    // evaluated in the caller's semantic precision so normalization cannot
-    // change pass/fail (for example, adjacent uint64_t values above 2^53).
-    ComparisonValue observed;
-    ComparisonValue expected;
-    bool pointwiseClose = true;
-};
-
-using ComparisonPairChunkLoader = void (*)(const void*, ptrdiff_t, ptrdiff_t, const void*,
-                                           ptrdiff_t, ptrdiff_t, size_t, const ComparisonOptions&,
-                                           ComparisonPair*);
-
-// Synchronous ABI bridge used by the public templates below. The compiled
-// engine does not retain storage pointers or the loader after the call returns.
-ComparisonResult compareWithPairLoader(const Layout& observedLayout, const void* observedStorage,
-                                       const Layout& expectedLayout, const void* expectedStorage,
-                                       ComparisonPairChunkLoader pairLoader,
-                                       const ComparisonOptions& options);
 
 template <typename Observed, typename Expected>
 bool pointwiseValuesClose(Observed observed, Expected expected, const ComparisonOptions& options) {

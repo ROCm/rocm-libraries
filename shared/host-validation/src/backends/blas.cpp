@@ -89,9 +89,9 @@ T* typedMutableData(const Tensor& view, const char* name) {
 }
 
 void validateCommon(const GemmRequest& problem) {
-    const GemmSupportInfo canonical =
-        queryGemmSupport(problem, {.backend = GemmBackend::Canonical});
-    if (!canonical) throw std::invalid_argument(canonical.reason);
+    const GemmSupportInfo pointwise =
+        queryGemmSupport(problem, {.backend = GemmBackend::Pointwise});
+    if (!pointwise) throw std::invalid_argument(pointwise.reason);
 
     if (problem.a.values.type() != problem.accumulatorType ||
         problem.b.values.type() != problem.accumulatorType ||
@@ -159,7 +159,8 @@ GemmRunInfo runReal(const GemmRequest& problem) {
     return {
         .backendUsed = GemmBackend::Blas,
         .fallbackReason = std::nullopt,
-        .outputElementsComputed = problem.d.shape().elementCount(),
+        .outputElementsWritten = problem.d.shape().elementCount(),
+        .outputElementsCovered = problem.d.shape().elementCount(),
     };
 }
 
@@ -187,7 +188,8 @@ GemmRunInfo runComplex(const GemmRequest& problem) {
     return {
         .backendUsed = GemmBackend::Blas,
         .fallbackReason = std::nullopt,
-        .outputElementsComputed = problem.d.shape().elementCount(),
+        .outputElementsWritten = problem.d.shape().elementCount(),
+        .outputElementsCovered = problem.d.shape().elementCount(),
     };
 }
 
@@ -196,9 +198,9 @@ Layout columnMajorLayout(const Shape& shape) {
 }
 
 void validateTransforming(const GemmRequest& problem) {
-    const GemmSupportInfo canonical =
-        queryGemmSupport(problem, {.backend = GemmBackend::Canonical});
-    if (!canonical) throw std::invalid_argument(canonical.reason);
+    const GemmSupportInfo pointwise =
+        queryGemmSupport(problem, {.backend = GemmBackend::Pointwise});
+    if (!pointwise) throw std::invalid_argument(pointwise.reason);
 
     switch (problem.accumulatorType) {
         case ScalarType::Float32:
@@ -323,7 +325,8 @@ GemmRunInfo runTransforming(const GemmRequest& problem) {
     return {
         .backendUsed = GemmBackend::Blas,
         .fallbackReason = std::nullopt,
-        .outputElementsComputed = problem.d.shape().elementCount(),
+        .outputElementsWritten = problem.d.shape().elementCount(),
+        .outputElementsCovered = problem.d.shape().elementCount(),
     };
 }
 }  // namespace

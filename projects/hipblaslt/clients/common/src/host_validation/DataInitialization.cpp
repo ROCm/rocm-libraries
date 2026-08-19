@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace hipblaslt::host_validation
@@ -49,13 +50,10 @@ namespace hipblaslt::host_validation
             return matrixElements;
         }
 
-        GenerationOptions sentinelOptions(GenerationPattern pattern, bool complexOutput)
+        GenerationRecipe sentinelRecipe(GenerationRecipe::Component component, bool complexOutput)
         {
-            GenerationOptions options;
-            options.real.pattern = pattern;
-            if(complexOutput)
-                options.imaginary = options.real;
-            return options;
+            return complexOutput ? GenerationRecipe::replicated(std::move(component))
+                                 : GenerationRecipe::realOnly(std::move(component));
         }
 
         bool supportsExplicitFloatingSentinel(ScalarType type)
@@ -64,10 +62,10 @@ namespace hipblaslt::host_validation
                    || type == ScalarType::Float32 || type == ScalarType::Float64;
         }
 
-        GenerationOptions matrixGenerationOptions(const MatrixStorageInitialization& initialization,
-                                                  const Tensor&                      destination)
+        GenerationRecipe matrixGenerationRecipe(const MatrixStorageInitialization& initialization,
+                                                const Tensor&                      destination)
         {
-            const ScalarType type          = destination.type();
+            const ScalarType type    = destination.type();
             const bool complexOutput = scalarTypeInfo(type).category == ScalarCategory::Complex;
             if(initialization.forceNaN)
             {
@@ -76,7 +74,7 @@ namespace hipblaslt::host_validation
                    || (info.category == ScalarCategory::FloatingPoint && !info.supportsNaN))
                     throw std::invalid_argument(
                         "hipBLASLt input type has no supported NaN initialization.");
-                return nanOptions(type, true);
+                return nanRecipe(type, ComplexGenerationPolicy::Replicated);
             }
 
             switch(initialization.initialization)
@@ -88,135 +86,101 @@ namespace hipblaslt::host_validation
                                                    && category != ScalarCategory::Boolean
                                                    && category != ScalarCategory::UnsignedInteger
                                                    && category != ScalarCategory::Scale;
-                return randomIntegerOptions(type, false, alternating);
+                return randomIntegerRecipe(type, {.alternating = alternating});
             }
             case hipblaslt_initialization::trig_float:
             {
-                GenerationOptions options;
-                options.real.pattern = initialization.role == MatrixRole::B
-                                           ? GenerationPattern::Cosine
-                                           : GenerationPattern::Sine;
-                if(initialization.positiveOnly)
-                    options.real.transform = GenerationTransform::Absolute;
-                if(complexOutput)
-                {
-                    options.imaginary.pattern = initialization.role == MatrixRole::B
-                                                    ? GenerationPattern::Sine
-                                                    : GenerationPattern::Cosine;
-                    if(initialization.positiveOnly)
-                        options.imaginary.transform = GenerationTransform::Absolute;
-                }
-                return options;
+                const TrigonometricComponent realComponent = initialization.role == MatrixRole::B
+                                                                 ? TrigonometricComponent::Cosine
+                                                                 : TrigonometricComponent::Sine;
+                return trigonometricRecipe(type, realComponent, initialization.positiveOnly);
             }
             case hipblaslt_initialization::hpl:
-                return hplOptions(type, initialization.positiveOnly);
+                return hplRecipe(type, {.positiveOnly = initialization.positiveOnly});
             case hipblaslt_initialization::uniform_low_precision:
-                return lowPrecisionOptions(type);
+                return lowPrecisionRecipe(type);
             case hipblaslt_initialization::special:
             {
-                GenerationOptions options;
                 if(initialization.role == MatrixRole::A)
-                {
-                    options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = specialInitializationAValue;
-                }
-                else if(initialization.role == MatrixRole::B)
-                {
-                    options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = specialInitializationBValue;
-                }
-                else
-                {
-                    options.real.pattern    = GenerationPattern::UniformInteger;
-                    options.real.parameter0 = 1;
-                    options.real.parameter1 = 10;
-                }
-                return options;
+                    return GenerationRecipe::realOnly(
+                        GenerationRecipe::constant({.value = specialInitializationAValue}));
+                if(initialization.role == MatrixRole::B)
+                    return GenerationRecipe::realOnly(
+                        GenerationRecipe::constant({.value = specialInitializationBValue}));
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::uniformInteger({.lower = 1, .upper = 10}));
             }
             case hipblaslt_initialization::zero:
-                return {};
+                return GenerationRecipe::realOnly(GenerationRecipe::zero());
             case hipblaslt_initialization::norm_dist:
-            {
-                GenerationOptions options;
-                options.seed         = defaultInitializationSeed;
-                options.real.pattern = GenerationPattern::Normal;
-                return options;
-            }
+                return normalRecipe(type);
             case hipblaslt_initialization::norm_dist_one_special:
             {
                 if(!supportsExplicitFloatingSentinel(type))
                     throw std::invalid_argument("hipBLASLt one-special normal initialization "
                                                 "requires an ordinary floating type.");
-                GenerationOptions options;
-                options.seed         = oneSpecialInitializationSeed;
-                options.real.pattern = GenerationPattern::Normal;
-                return options;
+                return normalRecipe(
+                    type, ComplexGenerationPolicy::RealOnly, oneSpecialInitializationSeed);
             }
             case hipblaslt_initialization::uniform_01:
-            {
-                GenerationOptions options;
-                options.seed            = defaultInitializationSeed;
-                options.real.pattern = type == ScalarType::Int8 ? GenerationPattern::UniformInteger
-                                                                : GenerationPattern::UniformReal;
-                options.real.parameter0 = 0;
-                options.real.parameter1 = 1;
-                return options;
-            }
+                return uniformZeroOneRecipe(type);
             case hipblaslt_initialization::integer_exact:
             {
-                GenerationOptions options;
-                options.seed            = defaultInitializationSeed;
-                options.real.pattern    = GenerationPattern::UniformInteger;
-                options.real.parameter0 = 0;
-                options.real.parameter1 = 2;
-                options.real.stream
-                    = initialization.role == MatrixRole::B ? integerExactBStream : 0;
+                GenerationRecipe::Component component
+                    = GenerationRecipe::uniformInteger({.lower = 0, .upper = 2});
+                uint64_t recipeSeed = defaultInitializationSeed;
                 if(initialization.role == MatrixRole::B)
-                    options.real.alternatingDimensions = {0, 1};
-                return options;
+                {
+                    component = component.withAlternatingSign(
+                        {.dimensions = {0, 1}, .negativeWhenOdd = false});
+                    recipeSeed = compatibility::seedForRandomDomain(
+                        defaultInitializationSeed, compatibility::integerExactMatrixBRandomDomain);
+                }
+                return GenerationRecipe::realOnly(std::move(component), {.seed = recipeSeed});
             }
             case hipblaslt_initialization::fp16_accumulator_probe:
             {
-                GenerationOptions options;
                 if(type != ScalarType::Float16)
-                    return options;
+                    return GenerationRecipe::realOnly(GenerationRecipe::zero());
                 if(initialization.role == MatrixRole::A)
-                {
-                    options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = maximumFiniteFloat16Value - 4.0;
-                }
-                else if(initialization.role == MatrixRole::B)
-                {
-                    options.real.pattern               = GenerationPattern::Constant;
-                    options.real.parameter0            = 2.0;
-                    options.real.alternatingDimensions = {0};
-                    options.real.negativeParity        = 1;
-                }
-                return options;
+                    return GenerationRecipe::realOnly(GenerationRecipe::constant(
+                        {.value = maximumFiniteFloat16Value - fp16AccumulatorProbeStep}));
+                if(initialization.role == MatrixRole::B)
+                    return GenerationRecipe::realOnly(
+                        GenerationRecipe::constant({.value = 2.0})
+                            .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}));
+                return GenerationRecipe::realOnly(GenerationRecipe::zero());
             }
             case hipblaslt_initialization::inf:
                 if(!supportsExplicitFloatingSentinel(type))
                     throw std::invalid_argument(
                         "hipBLASLt infinity initialization requires an ordinary floating type.");
-                return sentinelOptions(GenerationPattern::TypeInfinity, complexOutput);
+                return sentinelRecipe(GenerationRecipe::typeInfinity(), complexOutput);
             case hipblaslt_initialization::neg_zero:
                 if(!supportsExplicitFloatingSentinel(type))
                     throw std::invalid_argument("hipBLASLt negative-zero initialization requires "
                                                 "an ordinary floating type.");
-                return sentinelOptions(GenerationPattern::TypeNegativeZero, complexOutput);
+                return sentinelRecipe(GenerationRecipe::typeNegativeZero(), complexOutput);
             case hipblaslt_initialization::neg_inf:
                 if(!supportsExplicitFloatingSentinel(type))
                     throw std::invalid_argument("hipBLASLt negative-infinity initialization "
                                                 "requires an ordinary floating type.");
-                return sentinelOptions(GenerationPattern::TypeNegativeInfinity, complexOutput);
+                return sentinelRecipe(GenerationRecipe::typeNegativeInfinity(), complexOutput);
             case hipblaslt_initialization::nan:
                 if(!supportsExplicitFloatingSentinel(type))
                     throw std::invalid_argument(
                         "hipBLASLt NaN initialization requires an ordinary floating type.");
-                return nanOptions(type);
+                return nanRecipe(type);
             }
             throw std::invalid_argument("Unsupported hipBLASLt host matrix initialization mode.");
         }
+
+        enum class OneSpecialValue
+        {
+            PositiveInfinity = 0,
+            NegativeInfinity = 1,
+            NaN              = 2,
+        };
 
         void injectOneSpecial(Tensor view, int requestedSpecialType)
         {
@@ -224,26 +188,30 @@ namespace hipblaslt::host_validation
             if(logicalElements == 0)
                 return;
 
-            constexpr uint32_t multiplier       = 1103515245u;
-            constexpr uint32_t increment        = 12345u;
-            constexpr int      specialTypeCount = 3;
-
-            uint32_t state
-                = static_cast<uint32_t>(oneSpecialInitializationSeed) * multiplier + increment;
+            uint32_t     state              = static_cast<uint32_t>(oneSpecialInitializationSeed)
+                                                  * compatibility::oneSpecialLcgMultiplier
+                                              + compatibility::oneSpecialLcgIncrement;
             const size_t specialLinearIndex = size_t(state) % logicalElements;
-            state                           = state * multiplier + increment;
+            state                           = state * compatibility::oneSpecialLcgMultiplier
+                                              + compatibility::oneSpecialLcgIncrement;
             const int specialType
-                = requestedSpecialType >= 0 && requestedSpecialType < specialTypeCount
+                = requestedSpecialType >= 0
+                          && requestedSpecialType < compatibility::oneSpecialValueCount
                       ? requestedSpecialType
-                      : int(state >> 16) % specialTypeCount;
+                      : int(state >> compatibility::oneSpecialLcgValueShift)
+                            % compatibility::oneSpecialValueCount;
 
-            GenerationOptions special;
-            special.real.pattern = specialType == 0   ? GenerationPattern::TypeInfinity
-                                   : specialType == 1 ? GenerationPattern::TypeNegativeInfinity
-                                                      : GenerationPattern::TypeNaN;
-            if(scalarTypeInfo(view.type()).category == ScalarCategory::Complex)
-                special.imaginary = special.real;
-            generateAt(view, specialLinearIndex, special);
+            const GenerationRecipe::Component component
+                = specialType == static_cast<int>(OneSpecialValue::PositiveInfinity)
+                      ? GenerationRecipe::typeInfinity()
+                  : specialType == static_cast<int>(OneSpecialValue::NegativeInfinity)
+                      ? GenerationRecipe::typeNegativeInfinity()
+                      : GenerationRecipe::typeNaN();
+            generateAt(
+                view,
+                specialLinearIndex,
+                sentinelRecipe(component,
+                               scalarTypeInfo(view.type()).category == ScalarCategory::Complex));
         }
     } // namespace
 
@@ -269,7 +237,7 @@ namespace hipblaslt::host_validation
                        static_cast<ptrdiff_t>(initialization.leadingDimension),
                        static_cast<ptrdiff_t>(batchStride)});
         Tensor view(type, layout, storage);
-        generate(view, matrixGenerationOptions(initialization, view));
+        generate(view, matrixGenerationRecipe(initialization, view));
 
         if(initialization.initialization == hipblaslt_initialization::norm_dist_one_special)
             injectOneSpecial(view, initialization.specialValueType);

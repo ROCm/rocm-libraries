@@ -280,8 +280,8 @@ _run_component(
 _run_component(
     "${_full_install_dir}"
     full-tiled
-    Tiled
-    "Core,Operations,Tiled"
+    Blocked
+    "Core,Operations,Blocked"
 )
 _run_component(
     "${_full_install_dir}"

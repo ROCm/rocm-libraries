@@ -209,8 +209,9 @@ inline size_t retainedPositionSetIndexForGroup(const StructuredSparsityProblem& 
                                                const StructuredSparsityPlan& plan,
                                                size_t groupLinearIndex) {
     if (problem.pattern.selection == StructuredSparsitySelection::Fixed) return 0;
+    constexpr uint64_t selectionDomain = 0;
     const int selected =
-        indexedUniformInteger(problem.pattern.seed, problem.pattern.stream, groupLinearIndex, 0,
+        indexedUniformInteger(problem.pattern.seed, selectionDomain, groupLinearIndex, 0,
                               static_cast<int>(plan.retainedPositionSets.size()) - 1);
     return static_cast<size_t>(selected);
 }

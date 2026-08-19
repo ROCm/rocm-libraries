@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <algorithm>
-#include <array>
 #include <bit>
 #include <cmath>
 #include <complex>
@@ -169,8 +168,9 @@ class ComparisonAccumulator {
    public:
     ComparisonAccumulator(const ComparisonOptions& options, const Shape& shape)
         : m_options(options), m_shape(&shape) {
-        if (m_options.selection.stride == 0)
-            throw std::invalid_argument("Comparison selection stride must be non-zero.");
+        m_result.pointwiseEvaluated = m_options.pointwise;
+        m_result.frobeniusEvaluated = m_options.relativeFrobeniusTolerance.has_value();
+        m_result.ulpEvaluated = m_options.maximumUlpTolerance.has_value();
         m_result.reportedMismatches.reserve(m_options.maxReportedMismatches);
         if (m_options.reportMatchingElements)
             m_result.reportedComparisons.reserve(m_options.maxReportedMismatches);
@@ -184,7 +184,8 @@ class ComparisonAccumulator {
             (m_options.equalSignedZero || !oppositeZeroSigns(observed, expected)) &&
             !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
-            m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed));
+            if (m_options.computePointwiseStatistics)
+                m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed));
             return;
         }
 
@@ -208,9 +209,12 @@ class ComparisonAccumulator {
         if ((!pointwiseDecision || *pointwiseDecision) && exactReal && exactImaginary &&
             signedZeroMatches && !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
-            m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed.real));
-            if (complexValue)
-                m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed.imaginary));
+            if (m_options.computePointwiseStatistics) {
+                m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed.real));
+                if (complexValue)
+                    m_result.matchedInfinities +=
+                        static_cast<size_t>(std::isinf(observed.imaginary));
+            }
             return;
         }
 
@@ -268,8 +272,6 @@ class ComparisonAccumulator {
         }
 
         if (m_options.computeUlp) {
-            if (m_options.ulpType == ScalarType::Count)
-                throw std::invalid_argument("ULP comparison requires an explicit scalar type.");
             if (real.matchedNaN || real.matchedInfinity)
                 ++m_result.ulpCompared;
             else
@@ -341,7 +343,7 @@ class ComparisonAccumulator {
    private:
     void accumulateUlp(double exact, double approximation) {
         const double distance =
-            ulpDistanceForType(exact, approximation, m_options.ulpType, m_options.ulpMode);
+            ulpDistanceForType(exact, approximation, *m_options.ulpType, m_options.ulpMode);
         m_result.maximumUlp = std::max(m_result.maximumUlp, distance);
         m_result.sumUlp += distance;
         ++m_result.ulpCompared;
@@ -371,56 +373,6 @@ void forEachSelectedIndex(const Shape& shape, const ComparisonSelection& selecti
         if (selection.stride > std::numeric_limits<size_t>::max() - logicalIndex) break;
         logicalIndex += selection.stride;
     }
-}
-
-template <typename Function>
-bool forEachRegularSelectedRun(const Layout& observedLayout, const Layout& expectedLayout,
-                               const ComparisonSelection& selection, Function&& function) {
-    const Shape& shape = observedLayout.shape();
-    const size_t total = shape.elementCount();
-    if (selection.first >= total || selection.maxElements == 0) return true;
-    if (selection.first != 0 || selection.stride != 1 || shape.rank() == 0) return false;
-
-    const bool firstDimensionFastest =
-        selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest;
-    const size_t innerDimension = firstDimensionFastest ? 0 : shape.rank() - 1;
-    const size_t innerSize = shape[innerDimension];
-    const size_t selectedTotal = std::min(total, selection.maxElements);
-    const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
-    std::vector<size_t> coordinates(shape.rank(), 0);
-
-    for (size_t outerIndex = 0; outerIndex < outerCount; ++outerIndex) {
-        size_t remaining = outerIndex;
-        ptrdiff_t observedBase = observedLayout.offset();
-        ptrdiff_t expectedBase = expectedLayout.offset();
-
-        if (firstDimensionFastest) {
-            for (size_t dimension = 1; dimension < shape.rank(); ++dimension) {
-                coordinates[dimension] = remaining % shape[dimension];
-                remaining /= shape[dimension];
-                observedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                observedLayout.strides()[dimension];
-                expectedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                expectedLayout.strides()[dimension];
-            }
-        } else {
-            for (size_t dimension = shape.rank() - 1; dimension > 0; --dimension) {
-                const size_t index = dimension - 1;
-                coordinates[index] = remaining % shape[index];
-                remaining /= shape[index];
-                observedBase +=
-                    static_cast<ptrdiff_t>(coordinates[index]) * observedLayout.strides()[index];
-                expectedBase +=
-                    static_cast<ptrdiff_t>(coordinates[index]) * expectedLayout.strides()[index];
-            }
-        }
-
-        const size_t logicalBase = outerIndex * innerSize;
-        const size_t count = std::min(innerSize, selectedTotal - logicalBase);
-        function(logicalBase, observedBase, observedLayout.strides()[innerDimension], expectedBase,
-                 expectedLayout.strides()[innerDimension], count);
-    }
-    return true;
 }
 
 inline ComparisonValue loadComparisonValue(const Tensor& view, ptrdiff_t logicalOffset) {
@@ -615,11 +567,33 @@ inline bool isUnwrittenSentinelValue(ScalarType type, const ComparisonValue& val
     return false;
 }
 
+inline void validateSentinelRange(ScalarType type, std::span<const std::byte> storage,
+                                  size_t firstElement, size_t elementCount) {
+    const size_t storageBits = scalarTypeInfo(type).storageBits;
+    if (storageBits == 0) throw std::invalid_argument("Sentinel scalar type has no storage.");
+    if (firstElement > std::numeric_limits<size_t>::max() - elementCount)
+        throw std::invalid_argument("Sentinel element range overflows.");
+
+    const size_t endElement = firstElement + elementCount;
+    if (endElement != 0 &&
+        endElement - 1 > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
+        throw std::invalid_argument("Sentinel element range exceeds supported element offsets.");
+    if (endElement != 0 && storageBits > std::numeric_limits<size_t>::max() / endElement)
+        throw std::invalid_argument("Sentinel element range overflows.");
+
+    const size_t requiredBits = endElement * storageBits;
+    const size_t requiredBytes = requiredBits / 8 + static_cast<size_t>(requiredBits % 8 != 0);
+    if (requiredBytes > storage.size())
+        throw std::invalid_argument(
+            "Sentinel storage is too small for the requested element range.");
+}
+
 template <typename Tag>
 ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor& expected,
                                            const ComparisonOptions& options) {
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonResult result;
+        result.pointwiseEvaluated = true;
         if (options.selection.first == 0 && options.selection.stride == 1 &&
             options.selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest &&
             observed.shape().rank() != 0) {
@@ -736,60 +710,9 @@ double encodedUlpDistance(double exact, double approximation, ScalarType type) {
     return detail::encodedUlpDistance(exact, approximation, type);
 }
 
-namespace detail {
-ComparisonResult compareWithPairLoader(const Layout& observedLayout, const void* observedStorage,
-                                       const Layout& expectedLayout, const void* expectedStorage,
-                                       ComparisonPairChunkLoader pairLoader,
-                                       const ComparisonOptions& options) {
-    if (observedLayout.shape() != expectedLayout.shape())
-        throw std::invalid_argument("Host validation comparison shape mismatch.");
-    if (pairLoader == nullptr)
-        throw std::invalid_argument("Host validation comparison callback is null.");
-
-    ComparisonAccumulator accumulator(options, observedLayout.shape());
-    constexpr size_t chunkSize = 32;
-    std::array<ComparisonPair, chunkSize> pairs;
-    const auto observePair = [&](size_t logicalIndex, ptrdiff_t observedOffset,
-                                 ptrdiff_t expectedOffset, const ComparisonPair& pair) {
-        accumulator.observe(
-            logicalIndex, observedOffset, expectedOffset, pair.observed, pair.expected,
-            options.pointwise ? std::optional<bool>(pair.pointwiseClose) : std::nullopt);
-    };
-
-    const bool usedRegularRuns = forEachRegularSelectedRun(
-        observedLayout, expectedLayout, options.selection,
-        [&](size_t logicalBase, ptrdiff_t observedBase, ptrdiff_t observedStride,
-            ptrdiff_t expectedBase, ptrdiff_t expectedStride, size_t count) {
-            for (size_t first = 0; first < count; first += chunkSize) {
-                const size_t current = std::min(chunkSize, count - first);
-                const ptrdiff_t observedChunk =
-                    observedBase + static_cast<ptrdiff_t>(first) * observedStride;
-                const ptrdiff_t expectedChunk =
-                    expectedBase + static_cast<ptrdiff_t>(first) * expectedStride;
-                pairLoader(observedStorage, observedChunk, observedStride, expectedStorage,
-                           expectedChunk, expectedStride, current, options, pairs.data());
-                for (size_t index = 0; index < current; ++index)
-                    observePair(logicalBase + first + index,
-                                observedChunk + static_cast<ptrdiff_t>(index) * observedStride,
-                                expectedChunk + static_cast<ptrdiff_t>(index) * expectedStride,
-                                pairs[index]);
-            }
-        });
-    if (!usedRegularRuns) {
-        forEachSelectedOffsetPair(
-            observedLayout, expectedLayout, options.selection,
-            [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
-                pairLoader(observedStorage, observedOffset, 0, expectedStorage, expectedOffset, 0,
-                           1, options, pairs.data());
-                observePair(logicalIndex, observedOffset, expectedOffset, pairs[0]);
-            });
-    }
-    return accumulator.finish();
-}
-}  // namespace detail
-
 ComparisonResult compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options) {
+    detail::validateComparisonOptions(options);
     if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host validation tensor comparison shape mismatch.");
 
@@ -812,11 +735,10 @@ ComparisonResult compare(const Tensor& observed, const Tensor& expected,
             detail::forEachSelectedOffsetPair(
                 observed.layout(), expected.layout(), options.selection,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
-                    const std::optional<bool> decision =
-                        options.pointwise
-                            ? std::optional<bool>(detail::knownPointwiseDecision<Tag>(
-                                  observed, observedOffset, expected, expectedOffset, options))
-                            : std::nullopt;
+                    std::optional<bool> decision;
+                    if (options.pointwise)
+                        decision.emplace(detail::knownPointwiseDecision<Tag>(
+                            observed, observedOffset, expected, expectedOffset, options));
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
                         accumulator.observe(logicalIndex, observedOffset, expectedOffset,
                                             detail::loadComparisonValueKnown<Tag>(
@@ -868,12 +790,7 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
 SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
                                       size_t firstElement, size_t elementCount,
                                       SentinelRegion region, size_t maxReportedMismatches) {
-    const size_t storageBits = scalarTypeInfo(type).storageBits;
-    if (storageBits == 0) throw std::invalid_argument("Sentinel scalar type has no storage.");
-    const uint64_t requiredBits = static_cast<uint64_t>(firstElement + elementCount) * storageBits;
-    if ((requiredBits + 7) / 8 > storage.size())
-        throw std::invalid_argument(
-            "Sentinel storage is too small for the requested element range.");
+    detail::validateSentinelRange(type, storage, firstElement, elementCount);
 
     SentinelResult result;
     result.checked = elementCount;
@@ -890,7 +807,7 @@ SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte
         if (!detail::isUnwrittenSentinelValue(type, value)) {
             ++result.mismatches;
             if (result.reportedMismatches.size() < maxReportedMismatches)
-                result.reportedMismatches.push_back({region, index, value});
+                result.reportedMismatches.push_back({region, static_cast<size_t>(offset), value});
         }
     }
     return result;
@@ -899,6 +816,8 @@ SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte
 SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
                                         SentinelRegion region, size_t maxReportedMismatches) {
     const auto& layout = logicalTensor.layout();
+    detail::validateSentinelRange(logicalTensor.type(), logicalTensor.storage(), 0,
+                                  allocatedElements);
     std::vector<bool> used(allocatedElements, false);
     detail::forEachSelectedIndex(
         layout.shape(), {}, [&](size_t, std::span<const size_t> coordinates) {
@@ -916,7 +835,6 @@ SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
             checkUnwrittenSentinel(logicalTensor.type(), logicalTensor.storage(), index, 1, region,
                                    maxReportedMismatches - result.reportedMismatches.size());
         result.append(element, maxReportedMismatches);
-        if (!element.reportedMismatches.empty()) result.reportedMismatches.back().index = index;
     }
     return result;
 }

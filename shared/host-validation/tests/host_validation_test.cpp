@@ -54,8 +54,9 @@ void testRuntimeReferenceGemm() {
     require(static_cast<bool>(queryGemmSupport(problem, execution)),
             "Runtime reference GEMM request support mismatch.");
     const GemmResult result = referenceGemm(problem, execution);
-    require(result.runInfo.backendUsed == GemmBackend::Canonical &&
-                result.runInfo.outputElementsComputed == 4,
+    require(result.runInfo.backendUsed == GemmBackend::Pointwise &&
+                result.runInfo.outputElementsWritten == 4 &&
+                result.runInfo.outputElementsCovered == 4,
             "Runtime reference GEMM run information mismatch.");
     require(result.output.shape() == Shape{2, 2} &&
                 result.output.storage().data() == d.storage().data(),
@@ -72,11 +73,11 @@ void testRuntimeReferenceGemm() {
                 .passed(),
             "Runtime reference GEMM result mismatch.");
 
-    execution.backend = GemmBackend::Tiled;
+    execution.backend = GemmBackend::Blocked;
     require(!queryGemmSupport(problem, execution),
             "Runtime reference GEMM request unexpectedly supports a missing backend.");
     const GemmResult fallback = referenceGemm(problem, execution);
-    require(fallback.runInfo.backendUsed == GemmBackend::Canonical &&
+    require(fallback.runInfo.backendUsed == GemmBackend::Pointwise &&
                 fallback.runInfo.fallbackReason.has_value(),
             "Runtime reference GEMM backend fallback mismatch.");
 }
@@ -174,7 +175,7 @@ void testRuntimeMixedAndBlockScaledGemm() {
             "Runtime block-scaled GEMM result mismatch.");
 }
 
-void testPointwiseCompatibilityRoutes() {
+void testPointwiseRoutes() {
     using namespace roc::host_validation;
 
     const std::array<float, 7> a{1, 1, 1, 1, 1, 1, 1};
@@ -211,26 +212,28 @@ void testPointwiseCompatibilityRoutes() {
     GemmRequest automaticProblem = makeProblem(automaticOutput);
     const GemmResult automatic = referenceGemm(automaticProblem);
 
-    Tensor canonicalOutput =
+    Tensor pointwiseOutput =
         Tensor::fromNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
-    GemmRequest canonicalProblem = makeProblem(canonicalOutput);
-    const GemmResult canonical =
-        referenceGemm(canonicalProblem, {
-                                            .backend = GemmBackend::Canonical,
+    GemmRequest pointwiseProblem = makeProblem(pointwiseOutput);
+    const GemmResult pointwise =
+        referenceGemm(pointwiseProblem, {
+                                            .backend = GemmBackend::Pointwise,
                                             .requireRequestedBackend = true,
                                         });
 
     const Tensor expected =
         Tensor::fromNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});
     require(
-        compare(automaticOutput, expected).passed() && compare(canonicalOutput, expected).passed(),
-        "Automatic and Canonical pointwise compatibility routes diverged.");
-    require(automatic.runInfo.backendUsed == GemmBackend::Canonical &&
-                canonical.runInfo.backendUsed == GemmBackend::Canonical &&
-                automatic.runInfo.outputElementsComputed == 1 &&
-                canonical.runInfo.outputElementsComputed == 1 &&
-                !automatic.runInfo.fallbackReason && !canonical.runInfo.fallbackReason,
-            "Pointwise compatibility route information changed.");
+        compare(automaticOutput, expected).passed() && compare(pointwiseOutput, expected).passed(),
+        "Automatic and explicit Pointwise routes diverged.");
+    require(automatic.runInfo.backendUsed == GemmBackend::Pointwise &&
+                pointwise.runInfo.backendUsed == GemmBackend::Pointwise &&
+                automatic.runInfo.outputElementsWritten == 1 &&
+                pointwise.runInfo.outputElementsWritten == 1 &&
+                automatic.runInfo.outputElementsCovered == 1 &&
+                pointwise.runInfo.outputElementsCovered == 1 && !automatic.runInfo.fallbackReason &&
+                !pointwise.runInfo.fallbackReason,
+            "Pointwise route information changed.");
 }
 
 void testExactIntegerGemm() {
@@ -334,7 +337,7 @@ void testOutputSelection() {
         ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
     const GemmResult result = referenceGemm(problem);
-    require(result.runInfo.outputElementsComputed == 2,
+    require(result.runInfo.outputElementsWritten == 2 && result.runInfo.outputElementsCovered == 2,
             "Selected-output GEMM reported the wrong element count.");
     require(d.loadAs<float>({0, 0}) == 19 && d.loadAs<float>({0, 1}) == -99 &&
                 d.loadAs<float>({1, 0}) == -99 && d.loadAs<float>({1, 1}) == 50,
@@ -398,7 +401,10 @@ void testReferenceEpilogue() {
     problem.outputScale = 2.0;
     problem.auxiliaryScale = 3.0;
     problem.activation = Activation::Relu;
-    referenceEpilogue(problem);
+    const EpilogueRunInfo run = referenceEpilogue(problem);
+    require(run.outputElementsWritten == 4 && run.rawOutputElementsWritten == 4 &&
+                run.auxiliaryOutputElementsWritten == 4 && run.amaxElementsWritten == 1,
+            "Reference epilogue run information mismatch.");
 
     require(output.loadAs<float>({0, 0}) == 0 && output.loadAs<float>({0, 1}) == 4 &&
                 output.loadAs<float>({1, 0}) == 10 && output.loadAs<float>({1, 1}) == 0,
@@ -472,7 +478,7 @@ void testReferenceReduction() {
     Tensor output(ScalarType::Float32, Shape{3});
     ReductionProblem problem(input, output, ScalarType::Float32, {0, 2});
     const ReductionRunInfo run = referenceSum(problem);
-    require(run.outputElementsComputed == 3 && run.inputElementsRead == 24,
+    require(run.outputElementsWritten == 3 && run.inputElementsRead == 24,
             "Reference reduction run information mismatch.");
     require(compare(output,
                     Tensor::fromNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}))
@@ -482,7 +488,7 @@ void testReferenceReduction() {
     Tensor maximumAbsolute(ScalarType::Float32, Shape{});
     const ReductionRunInfo maximumRun =
         referenceMaximumAbsolute(input, maximumAbsolute, ScalarType::Float32);
-    require(maximumRun.outputElementsComputed == 1 && maximumRun.inputElementsRead == 24,
+    require(maximumRun.outputElementsWritten == 1 && maximumRun.inputElementsRead == 24,
             "Reference maximum-absolute run information mismatch.");
     require(maximumAbsolute.loadAs<float>({}) == 123.0f,
             "Reference maximum-absolute result mismatch.");
@@ -582,52 +588,47 @@ void testIndexedGeneration() {
     using namespace roc::host_validation;
 
     Tensor serial(ScalarType::Float32, Shape{2, 3});
-    GenerationOptions serialOptions;
-    serialOptions.real.pattern = GenerationPattern::SerialIndex;
-    const GenerationRunInfo serialRun = generate(serial, serialOptions);
+    const GenerationRunInfo serialRun =
+        generate(serial, GenerationRecipe::realOnly(GenerationRecipe::serialIndex()));
     require(serialRun.elementsGenerated == 6, "Indexed generation count mismatch.");
     require(serial.loadAs<float>({0, 0}) == 0 && serial.loadAs<float>({1, 0}) == 1 &&
                 serial.loadAs<float>({0, 1}) == 2 && serial.loadAs<float>({1, 2}) == 5,
             "First-dimension-fast serial generation mismatch.");
 
     Tensor complex(ScalarType::ComplexFloat32, Shape{2, 2});
-    GenerationOptions trigonometric;
-    trigonometric.real.pattern = GenerationPattern::Sine;
-    trigonometric.imaginary.pattern = GenerationPattern::Cosine;
-    generate(complex, trigonometric);
+    generate(complex,
+             GenerationRecipe::cartesian(GenerationRecipe::sine(), GenerationRecipe::cosine()));
     const std::complex<float> value = complex.loadAs<std::complex<float>>({1, 0});
     require(std::abs(value.real() - std::sin(1.0f)) < 1e-6f &&
                 std::abs(value.imag() - std::cos(1.0f)) < 1e-6f,
             "Complex trigonometric generation mismatch.");
 
     Tensor candidates(ScalarType::Float32, Shape{8});
-    GenerationOptions candidateOptions;
-    candidateOptions.seed = 37;
-    candidateOptions.real.pattern = GenerationPattern::CandidateSet;
-    candidateOptions.real.stream = 5;
-    candidateOptions.real.candidates = {-6.0, -1.5, 0.0, 4.0};
-    generate(candidates, candidateOptions);
+    const std::vector<double> candidateValues{-6.0, -1.5, 0.0, 4.0};
+    constexpr uint64_t candidateSeed = 37;
+    generate(candidates,
+             GenerationRecipe::realOnly(GenerationRecipe::candidateSet({.values = candidateValues}),
+                                        {.seed = candidateSeed}));
     for (size_t index = 0; index < candidates.size(); ++index) {
         const double expected =
-            candidateOptions.real.candidates[counterRandom(candidateOptions.seed,
-                                                           candidateOptions.real.stream, index) %
-                                             candidateOptions.real.candidates.size()];
+            candidateValues[counterRandom(candidateSeed,
+                                          generation_random_domain_version_1::realComponent,
+                                          index) %
+                            candidateValues.size()];
         require(candidates.loadAs<float>({index}) == expected,
                 "Candidate-set generation mismatch.");
     }
 
     Tensor point(ScalarType::Float32, Shape{2, 3, 2});
-    GenerationOptions pointOptions;
-    pointOptions.real.pattern = GenerationPattern::Constant;
-    pointOptions.real.parameter0 = 9.0;
-    const GenerationRunInfo pointRun = generateAt(point, 3, pointOptions);
+    const GenerationRunInfo pointRun = generateAt(
+        point, 3, GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 9.0})));
     require(pointRun.elementsGenerated == 1 && point.loadAs<float>({1, 1, 0}) == 9.0f &&
                 point.loadAs<float>({0, 1, 1}) == 0.0f,
             "First-dimension-fast point generation mismatch.");
 
-    pointOptions.indexOrder = LogicalIndexOrder::LastDimensionFastest;
-    pointOptions.real.parameter0 = 7.0;
-    generateAt(point, 3, pointOptions);
+    generateAt(point, 3,
+               GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 7.0}),
+                                          {.indexOrder = LogicalIndexOrder::LastDimensionFastest}));
     require(point.loadAs<float>({0, 1, 1}) == 7.0f,
             "Last-dimension-fast point generation mismatch.");
 
@@ -635,29 +636,23 @@ void testIndexedGeneration() {
          {LogicalIndexOrder::FirstDimensionFastest, LogicalIndexOrder::LastDimensionFastest}) {
         Tensor whole(ScalarType::Float4E2M1, Shape{2, 3, 2});
         Tensor elementwise(ScalarType::Float4E2M1, Shape{2, 3, 2});
-        GenerationOptions exactOptions;
-        exactOptions.seed = 0x12345678;
-        exactOptions.indexOrder = order;
-        exactOptions.real.pattern = GenerationPattern::UniformInteger;
-        exactOptions.real.parameter0 = -2;
-        exactOptions.real.parameter1 = 2;
-        exactOptions.real.stream = 9;
-        generate(whole, exactOptions);
+        const GenerationRecipe exactRecipe =
+            GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}),
+                                       {.seed = 0x12345678, .indexOrder = order});
+        generate(whole, exactRecipe);
         for (size_t index = 0; index < whole.size(); ++index)
-            generateAt(elementwise, index, exactOptions);
+            generateAt(elementwise, index, exactRecipe);
         require(std::equal(whole.storage().begin(), whole.storage().end(),
                            elementwise.storage().begin(), elementwise.storage().end()),
                 "Whole-tensor and elementwise generation encodings differ.");
     }
 
     Tensor affine(ScalarType::Float32, Shape{2, 3, 2});
-    GenerationOptions affineOptions;
-    affineOptions.real.pattern = GenerationPattern::AffineIndexRemainder;
-    affineOptions.real.dimensionCoefficients = {1, -1, 2};
-    affineOptions.real.affineOffset = -2;
-    affineOptions.real.remainderDivisor = 5;
-    affineOptions.real.valueOffset = 1.0;
-    generate(affine, affineOptions);
+    generate(affine,
+             GenerationRecipe::realOnly(
+                 GenerationRecipe::affineIndexRemainder(
+                     {.dimensionCoefficients = {1, -1, 2}, .offset = -2, .positiveDivisor = 5})
+                     .withAffineValueMapping({.offset = 1.0})));
     require(affine.loadAs<float>({0, 0, 0}) == -1.0f && affine.loadAs<float>({1, 2, 1}) == 0.0f,
             "Affine-index remainder generation mismatch.");
 
@@ -669,23 +664,19 @@ void testIndexedGeneration() {
     const Layout paddedLayout(Shape{128, 96}, {1, 137});
     Tensor oneThread(ScalarType::Float32, paddedLayout);
     Tensor fourThreads(ScalarType::Float32, paddedLayout);
-    GenerationOptions parallelOptions;
-    parallelOptions.seed = 0x1020304050607080ULL;
-    parallelOptions.real.pattern = GenerationPattern::UniformReal;
-    parallelOptions.real.parameter0 = -3.0;
-    parallelOptions.real.parameter1 = 7.0;
+    const GenerationRecipe parallelRecipe =
+        GenerationRecipe::realOnly(GenerationRecipe::uniformReal({.lower = -3.0, .upper = 7.0}),
+                                   {.seed = 0x1020304050607080ULL});
     omp_set_num_threads(1);
-    generate(oneThread, parallelOptions);
+    generate(oneThread, parallelRecipe);
     omp_set_num_threads(4);
-    generate(fourThreads, parallelOptions);
+    generate(fourThreads, parallelRecipe);
     require(std::equal(oneThread.storage().begin(), oneThread.storage().end(),
                        fourThreads.storage().begin(), fourThreads.storage().end()),
             "Ordinary generation changed with OpenMP thread count.");
 
     Tensor aliased(ScalarType::Float32, Layout(Shape{8192}, {0}));
-    GenerationOptions aliasedOptions;
-    aliasedOptions.real.pattern = GenerationPattern::SerialIndex;
-    generate(aliased, aliasedOptions);
+    generate(aliased, GenerationRecipe::realOnly(GenerationRecipe::serialIndex()));
     require(aliased.loadAs<float>({0}) == 8191.0f,
             "Aliased generation did not preserve deterministic traversal order.");
 
@@ -715,7 +706,7 @@ void testReferenceAxpby() {
     problem.alpha = 2.0;
     problem.beta = -0.5;
     const AxpbyRunInfo run = referenceAxpby(problem);
-    require(run.elementsComputed == shape.elementCount(),
+    require(run.outputElementsWritten == shape.elementCount(),
             "Reference AXPBY element count mismatch.");
 
     for (size_t batch = 0; batch < 2; ++batch) {
@@ -768,7 +759,7 @@ void testReferenceSoftmax() {
 
     const SoftmaxRunInfo run =
         referenceSoftmax(SoftmaxProblem(input, output, 1, ScalarType::Float32));
-    require(run.slicesComputed == 4 && run.elementsComputed == shape.elementCount(),
+    require(run.slicesProcessed == 4 && run.outputElementsWritten == shape.elementCount(),
             "Reference softmax run information mismatch.");
 
     for (size_t batch = 0; batch < 2; ++batch) {
@@ -812,7 +803,8 @@ void testReferenceLayerNorm() {
     problem.gamma = gamma;
     problem.beta = beta;
     const LayerNormRunInfo run = referenceLayerNorm(problem);
-    require(run.slicesComputed == 4 && run.elementsComputed == shape.elementCount(),
+    require(run.slicesProcessed == 4 && run.outputElementsWritten == shape.elementCount() &&
+                run.meanElementsWritten == 4 && run.inverseVarianceElementsWritten == 4,
             "Reference LayerNorm run information mismatch.");
     require(mean.loadAs<float>({0, 0}) == 2.0f, "Reference LayerNorm mean mismatch.");
     require(std::abs(inverseVariance.loadAs<float>({0, 0}) -
@@ -916,10 +908,8 @@ void testGenerationAndComparison() {
     require(indexedValue == 5 && indexedUniformInteger(42, 9, 123456789, -100, 100) == -31,
             "Counter-based integer generation sequence changed.");
 
-    GenerationOptions binaryGeneration;
-    binaryGeneration.seed = 42;
-    binaryGeneration.real.pattern = GenerationPattern::CandidateSet;
-    binaryGeneration.real.candidates = {-1.0, 1.0};
+    const GenerationRecipe binaryGeneration = GenerationRecipe::realOnly(
+        GenerationRecipe::candidateSet({.values = {-1.0, 1.0}}), {.seed = 42});
     Tensor a(ScalarType::Float32, Shape{32});
     Tensor b(ScalarType::Float32, Shape{32});
     generate(a, binaryGeneration);
@@ -927,8 +917,11 @@ void testGenerationAndComparison() {
     require(compare(b, a).passed(), "Random generation is not repeatable for equal seeds.");
 
     b.storeFrom({7}, b.loadAs<float>({7}) + 1.0f);
-    const auto result = compare(
-        b, a, {.absoluteTolerance = 0.0, .relativeTolerance = 0.0, .maxReportedMismatches = 4});
+    ComparisonOptions mismatchOptions;
+    mismatchOptions.absoluteTolerance = 0.0;
+    mismatchOptions.relativeTolerance = 0.0;
+    mismatchOptions.maxReportedMismatches = 4;
+    const auto result = compare(b, a, mismatchOptions);
     require(result.mismatches == 1, "Comparison did not count one mismatch.");
     require(result.reportedMismatches.size() == 1, "Comparison did not report one mismatch.");
     require(result.reportedMismatches[0].index == 7,
@@ -942,9 +935,11 @@ void testGenerationAndComparison() {
         std::numeric_limits<double>::infinity(),
         std::numeric_limits<double>::infinity(),
     };
-    const auto nonFiniteResult = compare(Tensor::fromNative(std::span<const double>(nonFiniteA)),
-                                         Tensor::fromNative(std::span<const double>(nonFiniteB)),
-                                         {.relativeTolerance = 1.0});
+    ComparisonOptions nonFiniteOptions;
+    nonFiniteOptions.relativeTolerance = 1.0;
+    const auto nonFiniteResult =
+        compare(Tensor::fromNative(std::span<const double>(nonFiniteA)),
+                Tensor::fromNative(std::span<const double>(nonFiniteB)), nonFiniteOptions);
     require(nonFiniteResult.mismatches == 1,
             "Comparison did not distinguish finite and infinite values.");
 
@@ -970,16 +965,16 @@ void testGenerationAndComparison() {
             "Matrix generation modified padding.");
 
     Tensor runtimeExpected(ScalarType::Float32, Shape{2, 3});
-    GenerationOptions runtimeGeneration;
-    runtimeGeneration.seed = 7;
-    runtimeGeneration.real.pattern = GenerationPattern::UniformInteger;
-    runtimeGeneration.real.parameter0 = -2;
-    runtimeGeneration.real.parameter1 = 2;
+    const GenerationRecipe runtimeGeneration = GenerationRecipe::realOnly(
+        GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), {.seed = 7});
     generate(runtimeExpected, runtimeGeneration);
     Tensor runtimeObserved = runtimeExpected.clone();
     runtimeObserved.storeFrom({1, 2}, runtimeExpected.loadAs<float>({1, 2}) + 1.0f);
-    const auto runtimeComparison = compare(runtimeObserved, runtimeExpected,
-                                           {.absoluteTolerance = 0.0, .maxReportedMismatches = 2});
+    ComparisonOptions runtimeComparisonOptions;
+    runtimeComparisonOptions.absoluteTolerance = 0.0;
+    runtimeComparisonOptions.maxReportedMismatches = 2;
+    const auto runtimeComparison =
+        compare(runtimeObserved, runtimeExpected, runtimeComparisonOptions);
     require(runtimeComparison.compared == 6 && runtimeComparison.mismatches == 1 &&
                 runtimeComparison.reportedMismatches[0].index == 5,
             "Runtime tensor generation/comparison mismatch.");
@@ -995,11 +990,63 @@ void testComparisonProgram() {
     emptyOptions.computeFrobenius = false;
     emptyOptions.maxReportedMismatches = 0;
     emptyOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
-    require(
-        compare(Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
-                Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)), emptyOptions)
-                .compared == 0,
-        "Runtime fast comparison rejected an empty tensor.");
+    const auto compareEmpty = [&](const ComparisonOptions& options) {
+        return compare(Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
+                       Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
+                       options);
+    };
+    const ComparisonResult emptyResult = compareEmpty(emptyOptions);
+    require(emptyResult.compared == 0 && emptyResult.pointwiseEvaluated &&
+                emptyResult.pointwisePassed && !emptyResult.frobeniusEvaluated &&
+                !emptyResult.ulpEvaluated,
+            "Runtime fast comparison rejected an empty tensor.");
+
+    const auto requireInvalidEmptyOptions = [&](const ComparisonOptions& options,
+                                                const char* message) {
+        bool rejected = false;
+        try {
+            (void)compareEmpty(options);
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        require(rejected, message);
+    };
+    ComparisonOptions missingUlpType;
+    missingUlpType.computeUlp = true;
+    requireInvalidEmptyOptions(missingUlpType,
+                               "Empty comparison accepted ULP evidence without a scalar type.");
+    ComparisonOptions invalidUlpType = missingUlpType;
+    invalidUlpType.ulpType = ScalarType::Count;
+    requireInvalidEmptyOptions(invalidUlpType,
+                               "Empty comparison accepted ScalarType::Count as a ULP type.");
+    ComparisonOptions missingUlpEvidence;
+    missingUlpEvidence.maximumUlpTolerance = 0.0;
+    requireInvalidEmptyOptions(missingUlpEvidence,
+                               "Empty comparison accepted a ULP criterion without ULP evidence.");
+    ComparisonOptions missingFrobeniusEvidence;
+    missingFrobeniusEvidence.computeFrobenius = false;
+    missingFrobeniusEvidence.relativeFrobeniusTolerance = 0.0;
+    requireInvalidEmptyOptions(
+        missingFrobeniusEvidence,
+        "Empty comparison accepted a Frobenius criterion without Frobenius evidence.");
+    ComparisonOptions zeroSelectionStride;
+    zeroSelectionStride.selection.stride = 0;
+    requireInvalidEmptyOptions(zeroSelectionStride,
+                               "Empty comparison accepted a zero selection stride.");
+
+    const std::array<double, 1> evidenceObserved{2.0};
+    const std::array<double, 1> evidenceExpected{1.0};
+    ComparisonOptions evidenceOnly;
+    evidenceOnly.pointwise = false;
+    evidenceOnly.computeUlp = true;
+    evidenceOnly.ulpType = ScalarType::Float64;
+    const ComparisonResult evidenceResult =
+        compare(Tensor::fromNative(std::span<const double>(evidenceObserved)),
+                Tensor::fromNative(std::span<const double>(evidenceExpected)), evidenceOnly);
+    require(!evidenceResult.pointwiseEvaluated && !evidenceResult.frobeniusEvaluated &&
+                !evidenceResult.ulpEvaluated && evidenceResult.passed() &&
+                evidenceResult.frobeniusDifference == 1.0 && evidenceResult.ulpCompared == 1,
+            "Evidence-only comparison reported an evaluated criterion.");
 
     const std::array<double, 3> reversedStorage{1.0, 2.0, 3.0};
     const Layout reversedLayout(Shape{3}, {-1}, 2);
@@ -1105,7 +1152,8 @@ void testComparisonProgram() {
                 std::abs(metricResult.frobeniusObserved - 5.0) < 1e-12 &&
                 std::abs(metricResult.frobeniusDifference - std::sqrt(18.0)) < 1e-12 &&
                 std::abs(metricResult.relativeFrobeniusError - std::sqrt(18.0) / 5.0) < 1e-12 &&
-                metricResult.frobeniusPassed,
+                !metricResult.pointwiseEvaluated && metricResult.frobeniusEvaluated &&
+                !metricResult.ulpEvaluated && metricResult.frobeniusPassed,
             "Comparison Frobenius evidence is incorrect.");
     ComparisonOptions sampledMetrics = metrics;
     sampledMetrics.selection.first = 1;
@@ -1125,7 +1173,9 @@ void testComparisonProgram() {
     ulp.maximumUlpTolerance = 1.0;
     const auto ulpResult = compare(Tensor::fromNative(std::span<const double>(ulpObserved)),
                                    Tensor::fromNative(std::span<const double>(ulpExpected)), ulp);
-    require(ulpResult.maximumUlp == 1.0 && ulpResult.averageUlp == 1.0 && ulpResult.ulpPassed,
+    require(ulpResult.maximumUlp == 1.0 && ulpResult.averageUlp == 1.0 &&
+                ulpResult.pointwiseEvaluated && !ulpResult.frobeniusEvaluated &&
+                ulpResult.ulpEvaluated && ulpResult.ulpPassed,
             "Comparison ULP evidence is incorrect.");
     require(encodedUlpDistance(0.0, static_cast<double>(std::numeric_limits<float>::denorm_min()),
                                ScalarType::Float32) == 1.0,
@@ -1145,6 +1195,52 @@ void testComparisonProgram() {
     require(nonFiniteResult.passed() && nonFiniteResult.matchedInfinities == 1 &&
                 nonFiniteResult.matchedNaNs == 1,
             "Complex non-finite comparison policy is incorrect.");
+    const std::array<double, 1> doubleInfinity{std::numeric_limits<double>::infinity()};
+    const std::array<float, 1> floatInfinity{std::numeric_limits<float>::infinity()};
+    ComparisonOptions noPointwiseStatistics;
+    noPointwiseStatistics.computePointwiseStatistics = false;
+    noPointwiseStatistics.computeFrobenius = false;
+    const ComparisonResult noPointwiseStatisticsResult =
+        compare(Tensor::fromNative(std::span<const double>(doubleInfinity)),
+                Tensor::fromNative(std::span<const float>(floatInfinity)), noPointwiseStatistics);
+    require(
+        noPointwiseStatisticsResult.passed() && noPointwiseStatisticsResult.matchedInfinities == 0,
+        "Disabled pointwise statistics collected matched infinities.");
+
+    const ComparisonOptions numpyDefaults = allCloseComparisonOptions();
+    require(numpyDefaults.absoluteTolerance == 1e-8 && numpyDefaults.relativeTolerance == 1e-5 &&
+                numpyDefaults.symmetricRelativeTolerance == 0.0 && !numpyDefaults.strictTolerance &&
+                !numpyDefaults.equalNaNs,
+            "Allclose options do not expose NumPy's real-valued defaults.");
+    const std::array<double, 1> lowerValue{8.0};
+    const std::array<double, 1> referenceValue{10.0};
+    ComparisonOptions numpyBoundary = allCloseComparisonOptions(0.0, 0.2);
+    numpyBoundary.computeFrobenius = false;
+    require(compare(Tensor::fromNative(std::span<const double>(lowerValue)),
+                    Tensor::fromNative(std::span<const double>(referenceValue)), numpyBoundary)
+                .passed(),
+            "Allclose rejected the inclusive NumPy boundary.");
+    require(!compare(Tensor::fromNative(std::span<const double>(referenceValue)),
+                     Tensor::fromNative(std::span<const double>(lowerValue)), numpyBoundary)
+                 .passed(),
+            "Allclose lost NumPy's expected-reference asymmetry.");
+    numpyBoundary.strictTolerance = true;
+    require(!compare(Tensor::fromNative(std::span<const double>(lowerValue)),
+                     Tensor::fromNative(std::span<const double>(referenceValue)), numpyBoundary)
+                 .passed(),
+            "Strict tolerance did not preserve the legacy exclusive boundary.");
+
+    const std::array<std::complex<double>, 1> componentwiseObserved{std::complex<double>(1.0, 1.0)};
+    const std::array<std::complex<double>, 1> componentwiseExpected{std::complex<double>(0.0, 0.0)};
+    ComparisonOptions componentwiseComplex = allCloseComparisonOptions(1.0, 0.0);
+    componentwiseComplex.computeFrobenius = false;
+    require(
+        compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
+                Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),
+                componentwiseComplex)
+            .passed(),
+        "Complex comparison no longer applies the documented componentwise policy.");
+
     const std::array<double, 4> absoluteCandidates{1e-6, 1e-5, 1e-4, 1e-3};
     const std::array<double, 1> relativeCandidates{0.0};
     const std::array<double, 1> closeObserved{1.00009};
@@ -1155,6 +1251,17 @@ void testComparisonProgram() {
         std::span<const double>(absoluteCandidates), std::span<const double>(relativeCandidates));
     require(tolerance && tolerance->absolute == 1e-4 && tolerance->relative == 0.0,
             "Allclose tolerance search selected the wrong candidate.");
+
+    std::array<float, 5> rangedSentinel{
+        std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(), 0.0f, std::numeric_limits<float>::infinity()};
+    const SentinelResult rangedSentinelResult = checkUnwrittenSentinel(
+        ScalarType::Float32, std::as_bytes(std::span<const float>(rangedSentinel)), 2, 2,
+        SentinelRegion::Before);
+    require(rangedSentinelResult.checked == 2 && rangedSentinelResult.mismatches == 1 &&
+                rangedSentinelResult.reportedMismatches[0].region == SentinelRegion::Before &&
+                rangedSentinelResult.reportedMismatches[0].index == 3,
+            "Sentinel range did not report an absolute storage element index.");
 
     std::array<float, 5> guarded{
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
@@ -1171,6 +1278,14 @@ void testComparisonProgram() {
     require(
         !sentinel.passed() && sentinel.mismatches == 1 && sentinel.reportedMismatches[0].index == 2,
         "Written tensor padding was not detected.");
+    bool rejectedOversizedSentinelAllocation = false;
+    try {
+        (void)checkUnusedTensorStorage(guardedView, guarded.size() + 1);
+    } catch (const std::invalid_argument&) {
+        rejectedOversizedSentinelAllocation = true;
+    }
+    require(rejectedOversizedSentinelAllocation,
+            "Sentinel check accepted an allocation larger than its storage.");
 }
 }  // namespace
 
@@ -1178,7 +1293,7 @@ int main() {
     testRuntimeReferenceGemm();
     testZeroGemmScalarsSuppressNonFiniteOperands();
     testRuntimeMixedAndBlockScaledGemm();
-    testPointwiseCompatibilityRoutes();
+    testPointwiseRoutes();
     testExactIntegerGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();

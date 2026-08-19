@@ -28,11 +28,11 @@ add_test(
     COMMAND host-validation-comparison-package-test
 )
 
-add_executable(host-validation-tiled-package-test tiled.cpp)
-target_link_libraries(host-validation-tiled-package-test PRIVATE roc::host-validation-tiled)
+add_executable(host-validation-blocked-package-test blocked.cpp)
+target_link_libraries(host-validation-blocked-package-test PRIVATE roc::host-validation-blocked)
 add_test(
-    NAME host-validation-tiled-package-consumer
-    COMMAND host-validation-tiled-package-test
+    NAME host-validation-blocked-package-consumer
+    COMMAND host-validation-blocked-package-test
 )
 
 if(TARGET roc::host-validation-blas)

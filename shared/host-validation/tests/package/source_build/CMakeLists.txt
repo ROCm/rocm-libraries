@@ -16,7 +16,7 @@ add_subdirectory("${ROCHostValidation_SOURCE_DIR}" host-validation)
 foreach(required_target
         roc::host-validation-core
         roc::host-validation
-        roc::host-validation-tiled
+        roc::host-validation-blocked
         roc::host-validation-mx
         roc::host-validation-amd-gpu-layout)
     if(NOT TARGET "${required_target}")

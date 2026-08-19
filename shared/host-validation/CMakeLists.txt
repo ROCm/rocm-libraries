@@ -85,10 +85,10 @@ add_library(host-validation STATIC
 )
 add_library(roc::host-validation ALIAS host-validation)
 
-add_library(host-validation-tiled STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/tiled.cpp"
+add_library(host-validation-blocked STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/blocked.cpp"
 )
-add_library(roc::host-validation-tiled ALIAS host-validation-tiled)
+add_library(roc::host-validation-blocked ALIAS host-validation-blocked)
 
 target_compile_features(host-validation-core INTERFACE cxx_std_20)
 target_include_directories(host-validation-core
@@ -101,6 +101,9 @@ target_sources(host-validation-core
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/scalar_codec.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/index_order.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/scalar.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/tensor.hpp"
 )
 
@@ -167,6 +170,7 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/epilogue.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/generation.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/generation_compatibility.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/generation_primitives.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/gemm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/layer_norm.hpp"
@@ -183,20 +187,20 @@ set_target_properties(host-validation
         VISIBILITY_INLINES_HIDDEN ON
 )
 
-target_compile_features(host-validation-tiled PUBLIC cxx_std_20)
-target_link_libraries(host-validation-tiled PUBLIC roc::host-validation)
-target_include_directories(host-validation-tiled
+target_compile_features(host-validation-blocked PUBLIC cxx_std_20)
+target_link_libraries(host-validation-blocked PUBLIC roc::host-validation)
+target_include_directories(host-validation-blocked
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-target_sources(host-validation-tiled
+target_sources(host-validation-blocked
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/backends/tiled.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/backends/blocked.hpp"
 )
-set_target_properties(host-validation-tiled
+set_target_properties(host-validation-blocked
     PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         POSITION_INDEPENDENT_CODE ON
@@ -350,9 +354,9 @@ roc_host_validation_install_component_target(
     ROCHostValidationOperationsTargets.cmake
 )
 roc_host_validation_install_component_target(
-    host-validation-tiled
-    host-validation-tiled-targets
-    ROCHostValidationTiledTargets.cmake
+    host-validation-blocked
+    host-validation-blocked-targets
+    ROCHostValidationBlockedTargets.cmake
 )
 roc_host_validation_install_component_target(
     host-validation-amd-gpu-layout
@@ -471,7 +475,7 @@ function(roc_host_validation_finalize_package)
     foreach(generic_target
             host-validation-core
             host-validation
-            host-validation-tiled
+            host-validation-blocked
             host-validation-blas
             host-validation-mx)
         roc_host_validation_assert_generic_target_boundary("${generic_target}")

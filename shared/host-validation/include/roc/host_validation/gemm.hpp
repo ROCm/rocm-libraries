@@ -12,34 +12,42 @@
 #include <vector>
 
 namespace roc::host_validation {
+// Selects the host implementation strategy. Pointwise computes exactly the
+// selected D coordinates. Blocked reuses operand blocks and may accumulate
+// unselected coordinates in every touched output block, but writes only the
+// selected D coordinates. Blas delegates to a supplied BLAS implementation.
 enum class GemmBackend {
-    Automatic,
-    Canonical,
-    Tiled,
-    Blas,
+    Automatic,  // Tries the supplied implementation, then falls back to Pointwise.
+    Pointwise,  // Computes and writes exactly the selected D coordinates.
+    Blocked,    // Accumulates complete touched output blocks; writes selected D coordinates.
+    Blas,       // Delegates to a supplied BLAS implementation.
 };
 
+// Selects when low-precision accumulator types are rounded.
 enum class AccumulationRounding {
-    TypeDefault,
-    FullPrecision,
-    AfterProductAndSum,
+    TypeDefault,         // Stepwise rounding for F16/BF16 accumulators; full precision otherwise.
+    FullPrecision,       // Keeps the host register type through the complete dot product.
+    AfterProductAndSum,  // Quantizes every product and accumulated sum.
 };
 
+// Associates a rank-two scale tensor with its reduction-dimension block width.
 struct BlockScaleBinding {
-    Tensor values;
-    size_t blockSize;
+    Tensor values;     // [free dimension, reduction block].
+    size_t blockSize;  // Number of consecutive K elements sharing one scale.
 };
 
+// Describes one normalized rank-two GEMM operand.
 struct GemmOperand {
     explicit GemmOperand(Tensor tensor) : values(std::move(tensor)) {}
 
-    Tensor values;
-    std::optional<ScalarType> computeType;
-    std::vector<VectorBinding> preQuantizationScales;
-    std::optional<BlockScaleBinding> blockScale;
-    bool conjugate = false;
+    Tensor values;                                     // A is [M,K]; B is [K,N].
+    std::optional<ScalarType> computeType;             // Optional per-element input quantization.
+    std::vector<VectorBinding> preQuantizationScales;  // Ordered factors before quantization.
+    std::optional<BlockScaleBinding> blockScale;       // Requires matching scales on both operands.
+    bool conjugate = false;  // Conjugates values after loading and before scaling.
 };
 
+// Describes alpha/beta combination and the fused D finalization program.
 struct GemmEpilogue {
     explicit GemmEpilogue(ScalarType coefficientType)
         : alpha(Scalar::one(coefficientType)),
@@ -48,19 +56,22 @@ struct GemmEpilogue {
           activationParameter0(Scalar::zero(coefficientType)),
           activationParameter1(Scalar::zero(coefficientType)) {}
 
-    Scalar alpha;
-    Scalar beta;
-    std::optional<VectorBinding> bias;
-    std::optional<VectorBinding> scaleAlpha;
-    std::optional<Tensor> scaleA;
-    std::optional<Tensor> scaleB;
-    Scalar outputScale;
-    OutputConversion outputConversion = OutputConversion::Default;
-    Activation activation = Activation::None;
-    Scalar activationParameter0;
-    Scalar activationParameter1;
+    Scalar alpha;                             // Multiplies the accumulated A*B term.
+    Scalar beta;                              // Multiplies C.
+    std::optional<VectorBinding> bias;        // Added after alpha*A*B + beta*C.
+    std::optional<VectorBinding> scaleAlpha;  // Row/column factor applied to alpha.
+    std::optional<Tensor> scaleA;             // Rank-one row factor applied to alpha.
+    std::optional<Tensor> scaleB;             // Rank-one column factor applied to alpha.
+    Scalar outputScale;                       // Applied after activation.
+    OutputConversion outputConversion = OutputConversion::Default;  // Final D encoding.
+    Activation activation = Activation::None;                       // Applied before outputScale.
+    Scalar activationParameter0;  // First activation-specific scalar.
+    Scalar activationParameter1;  // Second activation-specific scalar.
 };
 
+// Reusable numerical GEMM descriptor. It contains A, B, C, arithmetic policy,
+// and D's scalar type, but no destination tensor, output selection, or backend
+// policy.
 struct GemmProblem {
     GemmProblem(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, ScalarType output,
                 ScalarType accumulator)
@@ -71,16 +82,18 @@ struct GemmProblem {
           accumulatorType(accumulator),
           epilogue(accumulator) {}
 
-    GemmOperand a;
-    GemmOperand b;
-    Tensor c;
-    ScalarType outputType;
-    ScalarType accumulatorType;
+    GemmOperand a;               // Rank-two [M,K] operand.
+    GemmOperand b;               // Rank-two [K,N] operand.
+    Tensor c;                    // Rank-two [M,N] addend read when beta is nonzero.
+    ScalarType outputType;       // Required scalar type of a request's D tensor.
+    ScalarType accumulatorType;  // Dot-product and epilogue arithmetic type.
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
-    MathMode mathMode = MathMode::Default;
+    MathMode mathMode = MathMode::Default;  // Operand transform after compute-type quantization.
     GemmEpilogue epilogue;
 };
 
+// One GEMM invocation. It extends GemmProblem with the caller-owned D
+// destination and the coordinates allowed to change.
 struct GemmRequest : GemmProblem {
     GemmRequest(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, Tensor dTensor,
                 ScalarType accumulator)
@@ -88,47 +101,62 @@ struct GemmRequest : GemmProblem {
                       accumulator),
           d(std::move(dTensor)) {}
 
-    Tensor d;
-    OutputSelection outputSelection = OutputSelection::all();
+    Tensor d;  // Rank-two [M,N] destination; selected coordinates are overwritten.
+    OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.
 };
 
+// Result of validating one request against one execution policy.
 struct GemmSupportInfo {
-    bool supported = false;
-    std::string reason;
+    bool supported = false;  // True only when validation and backend restrictions pass.
+    std::string reason;      // Empty when supported; rejection text otherwise.
 
     explicit operator bool() const {
         return supported;
     }
 };
 
+// Reports the strategy used and its completed output work.
 struct GemmRunInfo {
-    GemmBackend backendUsed = GemmBackend::Canonical;
-    std::optional<std::string> fallbackReason;
-    size_t outputElementsComputed = 0;
+    GemmBackend backendUsed = GemmBackend::Pointwise;
+    std::optional<std::string> fallbackReason;  // Rejection that caused Automatic fallback.
+    size_t outputElementsWritten = 0;           // Logical D coordinates overwritten.
+    // Logical output coordinates covered by the strategy: selected coordinates
+    // for Pointwise, touched output blocks for Blocked, and full D for Blas.
+    size_t outputElementsCovered = 0;
 };
 
+// Backend policy for one invocation.
 struct GemmExecution {
-    GemmBackend backend = GemmBackend::Automatic;
+    GemmBackend backend = GemmBackend::Automatic;  // Strategy selection policy.
+    // For explicit Blocked or Blas requests, reject unsupported input instead
+    // of falling back to Pointwise. It has no effect for Automatic or Pointwise.
     bool requireRequestedBackend = false;
 };
 
+// referenceGemm returns the request's D tensor as output; it aliases the same
+// storage rather than copying the destination.
 struct GemmResult {
-    Tensor output;
+    Tensor output;  // Alias of GemmRequest::d.
     GemmRunInfo runInfo;
 };
 
+// Interface implemented by optional Blocked and BLAS strategies. Pointwise is
+// built into referenceGemm and does not require an implementation object.
 class GemmBackendImplementation {
    public:
     virtual ~GemmBackendImplementation() = default;
 
-    virtual GemmBackend backend() const = 0;
+    virtual GemmBackend backend() const = 0;  // Blocked or Blas.
     virtual GemmSupportInfo querySupport(const GemmRequest&) const = 0;
-    virtual GemmRunInfo run(const GemmRequest&) const = 0;
+    virtual GemmRunInfo run(const GemmRequest&) const = 0;  // Mutates GemmRequest::d.
 };
 
+// Validates the request and selected strategy without mutating any tensor.
 GemmSupportInfo queryGemmSupport(const GemmRequest& request, const GemmExecution& execution = {},
                                  const GemmBackendImplementation* backendImplementation = nullptr);
 
+// Executes the request, mutates selected D coordinates, and returns D's alias
+// plus completed-work metadata.
 GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execution = {},
                          const GemmBackendImplementation* backendImplementation = nullptr);
 }  // namespace roc::host_validation
