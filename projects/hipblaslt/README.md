@@ -281,8 +281,8 @@ inv build --architecture gfx1100 --clean
 * `HIPBLASLT_ASIC_REVISION` gfx1250 ASIC revision to build for, `v0` or `v1`; `invoke build` probes the local GPU and sets it when unset (default: empty, treated as `v1`)
 
 > [!NOTE]
-> To determine defaults for the `TensileCreateLibrary` command generated when building the device
-> libraries, run `tensilelite/bin/TensileCreateLibrary --help` from the tensilelite directory.
+> To determine defaults for the create-library command generated when building the device
+> libraries, run `python -m tensilelite create-library --help` from the tensilelite directory.
 
 > [!NOTE]
 > Refer to the tensilelite [README](./tensilelite/README.md) for instructions on building for the tensile workflow.

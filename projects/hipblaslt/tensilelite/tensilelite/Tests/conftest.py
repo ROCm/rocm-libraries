@@ -36,12 +36,10 @@ except ImportError:
 testdir = os.path.dirname(__file__)
 moddir = os.path.dirname(testdir)
 rootdir = os.path.dirname(moddir)
-sys.path.append(rootdir)
 
 def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
-    parser.addoption("--prebuilt-client")
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
@@ -180,10 +178,6 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
         rv += extraOptions.split(",")
     if pytestconfig.getoption("--global-parameters"):
         rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
-    if not pytestconfig.getoption("--no-common-build"):
-        if pytestconfig.getoption("--prebuilt-client"):
-            rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
-
     # Forward --gpu-targets to tensilelite. Do NOT forward --build-only or
     # --use-cache here — those are hardcoded in each test function's args.
     if pytestconfig.getoption("--gpu-targets"):
