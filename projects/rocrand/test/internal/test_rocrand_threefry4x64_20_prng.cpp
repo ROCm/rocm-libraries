@@ -60,7 +60,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry4x64_20_generator,
                                threefry4x64_20_generator_prng_offset_tests_types);
 
 #ifdef CODE_COVERAGE_ENABLED
-#include "test_rocrand_host_prng.hpp"
+    #include "test_rocrand_host_prng.hpp"
 
 using rocrand_impl::host::threefry4x64_20_generator_host;
 using threefry4x64_20_generator_prng_host_tests_types
@@ -101,7 +101,10 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry4x64_20_generator,
 class threefry4x64_engine_type_test : public threefry4x64_20_generator::engine_type
 {
 public:
-    __host__ threefry4x64_engine_type_test() : threefry4x64_20_generator::engine_type(0, 0, 0) {}
+    __host__
+    threefry4x64_engine_type_test()
+        : threefry4x64_20_generator::engine_type(0, 0, 0)
+    {}
 
     __host__
     state_type& internal_state_ref()

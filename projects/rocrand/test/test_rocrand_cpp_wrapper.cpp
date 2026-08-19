@@ -181,15 +181,18 @@ TYPED_TEST(rocrand_cpp_wrapper, rocrand_rng_ctor)
     generator_t generator2(generator1);
     ASSERT_EQ(generator1, nullptr);
 
-    try {
+    try
+    {
         generator_t generator3(generator1);
         FAIL() << "Move-constructing generator from an already moved generator. Expected "
                   "constructor to throw rocrand_cpp::error";
     }
-    catch(const rocrand_cpp::error& err) {
+    catch(const rocrand_cpp::error& err)
+    {
         EXPECT_EQ(err.error_code(), ROCRAND_STATUS_NOT_CREATED);
     }
-    catch(...) {
+    catch(...)
+    {
         FAIL() << "Expected rocrand_cpp::error";
     }
 }
@@ -357,14 +360,17 @@ auto rocrand_qrng_dims_template() -> typename std::enable_if<is_qrng<generator_t
     engine.dimensions(11U);
     engine.dimensions(20000U);
 
-    try {
+    try
+    {
         engine.dimensions(20001U);
         FAIL() << "Expected rocrand_cpp::error for QRNG dimension being out of range";
     }
-    catch(const rocrand_cpp::error& err) {
+    catch(const rocrand_cpp::error& err)
+    {
         EXPECT_EQ(err.error_code(), ROCRAND_STATUS_OUT_OF_RANGE);
     }
-    catch(...) {
+    catch(...)
+    {
         FAIL() << "Expected rocrand_cpp::error for QRNG dimension being out of range";
     }
 }
@@ -510,12 +516,12 @@ struct distribution_test<rocrand_cpp::poisson_distribution<unsigned int>>
 };
 
 template<class generator_t, class distribution_t>
-auto rocrand_dist_test() -> typename std::enable_if<
-    is_64bit<generator_t>::value
-    || (!is_64bit<generator_t>::value
-        && !std::is_same<distribution_t,
-                         rocrand_cpp::uniform_int_distribution<unsigned long long int>>::value)>::
-    type
+auto rocrand_dist_test() ->
+    typename std::enable_if<is_64bit<generator_t>::value
+                            || (!is_64bit<generator_t>::value
+                                && !std::is_same<distribution_t,
+                                                 rocrand_cpp::uniform_int_distribution<
+                                                     unsigned long long int>>::value)>::type
 {
     generator_t    engine;
     distribution_t distribution;
@@ -538,10 +544,11 @@ auto rocrand_dist_test() -> typename std::enable_if<
 }
 
 template<class generator_t, class distribution_t>
-auto rocrand_dist_test() -> typename std::enable_if<
-    !is_64bit<generator_t>::value
-    && std::is_same<distribution_t,
-                    rocrand_cpp::uniform_int_distribution<unsigned long long int>>::value>::type
+auto rocrand_dist_test() ->
+    typename std::enable_if<
+        !is_64bit<generator_t>::value
+        && std::is_same<distribution_t,
+                        rocrand_cpp::uniform_int_distribution<unsigned long long int>>::value>::type
 {
     // 64 bit generation is not supported for these generators
     generator_t    engine;
