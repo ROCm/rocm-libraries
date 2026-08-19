@@ -3102,6 +3102,23 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "TDMFuse=6 does not describe the sparse metadata tensor")
           return
+        # An equal pair is only correct here at ScheduleIterAlg=0. SIA=4 runs
+        # StinkyTofu at OptLevel 3, whose postMainLoopBarrierCheckAndReset
+        # discards every barrier and rebuilds placement from tensor_load/ds_read
+        # tokens; with A and B de-aliased into their own descriptor sets it
+        # rebuilds too few, and validation on gfx1250 silicon fails from K=1024
+        # at DepthU 256 while passing at 384 and 512 -- the write-after-read
+        # signature. SIA=0 passes at every K measured. A divergent pair cannot
+        # reach this clause: divergentPairUnsupportedReason already rejects it
+        # wherever ScheduleIterAlg is not 0.
+        decoupled, blkA, blkB = decouplePgrBlocks(state)
+        if not (decoupled and blkA != blkB) and state["ScheduleIterAlg"] == 4:
+          reject(state, printRejectionReason,
+                 "TDMFuse=6 without a divergent decoupled pair requires ScheduleIterAlg=0: at "
+                 "ScheduleIterAlg=4 the StinkyTofu OptLevel-3 barrier rebuild does not account "
+                 "for the de-aliased A/B descriptor sets and the kernel computes wrong results "
+                 "from K = 4*DepthU")
+          return
         # These guards must stay exactly tdmDealiasAB's preconditions; if they
         # drift, decline rather than accept a name the writer will not honour.
         if not tdmDealiasAB(state):
