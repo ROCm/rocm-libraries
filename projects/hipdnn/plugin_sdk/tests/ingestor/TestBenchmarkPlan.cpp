@@ -526,6 +526,143 @@ TEST(TestIngestorBenchmarkPlan, BuffersAndWorkspaceArriveAtTheChosenSubPlanUnmod
     EXPECT_EQ(subRaw->lastWorkspace(), workspace);
 }
 
+// ---------------------------------------------------------------------------
+// Ranked capture and write-back (D6, D11)
+// ---------------------------------------------------------------------------
+
+/// Sampling needs real hipEvents, so on a machine with no device every candidate scores
+/// unusable and no ranking is ever produced -- which would leave every assertion below
+/// green while proving nothing. This subclass supplies deterministic times through the
+/// protected seam instead, so ordering, omission and the all-unusable case are decided by
+/// the code under test rather than by whether a GPU happened to be present. The real
+/// hipEvent path is proven separately on gfx942.
+class DeterministicBenchmarkPlan : public TestBenchmarkPlan
+{
+public:
+    DeterministicBenchmarkPlan(std::vector<Candidate> candidates,
+                               const BenchmarkTestHandle& handle,
+                               std::vector<std::optional<double>> times,
+                               RecordRankingFn recordRanking = {})
+        : TestBenchmarkPlan(std::move(candidates), handle, std::move(recordRanking))
+        , _times(std::move(times))
+    {
+    }
+
+protected:
+    std::optional<double> sampleCandidate(size_t index,
+                                          const BenchmarkTestHandle& /*handle*/,
+                                          const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                                          uint32_t /*numDeviceBuffers*/,
+                                          void* /*workspace*/) const override
+    {
+        return index < _times.size() ? _times[index] : std::nullopt;
+    }
+
+private:
+    std::vector<std::optional<double>> _times;
+};
+
+std::vector<TestBenchmarkPlan::Candidate> threeCandidates()
+{
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x02), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x03), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    return candidates;
+}
+
+TEST(TestIngestorBenchmarkPlan, SamplingRecordsEveryUsableCandidateInMeasuredOrder)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    // Candidate 1 is fastest, then 2, then 0.
+    const DeterministicBenchmarkPlan plan(
+        threeCandidates(), handle, {5.0, 1.0, 3.0}, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 3U);
+    EXPECT_EQ(recorded[0].kernelId, testId(0x02)) << "the fastest candidate must rank first";
+    EXPECT_EQ(recorded[1].kernelId, testId(0x03));
+    EXPECT_EQ(recorded[2].kernelId, testId(0x01));
+    EXPECT_EQ(recorded[0].packId, testId(0xF0)) << "the staleness ids must travel with the id";
+    EXPECT_EQ(recorded[0].dispatchId, testId(0xD0));
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedSamplingNeverAppearsInTheRanking)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    // Candidate 1 failed to time; it must be omitted, not ranked last.
+    const DeterministicBenchmarkPlan plan(
+        threeCandidates(),
+        handle,
+        {5.0, std::nullopt, 3.0},
+        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 2U);
+    for(const auto& entry : recorded)
+    {
+        EXPECT_NE(entry.kernelId, testId(0x02))
+            << "a known-broken kernel recorded as a fallback would be served ahead of the "
+               "normal ranked path on a later run";
+    }
+}
+
+TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
+{
+    bool invoked = false;
+    const BenchmarkTestHandle handle;
+    const DeterministicBenchmarkPlan plan(
+        threeCandidates(),
+        handle,
+        {std::nullopt, std::nullopt, std::nullopt},
+        [&invoked](const std::vector<RankedEntry>&) { invoked = true; });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_FALSE(invoked) << "caching index 0 when nothing was usable would cache a guess";
+}
+
+/// The explicit no-caching path: every existing SDK fixture and every flag-off caller
+/// constructs a BenchmarkPlan without a callback, and must behave exactly as before.
+TEST(TestIngestorBenchmarkPlan, AnAbsentCallbackLeavesSelectionUnchanged)
+{
+    const BenchmarkTestHandle handle;
+    const DeterministicBenchmarkPlan plan(threeCandidates(), handle, {5.0, 1.0, 3.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+    plan.execute(handle, nullptr, 0U, nullptr);
+    SUCCEED() << "no callback, no crash, and sampling still resolves a winner";
+}
+
+/// Ties resolve to the lowest candidate index, exactly as the running-minimum comparison
+/// did before the ranking replaced it. std::sort would reorder equal times arbitrarily
+/// and silently change which kernel wins.
+TEST(TestIngestorBenchmarkPlan, EqualTimesKeepTheLowestCandidateIndexFirst)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const DeterministicBenchmarkPlan plan(
+        threeCandidates(), handle, {2.0, 2.0, 2.0}, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 3U);
+    EXPECT_EQ(recorded[0].kernelId, testId(0x01));
+    EXPECT_EQ(recorded[1].kernelId, testId(0x02));
+    EXPECT_EQ(recorded[2].kernelId, testId(0x03));
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
