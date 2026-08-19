@@ -58,7 +58,7 @@
 
 namespace hipblaslt_sample_detail
 {
-    enum class GemmInitializationDomain : std::uint64_t
+    enum class GemmInitializationSequence : std::uint64_t
     {
         A          = 0,
         B          = 1,
@@ -67,30 +67,30 @@ namespace hipblaslt_sample_detail
         ScaleAlpha = 4,
     };
 
-    enum class LayerNormInitializationDomain : std::uint64_t
+    enum class LayerNormInitializationSequence : std::uint64_t
     {
         Input = 0,
         Gamma = 1,
         Beta  = 2,
     };
 
-    enum class AMaxInitializationDomain : std::uint64_t
+    enum class AMaxInitializationSequence : std::uint64_t
     {
         Input = 0,
     };
 
-    constexpr std::uint64_t groupedInitializationDomain(std::uint64_t            group,
-                                                        GemmInitializationDomain role)
+    constexpr std::uint64_t groupedInitializationSequence(std::uint64_t            group,
+                                                        GemmInitializationSequence role)
     {
         return (group << 32) | static_cast<std::uint64_t>(role);
     }
 
     template <typename Type>
-    void generateUniformInteger(Type* values, size_t elements, std::uint64_t domain)
+    void generateUniformInteger(Type* values, size_t elements, std::uint64_t sequence)
     {
         const std::uint64_t recipeSeed
-            = hipblaslt::host_validation::compatibility::seedForRandomDomain(
-                hipblaslt::host_validation::defaultInitializationSeed, domain);
+            = hipblaslt::host_validation::initialization::seedForSequence(
+                hipblaslt::host_validation::defaultInitializationSeed, sequence);
         const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
             roc::host_validation::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
             {.seed = recipeSeed});
@@ -186,12 +186,12 @@ struct Runner
         hipblaslt_sample_detail::generateUniformInteger(
             static_cast<OutType*>(c),
             size_t(m * n * batch_count),
-            static_cast<std::uint64_t>(hipblaslt_sample_detail::GemmInitializationDomain::C));
+            static_cast<std::uint64_t>(hipblaslt_sample_detail::GemmInitializationSequence::C));
         hipblaslt_sample_detail::generateUniformInteger(
             static_cast<float*>(alphaVec),
             size_t(m * batch_count),
             static_cast<std::uint64_t>(
-                hipblaslt_sample_detail::GemmInitializationDomain::ScaleAlpha));
+                hipblaslt_sample_detail::GemmInitializationSequence::ScaleAlpha));
     }
 
     ~Runner()
@@ -244,7 +244,7 @@ struct Runner
                 static_cast<BiasType*>(biasVec),
                 size_t(biasElems),
                 static_cast<std::uint64_t>(
-                    hipblaslt_sample_detail::GemmInitializationDomain::Bias));
+                    hipblaslt_sample_detail::GemmInitializationSequence::Bias));
         }
     }
 
@@ -360,27 +360,27 @@ struct RunnerVec
             hipblaslt_sample_detail::generateUniformInteger(
                 static_cast<InTypeA*>(a[j]),
                 size_t(m[j] * k[j] * batch_count[j]),
-                hipblaslt_sample_detail::groupedInitializationDomain(
+                hipblaslt_sample_detail::groupedInitializationSequence(
                     static_cast<std::uint64_t>(j),
-                    hipblaslt_sample_detail::GemmInitializationDomain::A));
+                    hipblaslt_sample_detail::GemmInitializationSequence::A));
             hipblaslt_sample_detail::generateUniformInteger(
                 static_cast<InTypeB*>(b[j]),
                 size_t(n[j] * k[j] * batch_count[j]),
-                hipblaslt_sample_detail::groupedInitializationDomain(
+                hipblaslt_sample_detail::groupedInitializationSequence(
                     static_cast<std::uint64_t>(j),
-                    hipblaslt_sample_detail::GemmInitializationDomain::B));
+                    hipblaslt_sample_detail::GemmInitializationSequence::B));
             hipblaslt_sample_detail::generateUniformInteger(
                 static_cast<OutType*>(c[j]),
                 size_t(m[j] * n[j] * batch_count[j]),
-                hipblaslt_sample_detail::groupedInitializationDomain(
+                hipblaslt_sample_detail::groupedInitializationSequence(
                     static_cast<std::uint64_t>(j),
-                    hipblaslt_sample_detail::GemmInitializationDomain::C));
+                    hipblaslt_sample_detail::GemmInitializationSequence::C));
             hipblaslt_sample_detail::generateUniformInteger(
                 static_cast<float*>(alphaVec[j]),
                 size_t(m[j] * batch_count[j]),
-                hipblaslt_sample_detail::groupedInitializationDomain(
+                hipblaslt_sample_detail::groupedInitializationSequence(
                     static_cast<std::uint64_t>(j),
-                    hipblaslt_sample_detail::GemmInitializationDomain::ScaleAlpha));
+                    hipblaslt_sample_detail::GemmInitializationSequence::ScaleAlpha));
         }
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
@@ -500,17 +500,17 @@ struct LayerNormRunner
             static_cast<Type*>(in),
             size_t(m * n),
             static_cast<std::uint64_t>(
-                hipblaslt_sample_detail::LayerNormInitializationDomain::Input));
+                hipblaslt_sample_detail::LayerNormInitializationSequence::Input));
         hipblaslt_sample_detail::generateUniformInteger(
             static_cast<Type*>(gamma),
             size_t(n),
             static_cast<std::uint64_t>(
-                hipblaslt_sample_detail::LayerNormInitializationDomain::Gamma));
+                hipblaslt_sample_detail::LayerNormInitializationSequence::Gamma));
         hipblaslt_sample_detail::generateUniformInteger(
             static_cast<Type*>(beta),
             size_t(n),
             static_cast<std::uint64_t>(
-                hipblaslt_sample_detail::LayerNormInitializationDomain::Beta));
+                hipblaslt_sample_detail::LayerNormInitializationSequence::Beta));
     }
 
     ~LayerNormRunner()
@@ -592,7 +592,7 @@ struct OptAMaxRunner
         hipblaslt_sample_detail::generateUniformInteger(
             static_cast<Type*>(in),
             size_t(m * n),
-            static_cast<std::uint64_t>(hipblaslt_sample_detail::AMaxInitializationDomain::Input));
+            static_cast<std::uint64_t>(hipblaslt_sample_detail::AMaxInitializationSequence::Input));
     }
 
     ~OptAMaxRunner()

@@ -93,8 +93,8 @@ namespace hipblaslt::host_validation
 
     inline hipDataType hipDataTypeForScalarType(ScalarType type)
     {
-        // Reverse edge for product adapters that must call a legacy hipDataType
-        // API. E4M3 scale and Float8E4M3 data share one hipDataType
+        // Reverse edge for product adapters that must call a hipDataType API.
+        // E4M3 scale and Float8E4M3 data share one hipDataType
         // discriminant; the caller's scale/data context restores that meaning.
         switch(type)
         {
