@@ -28,6 +28,7 @@ SOFTWARE.
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -409,6 +410,22 @@ inline std::string voxel_op_config_name(const ::testing::TestParamInfo<VoxelWith
     const std::string suffix = info.param.op.name();
     return voxel_config_name(info.param.cfg) + (suffix.empty() ? "" : "_" + suffix);
 }
+
+// ---- value-parameter printing ----------------------------------------------
+//
+// See the note on PrintTo in backend_param.hpp: the label is already in the test name, so
+// every param type prints as empty.
+
+inline void PrintTo(const TestConfig&, std::ostream*) {}
+inline void PrintTo(const NdConfig&, std::ostream*) {}
+inline void PrintTo(const VoxelConfig&, std::ostream*) {}
+
+template <typename P>
+void PrintTo(const WithParams<P>&, std::ostream*) {}
+template <typename P>
+void PrintTo(const NdWithParams<P>&, std::ostream*) {}
+template <typename P>
+void PrintTo(const VoxelWithParams<P>&, std::ostream*) {}
 
 }  // namespace rpptest
 
