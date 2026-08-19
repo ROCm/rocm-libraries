@@ -14,6 +14,58 @@
 namespace hip_kernel_provider::rmsnorm
 {
 
+namespace
+{
+
+void forwardActivationCheckTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& fwdAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activationAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(activationAttr.in_0_tensor_uid() != fwdAttr.y_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Rmsnorm forward y output must be the activation input tensor");
+    }
+
+    const auto& activationTensorIn0
+        = findTensorAttributes(tensorMap, activationAttr.in_0_tensor_uid());
+    if(!activationTensorIn0.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Activation in_0 (y) must be virtual");
+    }
+
+    const auto& activationTensorOut0
+        = findTensorAttributes(tensorMap, activationAttr.out_0_tensor_uid());
+    if(activationTensorOut0.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Activation output must be non-virtual");
+    }
+
+    const auto& fwdTensorX = findTensorAttributes(tensorMap, fwdAttr.x_tensor_uid());
+    const auto& fwdTensorY = findTensorAttributes(tensorMap, fwdAttr.y_tensor_uid());
+    const auto* fwdTensorInvRms
+        = fwdAttr.inv_rms_tensor_uid().has_value()
+              ? &findTensorAttributes(tensorMap, fwdAttr.inv_rms_tensor_uid().value())
+              : nullptr;
+
+    if(fwdTensorX.virtual_() || !fwdTensorY.virtual_()
+       || (fwdTensorInvRms != nullptr && fwdTensorInvRms->virtual_()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Rmsnorm forward x input must not be virtual, y output tensor must be virtual, inverse "
+            "RMS output tensor must not be virtual");
+    }
+}
+
+} // namespace
+
 RMSnormPlanBuilder::RMSnormPlanBuilder(const IKernelCompiler& kernelCompiler,
                                        const IDevicePropertyProvider& devicePropertyProvider)
     : _kernelCompiler(kernelCompiler)
@@ -106,9 +158,12 @@ bool RMSnormPlanBuilder::isApplicable(
 
         try
         {
-            rmsnorm::RMSnormValidator validator(opGraph.getTensorMap());
             const auto& node0 = opGraph.getNode(0);
             const auto& node1 = opGraph.getNode(1);
+            forwardActivationCheckTensors(*node0.attributes_as_RMSNormAttributes(),
+                                          *node1.attributes_as_PointwiseAttributes(),
+                                          opGraph.getTensorMap());
+            rmsnorm::RMSnormValidator validator(opGraph.getTensorMap());
             validator.checkFwdActivationTensorConfigSupported(
                 *node0.attributes_as_RMSNormAttributes(),
                 *node1.attributes_as_PointwiseAttributes());
@@ -174,6 +229,7 @@ void buildPlanForwardActivation(
     const auto& activationAttr
         = nodeWrapperActivation
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
+    forwardActivationCheckTensors(fwdAttr, activationAttr, opGraph.getTensorMap());
 
     RMSnormFwdParams params(fwdAttr, activationAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<RMSnormFwdPlan>(std::move(params));

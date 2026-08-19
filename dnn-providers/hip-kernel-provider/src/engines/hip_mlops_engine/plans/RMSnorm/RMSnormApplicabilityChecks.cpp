@@ -290,26 +290,33 @@ void RMSnormValidator::checkActivationModeSupported(
 {
     // hip-kernel-provider rmsnorm supports: PASSTHRU, RELU, CLIPPEDRELU, CLAMP (no Leaky ReLU)
 
-    if(pointwiseAttr.operation() == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
+    switch(pointwiseAttr.operation())
     {
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
         return;
-    }
-
-    if(pointwiseAttr.operation() == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD
-       || pointwiseAttr.operation()
-              == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD)
-    {
-        if(!pointwiseAttr.relu_lower_clip_slope())
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
+        if(!pointwiseAttr.relu_lower_clip_slope().has_value())
         {
             return;
+        }
+        if(pointwiseAttr.relu_lower_clip().has_value()
+           && pointwiseAttr.relu_lower_clip().value() != 0.0f)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Rmsnorm fused activation does not support standard ReLU with a non-zero "
+                "lower_clip.");
         }
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Rmsnorm fused activation does not support Leaky ReLU.");
+    default:
+        const std::string activationModeName(EnumNamePointwiseMode(pointwiseAttr.operation()));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported activation mode for rmsnorm fusion: " + activationModeName + ".");
     }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for rmsnorm fusion.");
 }
 
 } // namespace hip_kernel_provider::rmsnorm
