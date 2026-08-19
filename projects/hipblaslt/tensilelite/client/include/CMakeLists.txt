@@ -10,7 +10,6 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationHelpers.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDataManipulation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LogReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RunListener.hpp"
