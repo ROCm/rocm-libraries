@@ -32,6 +32,15 @@ import os
 def isCustomKernelConfig(config):
     return "CustomKernelName" in config and config["CustomKernelName"]
 
+def supportsUserSgprKernargPreload(rocmVersion):
+    """Report whether the toolchain accepts .amdhsa_user_sgpr_kernarg_preload.
+
+    The directive is supported from ROCm 6 build 32650 onwards, and by every
+    later major release regardless of its build number.
+    """
+    return rocmVersion.major > 6 or (
+        rocmVersion.major == 6 and rocmVersion.patch >= 32650
+    )
 def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
     return os.path.join(directory, (name + ".s"))
 
