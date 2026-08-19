@@ -122,8 +122,10 @@ LayerNormRunInfo referenceLayerNormTyped(const LayerNormProblem& problem) {
     }
 
     return {
-        .slicesComputed = slices,
-        .elementsComputed = problem.input.shape().elementCount(),
+        .slicesProcessed = slices,
+        .outputElementsWritten = problem.output.shape().elementCount(),
+        .meanElementsWritten = problem.mean ? slices : 0,
+        .inverseVarianceElementsWritten = problem.inverseVariance ? slices : 0,
     };
 }
 }  // namespace detail

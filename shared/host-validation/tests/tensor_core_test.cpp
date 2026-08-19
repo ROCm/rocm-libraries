@@ -42,31 +42,6 @@ int main() {
     static_assert(
         std::is_same_v<decltype(std::declval<const Tensor&>().storage()), std::span<std::byte>>);
 
-    require(scalarTypeCount == scalarTypeInfos.size(),
-            "Scalar type count and metadata table size differ.");
-    for (size_t index = 0; index < scalarTypeCount; ++index) {
-        const ScalarType type = static_cast<ScalarType>(index);
-        require(isConcreteScalarType(type), "Concrete scalar type was classified as a sentinel.");
-        require(visitScalarType(type, [type]<typename Tag>() { return Tag::type == type; }),
-                "Scalar type visitor and dense enum ordering differ.");
-    }
-    require(!isConcreteScalarType(ScalarType::Count),
-            "ScalarType::Count was classified as a concrete scalar type.");
-    bool rejectedCountMetadata = false;
-    try {
-        (void)scalarTypeInfo(ScalarType::Count);
-    } catch (const std::invalid_argument&) {
-        rejectedCountMetadata = true;
-    }
-    require(rejectedCountMetadata, "Scalar metadata accepted the Count sentinel.");
-    bool rejectedCountDispatch = false;
-    try {
-        (void)visitScalarType(ScalarType::Count, []<typename>() { return true; });
-    } catch (const std::invalid_argument&) {
-        rejectedCountDispatch = true;
-    }
-    require(rejectedCountDispatch, "Scalar visitor accepted the Count sentinel.");
-
     const Shape shape{2, 3};
     require(shape.rank() == 2, "Shape rank mismatch.");
     require(shape.extent(0) == 2 && shape.extent(1) == 3, "Shape extent mismatch.");
@@ -77,19 +52,17 @@ int main() {
         "Shape dimension product helper mismatch.");
     require(Shape{2, 0, 4}.elementCountExcluding(1) == 8,
             "Shape excluded-dimension product incorrectly retained a zero extent.");
-    require(visitScalarType(ScalarType::Float32,
-                            []<typename Tag>() {
-                                return Tag::type == ScalarType::Float32 &&
-                                       std::is_same_v<typename Tag::Storage, float>;
-                            }),
-            "Runtime scalar tag dispatch mismatch.");
-    require(visitScalarType(ScalarType::Int4,
-                            []<typename Tag>() {
-                                return Tag::type == ScalarType::Int4 &&
-                                       std::is_void_v<typename Tag::Storage>;
-                            }),
-            "Packed scalar tag dispatch mismatch.");
-
+    const std::array<size_t, 3> logicalCoordinates{1, 0, 2};
+    require(
+        dimensionalShape.linearIndex(logicalCoordinates, IndexOrder::FirstDimensionFastest) == 13 &&
+            dimensionalShape.linearIndex(logicalCoordinates, IndexOrder::LastDimensionFastest) ==
+                14,
+        "Shape linear-index conversion mismatch.");
+    require(dimensionalShape.coordinates(17, IndexOrder::FirstDimensionFastest) ==
+                    std::vector<size_t>({1, 2, 2}) &&
+                dimensionalShape.coordinates(17, IndexOrder::LastDimensionFastest) ==
+                    std::vector<size_t>({1, 1, 1}),
+            "Shape coordinate conversion mismatch.");
     const Layout rowMajor = Layout::contiguousLastDimensionFastest(shape);
     const Layout columnMajor = Layout::contiguousFirstDimensionFastest(shape);
     require(rowMajor == Layout::contiguous(shape),

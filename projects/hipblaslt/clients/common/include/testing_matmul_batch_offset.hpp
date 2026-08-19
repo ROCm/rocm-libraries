@@ -112,12 +112,11 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     host_vector<To> h_D_gold(size_D_sub * batch_count); // CPU reference
 
     // Initialize matrices with known logical-coordinate patterns.
-    roc::host_validation::GenerationOptions aGeneration;
-    aGeneration.real.pattern = roc::host_validation::GenerationPattern::AffineIndexRemainder;
-    aGeneration.real.dimensionCoefficients = {1, 1, 1};
-    aGeneration.real.remainderDivisor      = 7;
-    aGeneration.real.valueOffset           = 1;
-    auto tensorA                           = hipblaslt::host_validation::tensorFromMutableStorage(
+    const auto aGeneration = roc::host_validation::GenerationRecipe::realOnly(
+        roc::host_validation::GenerationRecipe::affineIndexRemainder(
+            {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
+            .withAffineValueMapping({.offset = 1}));
+    auto tensorA = hipblaslt::host_validation::tensorFromMutableStorage(
         h_A_full.data(),
         h_A_full.size(),
         roc::host_validation::Layout(
@@ -127,9 +126,10 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     roc::host_validation::generate(tensorA, aGeneration);
     hipblaslt::host_validation::copyTensorStorageTo(h_A_full.data(), h_A_full.size(), tensorA);
 
-    roc::host_validation::GenerationOptions bGeneration = aGeneration;
-    bGeneration.real.dimensionCoefficients              = {1, -1, 1};
-    bGeneration.real.remainderDivisor                   = 5;
+    const auto bGeneration = roc::host_validation::GenerationRecipe::realOnly(
+        roc::host_validation::GenerationRecipe::affineIndexRemainder(
+            {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
+            .withAffineValueMapping({.offset = 1}));
     auto tensorB = hipblaslt::host_validation::tensorFromMutableStorage(
         h_B_full.data(),
         h_B_full.size(),
@@ -140,10 +140,9 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     roc::host_validation::generate(tensorB, bGeneration);
     hipblaslt::host_validation::copyTensorStorageTo(h_B_full.data(), h_B_full.size(), tensorB);
 
-    roc::host_validation::GenerationOptions cGeneration = aGeneration;
-    cGeneration.real.dimensionCoefficients              = {1, 1, 0};
-    cGeneration.real.remainderDivisor                   = 3;
-    cGeneration.real.valueOffset                        = 0;
+    const auto cGeneration = roc::host_validation::GenerationRecipe::realOnly(
+        roc::host_validation::GenerationRecipe::affineIndexRemainder(
+            {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3}));
     auto tensorC = hipblaslt::host_validation::tensorFromMutableStorage(
         h_C_full.data(),
         h_C_full.size(),
@@ -214,12 +213,10 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     hipblasLtMatmulDesc_t matmul_desc;
     CHECK_HIPBLASLT_ERROR(
         hipblasLtMatmulDescCreate(&matmul_desc, arg.compute_type, arg.scale_type));
-    CHECK_HIPBLASLT_ERROR(
-        hipblasLtMatmulDescSetAttribute(
-            matmul_desc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(transA)));
-    CHECK_HIPBLASLT_ERROR(
-        hipblasLtMatmulDescSetAttribute(
-            matmul_desc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(transB)));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+        matmul_desc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(transA)));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+        matmul_desc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(transB)));
 
     // Create matrix layouts
     hipblasLtMatrixLayout_t matA, matB, matC, matD;
@@ -265,21 +262,32 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     // Find algorithm
     hipblasLtMatmulPreference_t pref;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
-    size_t prefMaxWorkspaceSize = 128 * 1024 * 1024;  // 128 MB
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceSetAttribute(
-        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &prefMaxWorkspaceSize, sizeof(prefMaxWorkspaceSize)));
+    size_t prefMaxWorkspaceSize = 128 * 1024 * 1024; // 128 MB
+    CHECK_HIPBLASLT_ERROR(
+        hipblasLtMatmulPreferenceSetAttribute(pref,
+                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                              &prefMaxWorkspaceSize,
+                                              sizeof(prefMaxWorkspaceSize)));
 
     // Support testing multiple solutions via requested_solution_num parameter
     // Default to 1 (test only best solution) for backward compatibility
     // Use HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM when -1 to get all available solutions
     int32_t requestedAlgos = (arg.requested_solution_num < 0) ? HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM
-                           : (arg.requested_solution_num == 0) ? 1
-                           : arg.requested_solution_num;
+                             : (arg.requested_solution_num == 0) ? 1
+                                                                 : arg.requested_solution_num;
 
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult(requestedAlgos);
     int                                           numAlgos = 0;
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(
-        handle, matmul_desc, matA, matB, matC, matD, pref, requestedAlgos, heuristicResult.data(), &numAlgos));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                          matmul_desc,
+                                                          matA,
+                                                          matB,
+                                                          matC,
+                                                          matD,
+                                                          pref,
+                                                          requestedAlgos,
+                                                          heuristicResult.data(),
+                                                          &numAlgos));
 
     if(numAlgos == 0)
     {
@@ -413,8 +421,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 roc::host_validation::Shape{size_t(M), size_t(N)},
                 {1, static_cast<ptrdiff_t>(ldd)});
             roc::host_validation::ComparisonOptions comparisonOptions{
-                .absoluteTolerance     = std::nextafter(tol, 0.0),
-                .maxReportedMismatches = 0};
+                .absoluteTolerance = std::nextafter(tol, 0.0), .maxReportedMismatches = 0};
             comparisonOptions.selection.indexOrder
                 = roc::host_validation::ComparisonIndexOrder::FirstDimensionFastest;
             const auto comparison
@@ -434,8 +441,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
             {
                 numFailed++;
                 EXPECT_LT(max_error, tol)
-                    << "Solution " << algoIdx << "/" << numAlgos
-                    << " FAILED (error: " << max_error << ", tol: " << tol << ")";
+                    << "Solution " << algoIdx << "/" << numAlgos << " FAILED (error: " << max_error
+                    << ", tol: " << tol << ")";
             }
             else
             {
@@ -447,8 +454,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     // Report summary when testing multiple solutions
     if(numAlgos > 1 && arg.unit_check)
     {
-        hipblaslt_cout << "Tested " << numAlgos << " solutions: "
-                       << numPassed << " passed, " << numFailed << " failed" << std::endl;
+        hipblaslt_cout << "Tested " << numAlgos << " solutions: " << numPassed << " passed, "
+                       << numFailed << " failed" << std::endl;
     }
 
     // Cleanup
@@ -475,18 +482,18 @@ void testing_matmul_batch_offset(const Arguments& arg)
 {
     // Dispatch based on data types in Arguments
     // For now, support only f32, f16, bf16 with matching input/output types
-    if(arg.a_type == HIP_R_32F && arg.b_type == HIP_R_32F &&
-       arg.c_type == HIP_R_32F && arg.d_type == HIP_R_32F)
+    if(arg.a_type == HIP_R_32F && arg.b_type == HIP_R_32F && arg.c_type == HIP_R_32F
+       && arg.d_type == HIP_R_32F)
     {
         testing_matmul_batch_offset_impl<float, float, float>(arg);
     }
-    else if(arg.a_type == HIP_R_16F && arg.b_type == HIP_R_16F &&
-            arg.c_type == HIP_R_16F && arg.d_type == HIP_R_16F)
+    else if(arg.a_type == HIP_R_16F && arg.b_type == HIP_R_16F && arg.c_type == HIP_R_16F
+            && arg.d_type == HIP_R_16F)
     {
         testing_matmul_batch_offset_impl<hipblasLtHalf, hipblasLtHalf, float>(arg);
     }
-    else if(arg.a_type == HIP_R_16BF && arg.b_type == HIP_R_16BF &&
-            arg.c_type == HIP_R_16BF && arg.d_type == HIP_R_16BF)
+    else if(arg.a_type == HIP_R_16BF && arg.b_type == HIP_R_16BF && arg.c_type == HIP_R_16BF
+            && arg.d_type == HIP_R_16BF)
     {
         testing_matmul_batch_offset_impl<hip_bfloat16, hip_bfloat16, float>(arg);
     }

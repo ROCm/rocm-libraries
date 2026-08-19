@@ -2,41 +2,52 @@
 // SPDX-License-Identifier: MIT
 
 #include <algorithm>
-#include <atomic>
-#include <cstdlib>
-#include <exception>
+#include <cstring>
 #include <limits>
 #include <roc/host_validation/amd_gpu_layout/mx.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include "mx_threading.hpp"
 
-namespace roc::host_validation::amd_gpu_layout {
-namespace detail {
+namespace roc::host_validation::amd_gpu_layout::detail {
 namespace {
 
-size_t checkedProduct(std::vector<size_t> const& values) {
-    size_t result = 1;
-    for (const size_t value : values) result = checkedMultiply(result, value, "product");
-    return result;
-}
+struct DimensionShufflePlan {
+    bool identity = false;
+    std::vector<size_t> sizes;
+    std::vector<size_t> destinationStrides;
+    std::vector<size_t> sourceStrides;
+};
 
-}  // namespace
+struct GFX950ScalePlan {
+    size_t rowCount = 0;
+    size_t columnCount = 0;
+    size_t paddedRowCount = 0;
+    size_t paddedColumnCount = 0;
+    size_t outputElementCount = 0;
+    DimensionShufflePlan shuffle;
+};
 
-size_t checkedMultiply(size_t left, size_t right, std::string_view context) {
+struct GFX1250ScalePlan {
+    size_t slowDimension = 0;
+    size_t fastDimension = 0;
+    size_t dimK = 0;
+    size_t outputElementCount = 0;
+};
+
+size_t checkedMultiply(size_t left, size_t right, const std::string& context) {
     if (left != 0 && right > std::numeric_limits<size_t>::max() / left)
-        throw std::overflow_error(std::string(context) + ": size multiplication overflow");
+        throw std::overflow_error(context + ": size multiplication overflow");
     return left * right;
 }
 
-size_t checkedAdd(size_t left, size_t right, std::string_view context) {
+size_t checkedAdd(size_t left, size_t right, const std::string& context) {
     if (right > std::numeric_limits<size_t>::max() - left)
-        throw std::overflow_error(std::string(context) + ": size addition overflow");
+        throw std::overflow_error(context + ": size addition overflow");
     return left + right;
 }
 
@@ -46,49 +57,32 @@ size_t roundUp(size_t value, size_t multiple) {
     return remainder == 0 ? value : checkedAdd(value, multiple - remainder, "roundUp");
 }
 
-int operationThreadCount(size_t workItemCount, size_t minimumWorkItemsPerThread,
-                         int defaultMaximumThreadCount) {
-#ifdef _OPENMP
-    if (workItemCount == 0 || omp_in_parallel()) return 1;
-
-    const int runtimeMaximum = std::max(1, omp_get_max_threads());
-    const char* configuredThreadCount = std::getenv("OMP_NUM_THREADS");
-    const int maximum = configuredThreadCount != nullptr && configuredThreadCount[0] != '\0'
-                            ? runtimeMaximum
-                            : std::min(runtimeMaximum, defaultMaximumThreadCount);
-    const size_t usefulThreadCount = std::max(
-        size_t{1}, workItemCount / minimumWorkItemsPerThread +
-                       static_cast<size_t>(workItemCount % minimumWorkItemsPerThread != 0));
-    return static_cast<int>(std::min(usefulThreadCount, static_cast<size_t>(maximum)));
-#else
-    (void)workItemCount;
-    (void)minimumWorkItemsPerThread;
-    (void)defaultMaximumThreadCount;
-    return 1;
-#endif
+size_t checkedProduct(const std::vector<size_t>& values) {
+    size_t result = 1;
+    for (const size_t value : values) result = checkedMultiply(result, value, "product");
+    return result;
 }
 
-std::vector<size_t> computeStrides(std::vector<size_t> const& sizes) {
+std::vector<size_t> computeStrides(const std::vector<size_t>& sizes) {
     std::vector<size_t> strides(sizes.size());
     if (sizes.empty()) return strides;
 
     strides[0] = 1;
     for (size_t index = 1; index < sizes.size(); ++index)
         strides[index] = checkedMultiply(strides[index - 1], sizes[index - 1], "computeStrides");
-
     return strides;
 }
 
-std::vector<size_t> computeShuffledStrides(std::vector<size_t> const& sizes,
-                                           std::vector<size_t> const& dimOrder) {
-    if (dimOrder.size() != sizes.size())
+std::vector<size_t> computeShuffledStrides(const std::vector<size_t>& sizes,
+                                           const std::vector<size_t>& dimensionOrder) {
+    if (dimensionOrder.size() != sizes.size())
         throw std::runtime_error(
             "computeShuffledStrides: dimension order must contain every dimension");
 
     std::vector<size_t> strides(sizes.size(), 0);
     std::vector<bool> seen(sizes.size(), false);
     size_t stride = 1;
-    for (const size_t index : dimOrder) {
+    for (const size_t index : dimensionOrder) {
         if (index >= sizes.size() || seen[index])
             throw std::runtime_error(
                 "computeShuffledStrides: dimension order must be a permutation");
@@ -99,8 +93,8 @@ std::vector<size_t> computeShuffledStrides(std::vector<size_t> const& sizes,
     return strides;
 }
 
-size_t maximumOffset(std::vector<size_t> const& sizes, std::vector<size_t> const& strides,
-                     std::string_view context) {
+size_t maximumOffset(const std::vector<size_t>& sizes, const std::vector<size_t>& strides,
+                     const std::string& context) {
     size_t offset = 0;
     for (size_t dimension = 0; dimension < sizes.size(); ++dimension) {
         if (sizes[dimension] == 0) return 0;
@@ -111,56 +105,13 @@ size_t maximumOffset(std::vector<size_t> const& sizes, std::vector<size_t> const
     return offset;
 }
 
-void parallelForChunks(size_t iterationCount, size_t workItemCount, ParallelChunkFunction function,
-                       void* context) {
-    if (function == nullptr)
-        throw std::invalid_argument("parallelForChunks: function must be non-null");
-    if (iterationCount == 0) return;
-
-    const int threadCount = operationThreadCount(workItemCount);
-    if (threadCount <= 1) {
-        function(0, iterationCount, context);
-        return;
-    }
-
-#ifdef _OPENMP
-    std::atomic<bool> failed{false};
-    std::exception_ptr failure;
-#pragma omp parallel for schedule(static, 1) num_threads(threadCount)
-    for (int chunkIndex = 0; chunkIndex < threadCount; ++chunkIndex) {
-        if (failed.load(std::memory_order_relaxed)) continue;
-
-        const size_t chunk = static_cast<size_t>(chunkIndex);
-        const size_t chunks = static_cast<size_t>(threadCount);
-        const size_t baseSize = iterationCount / chunks;
-        const size_t extraItems = iterationCount % chunks;
-        const size_t begin = chunk * baseSize + std::min(chunk, extraItems);
-        const size_t end = begin + baseSize + static_cast<size_t>(chunk < extraItems);
-        try {
-            function(begin, end, context);
-        } catch (...) {
-#pragma omp critical(roc_host_validation_amd_gpu_layout_exception)
-            {
-                if (!failure) failure = std::current_exception();
-            }
-            failed.store(true, std::memory_order_relaxed);
-        }
-    }
-    if (failure) std::rethrow_exception(failure);
-#else
-    function(0, iterationCount, context);
-#endif
-}
-
-size_t validateShuffle(size_t inputElementCount, std::vector<size_t> const& sizes,
-                       std::vector<size_t> const& destinationStrides,
-                       std::vector<size_t> const& sourceStrides) {
-    if (sizes.size() != destinationStrides.size() || sizes.size() != sourceStrides.size())
+size_t validateShuffle(size_t inputElementCount, const DimensionShufflePlan& plan) {
+    if (plan.sizes.size() != plan.destinationStrides.size() ||
+        plan.sizes.size() != plan.sourceStrides.size())
         throw std::runtime_error("shuffleDims: size/stride dimension mismatch");
+    if (plan.sizes.size() < 2) throw std::runtime_error("shuffleDims: need at least 2 dimensions");
 
-    if (sizes.size() < 2) throw std::runtime_error("shuffleDims: need at least 2 dimensions");
-
-    const size_t totalElements = checkedProduct(sizes);
+    const size_t totalElements = checkedProduct(plan.sizes);
     if (inputElementCount != totalElements) {
         std::ostringstream message;
         message << "shuffleDims: input size " << inputElementCount << " doesn't match expected "
@@ -169,16 +120,16 @@ size_t validateShuffle(size_t inputElementCount, std::vector<size_t> const& size
     }
 
     if (totalElements != 0 &&
-        (maximumOffset(sizes, sourceStrides, "shuffleDims source") >= inputElementCount ||
-         maximumOffset(sizes, destinationStrides, "shuffleDims destination") >= inputElementCount))
+        (maximumOffset(plan.sizes, plan.sourceStrides, "shuffleDims source") >= inputElementCount ||
+         maximumOffset(plan.sizes, plan.destinationStrides, "shuffleDims destination") >=
+             inputElementCount))
         throw std::runtime_error("shuffleDims: strides address outside the storage");
-
     return totalElements;
 }
 
-DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<size_t> const& sizes,
-                                        std::vector<size_t> const& preSwizzleSize,
-                                        std::vector<size_t> const& preTileSize) {
+DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, const std::vector<size_t>& sizes,
+                                        const std::vector<size_t>& preSwizzleSize,
+                                        const std::vector<size_t>& preTileSize) {
     if (!preSwizzleSize.empty() && preSwizzleSize.size() != 3) {
         std::ostringstream message;
         message << "preSwizzle: preSwizzleSize must have 3 elements, got " << preSwizzleSize.size();
@@ -189,7 +140,6 @@ DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<si
         message << "preSwizzle: preTileSize must have 2 elements, got " << preTileSize.size();
         throw std::runtime_error(message.str());
     }
-
     if (sizes.size() != 2) {
         std::ostringstream message;
         message << "preSwizzle: Batch dimension not yet supported. sizes.size()=" << sizes.size();
@@ -248,7 +198,6 @@ DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<si
 
         if (VGPRIndex * VGPRBlock * SIMDBlock != tileK)
             throw std::runtime_error("preSwizzle: nVGPRIndex * nVGPRBlock * nSIMDBlock != tileK");
-
         if (lanesPerSIMD * SIMDIndexIndex * SIMDIndexBlock != tileMN)
             throw std::runtime_error(
                 "preSwizzle: nLanesPerSIMD * nSIMDIndexIndex * nSIMDIndexBlock != tileMN");
@@ -258,11 +207,11 @@ DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<si
 
         if (tileMN == 64)
             dimensionOrder = {6, 1, 2, 3, 4, 5, 0, 7};
-        else if (tileMN == 32 && subTileK == 4)
+        else if (subTileK == 4)
             dimensionOrder = {6, 2, 1, 3, 4, 5, 0, 7};
-        else if (tileMN == 32 && subTileK == 2)
+        else
             dimensionOrder = {1, 2, 0, 3, 4, 5, 6, 7};
-    } else if (preSwizzleSize.empty() && !preTileSize.empty()) {
+    } else if (preSwizzleSize.empty()) {
         if (sizes[0] % preTileSize[0] != 0 || sizes[1] % preTileSize[1] != 0)
             throw std::runtime_error(
                 "preSwizzle: tensor dimensions must be divisible by the pre-tile");
@@ -290,10 +239,8 @@ DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<si
         if (sizes[0] % preTileK != 0 || sizes[1] % preTileMN != 0)
             throw std::runtime_error(
                 "preSwizzle: tensor dimensions must be divisible by the pre-tile");
-
         if (VGPRIndex * VGPRBlock * SIMDBlock != tileK)
             throw std::runtime_error("preSwizzle: nVGPRIndex * nVGPRBlock * nSIMDBlock != tileK");
-
         if (lanesPerSIMD * SIMDIndexIndex * SIMDIndexBlock != tileMN)
             throw std::runtime_error(
                 "preSwizzle: nLanesPerSIMD * nSIMDIndexIndex * nSIMDIndexBlock != tileMN");
@@ -304,9 +251,9 @@ DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<si
 
         if (tileMN == 64)
             dimensionOrder = {7, 1, 2, 3, 5, 6, 0, 8, 4, 9};
-        else if (tileMN == 32 && subTileK == 4)
+        else if (subTileK == 4)
             dimensionOrder = {7, 2, 1, 3, 5, 6, 0, 8, 4, 9};
-        else if (tileMN == 32 && subTileK == 2)
+        else
             dimensionOrder = {1, 2, 0, 3, 5, 6, 7, 8, 4, 9};
     }
 
@@ -317,7 +264,6 @@ DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<si
                 << " != product(sizes)=" << totalElements;
         throw std::runtime_error(message.str());
     }
-
     if (sourceSizes.empty()) throw std::runtime_error("PreSwizzle source size not populated.");
     if (dimensionOrder.empty())
         throw std::runtime_error("PreSwizzle permutation order not populated.");
@@ -328,7 +274,7 @@ DimensionShufflePlan makePreSwizzlePlan(size_t inputElementCount, std::vector<si
     return plan;
 }
 
-GFX950ScalePlan makeGFX950ScalePlan(size_t inputElementCount, std::vector<size_t> const& sizes) {
+GFX950ScalePlan makeGFX950ScalePlan(size_t inputElementCount, const std::vector<size_t>& sizes) {
     if (sizes.size() != 2) {
         std::ostringstream message;
         message << "preSwizzleAITER: sizes must have 2 elements, got " << sizes.size();
@@ -336,40 +282,42 @@ GFX950ScalePlan makeGFX950ScalePlan(size_t inputElementCount, std::vector<size_t
     }
 
     GFX950ScalePlan plan;
-    plan.numRows = sizes[0];
-    plan.numCols = sizes[1];
-    const size_t totalElements =
-        checkedMultiply(plan.numRows, plan.numCols, "preSwizzleScalesGFX950");
-    if (totalElements != inputElementCount) {
+    plan.rowCount = sizes[0];
+    plan.columnCount = sizes[1];
+    const size_t inputElements =
+        checkedMultiply(plan.rowCount, plan.columnCount, "preSwizzleScalesGFX950");
+    if (inputElements != inputElementCount) {
         std::ostringstream message;
         message << "preSwizzleAITER: input size " << inputElementCount
-                << " doesn't match sizes product " << totalElements;
+                << " doesn't match sizes product " << inputElements;
         throw std::runtime_error(message.str());
     }
 
-    plan.paddedRows = roundUp(plan.numRows, 32);
-    plan.paddedCols = roundUp(plan.numCols, 8);
-    plan.paddedElements =
-        checkedMultiply(plan.paddedRows, plan.paddedCols, "preSwizzleScalesGFX950");
-    plan.shuffle.sizes = {plan.paddedRows / 32, 2, 16, plan.paddedCols / 8, 2, 4};
+    plan.paddedRowCount = roundUp(plan.rowCount, 32);
+    plan.paddedColumnCount = roundUp(plan.columnCount, 8);
+    plan.outputElementCount =
+        checkedMultiply(plan.paddedRowCount, plan.paddedColumnCount, "preSwizzleScalesGFX950");
+    plan.shuffle.sizes = {plan.paddedRowCount / 32, 2, 16, plan.paddedColumnCount / 8, 2, 4};
     plan.shuffle.sourceStrides = {
-        checkedMultiply(32, plan.paddedCols, "preSwizzleScalesGFX950 strides"),
-        checkedMultiply(16, plan.paddedCols, "preSwizzleScalesGFX950 strides"),
-        plan.paddedCols,
+        checkedMultiply(32, plan.paddedColumnCount, "preSwizzleScalesGFX950 strides"),
+        checkedMultiply(16, plan.paddedColumnCount, "preSwizzleScalesGFX950 strides"),
+        plan.paddedColumnCount,
         8,
         4,
         1};
     plan.shuffle.destinationStrides =
         computeShuffledStrides(plan.shuffle.sizes, {1, 4, 2, 5, 3, 0});
+    validateShuffle(plan.outputElementCount, plan.shuffle);
     return plan;
 }
 
-GFX1250ScalePlan makeGFX1250ScalePlan(size_t inputElementCount, size_t slowDim, size_t fastDim,
-                                      size_t mxBlock) {
+GFX1250ScalePlan makeGFX1250ScalePlan(size_t inputElementCount, size_t slowDimension,
+                                      size_t fastDimension, size_t mxBlock) {
     if (mxBlock != 16 && mxBlock != 32)
         throw std::runtime_error("preSwizzleScalesGFX1250: mxBlock must be 16 or 32");
 
-    const size_t expectedInput = checkedMultiply(slowDim, fastDim, "preSwizzleScalesGFX1250 input");
+    const size_t expectedInput =
+        checkedMultiply(slowDimension, fastDimension, "preSwizzleScalesGFX1250 input");
     if (expectedInput != inputElementCount) {
         std::ostringstream message;
         message << "preSwizzleScalesGFX1250: input size " << inputElementCount
@@ -378,27 +326,121 @@ GFX1250ScalePlan makeGFX1250ScalePlan(size_t inputElementCount, size_t slowDim, 
     }
 
     GFX1250ScalePlan plan;
-    plan.slowDim = slowDim;
-    plan.fastDim = fastDim;
-    plan.dimk = 128 / mxBlock;
-    const size_t paddedFast = roundUp(fastDim, plan.dimk);
-    plan.outputElements = checkedMultiply(slowDim, paddedFast, "preSwizzleScalesGFX1250 output");
+    plan.slowDimension = slowDimension;
+    plan.fastDimension = fastDimension;
+    plan.dimK = 128 / mxBlock;
+    const size_t paddedFastDimension = roundUp(fastDimension, plan.dimK);
+    plan.outputElementCount =
+        checkedMultiply(slowDimension, paddedFastDimension, "preSwizzleScalesGFX1250 output");
     return plan;
 }
 
-}  // namespace detail
-
-size_t preSwizzleScalesGFX950PaddedSize(size_t numRows, size_t numCols) {
-    return detail::checkedMultiply(detail::roundUp(numRows, 32), detail::roundUp(numCols, 8),
-                                   "preSwizzleScalesGFX950PaddedSize");
+void validateByteStorage(size_t inputElementCount, size_t outputElementCount, size_t elementSize,
+                         const std::string& context) {
+    checkedMultiply(inputElementCount, elementSize, context + " input bytes");
+    checkedMultiply(outputElementCount, elementSize, context + " output bytes");
 }
 
-size_t preSwizzleScalesGFX1250PaddedSize(size_t slowDim, size_t fastDim, size_t mxBlock) {
-    if (mxBlock != 16 && mxBlock != 32)
-        throw std::runtime_error("preSwizzleScalesGFX1250PaddedSize: mxBlock must be 16 or 32");
-    const size_t dimk = 128 / mxBlock;
-    return detail::checkedMultiply(slowDim, detail::roundUp(fastDim, dimk),
-                                   "preSwizzleScalesGFX1250PaddedSize");
+void copyElement(const std::byte* input, size_t sourceIndex, std::byte* output,
+                 size_t destinationIndex, size_t elementSize) {
+    std::memcpy(output + destinationIndex * elementSize, input + sourceIndex * elementSize,
+                elementSize);
 }
 
-}  // namespace roc::host_validation::amd_gpu_layout
+template <typename Function>
+void forEachShuffledElement(const DimensionShufflePlan& plan, size_t totalElements,
+                            Function function) {
+    parallelForChunks(totalElements, totalElements, [&](size_t begin, size_t end) {
+        std::vector<size_t> coordinate(plan.sizes.size());
+        for (size_t coordinateNumber = begin; coordinateNumber < end; ++coordinateNumber) {
+            size_t remaining = coordinateNumber;
+            for (size_t dimension = 0; dimension < plan.sizes.size(); ++dimension) {
+                coordinate[dimension] = remaining % plan.sizes[dimension];
+                remaining /= plan.sizes[dimension];
+            }
+
+            size_t sourceIndex = 0;
+            size_t destinationIndex = 0;
+            for (size_t dimension = 0; dimension < plan.sizes.size(); ++dimension) {
+                sourceIndex += coordinate[dimension] * plan.sourceStrides[dimension];
+                destinationIndex += coordinate[dimension] * plan.destinationStrides[dimension];
+            }
+            function(sourceIndex, destinationIndex);
+        }
+    });
+}
+
+}  // namespace
+
+size_t preSwizzleBytes(const std::byte* input, size_t inputElementCount, size_t elementSize,
+                       const std::vector<size_t>& sizes, const std::vector<size_t>& preSwizzleSize,
+                       const std::vector<size_t>& preTileSize, std::byte* output) {
+    const DimensionShufflePlan plan =
+        makePreSwizzlePlan(inputElementCount, sizes, preSwizzleSize, preTileSize);
+    validateByteStorage(inputElementCount, inputElementCount, elementSize, "preSwizzle");
+    if (output == nullptr) return inputElementCount;
+
+    if (plan.identity) {
+        const size_t byteCount = inputElementCount * elementSize;
+        if (byteCount != 0) std::memcpy(output, input, byteCount);
+        return inputElementCount;
+    }
+
+    const size_t totalElements = validateShuffle(inputElementCount, plan);
+    forEachShuffledElement(plan, totalElements, [&](size_t sourceIndex, size_t destinationIndex) {
+        copyElement(input, sourceIndex, output, destinationIndex, elementSize);
+    });
+    return totalElements;
+}
+
+size_t preSwizzleScalesGFX950Bytes(const std::byte* input, size_t inputElementCount,
+                                   size_t elementSize, const std::vector<size_t>& sizes,
+                                   std::byte* output) {
+    const GFX950ScalePlan plan = makeGFX950ScalePlan(inputElementCount, sizes);
+    validateByteStorage(inputElementCount, plan.outputElementCount, elementSize,
+                        "preSwizzleScalesGFX950");
+    if (output == nullptr) return plan.outputElementCount;
+
+    forEachShuffledElement(
+        plan.shuffle, plan.outputElementCount,
+        [&](size_t paddedSourceIndex, size_t destinationIndex) {
+            const size_t sourceRow = paddedSourceIndex / plan.paddedColumnCount;
+            const size_t sourceColumn = paddedSourceIndex % plan.paddedColumnCount;
+            if (sourceRow < plan.rowCount && sourceColumn < plan.columnCount) {
+                const size_t sourceIndex = sourceRow * plan.columnCount + sourceColumn;
+                copyElement(input, sourceIndex, output, destinationIndex, elementSize);
+            }
+        });
+    return plan.outputElementCount;
+}
+
+size_t preSwizzleScalesGFX1250Bytes(const std::byte* input, size_t inputElementCount,
+                                    size_t elementSize, size_t slowDimension, size_t fastDimension,
+                                    size_t mxBlock, std::byte* output) {
+    const GFX1250ScalePlan plan =
+        makeGFX1250ScalePlan(inputElementCount, slowDimension, fastDimension, mxBlock);
+    validateByteStorage(inputElementCount, plan.outputElementCount, elementSize,
+                        "preSwizzleScalesGFX1250");
+    if (output == nullptr) return plan.outputElementCount;
+
+    const size_t copyGroupCount = plan.outputElementCount / plan.dimK;
+    parallelForChunks(copyGroupCount, plan.outputElementCount, [&](size_t begin, size_t end) {
+        for (size_t copyGroup = begin; copyGroup < end; ++copyGroup) {
+            const size_t slowIndex = copyGroup % plan.slowDimension;
+            const size_t tile = copyGroup / plan.slowDimension;
+            const size_t outputBase = copyGroup * plan.dimK;
+            const size_t sourceFastBase = tile * plan.dimK;
+            for (size_t elementInTile = 0; elementInTile < plan.dimK; ++elementInTile) {
+                const size_t sourceFast = sourceFastBase + elementInTile;
+                if (sourceFast < plan.fastDimension) {
+                    const size_t sourceIndex = slowIndex * plan.fastDimension + sourceFast;
+                    copyElement(input, sourceIndex, output, outputBase + elementInTile,
+                                elementSize);
+                }
+            }
+        }
+    });
+    return plan.outputElementCount;
+}
+
+}  // namespace roc::host_validation::amd_gpu_layout::detail

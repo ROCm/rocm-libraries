@@ -16,79 +16,10 @@
 
 namespace roc::host_validation {
 namespace detail {
-inline size_t logicalLinearIndex(std::span<const size_t> indices, const Shape& shape,
-                                 LogicalIndexOrder order) {
-    size_t result = 0;
-    size_t stride = 1;
-    if (order == LogicalIndexOrder::FirstDimensionFastest) {
-        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
-            result += indices[dimension] * stride;
-            stride *= shape[dimension];
-        }
-    } else {
-        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-            const size_t index = dimension - 1;
-            result += indices[index] * stride;
-            stride *= shape[index];
-        }
-    }
-    return result;
-}
-
-inline std::vector<size_t> logicalCoordinates(size_t linearIndex, const Shape& shape,
-                                              LogicalIndexOrder order) {
-    if (linearIndex >= shape.elementCount())
-        throw std::out_of_range("Generation logical index exceeds tensor shape.");
-
-    std::vector<size_t> indices(shape.rank(), 0);
-    if (order == LogicalIndexOrder::FirstDimensionFastest) {
-        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
-            indices[dimension] = linearIndex % shape[dimension];
-            linearIndex /= shape[dimension];
-        }
-    } else {
-        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-            const size_t index = dimension - 1;
-            indices[index] = linearIndex % shape[index];
-            linearIndex /= shape[index];
-        }
-    }
-    return indices;
-}
-
-inline double indexedUniformUnit(uint64_t seed, uint64_t stream, uint64_t index) {
+inline double indexedUniformUnit(uint64_t seed, uint64_t domain, uint64_t index) {
     constexpr double inverseTwoTo53 = 1.0 / 9007199254740992.0;
-    const uint64_t mantissa = counterRandom(seed, stream, index) >> 11;
+    const uint64_t mantissa = counterRandom(seed, domain, index) >> 11;
     return (static_cast<double>(mantissa) + 0.5) * inverseTwoTo53;
-}
-
-inline bool isRawGenerationPattern(GenerationPattern pattern) {
-    return pattern == GenerationPattern::RawConstant ||
-           pattern == GenerationPattern::UniformRawInteger ||
-           pattern == GenerationPattern::RandomRawBits ||
-           pattern == GenerationPattern::RawSerialDimension;
-}
-
-inline uint64_t rawGenerationValue(const GenerationPatternSpec& spec, uint64_t seed,
-                                   std::span<const size_t> indices, const Shape& shape,
-                                   size_t logicalIndex) {
-    switch (spec.pattern) {
-        case GenerationPattern::RawConstant:
-            return static_cast<uint64_t>(static_cast<int64_t>(spec.parameter0));
-        case GenerationPattern::UniformRawInteger:
-            return static_cast<uint64_t>(static_cast<int64_t>(indexedUniformInteger(
-                seed, spec.stream, logicalIndex, static_cast<int>(spec.parameter0),
-                static_cast<int>(spec.parameter1))));
-        case GenerationPattern::RandomRawBits:
-            return counterRandom(seed, spec.stream, logicalIndex);
-        case GenerationPattern::RawSerialDimension:
-            if (spec.dimension >= shape.rank())
-                throw std::out_of_range("Generation dimension exceeds tensor rank.");
-            return static_cast<uint64_t>(indices[spec.dimension]);
-        default:
-            throw std::invalid_argument(
-                "Requested generation pattern does not produce raw storage.");
-    }
 }
 
 inline ScalarType generationComponentType(ScalarType type) {
@@ -267,21 +198,22 @@ inline double typeInfinity(ScalarType type, bool negative) {
                     : std::numeric_limits<double>::infinity();
 }
 
-inline double randomEncodedExponentValue(const GenerationPatternSpec& spec, uint64_t seed,
-                                         size_t logicalIndex, ScalarType destinationType) {
-    ScalarType type = spec.sourceType == ScalarType::Count
-                          ? generationComponentType(destinationType)
-                          : generationComponentType(spec.sourceType);
+inline double randomEncodedExponentValue(
+    const RandomEncodedExponentGenerationParameters& parameters, uint64_t seed, uint64_t domain,
+    size_t logicalIndex, ScalarType destinationType) {
+    ScalarType type = parameters.sourceType.has_value()
+                          ? generationComponentType(*parameters.sourceType)
+                          : generationComponentType(destinationType);
     const ScalarTypeInfo& info = scalarTypeInfo(type);
     if (info.exponentBits == 0)
         throw std::invalid_argument(
             "Random encoded-exponent generation requires a floating-point encoding.");
-    const int lowerExponent = static_cast<int>(spec.parameter0);
-    const int upperExponent = static_cast<int>(spec.parameter1);
+    const int lowerExponent = parameters.lowerUnbiasedExponent;
+    const int upperExponent = parameters.upperUnbiasedExponent;
     if (lowerExponent > upperExponent)
         throw std::invalid_argument("Random encoded-exponent lower bound exceeds upper bound.");
 
-    const uint64_t randomBits = counterRandom(seed, spec.stream, logicalIndex);
+    const uint64_t randomBits = counterRandom(seed, domain, logicalIndex);
     const int exponent =
         static_cast<int>(randomBits % static_cast<uint64_t>(upperExponent - lowerExponent + 1)) +
         lowerExponent;
@@ -319,202 +251,299 @@ inline double randomEncodedExponentValue(const GenerationPatternSpec& spec, uint
     }
 }
 
-inline double baseGenerationValue(const GenerationPatternSpec& spec, uint64_t seed,
+struct GenerationRecipeAccess {
+    using Component = GenerationRecipe::Component;
+
+    static uint64_t rawGenerationValue(const Component& component, uint64_t seed, uint64_t domain,
+                                       std::span<const size_t> indices, const Shape& shape,
+                                       size_t logicalIndex) {
+        return std::visit(
+            [&](const auto& pattern) -> uint64_t {
+                using Pattern = std::remove_cvref_t<decltype(pattern)>;
+                if constexpr (std::is_same_v<Pattern, Component::RawConstantPattern>) {
+                    return pattern.parameters.bits;
+                } else if constexpr (std::is_same_v<Pattern, Component::UniformRawIntegerPattern>) {
+                    return static_cast<uint64_t>(static_cast<int64_t>(
+                        indexedUniformInteger(seed, domain, logicalIndex, pattern.parameters.lower,
+                                              pattern.parameters.upper)));
+                } else if constexpr (std::is_same_v<Pattern, Component::RandomRawBitsPattern>) {
+                    return counterRandom(seed, domain, logicalIndex);
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::RawSerialDimensionPattern>) {
+                    if (pattern.parameters.dimension >= shape.rank())
+                        throw std::out_of_range("Generation dimension exceeds tensor rank.");
+                    return static_cast<uint64_t>(indices[pattern.parameters.dimension]);
+                } else {
+                    throw std::invalid_argument(
+                        "Requested generation pattern does not produce raw storage.");
+                }
+            },
+            component.pattern_);
+    }
+
+    static double baseGenerationValue(const Component& component, uint64_t seed, uint64_t domain,
+                                      std::span<const size_t> indices, const Shape& shape,
+                                      size_t logicalIndex, ScalarType destinationType) {
+        return std::visit(
+            [&](const auto& pattern) -> double {
+                using Pattern = std::remove_cvref_t<decltype(pattern)>;
+                if constexpr (std::is_same_v<Pattern, Component::ZeroPattern>) {
+                    return 0.0;
+                } else if constexpr (std::is_same_v<Pattern, Component::ConstantPattern>) {
+                    return pattern.parameters.value;
+                } else if constexpr (std::is_same_v<Pattern, Component::CandidateSetPattern>) {
+                    if (pattern.parameters.values.empty())
+                        throw std::invalid_argument("Candidate-set generation requires values.");
+                    return pattern.parameters.values[counterRandom(seed, domain, logicalIndex) %
+                                                     pattern.parameters.values.size()];
+                } else if constexpr (std::is_same_v<Pattern, Component::UniformIntegerPattern>) {
+                    return static_cast<double>(indexedUniformInteger(seed, domain, logicalIndex,
+                                                                     pattern.parameters.lower,
+                                                                     pattern.parameters.upper));
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::AbsoluteUniformIntegerPattern>) {
+                    return std::abs(static_cast<double>(
+                        indexedUniformInteger(seed, domain, logicalIndex, pattern.parameters.lower,
+                                              pattern.parameters.upper)));
+                } else if constexpr (std::is_same_v<Pattern, Component::UniformRealPattern>) {
+                    if (pattern.parameters.lower > pattern.parameters.upper)
+                        throw std::invalid_argument(
+                            "Uniform-real lower bound exceeds upper bound.");
+                    const double unit = indexedUniformUnit(seed, domain, logicalIndex);
+                    return pattern.parameters.lower +
+                           unit * (pattern.parameters.upper - pattern.parameters.lower);
+                } else if constexpr (std::is_same_v<Pattern, Component::NormalPattern>) {
+                    constexpr double twoPi = 6.28318530717958647692528676655900576;
+                    const double first = indexedUniformUnit(seed, domain, 2 * logicalIndex);
+                    const double second = indexedUniformUnit(seed, domain, 2 * logicalIndex + 1);
+                    const double standardNormal =
+                        std::sqrt(-2.0 * std::log(first)) * std::cos(twoPi * second);
+                    return pattern.parameters.mean +
+                           pattern.parameters.standardDeviation * standardNormal;
+                } else if constexpr (std::is_same_v<Pattern, Component::SinePattern>) {
+                    return std::sin(static_cast<double>(logicalIndex));
+                } else if constexpr (std::is_same_v<Pattern, Component::CosinePattern>) {
+                    return std::cos(static_cast<double>(logicalIndex));
+                } else if constexpr (std::is_same_v<Pattern, Component::AbsoluteSinePattern>) {
+                    return std::abs(std::sin(static_cast<double>(logicalIndex)));
+                } else if constexpr (std::is_same_v<Pattern, Component::AbsoluteCosinePattern>) {
+                    return std::abs(std::cos(static_cast<double>(logicalIndex)));
+                } else if constexpr (std::is_same_v<Pattern, Component::SerialIndexPattern>) {
+                    return static_cast<double>(logicalIndex);
+                } else if constexpr (std::is_same_v<Pattern, Component::SerialDimensionPattern>) {
+                    if (pattern.parameters.dimension >= shape.rank())
+                        throw std::out_of_range("Generation dimension exceeds tensor rank.");
+                    return static_cast<double>(indices[pattern.parameters.dimension]);
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::AffineIndexRemainderPattern>) {
+                    const auto& parameters = pattern.parameters;
+                    if (parameters.dimensionCoefficients.size() != shape.rank())
+                        throw std::invalid_argument(
+                            "Affine-index coefficient count must match the tensor rank.");
+                    if (parameters.positiveDivisor <= 0)
+                        throw std::invalid_argument(
+                            "Affine-index remainder divisor must be positive.");
+
+                    int64_t value = parameters.offset;
+                    for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+                        const int64_t coefficient = parameters.dimensionCoefficients[dimension];
+                        if (indices[dimension] >
+                            static_cast<size_t>(std::numeric_limits<int64_t>::max()))
+                            throw std::overflow_error("Affine-index coordinate exceeds Int64.");
+                        const int64_t index = static_cast<int64_t>(indices[dimension]);
+                        int64_t term = 0;
+                        if (coefficient > 0) {
+                            if (index > std::numeric_limits<int64_t>::max() / coefficient)
+                                throw std::overflow_error("Affine-index multiplication overflow.");
+                            term = coefficient * index;
+                        } else if (coefficient < 0) {
+                            if (coefficient == std::numeric_limits<int64_t>::min()) {
+                                if (index > 1)
+                                    throw std::overflow_error(
+                                        "Affine-index multiplication overflow.");
+                                term = index == 0 ? 0 : std::numeric_limits<int64_t>::min();
+                            } else {
+                                const int64_t magnitude = -coefficient;
+                                if (index > std::numeric_limits<int64_t>::max() / magnitude)
+                                    throw std::overflow_error(
+                                        "Affine-index multiplication overflow.");
+                                term = -(magnitude * index);
+                            }
+                        }
+
+                        if ((term > 0 && value > std::numeric_limits<int64_t>::max() - term) ||
+                            (term < 0 && value < std::numeric_limits<int64_t>::min() - term))
+                            throw std::overflow_error("Affine-index addition overflow.");
+                        value += term;
+                    }
+                    return static_cast<double>(value % parameters.positiveDivisor);
+                } else if constexpr (std::is_same_v<Pattern, Component::IdentityPattern>) {
+                    if (shape.rank() < 2)
+                        throw std::invalid_argument(
+                            "Identity generation requires rank at least two.");
+                    return indices[0] == indices[1] ? 1.0 : 0.0;
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::CheckerboardUniformIntegerPattern>) {
+                    double value = static_cast<double>(
+                        indexedUniformInteger(seed, domain, logicalIndex, pattern.parameters.lower,
+                                              pattern.parameters.upper));
+                    size_t parity = 0;
+                    for (const size_t index : indices) parity ^= index;
+                    return (parity & 1U) == 0 ? -value : value;
+                } else if constexpr (std::is_same_v<Pattern, Component::TypeMaximumPattern>) {
+                    return typeMaximum(destinationType);
+                } else if constexpr (std::is_same_v<Pattern, Component::TypeLowestPattern>) {
+                    return typeLowest(destinationType);
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::TypeDenormalMinimumPattern>) {
+                    return typeDenormalMinimum(destinationType);
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::TypeDenormalMaximumPattern>) {
+                    return typeDenormalMaximum(destinationType);
+                } else if constexpr (std::is_same_v<Pattern, Component::TypeNaNPattern>) {
+                    return typeNaN(destinationType);
+                } else if constexpr (std::is_same_v<Pattern, Component::TypeInfinityPattern>) {
+                    return typeInfinity(destinationType, false);
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::TypeNegativeInfinityPattern>) {
+                    return typeInfinity(destinationType, true);
+                } else if constexpr (std::is_same_v<Pattern, Component::TypeNegativeZeroPattern>) {
+                    return -0.0;
+                } else if constexpr (std::is_same_v<Pattern, Component::UniformTypeRangePattern>) {
+                    const double maximum = typeMaximum(destinationType);
+                    const double unit = indexedUniformUnit(seed, domain, logicalIndex);
+                    return maximum * (2.0 * unit - 1.0);
+                } else if constexpr (std::is_same_v<Pattern,
+                                                    Component::RandomEncodedExponentPattern>) {
+                    return randomEncodedExponentValue(pattern.parameters, seed, domain,
+                                                      logicalIndex, destinationType);
+                } else {
+                    throw std::invalid_argument("Raw generation requires encoded storage output.");
+                }
+            },
+            component.pattern_);
+    }
+
+    static double generationValue(const Component& component, uint64_t seed, uint64_t domain,
                                   std::span<const size_t> indices, const Shape& shape,
                                   size_t logicalIndex, ScalarType destinationType) {
-    switch (spec.pattern) {
-        case GenerationPattern::Zero:
-            return 0.0;
-        case GenerationPattern::Constant:
-            return spec.parameter0;
-        case GenerationPattern::CandidateSet:
-            if (spec.candidates.empty())
-                throw std::invalid_argument("Candidate-set generation requires values.");
-            return spec.candidates[counterRandom(seed, spec.stream, logicalIndex) %
-                                   spec.candidates.size()];
-        case GenerationPattern::UniformInteger:
-            return static_cast<double>(indexedUniformInteger(seed, spec.stream, logicalIndex,
-                                                             static_cast<int>(spec.parameter0),
-                                                             static_cast<int>(spec.parameter1)));
-        case GenerationPattern::AbsoluteUniformInteger:
-            return std::abs(static_cast<double>(indexedUniformInteger(
-                seed, spec.stream, logicalIndex, static_cast<int>(spec.parameter0),
-                static_cast<int>(spec.parameter1))));
-        case GenerationPattern::UniformReal: {
-            if (spec.parameter0 > spec.parameter1)
-                throw std::invalid_argument("Uniform-real lower bound exceeds upper bound.");
-            const double unit = indexedUniformUnit(seed, spec.stream, logicalIndex);
-            return spec.parameter0 + unit * (spec.parameter1 - spec.parameter0);
+        double value = baseGenerationValue(component, seed, domain, indices, shape, logicalIndex,
+                                           destinationType);
+        switch (component.unaryTransform_) {
+            case Component::UnaryTransform::None:
+                break;
+            case Component::UnaryTransform::Absolute:
+                value = std::abs(value);
+                break;
+            case Component::UnaryTransform::Sine:
+                value = std::sin(value);
+                break;
+            case Component::UnaryTransform::Cosine:
+                value = std::cos(value);
+                break;
         }
-        case GenerationPattern::Normal: {
-            constexpr double twoPi = 6.28318530717958647692528676655900576;
-            const double first = indexedUniformUnit(seed, spec.stream, 2 * logicalIndex);
-            const double second = indexedUniformUnit(seed, spec.stream, 2 * logicalIndex + 1);
-            const double standardNormal =
-                std::sqrt(-2.0 * std::log(first)) * std::cos(twoPi * second);
-            return spec.parameter0 + spec.parameter1 * standardNormal;
-        }
-        case GenerationPattern::Sine:
-            return std::sin(static_cast<double>(logicalIndex));
-        case GenerationPattern::Cosine:
-            return std::cos(static_cast<double>(logicalIndex));
-        case GenerationPattern::AbsoluteSine:
-            return std::abs(std::sin(static_cast<double>(logicalIndex)));
-        case GenerationPattern::AbsoluteCosine:
-            return std::abs(std::cos(static_cast<double>(logicalIndex)));
-        case GenerationPattern::SerialIndex:
-            return static_cast<double>(logicalIndex);
-        case GenerationPattern::SerialDimension:
-            if (spec.dimension >= shape.rank())
-                throw std::out_of_range("Generation dimension exceeds tensor rank.");
-            return static_cast<double>(indices[spec.dimension]);
-        case GenerationPattern::AffineIndexRemainder: {
-            if (spec.dimensionCoefficients.size() != shape.rank())
-                throw std::invalid_argument(
-                    "Affine-index coefficient count must match the tensor rank.");
-            if (spec.remainderDivisor <= 0)
-                throw std::invalid_argument("Affine-index remainder divisor must be positive.");
+        value = value * component.affineValue_.scale + component.affineValue_.offset;
 
-            int64_t value = spec.affineOffset;
-            for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
-                const int64_t coefficient = spec.dimensionCoefficients[dimension];
-                if (indices[dimension] > static_cast<size_t>(std::numeric_limits<int64_t>::max()))
-                    throw std::overflow_error("Affine-index coordinate exceeds Int64.");
-                const int64_t index = static_cast<int64_t>(indices[dimension]);
-                int64_t term = 0;
-                if (coefficient > 0) {
-                    if (index > std::numeric_limits<int64_t>::max() / coefficient)
-                        throw std::overflow_error("Affine-index multiplication overflow.");
-                    term = coefficient * index;
-                } else if (coefficient < 0) {
-                    if (coefficient == std::numeric_limits<int64_t>::min()) {
-                        if (index > 1)
-                            throw std::overflow_error("Affine-index multiplication overflow.");
-                        term = index == 0 ? 0 : std::numeric_limits<int64_t>::min();
-                    } else {
-                        const int64_t magnitude = -coefficient;
-                        if (index > std::numeric_limits<int64_t>::max() / magnitude)
-                            throw std::overflow_error("Affine-index multiplication overflow.");
-                        term = -(magnitude * index);
-                    }
-                }
-
-                if ((term > 0 && value > std::numeric_limits<int64_t>::max() - term) ||
-                    (term < 0 && value < std::numeric_limits<int64_t>::min() - term))
-                    throw std::overflow_error("Affine-index addition overflow.");
-                value += term;
-            }
-            return static_cast<double>(value % spec.remainderDivisor);
-        }
-        case GenerationPattern::Identity:
-            if (shape.rank() < 2)
-                throw std::invalid_argument("Identity generation requires rank at least two.");
-            return indices[0] == indices[1] ? 1.0 : 0.0;
-        case GenerationPattern::CheckerboardUniformInteger: {
-            double value = static_cast<double>(indexedUniformInteger(
-                seed, spec.stream, logicalIndex, static_cast<int>(spec.parameter0),
-                static_cast<int>(spec.parameter1)));
+        if (component.alternatingSign_.has_value()) {
             size_t parity = 0;
-            for (const size_t index : indices) parity ^= index;
-            return (parity & 1) == 0 ? -value : value;
+            for (const size_t dimension : component.alternatingSign_->dimensions) {
+                if (dimension >= shape.rank())
+                    throw std::out_of_range(
+                        "Alternating-sign generation dimension exceeds tensor rank.");
+                parity ^= indices[dimension];
+            }
+            if (((parity & 1U) != 0) == component.alternatingSign_->negativeWhenOdd) value = -value;
         }
-        case GenerationPattern::TypeMaximum:
-            return typeMaximum(destinationType);
-        case GenerationPattern::TypeLowest:
-            return typeLowest(destinationType);
-        case GenerationPattern::TypeDenormalMinimum:
-            return typeDenormalMinimum(destinationType);
-        case GenerationPattern::TypeDenormalMaximum:
-            return typeDenormalMaximum(destinationType);
-        case GenerationPattern::TypeNaN:
-            return typeNaN(destinationType);
-        case GenerationPattern::TypeInfinity:
-            return typeInfinity(destinationType, false);
-        case GenerationPattern::TypeNegativeInfinity:
-            return typeInfinity(destinationType, true);
-        case GenerationPattern::TypeNegativeZero:
-            return -0.0;
-        case GenerationPattern::UniformTypeRange: {
-            const double maximum = typeMaximum(destinationType);
-            const double unit = indexedUniformUnit(seed, spec.stream, logicalIndex);
-            return maximum * (2.0 * unit - 1.0);
-        }
-        case GenerationPattern::RandomEncodedExponent:
-            return randomEncodedExponentValue(spec, seed, logicalIndex, destinationType);
-        case GenerationPattern::RawConstant:
-        case GenerationPattern::UniformRawInteger:
-        case GenerationPattern::RandomRawBits:
-        case GenerationPattern::RawSerialDimension:
-            throw std::invalid_argument("Raw generation requires encoded storage output.");
+        return value;
     }
-    throw std::invalid_argument("Unsupported GenerationPattern.");
-}
 
-inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
-                              std::span<const size_t> indices, const Shape& shape,
-                              size_t logicalIndex, ScalarType destinationType) {
-    double value = baseGenerationValue(spec, seed, indices, shape, logicalIndex, destinationType);
-    switch (spec.transform) {
-        case GenerationTransform::None:
-            break;
-        case GenerationTransform::Absolute:
-            value = std::abs(value);
-            break;
-        case GenerationTransform::Sine:
-            value = std::sin(value);
-            break;
-        case GenerationTransform::Cosine:
-            value = std::cos(value);
-            break;
-    }
-    value = value * spec.valueScale + spec.valueOffset;
-
-    if (!spec.alternatingDimensions.empty()) {
-        size_t parity = 0;
-        for (const size_t dimension : spec.alternatingDimensions) {
-            if (dimension >= shape.rank())
-                throw std::out_of_range(
-                    "Alternating-sign generation dimension exceeds tensor rank.");
-            parity ^= indices[dimension];
-        }
-        if ((parity & 1U) == (spec.negativeParity & 1U)) value = -value;
-    }
-    return value;
-}
-
-inline void generateElement(Tensor destination, const GenerationOptions& options,
-                            std::span<const size_t> indices, size_t logicalIndex) {
-    const bool complexOutput =
-        scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;
-    if (isRawGenerationPattern(options.real.pattern)) {
-        if (complexOutput)
-            throw std::invalid_argument("Raw generation does not support complex output.");
+    static void writeRawGeneration(Tensor destination, const GenerationRecipe& recipe,
+                                   const GenerationRecipe::BoundComponent& bound,
+                                   std::span<const size_t> indices, size_t logicalIndex) {
         const uint16_t bits = scalarTypeInfo(destination.type()).storageBits;
         if (bits > 64)
             throw std::invalid_argument("Raw generation supports scalar encodings up to 64 bits.");
 
         const ptrdiff_t elementOffset = destination.layout().elementOffset(indices);
-        const uint64_t raw = rawGenerationValue(options.real, options.seed, indices,
-                                                destination.shape(), logicalIndex);
+        const uint64_t raw =
+            rawGenerationValue(bound.component, recipe.settings_.seed, bound.randomDomain, indices,
+                               destination.shape(), logicalIndex);
         const uint64_t offsetBits = bitOffset(destination.type(), elementOffset);
         if (bits <= 32) {
             writePackedBits(destination.storage(), offsetBits, bits, static_cast<uint32_t>(raw));
         } else {
             writeNative<uint64_t>(destination.storage(), static_cast<size_t>(offsetBits / 8), raw);
         }
-        return;
     }
 
-    const double real = generationValue(options.real, options.seed, indices, destination.shape(),
+    static void generateElement(Tensor destination, const GenerationRecipe& recipe,
+                                std::span<const size_t> indices, size_t logicalIndex) {
+        const bool complexOutput =
+            scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;
+        const GenerationRecipe::BoundComponent* real = std::visit(
+            [](const auto& policy) -> const GenerationRecipe::BoundComponent* {
+                using Policy = std::remove_cvref_t<decltype(policy)>;
+                if constexpr (std::is_same_v<Policy, GenerationRecipe::RealOnlyPolicy>)
+                    return &policy.real;
+                else if constexpr (std::is_same_v<Policy, GenerationRecipe::ReplicatedPolicy>)
+                    return &policy.value;
+                else
+                    return &policy.real;
+            },
+            recipe.complexPolicy_);
+
+        if (!complexOutput) {
+            if (real->component.isRaw()) {
+                writeRawGeneration(destination, recipe, *real, indices, logicalIndex);
+                return;
+            }
+            destination.storeFrom(
+                indices,
+                generationValue(real->component, recipe.settings_.seed, real->randomDomain, indices,
+                                destination.shape(), logicalIndex, destination.type()));
+            return;
+        }
+
+        std::visit(
+            [&](const auto& policy) {
+                using Policy = std::remove_cvref_t<decltype(policy)>;
+                if constexpr (std::is_same_v<Policy, GenerationRecipe::RealOnlyPolicy>) {
+                    if (policy.real.component.isRaw())
+                        throw std::invalid_argument(
+                            "Raw generation does not support complex output.");
+                    const double value = generationValue(
+                        policy.real.component, recipe.settings_.seed, policy.real.randomDomain,
+                        indices, destination.shape(), logicalIndex, destination.type());
+                    destination.storeFrom(indices, std::complex<double>(value, 0.0));
+                } else if constexpr (std::is_same_v<Policy, GenerationRecipe::ReplicatedPolicy>) {
+                    if (policy.value.component.isRaw())
+                        throw std::invalid_argument(
+                            "Raw generation does not support complex output.");
+                    const double value = generationValue(
+                        policy.value.component, recipe.settings_.seed, policy.value.randomDomain,
+                        indices, destination.shape(), logicalIndex, destination.type());
+                    destination.storeFrom(indices, std::complex<double>(value, value));
+                } else {
+                    if (policy.real.component.isRaw() || policy.imaginary.component.isRaw())
+                        throw std::invalid_argument(
+                            "Raw generation does not support complex output.");
+                    const double realValue = generationValue(
+                        policy.real.component, recipe.settings_.seed, policy.real.randomDomain,
+                        indices, destination.shape(), logicalIndex, destination.type());
+                    const double imaginaryValue =
+                        generationValue(policy.imaginary.component, recipe.settings_.seed,
+                                        policy.imaginary.randomDomain, indices, destination.shape(),
                                         logicalIndex, destination.type());
-    if (complexOutput) {
-        const double imaginary =
-            generationValue(options.imaginary, options.seed, indices, destination.shape(),
-                            logicalIndex, destination.type());
-        destination.storeFrom(indices, std::complex<double>(real, imaginary));
-    } else {
-        destination.storeFrom(indices, real);
+                    destination.storeFrom(indices, std::complex<double>(realValue, imaginaryValue));
+                }
+            },
+            recipe.complexPolicy_);
     }
+};
+
+inline void generateElement(Tensor destination, const GenerationRecipe& recipe,
+                            std::span<const size_t> indices, size_t logicalIndex) {
+    GenerationRecipeAccess::generateElement(destination, recipe, indices, logicalIndex);
 }
 }  // namespace detail
 }  // namespace roc::host_validation

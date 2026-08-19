@@ -48,8 +48,8 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
     such as `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `GOTO_NUM_THREADS`,
     `BLIS_NUM_THREADS`, `MKL_NUM_THREADS`, or
     `VECLIB_MAXIMUM_THREADS`.
-- `roc::host-validation-tiled`
-  - GPU-independent tiled implementation of `GemmBackend::Tiled`.
+- `roc::host-validation-blocked`
+  - GPU-independent blocked implementation of `GemmBackend::Blocked`.
   - Supports dense F32/F64 accumulation, runtime input/output types,
     compute-input quantization, XFloat32, vector/scalar epilogue operands,
     bias, and activation.
@@ -83,6 +83,9 @@ must not include or link the AMD GPU layout module.
 ```text
 include/roc/host_validation/
   amd_gpu_layout/mx.hpp
+  index_order.hpp
+  scalar.hpp
+  detail/scalar_codec.hpp
   tensor.hpp
   comparison.hpp
   validation.hpp
@@ -115,6 +118,8 @@ scalarTypeInfo(ScalarType);
 scalarTypeName(ScalarType);
 visitScalarType(ScalarType, visitor);
 
+IndexOrder::{FirstDimensionFastest, LastDimensionFastest};
+
 Shape::Shape(std::vector<size_t>);
 Shape::rank();
 Shape::extent(dimension);
@@ -122,6 +127,8 @@ Shape::dimensions();
 Shape::elementCount();
 Shape::elementCount(firstDimension, lastDimension);
 Shape::elementCountExcluding(dimension);
+Shape::linearIndex(coordinates, IndexOrder);
+Shape::coordinates(linearIndex, IndexOrder);
 
 Layout::Layout(Shape, std::vector<ptrdiff_t>, ptrdiff_t offset = 0);
 Layout::contiguous(const Shape&);
@@ -136,11 +143,22 @@ Layout::stride(dimension);
 Layout::offset();
 Layout::elementOffset(indices);
 
+Scalar::from(nativeValue);
+Scalar::fromStorage(ScalarType, encodedBytes);
+Scalar::zero(ScalarType);
+Scalar::one(ScalarType);
+Scalar::type();
+Scalar::storage();
+Scalar::as<T>();
+
+TensorStorage::allocate(bytes);
+TensorStorage::wrap(owner, mutableBytes);
+
 Tensor::Tensor(ScalarType, Shape);
 Tensor::Tensor(ScalarType, Layout);
 Tensor::Tensor(ScalarType, Shape, TensorStorageAllocator);
 Tensor::Tensor(ScalarType, Layout, TensorStorageAllocator);
-Tensor::fromStorage(ScalarType, Layout, TensorStorage);
+Tensor::wrapStorage(ScalarType, Layout, TensorStorage);
 Tensor::fromStorage(ScalarType, Layout, std::vector<std::byte>);
 Tensor::fromValues(ScalarType, Shape, values);
 Tensor::fromNativeValues(Shape, nativeValues);
@@ -160,6 +178,10 @@ Tensor::to(ScalarType);
 Tensor::to(ScalarType, ScalarConversionOptions);
 ```
 
+`Scalar` owns one encoded runtime-typed value inline. It has no shape, layout, or
+shared storage. Copying a Scalar copies its bytes. `fromStorage` copies exactly
+one encoded value; it does not retain the supplied span.
+
 `Tensor` is a reference-counted handle. Copy construction and assignment copy
 type/layout metadata and share the same storage; mutations are visible through
 every alias. `clone()` is the explicit deep-copy operation. `alias(Layout)`
@@ -169,7 +191,9 @@ intentional: a const Tensor handle may still mutate its shared data.
 Every Tensor participates in owning its storage lifetime. The default storage
 uses ordinary host bytes; an allocator callback may return owned storage backed
 by a product-specific allocator such as pooled HIP-pinned memory. Native-array
-factories copy into owned storage. There is no public borrowed tensor/view type.
+factories copy into owned storage. `TensorStorage::wrap` requires a lifetime
+owner and anchors an existing mutable allocation; `Tensor::wrapStorage` retains
+that owner without copying. There is no public unowned tensor/view type.
 
 Layout strides and offsets are measured in logical scalar elements, including
 for sub-byte formats; the tensor layer performs the element-to-bit addressing
@@ -195,48 +219,44 @@ mature.
 
 ## Deterministic tensor generation
 
-`GenerationOptions` describes an index-to-value recipe independently of
-storage type, product enums, and traversal parallelism:
+`GenerationRecipe` is the typed C++ generation API. Parameter objects use
+distribution terms rather than numbered fields, and the public recipe exposes
+one seed rather than RNG stream identifiers:
 
 ```cpp
-GenerationOptions options;
-options.seed = 17;
-options.indexOrder = LogicalIndexOrder::FirstDimensionFastest;
-options.real.pattern = GenerationPattern::Sine;
-options.imaginary.pattern = GenerationPattern::Cosine;
+GenerationRecipe recipe = GenerationRecipe::cartesian(
+    GenerationRecipe::sine(),
+    GenerationRecipe::cosine(),
+    {.seed = 17,
+     .indexOrder = LogicalIndexOrder::FirstDimensionFastest});
 
-Tensor output = generate(ScalarType::ComplexFloat32, layout, options);
-GenerationRunInfo patch = generateAt(output, logicalIndex, options);
+Tensor output = generate(ScalarType::ComplexFloat32, layout, recipe);
+GenerationRunInfo patch = generateAt(output, logicalIndex, recipe);
 ```
 
-The current patterns cover constants, selection from an explicit candidate
-set, uniform integer/real values, normal values, sine/cosine and absolute
-variants, serial logical indices, one selected dimension, identity tensors,
-affine coordinate/remainder patterns, checkerboard integers, type-derived
-extrema/non-finite values, encoded-exponent sampling, and explicit raw-storage
-recipes. Candidate-set
-selection is the generic equivalent of `numpy.random.choice` for fixed
-numerical values and is useful for exactly representable low-precision grids.
-Raw recipes are used only when compatibility depends on exact scalar
-encodings rather than numerical conversion. Real and imaginary components
-have independent recipes and random streams. Random values are counter-based,
-so a tensor element depends only on the seed, stream, and logical index—not
-loop order or thread count.
+Named factories cover constants, candidate sets, uniform integer/real and
+normal distributions, sine/cosine, logical or dimension indices, identity,
+affine-index remainders, type-derived values, encoded-exponent sampling, and
+raw storage. Modifiers return new components and apply an absolute/sine/cosine
+transform, affine scale/offset, or coordinate-parity sign alternation.
+
+Complex construction is explicit:
+
+- `realOnly(component)` writes zero to the imaginary component;
+- `replicated(component)` evaluates once and writes the same value to both
+  components; and
+- `cartesian(real, imaginary)` evaluates each component in a distinct internal
+  random domain.
+
+Random values are counter-based, so a tensor element depends only on the seed,
+internal domain, and logical index. Loop order and thread count do not affect
+the result. `GenerationOptions` and `GenerationPatternSpec` remain as a
+compatibility surface for existing product adapters and translate to
+`GenerationRecipe` before execution.
 
 `generateAt` applies the same recipe to one logical element. Its coordinate is
-decoded with `GenerationOptions::indexOrder`, so callers do not reproduce
+decoded with the recipe's index order, so callers do not reproduce
 layout-independent linear-index arithmetic.
-
-Each numerical component recipe can also apply one unary transform
-(`absolute`, `sine`, or `cosine`), an affine value scale/offset, and sign
-alternation over explicitly selected tensor dimensions. These modifiers let
-product adapters describe small-value, checkerboard, positive-only, and probe
-inputs without owning element loops.
-
-hipBLASLt and TensileLite keep private enum/type adapters. Common host
-initialization modes now translate to this API. Indexed `GenerationOptions`
-is the single public generation path; the former mutable, call-order-dependent
-generator has been removed.
 
 ## Tensor linear combination
 
@@ -317,7 +337,7 @@ One plan can select logical elements and collect:
 Comparison policy is intentionally entered through Tensors. The former
 scalar `valuesClose` helper and typed allclose-tolerance search were removed;
 one-element values use ordinary tensors, while tolerance search remains on the
-canonical runtime-typed API.
+runtime-typed API.
 
 The exhaustive numerical policy matrix is tested through the Python API
 against NumPy and raw-bit Python oracles. C++ comparison tests retain layout,
@@ -332,7 +352,7 @@ validation and remains a separate product/GPU concern.
 
 ## Runtime reference GEMM
 
-The canonical reference-GEMM API is tensor-centric and runtime-typed:
+The reference-GEMM API is tensor-centric and runtime-typed:
 
 ```cpp
 GemmOperand a(aTensor);
@@ -377,7 +397,7 @@ the numerical request.
 - output scaling plus explicit rounded/saturating Int8 conversion;
 - absolute, clipped/leaky ReLU, ReLU, GELU, GELU scaling and derivative,
   sigmoid, tanh, SiLU, Swish, clamp, and explicit ReLU derivative; and
-- canonical execution, pluggable object-oriented backend implementations,
+- Pointwise execution, pluggable object-oriented backend implementations,
   backend support queries, and fallback reporting.
 
 Int32 GEMM arithmetic never uses floating-point values as an accumulator
@@ -439,10 +459,11 @@ provider environment controls, including a moderately large exact GEMM.
 There is no standard CBLAS API for proving how many worker threads an arbitrary
 provider created, so these tests establish numerical conformance under both
 requested thread configurations rather than introspecting provider internals.
-The canonical backend computes only selected outputs. Accelerated backends may
-compute all outputs and report the actual count through `GemmRunInfo`.
+The Pointwise strategy covers and writes exactly the selected outputs.
+Accelerated strategies report selected writes separately from all output
+coordinates covered by their execution granularity.
 
-`TiledGemmBackend` implements the same object-oriented interface without BLAS
+`BlockedGemmBackend` implements the same object-oriented interface without BLAS
 or product dependencies. It reuses decoded A/B tiles across output elements
 and is the migration target for TensileLite's product-local fast CPU path.
 It also supports block-scaled MX operands when both block sizes and K align to
@@ -599,9 +620,9 @@ find_package(ROCHostValidation CONFIG REQUIRED COMPONENTS Core)
 target_link_libraries(app PRIVATE roc::host-validation-core)
 ```
 
-The installed package exposes `Core`, `Operations`, `Tiled`, `BLAS`, `MX`, and
+The installed package exposes `Core`, `Operations`, `Blocked`, `BLAS`, `MX`, and
 `AMDGPULayout` components. Component dependencies are loaded transitively:
-`Tiled` and `BLAS` require `Operations`, while `Operations` and `MX` require
+`Blocked` and `BLAS` require `Operations`, while `Operations` and `MX` require
 `Core`. A component lookup loads only the requested closure, so `Core` does not
 search for CBLAS or OpenMP. The `BLAS` component locates a conforming
 `CBLAS::CBLAS` target when requested; consumers do not manually repeat a
@@ -668,7 +689,7 @@ The NumPy suite independently checks:
   recipes, and structured comparison;
 - pointwise, selected, complex, non-finite, Frobenius, ULP, allclose-search,
   and unwritten-sentinel comparison behavior against NumPy;
-- F16 stepwise, F32, F64, I32, complex, and tiled GEMM against NumPy;
+- F16 stepwise, F32, F64, I32, complex, and blocked GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;
 - full/selected forward and gradient epilogues for the configured activation
@@ -684,6 +705,11 @@ normalized affine shape, strides, and offset. The Tensor does not retain the
 ndarray owner and does not observe later ndarray mutations. Packed and
 decoded-only formats such as BF16, FP8, FP6, FP4, E8M0, E4M3, and E5M3
 continue through the explicit owning conversion path.
+
+`to_numpy` decodes logical tensor values into an owning NumPy array. Its dtype
+selects the decoded output container and never reinterprets encoded
+`tensor.storage`; E5M3, for example, remains one encoded byte per tensor value
+and decodes to float32 by default.
 
 ## Standalone tests
 

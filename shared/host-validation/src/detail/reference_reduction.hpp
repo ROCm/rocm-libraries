@@ -147,7 +147,7 @@ ReductionRunInfo referenceReductionTyped(const ReductionProblem& problem,
     }
 
     return {
-        .outputElementsComputed = outputElements,
+        .outputElementsWritten = outputElements,
         .inputElementsRead = outputElements * reductionElements,
     };
 }

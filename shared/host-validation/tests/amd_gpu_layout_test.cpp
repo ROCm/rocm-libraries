@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iterator>
 #include <limits>
 #include <numeric>
 #include <roc/host_validation/amd_gpu_layout/mx.hpp>
@@ -17,339 +16,74 @@
 #endif
 
 using namespace roc::host_validation::amd_gpu_layout;
-using detail::computeShuffledStrides;
-using detail::computeStrides;
-using detail::product;
-using detail::roundUp;
-using detail::shuffleDims;
 
 namespace {
 size_t runtimeSize(size_t value) {
     volatile size_t runtimeValue = value;
     return runtimeValue;
 }
+
+std::vector<size_t> testStrides(const std::vector<size_t>& sizes,
+                                const std::vector<size_t>& dimensionOrder = {}) {
+    std::vector<size_t> strides(sizes.size());
+    size_t stride = 1;
+    if (dimensionOrder.empty()) {
+        for (size_t dimension = 0; dimension < sizes.size(); ++dimension) {
+            strides[dimension] = stride;
+            stride *= sizes[dimension];
+        }
+    } else {
+        for (const size_t dimension : dimensionOrder) {
+            strides[dimension] = stride;
+            stride *= sizes[dimension];
+        }
+    }
+    return strides;
+}
 }  // namespace
 
-// ============================================================================
-// Tests for product() helper function
-// ============================================================================
-
-TEST(PreSwizzleTest, ProductEmptyVector) {
-    std::vector<size_t> empty;
-    EXPECT_EQ(product(empty), 1);
-}
-
-TEST(PreSwizzleTest, ProductSingleElement) {
-    std::vector<size_t> vec = {5};
-    EXPECT_EQ(product(vec), 5);
-}
-
-TEST(PreSwizzleTest, ProductMultipleElements) {
-    std::vector<size_t> vec = {2, 3, 4};
-    EXPECT_EQ(product(vec), 24);
-}
-
-TEST(PreSwizzleTest, ProductWithZero) {
-    std::vector<size_t> vec = {2, 0, 4};
-    EXPECT_EQ(product(vec), 0);
-}
-
-TEST(PreSwizzleTest, ProductWithOne) {
-    std::vector<size_t> vec = {1, 5, 1, 3};
-    EXPECT_EQ(product(vec), 15);
-}
-
-TEST(PreSwizzleTest, ProductRejectsOverflow) {
-    EXPECT_THROW(product(std::vector<size_t>{std::numeric_limits<size_t>::max(), 2}),
-                 std::overflow_error);
-}
-
-TEST(PreSwizzleTest, CompiledThreadPolicyHandlesEmptyWork) {
-    EXPECT_EQ(detail::operationThreadCount(0), 1);
-}
-
-// ============================================================================
-// Tests for computeStrides()
-// ============================================================================
-
-TEST(PreSwizzleTest, ComputeStridesEmpty) {
-    std::vector<size_t> sizes;
-    auto strides = computeStrides(sizes);
-    EXPECT_TRUE(strides.empty());
-}
-
-TEST(PreSwizzleTest, ComputeStridesSingleElement) {
-    std::vector<size_t> sizes = {10};
-    auto strides = computeStrides(sizes);
-    ASSERT_EQ(strides.size(), 1);
-    EXPECT_EQ(strides[0], 1);
-}
-
-TEST(PreSwizzleTest, ComputeStridesColMajor) {
-    std::vector<size_t> sizes = {10, 20, 30};
-    auto strides = computeStrides(sizes);
-    ASSERT_EQ(strides.size(), 3);
-    EXPECT_EQ(strides[0], 1);
-    EXPECT_EQ(strides[1], 10);
-    EXPECT_EQ(strides[2], 200);
-}
-
-// ============================================================================
-// Tests for computeShuffledStrides()
-// ============================================================================
-
-TEST(PreSwizzleTest, ComputeShuffledStridesIdentity) {
-    std::vector<size_t> sizes = {2, 3, 4};
-    std::vector<size_t> dimOrder = {0, 1, 2};
-    auto strides = computeShuffledStrides(sizes, dimOrder);
-    auto normalStrides = computeStrides(sizes);
-    EXPECT_EQ(strides, normalStrides);
-}
-
-TEST(PreSwizzleTest, ComputeShuffledStridesReverse) {
-    std::vector<size_t> sizes = {2, 3, 4};
-    std::vector<size_t> dimOrder = {2, 1, 0};
-    auto strides = computeShuffledStrides(sizes, dimOrder);
-    ASSERT_EQ(strides.size(), 3);
-    EXPECT_EQ(strides[0], 12);  // 3 * 4
-    EXPECT_EQ(strides[1], 4);   // 4
-    EXPECT_EQ(strides[2], 1);   // 1
-}
-
-TEST(PreSwizzleTest, ComputeShuffledStridesCustomOrder) {
-    std::vector<size_t> sizes = {2, 3, 4};
-    std::vector<size_t> dimOrder = {1, 0, 2};
-    auto strides = computeShuffledStrides(sizes, dimOrder);
-    ASSERT_EQ(strides.size(), 3);
-    EXPECT_EQ(strides[0], 3);  // sizes[1] = 3
-    EXPECT_EQ(strides[1], 1);  // first in order
-    EXPECT_EQ(strides[2], 6);  // 2 * 3
-}
-
-TEST(PreSwizzleTest, ComputeShuffledStridesRejectsInvalidPermutation) {
-    EXPECT_THROW(computeShuffledStrides({2, 3}, {0}), std::runtime_error);
-    EXPECT_THROW(computeShuffledStrides({2, 3}, {0, 0}), std::runtime_error);
-    EXPECT_THROW(computeShuffledStrides({2, 3}, {0, 2}), std::runtime_error);
-}
-
-// ============================================================================
-// Tests for shuffleDims()
-// ============================================================================
-
-TEST(PreSwizzleTest, ShuffleDimsIdentity) {
-    std::vector<int> input = {0, 1, 2, 3, 4, 5};
-    std::vector<size_t> sizes = {2, 3};
-    auto srcStrides = computeStrides(sizes);
-    auto output = shuffleDims(input, sizes, srcStrides, srcStrides);
-    EXPECT_EQ(input, output);
-}
-
-TEST(PreSwizzleTest, ShuffleDimsTranspose2D) {
-    // Input is 2x3 matrix in col-major order: [[0,1,2], [3,4,5]]
-    std::vector<int> input = {0, 3, 1, 4, 2, 5};
-    std::vector<size_t> sizes = {2, 3};
-
-    auto srcStrides = computeStrides(sizes);
-    std::vector<size_t> dimOrder = {1, 0};  // transpose
-    auto dstStrides = computeShuffledStrides(sizes, dimOrder);
-
-    auto output = shuffleDims(input, sizes, dstStrides, srcStrides);
-
-    // After shuffle: 3x2 matrix [[0,3], [1,4], [2,5]]
-    std::vector<int> expected = {0, 1, 2, 3, 4, 5};
-    EXPECT_EQ(output, expected);
-}
-
-TEST(PreSwizzleTest, ShuffleDims3D) {
-    // 2x2x2 cube: input(i,j,k) = 4k + 2j + i (col-major storage)
-    std::vector<int> input = {0, 1, 2, 3, 4, 5, 6, 7};
-    std::vector<size_t> sizes = {2, 2, 2};
-
-    auto srcStrides = computeStrides(sizes);
-    std::vector<size_t> dimOrder = {2, 1, 0};  // reverse dimensions
-    auto dstStrides = computeShuffledStrides(sizes, dimOrder);
-
-    auto output = shuffleDims(input, sizes, dstStrides, srcStrides);
-
-    // After shuffle: ouput(i,j,k) = input(k,j,i) = 4i + 2j + k
-    std::vector<int> expected = {0, 4, 2, 6, 1, 5, 3, 7};
-    EXPECT_EQ(output, expected);
-}
-
-TEST(PreSwizzleTest, ShuffleDimsSizeMismatch) {
-    std::vector<int> input = {0, 1, 2, 3};
-    std::vector<size_t> sizes = {2, 3};  // 6 elements expected
-    auto srcStrides = computeStrides(sizes);
-    auto dstStrides = computeStrides(sizes);
-
-    EXPECT_THROW(shuffleDims(input, sizes, dstStrides, srcStrides), std::runtime_error);
-}
-
-TEST(PreSwizzleTest, ShuffleDimsTooFewDimensions) {
-    std::vector<int> input = {0, 1};
-    std::vector<size_t> sizes = {2};
-    auto srcStrides = computeStrides(sizes);
-    auto dstStrides = computeStrides(sizes);
-
-    EXPECT_THROW(shuffleDims(input, sizes, dstStrides, srcStrides), std::runtime_error);
-}
-
-TEST(PreSwizzleTest, ShuffleDimsDimensionMismatch) {
-    std::vector<int> input = {0, 1, 2, 3};
-    std::vector<size_t> sizes = {2, 2};
-    std::vector<size_t> srcStrides = {1, 2};
-    std::vector<size_t> dstStrides = {1, 2, 4};  // wrong size
-
-    EXPECT_THROW(shuffleDims(input, sizes, dstStrides, srcStrides), std::runtime_error);
-}
-
-// ============================================================================
-// Tests for preSwizzle()
-// ============================================================================
-
-// Helper class: Multi-dimensional index iterator
 class MultiIndex {
    public:
-    // Iterator traits
-    using iterator_category = std::forward_iterator_tag;
-    using value_type = size_t;
-    using difference_type = std::ptrdiff_t;
-    using pointer = const size_t*;
-    using reference = size_t;
-
     std::vector<size_t> sizes;
     std::vector<size_t> indexes;
     std::vector<size_t> strides;
-    size_t totalElements;
 
-    MultiIndex(std::vector<size_t> const& sizes) : sizes(sizes), totalElements(product(sizes)) {
+    explicit MultiIndex(const std::vector<size_t>& sizes) : sizes(sizes) {
         indexes.resize(sizes.size(), 0);
-        strides = computeStrides(this->sizes);
+        strides = testStrides(this->sizes);
     }
 
-    MultiIndex(std::vector<size_t> const& sizes, std::vector<size_t> const& dimOrder)
-        : sizes(sizes), totalElements(product(sizes)) {
+    MultiIndex(const std::vector<size_t>& sizes, const std::vector<size_t>& dimensionOrder)
+        : sizes(sizes) {
         indexes.resize(sizes.size(), 0);
-        strides = computeShuffledStrides(sizes, dimOrder);
+        strides = testStrides(sizes, dimensionOrder);
     }
 
-    // Create end iterator
-    static MultiIndex end(std::vector<size_t> const& sizes) {
-        MultiIndex it(sizes);
-        if (!it.sizes.empty()) it.indexes.back() = it.sizes.back();  // Last dimension past the end
-        return it;
-    }
-
-    static MultiIndex end(std::vector<size_t> const& sizes, std::vector<size_t> const& dimOrder) {
-        MultiIndex it(sizes, dimOrder);
-        if (!it.sizes.empty()) it.indexes.back() = it.sizes.back();  // Last dimension past the end
-        return it;
-    }
-
-    // Get linear index from multi-dimensional coordinates
     size_t index() const {
-        size_t rv = 0;
-        for (size_t i = 0; i < indexes.size(); ++i) rv += indexes[i] * strides[i];
-        return rv;
+        size_t result = 0;
+        for (size_t dimension = 0; dimension < indexes.size(); ++dimension)
+            result += indexes[dimension] * strides[dimension];
+        return result;
     }
 
-    // Dereference operator returns the linear index
     size_t operator*() const {
         return index();
     }
 
-    // Pre-increment
     MultiIndex& operator++() {
-        for (size_t i = 0; i < indexes.size(); ++i) {
-            indexes[i]++;
-            if (indexes[i] < sizes[i]) break;
-
-            // If this is the last dimension and we've overflowed,
-            // don't reset - leave it at sizes[i] to indicate end
-            if (i == indexes.size() - 1) break;
-
-            indexes[i] = 0;
+        for (size_t dimension = 0; dimension < indexes.size(); ++dimension) {
+            ++indexes[dimension];
+            if (indexes[dimension] < sizes[dimension]) break;
+            if (dimension == indexes.size() - 1) break;
+            indexes[dimension] = 0;
         }
         return *this;
     }
 
-    // Post-increment
-    MultiIndex operator++(int) {
-        MultiIndex tmp = *this;
-        ++(*this);
-        return tmp;
-    }
-
-    // Equality comparison
-    bool operator==(const MultiIndex& other) const {
-        return indexes == other.indexes && strides == other.strides;
-    }
-
-    // Inequality comparison
-    bool operator!=(const MultiIndex& other) const {
-        return !(*this == other);
-    }
-
-    // Check if we're at the end
     bool isEnd() const {
         return !indexes.empty() && indexes.back() >= sizes.back();
     }
 };
-
-TEST(PreSwizzleTest, MultiIndexIteratorInterface) {
-    std::vector<size_t> sizes = {2, 3, 4};
-    MultiIndex mi(sizes);
-    MultiIndex end = MultiIndex::end(sizes);
-
-    // Test dereference operator
-    EXPECT_EQ(*mi, 0);  // First element should have index 0
-
-    // Test pre-increment
-    ++mi;
-    EXPECT_EQ(*mi, 1);
-
-    // Test post-increment
-    MultiIndex mi2 = mi++;
-    EXPECT_EQ(*mi2, 1);  // Original value
-    EXPECT_EQ(*mi, 2);   // Incremented value
-
-    // Test inequality
-    EXPECT_NE(mi, end);
-
-    // Iterate through all elements
-    mi = MultiIndex(sizes);
-    std::vector<size_t> collectedIndices;
-
-    for (; mi != end; ++mi) {
-        collectedIndices.push_back(*mi);
-    }
-
-    // Should have iterated through all 2*3*4 = 24 elements
-    EXPECT_EQ(collectedIndices.size(), 24);
-    EXPECT_EQ(mi, end);
-
-    // Verify indices are sequential
-    std::vector<size_t> expected = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11,
-                                    12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
-    EXPECT_EQ(collectedIndices, expected);
-}
-
-TEST(PreSwizzleTest, MultiIndexWithDimOrder) {
-    std::vector<size_t> sizes = {2, 3};
-    std::vector<size_t> dimOrder = {1, 0};
-    MultiIndex mi(sizes, dimOrder);
-    MultiIndex end = MultiIndex::end(sizes, dimOrder);
-
-    std::vector<size_t> collectedIndices;
-    for (; mi != end; ++mi) {
-        collectedIndices.push_back(*mi);
-    }
-
-    EXPECT_EQ(collectedIndices.size(), 6);
-
-    std::vector<size_t> expected = {0, 3, 1, 4, 2, 5};
-    EXPECT_EQ(collectedIndices, expected);
-}
 
 void FillSwizzle(std::vector<float>& scales, size_t k, size_t mn,
                  std::vector<size_t> const& preSwizzleSize) {
@@ -789,63 +523,6 @@ TEST(PreSwizzleTest, PreSwizzleIntegerType) {
 }
 
 // ============================================================================
-// Tests for roundUp() helper
-// ============================================================================
-
-TEST(PreSwizzleTest, RoundUpAlreadyAligned) {
-    EXPECT_EQ(roundUp(32, 32), 32);
-    EXPECT_EQ(roundUp(64, 32), 64);
-    EXPECT_EQ(roundUp(8, 8), 8);
-    EXPECT_EQ(roundUp(16, 8), 16);
-}
-
-TEST(PreSwizzleTest, RoundUpNotAligned) {
-    EXPECT_EQ(roundUp(1, 32), 32);
-    EXPECT_EQ(roundUp(31, 32), 32);
-    EXPECT_EQ(roundUp(33, 32), 64);
-    EXPECT_EQ(roundUp(50, 32), 64);
-    EXPECT_EQ(roundUp(1, 8), 8);
-    EXPECT_EQ(roundUp(7, 8), 8);
-    EXPECT_EQ(roundUp(9, 8), 16);
-    EXPECT_EQ(roundUp(13, 8), 16);
-}
-
-TEST(PreSwizzleTest, RoundUpRejectsZeroAndOverflow) {
-    EXPECT_THROW(roundUp(1, 0), std::runtime_error);
-    EXPECT_THROW(roundUp(std::numeric_limits<size_t>::max(), 2), std::overflow_error);
-}
-
-// ============================================================================
-// Tests for preSwizzleScalesGFX950PaddedSize()
-// ============================================================================
-
-TEST(PreSwizzleTest, PaddedSizeAligned) {
-    // Already aligned: 64 rows (mult of 32), 16 cols (mult of 8)
-    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(64, 16), 64 * 16);
-    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(32, 8), 32 * 8);
-}
-
-TEST(PreSwizzleTest, PaddedSizeUnalignedRows) {
-    // 50 rows -> padded to 64, 16 cols stays
-    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(50, 16), 64 * 16);
-}
-
-TEST(PreSwizzleTest, PaddedSizeUnalignedCols) {
-    // 64 rows stays, 13 cols -> padded to 16
-    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(64, 13), 64 * 16);
-}
-
-TEST(PreSwizzleTest, PaddedSizeBothUnaligned) {
-    // 50 rows -> 64, 13 cols -> 16
-    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(50, 13), 64 * 16);
-}
-
-TEST(PreSwizzleTest, PaddedSizeRejectsOverflow) {
-    EXPECT_THROW(preSwizzleScalesGFX950PaddedSize(std::numeric_limits<size_t>::max(), 1),
-                 std::overflow_error);
-}
-
-// ============================================================================
 // Tests for preSwizzleScalesGFX950()
 // ============================================================================
 
@@ -878,10 +555,7 @@ TEST(PreSwizzleScalesGFX950Test, UnalignedRows) {
 
     auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
 
-    // Output should be padded: 64 * 16
-    size_t expectedSize = preSwizzleScalesGFX950PaddedSize(numRows, numCols);
-    ASSERT_EQ(expectedSize, 64 * 16);
-    ASSERT_EQ(output.size(), expectedSize);
+    ASSERT_EQ(output.size(), 64 * 16);
 }
 
 TEST(PreSwizzleScalesGFX950Test, UnalignedCols) {
@@ -893,10 +567,7 @@ TEST(PreSwizzleScalesGFX950Test, UnalignedCols) {
 
     auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
 
-    // Output should be padded: 64 * 16
-    size_t expectedSize = preSwizzleScalesGFX950PaddedSize(numRows, numCols);
-    ASSERT_EQ(expectedSize, 64 * 16);
-    ASSERT_EQ(output.size(), expectedSize);
+    ASSERT_EQ(output.size(), 64 * 16);
 }
 
 TEST(PreSwizzleScalesGFX950Test, BothUnaligned) {
@@ -908,10 +579,7 @@ TEST(PreSwizzleScalesGFX950Test, BothUnaligned) {
 
     auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
 
-    // Output should be padded: 64 * 16
-    size_t expectedSize = preSwizzleScalesGFX950PaddedSize(numRows, numCols);
-    ASSERT_EQ(expectedSize, 64 * 16);
-    ASSERT_EQ(output.size(), expectedSize);
+    ASSERT_EQ(output.size(), 64 * 16);
 }
 
 TEST(PreSwizzleScalesGFX950Test, PaddedMatchesManualPad) {
@@ -919,8 +587,8 @@ TEST(PreSwizzleScalesGFX950Test, PaddedMatchesManualPad) {
     // the same result as manually padding the data and then calling with aligned sizes
     size_t numRows = 50;
     size_t numCols = 13;
-    size_t paddedRows = roundUp(numRows, 32);  // 64
-    size_t paddedCols = roundUp(numCols, 8);   // 16
+    constexpr size_t paddedRows = 64;
+    constexpr size_t paddedCols = 16;
 
     std::vector<float> input(numRows * numCols);
     for (size_t i = 0; i < input.size(); ++i) input[i] = static_cast<float>(i) * 0.5f;
@@ -969,43 +637,15 @@ TEST(PreSwizzleScalesGFX950Test, InputSizeMismatch) {
     EXPECT_THROW(preSwizzleScalesGFX950(input, {64, 16}), std::runtime_error);
 }
 
-// ============================================================================
-// Tests for preSwizzleScalesGFX1250() (dimk-based swizzle for gfx1250-class
-// WMMA layouts).
-//
-// The swizzle is "pad fast dim to multiple of dimk = 128 / mxBlock; view as
-// {slow, fast/dimk, dimk}; permute (1,0,2)". This block tests:
-//   * the natural-layout to swizzled-layout index mapping
-//   * round-trip preservation of the original payload (after stripping the
-//     padded zero scales)
-//   * padding behaviour when fastDim % dimk != 0
-//   * padded-size helper
-//   * input validation
-// ============================================================================
-
-TEST(PreSwizzleScalesGFX1250Test, PaddedSizeNoPad) {
-    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(/*slowDim=*/8, /*fastDim=*/4, /*mxBlock=*/32), 32);
-    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(/*slowDim=*/16, /*fastDim=*/8, /*mxBlock=*/16),
-              128);
-}
-
-TEST(PreSwizzleScalesGFX1250Test, PaddedSizeWithPad) {
-    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(8, 5, 32), 8 * 8);
-    EXPECT_EQ(preSwizzleScalesGFX1250PaddedSize(8, 7, 16), 8 * 8);
-}
-
 TEST(PreSwizzleScalesGFX1250Test, ThrowsOnZeroBlock) {
     std::vector<uint8_t> in(4);
     EXPECT_THROW(preSwizzleScalesGFX1250(in, 1, 4, 0), std::runtime_error);
-    EXPECT_THROW(preSwizzleScalesGFX1250PaddedSize(1, 4, 0), std::runtime_error);
 }
 
 TEST(PreSwizzleScalesGFX1250Test, RejectsUnsupportedBlockAndOverflow) {
     std::vector<uint8_t> input;
     EXPECT_THROW(preSwizzleScalesGFX1250(input, 0, 0, 64), std::runtime_error);
-    EXPECT_THROW(preSwizzleScalesGFX1250PaddedSize(1, 1, 64), std::runtime_error);
     const size_t maximumSize = runtimeSize(std::numeric_limits<size_t>::max());
-    EXPECT_THROW(preSwizzleScalesGFX1250PaddedSize(maximumSize, 8, 16), std::overflow_error);
     EXPECT_THROW(preSwizzleScalesGFX1250(input, maximumSize, 2, 16), std::overflow_error);
 }
 

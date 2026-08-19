@@ -90,7 +90,7 @@ def modular_values(rows, columns, row_factor, column_factor, modulus, center, di
     ).astype(np.float32) / np.float32(divisor)
 
 
-class CanonicalPointwiseOracleTests(unittest.TestCase):
+class PointwiseOracleTests(unittest.TestCase):
     def test_selected_int32_outputs_wrap_in_affine_storage(self):
         left = np.asarray(
             [
@@ -124,7 +124,7 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
         request.output_selection = hv.OutputSelection.explicit_indices(selected)
 
         result = hv.reference_gemm_result(
-            request, hv.GemmExecution(hv.GemmBackend.Canonical, True)
+            request, hv.GemmExecution(hv.GemmBackend.Pointwise, True)
         )
 
         complete_expected = exact_int32_gemm(
@@ -139,8 +139,9 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
         np.testing.assert_array_equal(
             np.frombuffer(result.output.storage, dtype=np.int32), expected_storage
         )
-        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Canonical)
-        self.assertEqual(result.run_info.output_elements_computed, len(selected))
+        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Pointwise)
+        self.assertEqual(result.run_info.output_elements_written, len(selected))
+        self.assertEqual(result.run_info.output_elements_covered, len(selected))
 
     def test_unequal_mx_blocks_and_k_tail_use_per_k_scale_oracle(self):
         left = np.asarray(
@@ -201,7 +202,7 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
         request.output_selection = hv.OutputSelection.explicit_indices(selected)
 
         result = hv.reference_gemm_result(
-            request, hv.GemmExecution(hv.GemmBackend.Canonical, True)
+            request, hv.GemmExecution(hv.GemmBackend.Pointwise, True)
         )
 
         expected_complete = per_k_block_scaled_gemm(
@@ -210,8 +211,9 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
         expected = np.zeros_like(expected_complete)
         expected.reshape(-1)[selected] = expected_complete.reshape(-1)[selected]
         np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
-        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Canonical)
-        self.assertEqual(result.run_info.output_elements_computed, len(selected))
+        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Pointwise)
+        self.assertEqual(result.run_info.output_elements_written, len(selected))
+        self.assertEqual(result.run_info.output_elements_covered, len(selected))
 
     def test_complex_affine_inputs_and_output_respect_explicit_selection(self):
         left = np.asarray(
@@ -267,7 +269,7 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
         request.output_selection = hv.OutputSelection.explicit_indices(selected)
 
         result = hv.reference_gemm_result(
-            request, hv.GemmExecution(hv.GemmBackend.Canonical, True)
+            request, hv.GemmExecution(hv.GemmBackend.Pointwise, True)
         )
 
         expected_complete = np.complex64(alpha) * (np.conjugate(left) @ right)
@@ -284,8 +286,9 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
             np.frombuffer(result.output.storage, dtype=np.complex64),
             expected_storage,
         )
-        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Canonical)
-        self.assertEqual(result.run_info.output_elements_computed, len(selected))
+        self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Pointwise)
+        self.assertEqual(result.run_info.output_elements_written, len(selected))
+        self.assertEqual(result.run_info.output_elements_covered, len(selected))
 
 
 class GemmFinalizationOracleTests(unittest.TestCase):
@@ -399,7 +402,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
         relative_tolerance = 1.0e-4
         absolute_tolerance = 1.0e-5
         full_outputs = []
-        for backend in (hv.GemmBackend.Canonical, hv.GemmBackend.Tiled):
+        for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
             with self.subTest(backend=backend):
                 full = hv.to_numpy(
                     hv.reference_gemm(

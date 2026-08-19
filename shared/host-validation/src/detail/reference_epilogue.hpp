@@ -196,7 +196,12 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
         problem.amax->storeFrom(std::span<const size_t>(indices), maximum);
     }
 
-    return {.outputElementsComputed = computedElements};
+    return {
+        .outputElementsWritten = computedElements,
+        .rawOutputElementsWritten = problem.rawOutput ? computedElements : 0,
+        .auxiliaryOutputElementsWritten = problem.auxiliaryOutput ? computedElements : 0,
+        .amaxElementsWritten = problem.amax ? size_t{1} : size_t{0},
+    };
 }
 }  // namespace detail
 }  // namespace roc::host_validation

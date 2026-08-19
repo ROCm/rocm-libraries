@@ -44,7 +44,7 @@ namespace TensileLite
                       size_t                    elementsToValidate);
 
         // Specialized solver for ungrouped GEMM problems. Requests prefer the
-        // tiled backend and fall back to the canonical implementation when
+        // blocked backend and fall back to the pointwise implementation when
         // required numerical semantics are not yet supported.
         roc::host_validation::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
                                                        ContractionInputs const&      inputs,
@@ -53,12 +53,12 @@ namespace TensileLite
         // Compatibility wrappers around the structured product-private
         // GemmProblemAdapter. Returns false without modifying outputs when
         // descriptor translation or the requested backend is unsupported.
-        bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
+        bool tryRuntimePointwiseGemm(ContractionProblemGemm const& problem,
                                      ContractionInputs const&      inputs,
                                      size_t                        elementsToValidate);
-        bool tryRuntimeTiledGemm(ContractionProblemGemm const& problem,
-                                 ContractionInputs const&      inputs,
-                                 size_t                        elementsToValidate);
+        bool tryRuntimeBlockedGemm(ContractionProblemGemm const& problem,
+                                   ContractionInputs const&      inputs,
+                                   size_t                        elementsToValidate);
 
     } // namespace Client
 } // namespace TensileLite
