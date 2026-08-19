@@ -265,6 +265,9 @@ class TensorDataMoverLoad(TensorDataMover):
             return 0
         if numBytes <= 8:
             return int(log2(numBytes))
+        # f64-complex is 16B: moved as two 8B data_size elements along the contiguous run.
+        if dtype.isDoubleComplex():
+            return 3
         raise AssertionError(f"unsupported dtype for TDM data_size: {dtype}")
 
     def setDataType(self, dtype: DataType, group1: str | int, isMetadata: bool = False) -> Module:

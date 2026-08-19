@@ -5958,6 +5958,7 @@ class KernelWriterAssembly(KernelWriter):
       # final offset
       finalVgpr = vgpr("LocalReadAddr%s"%tc)
 
+      umldsVALU = kernel["UnrollMajorLDS%s" % tc]
       with self.allocTmpSgpr(1, tag="lraFinalOffset_tmpSgprInfo3") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
         if kernel["UseDotInstruction"]:
@@ -5969,6 +5970,11 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VAddLShiftLeftU32(dst=finalVgpr, shiftHex=hex(log2(tP["bpe"])), src0=vgpr(kidx), src1=vgpr(tP["gpr"]["lro"]), \
             comment="Final Offset: add padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
           self.vgprPool.checkIn(kidx)
+        elif umldsVALU:
+          # f64c+TDM: K-major LDS. lro already carries the K-major tile stride from
+          # LraTileAssignmentVALU; just scale to bytes (no extra M-tile LSU stride).
+          module.add(VLShiftLeftB32(dst=finalVgpr, shiftHex=hex(log2(tP["bpe"])), src=vgpr(tP["gpr"]["lro"]), \
+            comment="Final Offset: lro (K-major) * bpe"))
         else:
           sgid = self.vgprPool.checkOut(1, tag="lraFinalOffset_sgid") # quotient
           vtmp = self.vgprPool.checkOut(1, tag="lraFinalOffset_vtmp") # tmp
@@ -13173,6 +13179,10 @@ class KernelWriterAssembly(KernelWriter):
         # dot2
         inc = int(self.states.lrvwUnrollA * kernel["NumWaveSplitK"] * tP["bpeDS"])
         comment = "(LocalReadVectorWidth*NumWaveSplitK*bpeDS)"
+      elif kernel["UnrollMajorLDS%s" % tc]:
+        # f64c+TDM: K-major LDS -> next unroll (K) element is contiguous.
+        inc = int(tP["bpeDS"])
+        comment = " (bpeDS, K-major)"
       else:
         inc = int((kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad) * tP["bpeDS"])
         comment = " ((MT+PAD)*bpeDS)"
@@ -13318,6 +13328,9 @@ class KernelWriterAssembly(KernelWriter):
                   offsetInc //= 2
             else:
               raise Exception(f"unsupport tc %s{tc}")
+        elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+          # f64c+TDM: K-major LDS -> next unroll (K) element is contiguous.
+          offsetInc = 1
         else:
           # dot2
           offsetInc = self.states.lrvwUnrollA * kernel["NumWaveSplitK"] if kernel["UseDotInstruction"] else (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad)
@@ -19305,6 +19318,9 @@ class KernelWriterAssembly(KernelWriter):
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter: int = 1 if dtype.isFloat4() else 0
     is6bit: bool = dtype.is6bitFloat()
+    # f64-complex (16B) moves as two 8B data_size elements, so every dim0/tile0/stride
+    # count expressed in data_size units doubles (see the *2 shifts below).
+    isF64C: bool = dtype.isDoubleComplex()
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
     if isTdmIter:
       # Iterate-mode supplies the pad via the LDS write stride; disable pad_interval.
@@ -19330,6 +19346,10 @@ class KernelWriterAssembly(KernelWriter):
           mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(sizeRefName(dim0Idx)), "F6: elements / 4"))
           mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
           mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
+      elif isF64C:
+        with self.allocTmpSgpr(1, tag="initTDMDescriptor_tmpZ0") as tmpZ:
+          mod.add(SLShiftLeftB32(sgpr(tmpZ.idx), hex(1), sgpr(sizeRefName(dim0Idx)), "f64c: dim0 (K) elements * 2"))
+          mod.add(comp.setTensorDim0(descSgprName(1), tmpZ.idx, self, 0))
       else:
         mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(dim0Idx), self, sizeShifter, False,
                                     isSparseTrack=isSparseTrack if dim0IsK else False,
@@ -19339,6 +19359,8 @@ class KernelWriterAssembly(KernelWriter):
                                   isMetadata=isMetadata if not dim0IsK else False))
       if is6bit:
         mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 3 // 4, self, 0))
+      elif isF64C:
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 2, self, 0))
       else:
         mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
       if isTdmIter:
@@ -19362,6 +19384,12 @@ class KernelWriterAssembly(KernelWriter):
           mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(strRef), "F6: stride / 4"))
         mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
         mod.add(comp.setTensorStride0(descSgprName(1), tmpF6.idx, 0))
+    elif isF64C:
+      with self.allocTmpSgpr(1, tag="initTDMDescriptor_tmpZS") as tmpZS:
+        strRef = strideRefName()
+        src = strRef if isinstance(strRef, RegisterContainer) else sgpr(strRef)
+        mod.add(SLShiftLeftB32(sgpr(tmpZS.idx), hex(1), src, "f64c: stride * 2 (data_size units)"))
+        mod.add(comp.setTensorStride0(descSgprName(1), tmpZS.idx, 0))
     else:
       mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
@@ -19519,6 +19547,10 @@ class KernelWriterAssembly(KernelWriter):
             mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(dim0), "F6: elements / 4"))
             mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
             mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
+        elif dtype.isDoubleComplex():
+          with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_tmpZ0") as tmpZ:
+            mod.add(SLShiftLeftB32(sgpr(tmpZ.idx), hex(1), sgpr(dim0), "f64c: dim0 elements * 2"))
+            mod.add(comp.setTensorDim0(descSgprName(1), tmpZ.idx, self, 0))
         else:
           mod.add(comp.setTensorDim0(descSgprName(1), dim0, self, sizeShifter, False,
                                       isSparseTrack if unrolledMajor else False,
@@ -19552,6 +19584,8 @@ class KernelWriterAssembly(KernelWriter):
       is6bit = dtype.is6bitFloat()
       if is6bit:
         mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 3 // 4, self, 0))
+      elif dtype.isDoubleComplex():
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 2, self, 0))
       else:
         mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
       if isTdmIter:
@@ -19568,6 +19602,12 @@ class KernelWriterAssembly(KernelWriter):
             mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(strRef), "F6: stride / 4"))
           mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
           mod.add(comp.setTensorStride0(descSgprName(1), tmpF6.idx, 0))
+      elif dtype.isDoubleComplex():
+        with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_tmpZS") as tmpZS:
+          strRef = strideRefName()
+          src = strRef if isinstance(strRef, RegisterContainer) else sgpr(strRef)
+          mod.add(SLShiftLeftB32(sgpr(tmpZS.idx), hex(1), src, "f64c: stride * 2 (data_size units)"))
+          mod.add(comp.setTensorStride0(descSgprName(1), tmpZS.idx, 0))
       else:
         mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
@@ -20194,6 +20234,9 @@ class KernelWriterAssembly(KernelWriter):
         # F6 currently dense-only; isSparseTrack is False here, so omitted.
         mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(2), sgpr(tmpSgpr.idx), "F6 tail: / 4"))
         mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), 3, "F6 tail: * 3 = bytes"))
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, 0, isMXS))
+      elif dtype.isDoubleComplex() and tdmDescIdx == 1 and not isMXS:
+        mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(1), sgpr(tmpSgpr.idx), "f64c tail: K elements * 2"))
         mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, 0, isMXS))
       else:
         mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack))

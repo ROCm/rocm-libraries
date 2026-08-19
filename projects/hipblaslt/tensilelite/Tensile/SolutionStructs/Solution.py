@@ -2421,6 +2421,13 @@ class Solution(collections.abc.Mapping):
         state["TransposeLDS"] =  2
         state["UnrollMajorLDSA"] = True
         state["UnrollMajorLDSB"] = True
+      elif state["ProblemType"]["DataType"].isDoubleComplex() and state["TDMInst"]:
+        # f64c+TDM: each operand's LDS follows UnrollMajorLDS = not TLU (K-major for the
+        # K-contiguous operand, free-major for the free-contiguous one). TransposeLDS=1
+        # only when at least one operand is K-major; NT (both free-major) uses TLDS=0.
+        state["UnrollMajorLDSA"] = not state["ProblemType"]["TLUA"]
+        state["UnrollMajorLDSB"] = not state["ProblemType"]["TLUB"]
+        state["TransposeLDS"] = 1 if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) else 0
       else:
         state["TransposeLDS"] =  0
         state["UnrollMajorLDSA"] = False
@@ -2730,10 +2737,13 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasTDM"]:
         reject(state, printRejectionReason, "This arch does not support TDM")
         return
-      # TDM data_size is a 2-bit field (max element 8B); f64-complex is 16B.
+      # f64-complex (16B) moves as 2x8B; each operand's LDS follows UnrollMajorLDS=not TLU
+      # (all transposes TN/NN/TT/NT supported). Requires multi-wave: the async TDM DMA is
+      # drained by the cross-wave barrier that single-wave (NumThreads<=WavefrontSize) skips.
       if state["ProblemType"]["DataType"].isDoubleComplex():
-        reject(state, printRejectionReason, "TDM does not support f64-complex (16B exceeds data_size field)")
-        return
+        if state["NumThreads"] <= state["WavefrontSize"]:
+          reject(state, printRejectionReason, "TDM f64-complex requires multi-wave (NumThreads > WavefrontSize)")
+          return
 
     if state["CompactLoopStore"]:
       if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
@@ -4831,7 +4841,9 @@ class Solution(collections.abc.Mapping):
               state["LSPB"] % (state["LdsBlockSizePerPadB"] // (state["_DepthUB"] * state["ProblemType"]["MacDataTypeB"].numBytes())) != 0:
             reject(state, printRejectionReason, "can't pad by addrVgpr or instOffset")
     else:
-      if not state["UseDotInstruction"] and (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]):
+      if not state["UseDotInstruction"] \
+         and not (state["ProblemType"]["DataType"].isDoubleComplex() and state["TDMInst"]) \
+         and (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]):
         reject(state, printRejectionReason, "didn't support UnrollMajorLDS in VALU mode yet (except for dot2 kernel)")
       if state["LdsBlockSizePerPadA"] != 0 or state["LdsBlockSizePerPadB"] != 0:
         reject(state, printRejectionReason, "didn't support LdsBlockSizePerPad in VALU mode yet")
@@ -5102,7 +5114,8 @@ class Solution(collections.abc.Mapping):
     state["LdsBlockSizePerPadB"] = int(state["LdsBlockSizePerPadB"])
     state["LdsBlockSizePerPadMetadata"] = int(state["LdsBlockSizePerPadMetadata"])
 
-    if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
+    if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]) \
+       and not (state["ProblemType"]["DataType"].isDoubleComplex() and state["TDMInst"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
 
     (ldsNumBytesA, ldsNumBytesAlignedA) = calcLdsNumBytesAB("A", state["LdsPadA"], state["LdsBlockSizePerPadA"])
@@ -5799,7 +5812,8 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["Sparse"]:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 + Sparse is not supported yet")
     if state["TransposeLDS"] == 1:
-      if not state["EnableMatrixInstruction"]:
+      if not state["EnableMatrixInstruction"] \
+         and not (state["ProblemType"]["DataType"].isDoubleComplex() and state["TDMInst"]):
         reject(state, printRejectionReason, "TransposeLds Supports only in MatrixInstruction=1")
       if state["ProblemType"]["TLUA"] and state["ProblemType"]["TLUB"]:
           # TODO: Now in rocBLAS, lot of logic yamls are Type=NT and TLDS=1? Why aren't they rejected and how to get rid of them?
