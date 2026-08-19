@@ -224,10 +224,20 @@ _COHORTS = [
             ),
         ],
         reference=_reference_gfx942_fp16_flash,
-        # bf16 disqualifies the fp16-flash gate -> different branch.
-        foreign=lambda: _problem(dtype="bf16"),
-        foreign_field="dtype",
-        foreign_value="bf16",
+        # A narrow bf16 problem fails the fp16-flash gate and falls through to
+        # the generic cascade, which -- unlike either flash builder -- leaves the
+        # 32x32 MFMA flag OFF. dtype is a useless discriminator (every branch
+        # copies problem.dtype); use_mfma_32x32x8 actually differs, so a
+        # mis-route back into this cohort would flip it True and fail the assert.
+        foreign=lambda: _problem(
+            dtype="bf16",
+            num_query_heads=4,
+            num_kv_heads=4,
+            max_seqlen_q=16,
+            total_q=16,
+        ),
+        foreign_field="use_mfma_32x32x8",
+        foreign_value=False,
     ),
     _Cohort(
         name="gfx942_bf16_flash",
@@ -240,10 +250,19 @@ _COHORTS = [
             lambda: _problem(dtype="bf16", head_size=64),
         ],
         reference=_reference_gfx942_bf16_flash,
-        # fp16 disqualifies the bf16-flash gate -> different branch.
-        foreign=lambda: _problem(dtype="fp16"),
-        foreign_field="dtype",
-        foreign_value="fp16",
+        # A narrow bf16 problem (the small_q_narrow exclusion) fails the
+        # bf16-flash gate and falls through to the generic cascade, which leaves
+        # the 32x32 MFMA flag OFF. Both flash builders hardcode it True, so this
+        # field -- unlike dtype -- catches a mis-route back into the cohort.
+        foreign=lambda: _problem(
+            dtype="bf16",
+            num_query_heads=4,
+            num_kv_heads=4,
+            max_seqlen_q=16,
+            total_q=16,
+        ),
+        foreign_field="use_mfma_32x32x8",
+        foreign_value=False,
     ),
 ]
 

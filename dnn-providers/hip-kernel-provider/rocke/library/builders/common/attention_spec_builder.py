@@ -89,7 +89,7 @@ def _spec_gfx942_fp16_flash(problem: UnifiedAttentionProblem):
     itself still only decides ``(path, head_size, block_size)`` (see
     ``dispatch/AGENTS.md``).
     """
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
     num_warps = _select_gfx942_flash_num_warps(problem)
     use_cfvst = _gfx942_flash_use_cfvst(problem)
@@ -150,7 +150,7 @@ def _spec_gfx942_bf16_flash(problem: UnifiedAttentionProblem):
     legacy bf16-wide geometry: D64 -> nw=4, double-buffered K; D128 -> nw=2
     (BLOCK_M=64=T) + K single-buffer (LDS=48 KB).
     """
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
     use_ring = _enable_gfx942_flash_k_sliced_ring(problem)
     if use_ring:
