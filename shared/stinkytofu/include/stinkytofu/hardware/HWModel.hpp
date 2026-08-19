@@ -70,18 +70,19 @@ struct HWModel {
         int numRules;
     };
 
+    /// s_delay_alu SW scoreboard depths plus 1
+    struct DelayAlu {
+        unsigned valuDepth;
+        unsigned transDepth;
+        unsigned saluCycleMax;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
+    DelayAlu delayAlu;
 };
-
-// Deliberately NOT here: InsertDelayAluPass's s_delay_alu scoreboard depths
-// (VALU_MAX / TRANS_MAX / SALU_CYCLES_MAX). They describe the instruction's
-// encoding - how many DEP_1..4 and SALU_CYCLE_1..3 fields it has - rather than a
-// timing the scheduler can be retuned against, and they are compile-time constants
-// in that pass (default member initializers of a map value type). See the note in
-// InsertDelayAluPass.cpp.
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.
 ///

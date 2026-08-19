@@ -514,6 +514,49 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(projects, [])
 
     @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_skips_ci_for_draft_pr(self, mock_get_modified):
+        # A draft PR must skip CI even though it touched a real source file,
+        # and must do so WITHOUT diffing modified paths at all (the draft
+        # check short-circuits before get_modified_paths is ever called).
+        mock_get_modified.return_value = ["projects/rocprim/src/main.cpp"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "is_draft": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertEqual(projects, [])
+        self.assertEqual(test_type, "standard")
+        mock_get_modified.assert_not_called()
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_runs_ci_once_marked_ready(self, mock_get_modified):
+        # Once a PR leaves draft state (is_draft=False), the same changed
+        # file must produce the normal, non-empty project list.
+        mock_get_modified.return_value = ["projects/rocprim/src/main.cpp"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "is_draft": False, "base_ref": "HEAD^"}
+        )
+
+        self.assertIn("rocprim", str(projects))
+        self.assertEqual(test_type, "standard")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_draft_flag_ignored_outside_pull_request(
+        self, mock_get_modified
+    ):
+        # is_draft only makes sense for pull_request events; a push (e.g. to
+        # develop) must never be affected even if is_draft were somehow set.
+        mock_get_modified.return_value = ["projects/rocprim/src/main.cpp"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_push": True, "is_draft": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertIn("rocprim", str(projects))
+        self.assertEqual(test_type, "standard")
+
+    @patch("therock_configure_ci.get_modified_paths")
     def test_retrieve_projects_nightly_ignores_labels(self, mock_get_modified):
         # Test labels only apply to pull requests, not nightly runs
         mock_get_modified.return_value = []
