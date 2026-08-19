@@ -31,6 +31,7 @@
 #include <variant>
 #include <vector>
 
+#include "../../include/load_store_ops.h"
 #include "../kernels/callback.h"
 
 //
@@ -2115,11 +2116,14 @@ struct MakeCallbackRealComplexVisitor : public BaseVisitor
     const char* store_cb_jit_symbol = nullptr;
 };
 
-static Function make_callback_realcomplex(const Function& f,
-                                          CallbackType    cbtype,
-                                          const char*     load_cb_jit_symbol,
-                                          const char*     store_cb_jit_symbol)
+static Function make_callback_realcomplex(const Function&                f,
+                                          CallbackType                   cbtype,
+                                          const std::optional<LoadOps>&  loadOps,
+                                          const std::optional<StoreOps>& storeOps)
 {
-    auto visitor = MakeCallbackRealComplexVisitor(cbtype, load_cb_jit_symbol, store_cb_jit_symbol);
+    auto visitor = MakeCallbackRealComplexVisitor(
+        cbtype,
+        (loadOps && loadOps->has_spirv()) ? loadOps->spirv_cb.symbol_name : nullptr,
+        (storeOps && storeOps->has_spirv()) ? storeOps->spirv_cb.symbol_name : nullptr);
     return visitor(f);
 }

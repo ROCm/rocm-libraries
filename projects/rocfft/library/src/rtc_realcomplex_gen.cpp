@@ -304,13 +304,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     if(array_type_is_planar(specs.outArrayType))
         func = make_planar(func, "output");
 
-    func = make_callback_realcomplex(
-        func,
-        specs.cbtype,
-        (specs.loadOps && specs.loadOps->has_spirv()) ? specs.loadOps->spirv_cb.symbol_name
-                                                      : nullptr,
-        (specs.storeOps && specs.storeOps->has_spirv()) ? specs.storeOps->spirv_cb.symbol_name
-                                                        : nullptr);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     src += func.render();
     write_standalone_test_harness(func, src);
@@ -596,13 +590,7 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     if(array_type_is_planar(specs.outArrayType))
         func = make_planar(func, "output");
 
-    func = make_callback_realcomplex(
-        func,
-        specs.cbtype,
-        (specs.loadOps && specs.loadOps->has_spirv()) ? specs.loadOps->spirv_cb.symbol_name
-                                                      : nullptr,
-        (specs.storeOps && specs.storeOps->has_spirv()) ? specs.storeOps->spirv_cb.symbol_name
-                                                        : nullptr);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     src += func.render();
     write_standalone_test_harness(func, src);
@@ -1139,13 +1127,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         func.body += butterfly;
     }
 
-    func = make_callback_realcomplex(
-        func,
-        specs.cbtype,
-        (specs.loadOps && specs.loadOps->has_spirv()) ? specs.loadOps->spirv_cb.symbol_name
-                                                      : nullptr,
-        (specs.storeOps && specs.storeOps->has_spirv()) ? specs.storeOps->spirv_cb.symbol_name
-                                                        : nullptr);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     if(array_type_is_planar(specs.inArrayType))
         func = make_planar(func, "input");

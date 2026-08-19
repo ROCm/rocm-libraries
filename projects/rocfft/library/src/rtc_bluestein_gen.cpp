@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -129,13 +129,7 @@ std::string bluestein_single_rtc(const std::string& kernel_name, const Bluestein
             func = make_planar(func, "X");
     }
 
-    func = make_callback_realcomplex(
-        func,
-        specs.cbtype,
-        (specs.loadOps && specs.loadOps->has_spirv()) ? specs.loadOps->spirv_cb.symbol_name
-                                                      : nullptr,
-        (specs.storeOps && specs.storeOps->has_spirv()) ? specs.storeOps->spirv_cb.symbol_name
-                                                        : nullptr);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     src += func.render();
 
@@ -227,13 +221,7 @@ static std::string bluestein_multi_chirp_rtc(const std::string&         kernel_n
         {Assign{output[tx], CallExpr{"scalar_type", {Literal{"0.0"}, Literal{"0.0"}}}},
          Assign{output[tx + M], CallExpr{"scalar_type", {Literal{"0.0"}, Literal{"0.0"}}}}}};
 
-    func = make_callback_realcomplex(
-        func,
-        specs.cbtype,
-        (specs.loadOps && specs.loadOps->has_spirv()) ? specs.loadOps->spirv_cb.symbol_name
-                                                      : nullptr,
-        (specs.storeOps && specs.storeOps->has_spirv()) ? specs.storeOps->spirv_cb.symbol_name
-                                                        : nullptr);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     auto src = func.render();
     write_standalone_test_harness(func, src);
@@ -403,13 +391,7 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     if(array_type_is_planar(specs.outArrayType))
         func = make_planar(func, "output");
 
-    func = make_callback_realcomplex(
-        func,
-        specs.cbtype,
-        (specs.loadOps && specs.loadOps->has_spirv()) ? specs.loadOps->spirv_cb.symbol_name
-                                                      : nullptr,
-        (specs.storeOps && specs.storeOps->has_spirv()) ? specs.storeOps->spirv_cb.symbol_name
-                                                        : nullptr);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     src += func.render();
     write_standalone_test_harness(func, src);

@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -491,22 +491,14 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         src += device1->render();
     if(bluestein_load)
     {
-        *bluestein_load = make_callback_realcomplex(
-            *bluestein_load,
-            cbtype,
-            (loadOps && loadOps->has_spirv()) ? loadOps->spirv_cb.symbol_name : nullptr,
-            (storeOps && storeOps->has_spirv()) ? storeOps->spirv_cb.symbol_name : nullptr);
+        *bluestein_load = make_callback_realcomplex(*bluestein_load, cbtype, loadOps, storeOps);
         src += bluestein_load->render();
     }
     if(bluestein_intrinsic_load)
         src += bluestein_intrinsic_load->render();
     if(bluestein_store)
     {
-        *bluestein_store = make_callback_realcomplex(
-            *bluestein_store,
-            cbtype,
-            (loadOps && loadOps->has_spirv()) ? loadOps->spirv_cb.symbol_name : nullptr,
-            (storeOps && storeOps->has_spirv()) ? storeOps->spirv_cb.symbol_name : nullptr);
+        *bluestein_store = make_callback_realcomplex(*bluestein_store, cbtype, loadOps, storeOps);
         src += bluestein_store->render();
     }
     if(bluestein_intrinsic_store)
@@ -596,11 +588,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += "static const size_t large_twiddle_base = " + std::to_string(largeTwdBase) + ";\n";
     src += "static const size_t large_twiddle_steps = " + std::to_string(largeTwdSteps) + ";\n";
 
-    *global = make_callback_realcomplex(
-        *global,
-        cbtype,
-        (loadOps && loadOps->has_spirv()) ? loadOps->spirv_cb.symbol_name : nullptr,
-        (storeOps && storeOps->has_spirv()) ? storeOps->spirv_cb.symbol_name : nullptr);
+    *global = make_callback_realcomplex(*global, cbtype, loadOps, storeOps);
 
     *global = make_rtc(*global, kernel_name);
     src += global->render();
