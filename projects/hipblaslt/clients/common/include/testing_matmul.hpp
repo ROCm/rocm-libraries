@@ -4053,6 +4053,47 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
     }
+
+    auto readValidationSideOutputs = [&] {
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+        if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            return;
+
+        for(int gemmIdx = 0; gemmIdx < gemm_count; ++gemmIdx)
+        {
+            if(!arg.gradient && arg.use_e)
+            {
+                CHECK_HIP_ERROR(
+                    synchronize(hE[gemmIdx], dE[gemmIdx], 0, 0, 0, 0, 1, false, stream));
+            }
+            if(arg.amaxD)
+            {
+                CHECK_HIP_ERROR(
+                    synchronize(hAmaxD[gemmIdx], dAmaxD[gemmIdx], 0, 0, 0, 0, 1, false, stream));
+            }
+            if(arg.gradient && arg.bias_vector)
+            {
+                CHECK_HIP_ERROR(
+                    synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
+            }
+        }
+    };
+
+    const hipblaslt::host_validation::MatmulValidationOptions validationOptions{
+        .comparePointwise = bool(arg.unit_check),
+        .compareNorm = bool(arg.norm_check),
+        .searchAllClose = bool(arg.allclose_check),
+        .computeUlp = bool(arg.ulp_check),
+        .assertNorm = arg.norm_check_assert,
+        .gradient = arg.gradient,
+        .usesAuxiliary = arg.use_e,
+        .usesBias = arg.bias_vector,
+        .outputMaximum = arg.amaxD,
+        .computeType = arg.compute_type,
+        .inputTypeA = arg.a_type,
+        .inputTypeB = arg.b_type,
+    };
+
     if(!arg.timing)
     {
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
@@ -4223,9 +4264,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                 }
+                readValidationSideOutputs();
                 hipblaslt::host_validation::validateMatmulOutputs({
-                    .stream = stream,
-                    .arguments = arg,
+                    .options = validationOptions,
                     .gemmCount = gemm_count,
                     .rows = M,
                     .columns = N,
@@ -4239,13 +4280,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     .observedOutput = hD_1,
                     .expectedMaximum = hAmaxD_gold,
                     .observedMaximum = hAmaxD,
-                    .deviceMaximum = dAmaxD,
                     .expectedAuxiliary = hE_gold,
                     .observedAuxiliary = hE,
-                    .deviceAuxiliary = dE,
                     .expectedBias = hBias_gold,
                     .observedBias = hBias,
-                    .deviceBias = dBias,
                     .absoluteTolerances = tol,
                     .symmetricRelativeTolerances = symmetricRelativeTol,
                     .metrics
@@ -4860,9 +4898,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
                     }
                 }
+                readValidationSideOutputs();
                 hipblaslt::host_validation::validateMatmulOutputs({
-                    .stream = stream,
-                    .arguments = arg,
+                    .options = validationOptions,
                     .gemmCount = gemm_count,
                     .rows = M,
                     .columns = N,
@@ -4876,13 +4914,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     .observedOutput = hD_1,
                     .expectedMaximum = hAmaxD_gold,
                     .observedMaximum = hAmaxD,
-                    .deviceMaximum = dAmaxD,
                     .expectedAuxiliary = hE_gold,
                     .observedAuxiliary = hE,
-                    .deviceAuxiliary = dE,
                     .expectedBias = hBias_gold,
                     .observedBias = hBias,
-                    .deviceBias = dBias,
                     .absoluteTolerances = tol,
                     .symmetricRelativeTolerances = symmetricRelativeTol,
                     .metrics
