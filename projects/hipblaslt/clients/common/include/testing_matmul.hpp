@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include "TensorDataManipulation.hpp"
 #include "benchmark_timing.hpp"
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
@@ -48,6 +47,7 @@
 #include "utility.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <cstdlib>
 #include <functional>
 #include <hipblaslt/hipblaslt-ext-op.h>
@@ -60,6 +60,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <vector>
 
 extern "C" __global__ void flush_icache()
 {
@@ -192,42 +193,56 @@ void swizzle_tensor(T*               dst,
     if(ld < k)
         throw std::runtime_error("invalid value of ld in swizzle_tensor: ld must be >= k.");
 
-    using Tensor = Tensor::Manipulation::Tensor;
+    using roc::host_validation::Layout;
+    using roc::host_validation::ScalarType;
+    using roc::host_validation::Shape;
+    using roc::host_validation::Tensor;
+
     // currently, if A then it means MiM = 16, if B then it means MiN = 16
     size_t MiM_N = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(datatype, arg, MiK, MiKv, PackK);
     const size_t numElements = b * m_n * k;
-    auto         tmpTensor   = Tensor::create<T>({b, m_n, k});
+    const ScalarType tensorType = datatype == HIP_R_4F_E2M1
+                                      ? ScalarType::UInt8
+                                      : hipblaslt::host_validation::scalarType(datatype);
+    std::vector<T> compact(numElements);
 
     if(colMaj)
     {
-        auto orgTensor = Tensor::create<T>({b, k, m_n});
         for(size_t i = 0; i < b * k; i++)
         {
-            std::copy(src + (i * ld), src + (i * ld) + m_n, orgTensor.template as<T>() + (i * m_n));
+            std::copy(src + (i * ld), src + (i * ld) + m_n, compact.data() + (i * m_n));
         }
-        tmpTensor = permute(orgTensor, {0, 2, 1});
     }
     else
     {
         for(size_t i = 0; i < b * m_n; i++)
         {
-            std::copy(src + (i * ld), src + (i * ld) + k, tmpTensor.template as<T>() + (i * k));
+            std::copy(src + (i * ld), src + (i * ld) + k, compact.data() + (i * k));
         }
     }
+
+    Tensor tmpTensor(
+        tensorType,
+        Layout::contiguous(Shape(colMaj ? std::vector<size_t>{b, k, m_n}
+                                        : std::vector<size_t>{b, m_n, k})),
+        std::as_bytes(std::span<const T>(compact)));
+    if(colMaj)
+        tmpTensor = tmpTensor.permute({0, 2, 1});
 
     auto       MultipleM_N = MiM_N;
     auto       MultipleK   = MiK * PackK;
     const auto paddedM_N   = (m_n / MultipleM_N + !!(m_n % MultipleM_N)) * MultipleM_N;
     const auto paddedK     = (k / MultipleK + !!(k % MultipleK)) * MultipleK;
-    ::Tensor::Manipulation::Shape paddedShape{b, paddedM_N, paddedK};
-    auto paddedTensor = ::Tensor::Manipulation::pad(tmpTensor, paddedShape, T(0));
-    paddedTensor.reshape(
-        {b, paddedM_N / MiM_N, MiM_N, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor permuted = permute(paddedTensor, {0, 1, 3, 4, 2, 5});
-    std::copy(
-        permuted.template as<T>(), permuted.template as<T>() + (b * paddedM_N * paddedK), dst);
+    Tensor paddedTensor = tmpTensor.pad(Shape{b, paddedM_N, paddedK});
+    Tensor reshaped     = paddedTensor.reshape(
+        Shape{b, paddedM_N / MiM_N, MiM_N, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
+    Tensor permuted = reshaped.permute({0, 1, 3, 4, 2, 5});
+    const size_t outputBytes = b * paddedM_N * paddedK * sizeof(T);
+    if(permuted.storage().size() != outputBytes)
+        throw std::runtime_error("swizzle_tensor produced an unexpected storage size.");
+    std::memcpy(static_cast<void*>(dst), permuted.storage().data(), outputBytes);
 }
 
 void swizzle_tensor_type(HipHostBuffer&       dst,
