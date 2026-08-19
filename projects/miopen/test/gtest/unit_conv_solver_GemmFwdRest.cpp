@@ -42,6 +42,9 @@ auto GetConvTestCases(miopenDataType_t datatype)
         // clang-format on
     };
 
+    // Point-output shapes (stride == filter, output spatially 1x1) take the single-GEMM path.
+    // FP32 is left out: at K=1280 its RMS error sits just under the 1.0*eps threshold that
+    // non-TF32 GPUs use, so the case is not reliable there.
     if(datatype == miopenHalf)
     {
         // clang-format off
@@ -51,6 +54,21 @@ auto GetConvTestCases(miopenDataType_t datatype)
     }
 
     return cases;
+}
+
+// Point-output bf16, in 2D and 3D, exercising the single-GEMM path with a bf16 GEMM.
+auto GetConvTestCasesPointOutputBf16()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    constexpr auto datatype = miopenBFloat16;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype, datatype, datatype},
+        TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype, datatype, datatype},
+        // clang-format on
+    };
 }
 
 auto GetConvTestCasesFull(miopenDataType_t datatype)
@@ -137,6 +155,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(SmokePointOutput,
+                         GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16,
+                         testing::Combine(testing::Values(GetTestParamsNoGfx90A()),
+                                          testing::Values(miopenConvolutionAlgoGEMM),
+                                          testing::ValuesIn(GetConvTestCasesPointOutputBf16())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmFwdRestFwd_FP32,

@@ -39,6 +39,9 @@ auto GetConvTestCases(miopenDataType_t datatype)
         // clang-format on
     };
 
+    // Point-output shapes (stride == filter, output spatially 1x1) take the single-GEMM path.
+    // FP32 is left out: at K=1280 its RMS error sits just under the 1.0*eps threshold that
+    // non-TF32 GPUs use, so the case is not reliable there.
     if(datatype == miopenHalf)
     {
         // clang-format off
@@ -55,6 +58,23 @@ auto GetConvTestCases(miopenDataType_t datatype)
     }
 
     return cases;
+}
+
+// Point-output bf16, covering both the direct write into dx (dx spatial equals the filter) and
+// the 3D case where a larger dx has to be scattered out of the workspace by Col2Im.
+auto GetConvTestCasesPointOutputBf16()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    constexpr auto datatype = miopenBFloat16;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype},
+        TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
+        TestCase{{4, 3, 5, 5, 5}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
+        // clang-format on
+    };
 }
 
 auto GetConvTestCasesFull(miopenDataType_t datatype)
@@ -91,6 +111,18 @@ const auto& GetTestParams()
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         p.SetTolerance(Gpu::gfx90A, miopenHalf, 2.0f);
+        return p;
+    }();
+    return params;
+}
+
+// These shapes issue a BF16->BF16 GEMM, which rocBLAS does not support on gfx90a, so exclude it
+// here; every other GPU runs the point-output bf16 cases.
+// TODO: Remove this exclusion once the rocBLAS bug is fixed.
+const auto& GetTestParamsNoGfx90A()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All & ~Gpu::gfx90A);
         return p;
     }();
     return params;
@@ -137,6 +169,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(SmokePointOutput,
+                         GPU_UnitTestConvSolverGemmBwdRestBwd_BFP16,
+                         testing::Combine(testing::Values(GetTestParamsNoGfx90A()),
+                                          testing::Values(miopenConvolutionAlgoGEMM),
+                                          testing::ValuesIn(GetConvTestCasesPointOutputBf16())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmBwdRestBwd_FP32,
