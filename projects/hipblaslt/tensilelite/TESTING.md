@@ -205,15 +205,15 @@ migration. See [Coverage](#coverage) for the full breakdown.
 A third category sits outside the unit/characterization split: checks that validate the *entire
 production logic YAML corpus* for cross-file naming and metadata invariants, rather than exercising a
 fixture or pinning current behavior. In spirit this is closer to
-[`TensileLogic --check-all`](#build-time-validation-of-library-logic) than to a unit test: both
+[`tensilelite logic --check-all`](#build-time-validation-of-library-logic) than to a unit test: both
 validate tuning data rather than code, and where each one lives follows from that.
 
 Two of these checks — sibling-`DeviceNames` consistency and the gfx1250v0-overlay's logic-tree shape —
 are implemented in `tensilelite.tensilelite_logic.valid_corpus_consistency` and run unconditionally inside
-`TensileLogic --check-all`, so every kernel-generating build checks them regardless of which test lane
+`tensilelite logic --check-all`, so every kernel-generating build checks them regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy of each also lives in
-[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/test_PlaceholderMerge.py) and
+[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/source_only/test_PlaceholderMerge.py) and
 [`test_GpuRevisionTarget.py`](tensilelite/Tests/unit/test_GpuRevisionTarget.py) respectively — redundant
 confirmation wherever the real corpus happens to be on disk, not the enforcement point.
 
@@ -298,7 +298,7 @@ of the rocisa package. See [Where these tests actually run](#where-these-tests-a
 
 ## Build-Time Validation of Library Logic
 
-**What it does.** `TensileLogic --check-all` validates the library logic YAML before any of it is
+**What it does.** `tensilelite logic --check-all` validates the library logic YAML before any of it is
 compiled. It checks chip IDs, matrix instructions, work-group shapes, the XCC work-group mapping, and
 custom kernel declarations, one file at a time. It reads YAML only, so it needs no GPU and no compiled
 kernels, and it is fast. A failure stops the build. It is the only mechanism in the component that
@@ -376,11 +376,11 @@ of one specific incident.
 ### Why it runs in the build
 
 Relative to the build, the logic YAML is compiler input rather than build output:
-`TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
+`tensilelite create-library` consumes it and emits kernels from it. Validating it is front-end analysis
 rather than testing, and running codegen over input already known to be invalid produces output nobody
 should trust. So the check is wired in as a CMake custom command in
 [`hipblaslt_codegen.cmake`](../cmake/hipblaslt_codegen.cmake) that runs ahead of
-`TensileCreateLibrary` and writes a stamp file. A failure stops the build.
+`tensilelite create-library` and writes a stamp file. A failure stops the build.
 
 That placement buys good reach. It runs on every build that generates kernels, including every
 developer's local one, so a bad entry surfaces in the edit-build loop instead of a CI round trip
@@ -397,7 +397,7 @@ whole-corpus validation was dominating incremental build time on single-arch bui
 minutes locally for a gfx1151 build, validating the full multi-arch logic set when only a few dozen
 files were relevant), so the CMake step now passes `--architecture "${GPU_TARGETS}"` to
 `TensileLogic`, and only logic files matching the build's own target architectures are checked.
-`TensileLogic --check-all` still defaults to validating the whole
+`tensilelite logic --check-all` still defaults to validating the whole
 corpus when a developer runs it by hand with no `--architecture` argument; it is only the build-wired
 invocation that is now scoped down. The trade was deliberate and reasonable for build time, but it is
 worth naming plainly: a single-architecture CI build no longer catches a broken entry in an
@@ -736,7 +736,16 @@ the library-logic build-time validation; hipBLASLt's C++ client and library road
    what is missing is a job that fails on a stale entry. A dedicated GitHub Actions job is the right
    home for it, because the flag cannot be turned on inside the build without failing local developer
    builds. Worth extending to orphaned entries, which are silently ignored today.
-4. **Run the Python linter that already exists.** `tox -e lint` is configured and invoked by nothing.
+3. **Run the Python linter that already exists.** `tox -e lint` is configured and invoked by nothing.
+4. **Wire `Tests/common` into TheRock's `test_tensilelite.py` for real-hardware families, not just
+   the currently-unreachable `gfx1250` emulation path.** Config collection is already marker-based per
+   architecture, so this is mostly (a) broadening the hardcoded `gfx1250` gate and `--gpu-targets`
+   string, and (b) growing the 15-minute job timeout budget, which is sized for gfx1250's ~130 configs
+   alone. This closes the "`Tests/common` runs on zero TheRock/GHA architectures" gap above and gives
+   redundant, faster-feedback coverage for exactly the bug class the StreamK/#11335 near-miss
+   (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) exposed. This is a TheRock-repository change,
+   in `test_tensilelite.py` and its family-matrix configuration, not something this document can
+   implement directly.
 5. **Shard TheRock's `tensilelite-common` job if gfx950 comes back onto the pull-request path.** The
    job runs unsharded because only gfx942 (about an hour) is on that path today. gfx950 takes about
    two hours and its test machines are held back for capacity
@@ -785,9 +794,9 @@ the note there: an empty cell means the gap is real and acknowledged but not yet
 | As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | On gfx942, TheRock's `tensilelite-common` runs `common` as its own job, so a unit failure there no longer hides it; the other architectures still depend on `preliminary`'s ordering | AIHPBLAS-4431 |
 | `Tests/common` (real codegen, build, execution) runs in TheRock only on gfx90a/gfx942/gfx950/gfx120X, and only gfx942 on the pull-request path. gfx1250 and any family whose configs declare no `skip-gfxNNNN` for it (gfx1103, gfx115X) get none (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) | Medium | High if hit | Math CI's `preliminary` runs it per PR on `gfx90a`/`gfx942`/`gfx950`/`gfx12`; TheRock's `tensilelite-common` adds installed-artifact coverage on the same families | [#12491](https://github.com/ROCm/rocm-libraries/issues/12491) |
 | The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation |  |
-| Math CI's `preliminary` job appears to skip the `tensilelite/Tests/unit` suite entirely on YAML-only diffs, running only numeric/solution-correctness checks instead. Of the three logic-corpus consistency checks, this leaves only the chip-ID-arch-lock check uncovered on that path; sibling-`DeviceNames` and the gfx1250v0-overlay shape run unconditionally via `TensileLogic --check-all` regardless | Medium | Medium | `TensileLogic --check-all` covers two of the three checks regardless of this gap; Math CI's own suite still covers the chip-ID-arch-lock check whenever it runs |  |
-| The `_needs_logic_dir` xfail (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) is unconditional in TheRock CI, so the pytest-only logic-corpus checks gated on it never execute there. Only the chip-ID-arch-lock check is actually exposed to this; the other two run unconditionally via `TensileLogic --check-all` regardless | Low | Medium | `TensileLogic --check-all` covers two of the three checks regardless; Math CI's pytest suite can still catch a chip-ID-arch-lock violation when it runs | |
-| For gfx1250 specifically, TheRock's `amdgpu_family_matrix.py` has an empty `test-runs-on` for the `gfx125x` family (`gfx125X-dcgpu`, build-only, no runner wired up), so the whole Test stage — including the pytest copies of the logic-corpus consistency checks under `tensilelite/Tests/unit` — is skipped outright. Sibling-`DeviceNames` and the gfx1250v0-overlay shape still get build-time coverage there via `TensileLogic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the empty `test-runs-on` | |
+| Math CI's `preliminary` job appears to skip the `tensilelite/Tests/unit` suite entirely on YAML-only diffs, running only numeric/solution-correctness checks instead. Of the three logic-corpus consistency checks, this leaves only the chip-ID-arch-lock check uncovered on that path; sibling-`DeviceNames` and the gfx1250v0-overlay shape run unconditionally via `tensilelite logic --check-all` regardless | Medium | Medium | `tensilelite logic --check-all` covers two of the three checks regardless of this gap; Math CI's own suite still covers the chip-ID-arch-lock check whenever it runs |  |
+| The `_needs_logic_dir` xfail (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) is unconditional in TheRock CI, so the pytest-only logic-corpus checks gated on it never execute there. Only the chip-ID-arch-lock check is actually exposed to this; the other two run unconditionally via `tensilelite logic --check-all` regardless | Low | Medium | `tensilelite logic --check-all` covers two of the three checks regardless; Math CI's pytest suite can still catch a chip-ID-arch-lock violation when it runs | |
+| For gfx1250 specifically, TheRock's `amdgpu_family_matrix.py` has an empty `test-runs-on` for the `gfx125x` family (`gfx125X-dcgpu`, build-only, no runner wired up), so the whole Test stage — including the pytest copies of the logic-corpus consistency checks under `tensilelite/Tests/unit` — is skipped outright. Sibling-`DeviceNames` and the gfx1250v0-overlay shape still get build-time coverage there via `tensilelite logic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `tensilelite logic --check-all` runs as a build step, unaffected by the empty `test-runs-on` | |
 
 ### Known bugs and flaky tests
 

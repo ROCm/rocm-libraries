@@ -4,7 +4,7 @@ This file provides guidance for AI coding agents when working with code in this 
 
 ## Overview
 
-TensileLite is an auto-tuning framework for generating and selecting high-performance GPU kernels for tensor contractions (GEMM and related operations) on AMD GPUs. It is a component of hipBLASLt. The Python package (`tensilelite/`) drives kernel generation and benchmarking; `rocisa/` provides a C++ (Nanobind-wrapped) assembly generation module; `include/` and `src/` form the C++ runtime library; and `client/` contains the benchmark executable.
+TensileLite is an auto-tuning framework for generating and selecting high-performance GPU kernels for tensor contractions (GEMM and related operations) on AMD GPUs. It is a component of hipBLASLt. The Python package (`tensilelite/`) drives kernel generation and benchmarking; `rocisa` is a separately packaged Python dependency whose in-tree source has its own developer workflow; `include/` and `src/` form the C++ runtime library; and `client/` contains the benchmark executable.
 
 ## Working environment
 
@@ -127,6 +127,10 @@ Entry point: `python -m tensilelite run` → `tensilelite/tensilelite.py:tensile
 
 `rocisa/` is a C++ module (compiled with amdclang++, bound via Nanobind) that provides instruction-level assembly generation, optimization passes, and instruction counting for AMDGPU kernels. `KernelWriter.py` calls into it to emit actual assembly instructions.
 
+TensileLite packaging treats rocisa as opaque and independently supplied. Do
+not infer or change rocisa's wheel tags, Python ABI, native-library placement,
+or release version while working on the TensileLite package boundary.
+
 Normal install (once after cloning, or after `rocisa/pyproject.toml` / `CMakeLists.txt` changes):
 
 ```bash
@@ -141,7 +145,8 @@ invoke rocisa            # editable pip install — picks up Python changes imme
 
 ## Gotchas
 
-- `tox -e unit` skips the client build (hence "fast"); the env installs editable rocisa and TensileLite with a temporary `0.0.0` wheel identity. To run `pytest` directly outside tox, install rocisa once with `invoke rocisa`.
+- `tox -e unit` installs editable rocisa and TensileLite, builds the client, and configures the active installation binding before unit tests. To run `pytest` directly outside tox, use `invoke install` or perform the equivalent editable install and binding steps.
 - `tox -e py3` (the full common-tests env) does invoke `build-client` itself inside its `commands` block — that's where the "long client build" happens. Override its CMake/client args via `TENSILELITE_CLIENT_ARGS`, and parallelism via `TENSILE_NUM_PYTEST_WORKERS` (default 4).
+- `invoke install` is the Linux one-command source-development setup: it installs shared dev requirements, runs the editable rocisa workflow, builds the client, installs TensileLite editably, and then binds that installation with `python -m tensilelite_configure_client --client <absolute-executable>`. Use `--reset` to remove the current keyed binding.
 - Two test trees exist: `tensilelite/Tests/` (YAML kernel tests, run via `tox`/`pytest`) vs `tests/` (C++ host-library gtest, gated by CMake `TENSILELITE_BUILD_TESTING=ON`).
 - `rocisa.egg-info/` and `rocisa/build/` in the working tree are normal (left by editable install / cmake build); don't commit them.
