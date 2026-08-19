@@ -68,6 +68,5 @@ def client_executable() -> Path:
 def executable_search_paths() -> list[Path]:
     """Return the executable locations for the frozen ROCm installation model."""
     if _installation is None:
-        initialize()
-    assert _installation is not None
+        raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
     return list(_installation.executable_search_paths)
