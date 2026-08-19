@@ -1170,6 +1170,11 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
+    # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
+    # (different TDM wait groups) so every wave finishes the urgent group before any
+    # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
+    # gfx1250 / ScheduleIterAlg=4 path only, off by default.
+    "TDMLoadWaveSync": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

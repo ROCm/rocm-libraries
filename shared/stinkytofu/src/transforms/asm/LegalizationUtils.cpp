@@ -149,11 +149,11 @@ Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArc
 }
 
 Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
+    // Only legalize on gfx12.5 (either stepping).
     // TODO: Support other SeparateVMcnt + SeparateLGKMcnt archs (e.g. gfx1200,
     // gfx1201). Need to verify whether they also support combined instructions
     // (s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt).
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get wait count data from modifiers
     const SWaitCntData* waitData = inst->getModifier<SWaitCntData>();
@@ -251,8 +251,8 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
 }
 
 Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    // Only legalize on gfx12.5 (either stepping).
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get modifiers to transfer
     const CommentData* commentMod = inst->getModifier<CommentData>();

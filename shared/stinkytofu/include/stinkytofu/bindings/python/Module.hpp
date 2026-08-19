@@ -87,6 +87,8 @@
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \
     X(ClusterBarrier, bool)                       \
+    X(StreamKMulticast, bool)                     \
+    X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
     X(RemoveInstructions, std::string)            \
@@ -97,7 +99,8 @@
     X(DsReadPerWmma, int)                         \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
-    X(DsReadOrder, int)
+    X(DsReadOrder, int)                           \
+    X(ArchName, std::string)
 
 namespace stinkytofu {
 /**
