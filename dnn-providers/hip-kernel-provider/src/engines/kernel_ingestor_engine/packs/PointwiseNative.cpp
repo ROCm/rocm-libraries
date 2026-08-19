@@ -29,7 +29,18 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
-/// Mirrors PointwiseAddNative.cpp: same shape, different operation, symbols, kernel.
+/**
+ * @file PointwiseNative.cpp
+ * @brief The pointwise engine's native half: matching, scoring, dispatch, and the one
+ *        function that registers them.
+ *
+ * Three packs (add, mul, sub) share one applicability matcher -- node shape, binary,
+ * one element, uniform dtype -- evaluated once per graph; each pack adds only an
+ * operation check, so RFC 0017 §6 keeps them disjoint without duplicating that work.
+ * Symbol names are restated here rather than shared via a header, since a descriptor
+ * can't reference a C++ constant; the loader pre-flights every symbol a descriptor
+ * names, so a mismatched string is caught without becoming a compile error.
+ */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -39,17 +50,22 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-constexpr std::string_view GRAPH_MATCHER_SYMBOL_NAME = "hipkernel.pointwise_sub.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL_NAME = "hipkernel.pointwise_sub.kernel_match";
-constexpr std::string_view SCORE_SYMBOL_NAME = "hipkernel.pointwise_sub.score";
-constexpr std::string_view DISPATCH_SYMBOL_NAME = "hipkernel.pointwise_sub.dispatch";
+// The contract with the installed descriptor files, which restate these same strings.
+constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise.graph_match";
+constexpr std::string_view ADD_MATCHER_SYMBOL = "hipkernel.pointwise.add_match";
+constexpr std::string_view MUL_MATCHER_SYMBOL = "hipkernel.pointwise.mul_match";
+constexpr std::string_view SUB_MATCHER_SYMBOL = "hipkernel.pointwise.sub_match";
+constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise.kernel_match";
+constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise.score";
+constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise.dispatch";
 
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
-constexpr std::string_view INPUT_A_TOKEN = "pointwise_sub.input_a.uid";
-constexpr std::string_view INPUT_B_TOKEN = "pointwise_sub.input_b.uid";
-constexpr std::string_view OUTPUT_TOKEN = "pointwise_sub.output.uid";
+constexpr std::string_view INPUT_A_TOKEN = "pointwise.input_a.uid";
+constexpr std::string_view INPUT_B_TOKEN = "pointwise.input_b.uid";
+constexpr std::string_view OUTPUT_TOKEN = "pointwise.output.uid";
 
+/// Scratch reported by the larger-block kernel; keeps max-across-survivors non-zero.
 constexpr size_t LARGE_BLOCK_WORKSPACE_BYTES = 1024;
 constexpr int64_t LARGE_BLOCK_SIZE = 256;
 
@@ -60,8 +76,8 @@ constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 // Matching
 // ---------------------------------------------------------------------------
 
-/// Order is load-bearing: subtraction does not commute.
-struct PointwiseSubBinding
+/// The tensor uids a matched pointwise graph binds, in argument order.
+struct PointwiseBinding
 {
     int64_t inputA = 0;
     int64_t inputB = 0;
@@ -75,6 +91,7 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
+/// Channel-first or channel-last stride order, the only orders compile options classify.
 bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
 {
     try
@@ -88,16 +105,22 @@ bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
     }
 }
 
+/// Runs on an unvalidated graph, so must be total: a caller can present a tensor the
+/// frontend would have rejected.
 bool isSingleElement(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
+    // isChannelLastLayout below dereferences strides unchecked; this predicate must
+    // not crash.
     if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
        || dims->size() < MIN_SUPPORTED_RANK || dims->size() > MAX_SUPPORTED_RANK)
     {
         return false;
     }
 
+    // Every dim must be 1, not merely multiply to 1 -- the claim is about extent, not
+    // a product.
     for(const auto dim : *dims)
     {
         if(dim != 1)
@@ -136,30 +159,43 @@ std::string dataTypeName(data_objects::DataType dataType)
     return data_objects::EnumNameDataType(dataType);
 }
 
-bool pointwiseSubGraphMatches(const MatchContext& context, BoundTokens& bound)
+/// The node this engine's matchers read, or nullptr if the graph isn't a single
+/// pointwise node. Shared so the operation check doesn't depend on matcher order,
+/// which the descriptor controls.
+const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& context)
 {
-    if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
-    {
-        return false;
-    }
-
     if(context.graph.nodeCount() != 1)
     {
-        return false;
+        return nullptr;
     }
 
     const auto& node = context.graph.getNodeWrapper(0);
     if(node.attributesType() != data_objects::NodeAttributes::PointwiseAttributes)
     {
-        return false;
+        return nullptr;
     }
 
-    const auto& attributes = node.attributesAs<data_objects::PointwiseAttributes>();
-    if(attributes.operation() != data_objects::PointwiseMode::SUB)
+    return &node.attributesAs<data_objects::PointwiseAttributes>();
+}
+
+/**
+ * @brief Graph-scoped applicability shared by every pack: is this a single-node binary
+ *        pointwise op over 1-element tensors this engine can launch? Says nothing about
+ *        which operation -- every pack lists this matcher, so it runs once per (graph,
+ *        device) and the memoized verdict is reused, with only the operation check left
+ *        to each pack.
+ */
+bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
+{
+    // Exactly one node: this engine's kernels each serve one complete graph.
+    const auto* attributesPtr = pointwiseNode(context);
+    if(attributesPtr == nullptr)
     {
         return false;
     }
+    const auto& attributes = *attributesPtr;
 
+    // Binary: a second operand is required, a third would be a different operation.
     if(!attributes.in_1_tensor_uid().has_value() || attributes.in_2_tensor_uid().has_value())
     {
         return false;
@@ -195,14 +231,44 @@ bool pointwiseSubGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // Minuend then subtrahend; swapping is silently wrong, not a failure.
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
     return true;
 }
 
-bool pointwiseSubKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
+/**
+ * @brief Graph-scoped operation check: the one fact that separates this engine's packs.
+ *        Binds nothing -- the applicability matcher above already bound every token
+ *        dispatch reads.
+ */
+bool pointwiseOperationMatches(const MatchContext& context, data_objects::PointwiseMode operation)
+{
+    const auto* attributes = pointwiseNode(context);
+    return attributes != nullptr && attributes->operation() == operation;
+}
+
+bool pointwiseAddMatches(const MatchContext& context, BoundTokens& /*bound*/)
+{
+    return pointwiseOperationMatches(context, data_objects::PointwiseMode::ADD);
+}
+
+bool pointwiseMulMatches(const MatchContext& context, BoundTokens& /*bound*/)
+{
+    return pointwiseOperationMatches(context, data_objects::PointwiseMode::MUL);
+}
+
+bool pointwiseSubMatches(const MatchContext& context, BoundTokens& /*bound*/)
+{
+    return pointwiseOperationMatches(context, data_objects::PointwiseMode::SUB);
+}
+
+/**
+ * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
+ *        Evaluated once per candidate kernel; without it an f32 graph could reach an
+ *        f16 binary and return wrong numbers rather than failing.
+ */
+bool pointwiseKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
 {
     const auto dataType = graphDataType(context);
     if(!dataType.has_value())
@@ -213,12 +279,17 @@ bool pointwiseSubKernelMatches(const MatchContext& context, const KernelDefiniti
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
-double pointwiseSubScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
+double pointwiseScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
 {
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 }
 
-PointwiseSubBinding pointwiseSubBinding(const BoundTokens& bound)
+/**
+ * @brief Re-reads the operand bindings a match established.
+ *
+ * @throws HipdnnPluginException if the graph is not one this matcher accepts.
+ */
+PointwiseBinding pointwiseBinding(const BoundTokens& bound)
 {
     const auto read = [&bound](std::string_view token) {
         const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
@@ -226,7 +297,7 @@ PointwiseSubBinding pointwiseSubBinding(const BoundTokens& bound)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "pointwise sub dispatch is missing bound token '" + std::string(token)
+                "pointwise dispatch is missing bound token '" + std::string(token)
                     + "', or it does not hold a tensor uid");
         }
         return *value;
@@ -239,12 +310,14 @@ PointwiseSubBinding pointwiseSubBinding(const BoundTokens& bound)
 // Dispatch
 // ---------------------------------------------------------------------------
 
-class PreparedPointwiseSub : public PreparedDispatch
+/// The compiled kernel plus the operand uids it launches with: everything read from the
+/// graph, resolved once, owning nothing that points back into it.
+class PreparedPointwise : public PreparedDispatch
 {
 public:
-    PreparedPointwiseSub(std::unique_ptr<compilation::ICompiledProgram> program,
-                         std::unique_ptr<compilation::IRunnableKernel> kernel,
-                         PointwiseSubBinding binding)
+    PreparedPointwise(std::unique_ptr<compilation::ICompiledProgram> program,
+                      std::unique_ptr<compilation::IRunnableKernel> kernel,
+                      PointwiseBinding binding)
         : _program(std::move(program))
         , _kernel(std::move(kernel))
         , _binding(binding)
@@ -256,15 +329,17 @@ public:
         return *_kernel;
     }
 
-    const PointwiseSubBinding& binding() const
+    const PointwiseBinding& binding() const
     {
         return _binding;
     }
 
 private:
+    // Runnable kernel is a view into its program's module; both are held for the
+    // plan's lifetime.
     std::unique_ptr<compilation::ICompiledProgram> _program;
     std::unique_ptr<compilation::IRunnableKernel> _kernel;
-    PointwiseSubBinding _binding;
+    PointwiseBinding _binding;
 };
 
 std::string elementTypeFor(const KernelDefinition& kernel)
@@ -285,7 +360,7 @@ std::string elementTypeFor(const KernelDefinition& kernel)
 }
 
 const data_objects::TensorAttributes& firstInput(const MatchContext& context,
-                                                 const PointwiseSubBinding& binding)
+                                                 const PointwiseBinding& binding)
 {
     const auto& tensors = context.graph.getTensorMap();
     auto it = tensors.find(binding.inputA);
@@ -293,16 +368,25 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "matched pointwise sub has no tensor for uid " + std::to_string(binding.inputA));
+            "matched pointwise graph has no tensor for uid " + std::to_string(binding.inputA));
     }
     return *it->second;
 }
 
-class PointwiseSubDispatchHandler
-    : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
+/**
+ * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise
+ *        kernel. Shared across packs -- the operation is just the selected kernel's
+ *        entry point. Splits per RFC 0017 §8.5: everything graph/kernel-derived
+ *        resolves once at prepare(); execute() only resolves buffers and launches, so
+ *        nothing mutates once prepared and concurrent execution is safe.
+ */
+class PointwiseDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
-    explicit PointwiseSubDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
+    /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
+    /// Device properties aren't held here -- they arrive per call via MatchContext,
+    /// so each call compiles for the device it's actually for.
+    explicit PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
         : _kernelCompiler(kernelCompiler)
     {
     }
@@ -320,15 +404,16 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        const auto binding = pointwiseSubBinding(bound);
+        // Reads the operand uids the matcher bound rather than re-deriving them.
+        const auto binding = pointwiseBinding(bound);
 
         const auto blockSize
             = static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 
         compilation::KernelCompileOptions options(&firstInput(context, binding),
                                                   context.deviceProperties.gcnArchName);
-        options.add("HIP_PLUGIN_POINTWISE_SUB_TYPE", elementTypeFor(kernel));
-        options.add("HIP_PLUGIN_POINTWISE_SUB_BLOCK_SIZE", blockSize);
+        options.add("HIP_PLUGIN_POINTWISE_TYPE", elementTypeFor(kernel));
+        options.add("HIP_PLUGIN_POINTWISE_BLOCK_SIZE", blockSize);
 
         auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
         auto runnableKernel = program->getKernel(kernel.source.entryPoint);
@@ -336,7 +421,7 @@ public:
         runnableKernel->setBlockSize(blockSize, 1, 1);
         runnableKernel->setGridSize(1, 1, 1);
 
-        return std::make_unique<PreparedPointwiseSub>(
+        return std::make_unique<PreparedPointwise>(
             std::move(program), std::move(runnableKernel), binding);
     }
 
@@ -346,8 +431,8 @@ public:
                 uint32_t numDeviceBuffers,
                 void* /*workspace*/) const override
     {
-        const auto& preparedSub = dynamic_cast<const PreparedPointwiseSub&>(prepared);
-        const auto& binding = preparedSub.binding();
+        const auto& preparedPointwise = dynamic_cast<const PreparedPointwise&>(prepared);
+        const auto& binding = preparedPointwise.binding();
 
         const auto inputA
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.inputA, deviceBuffers, numDeviceBuffers);
@@ -356,28 +441,34 @@ public:
         const auto output
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.output, deviceBuffers, numDeviceBuffers);
 
-        preparedSub.kernel().launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
+        preparedPointwise.kernel().launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
     }
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
 };
 
-const PointwiseSubDispatchHandler& pointwiseSubDispatchHandler()
+/// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
+/// pointer to it, but a provider's Container is created and destroyed per handle, so
+/// it (and the compiler it holds) must outlive every Container.
+const PointwiseDispatchHandler& pointwiseDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const PointwiseSubDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler);
     return s_dispatchHandler;
 }
 
 } // namespace
 
-void registerPointwiseSubSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)
+void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)
 {
-    scope.add(std::string(GRAPH_MATCHER_SYMBOL_NAME), &pointwiseSubGraphMatches);
-    scope.add(std::string(KERNEL_MATCHER_SYMBOL_NAME), &pointwiseSubKernelMatches);
-    scope.add(std::string(SCORE_SYMBOL_NAME), &pointwiseSubScore);
-    scope.add(std::string(DISPATCH_SYMBOL_NAME), &pointwiseSubDispatchHandler());
+    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &pointwiseGraphMatches);
+    scope.add(std::string(ADD_MATCHER_SYMBOL), &pointwiseAddMatches);
+    scope.add(std::string(MUL_MATCHER_SYMBOL), &pointwiseMulMatches);
+    scope.add(std::string(SUB_MATCHER_SYMBOL), &pointwiseSubMatches);
+    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &pointwiseKernelMatches);
+    scope.add(std::string(SCORE_SYMBOL), &pointwiseScore);
+    scope.add(std::string(DISPATCH_SYMBOL), &pointwiseDispatchHandler());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
