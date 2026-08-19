@@ -758,6 +758,15 @@ void CheckFDBEntry(size_t thread_index,
 
         std::vector<miopen::FDBVal> fdb_vals;
         miopen::ParseFDBbVal(kinder.second.content, fdb_vals);
+        std::cerr << "ROW_DEBUG key=" << kinder.first
+                  << " content=" << kinder.second.content
+                  << " nvals=" << fdb_vals.size() << std::endl;
+        for(const auto& dv : fdb_vals) {
+            miopen::solver::Id did{dv.solver_id};
+            std::cerr << "  VAL solver_id=" << dv.solver_id
+                      << " valid=" << did.IsValid()
+                      << " vals=" << dv.vals << std::endl;
+        }
 
         std::unordered_map<std::string, std::string> pdb_vals;
         std::string pdb_select_query;
