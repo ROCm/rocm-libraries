@@ -1,6 +1,7 @@
 /* Copyright © Advanced Micro Devices, Inc., or its affiliates. */
 /* SPDX-License-Identifier:  MIT */
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -11,7 +12,6 @@
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"

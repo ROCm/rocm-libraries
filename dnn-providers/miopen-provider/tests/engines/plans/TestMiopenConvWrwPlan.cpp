@@ -3,11 +3,11 @@
 
 #include <memory>
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"

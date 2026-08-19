@@ -108,6 +108,13 @@ repos:
         files: ^projects/miopen/test/gtest/.*\.cpp$
         pass_filenames: false
 
+      - id: miopen-provider-rename-sync
+        name: MIOpen provider rename header in sync with MIOpen
+        entry: projects/miopen/script/check_rename_header_sync.sh
+        language: script
+        files: ^(projects/miopen/src/private/miopen_private_rename\.h|dnn-providers/miopen-provider/MiopenApiPrivateRename\.hpp)$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
