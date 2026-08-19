@@ -1210,8 +1210,9 @@ void testComparisonProgram() {
     const ComparisonOptions numpyDefaults = allCloseComparisonOptions();
     require(numpyDefaults.absoluteTolerance == 1e-8 && numpyDefaults.relativeTolerance == 1e-5 &&
                 numpyDefaults.symmetricRelativeTolerance == 0.0 && !numpyDefaults.strictTolerance &&
-                !numpyDefaults.equalNaNs,
-            "Allclose options do not expose NumPy's real-valued defaults.");
+                !numpyDefaults.equalNaNs &&
+                numpyDefaults.complexPointwiseMode == ComplexPointwiseMode::Magnitude,
+            "Allclose options do not expose NumPy's finite-value defaults.");
     const std::array<double, 1> lowerValue{8.0};
     const std::array<double, 1> referenceValue{10.0};
     ComparisonOptions numpyBoundary = allCloseComparisonOptions(0.0, 0.2);
@@ -1235,11 +1236,125 @@ void testComparisonProgram() {
     ComparisonOptions componentwiseComplex = allCloseComparisonOptions(1.0, 0.0);
     componentwiseComplex.computeFrobenius = false;
     require(
+        !compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
+                 Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),
+                 componentwiseComplex)
+             .passed(),
+        "Complex allclose did not apply magnitude tolerance.");
+    componentwiseComplex.complexPointwiseMode = ComplexPointwiseMode::Componentwise;
+    require(
         compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
                 Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),
                 componentwiseComplex)
             .passed(),
-        "Complex comparison no longer applies the documented componentwise policy.");
+        "Explicit componentwise complex comparison rejected passing components.");
+
+    ComparisonOptions magnitudePointwiseOnly = allCloseComparisonOptions(1.0, 0.0);
+    magnitudePointwiseOnly.computePointwiseStatistics = false;
+    magnitudePointwiseOnly.computeFrobenius = false;
+    magnitudePointwiseOnly.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    require(
+        !compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
+                 Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),
+                 magnitudePointwiseOnly)
+             .passed(),
+        "The optimized pointwise-only path ignored complex magnitude mode.");
+
+    const std::array<std::complex<double>, 1> magnitudeBoundaryObserved{
+        std::complex<double>(0.0, 0.0)};
+    const std::array<std::complex<double>, 1> magnitudeBoundaryExpected{
+        std::complex<double>(3.0, 4.0)};
+    ComparisonOptions magnitudeBoundary = allCloseComparisonOptions(0.0, 1.0);
+    magnitudeBoundary.computeFrobenius = false;
+    require(
+        compare(
+            Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryObserved)),
+            Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryExpected)),
+            magnitudeBoundary)
+            .passed(),
+        "Complex allclose rejected its inclusive magnitude boundary.");
+    require(
+        !compare(
+             Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryExpected)),
+             Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryObserved)),
+             magnitudeBoundary)
+             .passed(),
+        "Complex allclose lost expected-magnitude asymmetry.");
+
+    const double quietNaN = std::numeric_limits<double>::quiet_NaN();
+    const std::array<std::complex<double>, 1> crossComponentNaNObserved{
+        std::complex<double>(quietNaN, 1.0)};
+    const std::array<std::complex<double>, 1> crossComponentNaNExpected{
+        std::complex<double>(1.0, quietNaN)};
+    ComparisonOptions magnitudeEqualNaNs = allCloseComparisonOptions(0.0, 0.0, true);
+    magnitudeEqualNaNs.computeFrobenius = false;
+    const ComparisonResult crossComponentNaNResult = compare(
+        Tensor::fromNative(std::span<const std::complex<double>>(crossComponentNaNObserved)),
+        Tensor::fromNative(std::span<const std::complex<double>>(crossComponentNaNExpected)),
+        magnitudeEqualNaNs);
+    require(crossComponentNaNResult.passed() && crossComponentNaNResult.matchedNaNs == 1,
+            "Complex magnitude comparison did not match logical NaN values.");
+
+    const double infinity = std::numeric_limits<double>::infinity();
+    const std::array<std::complex<double>, 1> complexInfinity{
+        std::complex<double>(infinity, infinity)};
+    const ComparisonResult complexInfinityResult =
+        compare(Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
+                Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
+                magnitudeEqualNaNs);
+    require(complexInfinityResult.passed() && complexInfinityResult.matchedInfinities == 1,
+            "Complex magnitude comparison did not count a matched infinity as one logical value.");
+    ComparisonOptions magnitudeInfinityWithFrobenius = allCloseComparisonOptions(0.0, 0.0, true);
+    const ComparisonResult complexInfinityWithFrobeniusResult =
+        compare(Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
+                Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
+                magnitudeInfinityWithFrobenius);
+    require(complexInfinityWithFrobeniusResult.passed() &&
+                complexInfinityWithFrobeniusResult.matchedInfinities == 1,
+            "Complex magnitude infinity statistics depended on Frobenius evidence.");
+
+    const std::array<std::complex<double>, 1> mismatchedComplexInfinityObserved{
+        std::complex<double>(infinity, 1.0)};
+    const std::array<std::complex<double>, 1> mismatchedComplexInfinityExpected{
+        std::complex<double>(infinity, 2.0)};
+    ComparisonOptions permissiveComplexInfinity = allCloseComparisonOptions(infinity, infinity);
+    permissiveComplexInfinity.computeFrobenius = false;
+    require(!compare(Tensor::fromNative(
+                         std::span<const std::complex<double>>(mismatchedComplexInfinityObserved)),
+                     Tensor::fromNative(
+                         std::span<const std::complex<double>>(mismatchedComplexInfinityExpected)),
+                     permissiveComplexInfinity)
+                 .passed(),
+            "Complex magnitude comparison applied finite tolerances to unequal infinities.");
+
+    const std::array<double, 1> mixedReal{3.0};
+    const std::array<std::complex<double>, 1> mixedComplex{std::complex<double>(3.0, 4.0)};
+    ComparisonOptions mixedMagnitude = allCloseComparisonOptions(0.0, 1.0);
+    mixedMagnitude.computeFrobenius = false;
+    require(compare(Tensor::fromNative(std::span<const double>(mixedReal)),
+                    Tensor::fromNative(std::span<const std::complex<double>>(mixedComplex)),
+                    mixedMagnitude)
+                .passed(),
+            "Mixed real/complex comparison did not scale tolerance by the complex reference.");
+    require(!compare(Tensor::fromNative(std::span<const std::complex<double>>(mixedComplex)),
+                     Tensor::fromNative(std::span<const double>(mixedReal)), mixedMagnitude)
+                 .passed(),
+            "Mixed real/complex comparison lost expected-magnitude asymmetry.");
+
+    const std::array<std::complex<double>, 1> signedZeroNaNObserved{
+        std::complex<double>(quietNaN, 0.0)};
+    const std::array<std::complex<double>, 1> signedZeroNaNExpected{
+        std::complex<double>(quietNaN, -0.0)};
+    ComparisonOptions signedZeroNaN = allCloseComparisonOptions(0.0, 0.0, true);
+    signedZeroNaN.equalSignedZero = false;
+    signedZeroNaN.computeFrobenius = false;
+    const ComparisonResult signedZeroNaNResult =
+        compare(Tensor::fromNative(std::span<const std::complex<double>>(signedZeroNaNObserved)),
+                Tensor::fromNative(std::span<const std::complex<double>>(signedZeroNaNExpected)),
+                signedZeroNaN);
+    require(signedZeroNaNResult.passed() && signedZeroNaNResult.matchedNaNs == 1 &&
+                signedZeroNaNResult.signedZeroMismatches == 0,
+            "Logical complex NaN matching did not precede signed-zero classification.");
 
     const std::array<double, 4> absoluteCandidates{1e-6, 1e-5, 1e-4, 1e-3};
     const std::array<double, 1> relativeCandidates{0.0};
@@ -1251,6 +1366,27 @@ void testComparisonProgram() {
         std::span<const double>(absoluteCandidates), std::span<const double>(relativeCandidates));
     require(tolerance && tolerance->absolute == 1e-4 && tolerance->relative == 0.0,
             "Allclose tolerance search selected the wrong candidate.");
+
+    const std::array<std::complex<double>, 1> complexSearchObserved{
+        std::complex<double>(0.09, 0.09)};
+    const std::array<std::complex<double>, 1> complexSearchExpected{std::complex<double>(0.0, 0.0)};
+    const std::array<double, 1> complexSearchAbsoluteCandidates{0.1};
+    const std::array<double, 1> complexSearchRelativeCandidates{0.0};
+    require(!findAllCloseTolerance(
+                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchObserved)),
+                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchExpected)),
+                std::span<const double>(complexSearchAbsoluteCandidates),
+                std::span<const double>(complexSearchRelativeCandidates)),
+            "Allclose tolerance search defaulted complex values to componentwise comparison.");
+    ComparisonOptions componentwiseSearch = allCloseComparisonOptions();
+    componentwiseSearch.complexPointwiseMode = ComplexPointwiseMode::Componentwise;
+    require(findAllCloseTolerance(
+                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchObserved)),
+                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchExpected)),
+                std::span<const double>(complexSearchAbsoluteCandidates),
+                std::span<const double>(complexSearchRelativeCandidates), componentwiseSearch)
+                .has_value(),
+            "Allclose tolerance search did not preserve explicit componentwise comparison.");
 
     std::array<float, 5> rangedSentinel{
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),

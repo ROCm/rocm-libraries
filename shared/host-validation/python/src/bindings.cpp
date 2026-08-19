@@ -954,6 +954,10 @@ NB_MODULE(_roc_host_validation, module) {
         .value("RelativeSpacing", UlpComparisonMode::RelativeSpacing)
         .value("EncodedDistance", UlpComparisonMode::EncodedDistance);
 
+    nb::enum_<ComplexPointwiseMode>(module, "ComplexPointwiseMode")
+        .value("Componentwise", ComplexPointwiseMode::Componentwise)
+        .value("Magnitude", ComplexPointwiseMode::Magnitude);
+
     nb::class_<ComparisonSelection>(module, "ComparisonSelection")
         .def(nb::init<>())
         .def_rw("first", &ComparisonSelection::first)
@@ -970,6 +974,7 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("strict_tolerance", &ComparisonOptions::strictTolerance)
         .def_rw("equal_nans", &ComparisonOptions::equalNaNs)
         .def_rw("equal_signed_zero", &ComparisonOptions::equalSignedZero)
+        .def_rw("complex_pointwise_mode", &ComparisonOptions::complexPointwiseMode)
         .def_rw("compute_pointwise_statistics", &ComparisonOptions::computePointwiseStatistics)
         .def_rw("compute_frobenius", &ComparisonOptions::computeFrobenius)
         .def_rw("compute_ulp", &ComparisonOptions::computeUlp)
@@ -1237,8 +1242,9 @@ NB_MODULE(_roc_host_validation, module) {
     module.def("default_comparison_options", &defaultComparisonOptions, "type"_a,
                "symmetric_relative_tolerance"_a = std::optional<double>{});
     module.def("near_comparison_options", &nearComparisonOptions, "absolute_tolerance"_a);
-    module.def("allclose_comparison_options", &allCloseComparisonOptions, "absolute_tolerance"_a,
-               "relative_tolerance"_a, "equal_nans"_a = false);
+    module.def("allclose_comparison_options", &allCloseComparisonOptions,
+               "absolute_tolerance"_a = 1e-8, "relative_tolerance"_a = 1e-5,
+               "equal_nans"_a = false);
     module.def("ulp_mantissa_bits", &ulpMantissaBits, "type"_a);
     module.def("ulp_distance", &ulpDistance, "exact"_a, "approximation"_a, "mantissa_bits"_a);
     module.def("encoded_ulp_distance", &encodedUlpDistance, "exact"_a, "approximation"_a, "type"_a);
@@ -1252,7 +1258,7 @@ NB_MODULE(_roc_host_validation, module) {
                                          std::span<const double>(relativeCandidates), options);
         },
         "observed"_a, "expected"_a, "absolute_candidates"_a, "relative_candidates"_a,
-        "options"_a = ComparisonOptions{});
+        "options"_a = allCloseComparisonOptions());
     module.def(
         "find_allclose_tolerance",
         [](Tensor observed, Tensor expected, const std::vector<double>& absoluteCandidates,
@@ -1262,7 +1268,7 @@ NB_MODULE(_roc_host_validation, module) {
                                          std::span<const double>(relativeCandidates), options);
         },
         "observed"_a, "expected"_a, "absolute_candidates"_a, "relative_candidates"_a,
-        "options"_a = ComparisonOptions{});
+        "options"_a = allCloseComparisonOptions());
     module.def(
         "check_unwritten_sentinel",
         [](const Tensor& tensor, SentinelRegion region, size_t maxReportedMismatches) {

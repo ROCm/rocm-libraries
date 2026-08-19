@@ -252,7 +252,7 @@ namespace hipblaslt::host_validation
                                                    request.leadingDimension,
                                                    request.batchStride,
                                                    request.batchCount);
-            ComparisonOptions allCloseOptions;
+            ComparisonOptions allCloseOptions = allCloseComparisonOptions();
             allCloseOptions.computePointwiseStatistics = false;
             allCloseOptions.computeFrobenius           = false;
             allCloseOptions.maxReportedMismatches      = 0;
