@@ -53,7 +53,13 @@ namespace rocsparse
         const rocsparse_int tidy = hipThreadIdx_y;
 
         const rocsparse_int global_row = tidx + hipBlockIdx_x * row_block_dim;
-        const rocsparse_int global_col = tidy + hipBlockIdx_y * BLK_SIZE_Y;
+        // Loop over column panels: grid.y is capped at 65535, so each grid sweep
+        // covers hipGridDim_y * BLK_SIZE_Y columns. Advance by that stride to cover
+        // dense column counts that exceed the launch limit.
+        for(rocsparse_int col_offset = 0; col_offset < N;
+            col_offset += hipGridDim_y * BLK_SIZE_Y)
+        {
+        const rocsparse_int global_col = tidy + hipBlockIdx_y * BLK_SIZE_Y + col_offset;
 
         const rocsparse_int block_row = hipBlockIdx_x;
 
@@ -130,6 +136,7 @@ namespace rocsparse
             {
                 C[global_row + colC] = rocsparse::fma(beta, C[global_row + colC], alpha * sum);
             }
+        }
         }
     }
 }
