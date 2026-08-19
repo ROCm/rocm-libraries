@@ -506,7 +506,7 @@ typedef struct {
 /*! \brief RPPT Tensor descriptor type struct
  * \ingroup group_rppdefs
  */
-typedef struct {
+struct RpptDesc {
     RppSize_t numDims;
     Rpp32u offsetInBytes;
     RpptDataType dataType;
@@ -530,7 +530,8 @@ typedef struct {
             strides.cStride = 1;
         }
     }
-} RpptDesc, *RpptDescPtr;
+};
+typedef RpptDesc* RpptDescPtr;
 
 /*! \brief RPPT Tensor Generic descriptor type struct
  * \ingroup group_rppdefs
