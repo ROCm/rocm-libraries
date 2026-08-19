@@ -30,9 +30,15 @@ and bypasses the version comparison during that transition.
 ## Supported interface
 
 ```bash
+tensilelite benchmark-cluster --help
 tensilelite create-library --help
+tensilelite generate-summations --help
 tensilelite logic --help
+tensilelite logic-to-yaml --help
+tensilelite merge-library --help
+tensilelite retune-library --help
 tensilelite run --help
+tensilelite update-library --help
 
 # Equivalent module form
 python -m tensilelite --help
