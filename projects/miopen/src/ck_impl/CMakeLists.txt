@@ -141,7 +141,6 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
 
     # HIP runtime (hip::device required for compiling CK device code)
     target_link_libraries(${lib_name} PRIVATE hip::device)
-    miopen_workaround_amdhip64_missing(${lib_name})
 
     # Link against MIOpen for shared types (ConvSolution, InvokerFactory, etc.)
     target_link_libraries(${lib_name} PRIVATE MIOpen)

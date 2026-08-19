@@ -80,7 +80,6 @@ function( rocblas_library_settings lib_target_ )
   target_link_libraries( ${lib_target_} INTERFACE hip::host )
   if (WIN32)
     target_link_libraries( ${lib_target_} PRIVATE hip::device )
-    rocblas_workaround_amdhip64_missing( ${lib_target_} )
   else()
     target_link_libraries( ${lib_target_} PRIVATE hip::device -lstdc++fs --rtlib=compiler-rt --unwindlib=libgcc)
 

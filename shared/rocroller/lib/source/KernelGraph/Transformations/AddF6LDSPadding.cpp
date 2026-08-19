@@ -20,7 +20,7 @@ namespace rocRoller
         }
 
         CoordinateGraph::MacroTile paddedMacroTile(CoordinateGraph::MacroTile& macroTile,
-                                                   unsigned int                        paddingBytes)
+                                                   unsigned int                paddingBytes)
         {
             unsigned int const elementBits = 6;
             unsigned int const packing     = 16;

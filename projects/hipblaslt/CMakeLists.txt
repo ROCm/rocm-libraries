@@ -441,24 +441,6 @@ if(HIPBLASLT_ENABLE_HOST)
             ${rocTracer}
     )
 
-    if(WIN32 AND TARGET hip::amdhip64)
-        # clang's Windows HIP driver unconditionally appends the unversioned
-        # "amdhip64.lib" as a linker input whenever --hip-link is used (added by
-        # hip::device via hip-config-amd.cmake), regardless of the import lib's
-        # actual name. ROCm/TheRock Windows builds version that import lib (e.g.
-        # amdhip64_7.lib) to allow side-by-side installs, so the implicit lookup
-        # fails. Provide an unversioned alias on the link search path instead of
-        # patching clang.
-        set(HIPBLASLT_HIP_COMPAT_DIR "${CMAKE_CURRENT_BINARY_DIR}/hip_compat")
-        add_custom_command(TARGET hipblaslt PRE_LINK
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_HIP_COMPAT_DIR}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<TARGET_LINKER_FILE:hip::amdhip64>" "${HIPBLASLT_HIP_COMPAT_DIR}/amdhip64.lib"
-            VERBATIM
-        )
-        target_link_directories(hipblaslt PRIVATE "${HIPBLASLT_HIP_COMPAT_DIR}")
-    endif()
-
     if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
