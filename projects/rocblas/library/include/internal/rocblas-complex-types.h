@@ -153,10 +153,12 @@ class ROCBLAS_EXPORT rocblas_complex_num
         return ::sqrt(x);
     }
 
+#ifdef ROCM_USE_FLOAT16
     static __forceinline__ __device__ __host__ rocblas_half sqrt(rocblas_half x)
     {
         return static_cast<rocblas_half>(::sqrtf(float(x)));
     }
+#endif
 
     static __forceinline__ __device__ __host__ rocblas_bfloat16 sqrt(rocblas_bfloat16 x)
     {
