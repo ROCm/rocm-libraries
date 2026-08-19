@@ -169,6 +169,17 @@ knob, per the spec-field rule above.)*
   correctness bug — the day someone updates one site and forgets another, the code is subtly
   wrong only on the missed path. One named helper makes a partial update impossible. (This is
   the same failure as the duplicated-cohort case above.)
+- **Keep shape/dimension values out of identifiers, and hoist any hard-coded shape to a
+  named, classified constant.** A symbol like `_build_..._d256_lean`, or a bare
+  `head_size == 256` sprinkled through a body, reads as permanent and load-bearing even when
+  it is really *the only shape validated so far* — so the name lies the moment the code is
+  reused or generalized. Name the concept for what it *does* (`_build_..._lean`), lift the
+  shape into a named constant whose comment classifies it — **validation gate** (widen once
+  another shape is proven) vs **algorithmic limit** (the schedule genuinely bakes it, e.g. a
+  per-thread stride derived from that dimension) per §1 — and derive extents from `spec`
+  wherever the schedule actually allows it. Reviewer cue: a dimension baked into a symbol name
+  or a scattered literal is a prompt to ask "is this load-bearing, or just the first shape
+  that shipped?" — and to check the two answers (name vs guard) tell the same story.
 - **Arch-independent logic belongs in `common/`,** not forked across `gfx942/` and `gfx950/`.
   Forked copies drift; fix one, miss the other. Conversely, when logic *is* arch-specific, cover
   every arch you enabled — don't fix on the arch you happen to be sitting on and assume the
