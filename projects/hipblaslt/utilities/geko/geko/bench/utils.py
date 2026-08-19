@@ -24,9 +24,9 @@ logger = logging.getLogger("GEKO")
 
 import yaml
 try:
-    DEFAULT_YAML_LOADER = yaml.CSafeLoader
+    SafeLoader = yaml.CSafeLoader
 except (ModuleNotFoundError, AttributeError):
-    DEFAULT_YAML_LOADER = yaml.SafeLoader
+    SafeLoader = yaml.SafeLoader
 
 def parse_benchmark_output(file: str | Path) -> pd.DataFrame:
     """
@@ -144,7 +144,7 @@ def update_lib_source(df: pd.DataFrame, match_table_path: str | Path) -> pd.Data
     """
     try:
         with open(match_table_path) as f:
-            match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+            match_table = yaml.load(f, Loader=SafeLoader)
             df["lib_source"] = [Path(match_table[int(idx)][0]).parts[-2] for idx in df['solutionIdx']]
     except FileNotFoundError:
             logger.warning("MatchTable.yaml file not found.")
