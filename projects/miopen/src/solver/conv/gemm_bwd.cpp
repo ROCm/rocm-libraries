@@ -125,11 +125,12 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     {
         if(prefer_point_output_shape)
         {
-            // Keep the WTI model aligned with the 3D execution path:
-            // one strided-batched GEMM + one batched Col2Im launch.
-            n_gemm_strided_batched = in_n;
-            n_gemm_runs            = 1;
-            n_Col2ImGPU            = 1;
+            // Keep the WTI model aligned with the execution path: one strided-batched GEMM, plus
+            // one batched Col2Im only when dx cannot be written directly.
+            const auto direct_write = miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
+            n_gemm_strided_batched  = in_n;
+            n_gemm_runs             = 1;
+            n_Col2ImGPU             = direct_write ? 0 : 1;
         }
         else
         {
@@ -147,8 +148,6 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     wti *= gemm::SlowdownFactor(n_gemm_runs, 0.9, 0.9);
     wti *= gemm::SlowdownFactor(n_gemm_strided_batched, 1.0, 0.95);
     wti *= gemm::SlowdownFactor(n_Col2ImGPU, 0.4, 0.8);
-    if(prefer_point_output_shape && wti < 10.0)
-        wti = 10.0;
     return wti;
 }
 

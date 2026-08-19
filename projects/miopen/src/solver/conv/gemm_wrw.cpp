@@ -124,8 +124,6 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     wti *= gemm::SlowdownFactor(n_gemm_strided_batched, 1.0, 0.95);
     wti *= gemm::SlowdownFactor(n_gemm_strided_batched_sequental, 1.0, 0.9);
     wti *= gemm::SlowdownFactor(n_Im2ColGPU, 0.4, 0.8);
-    if(prefer_point_output_shape && wti < 10.0)
-        wti = 10.0;
     return wti;
 #else
     std::ignore = problem;
