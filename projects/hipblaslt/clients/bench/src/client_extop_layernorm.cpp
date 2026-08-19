@@ -196,40 +196,37 @@ int main(int argc, char** argv)
     using namespace hipblaslt::host_validation;
     const Layout tensorLayout     = Layout::contiguous(Shape{m, n});
     const Layout statisticsLayout = Layout::contiguous(Shape{m});
-    const Tensor referenceOutputTensor(ScalarType::Float32, tensorLayout);
-    const Tensor referenceMeanTensor(ScalarType::Float32, statisticsLayout);
-    const Tensor referenceInverseVarianceTensor(ScalarType::Float32, statisticsLayout);
 
     LayerNormProblem problem(tensorFromStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
-                             referenceOutputTensor,
+                             ScalarType::Float32,
                              1,
                              ScalarType::Float32);
-    problem.mean            = referenceMeanTensor;
-    problem.inverseVariance = referenceInverseVarianceTensor;
-    problem.epsilon         = 1e-5;
+    problem.meanType            = ScalarType::Float32;
+    problem.inverseVarianceType = ScalarType::Float32;
+    problem.epsilon             = 1e-5;
     if(affine)
     {
         const Layout affineLayout = Layout::contiguous(Shape{n});
         problem.gamma = tensorFromStorage(cpuGamma.data(), cpuGamma.size(), affineLayout);
         problem.beta  = tensorFromStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
     }
-    referenceLayerNorm(problem);
+    const LayerNormResult reference = referenceLayerNorm(problem);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
     reportComparison("Output",
                      roc::host_validation::compare(
                          tensorFromStorage(cpuOutput.data(), cpuOutput.size(), tensorLayout),
-                         referenceOutputTensor,
+                         reference.output,
                          comparisonOptions));
     reportComparison("Mean",
                      roc::host_validation::compare(
                          tensorFromStorage(cpuMean.data(), cpuMean.size(), statisticsLayout),
-                         referenceMeanTensor,
+                         *reference.mean,
                          comparisonOptions));
     reportComparison("Invvar",
                      roc::host_validation::compare(
                          tensorFromStorage(cpuInvvar.data(), cpuInvvar.size(), statisticsLayout),
-                         referenceInverseVarianceTensor,
+                         *reference.inverseVariance,
                          comparisonOptions));
 
     hipEvent_t beg, end;

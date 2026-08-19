@@ -152,25 +152,22 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     const Layout tensorLayout     = Layout::contiguous(Shape{m, n});
     const Layout statisticsLayout = Layout::contiguous(Shape{m});
     const Layout affineLayout     = Layout::contiguous(Shape{n});
-    const Tensor referenceOutputTensor(ScalarType::Float32, tensorLayout);
-    const Tensor referenceMeanTensor(ScalarType::Float32, statisticsLayout);
-    const Tensor referenceInverseVarianceTensor(ScalarType::Float32, statisticsLayout);
 
     LayerNormProblem problem(tensorFromStorage(input.data(), input.size(), tensorLayout),
-                             referenceOutputTensor,
+                             ScalarType::Float32,
                              1,
                              ScalarType::Float32);
-    problem.mean            = referenceMeanTensor;
-    problem.inverseVariance = referenceInverseVarianceTensor;
-    problem.gamma           = tensorFromStorage(gamma.data(), gamma.size(), affineLayout);
-    problem.beta            = tensorFromStorage(beta.data(), beta.size(), affineLayout);
-    problem.epsilon         = 1e-5;
-    referenceLayerNorm(problem);
+    problem.meanType            = ScalarType::Float32;
+    problem.inverseVarianceType = ScalarType::Float32;
+    problem.gamma               = tensorFromStorage(gamma.data(), gamma.size(), affineLayout);
+    problem.beta                = tensorFromStorage(beta.data(), beta.size(), affineLayout);
+    problem.epsilon             = 1e-5;
+    const LayerNormResult reference = referenceLayerNorm(problem);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
     const ComparisonResult  outputComparison
         = compare(tensorFromStorage(output.data(), output.size(), tensorLayout),
-                  referenceOutputTensor,
+                  reference.output,
                   comparisonOptions);
     EXPECT_TRUE(outputComparison.passed())
         << "LayerNorm output mismatches: " << outputComparison.mismatches
@@ -178,7 +175,7 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
 
     const ComparisonResult meanComparison
         = compare(tensorFromStorage(mean.data(), mean.size(), statisticsLayout),
-                  referenceMeanTensor,
+                  *reference.mean,
                   comparisonOptions);
     EXPECT_TRUE(meanComparison.passed())
         << "LayerNorm mean mismatches: " << meanComparison.mismatches
@@ -186,7 +183,7 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
 
     const ComparisonResult inverseVarianceComparison
         = compare(tensorFromStorage(invvar.data(), invvar.size(), statisticsLayout),
-                  referenceInverseVarianceTensor,
+                  *reference.inverseVariance,
                   comparisonOptions);
     EXPECT_TRUE(inverseVarianceComparison.passed())
         << "LayerNorm inverse-variance mismatches: " << inverseVarianceComparison.mismatches
