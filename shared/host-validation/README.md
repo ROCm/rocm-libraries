@@ -455,10 +455,11 @@ Python `VectorBinding`, `BlockScaleBinding`, `GemmOperand`, `GemmEpilogue`,
 `GemmProblem`, `GemmRequest`, and `GemmResult` are direct bindings of the C++
 types. C and D are explicit tensors; the result aliases D. Requests retain
 shallow Tensor handles, so inputs, outputs, aliases, and allocator-backed
-storage remain alive for the synchronous call. The flat Python
-`reference_gemm_result(a, b, c, ...)` overload delegates to the native owning
-path with a contiguous output. `GemmProblem` plus `GemmOutputOptions` exposes
-the same path with an affine output layout or partial logical selection.
+storage remain alive for the synchronous call.
+`reference_gemm_flat_result(a, b, c, ...)` is the explicitly named convenience
+that builds native descriptors and allocates a contiguous output.
+`GemmProblem` plus `GemmOutputOptions` exposes the same owning path with an
+affine output layout or partial logical selection.
 
 The optional `BlasGemmBackend` implements the same interface for dense
 F32/F64/complex GEMM and is selected through `GemmExecution`.

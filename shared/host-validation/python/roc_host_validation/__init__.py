@@ -117,10 +117,7 @@ def to_numpy(tensor, dtype=None) -> np.ndarray:
     return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
 
 
-_native_reference_gemm_result = reference_gemm_result  # noqa: F405
-
-
-def _reference_gemm_flat(
+def reference_gemm_flat_result(
     a,
     b,
     c,
@@ -148,7 +145,7 @@ def _reference_gemm_flat(
     output_conversion=OutputConversion.Default,  # noqa: F405
     accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
 ):
-    """Compatibility flat GEMM call translated into native descriptor objects."""
+    """Build native GEMM descriptors from tensor arguments and return the result."""
 
     operand_a = GemmOperand(a)  # noqa: F405
     operand_b = GemmOperand(b)  # noqa: F405
@@ -228,20 +225,16 @@ def _reference_gemm_flat(
         backend,
         backend == GemmBackend.Blocked,  # noqa: F405
     )
-    return _native_reference_gemm_result(problem, output, execution)
-
-
-def reference_gemm_result(*args, **kwargs):
-    """Run a native GEMM request/problem or translate the flat compatibility form."""
-
-    if args and isinstance(args[0], (GemmProblem, GemmRequest)):  # noqa: F405
-        return _native_reference_gemm_result(*args, **kwargs)
-    if "problem" in kwargs or "request" in kwargs:
-        return _native_reference_gemm_result(*args, **kwargs)
-    return _reference_gemm_flat(*args, **kwargs)
+    return reference_gemm_result(problem, output, execution)  # noqa: F405
 
 
 def reference_gemm(*args, **kwargs):
-    """Run reference GEMM and return only its output tensor."""
+    """Run a native GEMM request/problem and return only its output tensor."""
 
     return reference_gemm_result(*args, **kwargs).output
+
+
+def reference_gemm_flat(*args, **kwargs):
+    """Run the tensor-argument GEMM convenience API and return its output tensor."""
+
+    return reference_gemm_flat_result(*args, **kwargs).output
