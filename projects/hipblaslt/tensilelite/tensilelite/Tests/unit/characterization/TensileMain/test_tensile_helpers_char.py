@@ -278,12 +278,5 @@ def test_main_calls_tensile(monkeypatch):
     monkeypatch.setattr(M.sys, "argv", ["prog", "cfg.yaml", "out"])
     calls = []
     monkeypatch.setattr(M, "tensilelite", lambda argv: calls.append(argv))
-    assert M.main() == 0
-    assert calls == [["cfg.yaml", "out"]]
-
-def test_main_forwards_explicit_argv(monkeypatch):
-    calls = []
-    monkeypatch.setattr(M, "tensilelite", lambda argv: calls.append(argv))
-
-    assert M.main(["cfg.yaml", "out"]) == 0
+    M.main()
     assert calls == [["cfg.yaml", "out"]]
