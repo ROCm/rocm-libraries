@@ -5,6 +5,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
@@ -457,10 +458,39 @@ inline Config
     return config;
 }
 
+// Warns when `--engine-name` names nothing this process loaded. The check is on the
+// resolved ID rather than the string, so a name, a decimal ID and the hexadecimal ID an
+// unnamed engine displays under are all answered on the same terms. A miss is not fatal:
+// the name may belong to a plugin that was not loaded, and the preference is soft in any
+// case, so the run continues on the heuristic's pick.
+inline void warnOnUnknownEngineName(hipdnnHandle_t handle, const Config& config)
+{
+    if(config.engineName.empty())
+    {
+        return;
+    }
+
+    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(config.engineName);
+
+    size_t engineNameLen = 0;
+    if(hipdnnGetEngineNameById_ext(handle, engineId, nullptr, &engineNameLen)
+       == HIPDNN_STATUS_SUCCESS)
+    {
+        return;
+    }
+
+    std::cerr << "Warning: no loaded engine carries '" << config.engineName << "' (engine ID "
+              << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId)
+              << "). Check the spelling, and HIPDNN_PLUGIN_DIR if it names a plugin engine. "
+                 "Continuing with the engine the heuristic picks.\n";
+}
+
 template <typename F>
 bool run(F&& f)
 {
     bool allPassed = true;
+
+    warnOnUnknownEngineName(f.handle, f.config);
 
     const std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
     const std::vector<std::pair<std::string, TensorLayout>> layouts
