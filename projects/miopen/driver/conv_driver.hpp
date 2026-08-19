@@ -2166,6 +2166,13 @@ int ConvDriver<Tgpu, Tref>::RunForwardGPU()
     {
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
+        const bool perf_log_enabled = miopen::IsPerformanceLoggingEnabled();
+        miopen::ScopedKernelPhase bias_phase_scope(miopen::KernelPhase::Execution);
+        if(perf_log_enabled)
+        {
+            miopen::AddPerformanceConfig("ConvolutionForwardBias", "");
+        }
+
         int bias_return_code = CaptureKernel([&]() -> int {
             miopenConvolutionForwardBias(GetHandle(),
                                          &alpha,
@@ -2193,6 +2200,10 @@ int ConvDriver<Tgpu, Tref>::RunForwardGPU()
             else
             {
                 miopenGetKernelTime(GetHandle(), &time);
+            }
+            if(perf_log_enabled)
+            {
+                miopen::AddInvokerTimes(std::vector<float>{time});
             }
             printf("GPU Kernel Time Forward Conv. Bias Elapsed: %f ms\n", time);
         }
@@ -2843,6 +2854,13 @@ int ConvDriver<Tgpu, Tref>::RunBackwardGPU()
     {
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
+        const bool perf_log_enabled = miopen::IsPerformanceLoggingEnabled();
+        miopen::ScopedKernelPhase bias_phase_scope(miopen::KernelPhase::Execution);
+        if(perf_log_enabled)
+        {
+            miopen::AddPerformanceConfig("ConvolutionBackwardBias", "");
+        }
+
         int bias_return_code = CaptureKernel([&]() -> int {
             return miopenConvolutionBackwardBias(GetHandle(),
                                                  &alpha,
@@ -2878,6 +2896,10 @@ int ConvDriver<Tgpu, Tref>::RunBackwardGPU()
                 else
                 {
                     miopenGetKernelTime(GetHandle(), &time);
+                }
+                if(perf_log_enabled)
+                {
+                    miopen::AddInvokerTimes(std::vector<float>{time});
                 }
                 printf("GPU Kernel Time Backward Bias Conv. Elapsed: %f ms\n", time);
             }
