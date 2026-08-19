@@ -34,6 +34,17 @@ void requireOverflow(Function function, const char* message) {
     }
     require(overflowed, message);
 }
+
+template <typename Function>
+void requireInvalidArgument(Function function, const char* message) {
+    bool rejected = false;
+    try {
+        function();
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    require(rejected, message);
+}
 }  // namespace
 
 int main() {
@@ -112,6 +123,57 @@ int main() {
     require(tensor.loadAs<float>({1, 2}) == 11.0f && cloned.loadAs<float>({1, 2}) == 13.0f,
             "Tensor clone did not deep-copy storage.");
 
+    Tensor reshapeSource(ScalarType::Int32, Shape{2, 3});
+    for (size_t row = 0; row < 2; ++row)
+        for (size_t column = 0; column < 3; ++column)
+            reshapeSource.storeFrom({row, column}, static_cast<int32_t>(row * 3 + column));
+    Tensor reshaped = reshapeSource.reshape(Shape{3, 2});
+    require(reshaped.shape() == Shape{3, 2} && reshaped.loadAs<int32_t>({1, 1}) == 3,
+            "Tensor reshape changed logical linear order.");
+    reshaped.storeFrom({2, 1}, 19);
+    require(reshapeSource.loadAs<int32_t>({1, 2}) == 19,
+            "Tensor reshape did not return a shallow alias.");
+    requireInvalidArgument([&] { (void)reshapeSource.reshape(Shape{7}); },
+                           "Tensor reshape accepted a different element count.");
+
+    Tensor packedPaddingSource(ScalarType::Int4, Shape{3});
+    packedPaddingSource.storeFrom({0}, -8);
+    packedPaddingSource.storeFrom({1}, -3);
+    packedPaddingSource.storeFrom({2}, 7);
+    const Tensor packedPadded = packedPaddingSource.pad(Shape{5});
+    require(packedPadded.shape() == Shape{5} && packedPadded.storage().size() == 3 &&
+                packedPadded.loadAs<int32_t>({0}) == -8 &&
+                packedPadded.loadAs<int32_t>({1}) == -3 && packedPadded.loadAs<int32_t>({2}) == 7 &&
+                packedPadded.loadAs<int32_t>({3}) == 0 && packedPadded.loadAs<int32_t>({4}) == 0,
+            "Tensor padding did not preserve packed values and zero-fill new elements.");
+    requireInvalidArgument([&] { (void)packedPaddingSource.pad(Shape{2}); },
+                           "Tensor padding accepted a shrinking shape.");
+    requireInvalidArgument([&] { (void)packedPaddingSource.pad(Shape{3, 1}); },
+                           "Tensor padding accepted a different rank.");
+
+    Tensor permutationSource(ScalarType::Int12, Shape{2, 3});
+    for (size_t row = 0; row < 2; ++row)
+        for (size_t column = 0; column < 3; ++column)
+            permutationSource.storeFrom({row, column}, static_cast<int32_t>(100 * row + column));
+    const std::array<size_t, 2> transpose{1, 0};
+    const Tensor permutationResult = permutationSource.permute(transpose);
+    require(permutationResult.shape() == Shape{3, 2} && permutationResult.storage().size() == 9,
+            "Tensor permutation produced the wrong packed output geometry.");
+    for (size_t row = 0; row < 2; ++row)
+        for (size_t column = 0; column < 3; ++column)
+            require(permutationResult.loadAs<int32_t>({column, row}) ==
+                        permutationSource.loadAs<int32_t>({row, column}),
+                    "Tensor permutation changed a packed value.");
+    const std::array<size_t, 2> duplicatePermutation{0, 0};
+    const std::array<size_t, 2> outOfRangePermutation{0, 2};
+    const std::array<size_t, 1> wrongRankPermutation{0};
+    requireInvalidArgument([&] { (void)permutationSource.permute(duplicatePermutation); },
+                           "Tensor permutation accepted a duplicate dimension.");
+    requireInvalidArgument([&] { (void)permutationSource.permute(outOfRangePermutation); },
+                           "Tensor permutation accepted an out-of-range dimension.");
+    requireInvalidArgument([&] { (void)permutationSource.permute(wrongRankPermutation); },
+                           "Tensor permutation accepted the wrong rank.");
+
     Tensor packedCopySource(ScalarType::Int4, Shape{4});
     packedCopySource.storeFrom({0}, -8);
     packedCopySource.storeFrom({1}, -3);
@@ -133,6 +195,8 @@ int main() {
     paddedTensor.storeFrom({1, 1}, 9);
     require(paddedTensor.loadAs<int32_t>({0, 0}) == 4 && paddedTensor.loadAs<int32_t>({1, 1}) == 9,
             "Strided tensor layout mismatch.");
+    requireInvalidArgument([&] { (void)paddedTensor.reshape(Shape{4}); },
+                           "Tensor reshape accepted a noncontiguous layout.");
 
     Tensor paddedAlias = paddedTensor;
     paddedAlias.storeFrom({0, 1}, 12);
