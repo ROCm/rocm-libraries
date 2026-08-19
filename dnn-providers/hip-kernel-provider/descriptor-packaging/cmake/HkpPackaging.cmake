@@ -211,11 +211,11 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_register_tests(<kpack_python> <hipcc>)
-#   The pytest ctest entry (real compile -> prune -> pack -> rewrite, over the
-#   fixture slice). It compiles for real; there is no skip path. The shipped
-#   tree's shape (kpack-form UKDs, no loose .co, empty-arch skip) is asserted at
-#   the tool-output level in pytest; the install() rule itself is a stock
-#   recursive install(DIRECTORY) and is not separately staged.
+#   Register the pytest suite as two build-tree ctest entries running disjoint
+#   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
+#   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
+#   whose cascade runs each test once per tier with no overlap. Without pytest on
+#   PATH the entries register DISABLED so they list as skipped, not absent.
 # ---------------------------------------------------------------------------
 function(hkp_register_tests kpack_python hipcc)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
@@ -227,15 +227,47 @@ function(hkp_register_tests kpack_python hipcc)
             "the suite compiles kernels for real via --genco and cannot skip.")
     endif()
 
-    add_test(NAME hkp_pack_pytest
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -v)
-    # ENVIRONMENT is a ';'-joined list of VAR=VALUE entries; the resolved paths
-    # here use OS-native separators (no embedded ';'), so the join is safe.
+    # `python` resolves from PATH at test time; the ENVIRONMENT paths are
+    # configure-time absolutes, valid because these entries run only in the
+    # build tree on the configuring machine.
     set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}" "HKP_HIPCC=${hipcc}")
     if(kpack_python)
         list(APPEND _pyenv "HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${kpack_python}")
     endif()
-    set_tests_properties(hkp_pack_pytest PROPERTIES
-        LABELS "unit_test;hip-kernel-provider;quick;host"
-        ENVIRONMENT "${_pyenv}")
+
+    # When PATH `python` cannot import pytest, register the entries as DISABLED so
+    # they appear in the ctest listing as skipped rather than silently absent.
+    execute_process(
+        COMMAND python -c "import pytest"
+        RESULT_VARIABLE _pytest_rc
+        OUTPUT_QUIET ERROR_QUIET)
+    set(_disabled "")
+    if(NOT _pytest_rc EQUAL 0)
+        message(STATUS
+            "hkp: pytest not importable by PATH `python`; registering "
+            "descriptor-packaging pytest tests as DISABLED.")
+        set(_disabled DISABLED TRUE)
+    endif()
+
+    add_test(NAME hip-kernel-provider-hkp-pack-quick
+             COMMAND python -m pytest "${HKP_PKG_DIR}/tests" -m quick -v)
+    set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
+        ENVIRONMENT "${_pyenv}"
+        ${_disabled})
+
+    add_test(NAME hip-kernel-provider-hkp-pack
+             COMMAND python -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v)
+    set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
+        ENVIRONMENT "${_pyenv}"
+        ${_disabled})
+
+    # Both entries are add_test()'d in this scope just above, so the YAML's
+    # test_patterns match them via the directory-property loop. EXPLICIT_TESTS is
+    # avoided: apply_ctest_category_labels joins it with ';', which execute_process
+    # re-splits into separate argv, leaking a second name into the parser's
+    # positional install-file slot.
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+    endif()
 endfunction()

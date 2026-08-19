@@ -348,6 +348,7 @@ def test_neg_compile_failed(tmp_path, main_fixture, hipcc, kpack_python_dir):
         _run(src, tmp_path, hipcc, kpack_python_dir)
 
 
+@pytest.mark.quick
 def test_neg_malformed_build(tmp_path, main_fixture, hipcc, kpack_python_dir):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
@@ -359,6 +360,7 @@ def test_neg_malformed_build(tmp_path, main_fixture, hipcc, kpack_python_dir):
 
 
 # --- D. Negatives: descriptor ----------------------------------------------
+@pytest.mark.quick
 def test_neg_malformed_json(tmp_path, main_fixture, hipcc, kpack_python_dir):
     src = _copy_fixture(tmp_path, main_fixture)
     (src / "copy.kdp.json").write_text("{ not json", encoding="utf-8")
@@ -366,6 +368,7 @@ def test_neg_malformed_json(tmp_path, main_fixture, hipcc, kpack_python_dir):
         _run(src, tmp_path, hipcc, kpack_python_dir)
 
 
+@pytest.mark.quick
 def test_neg_missing_field(tmp_path, main_fixture, hipcc, kpack_python_dir):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
@@ -376,6 +379,7 @@ def test_neg_missing_field(tmp_path, main_fixture, hipcc, kpack_python_dir):
         _run(src, tmp_path, hipcc, kpack_python_dir)
 
 
+@pytest.mark.quick
 def test_neg_dangling_id(tmp_path, main_fixture, hipcc, kpack_python_dir):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
@@ -434,6 +438,7 @@ def test_cli1_single_arch(tmp_path, main_fixture, hipcc, kpack_python_dir):
     assert set(results) == {"gfx942"}
 
 
+@pytest.mark.quick
 def test_cli2_empty_gpu_targets(tmp_path, main_fixture, hipcc, kpack_python_dir):
     results = run_pipeline(
         source_root=main_fixture,
@@ -448,6 +453,7 @@ def test_cli2_empty_gpu_targets(tmp_path, main_fixture, hipcc, kpack_python_dir)
 
 
 # --- Unit: pruning reachability + wildcard ---------------------------------
+@pytest.mark.quick
 def test_wildcard_arch_matches(main_fixture):
     flat = load_flat_input(main_fixture)
     wild = next(k for k in flat.kdps() if k.id == "kdp-pointwise-wild")
@@ -540,6 +546,7 @@ def test_non_descriptor_json_skipped(tmp_path, main_fixture, hipcc, kpack_python
     assert not (tmp_path / "out" / "gfx942" / "notes.json").exists()
 
 
+@pytest.mark.quick
 def test_unknown_type_token_still_errors(
     tmp_path, main_fixture, hipcc, kpack_python_dir
 ):
@@ -625,6 +632,7 @@ def test_standalone_ukd_pruned_from_nonreferencing_shard(built):
     assert not (built["out"] / "gfx90a" / _STANDALONE_UKD_FILE).exists()
 
 
+@pytest.mark.quick
 def test_standalone_ukd_dangling_id(tmp_path, main_fixture, hipcc, kpack_python_dir):
     # A KDP referencing a UKD id string with no matching .ukd.json hard-errors.
     src = _copy_fixture(tmp_path, main_fixture)
@@ -673,6 +681,7 @@ def test_standalone_ukd_referenced_by_wildcard_kdp(
         assert (tmp_path / "out" / arch / _STANDALONE_UKD_FILE).exists(), arch
 
 
+@pytest.mark.quick
 def test_standalone_ukd_id_collides_with_inline(
     tmp_path, main_fixture, hipcc, kpack_python_dir
 ):
@@ -731,6 +740,7 @@ def test_every_shipped_ukd_stamped_with_shard_arch(built):
             assert _read(ukd_path)["arch"] == [arch], ukd_path.name
 
 
+@pytest.mark.quick
 def test_ukd_arch_not_subset_of_kdp_hard_errors(
     tmp_path, main_fixture, hipcc, kpack_python_dir
 ):
@@ -834,6 +844,7 @@ def test_wildcard_kdp_narrowed_per_kernel(
     assert (tmp_path / "out" / "gfx90a" / "pointwise_wild.kdp.json").exists()
 
 
+@pytest.mark.quick
 def test_multi_kdp_subset_violation_hard_errors(
     tmp_path, main_fixture, hipcc, kpack_python_dir
 ):
