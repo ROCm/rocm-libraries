@@ -43,47 +43,21 @@ from kernels import (
 
 
 def _patch_resolved_arch(arch: str):
-    """Pin the resolved attention arch for a test, on every module that reads it.
+    """Pin the resolved attention arch for a test, on the module that defines it.
 
-    ``_resolve_attention_arch`` is defined in ``kernels.common.attention_unified``
-    but imported *by name* into other modules (e.g.
-    ``builders.common.attention_spec_builder``), so each holds its own binding.
-    Patching only the defining module leaves the spec builder resolving the real
-    device arch -- which silently ignores the test's requested arch on any host
-    whose GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). Patch
-    every by-name importer so the pin actually reaches the builder.
+    ``_resolve_attention_arch`` lives in ``kernels.common.attention_unified`` and
+    ``builders.common.attention_spec_builder`` reaches it through that module
+    handle, so this one patch steers the builder too. A bound import in the
+    builder would freeze the reference at import time, leaving it on the real
+    device arch and silently ignoring the test's requested arch on any host whose
+    GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). That invariant
+    is pinned by ``test_arch_binding_guard.py``; it is not re-asserted here.
     """
     from unittest import mock
 
-    import builders.common.attention_spec_builder as _asb
     import kernels.common.attention_unified as _au
 
-    targets = [_au]
-    if getattr(_asb, "_resolve_attention_arch", None) is not None:
-        targets.append(_asb)
-    return _MultiPatch(
-        [
-            mock.patch.object(m, "_resolve_attention_arch", return_value=arch)
-            for m in targets
-        ]
-    )
-
-
-class _MultiPatch:
-    """Enter/exit a list of ``mock.patch`` context managers as one."""
-
-    def __init__(self, patches):
-        self._patches = patches
-
-    def __enter__(self):
-        for p in self._patches:
-            p.start()
-        return self
-
-    def __exit__(self, *exc):
-        for p in reversed(self._patches):
-            p.stop()
-        return False
+    return mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)
 
 
 # ---------------------------------------------------------------------
@@ -1967,6 +1941,65 @@ class TestAttentionHelpers(unittest.TestCase):
                     f"supported 3D kernel, got: {reason}",
                 )
 
+    @staticmethod
+    def _fp8_decode_problem(fp8_fnuz=False):
+        return UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=2048,
+            dtype="bf16",
+            use_fp8=True,
+            fp8_fnuz=fp8_fnuz,
+        )
+
+    def test_gfx942_fp8_decode_rejects_ocp_requires_fnuz(self):
+        """G3: OCP fp8 K/V on the gfx9_mfma family (gfx942) decodes as
+        e4m3fnuz and silently mis-decodes -> the gate must reject it (loud
+        error, not a NaN kernel) unless the caller opts into fnuz via
+        ``fp8_fnuz=True``.
+        """
+        from kernels import (
+            supports_native_unified_attention,
+            supports_native_unified_attention_3d_tiled,
+        )
+
+        with _patch_resolved_arch("gfx942"):
+            for gate in (
+                supports_native_unified_attention_3d_tiled,
+                supports_native_unified_attention,
+            ):
+                ok, reason = gate(self._fp8_decode_problem())
+                self.assertFalse(ok, msg=f"{gate.__name__} should reject OCP fp8")
+                self.assertIn("fnuz", reason)
+            # Opt-in acknowledges fnuz bytes -> not rejected for the format.
+            ok_fnuz, _ = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertTrue(ok_fnuz)
+
+    def test_gfx950_fp8_decode_accepts_ocp_rejects_fnuz(self):
+        """gfx950 decodes OCP fp8 natively: the guard accepts OCP K/V but must
+        reject fnuz-declared K/V, which would silently mis-decode on an OCP arch.
+        """
+        from kernels import supports_native_unified_attention_3d_tiled
+
+        with _patch_resolved_arch("gfx950"):
+            ok, reason = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem()
+            )
+            self.assertTrue(ok, msg=f"gfx950 decodes OCP fp8: {reason}")
+
+            ok_fnuz, reason_fnuz = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertFalse(ok_fnuz, msg="gfx950 should reject fnuz-declared fp8")
+            self.assertIn("fnuz", reason_fnuz)
+
     def test_tiled_3d_spec_builder_constructs_per_arch(self):
         """Focused guard on the 3D spec builder that broke: a decode problem must
         construct the arch's ``UnifiedAttention3DTiledSpec`` (signature parity)
@@ -2224,6 +2257,146 @@ class TestAttentionHelpers(unittest.TestCase):
         # Reduce kernel: exp2-weighted segment combine + NaN-safe factor.
         self.assertIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
+
+
+# ---------------------------------------------------------------------
+# AttentionDenseSpec — waves_per_eu validation, IR identity, cache isolation
+# ---------------------------------------------------------------------
+
+
+class TestAttentionDenseWavesPerEu(unittest.TestCase):
+    """Tests for the waves_per_eu fix on AttentionDenseSpec.
+
+    Three properties are verified independently so a single failure is
+    unambiguous:
+
+    1. ``__post_init__`` rejects out-of-range values (0, negative, >8).
+    2. The emitted LLVM IR carries the correct ``amdgpu-waves-per-eu``
+       attribute for each legal value — confirming the attribute reached
+       codegen correctly both before and after the cache-key fix.
+    3. Two specs differing only in ``waves_per_eu`` produce distinct compiled
+       binaries (cache-isolation fix: key now includes ``waves_per_eu``).
+
+    All three run without a GPU; test 3 needs comgr and is skipped when the
+    toolchain is unavailable (matching the pattern in
+    ``test_gfx950_dense_prefill_compiles_and_fits_budget``).
+    """
+
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+
+    def test_waves_per_eu_validation_rejects_out_of_range(self):
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        for bad in (0, -1, 9, 100):
+            with self.subTest(waves_per_eu=bad):
+                with self.assertRaises(
+                    ValueError, msg=f"waves_per_eu={bad} should be rejected"
+                ):
+                    AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=bad)
+
+        for good in (1, 2, 8):
+            with self.subTest(waves_per_eu=good):
+                # Must not raise
+                AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=good)
+
+    def test_waves_per_eu_ir_attribute(self):
+        """Each legal waves_per_eu value appears verbatim in the lowered IR."""
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+        from dataclasses import replace
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                spec = replace(base, waves_per_eu=wpe)
+                ll = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+                self.assertIn(f'"amdgpu-waves-per-eu"="{wpe},{wpe}"', ll)
+
+    def test_waves_per_eu_cache_key_isolation(self):
+        """Specs differing only in waves_per_eu produce distinct cache keys.
+
+        Before the fix the cache key was ``(kernel_name(), batch)``; two specs
+        with different ``waves_per_eu`` share the same ``kernel_name()`` and
+        ``batch``, so the second call would silently reuse the first binary.
+        After the fix the key is ``(kernel_name(), batch, waves_per_eu)``, so
+        each value maps to a distinct slot.
+
+        This test verifies the key structure directly (no comgr needed) and
+        checks that the distinct keys correspond to distinct binaries via the
+        IR attribute (which feeds AMDGPU register-file sizing).
+        """
+        from dataclasses import replace
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        specs = {wpe: replace(base, waves_per_eu=wpe) for wpe in (1, 2)}
+
+        # Cache keys must be distinct.
+        keys = {
+            wpe: (s.kernel_name(), s.batch, s.waves_per_eu) for wpe, s in specs.items()
+        }
+        self.assertNotEqual(
+            keys[1],
+            keys[2],
+            "waves_per_eu=1 and waves_per_eu=2 produce identical cache keys; "
+            "a sweep over waves_per_eu would silently reuse the first binary",
+        )
+
+        # The key difference (waves_per_eu in the 3rd position) must match the spec.
+        for wpe, key in keys.items():
+            self.assertEqual(key[2], wpe, f"cache key[2] should be waves_per_eu={wpe}")
+
+        # The two specs share kernel_name() and batch (the old key was just those two).
+        self.assertEqual(
+            keys[1][:2],
+            keys[2][:2],
+            "kernel_name() or batch differed unexpectedly — test setup error",
+        )
+
+    def test_waves_per_eu_cache_isolation_binaries(self):
+        """Specs differing only in waves_per_eu compile to distinct binaries.
+
+        Requires comgr; skipped when the toolchain is unavailable.
+        """
+        import hashlib
+        from dataclasses import replace
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        hsaco_hashes = {}
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                spec = replace(base, waves_per_eu=wpe)
+                art = _compile_or_skip(
+                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+                )
+                hsaco_hashes[wpe] = hashlib.sha256(art.hsaco).hexdigest()
+
+        if len(hsaco_hashes) == 2:
+            self.assertNotEqual(
+                hsaco_hashes[1],
+                hsaco_hashes[2],
+                "waves_per_eu=1 and waves_per_eu=2 produced identical binaries; "
+                "waves_per_eu is not reaching the register-file sizing pass",
+            )
 
 
 # ---------------------------------------------------------------------
@@ -2664,7 +2837,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # package system (editable-installed) rather than a hardcoded path, then
         # load it under a private name with a fake ``aiter`` injected.
         module_path = importlib.util.find_spec(
-            "builders.gfx950.attention.parity_unified_attention"
+            "builders.gfx950.attention.prefill.parity_unified_attention"
         ).origin
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")

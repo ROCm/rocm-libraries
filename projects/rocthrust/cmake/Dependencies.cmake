@@ -210,7 +210,7 @@ function(fetch_dep method repo_name repo_path download_branch)
         execute_process(COMMAND ${GIT_PATH} sparse-checkout init --cone
           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src OUTPUT_VARIABLE __git_out ERROR_VARIABLE __git_err)
 
-        execute_process(COMMAND ${GIT_PATH} sparse-checkout set projects/${repo_name}
+        execute_process(COMMAND ${GIT_PATH} sparse-checkout set projects/${repo_name} shared/primbench
           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src OUTPUT_VARIABLE __git_out ERROR_VARIABLE __git_err)
 
         # Finally, download the files using git checkout.
@@ -444,6 +444,10 @@ if(BUILD_BENCHMARK)
       set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
     endif()
 
+    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON leaks into
+    # rocrand and causes its benchmarks to build. Suppress that here.
+    set(BUILD_BENCHMARK OFF)
+    
     FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
@@ -454,6 +458,7 @@ if(BUILD_BENCHMARK)
       LOG_INSTALL   TRUE
     )
     FetchContent_MakeAvailable(rocrand)
+    set(BUILD_BENCHMARK ON)
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
