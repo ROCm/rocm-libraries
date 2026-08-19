@@ -602,24 +602,18 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
             // Point-output wrw: dW[K,C*Z*Y*X] = dY^T[K,N] * X[N,C*Z*Y*X].
             if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
             {
-                float zero = 0.0f;
                 float time = 0;
 
+                // The single GEMM below contracts the whole batch (k = N) with beta = 0, so it
+                // overwrites all K * C*Z*Y*X elements of the destination without reading it.
+                // That needs no pre-zeroing, unlike the accumulating per-batch loop further
+                // down, which relies on beta = 1.
                 Data_t accum_buf = dw;
                 if(use_fp32_accum)
                 {
                     accum_buf =
                         static_cast<Data_t>(static_cast<char*>(workspace) + fp32_accum_offset);
-                    TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
-                    SetTensor(handle, fp32Desc, accum_buf, &zero);
                 }
-                else
-                {
-                    SetTensor(handle, dwDesc_, dw, &zero);
-                }
-
-                if(handle.IsProfilingEnabled())
-                    time += handle.GetKernelTime();
 
                 auto single_gemm_desc        = gemm_desc;
                 single_gemm_desc.batch_count = 1;
