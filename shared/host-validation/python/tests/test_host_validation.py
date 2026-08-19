@@ -1702,11 +1702,9 @@ class TensorAndGemmTests(unittest.TestCase):
                 problem.leading_dimension = dimensions[0]
                 problem.block_axis = block_axis
                 problem.block_size = 32
-                recipe = hv.MxGenerationRecipe()
-                recipe.mode = hv.MxGenerationMode.Bounded
-                recipe.parameter0 = -1
-                recipe.parameter1 = 1
-                problem.data = recipe
+                problem.data = hv.MxDataRecipe.bounded(
+                    hv.MxBoundedDataParameters(-1, 1)
+                )
 
                 first = hv.generate_mx(problem)
                 second = hv.generate_mx(problem)
@@ -1744,11 +1742,9 @@ class TensorAndGemmTests(unittest.TestCase):
                 problem.block_axis = block_axis
                 problem.block_size = 4
                 problem.seed = 12345
-                recipe = hv.MxGenerationRecipe()
-                recipe.mode = hv.MxGenerationMode.Bounded
-                recipe.parameter0 = minimum
-                recipe.parameter1 = maximum
-                problem.data = recipe
+                problem.data = hv.MxDataRecipe.bounded(
+                    hv.MxBoundedDataParameters(minimum, maximum)
+                )
 
                 observed = hv.generate_mx(problem)
                 expected_data, expected_scales, expected_indices, expected_reference = (
@@ -1786,11 +1782,7 @@ class TensorAndGemmTests(unittest.TestCase):
         problem.shape = hv.Shape([8, 8])
         problem.block_axis = 0
         problem.block_size = 4
-        data_recipe = hv.MxGenerationRecipe()
-        data_recipe.mode = hv.MxGenerationMode.Bounded
-        data_recipe.parameter0 = -1.0
-        data_recipe.parameter1 = 1.0
-        problem.data = data_recipe
+        problem.data = hv.MxDataRecipe.bounded(hv.MxBoundedDataParameters(-1.0, 1.0))
         problem.scale = hv.MxScaleGenerationMode.One
 
         observed = hv.generate_mx(problem)

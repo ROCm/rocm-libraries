@@ -509,15 +509,20 @@ problem.shape = Shape{64, 128};
 problem.leadingDimension = 64;
 problem.blockAxis = 0;
 problem.blockSize = 32;
-problem.data.mode = MxGenerationMode::Bounded;
+problem.data = MxDataRecipe::bounded({.lower = -1.0, .upper = 1.0});
 problem.scale = MxScaleGenerationMode::Derived;
 
 MxGenerationResult result = generateMx(problem);
 ```
 
-`MxGenerationRecipe` controls only source data values.
+`MxDataRecipe` is an immutable, factory-built description of source data.
+Bounded intervals, alternating magnitudes, normal distributions, and integer
+distributions have typed parameter objects; fixed patterns use named factories.
 `MxScaleGenerationMode` independently selects derived per-block scales or a
 constant minimum, one, two, maximum, or NaN scale.
+
+The allocator overload applies one `TensorStorageAllocator` to data, scales,
+scale indices, and the decoded reference tensor.
 
 The operation is GEMM- and architecture-agnostic. A product adapter identifies
 which tensor axis is block-scaled and may subsequently transform the natural

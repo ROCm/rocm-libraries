@@ -76,7 +76,7 @@ void checkReference(const MxGenerationProblem& problem, const MxGenerationResult
     }
 }
 
-MxGenerationProblem stochasticProblem(MxGenerationMode mode) {
+MxGenerationProblem stochasticProblem(MxDataRecipe recipe) {
     MxGenerationProblem problem;
     problem.dataType = ScalarType::Float4E2M1;
     problem.scaleType = ScalarType::E8M0;
@@ -85,24 +85,7 @@ MxGenerationProblem stochasticProblem(MxGenerationMode mode) {
     problem.blockAxis = 0;
     problem.blockSize = 16;
     problem.seed = 12345;
-    problem.data.mode = mode;
-    switch (mode) {
-        case MxGenerationMode::Bounded:
-        case MxGenerationMode::BoundedAlternatingSign:
-            problem.data.parameter0 = -1.0;
-            problem.data.parameter1 = 1.0;
-            break;
-        case MxGenerationMode::Normal:
-            problem.data.parameter0 = 0.0;
-            problem.data.parameter1 = 1.25;
-            break;
-        case MxGenerationMode::UniformInteger:
-            problem.data.parameter0 = -4.0;
-            problem.data.parameter1 = 4.0;
-            break;
-        default:
-            break;
-    }
+    problem.data = std::move(recipe);
     return problem;
 }
 }  // namespace
@@ -126,9 +109,7 @@ int main() {
             problem.leadingDimension = 73;
             problem.blockAxis = 0;
             problem.blockSize = blockSize;
-            problem.data.mode = MxGenerationMode::Bounded;
-            problem.data.parameter0 = -1;
-            problem.data.parameter1 = 1;
+            problem.data = MxDataRecipe::bounded();
             const MxGenerationResult result = generateMx(problem);
             checkReference(problem, result);
             const size_t expectedBytes =
@@ -174,28 +155,48 @@ int main() {
                 "FP6 packing-tail storage size mismatch.");
     }
 
-    const std::array deterministicModes{
-        MxGenerationMode::Identity,
-        MxGenerationMode::Ones,
-        MxGenerationMode::Zeros,
-        MxGenerationMode::Sequential,
-        MxGenerationMode::RowIndex,
-        MxGenerationMode::ColumnIndex,
-        MxGenerationMode::Checkerboard,
-        MxGenerationMode::ScaledDiagonal,
-        MxGenerationMode::Twos,
-        MxGenerationMode::NegativeOnes,
-        MxGenerationMode::Maximum,
-        MxGenerationMode::DenormalMinimum,
-        MxGenerationMode::DenormalMaximum,
-        MxGenerationMode::NaN,
-        MxGenerationMode::UniformInteger,
+    MxGenerationProblem allocatorProblem;
+    allocatorProblem.dataType = ScalarType::Float6E3M2;
+    allocatorProblem.scaleType = ScalarType::E8M0;
+    allocatorProblem.shape = Shape{5, 1};
+    allocatorProblem.leadingDimension = 7;
+    allocatorProblem.blockAxis = 0;
+    allocatorProblem.blockSize = 4;
+    std::vector<size_t> allocationSizes;
+    const MxGenerationResult allocated = generateMx(allocatorProblem, [&](size_t bytes) {
+        allocationSizes.push_back(bytes);
+        return TensorStorage::allocate(bytes);
+    });
+    require(allocationSizes.size() == 4,
+            "MX allocator overload did not allocate all four result tensors.");
+    require(allocationSizes[0] == allocated.data.storage().size() &&
+                allocationSizes[1] == allocated.scales.storage().size() &&
+                allocationSizes[2] == allocated.scaleIndices.storage().size() &&
+                allocationSizes[3] == allocated.reference.storage().size(),
+            "MX allocator received a size different from its result tensor storage.");
+
+    const std::array deterministicRecipes{
+        MxDataRecipe::identity(),
+        MxDataRecipe::constant(1.0),
+        MxDataRecipe::constant(0.0),
+        MxDataRecipe::sequential(),
+        MxDataRecipe::rowIndex(),
+        MxDataRecipe::columnIndex(),
+        MxDataRecipe::checkerboard(),
+        MxDataRecipe::scaledDiagonal(),
+        MxDataRecipe::constant(2.0),
+        MxDataRecipe::constant(-1.0),
+        MxDataRecipe::typeMaximum(),
+        MxDataRecipe::typeDenormalMinimum(),
+        MxDataRecipe::typeDenormalMaximum(),
+        MxDataRecipe::typeNaN(),
+        MxDataRecipe::uniformInteger({.lower = -4, .upper = 4}),
     };
-    for (const MxGenerationMode mode : deterministicModes) {
-        MxGenerationProblem problem = stochasticProblem(mode);
+    for (const MxDataRecipe& recipe : deterministicRecipes) {
+        MxGenerationProblem problem = stochasticProblem(recipe);
         const MxGenerationResult result = generateMx(problem);
         checkReference(problem, result);
-        if (mode == MxGenerationMode::NaN) {
+        if (recipe == MxDataRecipe::typeNaN()) {
             for (size_t column = 0; column < problem.shape[1]; ++column)
                 for (size_t row = 0; row < problem.shape[0]; ++row)
                     require(std::isnan(result.reference.loadAs<float>({row, column})),
@@ -208,10 +209,10 @@ int main() {
     infinity.scaleType = ScalarType::E8M0;
     infinity.shape = Shape{16, 3};
     infinity.blockSize = 16;
-    infinity.data.mode = MxGenerationMode::Infinity;
+    infinity.data = MxDataRecipe::typeInfinity();
     checkReference(infinity, generateMx(infinity));
 
-    MxGenerationProblem explicitScale = stochasticProblem(MxGenerationMode::Bounded);
+    MxGenerationProblem explicitScale = stochasticProblem(MxDataRecipe::bounded());
     explicitScale.scale = MxScaleGenerationMode::One;
     const MxGenerationResult explicitlyScaled = generateMx(explicitScale);
     for (size_t scaleIndex = 0; scaleIndex < explicitlyScaled.scales.shape()[0]; ++scaleIndex)
@@ -225,7 +226,7 @@ int main() {
         std::pair{MxScaleGenerationMode::Two, uint8_t{128}},
     };
     for (const auto& [mode, expectedRaw] : constantScaleModes) {
-        MxGenerationProblem constantScale = stochasticProblem(MxGenerationMode::Sequential);
+        MxGenerationProblem constantScale = stochasticProblem(MxDataRecipe::sequential());
         constantScale.scale = mode;
         const MxGenerationResult result = generateMx(constantScale);
         for (size_t scaleIndex = 0; scaleIndex < result.scales.shape()[0]; ++scaleIndex)
@@ -234,7 +235,7 @@ int main() {
         checkReference(constantScale, result);
     }
 
-    MxGenerationProblem maximumScale = stochasticProblem(MxGenerationMode::Sequential);
+    MxGenerationProblem maximumScale = stochasticProblem(MxDataRecipe::sequential());
     maximumScale.scale = MxScaleGenerationMode::Maximum;
     const MxGenerationResult maximumScaled = generateMx(maximumScale);
     for (size_t scaleIndex = 0; scaleIndex < maximumScaled.scales.shape()[0]; ++scaleIndex)
@@ -242,7 +243,7 @@ int main() {
                 "MX explicit maximum-scale generation mismatch.");
     checkReference(maximumScale, maximumScaled);
 
-    MxGenerationProblem nanScale = stochasticProblem(MxGenerationMode::Sequential);
+    MxGenerationProblem nanScale = stochasticProblem(MxDataRecipe::sequential());
     nanScale.scale = MxScaleGenerationMode::NaN;
     const MxGenerationResult nanScaled = generateMx(nanScale);
     for (size_t scaleIndex = 0; scaleIndex < nanScaled.scales.shape()[0]; ++scaleIndex)
@@ -253,8 +254,7 @@ int main() {
     MxGenerationProblem impossibleInterval = explicitScale;
     impossibleInterval.shape = Shape{8192, 1};
     impossibleInterval.leadingDimension = 8192;
-    impossibleInterval.data.parameter0 = 0.1;
-    impossibleInterval.data.parameter1 = 0.2;
+    impossibleInterval.data = MxDataRecipe::bounded({.lower = 0.1, .upper = 0.2});
     bool rejectedImpossibleInterval = false;
     try {
         (void)generateMx(impossibleInterval);
@@ -264,13 +264,16 @@ int main() {
     require(rejectedImpossibleInterval,
             "MX parallel generation did not reject an unrepresentable bounded interval.");
 
-    const std::array stochasticModes{
-        MxGenerationMode::Bounded,   MxGenerationMode::BoundedAlternatingSign,
-        MxGenerationMode::Unbounded, MxGenerationMode::Trigonometric,
-        MxGenerationMode::Normal,    MxGenerationMode::UniformInteger,
+    const std::array stochasticRecipes{
+        MxDataRecipe::bounded(),
+        MxDataRecipe::boundedAlternatingSign(),
+        MxDataRecipe::unbounded(),
+        MxDataRecipe::trigonometric(),
+        MxDataRecipe::normal({.mean = 0.0, .standardDeviation = 1.25}),
+        MxDataRecipe::uniformInteger({.lower = -4, .upper = 4}),
     };
-    for (const MxGenerationMode mode : stochasticModes) {
-        MxGenerationProblem problem = stochasticProblem(mode);
+    for (const MxDataRecipe& recipe : stochasticRecipes) {
+        MxGenerationProblem problem = stochasticProblem(recipe);
 #ifdef _OPENMP
         omp_set_dynamic(0);
         omp_set_num_threads(1);
