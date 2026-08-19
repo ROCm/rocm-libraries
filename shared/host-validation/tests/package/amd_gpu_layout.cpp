@@ -20,12 +20,12 @@ int main() {
     std::vector<uint8_t> gfx950Input(32 * 8);
     std::iota(gfx950Input.begin(), gfx950Input.end(), uint8_t{0});
     auto gfx950 = preSwizzleScalesGFX950(gfx950Input, {32, 8});
-    if (gfx950.size() != preSwizzleScalesGFX950PaddedSize(32, 8)) return 2;
+    if (gfx950.size() != 32 * 8) return 2;
 
     std::vector<uint8_t> gfx1250Input(2 * 5);
     std::iota(gfx1250Input.begin(), gfx1250Input.end(), uint8_t{1});
     auto gfx1250 = preSwizzleScalesGFX1250(gfx1250Input, 2, 5, 32);
-    if (gfx1250.size() != preSwizzleScalesGFX1250PaddedSize(2, 5, 32)) return 3;
+    if (gfx1250.size() != 2 * 8) return 3;
 
     return 0;
 }

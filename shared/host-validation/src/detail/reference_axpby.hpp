@@ -50,7 +50,7 @@ AxpbyRunInfo referenceAxpbyTyped(const AxpbyProblem& problem) {
         if (y) value += beta * (*y)(indices);
         output.store(indices, value);
     });
-    return {.elementsComputed = problem.output.shape().elementCount()};
+    return {.outputElementsWritten = problem.output.shape().elementCount()};
 }
 }  // namespace detail
 }  // namespace roc::host_validation

@@ -16,6 +16,14 @@ namespace hipblaslt::host_validation
 {
     using namespace ::roc::host_validation;
 
+    enum class GroupedGemmRandomDomain : uint64_t
+    {
+        MatrixA = 0,
+        MatrixB = 1,
+        MatrixC = 2,
+        Bias    = 3,
+    };
+
     template <typename InputA, typename InputB, typename Output>
     void initializeGroupedGemm(std::vector<InputA>&     a,
                                int64_t                  sizeA,
@@ -28,55 +36,54 @@ namespace hipblaslt::host_validation
                                hipblaslt_initialization initialization,
                                uint64_t                 seed = defaultInitializationSeed)
     {
-        auto fillValues
-            = [&](auto& values, int64_t size, GenerationPatternSpec pattern, uint64_t stream) {
-                  if(size < 0)
-                      throw std::invalid_argument("Grouped GEMM initialization size is negative.");
-                  if(static_cast<size_t>(size) > values.size())
-                      throw std::invalid_argument(
-                          "Grouped GEMM initialization size exceeds destination storage.");
-                  pattern.stream = stream;
-                  initializeTensor(values.data(),
-                                   Layout::contiguous(Shape{static_cast<size_t>(size)}),
-                                   GenerationOptions{.seed = seed, .real = std::move(pattern)});
-              };
+        const auto fillValues = [&](auto&                              values,
+                                    int64_t                            size,
+                                    const GenerationRecipe::Component& component,
+                                    GroupedGemmRandomDomain            domain) {
+            if(size < 0)
+                throw std::invalid_argument("Grouped GEMM initialization size is negative.");
+            if(static_cast<size_t>(size) > values.size())
+                throw std::invalid_argument(
+                    "Grouped GEMM initialization size exceeds destination storage.");
+            const uint64_t recipeSeed
+                = compatibility::seedForRandomDomain(seed, static_cast<uint64_t>(domain));
+            initializeTensor(values.data(),
+                             Layout::contiguous(Shape{static_cast<size_t>(size)}),
+                             GenerationRecipe::realOnly(component, {.seed = recipeSeed}));
+        };
 
-        const auto fillAllOperands = [&](const GenerationPatternSpec& pattern) {
-            fillValues(a, sizeA, pattern, 0);
-            fillValues(b, sizeB, pattern, 1);
-            fillValues(c, sizeC, pattern, 2);
-            fillValues(bias, sizeBias, pattern, 3);
+        const auto fillAllOperands = [&](const GenerationRecipe::Component& component) {
+            fillValues(a, sizeA, component, GroupedGemmRandomDomain::MatrixA);
+            fillValues(b, sizeB, component, GroupedGemmRandomDomain::MatrixB);
+            fillValues(c, sizeC, component, GroupedGemmRandomDomain::MatrixC);
+            fillValues(bias, sizeBias, component, GroupedGemmRandomDomain::Bias);
         };
 
         // HPL means High-Performance Linpack style: uniform values in [-0.5, 0.5].
-        const GenerationPatternSpec hpl{
-            .pattern    = GenerationPattern::UniformReal,
-            .parameter0 = -0.5,
-            .parameter1 = 0.5,
-        };
+        const GenerationRecipe::Component hpl
+            = GenerationRecipe::uniformReal({.lower = -0.5, .upper = 0.5});
 
         if(initialization == hipblaslt_initialization::rand_int)
         {
-            const GenerationPatternSpec randomInteger{
-                .pattern    = GenerationPattern::UniformInteger,
-                .parameter0 = 1,
-                .parameter1 = 10,
-            };
+            const GenerationRecipe::Component randomInteger
+                = GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
             // Legacy grouped GEMM initialization alternates B's signs to limit reduction growth
             // for 16-bit inputs; A, C, and bias retain the positive integer recipe.
-            GenerationPatternSpec alternatingRandom = randomInteger;
-            alternatingRandom.alternatingDimensions = {0};
-            fillValues(a, sizeA, randomInteger, 0);
-            fillValues(b, sizeB, alternatingRandom, 1);
-            fillValues(c, sizeC, randomInteger, 2);
-            fillValues(bias, sizeBias, randomInteger, 3);
+            const GenerationRecipe::Component alternatingRandom
+                = randomInteger.withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = false});
+            fillValues(a, sizeA, randomInteger, GroupedGemmRandomDomain::MatrixA);
+            fillValues(b, sizeB, alternatingRandom, GroupedGemmRandomDomain::MatrixB);
+            fillValues(c, sizeC, randomInteger, GroupedGemmRandomDomain::MatrixC);
+            fillValues(bias, sizeBias, randomInteger, GroupedGemmRandomDomain::Bias);
         }
         else if(initialization == hipblaslt_initialization::trig_float)
         {
-            fillValues(a, sizeA, {.pattern = GenerationPattern::Sine}, 0);
-            fillValues(b, sizeB, {.pattern = GenerationPattern::Cosine}, 1);
-            fillValues(c, sizeC, {.pattern = GenerationPattern::Sine}, 2);
-            fillValues(bias, sizeBias, {.pattern = GenerationPattern::Sine}, 3);
+            const GenerationRecipe::Component sine   = GenerationRecipe::sine();
+            const GenerationRecipe::Component cosine = GenerationRecipe::cosine();
+            fillValues(a, sizeA, sine, GroupedGemmRandomDomain::MatrixA);
+            fillValues(b, sizeB, cosine, GroupedGemmRandomDomain::MatrixB);
+            fillValues(c, sizeC, sine, GroupedGemmRandomDomain::MatrixC);
+            fillValues(bias, sizeBias, sine, GroupedGemmRandomDomain::Bias);
         }
         else if(initialization == hipblaslt_initialization::hpl)
         {
@@ -84,33 +91,28 @@ namespace hipblaslt::host_validation
         }
         else if(initialization == hipblaslt_initialization::uniform_low_precision)
         {
-            const GenerationPatternSpec uniform{
-                .pattern    = GenerationPattern::UniformReal,
-                .parameter0 = -6.0,
-                .parameter1 = 6.0,
-            };
+            const GenerationRecipe::Component uniform
+                = GenerationRecipe::uniformReal({.lower = -6.0, .upper = 6.0});
             fillAllOperands(uniform);
         }
         else if(initialization == hipblaslt_initialization::special)
         {
             // Legacy "special" uses the fixed binary16 edge-value pair from
             // hipblaslt_init_alt_impl_big/small for A and B; C and bias use HPL-style values.
-            fillValues(
-                a,
-                sizeA,
-                {.pattern = GenerationPattern::Constant, .parameter0 = specialInitializationAValue},
-                0);
-            fillValues(
-                b,
-                sizeB,
-                {.pattern = GenerationPattern::Constant, .parameter0 = specialInitializationBValue},
-                1);
-            fillValues(c, sizeC, hpl, 2);
-            fillValues(bias, sizeBias, hpl, 3);
+            fillValues(a,
+                       sizeA,
+                       GenerationRecipe::constant({.value = specialInitializationAValue}),
+                       GroupedGemmRandomDomain::MatrixA);
+            fillValues(b,
+                       sizeB,
+                       GenerationRecipe::constant({.value = specialInitializationBValue}),
+                       GroupedGemmRandomDomain::MatrixB);
+            fillValues(c, sizeC, hpl, GroupedGemmRandomDomain::MatrixC);
+            fillValues(bias, sizeBias, hpl, GroupedGemmRandomDomain::Bias);
         }
         else
         {
-            fillAllOperands({});
+            fillAllOperands(GenerationRecipe::zero());
         }
     }
 } // namespace hipblaslt::host_validation

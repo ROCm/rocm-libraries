@@ -23,8 +23,8 @@ set(_expected_Core_target roc::host-validation-core)
 set(_expected_Core_dependencies)
 set(_expected_Operations_target roc::host-validation)
 set(_expected_Operations_dependencies Core)
-set(_expected_Tiled_target roc::host-validation-tiled)
-set(_expected_Tiled_dependencies Operations)
+set(_expected_Blocked_target roc::host-validation-blocked)
+set(_expected_Blocked_dependencies Operations)
 set(_expected_BLAS_target roc::host-validation-blas)
 set(_expected_BLAS_dependencies Operations)
 set(_expected_MX_target roc::host-validation-mx)
@@ -36,7 +36,7 @@ set(
 set(_expected_AMDGPULayout_dependencies)
 
 if(NOT "${ROCHostValidation_SUPPORTED_COMPONENTS}"
-   STREQUAL "Core;Operations;Tiled;BLAS;MX;AMDGPULayout")
+   STREQUAL "Core;Operations;Blocked;BLAS;MX;AMDGPULayout")
     message(FATAL_ERROR
         "Unexpected supported-component list: "
         "${ROCHostValidation_SUPPORTED_COMPONENTS}"
@@ -100,8 +100,8 @@ if(ROCHostValidation_TEST_COMPONENT STREQUAL "Core")
     set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../core_only/main.cpp")
 elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "Operations")
     set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../validation.cpp")
-elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "Tiled")
-    set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../tiled.cpp")
+elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "Blocked")
+    set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../blocked.cpp")
 elseif(ROCHostValidation_TEST_COMPONENT STREQUAL "BLAS")
     set(_test_source "${CMAKE_CURRENT_LIST_DIR}/../blas.cpp")
     if(NOT "${ROCHostValidation_BLAS_INTEGER_SIZE}" STREQUAL "4")

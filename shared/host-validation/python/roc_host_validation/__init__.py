@@ -8,7 +8,10 @@ import numpy as np
 from ._roc_host_validation import *  # noqa: F403
 
 
-_NUMPY_DTYPES = {
+# Default NumPy containers for decoded numerical values. These are not storage
+# dtypes: packed and custom encodings remain in tensor.storage and decode into
+# the wider type listed here.
+_DEFAULT_DECODED_DTYPES = {
     ScalarType.Boolean: np.bool_,  # noqa: F405
     ScalarType.UInt8: np.uint8,  # noqa: F405
     ScalarType.Int8: np.int8,  # noqa: F405
@@ -56,6 +59,21 @@ _SCALAR_TYPES_FROM_NUMPY = {
 }
 
 
+def default_decoded_dtype(scalar_type) -> np.dtype:
+    """Return the default NumPy dtype for decoded values of scalar_type.
+
+    This describes the owning array returned by to_numpy, not tensor.storage's
+    encoded or packed representation.
+    """
+
+    try:
+        return np.dtype(_DEFAULT_DECODED_DTYPES[scalar_type])
+    except KeyError as error:
+        raise ValueError(
+            f"No default decoded NumPy dtype for scalar type {scalar_type!r}"
+        ) from error
+
+
 def from_numpy(array: np.ndarray, scalar_type=None):
     """Create an owning host-validation tensor by quantizing NumPy values."""
 
@@ -88,10 +106,14 @@ def from_numpy(array: np.ndarray, scalar_type=None):
 
 
 def to_numpy(tensor, dtype=None) -> np.ndarray:
-    """Decode a host-validation tensor into an owning NumPy array."""
+    """Decode tensor values into an owning NumPy array.
+
+    dtype selects the decoded output container. It does not reinterpret the
+    encoded bytes exposed by tensor.storage.
+    """
 
     if dtype is None:
-        dtype = _NUMPY_DTYPES[tensor.type]
+        dtype = default_decoded_dtype(tensor.type)
     return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
 
 

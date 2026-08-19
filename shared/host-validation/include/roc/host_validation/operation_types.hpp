@@ -12,6 +12,13 @@
 #include <vector>
 
 namespace roc::host_validation {
+// Standalone Problem types bind the input and caller-owned output tensors for
+// one operation. GEMM separates reusable numerical semantics (GemmProblem)
+// from invocation state (GemmRequest). Execution types select implementation
+// policy without changing numerical semantics. Result types return output
+// aliases plus RunInfo; RunInfo fields count completed work as documented by
+// each operation.
+
 // Shared pointwise activation selector for GEMM and standalone epilogue
 // descriptors. Consumers provide any activation parameters separately.
 enum class Activation {
@@ -63,6 +70,32 @@ enum class OutputSelectionKind {
     Explicit,
 };
 
+namespace detail {
+// Tests divisors only through floor(sqrt(value)). The quotient comparison is
+// equivalent to divisor * divisor <= value and cannot overflow size_t.
+inline bool isPrimeStride(size_t value) {
+    if (value < 2) return false;
+    if (value % 2 == 0) return value == 2;
+    if (value % 3 == 0) return value == 3;
+
+    for (size_t divisor = 5; divisor <= value / divisor; divisor += 6) {
+        if (value % divisor == 0 || value % (divisor + 2) == 0) return false;
+    }
+    return true;
+}
+
+inline size_t nextPrimeStride(size_t value) {
+    if (value <= 2) return 2;
+    size_t candidate = value % 2 == 0 ? value + 1 : value;
+    while (!isPrimeStride(candidate)) {
+        if (candidate > std::numeric_limits<size_t>::max() - 2)
+            throw std::overflow_error("Prime-stride output selection overflow.");
+        candidate += 2;
+    }
+    return candidate;
+}
+}  // namespace detail
+
 // Describes which logical linear output indices an operation should evaluate.
 // Explicit indices are normalized when constructed and validated against the
 // operation's logical element count when consumed.
@@ -96,7 +129,7 @@ class OutputSelection {
                                        size_t requestedElements) {
         if (requestedElements == 0 || requestedElements >= logicalElements) return all();
         const size_t candidate = std::max<size_t>(1, allocatedElements / requestedElements);
-        return strided(0, nextPrime(candidate));
+        return strided(0, detail::nextPrimeStride(candidate));
     }
 
     OutputSelectionKind kind() const {
@@ -153,30 +186,6 @@ class OutputSelection {
         // only one needed to validate the complete selection.
         if (!m_indices.empty() && m_indices.back() >= logicalElements)
             throw std::out_of_range("Explicit output selection index exceeds output shape.");
-    }
-
-    static bool isPrime(size_t value) {
-        if (value < 2) return false;
-        if (value % 2 == 0) return value == 2;
-        if (value % 3 == 0) return value == 3;
-
-        // Every prime greater than three is 6k +/- 1. The quotient condition
-        // is equivalent to divisor * divisor <= value, but cannot overflow.
-        for (size_t divisor = 5; divisor <= value / divisor; divisor += 6) {
-            if (value % divisor == 0 || value % (divisor + 2) == 0) return false;
-        }
-        return true;
-    }
-
-    static size_t nextPrime(size_t value) {
-        if (value <= 2) return 2;
-        size_t candidate = value % 2 == 0 ? value + 1 : value;
-        while (!isPrime(candidate)) {
-            if (candidate > std::numeric_limits<size_t>::max() - 2)
-                throw std::overflow_error("Prime-stride output selection overflow.");
-            candidate += 2;
-        }
-        return candidate;
     }
 
     OutputSelectionKind m_kind = OutputSelectionKind::All;

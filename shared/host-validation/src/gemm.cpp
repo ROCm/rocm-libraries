@@ -20,9 +20,9 @@ GemmSupportInfo queryGemmSupport(const GemmRequest& request, const GemmExecution
 
     switch (backend) {
         case GemmBackend::Automatic:
-        case GemmBackend::Canonical:
+        case GemmBackend::Pointwise:
             return {.supported = true, .reason = {}};
-        case GemmBackend::Tiled:
+        case GemmBackend::Blocked:
         case GemmBackend::Blas:
             if (backendImplementation == nullptr)
                 return {
@@ -58,17 +58,17 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
                 };
             fallbackReason = implementationSupport.reason;
         }
-        backend = GemmBackend::Canonical;
+        backend = GemmBackend::Pointwise;
     }
 
     const GemmSupportInfo requestedSupport =
         queryGemmSupport(request, {.backend = backend}, backendImplementation);
     if (!requestedSupport) {
         if (execution.requireRequestedBackend) throw std::invalid_argument(requestedSupport.reason);
-        if (backend == GemmBackend::Canonical) throw std::invalid_argument(requestedSupport.reason);
+        if (backend == GemmBackend::Pointwise) throw std::invalid_argument(requestedSupport.reason);
         fallbackReason = requestedSupport.reason;
-        backend = GemmBackend::Canonical;
-    } else if (backend != GemmBackend::Canonical) {
+        backend = GemmBackend::Pointwise;
+    } else if (backend != GemmBackend::Pointwise) {
         return {
             .output = request.d,
             .runInfo = backendImplementation->run(request),
@@ -76,7 +76,7 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
     }
 
     const GemmSupportInfo pointwiseSupport =
-        queryGemmSupport(request, {.backend = GemmBackend::Canonical});
+        queryGemmSupport(request, {.backend = GemmBackend::Pointwise});
     if (!pointwiseSupport) throw std::invalid_argument(pointwiseSupport.reason);
 
     GemmRunInfo runInfo = detail::runPointwiseGemm(request);

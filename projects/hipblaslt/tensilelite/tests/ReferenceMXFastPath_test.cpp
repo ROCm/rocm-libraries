@@ -6,6 +6,7 @@
 #include <Reference.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
 #include <roc/host_validation/comparison.hpp>
 #include <roc/host_validation/generation.hpp>
 
@@ -61,21 +62,20 @@ namespace
     }
 
     template <typename T>
-    void generateValues(std::vector<T>&                             values,
-                        roc::host_validation::ScalarType            type,
-                        roc::host_validation::GenerationPatternSpec pattern,
-                        std::uint64_t                               seed,
-                        std::uint64_t                               stream)
+    void generateValues(std::vector<T>&                                   values,
+                        roc::host_validation::ScalarType                  type,
+                        roc::host_validation::GenerationRecipe::Component component,
+                        std::uint64_t                                     seed,
+                        std::uint64_t                                     stream)
     {
         static_assert(std::is_trivially_copyable_v<T>);
         using namespace roc::host_validation;
 
-        pattern.stream = stream;
-        GenerationOptions options;
-        options.seed = seed;
-        options.real = std::move(pattern);
+        const auto recipe = GenerationRecipe::realOnly(
+            std::move(component),
+            tensilelite_adapter::settingsForLegacyGenerationStream(seed, stream));
         Tensor generated(type, Layout::contiguous(Shape{values.size()}));
-        generate(generated, options);
+        generate(generated, recipe);
 
         const std::span<std::byte> destination = std::as_writable_bytes(std::span<T>(values));
         if(generated.storage().size() != destination.size())
@@ -85,7 +85,7 @@ namespace
 
 #ifdef TENSILE_USE_FP8_BF8
     template <typename Scale>
-    void expectTiledNonE8MXScale(rocisa::DataType scaleType)
+    void expectBlockedNonE8MXScale(rocisa::DataType scaleType)
     {
         const size_t M       = 2;
         const size_t N       = 2;
@@ -105,7 +105,7 @@ namespace
         inputs.mxsa = mxsa.data();
         inputs.mxsb = mxsb.data();
 
-        ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+        ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
         EXPECT_EQ(d, (std::vector<float>{128, 128, 128, 128}));
     }
 #endif
@@ -133,7 +133,7 @@ TEST(ReferenceMXFastPath, SupportsMixedInputTypesWithMXFP4)
     inputs.mxsa = mxsa.data();
     inputs.mxsb = mxsb.data();
 
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 64);
 }
 
@@ -143,11 +143,11 @@ TEST(ReferenceMXFastPath, SupportsMixedInputTypesWithMXFP4)
 
 TEST(ReferenceMXFastPath, SupportsNonE8ScaleStorage)
 {
-    expectTiledNonE8MXScale<E5M3>(rocisa::DataType::E5M3);
-    expectTiledNonE8MXScale<Float8>(rocisa::DataType::Float8);
+    expectBlockedNonE8MXScale<E5M3>(rocisa::DataType::E5M3);
+    expectBlockedNonE8MXScale<Float8>(rocisa::DataType::Float8);
 }
 
-TEST(ReferenceMXFastPath, MatchesCanonicalForScaledFP8Gemm)
+TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
 {
     const size_t M       = 64;
     const size_t N       = 64;
@@ -160,48 +160,46 @@ TEST(ReferenceMXFastPath, MatchesCanonicalForScaledFP8Gemm)
     std::vector<Float8> a(M * K);
     std::vector<Float8> b(K * N);
     std::vector<float>  c(M * N, 0.0f);
-    std::vector<float>  dCanonical(M * N, 0.0f);
-    std::vector<float>  dTiled(M * N, 0.0f);
+    std::vector<float>  dPointwise(M * N, 0.0f);
+    std::vector<float>  dBlocked(M * N, 0.0f);
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    roc::host_validation::GenerationPatternSpec binary;
-    binary.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
-    binary.candidates = {-1.0, 1.0};
-    roc::host_validation::GenerationPatternSpec scale;
-    scale.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
-    scale.candidates = {1.0, 2.0, 4.0};
-    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binary, 12345, 0);
-    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binary, 12345, 1);
-    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scale, 12345, 2);
-    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scale, 12345, 3);
+    const auto binaryValues
+        = roc::host_validation::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+    const auto scaleValues
+        = roc::host_validation::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
+    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 12345, 0);
+    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 12345, 1);
+    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scaleValues, 12345, 2);
+    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scaleValues, 12345, 3);
 
     EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(mxsa, [](E8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(mxsb, [](E8 value) { return float(value) != 0.0f; }));
 
-    ContractionInputs inputsCanonical(a.data(), b.data(), c.data(), dCanonical.data(), 1.0f, 0.0f);
-    inputsCanonical.mxsa = mxsa.data();
-    inputsCanonical.mxsb = mxsb.data();
+    ContractionInputs inputsPointwise(a.data(), b.data(), c.data(), dPointwise.data(), 1.0f, 0.0f);
+    inputsPointwise.mxsa = mxsa.data();
+    inputsPointwise.mxsb = mxsb.data();
 
-    ContractionInputs inputsTiled(a.data(), b.data(), c.data(), dTiled.data(), 1.0f, 0.0f);
-    inputsTiled.mxsa = mxsa.data();
-    inputsTiled.mxsb = mxsb.data();
+    ContractionInputs inputsBlocked(a.data(), b.data(), c.data(), dBlocked.data(), 1.0f, 0.0f);
+    inputsBlocked.mxsa = mxsa.data();
+    inputsBlocked.mxsb = mxsb.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputsCanonical, /*elementsToValidate=*/-1));
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsTiled, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputsBlocked, /*elementsToValidate=*/-1));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dTiled)),
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dCanonical)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dBlocked)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dPointwise)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
 }
 
-TEST(ReferenceMXFastPath, MatchesCanonicalWithBetaAndBias)
+TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
 {
     const size_t M       = 48;
     const size_t N       = 32;
@@ -216,30 +214,24 @@ TEST(ReferenceMXFastPath, MatchesCanonicalWithBetaAndBias)
     std::vector<Float8> a(M * K);
     std::vector<Float8> b(K * N);
     std::vector<float>  c(M * N);
-    std::vector<float>  dCanonical(M * N, 0.0f);
-    std::vector<float>  dTiled(M * N, 0.0f);
+    std::vector<float>  dPointwise(M * N, 0.0f);
+    std::vector<float>  dBlocked(M * N, 0.0f);
     std::vector<float>  bias(M);
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    roc::host_validation::GenerationPatternSpec binary;
-    binary.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
-    binary.candidates = {-1.0, 1.0};
-    roc::host_validation::GenerationPatternSpec scale;
-    scale.pattern    = roc::host_validation::GenerationPattern::CandidateSet;
-    scale.candidates = {1.0, 2.0, 4.0};
-    roc::host_validation::GenerationPatternSpec cPattern;
-    cPattern.pattern    = roc::host_validation::GenerationPattern::Constant;
-    cPattern.parameter0 = 0.25;
-    roc::host_validation::GenerationPatternSpec biasPattern;
-    biasPattern.pattern    = roc::host_validation::GenerationPattern::Constant;
-    biasPattern.parameter0 = 0.5;
-    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binary, 54321, 0);
-    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binary, 54321, 1);
-    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scale, 54321, 2);
-    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scale, 54321, 3);
-    generateValues(c, roc::host_validation::ScalarType::Float32, cPattern, 54321, 4);
-    generateValues(bias, roc::host_validation::ScalarType::Float32, biasPattern, 54321, 5);
+    const auto binaryValues
+        = roc::host_validation::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+    const auto scaleValues
+        = roc::host_validation::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
+    const auto cValues    = roc::host_validation::GenerationRecipe::constant({.value = 0.25});
+    const auto biasValues = roc::host_validation::GenerationRecipe::constant({.value = 0.5});
+    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 54321, 0);
+    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 54321, 1);
+    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scaleValues, 54321, 2);
+    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scaleValues, 54321, 3);
+    generateValues(c, roc::host_validation::ScalarType::Float32, cValues, 54321, 4);
+    generateValues(bias, roc::host_validation::ScalarType::Float32, biasValues, 54321, 5);
 
     EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
@@ -248,22 +240,22 @@ TEST(ReferenceMXFastPath, MatchesCanonicalWithBetaAndBias)
     EXPECT_EQ(c.front(), 0.25f);
     EXPECT_EQ(bias.front(), 0.5f);
 
-    ContractionInputs inputsCanonical(a.data(), b.data(), c.data(), dCanonical.data(), 1.0f, 0.5f);
-    inputsCanonical.mxsa = mxsa.data();
-    inputsCanonical.mxsb = mxsb.data();
-    inputsCanonical.bias = bias.data();
+    ContractionInputs inputsPointwise(a.data(), b.data(), c.data(), dPointwise.data(), 1.0f, 0.5f);
+    inputsPointwise.mxsa = mxsa.data();
+    inputsPointwise.mxsb = mxsb.data();
+    inputsPointwise.bias = bias.data();
 
-    ContractionInputs inputsTiled(a.data(), b.data(), c.data(), dTiled.data(), 1.0f, 0.5f);
-    inputsTiled.mxsa = mxsa.data();
-    inputsTiled.mxsb = mxsb.data();
-    inputsTiled.bias = bias.data();
+    ContractionInputs inputsBlocked(a.data(), b.data(), c.data(), dBlocked.data(), 1.0f, 0.5f);
+    inputsBlocked.mxsa = mxsa.data();
+    inputsBlocked.mxsb = mxsb.data();
+    inputsBlocked.bias = bias.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputsCanonical, /*elementsToValidate=*/-1));
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsTiled, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputsBlocked, /*elementsToValidate=*/-1));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dTiled)),
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dCanonical)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dBlocked)),
+        roc::host_validation::Tensor::fromNative(std::span<const float>(dPointwise)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches

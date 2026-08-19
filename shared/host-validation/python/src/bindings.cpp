@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "bindings.hpp"
+
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/complex.h>
 #include <nanobind/stl/optional.h>
@@ -13,10 +15,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
-#include <roc/host_validation/backends/tiled.hpp>
-#ifdef HOST_VALIDATION_PYTHON_HAS_MX
-#include <roc/host_validation/mx.hpp>
-#endif
+#include <roc/host_validation/backends/blocked.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
 #include <string>
@@ -427,14 +426,15 @@ GemmEpilogue gemmEpilogue(const PythonGemmEpilogue& epilogue, ScalarType accumul
 }
 
 const GemmBackendImplementation* pythonGemmBackendImplementation(
-    GemmBackend backend, bool useTiledForAutomatic = false) {
-    if (backend == GemmBackend::Tiled ||
-        (backend == GemmBackend::Automatic && useTiledForAutomatic)) {
-        static const TiledGemmBackend tiled;
-        return &tiled;
+    GemmBackend backend, bool useBlockedForAutomatic = false) {
+    if (backend == GemmBackend::Blocked ||
+        (backend == GemmBackend::Automatic && useBlockedForAutomatic)) {
+        static const BlockedGemmBackend blocked;
+        return &blocked;
     }
-    if (backend != GemmBackend::Automatic && backend != GemmBackend::Canonical)
-        throw std::invalid_argument("Python reference_gemm exposes Canonical and Tiled backends.");
+    if (backend != GemmBackend::Automatic && backend != GemmBackend::Pointwise)
+        throw std::invalid_argument(
+            "Python reference_gemm exposes Pointwise and Blocked backends.");
     return nullptr;
 }
 
@@ -518,7 +518,7 @@ PythonGemmResult referenceGemmOwned(
     request.outputSelection = std::move(outputSelection);
     const GemmExecution execution{
         .backend = backend,
-        .requireRequestedBackend = backend == GemmBackend::Tiled,
+        .requireRequestedBackend = backend == GemmBackend::Blocked,
     };
     GemmRunInfo runInfo =
         referenceGemm(request, execution, pythonGemmBackendImplementation(backend, true)).runInfo;
@@ -636,10 +636,6 @@ Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType 
     Tensor output(outputType, Shape(std::move(outputDimensions)));
     referenceSum(ReductionProblem(input, output, accumulatorType, std::move(axes)));
     return output;
-}
-
-Tensor generateOwned(ScalarType type, std::vector<size_t> shape, const GenerationOptions& options) {
-    return generate(type, Shape(std::move(shape)), options);
 }
 
 Tensor referenceMaximumAbsoluteOwned(const Tensor& input, ScalarType outputType,
@@ -761,8 +757,8 @@ NB_MODULE(_roc_host_validation, module) {
 
     nb::enum_<GemmBackend>(module, "GemmBackend")
         .value("Automatic", GemmBackend::Automatic)
-        .value("Canonical", GemmBackend::Canonical)
-        .value("Tiled", GemmBackend::Tiled);
+        .value("Pointwise", GemmBackend::Pointwise)
+        .value("Blocked", GemmBackend::Blocked);
 
     nb::enum_<OutputConversion>(module, "OutputConversion")
         .value("Default", OutputConversion::Default)
@@ -788,47 +784,8 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Swish", Activation::Swish)
         .value("Clamp", Activation::Clamp);
 
-    nb::enum_<GenerationPattern>(module, "GenerationPattern")
-        .value("Zero", GenerationPattern::Zero)
-        .value("Constant", GenerationPattern::Constant)
-        .value("CandidateSet", GenerationPattern::CandidateSet)
-        .value("UniformInteger", GenerationPattern::UniformInteger)
-        .value("AbsoluteUniformInteger", GenerationPattern::AbsoluteUniformInteger)
-        .value("UniformReal", GenerationPattern::UniformReal)
-        .value("Normal", GenerationPattern::Normal)
-        .value("Sine", GenerationPattern::Sine)
-        .value("Cosine", GenerationPattern::Cosine)
-        .value("AbsoluteSine", GenerationPattern::AbsoluteSine)
-        .value("AbsoluteCosine", GenerationPattern::AbsoluteCosine)
-        .value("SerialIndex", GenerationPattern::SerialIndex)
-        .value("SerialDimension", GenerationPattern::SerialDimension)
-        .value("AffineIndexRemainder", GenerationPattern::AffineIndexRemainder)
-        .value("Identity", GenerationPattern::Identity)
-        .value("CheckerboardUniformInteger", GenerationPattern::CheckerboardUniformInteger)
-        .value("TypeMaximum", GenerationPattern::TypeMaximum)
-        .value("TypeLowest", GenerationPattern::TypeLowest)
-        .value("TypeDenormalMinimum", GenerationPattern::TypeDenormalMinimum)
-        .value("TypeDenormalMaximum", GenerationPattern::TypeDenormalMaximum)
-        .value("TypeNaN", GenerationPattern::TypeNaN)
-        .value("TypeInfinity", GenerationPattern::TypeInfinity)
-        .value("TypeNegativeInfinity", GenerationPattern::TypeNegativeInfinity)
-        .value("TypeNegativeZero", GenerationPattern::TypeNegativeZero)
-        .value("UniformTypeRange", GenerationPattern::UniformTypeRange)
-        .value("RandomEncodedExponent", GenerationPattern::RandomEncodedExponent)
-        .value("RawConstant", GenerationPattern::RawConstant)
-        .value("UniformRawInteger", GenerationPattern::UniformRawInteger)
-        .value("RandomRawBits", GenerationPattern::RandomRawBits)
-        .value("RawSerialDimension", GenerationPattern::RawSerialDimension);
-
-    nb::enum_<LogicalIndexOrder>(module, "LogicalIndexOrder")
-        .value("FirstDimensionFastest", LogicalIndexOrder::FirstDimensionFastest)
-        .value("LastDimensionFastest", LogicalIndexOrder::LastDimensionFastest);
-
-    nb::enum_<GenerationTransform>(module, "GenerationTransform")
-        .value("Identity", GenerationTransform::None)
-        .value("Absolute", GenerationTransform::Absolute)
-        .value("Sine", GenerationTransform::Sine)
-        .value("Cosine", GenerationTransform::Cosine);
+    python_bindings::registerGenerationBindings(module);
+    python_bindings::registerMxBindings(module);
 
     nb::enum_<StructuredSparsitySelection>(module, "StructuredSparsitySelection")
         .value("Fixed", StructuredSparsitySelection::Fixed)
@@ -968,7 +925,7 @@ NB_MODULE(_roc_host_validation, module) {
 
     nb::class_<GemmExecution>(
         module, "GemmExecution",
-        "Call-time GEMM backend selection. Python supplies the built-in tiled implementation.")
+        "Call-time GEMM backend selection. Python supplies the built-in blocked implementation.")
         .def(nb::init<>())
         .def(nb::init<GemmBackend, bool>(), "backend"_a, "require_requested_backend"_a = false)
         .def_rw("backend", &GemmExecution::backend)
@@ -992,10 +949,6 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("math_mode", &PythonGemmRequest::mathMode)
         .def_rw("epilogue", &PythonGemmRequest::epilogue)
         .def_rw("output_selection", &PythonGemmRequest::outputSelection);
-
-    nb::enum_<ComparisonIndexOrder>(module, "ComparisonIndexOrder")
-        .value("FirstDimensionFastest", ComparisonIndexOrder::FirstDimensionFastest)
-        .value("LastDimensionFastest", ComparisonIndexOrder::LastDimensionFastest);
 
     nb::enum_<UlpComparisonMode>(module, "UlpComparisonMode")
         .value("RelativeSpacing", UlpComparisonMode::RelativeSpacing)
@@ -1098,90 +1051,6 @@ NB_MODULE(_roc_host_validation, module) {
     module.attr("ComparisonPlan") = module.attr("ComparisonOptions");
     module.attr("ComparisonReport") = module.attr("ComparisonResult");
 
-    nb::class_<GenerationPatternSpec>(module, "GenerationPatternSpec")
-        .def(nb::init<>())
-        .def_rw("pattern", &GenerationPatternSpec::pattern)
-        .def_rw("parameter0", &GenerationPatternSpec::parameter0)
-        .def_rw("parameter1", &GenerationPatternSpec::parameter1)
-        .def_rw("value_scale", &GenerationPatternSpec::valueScale)
-        .def_rw("value_offset", &GenerationPatternSpec::valueOffset)
-        .def_rw("stream", &GenerationPatternSpec::stream)
-        .def_rw("dimension", &GenerationPatternSpec::dimension)
-        .def_rw("source_type", &GenerationPatternSpec::sourceType)
-        .def_rw("transform", &GenerationPatternSpec::transform)
-        .def_rw("dimension_coefficients", &GenerationPatternSpec::dimensionCoefficients)
-        .def_rw("affine_offset", &GenerationPatternSpec::affineOffset)
-        .def_rw("remainder_divisor", &GenerationPatternSpec::remainderDivisor)
-        .def_rw("candidates", &GenerationPatternSpec::candidates)
-        .def_rw("alternating_dimensions", &GenerationPatternSpec::alternatingDimensions)
-        .def_rw("negative_parity", &GenerationPatternSpec::negativeParity);
-
-    nb::class_<GenerationOptions>(module, "GenerationOptions")
-        .def(nb::init<>())
-        .def_rw("seed", &GenerationOptions::seed)
-        .def_rw("index_order", &GenerationOptions::indexOrder)
-        .def_rw("real", &GenerationOptions::real)
-        .def_rw("imaginary", &GenerationOptions::imaginary);
-
-#ifdef HOST_VALIDATION_PYTHON_HAS_MX
-    nb::enum_<MxGenerationMode>(module, "MxGenerationMode")
-        .value("Bounded", MxGenerationMode::Bounded)
-        .value("BoundedAlternatingSign", MxGenerationMode::BoundedAlternatingSign)
-        .value("Unbounded", MxGenerationMode::Unbounded)
-        .value("Identity", MxGenerationMode::Identity)
-        .value("Ones", MxGenerationMode::Ones)
-        .value("Zeros", MxGenerationMode::Zeros)
-        .value("Sequential", MxGenerationMode::Sequential)
-        .value("RowIndex", MxGenerationMode::RowIndex)
-        .value("ColumnIndex", MxGenerationMode::ColumnIndex)
-        .value("Checkerboard", MxGenerationMode::Checkerboard)
-        .value("ScaledDiagonal", MxGenerationMode::ScaledDiagonal)
-        .value("Twos", MxGenerationMode::Twos)
-        .value("NegativeOnes", MxGenerationMode::NegativeOnes)
-        .value("Maximum", MxGenerationMode::Maximum)
-        .value("DenormalMinimum", MxGenerationMode::DenormalMinimum)
-        .value("DenormalMaximum", MxGenerationMode::DenormalMaximum)
-        .value("NaN", MxGenerationMode::NaN)
-        .value("Infinity", MxGenerationMode::Infinity)
-        .value("Trigonometric", MxGenerationMode::Trigonometric)
-        .value("Normal", MxGenerationMode::Normal)
-        .value("UniformInteger", MxGenerationMode::UniformInteger);
-
-    nb::class_<MxGenerationRecipe>(module, "MxGenerationRecipe")
-        .def(nb::init<>())
-        .def_rw("mode", &MxGenerationRecipe::mode)
-        .def_rw("parameter0", &MxGenerationRecipe::parameter0)
-        .def_rw("parameter1", &MxGenerationRecipe::parameter1);
-
-    nb::enum_<MxScaleGenerationMode>(module, "MxScaleGenerationMode")
-        .value("Derived", MxScaleGenerationMode::Derived)
-        .value("Minimum", MxScaleGenerationMode::Minimum)
-        .value("One", MxScaleGenerationMode::One)
-        .value("Two", MxScaleGenerationMode::Two)
-        .value("Maximum", MxScaleGenerationMode::Maximum)
-        .value("NaN", MxScaleGenerationMode::NaN);
-
-    nb::class_<MxGenerationProblem>(module, "MxGenerationProblem")
-        .def(nb::init<>())
-        .def_rw("data_type", &MxGenerationProblem::dataType)
-        .def_rw("scale_type", &MxGenerationProblem::scaleType)
-        .def_rw("shape", &MxGenerationProblem::shape)
-        .def_rw("leading_dimension", &MxGenerationProblem::leadingDimension)
-        .def_rw("block_axis", &MxGenerationProblem::blockAxis)
-        .def_rw("block_size", &MxGenerationProblem::blockSize)
-        .def_rw("data", &MxGenerationProblem::data)
-        .def_rw("scale", &MxGenerationProblem::scale)
-        .def_rw("seed", &MxGenerationProblem::seed);
-
-    nb::class_<MxGenerationResult>(module, "MxGenerationResult")
-        .def_ro("data", &MxGenerationResult::data)
-        .def_ro("scales", &MxGenerationResult::scales)
-        .def_ro("scale_indices", &MxGenerationResult::scaleIndices)
-        .def_ro("reference", &MxGenerationResult::reference);
-
-    module.def("generate_mx", &generateMx, "problem"_a);
-#endif
-
     nb::class_<StructuredSparsityPattern>(module, "StructuredSparsityPattern")
         .def(nb::init<>())
         .def_rw("axis", &StructuredSparsityPattern::axis)
@@ -1190,7 +1059,6 @@ NB_MODULE(_roc_host_validation, module) {
         .def_rw("selection", &StructuredSparsityPattern::selection)
         .def_rw("fixed_positions", &StructuredSparsityPattern::fixedPositions)
         .def_rw("seed", &StructuredSparsityPattern::seed)
-        .def_rw("stream", &StructuredSparsityPattern::stream)
         .def_rw("index_order", &StructuredSparsityPattern::indexOrder);
 
     nb::class_<StructuredSparsityRunInfo>(module, "StructuredSparsityRunInfo")
@@ -1253,7 +1121,7 @@ NB_MODULE(_roc_host_validation, module) {
             nb::rv_policy::reference_internal);
 
     nb::class_<AxpbyRunInfo>(module, "AxpbyRunInfo")
-        .def_ro("elements_computed", &AxpbyRunInfo::elementsComputed);
+        .def_ro("output_elements_written", &AxpbyRunInfo::outputElementsWritten);
 
     nb::class_<PythonAxpbyResult>(module, "AxpbyResult")
         .def_prop_ro(
@@ -1266,8 +1134,8 @@ NB_MODULE(_roc_host_validation, module) {
             nb::rv_policy::reference_internal);
 
     nb::class_<SoftmaxRunInfo>(module, "SoftmaxRunInfo")
-        .def_ro("slices_computed", &SoftmaxRunInfo::slicesComputed)
-        .def_ro("elements_computed", &SoftmaxRunInfo::elementsComputed);
+        .def_ro("slices_processed", &SoftmaxRunInfo::slicesProcessed)
+        .def_ro("output_elements_written", &SoftmaxRunInfo::outputElementsWritten);
 
     nb::class_<PythonSoftmaxResult>(module, "SoftmaxResult")
         .def_prop_ro(
@@ -1282,8 +1150,11 @@ NB_MODULE(_roc_host_validation, module) {
             nb::rv_policy::reference_internal);
 
     nb::class_<LayerNormRunInfo>(module, "LayerNormRunInfo")
-        .def_ro("slices_computed", &LayerNormRunInfo::slicesComputed)
-        .def_ro("elements_computed", &LayerNormRunInfo::elementsComputed);
+        .def_ro("slices_processed", &LayerNormRunInfo::slicesProcessed)
+        .def_ro("output_elements_written", &LayerNormRunInfo::outputElementsWritten)
+        .def_ro("mean_elements_written", &LayerNormRunInfo::meanElementsWritten)
+        .def_ro("inverse_variance_elements_written",
+                &LayerNormRunInfo::inverseVarianceElementsWritten);
 
     nb::class_<PythonLayerNormResult>(module, "LayerNormResult")
         .def_prop_ro(
@@ -1310,7 +1181,8 @@ NB_MODULE(_roc_host_validation, module) {
     nb::class_<GemmRunInfo>(module, "GemmRunInfo")
         .def_ro("backend_used", &GemmRunInfo::backendUsed)
         .def_ro("fallback_reason", &GemmRunInfo::fallbackReason)
-        .def_ro("output_elements_computed", &GemmRunInfo::outputElementsComputed);
+        .def_ro("output_elements_written", &GemmRunInfo::outputElementsWritten)
+        .def_ro("output_elements_covered", &GemmRunInfo::outputElementsCovered);
 
     nb::class_<PythonGemmResult>(module, "GemmResult")
         .def_prop_ro(
@@ -1346,14 +1218,6 @@ NB_MODULE(_roc_host_validation, module) {
             nb::rv_policy::reference_internal);
 
     module.def("scalar_type_info", [](ScalarType type) { return scalarTypeInfo(type); });
-    module.def("generate_tensor", &generateOwned, "type"_a, "shape"_a, "options"_a);
-    module.def(
-        "generate_at",
-        [](Tensor& tensor, size_t logicalIndex, const GenerationOptions& options) -> Tensor& {
-            generateAt(tensor, logicalIndex, options);
-            return tensor;
-        },
-        "tensor"_a, "logical_index"_a, "options"_a, nb::rv_policy::reference);
     module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
                "emit_two_of_four_metadata"_a = false);
     module.def("encode_two_of_four_metadata", &encodeTwoOfFourMetadataOwned, "retained_indices"_a,
@@ -1441,7 +1305,7 @@ NB_MODULE(_roc_host_validation, module) {
                "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
                "activation"_a = Activation::None, "activation_parameter0"_a = 0.0,
                "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all(),
-               "backend"_a = GemmBackend::Canonical, "block_scale_a"_a = std::optional<Tensor>{},
+               "backend"_a = GemmBackend::Pointwise, "block_scale_a"_a = std::optional<Tensor>{},
                "block_scale_b"_a = std::optional<Tensor>{}, "block_size_a"_a = 0,
                "block_size_b"_a = 0, "pre_quantization_scales_a"_a = std::vector<Tensor>{},
                "pre_quantization_axes_a"_a = std::vector<MatrixAxis>{},

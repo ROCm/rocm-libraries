@@ -38,18 +38,16 @@ int main() {
                              maximumAbsolute, ScalarType::Float32);
     if (maximumAbsolute.loadAs<float>({}) != 4) return 1;
 
-    GenerationOptions generation;
-    generation.seed = 17;
-    generation.real.pattern = GenerationPattern::CandidateSet;
-    generation.real.candidates = {-2.0, 3.0};
-    Tensor generated = generate(ScalarType::Float32, Shape{4}, generation);
+    Tensor generated =
+        generate(ScalarType::Float32, Shape{4},
+                 GenerationRecipe::realOnly(GenerationRecipe::candidateSet({.values = {-2.0, 3.0}}),
+                                            {.seed = 17}));
     for (size_t index = 0; index < generated.size(); ++index) {
         const float value = generated.loadAs<float>({index});
         if (value != -2.0f && value != 3.0f) return 1;
     }
-    generation.real.pattern = GenerationPattern::Constant;
-    generation.real.parameter0 = 11.0;
-    generateAt(generated, 2, generation);
+    generateAt(generated, 2,
+               GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 11.0})));
     if (generated.loadAs<float>({2}) != 11.0f) return 1;
 
     Tensor axpbyOutput(ScalarType::Float32, Shape{1});
@@ -59,7 +57,7 @@ int main() {
         axpbyOutput, ScalarType::Float32);
     axpby.alpha = 2.0;
     axpby.beta = -1.0;
-    if (referenceAxpby(axpby).elementsComputed != 1 || axpbyOutput.loadAs<float>({0}) != 1.0f)
+    if (referenceAxpby(axpby).outputElementsWritten != 1 || axpbyOutput.loadAs<float>({0}) != 1.0f)
         return 1;
 
     const std::array<float, 2> softmaxValues{1.0f, 2.0f};
@@ -68,8 +66,9 @@ int main() {
     Tensor softmaxOutput(ScalarType::Float32, Shape{1, 2});
     const SoftmaxRunInfo softmax =
         referenceSoftmax(SoftmaxProblem(softmaxInput, softmaxOutput, 1, ScalarType::Float32));
-    if (softmax.slicesComputed != 1 || std::abs(softmaxOutput.loadAs<float>({0, 0}) +
-                                                softmaxOutput.loadAs<float>({0, 1}) - 1.0f) > 1e-6f)
+    if (softmax.slicesProcessed != 1 || softmax.outputElementsWritten != 2 ||
+        std::abs(softmaxOutput.loadAs<float>({0, 0}) + softmaxOutput.loadAs<float>({0, 1}) - 1.0f) >
+            1e-6f)
         return 1;
 
     Tensor layerNormOutput(ScalarType::Float32, Shape{1, 2});
@@ -78,7 +77,9 @@ int main() {
     LayerNormProblem layerNorm(softmaxInput, layerNormOutput, 1, ScalarType::Float32);
     layerNorm.mean = layerNormMean;
     layerNorm.inverseVariance = layerNormInverseVariance;
-    if (referenceLayerNorm(layerNorm).slicesComputed != 1 ||
+    const LayerNormRunInfo layerNormRun = referenceLayerNorm(layerNorm);
+    if (layerNormRun.slicesProcessed != 1 || layerNormRun.outputElementsWritten != 2 ||
+        layerNormRun.meanElementsWritten != 1 || layerNormRun.inverseVarianceElementsWritten != 1 ||
         layerNormMean.loadAs<float>({0}) != 1.5f)
         return 1;
     return 0;

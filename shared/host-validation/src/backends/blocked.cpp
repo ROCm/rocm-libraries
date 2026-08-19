@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <optional>
-#include <roc/host_validation/backends/tiled.hpp>
+#include <roc/host_validation/backends/blocked.hpp>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -13,30 +13,30 @@
 
 namespace roc::host_validation {
 namespace {
-constexpr size_t outputTileRows = 32;
-constexpr size_t outputTileColumns = 32;
-constexpr size_t reductionTileElements = 8;
+constexpr size_t outputBlockRows = 32;
+constexpr size_t outputBlockColumns = 32;
+constexpr size_t reductionBlockElements = 8;
 
 struct SelectedOutputLocation {
-    size_t tileRow;
-    size_t tileColumn;
+    size_t blockRow;
+    size_t blockColumn;
     size_t localIndex;
 };
 
-struct PlannedOutputTile {
+struct PlannedOutputBlock {
     size_t rowBase;
     size_t columnBase;
     size_t firstSelectedOutput;
     size_t selectedOutputCount;
 };
 
-struct SelectedOutputTilePlan {
-    std::vector<PlannedOutputTile> tiles;
+struct SelectedOutputBlockPlan {
+    std::vector<PlannedOutputBlock> blocks;
     std::vector<size_t> localIndices;
 };
 
-SelectedOutputTilePlan planSelectedOutputTiles(const OutputSelection& selection,
-                                               size_t logicalElements, size_t outputColumns) {
+SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selection,
+                                                 size_t logicalElements, size_t outputColumns) {
     const std::vector<size_t> selectedIndices = selection.indices(logicalElements);
     std::vector<SelectedOutputLocation> locations;
     locations.reserve(selectedIndices.size());
@@ -44,37 +44,38 @@ SelectedOutputTilePlan planSelectedOutputTiles(const OutputSelection& selection,
         const size_t row = logicalIndex / outputColumns;
         const size_t column = logicalIndex % outputColumns;
         locations.push_back({
-            .tileRow = row / outputTileRows,
-            .tileColumn = column / outputTileColumns,
-            .localIndex = (row % outputTileRows) * outputTileColumns + column % outputTileColumns,
+            .blockRow = row / outputBlockRows,
+            .blockColumn = column / outputBlockColumns,
+            .localIndex =
+                (row % outputBlockRows) * outputBlockColumns + column % outputBlockColumns,
         });
     }
 
-    // Group unique requests in the same tile-major, row-major order as the full path.
+    // Group unique requests in the same block-major, row-major order as the full path.
     std::sort(locations.begin(), locations.end(),
               [](const SelectedOutputLocation& left, const SelectedOutputLocation& right) {
-                  if (left.tileRow != right.tileRow) return left.tileRow < right.tileRow;
-                  if (left.tileColumn != right.tileColumn)
-                      return left.tileColumn < right.tileColumn;
+                  if (left.blockRow != right.blockRow) return left.blockRow < right.blockRow;
+                  if (left.blockColumn != right.blockColumn)
+                      return left.blockColumn < right.blockColumn;
                   return left.localIndex < right.localIndex;
               });
     locations.erase(
         std::unique(locations.begin(), locations.end(),
                     [](const SelectedOutputLocation& left, const SelectedOutputLocation& right) {
-                        return left.tileRow == right.tileRow &&
-                               left.tileColumn == right.tileColumn &&
+                        return left.blockRow == right.blockRow &&
+                               left.blockColumn == right.blockColumn &&
                                left.localIndex == right.localIndex;
                     }),
         locations.end());
 
-    SelectedOutputTilePlan plan;
+    SelectedOutputBlockPlan plan;
     plan.localIndices.reserve(locations.size());
     for (const SelectedOutputLocation& location : locations) {
-        const size_t rowBase = location.tileRow * outputTileRows;
-        const size_t columnBase = location.tileColumn * outputTileColumns;
-        if (plan.tiles.empty() || plan.tiles.back().rowBase != rowBase ||
-            plan.tiles.back().columnBase != columnBase) {
-            plan.tiles.push_back({
+        const size_t rowBase = location.blockRow * outputBlockRows;
+        const size_t columnBase = location.blockColumn * outputBlockColumns;
+        if (plan.blocks.empty() || plan.blocks.back().rowBase != rowBase ||
+            plan.blocks.back().columnBase != columnBase) {
+            plan.blocks.push_back({
                 .rowBase = rowBase,
                 .columnBase = columnBase,
                 .firstSelectedOutput = plan.localIndices.size(),
@@ -82,31 +83,32 @@ SelectedOutputTilePlan planSelectedOutputTiles(const OutputSelection& selection,
             });
         }
         plan.localIndices.push_back(location.localIndex);
-        ++plan.tiles.back().selectedOutputCount;
+        ++plan.blocks.back().selectedOutputCount;
     }
     return plan;
 }
 
-void validateTiled(const GemmRequest& problem) {
-    const GemmSupportInfo canonical =
-        queryGemmSupport(problem, {.backend = GemmBackend::Canonical});
-    if (!canonical) throw std::invalid_argument(canonical.reason);
+void validateBlocked(const GemmRequest& problem) {
+    const GemmSupportInfo pointwise =
+        queryGemmSupport(problem, {.backend = GemmBackend::Pointwise});
+    if (!pointwise) throw std::invalid_argument(pointwise.reason);
     if (problem.accumulatorType != ScalarType::Float32 &&
         problem.accumulatorType != ScalarType::Float64)
-        throw std::invalid_argument("Tiled backend supports F32 and F64 accumulation.");
+        throw std::invalid_argument("Blocked backend supports F32 and F64 accumulation.");
     if (problem.a.blockScale) {
         const size_t k = problem.a.values.shape()[1];
-        if (problem.a.blockScale->blockSize % reductionTileElements != 0 ||
-            problem.b.blockScale->blockSize % reductionTileElements != 0)
+        if (problem.a.blockScale->blockSize % reductionBlockElements != 0 ||
+            problem.b.blockScale->blockSize % reductionBlockElements != 0)
             throw std::invalid_argument(
-                "Tiled backend requires block sizes divisible by its K tile.");
+                "Blocked backend requires block sizes divisible by its K block.");
         if (k % problem.a.blockScale->blockSize != 0 || k % problem.b.blockScale->blockSize != 0)
-            throw std::invalid_argument("Tiled backend requires K divisible by both block sizes.");
+            throw std::invalid_argument(
+                "Blocked backend requires K divisible by both block sizes.");
     }
 }
 
 template <typename Accumulator>
-GemmRunInfo runTiled(const GemmRequest& problem) {
+GemmRunInfo runBlocked(const GemmRequest& problem) {
     using namespace detail;
 
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
@@ -138,17 +140,17 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
     const size_t k = problem.a.values.shape()[1];
     const size_t n = problem.b.values.shape()[1];
 
-    const auto executeTile = [&](size_t rowBase, size_t columnBase, bool storeAllOutputs,
-                                 std::span<const size_t> selectedOutputIndices) {
-        const size_t rows = std::min(outputTileRows, m - rowBase);
-        const size_t columns = std::min(outputTileColumns, n - columnBase);
+    const auto executeBlock = [&](size_t rowBase, size_t columnBase, bool storeAllOutputs,
+                                  std::span<const size_t> selectedOutputIndices) {
+        const size_t rows = std::min(outputBlockRows, m - rowBase);
+        const size_t columns = std::min(outputBlockColumns, n - columnBase);
         std::vector<Accumulator> accumulator(rows * columns, Accumulator(0));
 
         for (size_t reductionBase = 0; !finalizer.alphaIsZero() && reductionBase < k;
-             reductionBase += reductionTileElements) {
-            const size_t reductions = std::min(reductionTileElements, k - reductionBase);
-            std::vector<Accumulator> aTile(rows * reductions);
-            std::vector<Accumulator> bTile(reductions * columns);
+             reductionBase += reductionBlockElements) {
+            const size_t reductions = std::min(reductionBlockElements, k - reductionBase);
+            std::vector<Accumulator> aBlock(rows * reductions);
+            std::vector<Accumulator> bBlock(reductions * columns);
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
                     Accumulator value = conjugateIfNeeded(
@@ -162,7 +164,7 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
                                                                    : reductionBase + reduction);
                         value *= preScalesA[scaleIndex][index];
                     }
-                    aTile[row * reductions + reduction] = operandMath(quantizeA(value));
+                    aBlock[row * reductions + reduction] = operandMath(quantizeA(value));
                 }
             }
             for (size_t reduction = 0; reduction < reductions; ++reduction) {
@@ -178,7 +180,7 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
                                                                    : columnBase + column);
                         value *= preScalesB[scaleIndex][index];
                     }
-                    bTile[reduction * columns + column] = operandMath(quantizeB(value));
+                    bBlock[reduction * columns + column] = operandMath(quantizeB(value));
                 }
             }
 
@@ -186,10 +188,10 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
             std::vector<Accumulator>& destination = blockScaleA ? partial : accumulator;
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
-                    const Accumulator aValue = aTile[row * reductions + reduction];
+                    const Accumulator aValue = aBlock[row * reductions + reduction];
                     for (size_t column = 0; column < columns; ++column)
                         destination[row * columns + column] +=
-                            aValue * bTile[reduction * columns + column];
+                            aValue * bBlock[reduction * columns + column];
                 }
             }
             if (blockScaleA) {
@@ -217,8 +219,8 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
             }
         } else {
             for (const size_t localIndex : selectedOutputIndices) {
-                const size_t row = localIndex / outputTileColumns;
-                const size_t column = localIndex % outputTileColumns;
+                const size_t row = localIndex / outputBlockColumns;
+                const size_t column = localIndex % outputBlockColumns;
                 output.store(rowBase + row, columnBase + column,
                              finalizer.finalize(rowBase + row, columnBase + column,
                                                 accumulator[row * columns + column]));
@@ -227,54 +229,57 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
         return rows * columns;
     };
 
-    size_t outputElementsComputed = 0;
+    size_t outputElementsCovered = 0;
+    const size_t outputElementsWritten =
+        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
     if (problem.outputSelection.selectsAll()) {
-        for (size_t rowBase = 0; rowBase < m; rowBase += outputTileRows) {
-            for (size_t columnBase = 0; columnBase < n; columnBase += outputTileColumns)
-                outputElementsComputed += executeTile(rowBase, columnBase, true, {});
+        for (size_t rowBase = 0; rowBase < m; rowBase += outputBlockRows) {
+            for (size_t columnBase = 0; columnBase < n; columnBase += outputBlockColumns)
+                outputElementsCovered += executeBlock(rowBase, columnBase, true, {});
         }
     } else {
-        const SelectedOutputTilePlan plan =
-            planSelectedOutputTiles(problem.outputSelection, problem.d.shape().elementCount(), n);
+        const SelectedOutputBlockPlan plan =
+            planSelectedOutputBlocks(problem.outputSelection, problem.d.shape().elementCount(), n);
         const std::span<const size_t> localIndices(plan.localIndices);
-        for (const PlannedOutputTile& tile : plan.tiles) {
-            outputElementsComputed += executeTile(
-                tile.rowBase, tile.columnBase, false,
-                localIndices.subspan(tile.firstSelectedOutput, tile.selectedOutputCount));
+        for (const PlannedOutputBlock& block : plan.blocks) {
+            outputElementsCovered += executeBlock(
+                block.rowBase, block.columnBase, false,
+                localIndices.subspan(block.firstSelectedOutput, block.selectedOutputCount));
         }
     }
 
     return {
-        .backendUsed = GemmBackend::Tiled,
+        .backendUsed = GemmBackend::Blocked,
         .fallbackReason = std::nullopt,
-        .outputElementsComputed = outputElementsComputed,
+        .outputElementsWritten = outputElementsWritten,
+        .outputElementsCovered = outputElementsCovered,
     };
 }
 }  // namespace
 
-GemmBackend TiledGemmBackend::backend() const {
-    return GemmBackend::Tiled;
+GemmBackend BlockedGemmBackend::backend() const {
+    return GemmBackend::Blocked;
 }
 
-GemmSupportInfo TiledGemmBackend::querySupport(const GemmRequest& problem) const {
+GemmSupportInfo BlockedGemmBackend::querySupport(const GemmRequest& problem) const {
     try {
-        validateTiled(problem);
+        validateBlocked(problem);
         return {.supported = true, .reason = {}};
     } catch (const std::exception& error) {
         return {.supported = false, .reason = error.what()};
     }
 }
 
-GemmRunInfo TiledGemmBackend::run(const GemmRequest& problem) const {
+GemmRunInfo BlockedGemmBackend::run(const GemmRequest& problem) const {
     const GemmSupportInfo support = querySupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
     switch (problem.accumulatorType) {
         case ScalarType::Float32:
-            return runTiled<float>(problem);
+            return runBlocked<float>(problem);
         case ScalarType::Float64:
-            return runTiled<double>(problem);
+            return runBlocked<double>(problem);
         default:
-            throw std::invalid_argument("Tiled backend accumulator type is unsupported.");
+            throw std::invalid_argument("Blocked backend accumulator type is unsupported.");
     }
 }
 }  // namespace roc::host_validation

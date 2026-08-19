@@ -11,6 +11,9 @@ set(layout_header
 set(layout_source
     "${HOST_VALIDATION_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
 )
+set(layout_threading
+    "${HOST_VALIDATION_SOURCE_DIR}/src/amd_gpu_layout/mx_threading.hpp"
+)
 set(component_cmake "${HOST_VALIDATION_SOURCE_DIR}/CMakeLists.txt")
 set(forbidden_layout_patterns
     "#[ \t]*include[ \t]*[<\"]hip[/<\"]"
@@ -30,6 +33,19 @@ set(forbidden_layout_patterns
     "#[ \t]*pragma[ \t]+omp"
     "_OPENMP"
     "omp_[A-Za-z0-9_]+"
+    "DimensionShufflePlan"
+    "GFX[0-9]+ScalePlan"
+    "ParallelChunkFunction"
+    "parallelForChunks"
+    "operationThreadCount"
+    "checkedMultiply"
+    "computeStrides"
+    "computeShuffledStrides"
+    "shuffleDims"
+    "preSwizzleScalesGFX950PaddedSize"
+    "preSwizzleScalesGFX1250PaddedSize"
+    "std::function"
+    "void[ \t]*\\*"
 )
 
 file(READ "${layout_header}" layout_contents)
@@ -47,11 +63,26 @@ if(NOT EXISTS "${layout_source}")
         "AMD GPU layout implementation source is missing: ${layout_source}"
     )
 endif()
+if(NOT EXISTS "${layout_threading}")
+    message(FATAL_ERROR
+        "AMD GPU layout private threading header is missing: ${layout_threading}"
+    )
+endif()
 file(READ "${layout_source}" layout_source_contents)
-if(NOT layout_source_contents MATCHES
+file(READ "${layout_threading}" layout_threading_contents)
+set(layout_implementation_contents
+    "${layout_source_contents}\n${layout_threading_contents}"
+)
+if(NOT layout_implementation_contents MATCHES
    "#[ \t]*include[ \t]*[<\"]omp\\.h[>\"]")
     message(FATAL_ERROR
-        "OpenMP implementation is not isolated in ${layout_source}"
+        "OpenMP implementation is missing from the private AMD GPU layout sources."
+    )
+endif()
+if(NOT layout_implementation_contents MATCHES
+   "#[ \t]*pragma[ \t]+omp")
+    message(FATAL_ERROR
+        "OpenMP work sharing is missing from the private AMD GPU layout sources."
     )
 endif()
 

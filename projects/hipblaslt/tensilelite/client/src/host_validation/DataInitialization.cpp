@@ -7,6 +7,7 @@
 #include "DataInitialization.hpp"
 
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
+#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include <algorithm>
@@ -24,19 +25,21 @@ namespace TensileLite::Client
 {
     std::uint64_t stableDataInitializationStream(std::string_view semanticName)
     {
-        std::uint64_t hash = 1469598103934665603ULL;
+        using namespace roc::host_validation::tensilelite_adapter;
+
+        std::uint64_t hash = dataInitializationFnvLikeOffsetBasis;
         for(const unsigned char character : semanticName)
         {
             hash ^= character;
-            hash *= 1099511628211ULL;
+            hash *= dataInitializationFnvLikePrime;
         }
         return hash;
     }
 
     namespace
     {
-        using roc::host_validation::GenerationOptions;
-        using roc::host_validation::GenerationPattern;
+        using roc::host_validation::GenerationRecipe;
+        using roc::host_validation::GenerationRecipeSettings;
         using roc::host_validation::Layout;
         using roc::host_validation::ScalarType;
         using roc::host_validation::Shape;
@@ -45,6 +48,13 @@ namespace TensileLite::Client
         using roc::host_validation::StructuredSparsitySelection;
         using roc::host_validation::StructuredSparsitySliceRange;
         using roc::host_validation::Tensor;
+        using roc::host_validation::tensilelite_adapter::LegacyCartesianGenerationStreams;
+
+        struct DataInitializationRecipe
+        {
+            GenerationRecipe                                recipe;
+            std::optional<LegacyCartesianGenerationStreams> legacyCartesianStreams;
+        };
 
         std::optional<ScalarType> generationScalarType(rocisa::DataType type)
         {
@@ -79,280 +89,200 @@ namespace TensileLite::Client
             }
         }
 
-        std::optional<GenerationOptions> generationOptions(rocisa::DataType      dataType,
-                                                           InitMode              mode,
-                                                           bool                  problemDependent,
-                                                           std::uint64_t         seed,
-                                                           std::optional<double> freeValue
-                                                           = std::nullopt)
+        std::optional<DataInitializationRecipe> generationRecipe(rocisa::DataType dataType,
+                                                                 InitMode         mode,
+                                                                 bool             problemDependent,
+                                                                 std::uint64_t    seed,
+                                                                 std::uint64_t    legacyRealStream,
+                                                                 std::optional<double> freeValue
+                                                                 = std::nullopt)
         {
-            GenerationOptions options;
-            options.seed = seed;
+            using namespace roc::host_validation;
+            using namespace roc::host_validation::tensilelite_adapter;
+
+            const GenerationRecipeSettings settings
+                = settingsForLegacyGenerationStream(seed, legacyRealStream);
+            auto realOnly = [settings](GenerationRecipe::Component component) {
+                return DataInitializationRecipe{
+                    .recipe = GenerationRecipe::realOnly(std::move(component), settings)};
+            };
+            auto replicated = [settings](GenerationRecipe::Component component) {
+                return DataInitializationRecipe{
+                    .recipe = GenerationRecipe::replicated(std::move(component), settings)};
+            };
+            auto cartesian
+                = [settings, seed, legacyRealStream](GenerationRecipe::Component component) {
+                      GenerationRecipe::Component imaginary = component;
+                      return DataInitializationRecipe{
+                          .recipe = GenerationRecipe::cartesian(
+                              std::move(component), std::move(imaginary), settings),
+                          .legacyCartesianStreams = LegacyCartesianGenerationStreams{
+                              .seed            = seed,
+                              .realStream      = legacyRealStream,
+                              .imaginaryStream = legacyRealStream + 1}};
+                  };
+
             switch(mode)
             {
             case InitMode::Zero:
                 if(dataType == rocisa::DataType::E8)
-                    options.real.pattern = GenerationPattern::RawConstant;
-                return options;
+                    return realOnly(GenerationRecipe::rawConstant({.bits = 0}));
+                return realOnly(GenerationRecipe::zero());
             case InitMode::One:
-                options.real.pattern    = GenerationPattern::Constant;
-                options.real.parameter0 = 1;
-                return options;
+                return realOnly(GenerationRecipe::constant({.value = 1}));
             case InitMode::Two:
-                options.real.pattern    = GenerationPattern::Constant;
-                options.real.parameter0 = 2;
-                return options;
+                return realOnly(GenerationRecipe::constant({.value = 2}));
             case InitMode::NegOne:
-                options.real.pattern    = GenerationPattern::Constant;
-                options.real.parameter0 = -1;
-                return options;
+                return realOnly(GenerationRecipe::constant({.value = -1}));
             case InitMode::Max:
                 if(dataType == rocisa::DataType::BFloat16)
                 {
                     // Tensile's BF16 conversion rounds Float32 max to +Inf.
-                    options.real.pattern = GenerationPattern::TypeInfinity;
+                    return replicated(GenerationRecipe::typeInfinity());
                 }
-                else if(dataType == rocisa::DataType::BFloat6)
+                if(dataType == rocisa::DataType::BFloat6)
                 {
                     // Preserve the existing Tensile compatibility value even
                     // though the E3M2 format itself has a larger finite range.
-                    options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = 7.5;
+                    return replicated(GenerationRecipe::constant({.value = 7.5}));
                 }
-                else
-                {
-                    options.real.pattern = GenerationPattern::TypeMaximum;
-                }
-                options.imaginary = options.real;
-                return options;
+                return replicated(GenerationRecipe::typeMaximum());
             case InitMode::DenormMin:
                 if(dataType == rocisa::DataType::BFloat6)
                 {
-                    options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = 0.125;
+                    return replicated(GenerationRecipe::constant({.value = 0.125}));
                 }
-                else
-                {
-                    options.real.pattern = GenerationPattern::TypeDenormalMinimum;
-                }
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::typeDenormalMinimum());
             case InitMode::DenormMax:
                 if(dataType == rocisa::DataType::BFloat6)
                 {
-                    options.real.pattern    = GenerationPattern::Constant;
-                    options.real.parameter0 = 0.875;
+                    return replicated(GenerationRecipe::constant({.value = 0.875}));
                 }
-                else
-                {
-                    options.real.pattern = GenerationPattern::TypeDenormalMaximum;
-                }
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::typeDenormalMaximum());
             case InitMode::NaN:
-                options.real.pattern = GenerationPattern::TypeNaN;
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::typeNaN());
             case InitMode::Inf:
-                if(dataType == rocisa::DataType::Float8
-                   || dataType == rocisa::DataType::Float8_fnuz
+                if(dataType == rocisa::DataType::Float8 || dataType == rocisa::DataType::Float8_fnuz
                    || dataType == rocisa::DataType::BFloat8_fnuz)
-                    options.real.pattern = GenerationPattern::TypeNaN;
-                else
-                    options.real.pattern = GenerationPattern::TypeInfinity;
-                options.imaginary = options.real;
-                return options;
+                    return replicated(GenerationRecipe::typeNaN());
+                return replicated(GenerationRecipe::typeInfinity());
             case InitMode::BadInput:
-                if(dataType == rocisa::DataType::Int8
-                   || dataType == rocisa::DataType::Int32)
-                    options.real.pattern = GenerationPattern::TypeMaximum;
-                else
-                    options.real.pattern = GenerationPattern::TypeNaN;
-                options.imaginary = options.real;
-                return options;
+                if(dataType == rocisa::DataType::Int8 || dataType == rocisa::DataType::Int32)
+                    return replicated(GenerationRecipe::typeMaximum());
+                return replicated(GenerationRecipe::typeNaN());
             case InitMode::BadOutput:
-                if(dataType == rocisa::DataType::Int8
-                   || dataType == rocisa::DataType::Int32)
-                    options.real.pattern = GenerationPattern::TypeLowest;
-                else if(dataType == rocisa::DataType::Float8
-                        || dataType == rocisa::DataType::Float8_fnuz
-                        || dataType == rocisa::DataType::BFloat8_fnuz
-                        || dataType == rocisa::DataType::E8
-                        || dataType == rocisa::DataType::E5M3)
-                    options.real.pattern = GenerationPattern::TypeNaN;
-                else
-                    options.real.pattern = GenerationPattern::TypeInfinity;
-                options.imaginary = options.real;
-                return options;
+                if(dataType == rocisa::DataType::Int8 || dataType == rocisa::DataType::Int32)
+                    return replicated(GenerationRecipe::typeLowest());
+                if(dataType == rocisa::DataType::Float8 || dataType == rocisa::DataType::Float8_fnuz
+                   || dataType == rocisa::DataType::BFloat8_fnuz || dataType == rocisa::DataType::E8
+                   || dataType == rocisa::DataType::E5M3)
+                    return replicated(GenerationRecipe::typeNaN());
+                return replicated(GenerationRecipe::typeInfinity());
             case InitMode::Random:
-                options.real.pattern = GenerationPattern::UniformInteger;
                 if(dataType == rocisa::DataType::E8)
                 {
-                    options.real.pattern    = GenerationPattern::RandomEncodedExponent;
-                    options.real.parameter0 = -3;
-                    options.real.parameter1 = 3;
+                    return realOnly(GenerationRecipe::randomEncodedExponent(
+                        {.lowerUnbiasedExponent = -3, .upperUnbiasedExponent = 3}));
                 }
-                else if(dataType == rocisa::DataType::E5M3)
+                if(dataType == rocisa::DataType::E5M3)
                 {
-                    options.real.pattern    = GenerationPattern::AbsoluteUniformInteger;
-                    options.real.parameter0 = -3;
-                    options.real.parameter1 = 3;
+                    return cartesian(
+                        GenerationRecipe::absoluteUniformInteger({.lower = -3, .upper = 3}));
                 }
-                else if(dataType == rocisa::DataType::Float4)
+                if(dataType == rocisa::DataType::Float4)
                 {
-                    options.real.pattern    = GenerationPattern::UniformRawInteger;
-                    options.real.parameter0 = 0;
-                    options.real.parameter1 = 14;
+                    return realOnly(GenerationRecipe::uniformRawInteger({.lower = 0, .upper = 14}));
                 }
-                else if(dataType == rocisa::DataType::Float)
-                {
-                    options.real.parameter0 = -100;
-                    options.real.parameter1 = 100;
-                }
-                else if(dataType == rocisa::DataType::Double)
-                {
-                    options.real.parameter0 = -1000;
-                    options.real.parameter1 = 1000;
-                }
-                else
-                {
-                    options.real.parameter0 = -3;
-                    options.real.parameter1 = 3;
-                }
-                options.imaginary        = options.real;
-                options.imaginary.stream = 1;
-                return options;
+                if(dataType == rocisa::DataType::Float)
+                    return cartesian(
+                        GenerationRecipe::uniformInteger({.lower = -100, .upper = 100}));
+                if(dataType == rocisa::DataType::Double)
+                    return cartesian(
+                        GenerationRecipe::uniformInteger({.lower = -1000, .upper = 1000}));
+                return cartesian(GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}));
             case InitMode::RandomNarrow:
-                if(dataType == rocisa::DataType::E8
-                   || dataType == rocisa::DataType::E5M3
+                if(dataType == rocisa::DataType::E8 || dataType == rocisa::DataType::E5M3
                    || dataType == rocisa::DataType::Float4)
-                    return generationOptions(
-                        dataType, InitMode::Random, problemDependent, seed, freeValue);
-                if(dataType == rocisa::DataType::Int8
-                   || dataType == rocisa::DataType::Int32
+                    return generationRecipe(dataType,
+                                            InitMode::Random,
+                                            problemDependent,
+                                            seed,
+                                            legacyRealStream,
+                                            freeValue);
+                if(dataType == rocisa::DataType::Int8 || dataType == rocisa::DataType::Int32
                    || dataType == rocisa::DataType::Int64)
                 {
-                    options.real.pattern    = GenerationPattern::UniformInteger;
-                    options.real.parameter0 = -3;
-                    options.real.parameter1 = 3;
+                    return cartesian(GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}));
                 }
-                else
-                {
-                    options.real.pattern = GenerationPattern::RandomEncodedExponent;
-                    options.real.parameter0 =
-                        dataType == rocisa::DataType::Double ? -189 : -100;
-                    options.real.parameter1 = 0;
-                    if(dataType == rocisa::DataType::Float6
-                       || dataType == rocisa::DataType::BFloat6)
-                        options.real.sourceType = ScalarType::Float32;
-                }
-                options.imaginary        = options.real;
-                options.imaginary.stream = 1;
-                return options;
+                return cartesian(GenerationRecipe::randomEncodedExponent(
+                    {.lowerUnbiasedExponent = dataType == rocisa::DataType::Double ? -189 : -100,
+                     .upperUnbiasedExponent = 0,
+                     .sourceType
+                     = dataType == rocisa::DataType::Float6 || dataType == rocisa::DataType::BFloat6
+                           ? std::optional<ScalarType>(ScalarType::Float32)
+                           : std::nullopt}));
             case InitMode::RandomNegPosLimited:
                 if(dataType == rocisa::DataType::E8)
                 {
-                    options.real.pattern    = GenerationPattern::UniformRawInteger;
-                    options.real.parameter0 = -128;
-                    options.real.parameter1 = 128;
+                    return realOnly(
+                        GenerationRecipe::uniformRawInteger({.lower = -128, .upper = 128}));
                 }
-                else if(dataType == rocisa::DataType::E5M3)
+                if(dataType == rocisa::DataType::E5M3)
                 {
-                    options.real.pattern    = GenerationPattern::AbsoluteUniformInteger;
-                    options.real.parameter0 = -128;
-                    options.real.parameter1 = 128;
+                    return cartesian(
+                        GenerationRecipe::absoluteUniformInteger({.lower = -128, .upper = 128}));
                 }
-                else if(dataType == rocisa::DataType::Int8
-                        || dataType == rocisa::DataType::Int32
-                        || dataType == rocisa::DataType::Int64)
+                if(dataType == rocisa::DataType::Int8 || dataType == rocisa::DataType::Int32
+                   || dataType == rocisa::DataType::Int64)
                 {
-                    options.real.pattern    = GenerationPattern::UniformInteger;
-                    options.real.parameter0 = -128;
-                    options.real.parameter1 = 128;
+                    return cartesian(
+                        GenerationRecipe::uniformInteger({.lower = -128, .upper = 128}));
                 }
-                else
-                {
-                    options.real.pattern    = GenerationPattern::UniformReal;
-                    options.real.parameter0 = -1;
-                    options.real.parameter1 = 1;
-                }
-                options.imaginary        = options.real;
-                options.imaginary.stream = 1;
-                return options;
+                return cartesian(GenerationRecipe::uniformReal({.lower = -1, .upper = 1}));
             case InitMode::UniformLowPrecision:
-                options.real.pattern = GenerationPattern::UniformReal;
                 if(dataType == rocisa::DataType::Float4)
                 {
-                    options.real.parameter0 = -6.0;
-                    options.real.parameter1 = 6.0;
+                    return realOnly(GenerationRecipe::uniformReal({.lower = -6.0, .upper = 6.0}));
                 }
-                else if(dataType == rocisa::DataType::Float6
-                        || dataType == rocisa::DataType::BFloat6)
+                if(dataType == rocisa::DataType::Float6 || dataType == rocisa::DataType::BFloat6)
                 {
-                    options.real.parameter0 = -7.5;
-                    options.real.parameter1 = 7.5;
+                    return cartesian(GenerationRecipe::uniformReal({.lower = -7.5, .upper = 7.5}));
                 }
-                else
-                {
-                    return std::nullopt;
-                }
-                options.imaginary        = options.real;
-                options.imaginary.stream = 1;
-                return options;
+                return std::nullopt;
             case InitMode::Free:
                 if(!freeValue)
                     return std::nullopt;
-                options.real.pattern    = GenerationPattern::Constant;
-                options.real.parameter0 = *freeValue;
-                return options;
+                return realOnly(GenerationRecipe::constant({.value = *freeValue}));
             case InitMode::SerialIdx:
-                options.real.pattern = GenerationPattern::SerialIndex;
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::serialIndex());
             case InitMode::SerialDim0:
                 if(!problemDependent)
                     return std::nullopt;
-                options.real.pattern   = dataType == rocisa::DataType::Half
-                                             ? GenerationPattern::RawSerialDimension
-                                             : GenerationPattern::SerialDimension;
-                options.real.dimension = 0;
-                options.imaginary      = options.real;
-                return options;
+                if(dataType == rocisa::DataType::Half)
+                    return realOnly(GenerationRecipe::rawSerialDimension({.dimension = 0}));
+                return replicated(GenerationRecipe::serialDimension({.dimension = 0}));
             case InitMode::SerialDim1:
                 if(!problemDependent)
                     return std::nullopt;
-                options.real.pattern   = dataType == rocisa::DataType::Half
-                                             ? GenerationPattern::RawSerialDimension
-                                             : GenerationPattern::SerialDimension;
-                options.real.dimension = 1;
-                options.imaginary      = options.real;
-                return options;
+                if(dataType == rocisa::DataType::Half)
+                    return realOnly(GenerationRecipe::rawSerialDimension({.dimension = 1}));
+                return replicated(GenerationRecipe::serialDimension({.dimension = 1}));
             case InitMode::Identity:
                 if(!problemDependent)
                     return std::nullopt;
-                options.real.pattern = GenerationPattern::Identity;
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::identity());
             case InitMode::TrigSin:
             case InitMode::TrigIndSin:
-                options.real.pattern = GenerationPattern::Sine;
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::sine());
             case InitMode::TrigCos:
             case InitMode::TrigIndCos:
-                options.real.pattern = GenerationPattern::Cosine;
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::cosine());
             case InitMode::TrigAbsSin:
             case InitMode::TrigIndAbsSin:
-                options.real.pattern = GenerationPattern::AbsoluteSine;
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::absoluteSine());
             case InitMode::TrigAbsCos:
             case InitMode::TrigIndAbsCos:
-                options.real.pattern = GenerationPattern::AbsoluteCosine;
-                options.imaginary    = options.real;
-                return options;
+                return replicated(GenerationRecipe::absoluteCosine());
             default:
                 return std::nullopt;
             }
@@ -373,56 +303,44 @@ namespace TensileLite::Client
                                            size_t                  metadataAxis)
         {
             if(dense.dimensions() != metadata.dimensions())
-                throw std::invalid_argument(
-                    "TensileLite sparse data and metadata ranks differ.");
+                throw std::invalid_argument("TensileLite sparse data and metadata ranks differ.");
             if(sparseAxis >= dense.dimensions())
-                throw std::out_of_range(
-                    "TensileLite sparse axis exceeds the data tensor rank.");
+                throw std::out_of_range("TensileLite sparse axis exceeds the data tensor rank.");
             if(metadataAxis >= metadata.dimensions())
                 throw std::out_of_range(
                     "TensileLite metadata axis exceeds the metadata tensor rank.");
             if(dense.sizes()[sparseAxis] == 0)
-                throw std::invalid_argument(
-                    "TensileLite sparse axis extent must be nonzero.");
+                throw std::invalid_argument("TensileLite sparse axis extent must be nonzero.");
             if(dense.sizes()[sparseAxis] % 4 != 0)
                 throw std::invalid_argument(
                     "TensileLite sparse axis extent must be divisible by four.");
 
             std::vector<size_t> logicalDimensions = dense.sizes();
-            logicalDimensions[sparseAxis]
-                = (dense.sizes()[sparseAxis] / 4 + 1) / 2;
+            logicalDimensions[sparseAxis]         = (dense.sizes()[sparseAxis] / 4 + 1) / 2;
             std::vector<ptrdiff_t> logicalStrides(dense.dimensions());
-            logicalStrides[sparseAxis]
-                = static_cast<ptrdiff_t>(metadata.strides()[metadataAxis]);
-            if(metadata.sizes()[metadataAxis]
-               != logicalDimensions[sparseAxis])
-                throw std::invalid_argument(
-                    "TensileLite sparse metadata axis extent mismatch.");
+            logicalStrides[sparseAxis] = static_cast<ptrdiff_t>(metadata.strides()[metadataAxis]);
+            if(metadata.sizes()[metadataAxis] != logicalDimensions[sparseAxis])
+                throw std::invalid_argument("TensileLite sparse metadata axis extent mismatch.");
 
             size_t metadataDimension = 0;
-            for(size_t denseDimension = 0;
-                denseDimension < dense.dimensions();
-                ++denseDimension)
+            for(size_t denseDimension = 0; denseDimension < dense.dimensions(); ++denseDimension)
             {
                 if(denseDimension == sparseAxis)
                     continue;
                 while(metadataDimension == metadataAxis)
                     ++metadataDimension;
                 if(metadataDimension >= metadata.dimensions()
-                   || metadata.sizes()[metadataDimension]
-                          != logicalDimensions[denseDimension])
+                   || metadata.sizes()[metadataDimension] != logicalDimensions[denseDimension])
                     throw std::invalid_argument(
                         "TensileLite sparse metadata non-axis extent mismatch.");
-                logicalStrides[denseDimension] = static_cast<ptrdiff_t>(
-                    metadata.strides()[metadataDimension]);
+                logicalStrides[denseDimension]
+                    = static_cast<ptrdiff_t>(metadata.strides()[metadataDimension]);
                 ++metadataDimension;
             }
-            return Layout(Shape(std::move(logicalDimensions)),
-                          std::move(logicalStrides));
+            return Layout(Shape(std::move(logicalDimensions)), std::move(logicalStrides));
         }
 
-        StructuredSparsityPattern sparsePattern(PruneSparseMode mode,
-                                                size_t          sparseAxis)
+        StructuredSparsityPattern sparsePattern(PruneSparseMode mode, size_t sparseAxis)
         {
             StructuredSparsityPattern pattern;
             pattern.axis = sparseAxis;
@@ -430,8 +348,11 @@ namespace TensileLite::Client
             {
             case PruneSparseMode::PruneRandom:
                 pattern.selection = StructuredSparsitySelection::Random;
-                pattern.seed      = 0x54454e53494c454cULL;
-                pattern.stream    = 1;
+                pattern.seed
+                    = roc::host_validation::tensilelite_adapter::seedForLegacyGenerationStream(
+                        roc::host_validation::tensilelite_adapter::sparsePruningCompatibilitySeed,
+                        roc::host_validation::tensilelite_adapter::
+                            sparsePruningCompatibilityStream);
                 break;
             case PruneSparseMode::PruneXX00:
                 pattern.fixedPositions = {0, 1};
@@ -452,8 +373,7 @@ namespace TensileLite::Client
                 pattern.fixedPositions = {2, 3};
                 break;
             default:
-                throw std::invalid_argument(
-                    "Unsupported TensileLite sparse pruning mode.");
+                throw std::invalid_argument("Unsupported TensileLite sparse pruning mode.");
             }
             return pattern;
         }
@@ -466,17 +386,25 @@ namespace TensileLite::Client
                       DataInitializationKey key,
                       std::optional<double> freeValue = std::nullopt)
         {
-            const std::optional<ScalarType>        type = generationScalarType(dataType);
-            const std::optional<GenerationOptions> options
-                = generationOptions(dataType, mode, problemDependent, key.seed, freeValue);
-            if(!type || !options)
+            const std::optional<ScalarType>               type = generationScalarType(dataType);
+            const std::uint64_t                           legacyRealStream = 2 * key.semanticStream;
+            const std::optional<DataInitializationRecipe> recipe           = generationRecipe(
+                dataType, mode, problemDependent, key.seed, legacyRealStream, freeValue);
+            if(!type || !recipe)
                 return false;
 
-            GenerationOptions adjusted = *options;
-            adjusted.real.stream += 2 * key.semanticStream;
-            adjusted.imaginary.stream += 2 * key.semanticStream;
             Tensor generated(*type, std::move(layout), storage);
-            roc::host_validation::generate(generated, adjusted);
+            if(recipe->legacyCartesianStreams
+               && roc::host_validation::scalarTypeInfo(*type).category
+                      == roc::host_validation::ScalarCategory::Complex)
+            {
+                roc::host_validation::tensilelite_adapter::generateWithLegacyCartesianStreams(
+                    generated, recipe->recipe, *recipe->legacyCartesianStreams);
+            }
+            else
+            {
+                roc::host_validation::generate(generated, recipe->recipe);
+            }
             std::ranges::copy(generated.storage(), storage.begin());
             return true;
         }
@@ -541,42 +469,34 @@ namespace TensileLite::Client
         for(const size_t stride : descriptor.strides())
             strides.push_back(static_cast<ptrdiff_t>(stride));
 
-        Layout layout(Shape(descriptor.sizes()), std::move(strides));
+        Layout       layout(Shape(descriptor.sizes()), std::move(strides));
         const size_t bytes = roc::host_validation::storageBytesForLayout(*type, layout);
         if(array == nullptr && bytes != 0)
             throw std::invalid_argument("Null TensileLite tensor initialization buffer.");
-        return generate(dataType,
-                        mode,
-                        std::move(layout),
-                        {static_cast<std::byte*>(array), bytes},
-                        true,
-                        key);
+        return generate(
+            dataType, mode, std::move(layout), {static_cast<std::byte*>(array), bytes}, true, key);
     }
 
     double hostValidationDoubleValue(InitMode mode, DataInitializationKey key, double freeValue)
     {
         double value = 0;
         if(!tryHostValidationInitialize(rocisa::DataType::Double, mode, &value, 1, key, freeValue))
-            throw std::invalid_argument(
-                "TensileLite constant initialization mode is unsupported.");
+            throw std::invalid_argument("TensileLite constant initialization mode is unsupported.");
         return value;
     }
 
     double hostValidationUniformDouble(double lower, double upper, DataInitializationKey key)
     {
         if(lower > upper)
-            throw std::invalid_argument(
-                "TensileLite uniform lower bound exceeds upper bound.");
+            throw std::invalid_argument("TensileLite uniform lower bound exceeds upper bound.");
 
-        GenerationOptions options;
-        options.seed            = key.seed;
-        options.real.pattern    = GenerationPattern::UniformReal;
-        options.real.parameter0 = lower;
-        options.real.parameter1 = upper;
-        options.real.stream     = 2 * key.semanticStream;
+        const auto uniformRealRecipe = roc::host_validation::GenerationRecipe::realOnly(
+            roc::host_validation::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
+            roc::host_validation::tensilelite_adapter::settingsForLegacyGenerationStream(
+                key.seed, 2 * key.semanticStream));
 
         Tensor generated(ScalarType::Float64, Shape{1});
-        roc::host_validation::generate(generated, options);
+        roc::host_validation::generate(generated, uniformRealRecipe);
         return generated.loadAs<double>({0});
     }
 
@@ -595,39 +515,29 @@ namespace TensileLite::Client
             throw std::invalid_argument(
                 "TensileLite sparse data and compressed tensor types differ.");
         if(tensorMeta.dataType() != rocisa::DataType::Int8)
-            throw std::invalid_argument(
-                "TensileLite sparse metadata must use byte storage.");
+            throw std::invalid_argument("TensileLite sparse metadata must use byte storage.");
         if(dstPruned == nullptr && tensor.totalAllocatedBytes() != 0)
-            throw std::invalid_argument(
-                "Null TensileLite sparse input buffer.");
+            throw std::invalid_argument("Null TensileLite sparse input buffer.");
         if(dstCompressed == nullptr && tensorC.totalAllocatedBytes() != 0)
-            throw std::invalid_argument(
-                "Null TensileLite compressed sparse buffer.");
+            throw std::invalid_argument("Null TensileLite compressed sparse buffer.");
         if(dstMeta == nullptr && tensorMeta.totalAllocatedBytes() != 0)
-            throw std::invalid_argument(
-                "Null TensileLite sparse metadata buffer.");
+            throw std::invalid_argument("Null TensileLite sparse metadata buffer.");
 
         if(tensorC.totalAllocatedElements() > tensorC.totalLogicalElements())
             std::memset(dstCompressed, 0, tensorC.totalAllocatedBytes());
         if(tensorMeta.totalAllocatedElements() > tensorMeta.totalLogicalElements())
             std::memset(dstMeta, 0, tensorMeta.totalAllocatedBytes());
 
-        std::span<std::byte> prunedStorage(
-            static_cast<std::byte*>(dstPruned),
-            tensor.totalAllocatedBytes());
-        std::span<std::byte> compressedStorage(
-            static_cast<std::byte*>(dstCompressed),
-            tensorC.totalAllocatedBytes());
-        std::span<std::byte> metadataStorage(
-            static_cast<std::byte*>(dstMeta),
-            tensorMeta.totalAllocatedBytes());
-        const Layout denseLayout      = tensorLayout(tensor);
-        const Layout compressedLayout = tensorLayout(tensorC);
-        const Layout metadataTensorLayout = logicalSparseMetadataLayout(
-            tensor,
-            tensorMeta,
-            dim,
-            static_cast<size_t>(metadataLayout));
+        std::span<std::byte> prunedStorage(static_cast<std::byte*>(dstPruned),
+                                           tensor.totalAllocatedBytes());
+        std::span<std::byte> compressedStorage(static_cast<std::byte*>(dstCompressed),
+                                               tensorC.totalAllocatedBytes());
+        std::span<std::byte> metadataStorage(static_cast<std::byte*>(dstMeta),
+                                             tensorMeta.totalAllocatedBytes());
+        const Layout         denseLayout          = tensorLayout(tensor);
+        const Layout         compressedLayout     = tensorLayout(tensorC);
+        const Layout         metadataTensorLayout = logicalSparseMetadataLayout(
+            tensor, tensorMeta, dim, static_cast<size_t>(metadataLayout));
         Tensor prunedTensor(scalarType, denseLayout, prunedStorage);
         Tensor compressedTensor(scalarType, compressedLayout, compressedStorage);
         Tensor metadataTensor(ScalarType::UInt8, metadataTensorLayout, metadataStorage);
@@ -635,16 +545,13 @@ namespace TensileLite::Client
             prunedTensor, prunedTensor, compressedTensor, sparsePattern(mode, dim));
         problem.twoOfFourMetadata = metadataTensor;
 
-        const size_t sliceCount =
-            tensor.totalLogicalElements() / tensor.sizes()[dim];
+        const size_t sliceCount = tensor.totalLogicalElements() / tensor.sizes()[dim];
         if(sliceCount == 0)
             return;
-        const size_t requestedWorkers = std::max<size_t>(
-            1, static_cast<size_t>(std::thread::hardware_concurrency()));
+        const size_t requestedWorkers
+            = std::max<size_t>(1, static_cast<size_t>(std::thread::hardware_concurrency()));
         auto hasIndependentSlices = [dim](const Layout& layout) {
-            for(size_t dimension = 0;
-                dimension < layout.shape().rank();
-                ++dimension)
+            for(size_t dimension = 0; dimension < layout.shape().rank(); ++dimension)
             {
                 if(dimension != dim && layout.shape()[dimension] > 1
                    && layout.strides()[dimension] == 0)
@@ -652,26 +559,19 @@ namespace TensileLite::Client
             }
             return true;
         };
-        const bool independentSlices
-            = hasIndependentSlices(denseLayout)
-              && hasIndependentSlices(compressedLayout)
-              && hasIndependentSlices(metadataTensorLayout);
-        const size_t chunkCount
-            = independentSlices ? std::min(sliceCount, requestedWorkers) : 1;
+        const bool   independentSlices = hasIndependentSlices(denseLayout)
+                                         && hasIndependentSlices(compressedLayout)
+                                         && hasIndependentSlices(metadataTensorLayout);
+        const size_t chunkCount = independentSlices ? std::min(sliceCount, requestedWorkers) : 1;
 #pragma omp parallel for schedule(static)
-        for(ptrdiff_t chunk = 0;
-            chunk < static_cast<ptrdiff_t>(chunkCount);
-            ++chunk)
+        for(ptrdiff_t chunk = 0; chunk < static_cast<ptrdiff_t>(chunkCount); ++chunk)
         {
-            const size_t firstSlice =
-                sliceCount * static_cast<size_t>(chunk) / chunkCount;
-            const size_t endSlice =
-                sliceCount * static_cast<size_t>(chunk + 1) / chunkCount;
+            const size_t firstSlice = sliceCount * static_cast<size_t>(chunk) / chunkCount;
+            const size_t endSlice   = sliceCount * static_cast<size_t>(chunk + 1) / chunkCount;
             roc::host_validation::applyStructuredSparsity(
                 problem,
-                StructuredSparsitySliceRange{
-                    .firstSlice = firstSlice,
-                    .sliceCount = endSlice - firstSlice});
+                StructuredSparsitySliceRange{.firstSlice = firstSlice,
+                                             .sliceCount = endSlice - firstSlice});
         }
         std::ranges::copy(prunedTensor.storage(), prunedStorage.begin());
         std::ranges::copy(compressedTensor.storage(), compressedStorage.begin());
