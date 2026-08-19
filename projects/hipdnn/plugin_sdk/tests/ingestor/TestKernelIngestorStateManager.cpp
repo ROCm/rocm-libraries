@@ -155,6 +155,158 @@ TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackLi
     EXPECT_EQ(counters().kernelCalls, 0);
 }
 
+/// Per-arch shards ship the same logical kernel built for different targets, so their
+/// completed tuples are identical by construction. Tuple uniqueness is per
+/// overlapping-arch group, not per engine: no device sees both, so neither is ambiguous.
+/// Asserted per device rather than as "construction succeeded", which cannot tell an
+/// admitted pair from a silently deduplicated one.
+TEST(TestKernelIngestorStateManager, AdmitsTwoPacksSharingATupleUnderDisjointArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    auto first = makePack({GRAPH_MATCHER_ID}, {"gfx90a"});
+    first.kernels = {makeKernel(testId(0x90), "kernel_gfx90a", 64, "FLOAT")};
+    auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    second.id = testId(0x91);
+    second.kernels = {makeKernel(testId(0x92), "kernel_gfx942", 64, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {first, second},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+
+    const TestGraph graph(makeGraphId(22));
+    // Distinct device ids as well as arch strings: the catalog cache is keyed by
+    // (graph, device id), so two devices sharing an id would answer from one catalog.
+    const auto definitionsFor = [&](int deviceId, const char* deviceArch) {
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = deviceArch;
+        return manager.unsortedDefinitions(MatchContext{graph, deviceId, properties});
+    };
+
+    const auto onGfx90a = definitionsFor(0, "gfx90a:sramecc+:xnack-");
+    ASSERT_EQ(onGfx90a.size(), 1u);
+    EXPECT_EQ(onGfx90a.front().kernelId, testId(0x90));
+
+    const auto onGfx942 = definitionsFor(1, "gfx942:sramecc+");
+    ASSERT_EQ(onGfx942.size(), 1u);
+    EXPECT_EQ(onGfx942.front().kernelId, testId(0x92));
+}
+
+/// The same thing one level down, and the reason a kernel carries an arch at all: two
+/// implementations of ONE problem shape in ONE pack, each built for what it can run on.
+/// Their completed tuples are identical -- same block_size, same dtype -- so claiming by
+/// the pack would throw, and both would have to be split into separate packs to coexist.
+TEST(TestKernelIngestorStateManager, AdmitsTwoKernelsOfOnePackSharingATupleUnderDisjointArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx90a", "gfx942"});
+    auto portable = makeKernel(testId(0x90), "portable", 64, "FLOAT");
+    portable.arch = {"gfx90a"};
+    auto accelerated = makeKernel(testId(0x92), "mfma", 64, "FLOAT");
+    accelerated.arch = {"gfx942"};
+    pack.kernels = {portable, accelerated};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+
+    const TestGraph graph(makeGraphId(23));
+    const auto definitionsFor = [&](int deviceId, const char* deviceArch) {
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = deviceArch;
+        return manager.unsortedDefinitions(MatchContext{graph, deviceId, properties});
+    };
+
+    // The pack passes the arch gate on both devices, so only the per-kernel gate can be
+    // what separates these -- a pack-level filter alone would hand both to both.
+    const auto onGfx90a = definitionsFor(0, "gfx90a:sramecc+:xnack-");
+    ASSERT_EQ(onGfx90a.size(), 1u);
+    EXPECT_EQ(onGfx90a.front().kernelId, testId(0x90));
+
+    const auto onGfx942 = definitionsFor(1, "gfx942:sramecc+");
+    ASSERT_EQ(onGfx942.size(), 1u);
+    EXPECT_EQ(onGfx942.front().kernelId, testId(0x92));
+}
+
+/// Narrowing does not buy an escape from uniqueness: two kernels a gfx942 device would
+/// both see still name one catalog key, whether they narrowed to reach it or inherited
+/// the pack. Overlapping is enough -- the two lists need not be equal.
+TEST(TestKernelIngestorStateManager, RejectsTwoKernelsOfOnePackNarrowedToOverlappingArch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx942", "gfx950"});
+    auto broad = makeKernel(testId(0x90), "broad", 64, "FLOAT");
+    broad.arch = {"gfx942", "gfx950"};
+    auto narrow = makeKernel(testId(0x92), "narrow", 64, "FLOAT");
+    narrow.arch = {"gfx942"};
+    pack.kernels = {broad, narrow};
+
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
+                              {pack},
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
+                 std::invalid_argument);
+}
+
+/// A kernel that declares nothing runs wherever its pack does. Pinned because the gate
+/// reads the kernel's list, so an empty one must stay the widest value rather than
+/// becoming a claim on nothing and filtering every unstamped kernel out.
+TEST(TestKernelIngestorStateManager, OffersAnUnstampedKernelEverywhereItsPackReaches)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx90a", "gfx942"});
+    pack.kernels = {makeKernel(testId(0x90), "unstamped", 64, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+
+    const TestGraph graph(makeGraphId(24));
+    int deviceId = 0;
+    for(const auto* deviceArch : {"gfx90a:sramecc+:xnack-", "gfx942:sramecc+"})
+    {
+        // A fresh device id per arch: the catalog is cached by (graph, device id), so
+        // reusing one would answer the second arch from the first one's catalog.
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = deviceArch;
+        const auto definitions
+            = manager.unsortedDefinitions(MatchContext{graph, deviceId++, properties});
+        EXPECT_EQ(definitions.size(), 1u) << "unstamped kernel missing on " << deviceArch;
+    }
+}
+
+/// An arch-independent pack claims every device, so it overlaps a per-arch one and the
+/// two cannot share a tuple: on a gfx942 device both would apply and the catalog key
+/// would name two kernels. This is the empty-list arm of archOverlaps, which the disjoint
+/// case above never reaches.
+TEST(TestKernelIngestorStateManager, RejectsATupleSharedByAnArchIndependentAndAPerArchPack)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    auto anywhere = makePack({GRAPH_MATCHER_ID});
+    anywhere.kernels = {makeKernel(testId(0x93), "kernel_anywhere", 64, "FLOAT")};
+    auto pinned = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    pinned.id = testId(0x94);
+    pinned.kernels = {makeKernel(testId(0x95), "kernel_gfx942", 64, "FLOAT")};
+
+    EXPECT_THROW(StateManager(makeSchema(),
+                              makeTestMatchers(),
+                              makeTestDispatches(),
+                              {anywhere, pinned},
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
+                 std::invalid_argument);
+}
+
 TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingPackKernels)
 {
     // Pruned pack's matcher binds a token before a second fails and prunes it; the
@@ -334,6 +486,21 @@ TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)
     EXPECT_EQ(counters().graphCalls, 2);
 }
 
+TEST(TestKernelIngestorStateManager, NoDeviceYieldsAnEmptyCatalogEvenWhenMatchersWouldAccept)
+{
+    const ScopedSymbols symbols("test.graph", acceptAnyGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x61));
+    const auto properties = testDeviceProperties();
+
+    // Positive half first: same manager and graph, a real device, matchers that accept.
+    ASSERT_FALSE(manager->unsortedCatalog(MatchContext{graph, 0, properties}).entries.empty());
+
+    // Only the device id changes; the catalog must go empty before any matcher runs.
+    EXPECT_TRUE(
+        manager->unsortedCatalog(MatchContext{graph, NO_DEVICE, properties}).entries.empty());
+}
+
 TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -493,8 +660,8 @@ TEST(TestKernelIngestorStateManager, APackAdmittingNoKernelSaysSoRatherThanRepor
 
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO,
                                           toString(PACK_ID)
-                                              + " admitted no kernel of 3 at a kernel-scoped "
-                                                "matcher"))
+                                              + " admitted no kernel of 3 at the arch gate or a "
+                                                "kernel-scoped matcher"))
         << "a pack that contributed nothing must not read as one that scored zero:\n"
         << recorder.getRecordedLogsAsString();
 
@@ -715,6 +882,24 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+            }},
+        // Overlapping lists need not be equal: a gfx942 device satisfies both, so the
+        // tuple really is ambiguous. Plain string equality would let this construct.
+        StateManagerConstructionThrowCase{
+            "RejectsTwoPacksSharingATupleUnderOverlappingArch",
+            "duplicates the metadata tuple",
+            [] {
+                auto first = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+                first.kernels = {makeKernel(testId(0x93), "kernel_narrow", 64, "FLOAT")};
+                auto second = makePack({GRAPH_MATCHER_ID}, {"gfx942", "gfx950"});
+                second.id = testId(0x94);
+                second.kernels = {makeKernel(testId(0x95), "kernel_broad", 64, "FLOAT")};
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{first, second},
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
             }},
         StateManagerConstructionThrowCase{
