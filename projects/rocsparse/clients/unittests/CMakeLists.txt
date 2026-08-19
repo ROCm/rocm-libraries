@@ -137,6 +137,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_precond_direct.cpp
   unit_test_internal_hostblocks_bitops.cpp
   unit_test_internal_hostblocks_csrmm_alg.cpp
+  #10152: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_csrgemm.cpp
   unit_test_internal_hostblocks_indextype.cpp
   unit_test_internal_hostblocks_itilu0.cpp
   #10153: distinct anchor to avoid stacked-branch merge conflicts
