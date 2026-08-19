@@ -1985,7 +1985,7 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.arange(15, dtype=np.float32).reshape(3, 5) - 4
         b = np.arange(20, dtype=np.float32).reshape(5, 4) - 7
         c = np.arange(12, dtype=np.float32).reshape(3, 4)
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -1996,7 +1996,7 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         expected = 2.0 * (a @ b) - c
         np.testing.assert_array_equal(hv.to_numpy(observed), expected)
-        blocked_result = hv.reference_gemm_result(
+        blocked_result = hv.reference_gemm_flat_result(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2018,7 +2018,7 @@ class TensorAndGemmTests(unittest.TestCase):
         finite_b = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
         for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
             with self.subTest(backend=backend):
-                alpha_zero = hv.reference_gemm(
+                alpha_zero = hv.reference_gemm_flat(
                     hv.from_numpy(np.full((2, 2), np.nan, dtype=np.float32)),
                     hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
                     hv.from_numpy(finite_c),
@@ -2030,7 +2030,7 @@ class TensorAndGemmTests(unittest.TestCase):
                 )
                 np.testing.assert_array_equal(hv.to_numpy(alpha_zero), 2.0 * finite_c)
 
-                beta_zero = hv.reference_gemm(
+                beta_zero = hv.reference_gemm_flat(
                     hv.from_numpy(finite_a),
                     hv.from_numpy(finite_b),
                     hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
@@ -2058,7 +2058,7 @@ class TensorAndGemmTests(unittest.TestCase):
 
         for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
             with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
+                observed = hv.reference_gemm_flat(
                     hv.from_numpy(a),
                     hv.from_numpy(b),
                     hv.from_numpy(c),
@@ -2076,7 +2076,7 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.asarray([[0.25, -1.5], [2.0, 3.25]], dtype=np.float64)
         b = np.asarray([[4.0, 0.5], [-2.0, 1.25]], dtype=np.float64)
         c = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2094,7 +2094,7 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.asarray([[1, 3], [2, 4]], dtype=np.int8)
         b = np.asarray([[5], [6]], dtype=np.int8)
         c = np.zeros((2, 1), dtype=np.int32)
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2112,7 +2112,7 @@ class TensorAndGemmTests(unittest.TestCase):
         alpha = 2
         beta = 2
         output_scale = -3
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2136,7 +2136,7 @@ class TensorAndGemmTests(unittest.TestCase):
         values = np.ones((1, 1), dtype=np.int8)
         initial = np.zeros((1, 1), dtype=np.int32)
         with self.assertRaises(ValueError):
-            hv.reference_gemm(
+            hv.reference_gemm_flat(
                 hv.from_numpy(values),
                 hv.from_numpy(values),
                 hv.from_numpy(initial),
@@ -2149,7 +2149,7 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.full((1, 64), np.float16(0.1), dtype=np.float16)
         b = np.full((64, 1), np.float16(0.1), dtype=np.float16)
         c = np.zeros((1, 1), dtype=np.float16)
-        result = hv.reference_gemm_result(
+        result = hv.reference_gemm_flat_result(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2173,7 +2173,7 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.full((1, 16), np.float32(0.1), dtype=np.float32)
         b = np.full((16, 1), np.float32(0.1), dtype=np.float32)
         c = np.zeros((1, 1), dtype=np.float32)
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2197,7 +2197,7 @@ class TensorAndGemmTests(unittest.TestCase):
         b = np.full((16, 1), np.float32(0.1), dtype=np.float32)
         c = np.zeros((1, 1), dtype=np.float32)
 
-        rounded = hv.reference_gemm(
+        rounded = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2205,7 +2205,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.ScalarType.BFloat16,
             accumulation_rounding=hv.AccumulationRounding.AfterProductAndSum,
         )
-        full_precision = hv.reference_gemm(
+        full_precision = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2233,7 +2233,7 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.asarray([[1.234567, -2.345678]], dtype=np.float32)
         b = np.asarray([[3.456789], [4.567891]], dtype=np.float32)
         c = np.zeros((1, 1), dtype=np.float32)
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2259,7 +2259,7 @@ class TensorAndGemmTests(unittest.TestCase):
         c = np.asarray([[1.0j], [2.0 - 1.0j]], dtype=np.complex64)
         alpha = 0.5 + 0.25j
         beta = -1.0 + 0.5j
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2283,7 +2283,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.ScalarType.Float8E5M2,
         )
         c = hv.from_numpy(np.asarray([[1.0]], dtype=np.float32))
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             a,
             b,
             c,
@@ -2296,7 +2296,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed, np.float32), np.asarray([[9.0]], np.float32)
         )
 
-        pre_scaled = hv.reference_gemm(
+        pre_scaled = hv.reference_gemm_flat(
             hv.from_numpy(np.asarray([[1.1]], dtype=np.float32), hv.ScalarType.Float16),
             hv.from_numpy(np.asarray([[1.0]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[0.0]], dtype=np.float32)),
@@ -2311,7 +2311,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(pre_scaled), np.asarray([[3.25]], dtype=np.float32)
         )
 
-        vector_pre_scaled = hv.reference_gemm(
+        vector_pre_scaled = hv.reference_gemm_flat(
             hv.from_numpy(
                 np.asarray([[1.1], [1.1]], dtype=np.float32),
                 hv.ScalarType.Float16,
@@ -2331,7 +2331,7 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([[3.25], [4.5]], dtype=np.float32),
         )
 
-        combined_pre_scaled = hv.reference_gemm(
+        combined_pre_scaled = hv.reference_gemm_flat(
             hv.from_numpy(np.asarray([[0.3]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[1.0]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[0.0]], dtype=np.float32)),
@@ -2397,7 +2397,7 @@ class TensorAndGemmTests(unittest.TestCase):
         backend_outputs = []
         for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
             with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
+                observed = hv.reference_gemm_flat(
                     hv.from_numpy(a),
                     hv.from_numpy(b),
                     hv.from_numpy(c),
@@ -2412,7 +2412,7 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(backend_outputs[0], backend_outputs[1])
 
     def test_gemm_output_scale_and_saturating_conversion(self):
-        scaled_half = hv.reference_gemm(
+        scaled_half = hv.reference_gemm_flat(
             hv.from_numpy(np.asarray([[0.3333]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[3.0]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[0.0]], dtype=np.float32)),
@@ -2425,7 +2425,7 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([[np.float16(np.float32(0.3333 * 3.0 * 0.1))]]),
         )
 
-        saturated_int8 = hv.reference_gemm(
+        saturated_int8 = hv.reference_gemm_flat(
             hv.from_numpy(np.asarray([[63.75]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[2.0]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[0]], dtype=np.int8)),
@@ -2462,7 +2462,7 @@ class TensorAndGemmTests(unittest.TestCase):
         backend_outputs = []
         for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
             with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
+                observed = hv.reference_gemm_flat(
                     hv.from_numpy(a),
                     hv.from_numpy(b),
                     hv.from_numpy(c),
@@ -2495,7 +2495,7 @@ class TensorAndGemmTests(unittest.TestCase):
         backend_outputs = []
         for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
             with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
+                observed = hv.reference_gemm_flat(
                     hv.from_numpy(a),
                     hv.from_numpy(b),
                     hv.from_numpy(c),
@@ -2516,7 +2516,7 @@ class TensorAndGemmTests(unittest.TestCase):
         a = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         b = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
         c = np.zeros((2, 2), dtype=np.float32)
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),
@@ -2528,7 +2528,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed),
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
-        blocked = hv.reference_gemm_result(
+        blocked = hv.reference_gemm_flat_result(
             hv.from_numpy(a),
             hv.from_numpy(b),
             hv.from_numpy(c),

@@ -362,7 +362,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
 
         wrapped = exact_int32_gemm(left, right, initial, alpha, 1, output_scale)
         np.testing.assert_array_equal(wrapped, targets)
-        observed = hv.reference_gemm(
+        observed = hv.reference_gemm_flat(
             hv.from_numpy(left),
             hv.from_numpy(right),
             hv.from_numpy(initial),
@@ -404,7 +404,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
         for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
             with self.subTest(backend=backend):
                 full = hv.to_numpy(
-                    hv.reference_gemm(
+                    hv.reference_gemm_flat(
                         *tensors,
                         hv.ScalarType.Float32,
                         hv.ScalarType.Float32,
@@ -414,7 +414,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                     )
                 )
                 partial = hv.to_numpy(
-                    hv.reference_gemm(
+                    hv.reference_gemm_flat(
                         *tensors,
                         hv.ScalarType.Float32,
                         hv.ScalarType.Float32,
