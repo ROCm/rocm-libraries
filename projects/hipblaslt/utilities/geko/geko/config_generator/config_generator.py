@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 import copy
 from functools import partial
 from pathlib import Path
@@ -43,15 +42,13 @@ def run(
         config: Prepared config dict (already passed through
             apply_input_config_defaults).
             Must contain the GemmProblems list along with ARCH-related fields.
-        hipblaslt_path: Path to the local hipBLASLt repository
-            (tensilelite is added to sys.path).
+        hipblaslt_path: Path to the local hipBLASLt repository used to build
+            and stage the TensileLite client.
         output_path: Output directory for generated artifacts.
         write_shell_scripts: If false, emit only YAML and config log
             (no .sh or run-all script).
     """
     hipblaslt_path, output_path = map(Path, (hipblaslt_path, output_path))
-
-    sys.path.insert(0, str(hipblaslt_path / "tensilelite"))
 
     client_path = None
     if write_shell_scripts:
