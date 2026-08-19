@@ -402,7 +402,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. For test category targets and other details, see [Testing](./TESTING.md#development-workflow).
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. See [Build Targets](#build-targets) for target names and [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
 
 > [!NOTE]
 > `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./TESTING.md#development-workflow) for the available test paths.
