@@ -60,13 +60,31 @@ public:
     // assignment operator
     OverrideSingleton& operator=(const OverrideSingleton&) = delete;
 
+    /**
+     * Re-read HIPBLASLT_TUNING_OVERRIDE_FILE. Tests only, for the same reason as
+     * TuningModeSingleton::reloadForTest: the variable is latched the first time
+     * anything asks for it, which in a test binary is whichever case ran first,
+     * so a later case setting it would otherwise be testing nothing.
+     */
+    void reloadForTest()
+    {
+        readEnv();
+    }
+
 private:
     OverrideSingleton()
     {
-        char* Env = getenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
-        if(Env)
+        readEnv();
+    }
+
+    void readEnv()
+    {
+        file_path.clear();
+        env_mode = false;
+
+        if(const char* env = getenv("HIPBLASLT_TUNING_OVERRIDE_FILE"))
         {
-            file_path = Env;
+            file_path = env;
             env_mode  = true;
         }
     }
@@ -465,6 +483,144 @@ namespace TensileLite
      * path is parsed at most once.
      */
     void getContractionProblemsFromFile(const std::string& path);
+
+    /**
+     * What one tuning attempt did.
+     *
+     * The benchmarker used to answer with an index or a bare -1, and that -1
+     * covered both deliberate declines and half a dozen silent failures. The
+     * call site could not tell which of them had already logged, so it could
+     * not promise exactly one terminal event per attempt without either
+     * printing twice or saying nothing at all.
+     *
+     * Skips are policy: the tuner understood the problem and chose not to
+     * measure it. Fallbacks are everything else, and they are worth
+     * distinguishing because a skip is expected on some shapes forever while a
+     * fallback usually means something is wrong. Scratch splits across that
+     * line: a request over the configured cap is the cap doing its job, while a
+     * device that refuses the allocation is a failure the user should see as
+     * one.
+     */
+    enum class TuningAttempt : uint32_t
+    {
+        Tuned = 0,
+        SkippedInPlaceBeta,
+        SkippedExtentUnknown,
+        SkippedScratchCap,
+        SkippedBudget,
+        FallbackScratchAlloc,
+        FallbackSetup,
+        FallbackEnumeration,
+        FallbackNoWinner,
+        FallbackException,
+    };
+
+    /** True for a policy decline, false for a failure. */
+    bool tuningAttemptIsSkip(TuningAttempt result);
+
+    /** Human-readable cause, without the tuning-cache prefix or event token. */
+    const char* tuningAttemptReason(TuningAttempt result);
+
+    /** How the managed cache file was read, for the startup announcement. */
+    enum class TuningLoadStatus : uint32_t
+    {
+        Ok = 0,
+        NotFound,
+        ReadError,
+        NoPath,
+    };
+
+    /**
+     * Announce mode, path and load result once per process, and arrange for the
+     * closing summary.
+     *
+     * Repeat calls are free. Callers do not need to know whether they are the
+     * first; the load path and the no-path branch both call this.
+     */
+    void announceTuningModeOnce(TuningLoadStatus status);
+
+    /**
+     * Note that a lookup for this problem did or did not find a usable entry.
+     *
+     * Counted by distinct key rather than by call, because the summary is read
+     * against `loaded=N`: a hot loop over one uncached shape would otherwise
+     * report tens of thousands of fallbacks for a single missing row. Matching
+     * is sticky, so a shape that is tuned mid-run and served afterwards ends up
+     * counted as served. Does nothing in off mode.
+     */
+    void recordTuningLookup(const ProblemOverride& key, bool matched);
+
+    /**
+     * Note that this problem was successfully tuned in this process.
+     *
+     * Distinct-key, and deliberately independent of whether the winner reached
+     * the file. The winner is published to the in-memory cache before the append
+     * is attempted, so it serves every later call either way, and counting the
+     * append instead made a run that reported `tuning-done ... persisted=no`
+     * close with `tuned=0`. Counting attempts rather than keys could also report
+     * more tuned shapes than shapes seen, since one key can be retuned.
+     */
+    void recordTuningWinner(const ProblemOverride& key);
+
+    /**
+     * Claim the first sighting of a cache entry that failed identity validation.
+     *
+     * True only the first time this key/index pair is rejected. A stale row is
+     * rediscovered by the heuristic lookup, the execution probe and the recheck
+     * that follows the tuning lock, so counting every sighting reported three
+     * invalidations for one entry.
+     */
+    bool recordTuningInvalidation(const ProblemOverride& key, int solutionIndex);
+
+    /**
+     * Whether a tuning lifecycle line should be written.
+     *
+     * These exist because a skipped or failed attempt records no winner, so the
+     * shape stays uncached and the whole attempt runs again on the next matmul.
+     * Unbounded, that is one line per call on the default channel.
+     *
+     * Both consult the info bit first and never suppress anything once it is
+     * on: a user who asked for diagnostics gets every attempt, matching what
+     * the info logging did before.
+     *
+     * Success and failure are bounded separately, so a key whose first attempt
+     * failed can still report the tune that eventually succeeds. A failure is
+     * bounded per key once that key has announced a start, because a start with
+     * no ending is the hang this feature exists to rule out, and per reason
+     * before then, because the declines made before a start are the ones that
+     * repeat across thousands of shapes.
+     */
+    bool shouldLogTuningStart(const ProblemOverride& key);
+    bool shouldLogTuningTerminal(const ProblemOverride& key, TuningAttempt result);
+
+    /** Cache events that are logged at most once per key when info is on. */
+    enum class TuningKeyEvent : uint32_t
+    {
+        Hit = 0,
+        Miss,
+        Invalid,
+    };
+
+    /**
+     * Whether this key-scoped cache event is worth logging.
+     *
+     * Always false when the info bit is off, so the replay hot path never pays
+     * for the hash or the set probe.
+     */
+    bool shouldLogTuningKeyEvent(TuningKeyEvent kind, const ProblemOverride& key);
+
+    /**
+     * Drop every process-lifetime diagnostic latch. Tests only: one test binary
+     * runs many modes and cache files, and would otherwise inherit the first
+     * test's announcement and bounds.
+     */
+    void resetTuningDiagnosticsForTest();
+
+    /** Distinct-key tally behind the summary line, for tests. */
+    void tuningLookupTallyForTest(uint64_t* shapes,
+                                  uint64_t* matched,
+                                  uint64_t* fellback,
+                                  uint64_t* tuned);
 
     template <>
     struct Comparison<ProblemOverride>

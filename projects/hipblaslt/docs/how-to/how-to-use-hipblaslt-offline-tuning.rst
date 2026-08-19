@@ -212,6 +212,53 @@ enough to check by hand.
 Benchmarking never writes to your buffers. Candidates run against memory the library allocates for
 the purpose, and only the winner runs on the real output.
 
+Reading the tuning output
+-------------------------
+
+Because the first call on a new shape can block for minutes, ``cache`` and ``tune`` mode report what
+they are doing without needing any logging variable. A first ``tune`` run looks like this:
+
+.. code-block:: none
+
+   tuning-cache: mode=tune path=tuning.txt load=not-found loaded=0
+   tuning-cache: tuning-start m=2048 n=1024 k=2048 batch=1 trans=TN types=f16_r/f16_r; this call will block until it finishes
+   tuning-cache: tuning-done winner=247670 elapsed=145.7s persisted=yes
+   tuning-cache: summary shapes=1 matched=1 fellback=0 tuned=1 invalidated=0
+
+Replaying that cache prints only the first and last lines, since a cache hit says nothing per call:
+
+.. code-block:: none
+
+   tuning-cache: mode=cache path=tuning.txt load=ok loaded=1
+   tuning-cache: summary shapes=1 matched=1 fellback=0 tuned=0 invalidated=0
+
+The summary is how you confirm a deployed cache is actually being used. ``shapes`` counts distinct
+problems the process looked up, not calls, so it stays comparable with ``loaded``. ``matched`` is how
+many of them a cache entry served and ``fellback`` how many fell through to the default heuristic;
+those are the shapes still worth tuning. ``tuned`` counts distinct shapes this run benchmarked,
+whether or not their winners reached the file; ``persisted`` on each ``tuning-done`` line is what
+tells you that. ``invalidated`` counts entries rejected because a rebuild
+moved the kernel they named. The summary is written as the process exits normally, so a run that is
+killed or aborts does not produce one, and it is left out entirely when a process loaded no entries
+and looked nothing up.
+
+The output is bounded. A shape that cannot be tuned reports its reason once rather than once per
+call, and shapes are announced at most once each. A shape declined for one call can still be tuned
+on a later one, and that tune is reported:
+
+.. code-block:: none
+
+   tuning-cache: tuning-skipped in-place C==D with nonzero beta cannot be measured without mutating its input; using default selection
+
+``tuning-skipped`` means the tuner understood the problem and declined it, which is expected for
+some shapes forever. ``tuning-fallback`` means an attempt failed and is worth investigating.
+
+Setting ``HIPBLASLT_LOG_LEVEL=4`` keeps all of the above, timestamps it like the rest of the library
+log, and adds per-problem cache hit, miss and invalidation lines, the scratch and candidate setup,
+a progress heartbeat every ten seconds during a long search, and the winner's measured time against
+the baseline. At that level nothing is collapsed, so every attempt is reported. See
+:ref:`environment-variables` for where each of these is written.
+
 Limitations
 -----------
 
@@ -220,4 +267,6 @@ Limitations
 * An uncached in-place problem where ``C`` and ``D`` alias and ``beta`` is nonzero runs with normal selection instead of being tuned. Repeated benchmark launches would otherwise overwrite and reuse C rather than measuring the caller's input.
 * One process should write a given cache file at a time.
 * ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry tuned at one value of ``beta`` can serve a caller using another.
-* Passing ``algo=nullptr`` to ``hipblasLtMatmul`` does not replay cached winners.
+* Passing ``algo=nullptr`` to ``hipblasLtMatmul`` does not replay cached winners, and such a call is
+  left out of the summary rather than counted as a shape the cache served. In ``tune`` mode the shape
+  is still benchmarked, and that winner does run.

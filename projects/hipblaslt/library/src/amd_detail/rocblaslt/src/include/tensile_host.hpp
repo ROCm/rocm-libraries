@@ -316,12 +316,20 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
  * The execution-path tuning hook needs "is there a usable entry", not "is there
  * any entry": a shape whose rows all failed validation after a rebuild must be
  * eligible for re-tuning.
+ *
+ * countLookup false suppresses the hit/miss and summary accounting, for the two
+ * cases where a probe is not a cache lookup on the caller's behalf: the re-check
+ * the hook performs after taking the tuning lock, which asks the same question
+ * about the same key within one call and would otherwise report two or three
+ * misses for a single matmul, and a hipblasLtMatmul given no algorithm, which is
+ * launched with default selection whatever the cache holds.
  */
 bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
-                                  size_t                              max_workspace_bytes);
+                                  size_t                              max_workspace_bytes,
+                                  bool                                countLookup = true);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 

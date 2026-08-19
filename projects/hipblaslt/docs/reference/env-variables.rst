@@ -26,6 +26,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_LEVEL``
         | Controls the verbosity level of hipBLASLt logging output.
+        | Levels are cumulative: each one also enables the levels below it.
       - | 0: Off (logging disabled, default)
         | 1: Error (only errors are logged)
         | 2: Trace (API calls with kernel launches log parameters)
@@ -35,6 +36,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_MASK``
         | Controls logging output using bit mask flags (can be combined).
+        | Consulted only when ``HIPBLASLT_LOG_LEVEL`` is unset.
       - | 0: Off
         | 1: Error
         | 2: Trace
@@ -47,8 +49,9 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_FILE``
         | Specifies path to logging file. Can contain ``%i`` for process ID replacement.
+        | Has no effect unless a level or mask has enabled logging.
       - | Path to log file (for example, ``logfile_%i.log``)
-        | If not defined: log messages printed to stdout
+        | If not defined: log messages printed to stderr
 
     * - | ``HIPBLASLT_ENABLE_MARKER``
         | Enables marker trace for ROCProfiler profiling.
@@ -92,6 +95,24 @@ Runtime tuning is opt-in. ``HIPBLASLT_TUNING_MODE`` and
 set them before the first hipBLASLt call. The scratch cap is read on the first
 scratch allocation. For more information, see
 :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
+
+Setting ``cache`` or ``tune`` mode emits a few concise lifecycle notices without
+requiring any logging variable, because tuning can block the first call on a new
+shape for minutes and a silent pause is indistinguishable from a hang. The notices
+are bounded: one line naming the mode and what loaded, one start and one result
+per shape that is actually tuned, and one closing summary. Replaying a cache adds
+no output per call. Where they are written depends on whether logging is on:
+
+* No level or mask: the notices go to stderr. ``HIPBLASLT_LOG_FILE`` alone does
+  not open a log file, so it does not capture them.
+* ``HIPBLASLT_LOG_LEVEL`` 1 to 3, or a mask without the info bit: the notices go
+  to whichever sink logging already opened, including ``HIPBLASLT_LOG_FILE``.
+* ``HIPBLASLT_LOG_LEVEL=4`` or higher, or ``HIPBLASLT_LOG_MASK`` including ``8``:
+  the notices are timestamped like every other log line, and detailed tuning
+  diagnostics are added (cache hit, miss and invalidation per problem, scratch and
+  candidate setup, a progress heartbeat, and measurement results).
+
+Setting ``off``, or leaving the mode unset, produces no tuning output at any level.
 
 .. list-table::
     :header-rows: 1

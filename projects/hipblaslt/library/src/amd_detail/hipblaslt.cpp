@@ -493,8 +493,13 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulAlgoGetHeuristic");
 
+    // Only when no tuning mode is set. selectTuningFile already ignores the
+    // legacy override in cache and tune mode, so running this preflight anyway
+    // opened a file that will never be consulted and could then announce a build
+    // mismatch about it. The startup line reports the override being ignored.
     OverrideSingleton& override = OverrideSingleton::getInstance();
-    if(override.env_mode)
+    if(override.env_mode
+       && TensileLite::TuningModeSingleton::getInstance().mode() == TensileLite::TuningMode::Off)
     {
         bool override_success = override_path_compare_git_version(override, handle);
         if(override_success)

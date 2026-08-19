@@ -188,6 +188,7 @@ namespace
      * stamp when the file was loaded, so there is nothing further to check.
      */
     bool tuned_entry_identity_matches(rocblaslt_handle                         handle,
+                                      const TensileLite::ProblemOverride&      key,
                                       const TensileLite::TunedEntry&           entry,
                                       const rocblaslt_matmul_heuristic_result& resolved)
     {
@@ -221,12 +222,20 @@ namespace
             return true;
 
         auto& counters = TensileLite::TuningCounters::instance();
-        counters.invalidated++;
 
-        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        // Once per rejected entry rather than once per probe. A single call in
+        // tune mode meets this row three times, through the heuristic lookup,
+        // the execution probe and the recheck taken under the tuning lock, and
+        // counting each sighting reported three invalidations for one entry.
+        if(TensileLite::recordTuningInvalidation(key, entry.solutionIndex))
+            counters.invalidated++;
+
+        // Once per key rather than once per lookup: a stale entry is rediscovered
+        // on every call for that shape, and the message is the same every time.
+        if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Invalid, key))
         {
             std::ostringstream msg;
-            msg << "tuning-cache: entry invalid, index " << entry.solutionIndex
+            msg << "tuning-cache: cache-invalid index=" << entry.solutionIndex
                 << " now resolves to '" << currentName << "', recorded '" << recorded << "' ["
                 << counters.summary() << "]";
             log_info(__func__, msg.str());
@@ -250,6 +259,18 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
 
     if(m_override.size() == 0)
     {
+        // Still a lookup, and still one that fell back. Leaving early without
+        // counting it made a cache mode pointed at a missing or fully rejected
+        // file report shapes=0 and misses=0, which reads as "nothing asked" when
+        // the truth is "everything asked and nothing was there". The key build
+        // is behind the mode check because legacy override users reach this too
+        // and must not start paying for it.
+        TensileLite::TuningCounters::instance().misses++;
+
+        if(TensileLite::TuningModeSingleton::getInstance().mode() != TensileLite::TuningMode::Off)
+            TensileLite::recordTuningLookup(RocblasltContractionProblem2ProblemOverride(problem),
+                                            false);
+
         log_info(__func__, "No valid entries found in override file.");
     }
     else
@@ -283,7 +304,7 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
                    handle, solutionIndex, overrideResults, max_workspace_bytes)
                && !overrideResults.empty())
             {
-                if(!tuned_entry_identity_matches(handle, entry, overrideResults[0]))
+                if(!tuned_entry_identity_matches(handle, prob_key, entry, overrideResults[0]))
                     continue;
 
                 size_t required_workspace_size = 0;
@@ -332,14 +353,19 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         if(!success)
         {
             TensileLite::TuningCounters::instance().misses++;
-            log_info(__func__, "No valid solution index found in override file.");
+            TensileLite::recordTuningLookup(prob_key, false);
+
+            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Miss, prob_key))
+                log_info(__func__, "tuning-cache: cache-miss, no valid entry for this problem");
         }
         else
         {
             TensileLite::TuningCounters::instance().hits++;
-            std::string mapping_result = "Find solution with index: ";
-            mapping_result += std::to_string(solutionIndex[0]);
-            log_info(__func__, mapping_result);
+            TensileLite::recordTuningLookup(prob_key, true);
+
+            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Hit, prob_key))
+                log_info(__func__,
+                         "tuning-cache: cache-hit index=" + std::to_string(solutionIndex[0]));
         }
     }
 
@@ -352,7 +378,8 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
-                                  size_t                              max_workspace_bytes)
+                                  size_t                              max_workspace_bytes,
+                                  bool                                countLookup)
 {
     TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
 
@@ -362,6 +389,27 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
 
     std::vector<rocblaslt_matmul_heuristic_result> resolved;
     std::vector<int>                               index(1);
+
+    // Recorded whichever way this returns. Until now this path updated neither
+    // the counters nor any tally, so a matmul-only caller, which never enters a
+    // heuristic entry point, was invisible to both.
+    struct RecordLookup
+    {
+        const TensileLite::ProblemOverride& key;
+        bool                                count;
+        bool                                matched = false;
+        ~RecordLookup()
+        {
+            if(!count)
+                return;
+
+            TensileLite::recordTuningLookup(key, matched);
+            if(matched)
+                TensileLite::TuningCounters::instance().hits++;
+            else
+                TensileLite::TuningCounters::instance().misses++;
+        }
+    } record{key, countLookup};
 
     for(const auto& entry : entries)
     {
@@ -375,7 +423,7 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                != getSolutionsFromIndex(handle, index, resolved, max_workspace_bytes)
            || resolved.empty())
             continue;
-        if(!tuned_entry_identity_matches(handle, entry, resolved[0]))
+        if(!tuned_entry_identity_matches(handle, key, entry, resolved[0]))
             continue;
 
         // Identity says the index still names the recorded kernel; usability
@@ -390,7 +438,10 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
         if(rocblaslt_status_success
                == isSolutionSupportedNoMutation(handle, supportProblem, gemmData, &algo, &required)
            && required <= max_workspace_bytes)
+        {
+            record.matched = true;
             return true;
+        }
 
         // Mirror replay's XF32 fallback, but keep this a pure probe. The
         // algorithm passed to runContractionProblem is not necessarily this
@@ -405,7 +456,10 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                    == isSolutionSupportedNoMutation(
                        handle, supportProblem, gemmData, &algo, &required)
                && required <= max_workspace_bytes)
+            {
+                record.matched = true;
                 return true;
+            }
         }
     }
 
@@ -438,6 +492,11 @@ bool problem_override_from_file_cpp(
 
     if(m_override.size() == 0)
     {
+        // Counted for the same reason as the C path. The key is already built
+        // and stored on the gemm data here, so there is nothing to guard.
+        TensileLite::TuningCounters::instance().misses++;
+        TensileLite::recordTuningLookup(TensileDataGemm2ProblemOverride(gemmData), false);
+
         log_info(__func__, "No valid entries found in override file.");
     }
     else
@@ -468,7 +527,7 @@ bool problem_override_from_file_cpp(
                 // Applied here too. This path never called the git-version gate
                 // at all, so before per-entry validation a stale file was used
                 // across builds with no check whatsoever.
-                if(!tuned_entry_identity_matches(handle, entry, overrideResults[0]))
+                if(!tuned_entry_identity_matches(handle, prob_key, entry, overrideResults[0]))
                     continue;
 
                 size_t                  required_workspace_size = 0;
@@ -522,15 +581,25 @@ bool problem_override_from_file_cpp(
             }
         }
 
+        // Counted here for the same reason as the C path. This path used to
+        // update nothing, so a structured-extension caller replaying happily
+        // still reported zero hits.
         if(!success)
         {
-            log_info(__func__, "No valid solution index found in override file.");
+            TensileLite::TuningCounters::instance().misses++;
+            TensileLite::recordTuningLookup(prob_key, false);
+
+            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Miss, prob_key))
+                log_info(__func__, "tuning-cache: cache-miss, no valid entry for this problem");
         }
         else
         {
-            std::string mapping_result = "Find solution with index: ";
-            mapping_result += std::to_string(solutionIndex[0]);
-            log_info(__func__, mapping_result);
+            TensileLite::TuningCounters::instance().hits++;
+            TensileLite::recordTuningLookup(prob_key, true);
+
+            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Hit, prob_key))
+                log_info(__func__,
+                         "tuning-cache: cache-hit index=" + std::to_string(solutionIndex[0]));
         }
     }
 
@@ -2956,6 +3025,16 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     TensileLite::TuningModeSingleton::getInstance().reloadForTest();
     TensileLite::OverrideMap::getMap().resetForTest();
 
+    // The legacy override variable latches on first use too, and the first use
+    // in a test binary is whichever case ran first. Without this a case that
+    // sets it is silently exercising default selection instead.
+    OverrideSingleton::getInstance().reloadForTest();
+
+    // The announcement latch, the default-channel bounds and the once-per-key
+    // sets all live for the process, so without this the second test in a
+    // binary would inherit the first one's "already said that" state.
+    TensileLite::resetTuningDiagnosticsForTest();
+
     auto& counters = TensileLite::TuningCounters::instance();
     counters.entriesLoaded = 0;
     counters.hits          = 0;
@@ -2987,4 +3066,26 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_counters_for_test(uint64_t* lo
         *tuned = c.tuned.load();
     if(skipped)
         *skipped = c.skipped.load();
+}
+
+// The distinct-shape tally behind the summary line. Separate from the counters
+// above because those count lookups while this counts problems, and because the
+// summary itself is written during static destruction, long after any in-process
+// stderr capture a test could install.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_lookup_tally_for_test(uint64_t* shapes,
+                                                                        uint64_t* matched,
+                                                                        uint64_t* fellback,
+                                                                        uint64_t* tuned)
+{
+    uint64_t localShapes = 0, localMatched = 0, localFellback = 0, localTuned = 0;
+    TensileLite::tuningLookupTallyForTest(&localShapes, &localMatched, &localFellback, &localTuned);
+
+    if(shapes)
+        *shapes = localShapes;
+    if(matched)
+        *matched = localMatched;
+    if(fellback)
+        *fellback = localFellback;
+    if(tuned)
+        *tuned = localTuned;
 }

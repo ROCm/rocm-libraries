@@ -24,8 +24,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <sstream>
+#include <streambuf>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,6 +45,10 @@ extern "C" void hipblaslt_tuning_counters_for_test(uint64_t* loaded,
                                                    uint64_t* invalidated,
                                                    uint64_t* tuned,
                                                    uint64_t* skipped);
+extern "C" void hipblaslt_tuning_lookup_tally_for_test(uint64_t* shapes,
+                                                       uint64_t* matched,
+                                                       uint64_t* fellback,
+                                                       uint64_t* tuned);
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -502,6 +508,63 @@ namespace
         return false;
     }
 
+    /**
+     * Collects what the library writes to std::cerr for the life of the object.
+     *
+     * Enough for the no-log-level cases, which are the ones worth asserting on:
+     * with logging off the lifecycle router writes to the std::cerr object
+     * itself, so swapping its buffer catches it. It cannot see anything sent to
+     * a log file or written straight to file descriptor 2, and it is deliberately
+     * scoped tightly around one call because unrelated warnings share the stream.
+     */
+    class CerrCapture
+    {
+    public:
+        CerrCapture()
+            : m_saved(std::cerr.rdbuf(m_buffer.rdbuf()))
+        {
+        }
+
+        ~CerrCapture()
+        {
+            std::cerr.rdbuf(m_saved);
+        }
+
+        CerrCapture(const CerrCapture&)            = delete;
+        CerrCapture& operator=(const CerrCapture&) = delete;
+
+        std::string str() const
+        {
+            return m_buffer.str();
+        }
+
+    private:
+        std::ostringstream m_buffer;
+        std::streambuf*    m_saved;
+    };
+
+    size_t countOccurrences(const std::string& haystack, const std::string& needle)
+    {
+        size_t n = 0;
+        for(size_t at = haystack.find(needle); at != std::string::npos;
+            at        = haystack.find(needle, at + needle.size()))
+            n++;
+        return n;
+    }
+
+    /**
+     * Whether tuning output is predictable enough to assert on.
+     *
+     * The logger latches its environment at first use and cannot be reset, so a
+     * run that already has a level or a log file set sends the lifecycle lines
+     * somewhere this fixture cannot see.
+     */
+    bool loggingEnvIsClean()
+    {
+        return getenv("HIPBLASLT_LOG_LEVEL") == nullptr && getenv("HIPBLASLT_LOG_MASK") == nullptr
+               && getenv("HIPBLASLT_LOG_FILE") == nullptr;
+    }
+
     size_t valueRowCount(const std::string& path)
     {
         size_t     n     = 0;
@@ -532,7 +595,11 @@ namespace
                                                 "HIPBLASLT_TUNING_ROTATING_MB",
                                                 "HIPBLASLT_TUNING_FLUSH_ICACHE",
                                                 "HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE",
-                                                "HIPBLASLT_TUNING_SCRATCH_MAX_BYTES"};
+                                                "HIPBLASLT_TUNING_SCRATCH_MAX_BYTES",
+                                                // Set by one logging case, and
+                                                // left set would make every
+                                                // later case skip itself.
+                                                "HIPBLASLT_LOG_FILE"};
             for(const char* name : names)
             {
                 const char* value = getenv(name);
@@ -559,6 +626,28 @@ namespace
                 else
                     unsetenv(name.c_str());
             }
+            hipblaslt_tuning_reset_for_test();
+        }
+
+        /**
+         * enterMode with the search cut down to almost nothing.
+         *
+         * The logging cases care about which lines appear, not about tuning
+         * quality, and the shared enterMode settings pay for rotation seeding and
+         * an icache calibration burst that none of these assertions look at.
+         * Keeping them separate also guarantees each search finishes well inside
+         * the ten-second progress interval, so the heartbeat cannot appear and
+         * make the negative assertions flaky.
+         */
+        void enterModeForLogging(const char* mode, const std::string& path)
+        {
+            enterMode(mode, path);
+            setenv("HIPBLASLT_TUNING_ALL_KERNELS", "0", 1);
+            setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+            setenv("HIPBLASLT_TUNING_COLD_ITERS", "0", 1);
+            setenv("HIPBLASLT_TUNING_HOT_ITERS", "1", 1);
+            setenv("HIPBLASLT_TUNING_FLUSH_ICACHE", "0", 1);
+            setenv("HIPBLASLT_TUNING_ROTATING_MB", "0", 1);
             hipblaslt_tuning_reset_for_test();
         }
 
@@ -975,5 +1064,250 @@ namespace
         const auto c = counters();
         EXPECT_GE(c.loaded, 1u) << "legacy row was not loaded";
         EXPECT_GE(c.hits, 1u) << "legacy row did not match";
+    }
+
+    // Turning tuning on has to explain the pause it causes, without the user
+    // also having to turn on library logging.
+    TEST_F(TuningCache, TuneLifecycleIsVisibleWithoutLogLevel)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        enterModeForLogging("tune", m_path);
+
+        std::string out;
+        {
+            CerrCapture capture;
+            ASSERT_TRUE(runGemm(256, 256, 256));
+            out = capture.str();
+        }
+
+        EXPECT_NE(out.find("tuning-cache: mode=tune"), std::string::npos) << out;
+        EXPECT_NE(out.find("tuning-start"), std::string::npos) << out;
+        EXPECT_NE(out.find("tuning-done"), std::string::npos) << out;
+
+        // Everything below belongs to the info bit and must stay off by default.
+        EXPECT_EQ(out.find("progress"), std::string::npos) << out;
+        EXPECT_EQ(out.find("setup candidates="), std::string::npos) << out;
+        EXPECT_EQ(out.find("cache-hit"), std::string::npos) << out;
+        EXPECT_EQ(out.find("cache-miss"), std::string::npos) << out;
+    }
+
+    // A legacy override user never opted into any of this and must not start
+    // seeing new output on stderr because the feature exists.
+    TEST_F(TuningCache, OffModeWithLegacyOverrideEmitsNoLifecycle)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        enterModeForLogging("tune", m_path);
+        ASSERT_TRUE(runGemm(256, 256, 256));
+        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
+
+        enterMode("off", "");
+        setenv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
+        hipblaslt_tuning_reset_for_test();
+
+        std::string out;
+        {
+            CerrCapture capture;
+            ASSERT_TRUE(runGemm(256, 256, 256));
+            out = capture.str();
+        }
+
+        // Asserted before the silence check, because silence is also what a run
+        // that never consulted the override file looks like. The tune phase
+        // above wrote this exact shape, so off mode must replay it from the
+        // legacy variable to get here.
+        ASSERT_GE(counters().hits, 1u) << "the legacy override file was never consulted";
+
+        EXPECT_EQ(out.find("tuning-cache:"), std::string::npos) << out;
+    }
+
+    // Replay is the steady state, so it has to be silent per call. Otherwise the
+    // feature costs a line of stderr for every matmul an application runs.
+    TEST_F(TuningCache, RepeatedCacheHitsAddNoOutput)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        enterModeForLogging("tune", m_path);
+        ASSERT_TRUE(runGemm(256, 256, 256));
+        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
+
+        enterModeForLogging("cache", m_path);
+
+        // First call carries the once-per-process startup line.
+        {
+            CerrCapture capture;
+            ASSERT_TRUE(runGemm(256, 256, 256));
+        }
+
+        std::string later;
+        {
+            CerrCapture capture;
+            ASSERT_TRUE(runGemm(256, 256, 256));
+            ASSERT_TRUE(runGemm(256, 256, 256));
+            later = capture.str();
+        }
+
+        EXPECT_EQ(later, "") << later;
+    }
+
+    // A skip records no winner, so the shape stays uncached and the whole attempt
+    // runs again on the next matmul. Unbounded, that is a line per call.
+    TEST_F(TuningCache, RepeatedSkipReportsItsReasonOnce)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        enterModeForLogging("tune", m_path);
+
+        std::string out;
+        {
+            CerrCapture capture;
+            for(int i = 0; i < 3; i++)
+                ASSERT_TRUE(runGemm(384, 256, 128, 2.0f, true, true));
+            out = capture.str();
+        }
+
+        ASSERT_GE(counters().skipped, 3u) << "the shape was not retried, so nothing was bounded";
+        EXPECT_EQ(countOccurrences(out, "tuning-skipped"), 1u) << out;
+
+        // This decline is made before the search is announced, which is what
+        // lets it collapse. A skip that had announced one would owe an ending.
+        EXPECT_EQ(out.find("tuning-start"), std::string::npos) << out;
+    }
+
+    // Bounding a skip must not spend the shape's one terminal line.
+    //
+    // beta and C/D aliasing are deliberately outside the cache key, so the
+    // declined in-place call below and the ordinary call after it are one key
+    // with two different outcomes. The second one blocks for the whole search,
+    // which is exactly the pause these notices exist to explain.
+    TEST_F(TuningCache, SkipDoesNotSilenceALaterTuneOfTheSameShape)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        enterModeForLogging("tune", m_path);
+
+        std::string out;
+        {
+            CerrCapture capture;
+            ASSERT_TRUE(runGemm(384, 256, 128, 2.0f, true, true));
+            ASSERT_TRUE(runGemm(384, 256, 128));
+            out = capture.str();
+        }
+
+        ASSERT_GE(counters().skipped, 1u) << "the in-place call was not declined";
+        EXPECT_NE(out.find("tuning-skipped"), std::string::npos) << out;
+        EXPECT_NE(out.find("tuning-done"), std::string::npos) << out;
+    }
+
+    // A cache that served nothing must not read like a process that asked
+    // nothing. Without the shape recorded here the summary says shapes=0, which
+    // is the same thing it says when tuning was never reached at all.
+    TEST_F(TuningCache, ShapesThatMissAnEmptyCacheAreStillCounted)
+    {
+        enterModeForLogging("cache", m_path);
+        ASSERT_FALSE(std::ifstream(m_path).good()) << "the cache file was supposed to be absent";
+
+        ASSERT_TRUE(runGemm(256, 256, 256));
+
+        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
+        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
+
+        EXPECT_EQ(shapes, 1u);
+        EXPECT_EQ(matched, 0u);
+        EXPECT_EQ(fellback, 1u);
+        EXPECT_EQ(tuned, 0u);
+    }
+
+    // The summary is read against loaded=N, so it counts problems rather than
+    // lookups. A replay loop over one shape is one shape.
+    TEST_F(TuningCache, LookupTallyCountsShapesNotCalls)
+    {
+        enterModeForLogging("tune", m_path);
+        ASSERT_TRUE(runGemm(256, 256, 256));
+        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
+
+        enterModeForLogging("cache", m_path);
+        for(int i = 0; i < 4; i++)
+            ASSERT_TRUE(runGemm(256, 256, 256));
+
+        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
+        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
+
+        EXPECT_EQ(shapes, 1u);
+        EXPECT_EQ(matched, 1u);
+        EXPECT_EQ(fellback, 0u);
+    }
+
+    // A winner that could not be written was still tuned: it is in the in-memory
+    // cache and serves every later call in this process. Reporting tuned=0 next
+    // to a "tuning-done ... persisted=no" line contradicts it.
+    TEST_F(TuningCache, TuneThatCannotPersistIsStillCountedAsTuned)
+    {
+        // No such directory, so the load finds nothing and the append cannot
+        // create the file. Tuning itself is unaffected.
+        const std::string unwritable = "/nonexistent-hipblaslt-review-dir/cache.tuning";
+
+        enterModeForLogging("tune", unwritable);
+        ASSERT_TRUE(runGemm(256, 256, 256));
+
+        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
+        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
+
+        EXPECT_EQ(tuned, 1u) << "a successful tune vanished from the summary because the "
+                                "winner could not be written";
+
+        // The persist-only counter is what stayed at zero, and that is the
+        // distinction the outcome line reports.
+        EXPECT_EQ(counters().tuned, 0u) << "the winner was somehow written to " << unwritable;
+    }
+
+    // One stale row is met three times in a tune-mode call: the heuristic
+    // lookup, the execution probe, and the recheck under the tuning lock.
+    TEST_F(TuningCache, StaleEntryIsCountedAsOneInvalidation)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "expected exactly one tuned row to spoil";
+        ASSERT_TRUE(rewriteColumn(m_path, "kernel_name", "NotARealKernelName"));
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        EXPECT_EQ(counters().invalidated, 1u) << "one rejected entry was counted more than once";
+    }
+
+    // The router must never open the log file itself: doing so would create and
+    // truncate it for a process that asked for tuning but not for logging.
+    TEST_F(TuningCache, LogFileWithoutLevelIsNotCreated)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        const std::string logPath = tempCachePath("LogFileProbe") + ".log";
+        std::remove(logPath.c_str());
+        setenv("HIPBLASLT_LOG_FILE", logPath.c_str(), 1);
+
+        enterModeForLogging("tune", m_path);
+
+        bool ran = false;
+        {
+            CerrCapture capture;
+            ran = runGemm(256, 256, 256);
+        }
+
+        unsetenv("HIPBLASLT_LOG_FILE");
+        ASSERT_TRUE(ran);
+
+        const bool created = std::ifstream(logPath).good();
+        std::remove(logPath.c_str());
+
+        EXPECT_FALSE(created) << "the lifecycle router created " << logPath
+                              << " even though no log level was set";
     }
 } // namespace

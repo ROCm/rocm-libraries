@@ -3712,8 +3712,22 @@ namespace
 
         size_t cap() const { return m_cap; }
 
+        /** Why acquire() returned null, so the caller can tell policy from failure. */
+        enum class Denial
+        {
+            None = 0,
+            OverCap,
+            Unavailable,
+        };
+
         /**
          * Null when the request exceeds the cap or allocation fails.
+         *
+         * Those two are reported apart through denial. Refusing a request over
+         * the cap is the cap working as configured, while a device that will not
+         * give up the memory is a failure, and folding both into one outcome
+         * told a user whose GPU was out of memory to raise a limit that was
+         * never reached.
          *
          * One buffer per device, keyed by whichever device is current, because
          * that is the device hipMalloc will allocate on. A single process-wide
@@ -3722,14 +3736,23 @@ namespace
          * memory: on a peer-capable pair that silently measures cross-device
          * traffic, and otherwise it faults.
          */
-        void* acquire(size_t bytes)
+        void* acquire(size_t bytes, Denial* denial = nullptr)
         {
-            if(bytes == 0 || bytes > m_cap)
+            const auto deny = [&](Denial why) -> void* {
+                if(denial)
+                    *denial = why;
                 return nullptr;
+            };
+
+            if(denial)
+                *denial = Denial::None;
+
+            if(bytes == 0 || bytes > m_cap)
+                return deny(Denial::OverCap);
 
             int device = 0;
             if(hipGetDevice(&device) != hipSuccess)
-                return nullptr;
+                return deny(Denial::Unavailable);
 
             Slot& slot = m_slots[device];
 
@@ -3743,7 +3766,7 @@ namespace
 
             void* fresh = nullptr;
             if(hipMalloc(&fresh, bytes) != hipSuccess)
-                return nullptr;
+                return deny(Denial::Unavailable);
 
             slot.ptr  = fresh;
             slot.size = bytes;
@@ -4173,22 +4196,29 @@ namespace
     }
 
     /**
-     * Benchmark candidates on isolated scratch and return the winning solution
-     * index, or -1 to leave selection alone.
+     * Benchmark candidates on isolated scratch and say what happened.
+     *
+     * Returns a reason rather than a bare -1 so the caller can report exactly
+     * one terminal event per attempt. On TuningAttempt::Tuned, and only then,
+     * winnerIndexOut and winnerOut describe the winner.
      *
      * Nothing here touches the caller's buffers. The winner is launched once by
      * the normal path afterwards, on the real ones.
      */
-    int benchmarkAndSelectWinner(
-        rocblaslt_handle                   handle,
-        const RocblasltContractionProblem& prob,
-        std::shared_ptr<void>              gemmData,
+    TensileLite::TuningAttempt benchmarkAndSelectWinner(
+        rocblaslt_handle                    handle,
+        const RocblasltContractionProblem&  prob,
+        const TensileLite::ProblemOverride& key,
+        std::shared_ptr<void>               gemmData,
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>&
                                                 library,
         std::shared_ptr<TensileLite::Hardware>& hardware,
         TensileLite::hip::SolutionAdapter*      adapter,
-        TensileLite::TunedEntry&                winnerOut)
+        TensileLite::TunedEntry&                winnerOut,
+        int&                                    winnerIndexOut)
     {
+        using TensileLite::TuningAttempt;
+
         // Wall clock from function entry, not the sum of the timed spans.
         // Scratch allocation, rotation seeding, enumeration, support checks,
         // solve() and code-object loading are most of the cost and none of them
@@ -4224,10 +4254,7 @@ namespace
                 // this case until the timing loop can provide an untimed reset
                 // before every reuse.
                 TensileLite::TuningCounters::instance().skipped++;
-                log_info(__func__,
-                         "tuning-cache: skipped, in-place C==D with nonzero beta "
-                         "cannot be measured without mutating its input");
-                return -1;
+                return TuningAttempt::SkippedInPlaceBeta;
             }
         }
 
@@ -4235,16 +4262,39 @@ namespace
         if(!layout.usable)
         {
             TensileLite::TuningCounters::instance().skipped++;
-            log_info(__func__, "tuning-cache: skipped, output extent could not be established");
-            return -1;
+            return TuningAttempt::SkippedExtentUnknown;
         }
 
-        void* base = TuningScratch::instance().acquire(layout.total);
+        TuningScratch::Denial denial = TuningScratch::Denial::None;
+        void*                 base   = TuningScratch::instance().acquire(layout.total, &denial);
         if(base == nullptr)
         {
+            // Only the cap is a policy decline. An allocation the device refused
+            // is a failure, and counting it as skipped would hide it among the
+            // shapes tuning is expected to pass over.
+            if(denial != TuningScratch::Denial::OverCap)
+                return TuningAttempt::FallbackScratchAlloc;
+
             TensileLite::TuningCounters::instance().skipped++;
-            log_info(__func__, "tuning-cache: skipped, scratch exceeds cap or allocation failed");
-            return -1;
+            return TuningAttempt::SkippedScratchCap;
+        }
+
+        // Announced here, past the declines and before enumeration, because this
+        // is the first point at which the caller is certainly about to block.
+        // getAllSolutions over a thousand-odd candidates is itself part of that
+        // wait, so saying it afterwards would explain a pause only once it was
+        // nearly over.
+        if(TensileLite::shouldLogTuningStart(key))
+        {
+            std::ostringstream msg;
+            msg << "tuning-start m=" << prob.m << " n=" << prob.n << " k=" << prob.k
+                << " batch=" << prob.batch_count
+                << " trans=" << (prob.trans_a != HIPBLAS_OP_N ? 'T' : 'N')
+                << (prob.trans_b != HIPBLAS_OP_N ? 'T' : 'N')
+                << " types=" << hip_datatype_to_string(prob.a_type) << "/"
+                << hip_datatype_to_string(prob.d_type)
+                << "; this call will block until it finishes";
+            log_tuning_lifecycle(__func__, msg.str());
         }
 
         auto* bytes = static_cast<uint8_t*>(base);
@@ -4283,7 +4333,7 @@ namespace
         if(hipMemsetAsync(bytes, 0, layout.total, prob.stream) != hipSuccess)
         {
             static_cast<void>(hipGetLastError());
-            return -1;
+            return TuningAttempt::FallbackSetup;
         }
 
         // Every path after the first scratch operation must drain this stream
@@ -4337,14 +4387,6 @@ namespace
             }
         }
 
-        if(blocks > 1 && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
-        {
-            std::ostringstream msg;
-            msg << "tuning-cache: rotating over " << blocks << " blocks, " << (layout.total >> 20)
-                << " MiB scratch";
-            log_info(__func__, msg.str());
-        }
-
         // Default selection's pick, needed whichever way candidates are
         // enumerated. With the ranked prefix it is simply the first entry, but
         // an unranked enumeration has no such entry, so ask for it separately
@@ -4368,7 +4410,7 @@ namespace
                                all,
                                prob.workspaceSize)
                != rocblaslt_status_success)
-                return -1;
+                return TuningAttempt::FallbackEnumeration;
 
             candidateIndexes.reserve(all.size());
             for(const auto& result : all)
@@ -4405,14 +4447,15 @@ namespace
                 candidates.push_back(std::move(solution));
 
         if(candidates.empty())
-            return -1;
+            return TuningAttempt::FallbackEnumeration;
 
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
         {
             std::ostringstream msg;
-            msg << "tuning-cache: " << candidates.size() << " candidates"
+            msg << "tuning-cache: setup candidates=" << candidates.size()
                 << (TuningPolicy::allKernels() ? " (all kernels)" : " (ranked prefix)")
-                << ", baseline index " << baselineIndex;
+                << " baseline=" << baselineIndex << " scratch=" << layout.total
+                << "B blocks=" << blocks << " workspace=" << prob.workspaceSize << "B";
             log_info(__func__, msg.str());
         }
 
@@ -4439,7 +4482,7 @@ namespace
 
         if(hipEventCreate(&events.start) != hipSuccess
            || hipEventCreate(&events.stop) != hipSuccess)
-            return -1;
+            return TuningAttempt::FallbackSetup;
 
         hipEvent_t start = events.start;
         hipEvent_t stop  = events.stop;
@@ -4612,7 +4655,17 @@ namespace
         // properly, which is what a shortlist did: on a large shape the eventual
         // winner screened 396th of 1025 and never reached the decision round.
         size_t measured  = 0;
+        size_t attempted = 0;
         bool   truncated = false;
+
+        // Time-based rather than every N candidates: a heartbeat tied to the
+        // candidate count fires hundreds of times on a shape whose kernels are
+        // quick and barely at all on one whose kernels are slow. Checked between
+        // candidates, so a single very long candidate can delay it.
+        const bool   wantProgress = (get_logger_layer_mode() & rocblaslt_layer_mode_log_info) != 0;
+        const double progressEveryUs = 10.0 * 1000.0 * 1000.0;
+        double       nextProgressUs  = progressEveryUs;
+
         for(const auto& solution : candidates)
         {
             if(outOfBudget())
@@ -4620,6 +4673,22 @@ namespace
                 truncated = true;
                 break;
             }
+
+            if(wantProgress && elapsedUs() >= nextProgressUs)
+            {
+                std::ostringstream msg;
+                msg << "tuning-cache: progress attempted=" << attempted << " measured=" << measured
+                    << " total=" << candidates.size()
+                    << " elapsed=" << static_cast<long long>(elapsedUs() / 1.0e6) << "s";
+                log_info(__func__, msg.str());
+
+                // Advanced past now rather than by one interval, so a long gap
+                // does not queue up a burst of catch-up lines.
+                while(nextProgressUs <= elapsedUs())
+                    nextProgressUs += progressEveryUs;
+            }
+
+            attempted++;
 
             size_t       required = 0;
             const double us       = measure(solution, required);
@@ -4652,8 +4721,9 @@ namespace
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
         {
             std::ostringstream msg;
-            msg << "tuning-cache: measured " << measured << " of " << candidates.size()
-                << " candidates in " << static_cast<long long>(elapsedUs() / 1000.0) << " ms";
+            msg << "tuning-cache: measured attempted=" << attempted << " measured=" << measured
+                << " total=" << candidates.size()
+                << " elapsed_ms=" << static_cast<long long>(elapsedUs() / 1000.0);
             log_info(__func__, msg.str());
         }
 
@@ -4669,19 +4739,11 @@ namespace
         if(truncated)
         {
             TensileLite::TuningCounters::instance().skipped++;
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
-            {
-                std::ostringstream msg;
-                msg << "tuning-cache: discarded, time budget stopped the search after " << measured
-                    << " of " << candidates.size()
-                    << " candidates; raise or unset HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE";
-                log_info(__func__, msg.str());
-            }
-            return -1;
+            return TuningAttempt::SkippedBudget;
         }
 
         if(bestIndex < 0)
-            return -1;
+            return TuningAttempt::FallbackNoWinner;
 
         // The first candidate is what default selection would have returned, so
         // recording it costs nothing and cannot be reconstructed later.
@@ -4701,7 +4763,8 @@ namespace
         // Note this persists an entry even when the winner is the default pick,
         // which is deliberate: it records that the shape was measured, so tune
         // mode does not re-benchmark it on every process start.
-        return bestIndex;
+        winnerIndexOut = bestIndex;
+        return TuningAttempt::Tuned;
     }
 } // namespace
 
@@ -4741,6 +4804,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(prob.trans_b == HIPBLAS_OP_C)
             data->problem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
 
+        // Noted before algo is filled in below, because it decides whether this
+        // call can be served by the cache at all. A caller that supplies an algo
+        // got it from the heuristic entry point, which already applied any
+        // cached winner; a caller that does not is launched with default
+        // selection no matter what the cache holds.
+        const bool callerSuppliedAlgo = (algo != nullptr);
+
         if(algo == nullptr)
         {
             int returnAlgoCount;
@@ -4773,6 +4843,62 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // be rewritten; only the index used for this launch changes.
         int  tunedIndex  = -1;
         bool benchmarked = false;
+
+        // Set the moment an attempt begins, so the handler below can tell an
+        // exception thrown while benchmarking from one thrown before the
+        // attempt started, and report a terminal event only for the former.
+        // The clock is out here with it because an attempt that throws has still
+        // blocked the caller for however long it ran, which is the number that
+        // makes the failure legible.
+        std::optional<TensileLite::ProblemOverride> attemptKey;
+        std::chrono::steady_clock::time_point       attemptStart;
+
+        // __func__ inside the lambda would name the lambda, not this function.
+        const char* const funcName = __func__;
+
+        // One place where an attempt is turned into its single terminal line,
+        // shared by the normal path and the exception handler so that neither
+        // can leave an announced attempt without an ending.
+        auto reportAttempt = [&](const TensileLite::ProblemOverride& key,
+                                 TensileLite::TuningAttempt          result,
+                                 double                              elapsedSeconds,
+                                 int                                 winnerIndex,
+                                 bool                                persisted) {
+            if(!TensileLite::shouldLogTuningTerminal(key, result))
+                return;
+
+            std::ostringstream msg;
+            if(result == TensileLite::TuningAttempt::Tuned)
+            {
+                msg << "tuning-done winner=" << winnerIndex << " elapsed=" << std::fixed
+                    << std::setprecision(1) << elapsedSeconds
+                    << "s persisted=" << (persisted ? "yes" : "no");
+                if(!persisted)
+                    msg << " (could not write "
+                        << TensileLite::TuningModeSingleton::getInstance().cachePath()
+                        << "; the winner is used now but lost at exit)";
+            }
+            else
+            {
+                msg << (TensileLite::tuningAttemptIsSkip(result) ? "tuning-skipped "
+                                                                 : "tuning-fallback ")
+                    << TensileLite::tuningAttemptReason(result);
+
+                // Only when there was a wait to account for. A policy decline is
+                // made before anything is measured and would always read 0.0s,
+                // whereas a budget truncation or a benchmarker that threw partway
+                // is precisely the case where the user wants to know how long the
+                // call blocked before giving up.
+                if(elapsedSeconds >= 0.05)
+                    msg << "; elapsed=" << std::fixed << std::setprecision(1) << elapsedSeconds
+                        << "s";
+
+                msg << "; using default selection";
+            }
+
+            log_tuning_lifecycle(funcName, msg.str());
+        };
+
         try
         {
             const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
@@ -4796,7 +4922,15 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // "No usable entry", not "no entry". Entries that failed name
                 // validation after a rebuild stay in the map, and testing for
                 // mere presence made them permanently un-retunable.
-                if(!tuning_cache_has_valid_entry(handle, key, prob, gemmData, prob.workspaceSize))
+                //
+                // Counted as a cache lookup only when this call could actually
+                // be served by one. With algo == nullptr the probe is purely a
+                // "does this still need tuning" gate: the launch below uses
+                // default selection unless tuning produces a winner here, so
+                // recording a hit would have the summary claim the cache served
+                // a shape it never touched.
+                if(!tuning_cache_has_valid_entry(
+                       handle, key, prob, gemmData, prob.workspaceSize, callerSuppliedAlgo))
                 {
                     // try_lock, not lock: a second thread meeting an untuned
                     // shape runs normally rather than stalling behind a
@@ -4804,14 +4938,39 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     std::unique_lock<std::mutex> guard(tuningLock(), std::try_to_lock);
                     if(guard.owns_lock()
                        && !tuning_cache_has_valid_entry(
-                           handle, key, prob, gemmData, prob.workspaceSize))
+                           handle, key, prob, gemmData, prob.workspaceSize, false))
                     {
                         TensileLite::TunedEntry winner;
                         benchmarked = true;
-                        tunedIndex  = benchmarkAndSelectWinner(
-                            handle, prob, gemmData, library, hardware, adapter, winner);
 
-                        if(tunedIndex >= 0)
+                        // Timed out here rather than inside, because the
+                        // benchmarker's own clock is not returned and because
+                        // this span also covers the attempts that fail. Started
+                        // before the key is stored so that the handler's test for
+                        // "an attempt was under way" can never be true while the
+                        // clock is still at its default.
+                        attemptStart = std::chrono::steady_clock::now();
+                        attemptKey   = key;
+
+                        const TensileLite::TuningAttempt result
+                            = benchmarkAndSelectWinner(handle,
+                                                       prob,
+                                                       key,
+                                                       gemmData,
+                                                       library,
+                                                       hardware,
+                                                       adapter,
+                                                       winner,
+                                                       tunedIndex);
+
+                        const double elapsedSeconds
+                            = std::chrono::duration<double>(std::chrono::steady_clock::now()
+                                                            - attemptStart)
+                                  .count();
+
+                        bool persisted = false;
+
+                        if(result == TensileLite::TuningAttempt::Tuned)
                         {
                             // solutionName is already set from the benchmarked
                             // solution object; re-deriving it from the index
@@ -4825,28 +4984,37 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                             // outright if the fresh winner reused their index.
                             cache.replaceAll(key, winner);
 
-                            const bool persisted
+                            persisted
                                 = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner);
 
                             auto& counters = TensileLite::TuningCounters::instance();
                             if(persisted)
                                 counters.tuned++;
-                            else
-                                log_error(__func__,
-                                          "tuning-cache: failed to write winner to "
-                                              + tuning.cachePath()
-                                              + "; it will be lost when this process exits");
+
+                            // The shape is served by a tuned kernel from here
+                            // on, so the summary counts it as matched rather
+                            // than as the fallback its first lookup recorded.
+                            TensileLite::recordTuningLookup(key, true);
+
+                            // Recorded whether or not the append succeeded. The
+                            // winner is already in the in-memory cache above, so
+                            // this shape was tuned in this run either way; the
+                            // persisted flag on the outcome line is what says
+                            // whether the next run inherits it.
+                            TensileLite::recordTuningWinner(key);
 
                             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                             {
                                 std::ostringstream msg;
-                                msg << "tuning-cache: tuned shape, winner index " << tunedIndex
-                                    << " at " << winner.winnerTimeUs << " us vs baseline "
-                                    << winner.baselineTimeUs << " us [" << counters.summary()
-                                    << "]";
+                                msg << "tuning-cache: winner " << tunedIndex << " at "
+                                    << winner.winnerTimeUs << " us vs baseline "
+                                    << winner.baselineIndex << " at " << winner.baselineTimeUs
+                                    << " us [" << counters.summary() << "]";
                                 log_info(__func__, msg.str());
                             }
                         }
+
+                        reportAttempt(key, result, elapsedSeconds, tunedIndex, persisted);
                     }
                 }
             }
@@ -4865,7 +5033,22 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // benchmarked flag stays set so data->problem is restored below.
             static_cast<void>(hipGetLastError());
             tunedIndex = -1;
-            log_error(__func__, "tuning-cache: benchmarking threw; using default selection");
+
+            // Only when an attempt was actually announced. An exception from the
+            // lookup or the file load never reached the benchmarker, so calling
+            // it a failed tuning attempt would be wrong.
+            if(attemptKey)
+            {
+                const double elapsedSeconds
+                    = std::chrono::duration<double>(std::chrono::steady_clock::now() - attemptStart)
+                          .count();
+
+                reportAttempt(*attemptKey,
+                              TensileLite::TuningAttempt::FallbackException,
+                              elapsedSeconds,
+                              -1,
+                              false);
+            }
         }
 
         if(benchmarked)
