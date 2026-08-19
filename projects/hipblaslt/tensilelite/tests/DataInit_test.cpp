@@ -432,14 +432,15 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     Tensor componentMetadataTensor(ScalarType::UInt8,
                                    logicalMetadataLayout,
                                    std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
-    StructuredSparsityProblem componentProblem(
+    StructuredSparsityRequest componentRequest(
         Tensor(
             scalarType, layout(denseDescriptor), std::as_bytes(std::span<const int8_t>(original))),
         componentPrunedTensor,
         componentCompressedTensor,
+        std::nullopt,
+        componentMetadataTensor,
         pattern);
-    componentProblem.twoOfFourMetadata = componentMetadataTensor;
-    applyStructuredSparsity(componentProblem);
+    applyStructuredSparsity(componentRequest);
     std::memcpy(componentPruned.data(),
                 componentPrunedTensor.storage().data(),
                 componentPrunedTensor.storage().size());

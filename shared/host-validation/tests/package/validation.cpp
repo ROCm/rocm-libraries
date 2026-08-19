@@ -9,6 +9,7 @@
 #include <roc/host_validation/layer_norm.hpp>
 #include <roc/host_validation/reduction.hpp>
 #include <roc/host_validation/softmax.hpp>
+#include <roc/host_validation/structured_sparsity.hpp>
 #include <span>
 #include <utility>
 
@@ -80,6 +81,18 @@ int main() {
         layerNormResult.runInfo.meanElementsWritten != 1 ||
         layerNormResult.runInfo.inverseVarianceElementsWritten != 1 || !layerNormResult.mean ||
         layerNormResult.mean->loadAs<float>({0}) != 1.5f)
+        return 1;
+
+    StructuredSparsityPattern sparsityPattern;
+    sparsityPattern.axis = 0;
+    sparsityPattern.fixedPositions = {0, 2};
+    const std::array<float, 4> sparseValues{1, 2, 3, 4};
+    const StructuredSparsityResult sparse = applyStructuredSparsity(StructuredSparsityProblem(
+        Tensor::fromNativeValues<float>(Shape{4}, std::span<const float>(sparseValues)),
+        sparsityPattern, {.retainedIndices = true, .twoOfFourMetadata = true}));
+    if (sparse.pruned.loadAs<float>({1}) != 0 || sparse.compressed.loadAs<float>({1}) != 3 ||
+        !sparse.retainedIndices || !sparse.twoOfFourMetadata ||
+        sparse.twoOfFourMetadata->loadAs<uint8_t>({0}) != 0x08)
         return 1;
     return 0;
 }

@@ -57,7 +57,7 @@ void legacyTwoPass(std::vector<float>& pruned, std::vector<float>& compressed,
 }
 
 roc::host_validation::StructuredSparsityRunInfo applyParallel(
-    const roc::host_validation::StructuredSparsityProblem& problem, size_t sliceCount) {
+    const roc::host_validation::StructuredSparsityRequest& request, size_t sliceCount) {
     using namespace roc::host_validation;
     const size_t requestedWorkers =
         std::max<size_t>(1, static_cast<size_t>(std::thread::hardware_concurrency()));
@@ -68,7 +68,7 @@ roc::host_validation::StructuredSparsityRunInfo applyParallel(
         const size_t firstSlice = sliceCount * static_cast<size_t>(chunk) / chunkCount;
         const size_t endSlice = sliceCount * static_cast<size_t>(chunk + 1) / chunkCount;
         runs[static_cast<size_t>(chunk)] = applyStructuredSparsity(
-            problem, {.firstSlice = firstSlice, .sliceCount = endSlice - firstSlice});
+            request, {.firstSlice = firstSlice, .sliceCount = endSlice - firstSlice});
     }
 
     StructuredSparsityRunInfo result;
@@ -110,11 +110,11 @@ int main(int argc, char** argv) {
         Tensor::fromNative<float>(compressedLayout, std::span<const float>(compressed));
     Tensor metadataTensor =
         Tensor::fromNative<uint8_t>(metadataLayout, std::span<const uint8_t>(metadata));
-    StructuredSparsityProblem problem(prunedTensor, prunedTensor, compressedTensor, pattern);
-    problem.twoOfFourMetadata = metadataTensor;
+    StructuredSparsityRequest request(prunedTensor, prunedTensor, compressedTensor, std::nullopt,
+                                      metadataTensor, pattern);
 
     const double componentMilliseconds =
-        milliseconds([&] { applyParallel(problem, rows); }, iterations);
+        milliseconds([&] { applyParallel(request, rows); }, iterations);
     std::memcpy(pruned.data(), prunedTensor.storage().data(), prunedTensor.storage().size());
     std::memcpy(compressed.data(), compressedTensor.storage().data(),
                 compressedTensor.storage().size());
