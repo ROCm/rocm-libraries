@@ -77,6 +77,6 @@ def test_module_guard_true_direct_exec_prints_deprecation():
         capture_output=True,
         text=True,
     )
-    assert "tensilelite/bin/Tensile" in result.stdout, (
+    assert "python -m tensilelite run" in result.stdout, (
         "Expected redirect notice in stdout; got: {!r}".format(result.stdout)
     )
