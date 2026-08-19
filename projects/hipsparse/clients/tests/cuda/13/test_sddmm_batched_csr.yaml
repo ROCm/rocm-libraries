@@ -21,43 +21,32 @@
 #
 # ########################################################################
 
-# generic
-include: test_axpby.yaml
-include: test_gather.yaml
-include: test_scatter.yaml
-include: test_rot.yaml
-include: test_sddmm_coo_aos.yaml
-include: test_sddmm_coo.yaml
-include: test_sddmm_csc.yaml
-include: test_sddmm_csr.yaml
-include: test_sddmm_batched_csr.yaml
-include: test_dense_to_sparse_bell_no_set_pointers.yaml
-include: test_dense_to_sparse_coo.yaml
-include: test_dense_to_sparse_csc.yaml
-include: test_dense_to_sparse_csr.yaml
-include: test_sparse_to_dense_coo.yaml
-include: test_sparse_to_dense_csc.yaml
-include: test_sparse_to_dense_csr.yaml
-include: test_spgeam_csr.yaml
-include: test_spgemm_csr.yaml
-include: test_spgemmreuse_csr.yaml
-include: test_spmm_batched_coo.yaml
-include: test_spmm_batched_csc.yaml
-include: test_spmm_batched_csr.yaml
-include: test_spmm_bell.yaml
-include: test_spmm_bsr.yaml
-include: test_spmm_coo.yaml
-include: test_spmm_csc.yaml
-include: test_spmm_csr.yaml
-include: test_spmv_coo_aos.yaml
-include: test_spmv_coo.yaml
-include: test_spmv_csr.yaml
-include: test_spmv_csr_reuse_descr.yaml
-include: test_spmv_sell.yaml
-include: test_spsv_coo.yaml
-include: test_spsv_csc.yaml
-include: test_spsv_csr.yaml
-include: test_spsm_coo.yaml
-include: test_spsm_csc.yaml
-include: test_spsm_csr.yaml
-include: test_spvv.yaml
+---
+include: hipsparse_common.yaml
+
+
+Tests:
+- name: sddmm_batched_csr_bad_arg
+  category: pre_checkin
+  function: sddmm_batched_csr_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+
+- name: sddmm_batched_csr
+  category: quick
+  function: sddmm_batched_csr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [84]
+  K: [5]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
