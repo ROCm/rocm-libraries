@@ -357,24 +357,16 @@ endif()
 if(_hipblaslt_host_validation_enabled
         AND _hipblaslt_mxdatagen_enabled
         AND NOT TARGET roc::host-validation-mx)
-    if(COMMAND roc_host_validation_enable_mx_backend)
-        roc_host_validation_enable_mx_backend()
-    else()
-        message(FATAL_ERROR
-            "hipBLASLt MX clients require the optional roc::host-validation-mx target."
-        )
-    endif()
+    message(FATAL_ERROR
+        "hipBLASLt MX clients require the roc::host-validation-mx target."
+    )
 endif()
 if(_hipblaslt_host_validation_enabled
         AND HIPBLASLT_ENABLE_CLIENT
         AND NOT TARGET roc::host-validation-blas)
-    if(COMMAND roc_host_validation_enable_blas_backend)
-        roc_host_validation_enable_blas_backend()
-    else()
-        message(FATAL_ERROR
-            "hipBLASLt clients require the optional roc::host-validation-blas target."
-        )
-    endif()
+    message(FATAL_ERROR
+        "hipBLASLt clients require the roc::host-validation-blas target."
+    )
 endif()
 
 if(_hipblaslt_host_validation_enabled)
