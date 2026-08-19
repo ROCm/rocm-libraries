@@ -697,6 +697,23 @@ void host_cscsm(J                    M,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
 
+template <typename I, typename J, typename T>
+void host_diagonal_solve(rocsparse_operation  trans,
+                         J                    M,
+                         J                    nrhs,
+                         T                    alpha,
+                         const I*             csr_row_ptr,
+                         const J*             csr_col_ind,
+                         const T*             csr_val,
+                         const T*             B,
+                         T*                   C,
+                         int64_t              ld,
+                         rocsparse_order      order,
+                         rocsparse_index_base base,
+                         int32_t              diagonal_mode,
+                         J*                   struct_pivot,
+                         J*                   numeric_pivot);
+
 template <typename I, typename T>
 void host_coosm(I                    M,
                 I                    nrhs,

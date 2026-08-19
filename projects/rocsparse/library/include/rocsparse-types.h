@@ -393,6 +393,28 @@ typedef enum rocsparse_fill_mode_
     rocsparse_fill_mode_upper = 1 /**< Upper triangular part is stored. */
 } rocsparse_fill_mode;
 
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+/*! \ingroup types_module
+ *  \brief Specify how the diagonal is applied during a triangular solve.
+ *
+ *  \details
+ *  The \ref rocsparse_diagonal_mode selects, for \ref rocsparse_sptrsv and
+ *  \ref rocsparse_sptrsm, whether the compute stage performs the regular triangular
+ *  solve or a diagonal-only solve that reuses the diagonal positions collected
+ *  during the analysis stage. The diagonal-only modes are intended for the diagonal
+ *  step of a factored solve such as \f$L D L^H\f$: \ref rocsparse_diagonal_mode_signed
+ *  solves with \f$D\f$, while \ref rocsparse_diagonal_mode_absolute solves with
+ *  \f$|D|\f$, which turns \f$L |D| L^H\f$ into an HPD operator (a valid inner product
+ *  for Hermitian Krylov methods even when \f$D\f$ is indefinite).
+ */
+typedef enum rocsparse_diagonal_mode_
+{
+    rocsparse_diagonal_mode_none     = 0, /**< Regular triangular solve (default). */
+    rocsparse_diagonal_mode_signed   = 1, /**< Diagonal solve \f$y = \alpha \, x / D\f$. */
+    rocsparse_diagonal_mode_absolute = 2 /**< Diagonal solve \f$y = \alpha \, x / |D|\f$. */
+} rocsparse_diagonal_mode;
+#endif
+
 /*! \ingroup types_module
  *  \brief Specify whether the matrix is stored sorted or not.
  *

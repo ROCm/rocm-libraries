@@ -168,6 +168,7 @@ set(rocsparse_source
   src/level2/rocsparse_spsv.cpp
   src/level2/rocsparse_sptrsv.cpp
   src/level2/rocsparse_sptrsv_descr.cpp
+  src/level2/rocsparse_diagonal_solve.cpp
   src/level2/rocsparse_spitsv.cpp
   src/level2/rocsparse_gebsrmv.cpp
   src/level2/rocsparse_gebsrmv_template_row_block_dim_1.cpp
