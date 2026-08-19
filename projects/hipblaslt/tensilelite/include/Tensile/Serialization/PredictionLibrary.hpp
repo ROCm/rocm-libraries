@@ -132,11 +132,11 @@ namespace TensileLite
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a             = solution->sizeMapping.nonTemporalA,
                                 .cache_hints_b             = solution->sizeMapping.nonTemporalB,
-                                .cluster_dim               = origami_cluster_dim,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
+                                .cluster_dim               = origami_cluster_dim,
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
