@@ -128,8 +128,10 @@ add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 hipblaslt_attach_tensilelite_metadata(tensilelite-client)
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 
-add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
-target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+    add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
+    target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+endif()
 
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
