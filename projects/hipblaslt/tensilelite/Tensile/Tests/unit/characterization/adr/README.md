@@ -2,7 +2,7 @@
 
 This directory holds the **Architecture Decision Records** for the TensileLite characterization suite: one short file per genuine decision, in [Michael Nygard's](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) format. An ADR captures *why* a decision was made, so a future reader — or a reviewer of a PR that touches the tests or goldens next to it — can recover the intent without archaeology.
 
-See the characterization [`README.md`](../README.md) for the suite protocol and the snapshot/golden discipline; this file covers only the ADR mechanics.
+See the characterization [`README.md`](../README.md) for the suite protocol and the snapshot/golden discipline; the content below covers only the ADR mechanics.
 
 ## When to write an ADR
 
@@ -20,7 +20,7 @@ The running catalog of pinned behaviors, coverage ceilings, and accepted mutants
 - One file per decision, named `NNNN-short-slug.md` (zero-padded, monotonic) — e.g. `0001-pin-results-only-boolop-crash.md`.
 - Nygard sections: **Status**, **Context**, **Decision**, **Consequences**. Add a `Defect:` line when the decision pins a behavior that looks wrong.
 - **Status** is one of `Proposed`, `Accepted`, or `Superseded by adr/NNNN`.
-- **Append-only.** Never rewrite an accepted ADR's decision. If the world changes (e.g. a pinned bug is fixed and its golden flips), write a *new* ADR that supersedes the old one and set the old one's status to `Superseded by adr/NNNN`.
+- **Append-only.** Never rewrite an accepted ADR's Context, Decision, or Consequences prose. Two metadata fields are the narrow, expected exceptions: `Status` (flip to `Superseded by adr/NNNN` when a *new* ADR — the thing actually being appended — supersedes this one; this file's own prose is untouched) and `Defect` (fill in a tracker ID once one is filed, if it wasn't known when the ADR was written).
 - **`Commit:` is a backfill-only field, not a template requirement.** An ADR written in the same PR as its decision doesn't need one — that PR's own commit(s) already are the provenance, and you can't know your own commit's SHA before it exists anyway. It exists only for retrofitted ADRs written after the fact (like ADRs 0004-0011, written well after their decisions), where the ADR's authoring commit and the decision's actual commit are two different things and that gap needs to be spelled out explicitly. When present, point it at the commit that made the real change (test/code), not the commit that wrote the ADR file — check with `git log -S` / `git blame` on `DECISIONS.md`, and if the repo squash-merges PRs, fetch the PR's pre-squash history (`git fetch origin refs/pull/<n>/head`) to find the real per-decision commit instead of citing the one shared squash commit for everything that PR touched.
 
 ## Template

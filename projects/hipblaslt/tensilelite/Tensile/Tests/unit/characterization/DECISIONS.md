@@ -129,7 +129,7 @@ a class that shadows a same-named submodule attribute, so
 
 **ADR:** [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
 
-**Defect:** none filed yet — see the ADR's Consequences section
+**Defect:** [`AIHPBLAS-4409`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4409)
 
 **Decision:** Pin the real `AttributeError` that `formGroups` raises on the skipMI / MI-disabled path (a string `"None"` sentinel hits `.items()`) instead of asserting a working sentinel Group; drive the rest of the orchestrator/fork tests through the working MI-enabled path.
 

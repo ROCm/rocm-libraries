@@ -1,7 +1,7 @@
 # ADR 0010: Pin the `formGroups("None")` crash on the skipMI / MI-disabled path
 
 Status:  Accepted
-Defect:  none filed yet — flagged during ADR retrofit, needs a tracker ID (see Consequences)
+Defect:  [AIHPBLAS-4409](https://amd-hub.atlassian.net/browse/AIHPBLAS-4409)
 Commit:  ce8c60e (PR #7989) — https://github.com/ROCm/rocm-libraries/commit/ce8c60e66640b60f7fde9122907b593ed6620c7d — landed on develop via PR #7989's squash merge, 74e4693
 
 ## Context
@@ -22,12 +22,9 @@ works. Characterization records present behavior; add-only forbids fixing
 ## Consequences
 This is a real, user-facing bug: the `--skipMI` CLI flag is unusable. The
 golden encodes the crash on purpose so the suite stays an honest record of
-current behavior. **No defect has been filed for this yet** — that should
-happen before or shortly after this ADR lands, and this ADR should be
-updated with the tracker ID once one exists (this is one of the rare fields
-on an otherwise-immutable ADR that's expected to be filled in after the
-fact, per the template's own guidance to link a filed defect). The fix
-belongs in a separate change (make `formForkParams` build a real
+current behavior. Filed as
+[`AIHPBLAS-4409`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4409). The
+fix belongs in a separate change (make `formForkParams` build a real
 MI-disabled `Group` instead of the string sentinel `"None"`) with its own
 regression coverage; when that lands, flip this golden and supersede this
 ADR.

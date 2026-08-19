@@ -7,7 +7,7 @@ Companion docs in this directory:
 - **`DECISIONS.md`** — the running registry: the at-a-glance catalog of modules accepted below the coverage bar, pinned latent bugs, accepted-equivalent mutants, and the few departures from the add-only rule.
 - **`_codegen/GPU-MOCK.md`** — the GPU-less (`--cpu-only`) seam that makes the client/perf and device-probe paths exercisable without a GPU, and the synthetic-perf caveat that comes with it.
 
-Everything you need to understand or extend the suite is in this directory. Per-module provenance — for each characterized module, the public surface by tier, the determinism strategy, before→after coverage, and the mutation-testing outcome — is recorded in `DECISIONS.md` and the per-module commit history. Any accepted coverage ceiling or pinned-bug rationale gets a full writeup in an ADR under `adr/`, with a short pointer row in `DECISIONS.md`.
+Everything you need to understand or extend the suite is in this directory. Per-module provenance for each characterized module — the public surface by tier, the determinism strategy, before→after coverage, and the mutation-testing outcome — is recorded in `DECISIONS.md` and the per-module commit history. Any accepted coverage ceiling or pinned-bug rationale gets a full writeup in an ADR under `adr/`, with a short pointer row in `DECISIONS.md`.
 
 ## Per-module protocol
 
