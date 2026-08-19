@@ -163,6 +163,11 @@ public:
     // will be provided with externally-managed work area(s):
     static std::vector<gpubuf> externally_managed_workareas;
 
+    // JIT callback data pointers, stored in a params-level vector so
+    // that they live as long as the plan
+    std::vector<void*> load_jit_cb_data_ptrs;
+    std::vector<void*> store_jit_cb_data_ptrs;
+
     static std::vector<size_t> externally_managed_extra_vram_footprint()
     {
         std::vector<size_t> footprint;
@@ -1300,14 +1305,17 @@ private:
         }
 
         check_jit_callback_state();
+        load_jit_cb_data_ptrs.resize(load_jit_cb_state->data.size());
+        std::transform(load_jit_cb_state->data.begin(),
+                       load_jit_cb_state->data.end(),
+                       load_jit_cb_data_ptrs.begin(),
+                       [](gpubuf& buf) { return buf.data(); });
         ret = hipfftXtSetJITCallback(plan,
                                      load_jit_cb_state->symbol,
                                      load_jit_cb_state->func.data(),
                                      load_jit_cb_state->func.size(),
                                      cbtype,
-                                     load_jit_cb_state->data.empty()
-                                         ? nullptr
-                                         : load_jit_cb_state->get_raw_data_ptrs().data());
+                                     load_jit_cb_data_ptrs.data());
         if(ret != HIPFFT_SUCCESS)
             return ret;
 
@@ -1351,14 +1359,17 @@ private:
             throw std::runtime_error("unsupported data type for store callback");
         }
         }
+        store_jit_cb_data_ptrs.resize(store_jit_cb_state->data.size());
+        std::transform(store_jit_cb_state->data.begin(),
+                       store_jit_cb_state->data.end(),
+                       store_jit_cb_data_ptrs.begin(),
+                       [](gpubuf& buf) { return buf.data(); });
         ret = hipfftXtSetJITCallback(plan,
                                      store_jit_cb_state->symbol,
                                      store_jit_cb_state->func.data(),
                                      store_jit_cb_state->func.size(),
                                      cbtype,
-                                     store_jit_cb_state->data.empty()
-                                         ? nullptr
-                                         : store_jit_cb_state->get_raw_data_ptrs().data());
+                                     store_jit_cb_data_ptrs.data());
         return ret;
     }
 

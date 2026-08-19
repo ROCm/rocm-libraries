@@ -93,6 +93,9 @@ typedef void (*hipfftCallbackStoreD)(
    * callback data pointers must be given - one per device executing
    * the plan.
    *
+   * The specified arrays must remain valid until either the plan is
+   * destroyed or callbacks are cleared from the plan.
+   *
    * @param[in] plan The FFT plan.
    * @param[in] callbacks Array of callback function pointers.
    * @param[in] cbtype Type of callback being set.
@@ -162,19 +165,22 @@ typedef void (*hipfftJITCallbackStoreD)(
    * The callback is provided as SPIR-V on AMD platforms and as
    * LTO-IR fatbin on CUDA platforms.
    *
-   *  'cbdata' is an optional array of pointers of data that is passed
-   *  to the callback function, one per visible HIP device.  hipFFT may
-   *  execute the callback function on the current HIP device as well
-   *  as any device used by a multi-device transform.  The
-   *  corresponding pointer for a device in the array will be passed to
-   *  the callback function's `cbdata` parameter when it is executed on
-   *  that device.
+   * 'cbdata' is an optional array of pointers of data that is passed
+   * to the callback function, one per visible HIP device.  hipFFT may
+   * execute the callback function on the current HIP device as well
+   * as any device used by a multi-device transform.  The
+   * corresponding pointer for a device in the array will be passed to
+   * the callback function's `cbdata` parameter when it is executed on
+   * that device.
    *
-   *  This function must be called after the plan is allocated using
-   *  ::hipfftCreate, but before the plan is initialized by any of the
-   *  "MakePlan" functions.  Therefore, API functions that combine
-   *  creation and initialization (::hipfftPlan1d, ::hipfftPlan2d,
-   *  ::hipfftPlan3d, and ::hipfftPlanMany) cannot set a JIT callback.
+   * If specified, the 'cbdata' array must remain valid until either
+   * the plan is destroyed or callbacks are cleared from the plan.
+   *
+   * This function must be called after the plan is allocated using
+   * ::hipfftCreate, but before the plan is initialized by any of the
+   * "MakePlan" functions.  Therefore, API functions that combine
+   * creation and initialization (::hipfftPlan1d, ::hipfftPlan2d,
+   * ::hipfftPlan3d, and ::hipfftPlanMany) cannot set a JIT callback.
    *
    * @param[in] plan The FFT plan.
    * @param[in] symbol_name Name of the symbol in the compiled bitcode.
