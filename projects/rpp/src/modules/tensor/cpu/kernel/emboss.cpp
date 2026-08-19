@@ -151,7 +151,9 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                                                               pRow[rowIndex + 2],
                                                               &pFilter[filterIndex], pxMaskPln);
                         }
-                        if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 2);
+                        if constexpr (std::is_same<T, Rpp32f>::value ||
+                                      std::is_same<T, Rpp16f>::value)
+                            rpp_pixel_check_0to1(pDst, 2);
                         if constexpr (std::is_same<T, Rpp32f>::value)
                             rpp_store16_f32_to_f32_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp16f>::value)
@@ -236,7 +238,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                                                            &pFilter[filterIndex], pxMaskPkd);
                     }
 
-                    if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 3);
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
+                        rpp_pixel_check_0to1(pDst, 3);
 
                     // In each pass, convolution filter is applied 24 times
                     increment_row_ptrs(srcPtrTemp, kernelSize, 24);
@@ -319,7 +322,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                                                            pRow[rowIndex + 3],
                                                            &pFilter[filterIndex], pxMaskPkd);
                     }
-                    if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 3);
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
+                        rpp_pixel_check_0to1(pDst, 3);
 
                     __m128 pDstPln[6];
                     rpp_convert24_f32pkd3_to_f32pln3(pDst, pDstPln);
@@ -411,7 +415,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                                                               pRow[rowIdx + 1], pRow[rowIdx + 2],
                                                               &pFilter[filterIndex], pxMaskPln);
                         }
-                        if constexpr (std::is_same<T, Rpp32f>::value)
+                        if constexpr (std::is_same<T, Rpp32f>::value ||
+                                      std::is_same<T, Rpp16f>::value)
                             rpp_pixel_check_0to1(pResult, 6);
                         // In each pass, convolution filter is applied 14 times
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 14);
@@ -503,7 +508,9 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                             permute_blend_add_5x5_pln(pDst[1], pRow[rowIndex + 1], avx_p0,
                                                       &pFilter[filterIndex]);
                         }
-                        if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 2);
+                        if constexpr (std::is_same<T, Rpp32f>::value ||
+                                      std::is_same<T, Rpp16f>::value)
+                            rpp_pixel_check_0to1(pDst, 2);
                         if constexpr (std::is_same<T, Rpp32f>::value)
                             rpp_store16_f32_to_f32_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp16f>::value)
@@ -580,7 +587,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                         permute_blend_add_5x5_pkd(pDst[1], &pRow[rowIndex + 1],
                                                   &pFilter[filterIndex]);
                     }
-                    if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 2);
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
+                        rpp_pixel_check_0to1(pDst, 2);
                     if constexpr (std::is_same<T, Rpp32f>::value)
                         rpp_store16_f32_to_f32_avx(dstPtrTemp, pDst);
                     else if constexpr (std::is_same<T, Rpp16f>::value)
@@ -672,7 +680,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                              k++, filterIndex += 5, rowIndex += 2)
                             permute_blend_add_5x5_pln(pResultPln[c], pRow[rowIndex],
                                                       pRow[rowIndex + 1], &pFilter[filterIndex]);
-                        if constexpr (std::is_same<T, Rpp32f>::value)
+                        if constexpr (std::is_same<T, Rpp32f>::value ||
+                                      std::is_same<T, Rpp16f>::value)
                             rpp_pixel_check_0to1(pResultPln, 3);
                         // In each pass, convolution filter is applied 8 times
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 8);
@@ -757,7 +766,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                         permute_blend_add_5x5_pkd(pDst[1], &pRow[rowIndex + 1],
                                                   &pFilter[filterIndex]);
                     }
-                    if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 2);
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
+                        rpp_pixel_check_0to1(pDst, 2);
                     __m128 pDstPln[3];
                     rpp_convert12_f32pkd3_to_f32pln3(pDst, pDstPln);
                     rpp_store12_float_pkd_pln(dstPtrTempChannels, pDstPln);
@@ -839,10 +849,12 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                              k++, filterIndex += 7, rowIndex += 2)
                             permute_blend_add_7x7_pln(pDst, &pRow[rowIndex], &pFilter[filterIndex]);
                         // convert result from pln to pkd format and store in output buffer
-                        if constexpr (std::is_same<T, Rpp32f>::value) {
+                        if constexpr (std::is_same<T, Rpp32f>::value ||
+                                      std::is_same<T, Rpp16f>::value)
                             rpp_pixel_check_0to1(&pDst, 1);
+                        if constexpr (std::is_same<T, Rpp32f>::value)
                             _mm256_storeu_ps(dstPtrTemp, pDst);
-                        } else if constexpr (std::is_same<T, Rpp16f>::value)
+                        else if constexpr (std::is_same<T, Rpp16f>::value)
                             _mm_storeu_si128(
                                 (__m128i*)dstPtrTemp,
                                 _mm256_cvtps_ph(pDst, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
@@ -919,10 +931,11 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                          k++, filterIndex += 7, rowIndex += 4)
                         permute_blend_add_7x7_pkd(pDst, &pRow[rowIndex], pRow[rowIndex + 3],
                                                   &pFilter[filterIndex]);
-                    if constexpr (std::is_same<T, Rpp32f>::value) {
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
                         rpp_pixel_check_0to1(&pDst, 1);
+                    if constexpr (std::is_same<T, Rpp32f>::value)
                         _mm256_storeu_ps(dstPtrTemp, pDst);
-                    } else if constexpr (std::is_same<T, Rpp16f>::value)
+                    else if constexpr (std::is_same<T, Rpp16f>::value)
                         _mm_storeu_si128(
                             (__m128i*)dstPtrTemp,
                             _mm256_cvtps_ph(pDst, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
@@ -1020,10 +1033,11 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 8);
                     }
                     // convert result from pln to pkd format and store in output buffer
-                    if constexpr (std::is_same<T, Rpp32f>::value) {
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
                         rpp_pixel_check_0to1(pResultPln, 3);
+                    if constexpr (std::is_same<T, Rpp32f>::value)
                         rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp, pResultPln);
-                    } else if constexpr (std::is_same<T, Rpp16f>::value)
+                    else if constexpr (std::is_same<T, Rpp16f>::value)
                         rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp, pResultPln);
                     else if constexpr (std::is_same<T, Rpp8u>::value)
                         rpp_simd_store(rpp_store24_f32pln3_to_u8pkd3_avx, dstPtrTemp, pResultPln);
@@ -1103,7 +1117,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                         permute_blend_add_7x7_pkd(pDst[1], &pRow[rowIndex + 1], avx_p0,
                                                   &pFilter[filterIndex]);
                     }
-                    if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 2);
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
+                        rpp_pixel_check_0to1(pDst, 2);
 
                     __m128 pDstPln[3];
                     rpp_convert12_f32pkd3_to_f32pln3(pDst, pDstPln);
@@ -1192,10 +1207,12 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                              k++, filterIndex += 9, rowIndex += 2)
                             permute_blend_add_9x9_pln(pDst, &pRow[rowIndex], &pFilter[filterIndex]);
 
-                        if constexpr (std::is_same<T, Rpp32f>::value) {
+                        if constexpr (std::is_same<T, Rpp32f>::value ||
+                                      std::is_same<T, Rpp16f>::value)
                             rpp_pixel_check_0to1(&pDst, 1);
+                        if constexpr (std::is_same<T, Rpp32f>::value)
                             _mm256_storeu_ps(dstPtrTemp, pDst);
-                        } else if constexpr (std::is_same<T, Rpp16f>::value)
+                        else if constexpr (std::is_same<T, Rpp16f>::value)
                             _mm_storeu_si128(
                                 (__m128i*)dstPtrTemp,
                                 _mm256_cvtps_ph(pDst, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
@@ -1277,10 +1294,11 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                          k++, filterIndex += 9, rowIndex += 4)
                         permute_blend_add_9x9_pkd(pDst, &pRow[rowIndex], &pFilter[filterIndex]);
 
-                    if constexpr (std::is_same<T, Rpp32f>::value) {
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
                         rpp_pixel_check_0to1(&pDst, 1);
+                    if constexpr (std::is_same<T, Rpp32f>::value)
                         _mm256_storeu_ps(dstPtrTemp, pDst);
-                    } else if constexpr (std::is_same<T, Rpp16f>::value)
+                    else if constexpr (std::is_same<T, Rpp16f>::value)
                         _mm_storeu_si128(
                             (__m128i*)dstPtrTemp,
                             _mm256_cvtps_ph(pDst, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
@@ -1381,7 +1399,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                              k++, filterIndex += 9, rowIndex += 2)
                             permute_blend_add_9x9_pln(pResultPln[c], &pRow[rowIndex],
                                                       &pFilter[filterIndex]);
-                        if constexpr (std::is_same<T, Rpp32f>::value)
+                        if constexpr (std::is_same<T, Rpp32f>::value ||
+                                      std::is_same<T, Rpp16f>::value)
                             rpp_pixel_check_0to1(pResultPln, 3);
                         // In each pass, convolution filter is applied 8 times
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 8);
@@ -1474,7 +1493,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                         permute_blend_add_9x9_pkd(pDst[1], &pRow[rowIndex + 1],
                                                   &pFilter[filterIndex]);
                     }
-                    if constexpr (std::is_same<T, Rpp32f>::value) rpp_pixel_check_0to1(pDst, 2);
+                    if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value)
+                        rpp_pixel_check_0to1(pDst, 2);
 
                     __m128 pDstPln[3];
                     rpp_convert12_f32pkd3_to_f32pln3(pDst, pDstPln);
