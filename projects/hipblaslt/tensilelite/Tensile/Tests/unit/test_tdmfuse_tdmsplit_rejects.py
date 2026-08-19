@@ -561,8 +561,19 @@ def test_row_six_at_sia_four_with_a_divergent_pair_is_admitted(
     SIA=4 is exactly as un-silicon-validated after the barrier fix as the other
     five arms the guard now returns -- no better, no worse. The failure that
     motivated row 6's own clause was measured on the EQUAL pair, which this row
-    still refuses, and the one divergent row-6 failure on record was measured
-    before the fix. It is admitted on the consistency argument with row 0, not
+    still refuses. The one divergent row-6 failure on record predates the
+    barrier fix and is now sourced so nobody has to take it on trust:
+    b8-3 (MI450 B0), the two-size ini campaign of 2026-08-19 that ran K=1536
+    then K=2048 in one client process, harness and logs under
+    b8-3:~/val_s4d/camp2/ with the hit in rep3_two_rand.log. The arm was
+    mirror_f6@SIA4 -- the (PGRA=1, PGRB=2) spelling this test admits -- and it
+    returned wrong results at K=2048 under Random MX init with
+    num-elements-to-validate=-1. Read it as ONE EVENT in 72 divergent-arm
+    observations (six SIA4 divergent arms, six reps, two sizes each), never as
+    a rate. The thinness is the point: one failure is enough to establish that
+    this arm CAN compute wrong results without the fix, which is the only thing
+    it is cited for, and it is no evidence that the fix works.
+    It is admitted on the consistency argument with row 0, not
     on a passing silicon run, and it should be validated there before anyone
     tunes against it.
     """
