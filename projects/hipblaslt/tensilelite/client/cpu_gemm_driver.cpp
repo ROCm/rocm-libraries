@@ -640,12 +640,12 @@ int runGemm(size_t             m,
     auto start = std::chrono::high_resolution_clock::now();
 
     constexpr int elementsToValidate = -1;
-    const bool    executed
-        = tryFastPath
-              ? TensileLite::Client::tryRuntimeBlockedGemm(contraction, inputs, elementsToValidate)
-              : TensileLite::Client::tryRuntimePointwiseGemm(
-                    contraction, inputs, elementsToValidate);
-    if(!executed)
+    const auto execution = tryFastPath
+                               ? TensileLite::Client::ReferenceGemmExecution::BlockedRequired
+                               : TensileLite::Client::ReferenceGemmExecution::Pointwise;
+    const auto runInfo = TensileLite::Client::tryReferenceGemm(
+        contraction, inputs, elementsToValidate, execution);
+    if(!runInfo)
     {
         if(tryFastPath)
             throw std::runtime_error(
