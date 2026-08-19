@@ -54,6 +54,7 @@ jobs:
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
+      miopen_selected: ${{ steps.dbsync_gate.outputs.miopen_selected }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -126,6 +127,27 @@ jobs:
         run: |
           python .github/scripts/therock_configure_ci.py
 
+      # linux_projects' "projects_to_test" is a comma-separated STRING per bundle (not a JSON
+      # array of individual strings), e.g. "hipblas,miopen,rocblas" -- a naive
+      # contains(linux_projects, 'miopen') substring check on the raw JSON would also match
+      # "miopenprovider", so this parses it properly and checks "miopen" as an exact
+      # comma-delimited token across all bundles. Used to gate the GPU-free rocjitsu dbsync job
+      # the same way MIOpen's own Test miopen job is effectively gated.
+      - name: Determine if MIOpen dbsync gate should run
+        id: dbsync_gate
+        env:
+          LINUX_PROJECTS: ${{ steps.linux_projects.outputs.linux_projects }}
+        run: |
+          python3 -c "
+          import json, os
+          bundles = json.loads(os.environ['LINUX_PROJECTS'])
+          selected = any(
+              'miopen' in bundle.get('projects_to_test', '').split(',')
+              for bundle in bundles
+          )
+          print(f'miopen_selected={str(selected).lower()}')
+          " >> "$GITHUB_OUTPUT"
+
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
@@ -196,6 +218,160 @@ jobs:
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
 
+  # GPU-free MIOpen dbsync (StaticFDBSync) via the rocjitsu KMD interposer, for arches TheRock
+  # builds AND rocjitsu has a functional-emulation config for (gfx942/cdna3, gfx950/cdna4 --
+  # gfx90a/cdna2 has no rocjitsu config, out of scope for now). Gated the same way MIOpen's own
+  # `Test miopen` job is effectively gated: needs.setup.outputs.miopen_selected (computed from
+  # linux_projects' per-bundle "projects_to_test" comma-lists, see the "Determine if MIOpen
+  # dbsync gate should run" step above), so this only runs when TheRock's MIOpen CI would run.
+  # Self-references github.run_id for the artifact (this job runs within the same GHA run as the
+  # build, no external input needed) -- see therock-dbsync-rocjitsu.yml for the standalone
+  # workflow_dispatch version used for manual/diagnostic runs against a pinned commit.
+  #
+  # Only depends on `setup`, NOT `therock-ci-linux` -- deliberately. `therock-ci-linux` is one
+  # reusable-workflow job matrixed over EVERY family/project bundle in this PR (build AND test for
+  # ALL of them, not just MIOpen), so `needs: therock-ci-linux` would block this job on unrelated
+  # components' test runs finishing too -- confirmed live (run 32195745347) this can stall for a
+  # very long time on scarce GPU test-runner availability having nothing to do with MIOpen/dbsync.
+  # Instead the fetch step below retries with a bounded budget until this run's own MIOpen build
+  # artifact appears (confirmed separately, run 32194708858, that fetching too early fails with
+  # "Found no artifacts matching [...] at s3://..." -- a fixed wait, not a permanent error).
+  dbsync-rocjitsu:
+    name: "dbsync rocjitsu (${{ matrix.arch }})"
+    permissions:
+      contents: read
+    needs: setup
+    if: ${{ needs.setup.outputs.miopen_selected == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: gfx942, family: gfx94X-dcgpu, rj_config: amdgpu_cdna3_kmd.json }
+          - { arch: gfx950, family: gfx950-dcgpu, rj_config: amdgpu_cdna4_kmd.json }
+    runs-on: azure-linux-scale-rocm
+    # Generous ceiling: up to ~45 min retry-polling for the MIOpen build's own artifact (see the
+    # "Fetch artifact" step) plus the KMD build + dbsync run itself (observed 15-200s).
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host --user 0
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      AMDGPU_FAMILIES: ${{ matrix.family }}
+      VENV_DIR: ${{ github.workspace }}/.venv
+    steps:
+      - name: Checkout ROCm/TheRock (build_tools)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ needs.setup.outputs.therock_ref }}
+
+      - name: Checkout rocm-libraries (scripts)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: rocm-libraries
+
+      - name: Checkout rocjitsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: 481982dfe23e181a302006747c561e7cf43e35ba # 2026-06-04
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install UV
+        run: pip install uv
+
+      - name: Create Python venv
+        run: python build_tools/setup_venv.py "${VENV_DIR}" --activate-in-future-github-actions-steps --use-uv
+
+      - name: Install test requirements
+        run: |
+          uv pip install -r requirements-test.txt
+          uv pip freeze
+
+      # install_rocm_from_artifacts.py called directly (not via the setup_test_environment
+      # composite action, which has no --run-github-repo input) with --run-github-repo defaulting
+      # to this repo, since ARTIFACT_RUN_ID is this same GHA run's own id.
+      #
+      # This job starts as soon as `setup` finishes (see the job-level comment above), so the
+      # MIOpen build for this family may not have uploaded its artifact yet. Retries on a "Found
+      # no artifacts matching [...]" failure with a bounded budget instead of depending on
+      # therock-ci-linux's full completion (which would also wait on unrelated components' tests).
+      #
+      # The retry condition checks for build/bin/miopen_gtest explicitly, NOT just the script's own
+      # exit code -- confirmed live (run 32204574647) that install_rocm_from_artifacts.py exits 0
+      # as soon as ANY artifacts exist at this run's S3 prefix, which happens as soon as ANY OTHER
+      # project bundle sharing this family (e.g. hipkernelprovider, rpp, hiptensor) finishes
+      # uploading its "generic" (architecture-independent) pieces -- well before MIOpen's own bundle
+      # (still in_progress at that point) has uploaded miopen_gtest.
+      - name: Fetch artifact (source-CK build for ${{ matrix.family }})
+        timeout-minutes: 50
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          max_wait_seconds=2700
+          poll_interval_seconds=60
+          start="${SECONDS}"
+          while true; do
+            if python ./build_tools/install_rocm_from_artifacts.py \
+                --run-id="${ARTIFACT_RUN_ID}" \
+                --run-github-repo="${{ github.repository }}" \
+                --artifact-group="${AMDGPU_FAMILIES}" \
+                --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+                --blas --miopen --rand --tests \
+                && [ -f "${OUTPUT_ARTIFACTS_DIR}/bin/miopen_gtest" ]; then
+              echo "Fetched artifact (miopen_gtest present) after $((SECONDS - start))s"
+              break
+            fi
+            elapsed=$((SECONDS - start))
+            if [ "${elapsed}" -ge "${max_wait_seconds}" ]; then
+              echo "::error::Timed out after ${elapsed}s waiting for miopen_gtest in the ${AMDGPU_FAMILIES} artifact (run ${ARTIFACT_RUN_ID})"
+              exit 1
+            fi
+            echo "miopen_gtest not present yet (${elapsed}s elapsed) -- retrying in ${poll_interval_seconds}s"
+            sleep "${poll_interval_seconds}"
+          done
+
+      - name: Inspect artifact (key check — CK plugin + DBs must be present)
+        run: |
+          set -euxo pipefail
+          test -f ./build/bin/miopen_gtest
+          echo "== CK grouped-conv plugins in the dist =="
+          find ./build -name 'libMIOpenCKGroupedConv_*.so' -print
+          echo "== ${{ matrix.arch }} system DBs in the dist =="
+          ls -la ./build/share/miopen/db/${{ matrix.arch }}*.HIP.fdb.txt \
+                 ./build/share/miopen/db/${{ matrix.arch }}*.db.txt
+
+      - name: Build rocjitsu KMD
+        run: |
+          set -euxo pipefail
+          apt-get update && apt-get install -y --no-install-recommends cmake build-essential libdrm-dev
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j"$(nproc)"
+
+      - name: Run StaticFDBSync (rocjitsu, ${{ matrix.arch }})
+        run: |
+          set -euxo pipefail
+          export ROCM_PATH="$(realpath ./build)"
+          export LD_LIBRARY_PATH="$(realpath ./build/lib):${LD_LIBRARY_PATH:-}"
+          export RJ_CONFIG="$(realpath rocm-systems/emulation/rocjitsu/configs/${{ matrix.rj_config }})"
+          export MIOPEN_DEVICE_ARCH="${{ matrix.arch }}"
+          LD_PRELOAD="$(realpath rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so)" \
+            ./build/bin/miopen_gtest --gtest_filter='*StaticFDBSync*' --gtest_color=no
+
   therock_ci_summary:
     name: TheRock CI Summary
     if: always()
@@ -203,6 +379,7 @@ jobs:
       - setup
       - therock-ci-linux
       - therock-ci-windows
+      - dbsync-rocjitsu
     runs-on: ubuntu-24.04
     steps:
       - name: Output failed jobs
