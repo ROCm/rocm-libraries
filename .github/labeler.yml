@@ -93,6 +93,12 @@
     - 'projects/composablekernel/include/ck/tensor_operation/operator_transform/**'
     - 'projects/composablekernel/include/ck/tensor_operation/gpu/element/**'
     - 'projects/composablekernel/include/ck/tensor_operation/gpu/thread/**'
+    # Shared kernel engine. Old-CK convolution is implemented on top of the blockwise
+    # and gridwise GEMM stack, so a "GEMM-only" change here can still reach MIOpen.
+    # The conv and GEMM users of these two directories are not separable by filename,
+    # so they are matched wholesale and trade some precision for full recall.
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/block/**'
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/grid/**'
     # Old-CK convolution device ops, plus the conv instance headers and sources that
     # are compiled into the device_conv_operations archive MIOpen links against.
     - 'projects/composablekernel/include/ck/tensor_operation/gpu/**/*conv*'
