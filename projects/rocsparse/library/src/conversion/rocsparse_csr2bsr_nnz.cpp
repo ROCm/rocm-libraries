@@ -40,7 +40,8 @@
 #define launch_csr2bsr_nnz_wavefront_per_row_multipass_kernel(blocksize, wfsize, blockdim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                           \
         (rocsparse::csr2bsr_nnz_wavefront_per_row_multipass_kernel<blocksize, wfsize, blockdim>), \
-        dim3((mb - 1) / (blocksize / wfsize) + 1),                                                \
+        dim3(rocsparse::min((mb - 1) / (blocksize / wfsize) + 1,                                  \
+                            static_cast<J>(handle->properties.maxGridSize[0]))),                  \
         dim3(blocksize),                                                                          \
         0,                                                                                        \
         handle->stream,                                                                           \
@@ -58,7 +59,7 @@
 #define launch_csr2bsr_nnz_block_per_row_multipass_kernel(blocksize, blockdim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                               \
         (rocsparse::csr2bsr_nnz_block_per_row_multipass_kernel<blocksize, blockdim>), \
-        dim3(mb),                                                                     \
+        dim3(rocsparse::min(mb, static_cast<J>(handle->properties.maxGridSize[0]))),                   \
         dim3(blocksize),                                                              \
         0,                                                                            \
         handle->stream,                                                               \
@@ -376,7 +377,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
         I* temp1 = reinterpret_cast<I*>(temp_storage_ptr);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((csr2bsr_nnz_65_inf_kernel<block_size, I, J>),
-                                           dim3(mb),
+                                           dim3(rocsparse::min(
+                                               mb, static_cast<J>(handle->properties.maxGridSize[0]))),
                                            dim3(block_size),
                                            0,
                                            handle->stream,

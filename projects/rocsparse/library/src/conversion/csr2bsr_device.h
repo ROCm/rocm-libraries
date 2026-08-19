@@ -54,7 +54,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(WFSIZE % BLOCKDIM == 0, "WFSIZE must be a multiple of BLOCKDIM.");
-        int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
         // Lane id
@@ -65,11 +64,17 @@ namespace rocsparse
         int c = lid & (WFSIZE / BLOCKDIM - 1);
         int r = lid / (WFSIZE / BLOCKDIM);
 
-        J block_row = (BLOCKSIZE / WFSIZE) * bid + wid;
-        J row       = (BLOCKSIZE / WFSIZE) * block_dim * bid + block_dim * wid + r;
-
         __shared__ bool table[BLOCKSIZE / WFSIZE];
         __shared__ T    data[(BLOCKSIZE / WFSIZE) * BLOCKDIM * BLOCKDIM];
+
+        // Grid-stride loop over block rows so the grid can be clamped below the
+        // number of block rows (which can exceed the 32-bit grid limit). Each
+        // wavefront handles one block row per iteration; there are no block-wide
+        // barriers, so per-iteration divergence is safe.
+        for(J bid = hipBlockIdx_x; (BLOCKSIZE / WFSIZE) * bid < mb; bid += hipGridDim_x)
+        {
+        J block_row = (BLOCKSIZE / WFSIZE) * bid + wid;
+        J row       = (BLOCKSIZE / WFSIZE) * block_dim * bid + block_dim * wid + r;
 
         I row_begin = (row < m && r < block_dim) ? csr_row_ptr[row] - csr_base : 0;
         I row_end   = (row < m && r < block_dim) ? csr_row_ptr[row + 1] - csr_base : 0;
@@ -160,6 +165,7 @@ namespace rocsparse
 
             __threadfence_block();
         }
+        }
     }
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T, typename I, typename J>
@@ -182,7 +188,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
         static_assert(BLOCKSIZE % BLOCKDIM == 0, "BLOCKSIZE must be a multiple of BLOCKDIM.");
-        int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
         // Lane id
@@ -190,11 +195,17 @@ namespace rocsparse
         // Wavefront id
         int wid = tid / (BLOCKSIZE / BLOCKDIM);
 
-        J block_row = bid;
-        J row       = block_dim * bid + wid;
-
         __shared__ bool table;
         __shared__ T    data[BLOCKDIM * BLOCKDIM];
+
+        // Grid-stride loop over block rows so the grid can be clamped below the
+        // number of block rows (which can exceed the 32-bit grid limit). The loop
+        // trip count is uniform across the block, so the __syncthreads() below
+        // stay convergent.
+        for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
+        {
+        J block_row = bid;
+        J row       = block_dim * bid + wid;
 
         I row_begin = (row < m && wid < block_dim) ? csr_row_ptr[row] - csr_base : 0;
         I row_end   = (row < m && wid < block_dim) ? csr_row_ptr[row + 1] - csr_base : 0;
@@ -288,6 +299,7 @@ namespace rocsparse
             chunk_begin = shared[0];
             __syncthreads();
         }
+        }
     }
 
     template <uint32_t BLOCKSIZE, typename T, typename I, typename J>
@@ -313,30 +325,27 @@ namespace rocsparse
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
-        J block_id = hipBlockIdx_x;
-        J lane_id  = hipThreadIdx_x;
+        J lane_id = hipThreadIdx_x;
 
-        J bsr_row_start = 0;
+        // temp arrays used as global scratch pad; partitioned by the physical
+        // block index so the grid can be clamped below the number of block rows.
+        J  phys = hipBlockIdx_x;
+        I* row_start
+            = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
+        I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys)
+                     + rows_per_segment * BLOCKSIZE + rows_per_segment * lane_id;
+        J* csr_col_index
+            = temp2 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
+        T* csr_value = temp3 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
 
-        if(block_id < mb)
+        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
+        for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
         {
-            bsr_row_start = bsr_row_ptr[block_id] - bsr_base;
-        }
+        J bsr_row_start = bsr_row_ptr[block_id] - bsr_base;
 
         J csr_col       = 0;
         J bsr_block_col = 0;
         J nnzb_per_row  = 0;
-
-        // temp arrays used as global scratch pad
-
-        I* row_start
-            = temp1 + (2 * rows_per_segment * BLOCKSIZE * block_id) + rows_per_segment * lane_id;
-        I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * block_id)
-                     + rows_per_segment * BLOCKSIZE + rows_per_segment * lane_id;
-        J* csr_col_index
-            = temp2 + (rows_per_segment * BLOCKSIZE * block_id) + rows_per_segment * lane_id;
-        T* csr_value
-            = temp3 + (rows_per_segment * BLOCKSIZE * block_id) + rows_per_segment * lane_id;
 
         for(J j = 0; j < rows_per_segment; j++)
         {
@@ -432,6 +441,7 @@ namespace rocsparse
 
             // update csr_col for all threads in segment
             csr_col = min_csr_col_index + 1;
+        }
         }
     }
 
