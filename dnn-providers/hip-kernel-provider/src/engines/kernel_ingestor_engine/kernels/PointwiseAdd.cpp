@@ -4,9 +4,9 @@
 // Elementwise add over a single-element tensor. Block size metadata is unused here but
 // must reach the compiler for ranking and knob reporting.
 
-extern "C" __global__ void PointwiseAdd(const HIP_PLUGIN_POINTWISE_ADD_TYPE* a,
-                                        const HIP_PLUGIN_POINTWISE_ADD_TYPE* b,
-                                        HIP_PLUGIN_POINTWISE_ADD_TYPE* c)
+extern "C" __global__ void PointwiseAdd(const HIP_PLUGIN_POINTWISE_TYPE* a,
+                                        const HIP_PLUGIN_POINTWISE_TYPE* b,
+                                        HIP_PLUGIN_POINTWISE_TYPE* c)
 {
     if(blockIdx.x == 0 && threadIdx.x == 0)
     {
