@@ -322,33 +322,40 @@ int main(int argc, char** argv) noexcept
 
         hipdnn_integration_tests::bundle::registerBundleTests();
 
-        if(::testing::UnitTest::GetInstance()->test_to_run_count() == 0
-           && hipdnn_integration_tests::TestConfig::get().allowBundles())
-        {
-            const auto dataDir = hipdnn_integration_tests::bundle::resolveDataDir();
-            if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
-            {
-                std::cerr << "Error: zero tests registered. --test-engine was specified but "
-                             "no bundle tests were discovered. Verify the bundle data "
-                             "directory exists: "
-                          << dataDir << "\n";
-                static_cast<void>(hipStreamDestroy(stream));
-                return 1;
-            }
-            if(std::filesystem::exists(dataDir))
-            {
-                std::cerr << "Error: zero tests registered (bundles are enabled and the data "
-                             "directory exists but no tests were discovered).\n";
-                static_cast<void>(hipStreamDestroy(stream));
-                return 1;
-            }
-        }
-
         const int result = RUN_ALL_TESTS();
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+
+        // Guard against a silently empty run: bundles are enabled, yet nothing
+        // was selected. This must be checked *after* RUN_ALL_TESTS(). GTest only
+        // applies --gtest_filter inside UnitTestImpl::RunAllTests(), via
+        // FilterTests(), which is the sole place TestInfo::should_run_ is set;
+        // it is default-constructed to false. So test_to_run_count() is
+        // unconditionally 0 before RUN_ALL_TESTS(), no matter how many tests
+        // were registered, and checking it earlier fails every engine-driven run.
+        if(::testing::UnitTest::GetInstance()->test_to_run_count() == 0
+           && hipdnn_integration_tests::TestConfig::get().allowBundles())
+        {
+            const auto dataDir = hipdnn_integration_tests::bundle::resolveDataDir();
+            const bool dataDirFound = std::filesystem::exists(dataDir);
+            if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
+            {
+                std::cerr << "Error: zero tests ran. --test-engine was specified but no test "
+                             "matched --gtest_filter. Bundle data directory "
+                          << dataDir << (dataDirFound ? " exists." : " does NOT exist.") << "\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+            if(dataDirFound)
+            {
+                std::cerr << "Error: zero tests ran (bundles are enabled and the data "
+                             "directory exists but no test matched --gtest_filter).\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+        }
 
         {
             const auto* unit = ::testing::UnitTest::GetInstance();
