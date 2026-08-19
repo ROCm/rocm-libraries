@@ -919,9 +919,9 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         target_link_options(MIOpen PRIVATE "LINKER:--no-undefined")
     endif()
 
-    # 5,800 lines of hand-maintained forwarding code is the part of this change
-    # most in need of automated checking, and clang_tidy_check() below runs
-    # against the implementation target only.
+    # The hand-maintained forwarding code is the part of this change most in
+    # need of automated checking, and clang_tidy_check() below runs against the
+    # implementation target only.
     clang_tidy_check(MIOpen)
 
     # The generated public export header (miopen_generate_export_header below)

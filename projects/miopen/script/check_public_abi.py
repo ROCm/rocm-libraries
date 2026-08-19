@@ -37,12 +37,37 @@ MIGraphX shims) stay on libMIOpen_private.so under their original names.
      library (``--private-lib``), so the carve-out cannot delete a symbol from
      the whole installed surface.
 
-Deliberately NOT verified: function signatures, struct/enum layout, behaviour,
-exported symbols outside the ``miopen[A-Z]`` C API convention (including the
-mangled ``_ZN6miopen...`` internals that the driver, gtests and CK plugins
-link against), symbol addresses/sizes, and dynamic-symbol ordering. A green
-result means "the public C entry-point name set and library identity are
-unchanged", nothing more.
+``check-headers`` -- a source-only cross-check of the four hand-maintained
+artifacts of the split. It needs no build, no GPU and no flag-on configuration,
+so unlike the two gates above it can run in a lint lane on every PR:
+
+  1. include/miopen/miopen.h        -- the public contract (MIOPEN_EXPORT decls)
+  2. src/private/miopen_impl.h      -- the matching _impl declarations
+  3. src/private/miopen_private_rename.h -- the compile-time rename
+  4. src/private/wrapper.cpp        -- the forwarding stubs
+
+Every public entry point must appear in all four, the wrapper stub's signature
+must match miopen.h, the _impl declaration's signature must match it too (modulo
+the suffix), and each stub must forward to its own _impl symbol and nothing
+else. No artifact may carry an entry the public header does not.
+
+This is the only check in this script that can see *signature* drift. It matters
+because the _impl entry points have C linkage: the wrapper's stub definitions are
+compiler-checked against miopen.h, and the private library's _impl definitions
+are the miopen.h declarations with a macro applied, but nothing compiles
+miopen_impl.h against the definitions it describes. A divergence there links
+cleanly and corrupts arguments at runtime. The symbol-set gates above cannot see
+it -- the exported names are unchanged.
+
+Deliberately NOT verified: struct/enum layout, behaviour, exported symbols
+outside the ``miopen[A-Z]`` C API convention (including the mangled
+``_ZN6miopen...`` internals that the driver, gtests and CK plugins link
+against), symbol addresses/sizes, and dynamic-symbol ordering. ``check`` and
+``check-wrapper`` additionally do not verify signatures; that is what
+``check-headers`` is for. Signature comparison is textual after normalisation,
+not semantic: it will not resolve a typedef, so two spellings of the same
+underlying type read as a mismatch. That is the intended bias -- the four files
+are meant to be copies of one another.
 
 ``compare-pair`` diffs two ``dump`` outputs and reports a content hash for
 information only; a content hash is build-path dependent and is never gated.
@@ -265,6 +290,207 @@ A baseline change is an ABI change and requires API review -- do not regenerate
 the baseline just to turn this gate green.""".rstrip()
 
 
+HEADERS_REMEDY = """
+Every public entry point must be spelled identically in all four places:
+  include/miopen/miopen.h              MIOPEN_EXPORT <ret> miopenFoo(<params>);
+  src/private/miopen_impl.h            extern "C" <ret> miopenFoo_impl(<params>);
+  src/private/miopen_private_rename.h  #define miopenFoo miopenFoo_impl
+  src/private/wrapper.cpp              extern "C" <ret> miopenFoo(<params>)
+                                       { return miopenFoo_impl(<args>); }
+Update the three private files to match the public header. Do not edit
+miopen.h to match them -- that changes the public C API.""".rstrip()
+
+
+# --------------------------------------------------------------------------
+# Minimal C declaration parser.
+#
+# Parsing the four files textually rather than invoking a compiler keeps this
+# check free of any build, toolchain or GPU dependency, so it can run in a lint
+# lane on every PR. The cost is that the comparison is textual: the parser
+# reduces a prototype to a return type plus a list of parameter types with the
+# parameter names dropped, and compares those strings. It does not resolve
+# typedefs, so two spellings of the same underlying type read as a mismatch.
+# That bias is deliberate -- the private files are meant to be transcriptions of
+# the public header, so an intentional divergence in spelling is itself worth a
+# human look.
+#
+# Two constructs the parser cannot handle are function-pointer parameters and
+# array parameters. Neither occurs in miopen.h today (function-pointer types are
+# introduced via typedef and passed by that name). A declaration that fails to
+# parse raises rather than being skipped, so adding one produces a loud failure
+# here instead of a silent coverage hole.
+# --------------------------------------------------------------------------
+
+BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+EXPORT_ANCHOR_RE = re.compile(r"\bMIOPEN_EXPORT\b")
+EXTERN_C_ANCHOR_RE = re.compile(r'\bextern\s+"C"(?!\s*\{)')
+RENAME_RE = re.compile(
+    r"^[ \t]*#[ \t]*define[ \t]+(miopen[A-Za-z0-9_]*)[ \t]+(\S+)[ \t]*$", re.M
+)
+WRAPPER_DEF_RE = re.compile(
+    r'\bextern\s+"C"\s+(?P<decl>[^;{}]*?)\s*\{(?P<body>[^{}]*)\}', re.S
+)
+DECL_RE = re.compile(
+    r"(?P<ret>.*?)(?P<name>miopen[A-Za-z0-9_]*)\s*\((?P<params>[^()]*)\)"
+)
+IMPL_CALL_RE = re.compile(r"\b(miopen[A-Za-z0-9_]*_impl)\s*\(")
+
+# An unnamed parameter can end in one of these, so a trailing identifier that is
+# one of them is part of the type rather than a parameter name.
+TYPE_TAIL_KEYWORDS = frozenset(
+    {
+        "void",
+        "char",
+        "short",
+        "int",
+        "long",
+        "float",
+        "double",
+        "bool",
+        "signed",
+        "unsigned",
+        "const",
+        "struct",
+        "enum",
+    }
+)
+
+
+def strip_comments(text: str) -> str:
+    return LINE_COMMENT_RE.sub("", BLOCK_COMMENT_RE.sub(" ", text))
+
+
+def squash(text: str) -> str:
+    """Collapse whitespace and normalise pointer spelling to ``T* x``."""
+    text = " ".join(text.split())
+    text = re.sub(r"\s*\*", "*", text)
+    text = re.sub(r"\*(?=[A-Za-z_])", "* ", text)
+    return text.strip()
+
+
+def split_params(params: str) -> list[str]:
+    """Split a parameter list on top-level commas."""
+    out: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in params:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    tail = "".join(cur)
+    if out or tail.strip():
+        out.append(tail)
+    return out
+
+
+def drop_top_level_const(type_text: str) -> str:
+    """Remove a top-level const, which does not participate in type identity.
+
+    ``const float`` and ``float`` are the same parameter type, as are
+    ``void* const`` and ``void*``: a const on the parameter object itself is
+    ignored when the compiler matches declarations. A const *below* the top
+    level is part of the type and must be kept, so ``const void*`` -- a pointer
+    to const -- is left alone. The distinction is positional: a const after the
+    last ``*``, or a leading const on a type with no ``*`` at all, is top level.
+    """
+    text = re.sub(r"\bconst\b\s*$", "", type_text).strip()
+    if "*" not in text:
+        text = re.sub(r"^const\b\s*", "", text)
+    return squash(text)
+
+
+def normalise_param(param: str) -> str:
+    """Reduce one parameter to its type, dropping name and default argument.
+
+    A few entry points carry a C++ default argument. It is a property of the
+    declaration, not of the type, so a wrapper stub that omits it -- as a
+    definition must -- is not drift.
+    """
+    text = squash(param.split("=", 1)[0])
+    if not text or text == "void":
+        return "void"
+    match = re.fullmatch(r"(.*?)([A-Za-z_]\w*)", text)
+    if match:
+        prefix, tail = match.group(1).strip(), match.group(2)
+        if prefix and tail not in TYPE_TAIL_KEYWORDS and not tail.endswith("_t"):
+            text = prefix
+    return drop_top_level_const(text)
+
+
+def parse_prototype(decl: str, what: str) -> tuple[str, tuple[str, ...]]:
+    """Turn one declarator into ``(name, (return_type, *param_types))``."""
+    text = squash(decl.replace('extern "C"', " ").replace("MIOPEN_EXPORT", " "))
+    match = DECL_RE.fullmatch(text)
+    if match is None:
+        raise AbiError(f"cannot parse declaration in {what}: {text!r}")
+    params = [normalise_param(p) for p in split_params(match.group("params"))] or [
+        "void"
+    ]
+    return match.group("name"), (squash(match.group("ret")), *params)
+
+
+def render_signature(sig: tuple[str, ...]) -> str:
+    return f"{sig[0]}({', '.join(sig[1:])})"
+
+
+def parse_declarations(
+    path: Path, anchor: re.Pattern[str], what: str
+) -> dict[str, tuple[str, ...]]:
+    """Collect every miopen* prototype introduced by ``anchor``, keyed by name."""
+    text = strip_comments(read_source(path, what))
+    out: dict[str, tuple[str, ...]] = {}
+    for match in anchor.finditer(text):
+        end = text.find(";", match.end())
+        if end < 0:
+            raise AbiError(f"unterminated declaration in {what}")
+        decl = text[match.end() : end]
+        if "{" in decl:
+            raise AbiError(f"unexpected block after declaration anchor in {what}")
+        name, sig = parse_prototype(decl, what)
+        if name in out:
+            raise AbiError(f"duplicate declaration of {name} in {what}")
+        out[name] = sig
+    return out
+
+
+def parse_wrapper(path: Path) -> tuple[dict[str, tuple[str, ...]], dict[str, set[str]]]:
+    """Collect the wrapper's stub prototypes and the _impl symbols each one calls."""
+    text = strip_comments(read_source(path, "wrapper"))
+    protos: dict[str, tuple[str, ...]] = {}
+    forwards: dict[str, set[str]] = {}
+    for match in WRAPPER_DEF_RE.finditer(text):
+        name, sig = parse_prototype(match.group("decl"), "wrapper")
+        if name in protos:
+            raise AbiError(f"duplicate definition of {name} in wrapper")
+        protos[name] = sig
+        forwards[name] = set(IMPL_CALL_RE.findall(match.group("body")))
+    return protos, forwards
+
+
+def parse_renames(path: Path) -> dict[str, str]:
+    """Collect the rename header's #defines, folding backslash continuations."""
+    text = strip_comments(read_source(path, "rename header").replace("\\\n", " "))
+    out: dict[str, str] = {}
+    for name, target in RENAME_RE.findall(text):
+        if name in out:
+            raise AbiError(f"duplicate #define of {name} in rename header")
+        out[name] = target
+    return out
+
+
+def read_source(path: Path, what: str) -> str:
+    if not path.is_file():
+        raise AbiError(f"{what} source not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
 # --------------------------------------------------------------------------
 # Individual assertions. Each returns True on pass and prints its own verdict,
 # so `check` and `check-wrapper` are assembled from the same primitives rather
@@ -374,6 +600,61 @@ def check_excluded_on_private(excluded: set[str], private_lib: str) -> bool:
     return False
 
 
+def check_entry_point_set(public: set[str], other: set[str], what: str) -> bool:
+    if public == other:
+        print(f"PASS: {what} covers exactly the {len(public)} miopen.h entry points")
+        return True
+    print(f"FAIL: {what} does not match the miopen.h entry point set")
+    for sym in sorted(public - other):
+        print(f"  - declared in miopen.h, absent from {what}: {sym}")
+    for sym in sorted(other - public):
+        print(f"  + present in {what}, not declared in miopen.h: {sym}")
+    return False
+
+
+def check_prototypes(
+    public: dict[str, tuple[str, ...]], other: dict[str, tuple[str, ...]], what: str
+) -> bool:
+    drifted = [n for n in sorted(public.keys() & other.keys()) if public[n] != other[n]]
+    if not drifted:
+        print(f"PASS: {what} prototypes match miopen.h")
+        return True
+    print(f"FAIL: {what} prototypes have drifted from miopen.h")
+    for name in drifted:
+        print(f"  {name}")
+        print(f"      miopen.h: {render_signature(public[name])}")
+        print(f"      {what}: {render_signature(other[name])}")
+    return False
+
+
+def check_rename_targets(renames: dict[str, str]) -> bool:
+    bad = {n: t for n, t in sorted(renames.items()) if t != f"{n}_impl"}
+    if not bad:
+        print(f"PASS: all {len(renames)} renames map miopenFoo to miopenFoo_impl")
+        return True
+    print("FAIL: renames point at the wrong symbol -- calls would be misrouted:")
+    for name, target in bad.items():
+        print(f"  {name} -> {target} (expected {name}_impl)")
+    return False
+
+
+def check_wrapper_forwards(forwards: dict[str, set[str]]) -> bool:
+    bad = {n: c for n, c in sorted(forwards.items()) if c != {f"{n}_impl"}}
+    if not bad:
+        print(
+            f"PASS: all {len(forwards)} wrapper stubs forward to their own _impl symbol"
+        )
+        return True
+    print(
+        "FAIL: wrapper stubs do not forward to their own _impl symbol. A stub must "
+        "be a pure forward -- logic here diverges the two libraries:"
+    )
+    for name, calls in bad.items():
+        got = ", ".join(sorted(calls)) if calls else "no _impl call"
+        print(f"  {name} calls {got} (expected {name}_impl)")
+    return False
+
+
 # --------------------------------------------------------------------------
 # Subcommands
 # --------------------------------------------------------------------------
@@ -463,6 +744,47 @@ def cmd_check_wrapper(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_check_headers(args) -> int:
+    root = Path(args.source_root)
+    public_path = Path(args.public_header or root / "include/miopen/miopen.h")
+    impl_path = Path(args.impl_header or root / "src/private/miopen_impl.h")
+    rename_path = Path(
+        args.rename_header or root / "src/private/miopen_private_rename.h"
+    )
+    wrapper_path = Path(args.wrapper or root / "src/private/wrapper.cpp")
+
+    public = parse_declarations(public_path, EXPORT_ANCHOR_RE, "miopen.h")
+    if not public:
+        raise AbiError(f"no MIOPEN_EXPORT declarations found in {public_path}")
+    impl = parse_declarations(impl_path, EXTERN_C_ANCHOR_RE, "miopen_impl.h")
+    renames = parse_renames(rename_path)
+    wrapper, forwards = parse_wrapper(wrapper_path)
+
+    # The private declarations carry the suffix; strip it so every comparison
+    # below is against the public header under one common set of names. An
+    # unsuffixed declaration is a defect, not something to silently rekey.
+    unsuffixed = sorted(n for n in impl if not n.endswith("_impl"))
+    if unsuffixed:
+        print("FAIL: miopen_impl.h declares entry points without the _impl suffix:")
+        for name in unsuffixed:
+            print(f"  {name}")
+    impl = {n[: -len("_impl")]: sig for n, sig in impl.items() if n.endswith("_impl")}
+
+    ok = not unsuffixed
+    ok &= check_entry_point_set(set(public), set(impl), "miopen_impl.h")
+    ok &= check_prototypes(public, impl, "miopen_impl.h")
+    ok &= check_entry_point_set(set(public), set(renames), "miopen_private_rename.h")
+    ok &= check_rename_targets(renames)
+    ok &= check_entry_point_set(set(public), set(wrapper), "wrapper.cpp")
+    ok &= check_prototypes(public, wrapper, "wrapper.cpp")
+    ok &= check_wrapper_forwards(forwards)
+
+    if not ok:
+        print(HEADERS_REMEDY)
+    print(f"public/private header consistency check: {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
 def cmd_compare_pair(args) -> int:
     ok = True
     for ext in ("soname", "symbols", "needed"):
@@ -508,6 +830,24 @@ def build_parser() -> argparse.ArgumentParser:
         "runtime dependency list must match it exactly",
     )
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser(
+        "check-headers",
+        help="cross-check the four hand-maintained split sources (no build needed)",
+    )
+    p.add_argument(
+        "--source-root",
+        default=str(Path(__file__).resolve().parent.parent),
+        help="MIOpen source root; the four files are located under it by "
+        "convention (default: the tree containing this script)",
+    )
+    p.add_argument("--public-header", help="override path to include/miopen/miopen.h")
+    p.add_argument("--impl-header", help="override path to src/private/miopen_impl.h")
+    p.add_argument(
+        "--rename-header", help="override path to src/private/miopen_private_rename.h"
+    )
+    p.add_argument("--wrapper", help="override path to src/private/wrapper.cpp")
+    p.set_defaults(func=cmd_check_headers)
 
     p = sub.add_parser("check-wrapper", help="gate a flag-on wrapper build")
     p.add_argument("lib", help="path to the built wrapper libMIOpen.so")
