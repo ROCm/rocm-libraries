@@ -80,7 +80,16 @@ public:
         std::vector<NodeSpec> nodes{NodeSpec{}};
     };
 
-    explicit ContentCarryingTestGraph(Spec spec = Spec{})
+    /// Two constructors rather than one with a `Spec{}` default argument: a default
+    /// argument is not a complete-class context, so naming `Spec{}` there while
+    /// `ContentCarryingTestGraph`'s own body is still open cannot see `Spec`'s default
+    /// member initializers.
+    ContentCarryingTestGraph()
+        : ContentCarryingTestGraph(Spec{})
+    {
+    }
+
+    explicit ContentCarryingTestGraph(Spec spec)
         : _spec(std::move(spec))
     {
         build();
