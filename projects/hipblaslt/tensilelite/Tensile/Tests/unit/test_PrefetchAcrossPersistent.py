@@ -162,7 +162,6 @@ class _SetupNewTilePapTdmWriter:
             actualSummationLoops=1,
             doShadowInit=2,
             IncLdsBufSwitch=False,
-            kernel={"TDMPlusLdsBuf": 0},
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
@@ -173,7 +172,7 @@ class _SetupNewTilePapTdmWriter:
             # PartialMatch (asmCaps HasTDM + kernel TDMInst==3), mirroring the
             # real writer.states on a gfx1250 TDM path so the component matches.
             asmCaps={"HasTDM": True},
-            kernel={"TDMInst": 3},
+            kernel={"TDMInst": 3, "TDMPlusLdsBuf": 0},
             waveIdxReleasedAfterStagger=False,
         )
         self.do = {"executeToInitEnd": False}
