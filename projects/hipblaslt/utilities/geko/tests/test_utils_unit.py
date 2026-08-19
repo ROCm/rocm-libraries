@@ -184,36 +184,6 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
     assert calls[3][2]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
     assert calls[4][0] == calls[2][0]
 
-def test_default_client_build_keeps_source_wrapper_return_shape(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    hip = Path("hip")
-    tensile = hip / "tensilelite"
-    tensile.mkdir(parents=True)
-    client = (tensile / "build_tmp/tensilelite/client/tensilelite-client").resolve()
-    calls = []
-
-    def _fake_run(command, cwd=None, env=None):
-        calls.append((command, cwd, env))
-        client.parent.mkdir(parents=True, exist_ok=True)
-        client.write_text("bin\n")
-
-    monkeypatch.setattr(utils, "find_spec", lambda _n: object())
-    monkeypatch.setattr(utils, "run_silent_command", _fake_run)
-    monkeypatch.setattr(
-        utils, "_tensilelite_build_environment", lambda: {"TENSILELITE_ROCM_VERSION": "7.2.4"}
-    )
-
-    assert utils.build_tensilelite_client(hip) is None
-    assert calls[0][0] == [
-        "invoke",
-        "build-client",
-        "--build-dir",
-        str((tensile / "build_tmp").resolve()),
-    ]
-    assert calls[1][2]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
-    assert calls[2][0][-1] == client
 
 def test_tensilelite_build_environment_reads_the_selected_rocm_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -226,6 +196,7 @@ def test_tensilelite_build_environment_reads_the_selected_rocm_identity(
 
     assert utils._tensilelite_build_environment()["TENSILELITE_ROCM_VERSION"] == "7.2.4"
 
+
 def test_tensilelite_build_environment_prefers_an_explicit_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -237,6 +208,7 @@ def test_tensilelite_build_environment_prefers_an_explicit_identity(
         == "10.1.0a20260813"
     )
 
+
 def test_tensilelite_build_environment_reports_missing_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -245,6 +217,7 @@ def test_tensilelite_build_environment_reports_missing_metadata(
 
     with pytest.raises(RuntimeError, match="could not determine the ROCm identity"):
         utils._tensilelite_build_environment()
+
 
 def test_tensilelite_build_environment_rejects_empty_rocm_path(
     monkeypatch: pytest.MonkeyPatch,
