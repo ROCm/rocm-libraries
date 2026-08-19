@@ -66,7 +66,7 @@ namespace hipblaslt::host_validation
         const Layout     matrixLayout(Shape{rows, columns},
                                       {1, static_cast<ptrdiff_t>(leadingDimension)});
 
-        EpilogueProblem problem(
+        EpilogueRequest request(
             Tensor(computeType,
                    matrixLayout,
                    constStorage(arguments.input, computeType, matrixLayout, "input")),
@@ -76,36 +76,43 @@ namespace hipblaslt::host_validation
             computeType);
 
         if(arguments.rawOutput != nullptr)
-            problem.rawOutput = Tensor(
+        {
+            request.rawOutput = Tensor(
                 computeType,
                 matrixLayout,
                 mutableStorage(arguments.rawOutput, computeType, matrixLayout, "raw output"));
+            request.rawOutputType = request.rawOutput->type();
+        }
 
         if(arguments.auxiliary != nullptr)
         {
             const ScalarType auxiliaryType = scalarType(arguments.auxiliaryType);
             if(arguments.activationApplication == ActivationApplication::Gradient)
-                problem.auxiliaryInput = Tensor(
+                request.auxiliaryInput = Tensor(
                     auxiliaryType,
                     matrixLayout,
                     constStorage(
                         arguments.auxiliary, auxiliaryType, matrixLayout, "auxiliary input"));
             else
-                problem.auxiliaryOutput = Tensor(
+            {
+                request.auxiliaryOutput = Tensor(
                     auxiliaryType,
                     matrixLayout,
                     mutableStorage(
                         arguments.auxiliary, auxiliaryType, matrixLayout, "auxiliary output"));
+                request.auxiliaryOutputType = request.auxiliaryOutput->type();
+            }
         }
 
         if(arguments.amax != nullptr)
         {
             const Layout amaxLayout = Layout::contiguous(Shape{1});
-            problem.amax
+            request.amax
                 = Tensor(computeType,
                          amaxLayout,
                          mutableStorage(arguments.amax, computeType, amaxLayout, "AMax output"));
-            problem.accumulateAmax = arguments.accumulateAmax;
+            request.amaxType       = request.amax->type();
+            request.accumulateAmax = arguments.accumulateAmax;
         }
 
         if(arguments.bias != nullptr)
@@ -113,7 +120,7 @@ namespace hipblaslt::host_validation
             const ScalarType biasType     = scalarType(arguments.biasType);
             const size_t     biasElements = arguments.biasAxis == MatrixAxis::Row ? rows : columns;
             const Layout     biasLayout   = Layout::contiguous(Shape{biasElements});
-            problem.bias
+            request.bias
                 = VectorBinding{Tensor(biasType,
                                        biasLayout,
                                        constStorage(arguments.bias, biasType, biasLayout, "bias")),
@@ -121,25 +128,25 @@ namespace hipblaslt::host_validation
         }
 
         if(arguments.outputScale != nullptr)
-            problem.outputScale = scalarValue(arguments.outputScale, computeType, "output scale");
+            request.outputScale = scalarValue(arguments.outputScale, computeType, "output scale");
         if(arguments.auxiliaryScale != nullptr)
-            problem.auxiliaryScale
+            request.auxiliaryScale
                 = scalarValue(arguments.auxiliaryScale, computeType, "auxiliary scale");
         if(outputType == ScalarType::Int8)
-            problem.outputConversion = OutputConversion::SaturatingInt8;
-        problem.activation            = arguments.activation;
-        problem.activationApplication = arguments.activationApplication;
-        problem.activationParameter0  = arguments.activationParameter0;
-        problem.activationParameter1  = arguments.activationParameter1;
-        const EpilogueRunInfo run     = roc::host_validation::referenceEpilogue(problem);
-        copyBack(arguments.output, problem.output);
+            request.outputConversion = OutputConversion::SaturatingInt8;
+        request.activation            = arguments.activation;
+        request.activationApplication = arguments.activationApplication;
+        request.activationParameter0  = arguments.activationParameter0;
+        request.activationParameter1  = arguments.activationParameter1;
+        const EpilogueRunInfo run     = roc::host_validation::referenceEpilogue(request);
+        copyBack(arguments.output, request.output);
         if(arguments.rawOutput != nullptr)
-            copyBack(arguments.rawOutput, *problem.rawOutput);
+            copyBack(arguments.rawOutput, *request.rawOutput);
         if(arguments.auxiliary != nullptr
            && arguments.activationApplication != ActivationApplication::Gradient)
-            copyBack(arguments.auxiliary, *problem.auxiliaryOutput);
+            copyBack(arguments.auxiliary, *request.auxiliaryOutput);
         if(arguments.amax != nullptr)
-            copyBack(arguments.amax, *problem.amax);
+            copyBack(arguments.amax, *request.amax);
         return run;
     }
 } // namespace hipblaslt::host_validation
