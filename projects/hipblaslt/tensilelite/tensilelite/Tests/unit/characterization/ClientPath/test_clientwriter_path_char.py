@@ -46,6 +46,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 import tensilelite.ClientWriter as CW
+from tensilelite import _runtime
 from tensilelite.Common.GlobalParameters import globalParameters
 
 pytestmark = pytest.mark.unit
@@ -71,7 +72,6 @@ def _default_globalParameters_overrides(monkeypatch):
     monkeypatch.setitem(globalParameters, "MXScaleFormat", 0)
     monkeypatch.setitem(globalParameters, "ParallelGpuExecution", 1)
     monkeypatch.setitem(globalParameters, "ClientExecutionLockPath", None)
-    monkeypatch.setitem(globalParameters, "PrebuiltClient", "/fake/tensile_client")
     monkeypatch.setitem(globalParameters, "DataInitTypeAB", 3)
     monkeypatch.setitem(globalParameters, "DataInitTypeA", -1)
     monkeypatch.setitem(globalParameters, "DataInitTypeB", -1)
@@ -176,7 +176,6 @@ class TestWriteRunScriptNonBenchmark:
 
     def _run(self, tmp_path, monkeypatch, configPaths=None, clientExePath="/fake/client"):
         _default_globalParameters_overrides(monkeypatch)
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", clientExePath)
 
         buildDir = tmp_path / "build"
         buildDir.mkdir(parents=True)
@@ -254,7 +253,6 @@ class TestWriteRunScriptBenchmark:
 
     def _run_benchmark(self, tmp_path, monkeypatch, configPaths=None, clientExePath="/fake/client"):
         _default_globalParameters_overrides(monkeypatch)
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", clientExePath)
         monkeypatch.setitem(globalParameters, "DataInitTypeA", -1)
         monkeypatch.setitem(globalParameters, "DataInitTypeB", -1)
         monkeypatch.setitem(globalParameters, "DataInitTypeAB", 3)
@@ -622,20 +620,32 @@ class TestRunNewClient:
 # ---------------------------------------------------------------------------
 
 class TestGetClientExecutablePath:
-    """getClientExecutablePath exercises lines 804-814."""
-
     def test_raises_when_file_not_found(self, monkeypatch):
-        """Lines 807-813: raises FileNotFoundError when PrebuiltClient doesn't exist."""
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", "/nonexistent/fake_client")
+        """Forwards the runtime error when no client can be selected."""
+        def client_not_found():
+            raise _runtime.TensileLiteRuntimeError("tensilelite-client was not found")
 
-        with pytest.raises(FileNotFoundError, match="TensileLite client executable not found"):
+        monkeypatch.setattr(_runtime, "client_executable", client_not_found)
+
+        with pytest.raises(_runtime.TensileLiteRuntimeError, match="tensilelite-client was not found"):
             CW.getClientExecutablePath()
 
     def test_returns_path_when_file_exists(self, tmp_path, monkeypatch):
-        """Lines 805-806: returns PrebuiltClient path when it exists."""
+        """Returns the client path selected by the runtime binding."""
         fake_exe = tmp_path / "tensile_client"
         fake_exe.write_text("#!/bin/bash\necho fake")
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", str(fake_exe))
+        monkeypatch.setattr(_runtime, "_client", fake_exe)
 
         result = CW.getClientExecutablePath()
         assert result == str(fake_exe)
+
+    def test_global_parameter_cannot_override_binding(self, monkeypatch, tmp_path):
+        monkeypatch.setitem(globalParameters, "ClientExecutable", "/nonexistent/fake_client")
+        bound_client = tmp_path / "tensilelite-client"
+        bound_client.touch()
+        monkeypatch.setattr(_runtime, "_client", bound_client)
+
+        result = CW.getClientExecutablePath()
+
+        assert result != "/nonexistent/fake_client"
+        assert result == str(bound_client)
