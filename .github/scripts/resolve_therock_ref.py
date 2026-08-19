@@ -227,8 +227,16 @@ class RestGitHubClient:
             f"/repos/{repo}/actions/workflows/{workflow_file}/runs",
             params={
                 "branch": branch,
-                "status": "completed",
-                "conclusion": "success",
+                # The workflow-runs list endpoint has no separate `conclusion`
+                # filter; `status` doubles as either a status (queued,
+                # completed, ...) or a conclusion (success, failure,
+                # cancelled, ...), but only one value at a time. Passing
+                # status=completed plus a conclusion param here would get the
+                # conclusion silently ignored, matching *any* completed run
+                # (including failed/cancelled ones) -- confirmed against the
+                # live API, where this returned a cancelled run at
+                # ROCm/TheRock@82a6b894.
+                "status": "success",
                 "created": f"<={iso_utc(until)}",
                 "per_page": limit,
             },
