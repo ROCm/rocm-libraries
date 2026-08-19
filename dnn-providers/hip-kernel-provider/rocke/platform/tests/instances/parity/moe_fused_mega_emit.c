@@ -59,12 +59,15 @@ static int make_spec(int idx, rocke_moe_fused_mega_kernel_spec_t* spec)
         spec->dtype = "fp16";
         break;
     case 3: /* moe_mega_wide_n */
+        /* tile_k_down is 32 rather than 64 to keep the LDS pool inside gfx950's
+         * 163840 B: at 64 this config needs 165888 B. Both wide-N dims are the
+         * point of the sample, so the down-GEMM K tile is what gives. */
         spec->name = "moe_mega_wide_n";
         spec->tile_m = 32;
         spec->tile_n_inter = 512;
         spec->tile_k_gu = 32;
         spec->tile_n_down = 512;
-        spec->tile_k_down = 64;
+        spec->tile_k_down = 32;
         spec->dtype = "fp16";
         break;
     case 4: /* moe_mega_fp8 */
