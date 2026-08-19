@@ -1,6 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 from pathlib import Path
 import runpy
 import subprocess
@@ -9,10 +8,9 @@ import sys
 import pytest
 
 from tensilelite import GENERATOR_VERSION
-
+import os
 
 pytestmark = pytest.mark.unit
-
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -71,3 +69,25 @@ def test_component_version_rejects_non_release_values(tmp_path, value):
 
     with pytest.raises(RuntimeError, match="VERSION must contain"):
         metadata["component_version"]()
+
+def test_tox_package_bootstrap_reads_the_selected_rocm_identity(tmp_path):
+    root = tmp_path / "rocm"
+    (root / ".info").mkdir(parents=True)
+    (root / ".info" / "version").write_text("7.2.4\n", encoding="utf-8")
+    environment = dict(
+        os.environ,
+        TOX_ENV_NAME="unit",
+        ROCM_PATH=str(root),
+    )
+    environment.pop("TENSILELITE_ROCM_VERSION", None)
+
+    result = subprocess.run(
+        [sys.executable, "setup.py", "--version"],
+        cwd=_SOURCE_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "5.0.0+rocm7.2.4"
