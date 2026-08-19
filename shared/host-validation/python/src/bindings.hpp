@@ -10,4 +10,5 @@ void registerComparisonBindings(nanobind::module_& module);
 void registerGenerationBindings(nanobind::module_& module);
 void registerGemmBindings(nanobind::module_& module);
 void registerMxBindings(nanobind::module_& module);
+void registerOperationBindings(nanobind::module_& module);
 }  // namespace roc::host_validation::python_bindings
