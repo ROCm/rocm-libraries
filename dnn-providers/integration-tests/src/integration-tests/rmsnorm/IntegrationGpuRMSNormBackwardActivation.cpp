@@ -109,7 +109,7 @@ public:
         auto invRmsTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(invRmsAttr));
 
         graph::PointwiseAttributes activBwdAttrs;
-        activBwdAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activBwdAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
 
         // Set activation-specific parameters
         if(activTestCase.reluLowerClip.has_value())
@@ -138,7 +138,6 @@ public:
         }
 
         auto dyDreluTensorAttr = graphObj.pointwise(dyTensorAttr, yTensorAttr, activBwdAttrs);
-        dyDreluTensorAttr->set_data_type(dyType);
 
         graph::RMSNormBackwardAttributes rmsnormBwdAttrs;
         rmsnormBwdAttrs.set_compute_data_type(computeType);
