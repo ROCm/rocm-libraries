@@ -20,8 +20,8 @@ struct ComparisonContext
     std::string contextLine;
     std::string tensorLabel;
     std::string dtypeName;
-    float atol;
-    float rtol;
+    float atol = 0.0f;
+    float rtol = 0.0f;
 };
 
 inline std::string formatComparisonHeader(const ComparisonContext& ctx,

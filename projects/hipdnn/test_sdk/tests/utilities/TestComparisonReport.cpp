@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
+#include <regex>
 #include <sstream>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -43,47 +44,101 @@ TEST(TestFormatComparisonHeader, IncludesShape)
 }
 
 // =================================================================================================
-// appendComparisonDiffByDataType
+// appendComparisonDiffByDataType — typed dispatch
 // =================================================================================================
 
-TEST(TestAppendComparisonDiffByDataType, FloatProducesSummary)
+namespace
 {
-    Tensor<float> ref({4});
-    Tensor<float> actual({4});
+
+template <typename T>
+struct DataTypeTraits;
+
+template <>
+struct DataTypeTraits<float>
+{
+    static constexpr DT DATA_TYPE = DT::FLOAT;
+};
+
+template <>
+struct DataTypeTraits<double>
+{
+    static constexpr DT DATA_TYPE = DT::DOUBLE;
+};
+
+template <>
+struct DataTypeTraits<hipdnn_data_sdk::types::half>
+{
+    static constexpr DT DATA_TYPE = DT::HALF;
+};
+
+template <>
+struct DataTypeTraits<hipdnn_data_sdk::types::bfloat16>
+{
+    static constexpr DT DATA_TYPE = DT::BFLOAT16;
+};
+
+} // namespace
+
+using SupportedDataTypes = ::testing::
+    Types<float, double, hipdnn_data_sdk::types::half, hipdnn_data_sdk::types::bfloat16>;
+
+template <typename T>
+class TestAppendComparisonDiffByDataType : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(TestAppendComparisonDiffByDataType, SupportedDataTypes, );
+
+TYPED_TEST(TestAppendComparisonDiffByDataType, MismatchProducesSummary)
+{
+    using T = TypeParam;
+    constexpr auto DATA_TYPE = DataTypeTraits<T>::DATA_TYPE;
+
+    Tensor<T> ref({4});
+    Tensor<T> actual({4});
 
     for(int64_t i = 0; i < 4; ++i)
     {
-        ref.setHostValue(0.0f, std::vector<int64_t>{i});
-        actual.setHostValue(0.0f, std::vector<int64_t>{i});
+        ref.setHostValue(static_cast<T>(0.0f), std::vector<int64_t>{i});
+        actual.setHostValue(static_cast<T>(0.0f), std::vector<int64_t>{i});
     }
-    ref.setHostValue(1.0f, std::vector<int64_t>{2});
-    actual.setHostValue(2.0f, std::vector<int64_t>{2});
+    ref.setHostValue(static_cast<T>(1.0f), std::vector<int64_t>{2});
+    actual.setHostValue(static_cast<T>(2.0f), std::vector<int64_t>{2});
 
     std::ostringstream oss;
-    appendComparisonDiffByDataType(oss, DT::FLOAT, "y", ref, actual, 0.0f, 0.0f);
+    appendComparisonDiffByDataType(oss, DATA_TYPE, "y", ref, actual, 0.0f, 0.0f);
     const std::string output = oss.str();
 
     EXPECT_NE(output.find("Total elements:"), std::string::npos);
     EXPECT_NE(output.find("Mismatched:"), std::string::npos);
+    EXPECT_TRUE(std::regex_search(output, std::regex(R"(Mismatched:\s+1\b)")));
 }
 
-TEST(TestAppendComparisonDiffByDataType, DoubleProducesSummary)
+TYPED_TEST(TestAppendComparisonDiffByDataType, MatchingTensorsShowZeroMismatches)
 {
-    Tensor<double> ref({3});
-    Tensor<double> actual({3});
+    using T = TypeParam;
+    constexpr auto DATA_TYPE = DataTypeTraits<T>::DATA_TYPE;
+
+    Tensor<T> ref({3});
+    Tensor<T> actual({3});
 
     for(int64_t i = 0; i < 3; ++i)
     {
-        ref.setHostValue(1.0, std::vector<int64_t>{i});
-        actual.setHostValue(1.0, std::vector<int64_t>{i});
+        ref.setHostValue(static_cast<T>(static_cast<float>(i)), std::vector<int64_t>{i});
+        actual.setHostValue(static_cast<T>(static_cast<float>(i)), std::vector<int64_t>{i});
     }
-    actual.setHostValue(99.0, std::vector<int64_t>{0});
 
     std::ostringstream oss;
-    appendComparisonDiffByDataType(oss, DT::DOUBLE, "z", ref, actual, 0.0f, 0.0f);
+    appendComparisonDiffByDataType(oss, DATA_TYPE, "clean", ref, actual, 1e-5f, 1e-5f);
+    const std::string output = oss.str();
 
-    EXPECT_NE(oss.str().find("Total elements:"), std::string::npos);
+    EXPECT_TRUE(std::regex_search(output, std::regex(R"(Mismatched:\s+0\b)")));
+    EXPECT_EQ(output.find("Worst mismatches:"), std::string::npos);
 }
+
+// =================================================================================================
+// appendComparisonDiffByDataType — unsupported type
+// =================================================================================================
 
 TEST(TestAppendComparisonDiffByDataType, UnsupportedTypeShowsMessage)
 {
@@ -95,25 +150,6 @@ TEST(TestAppendComparisonDiffByDataType, UnsupportedTypeShowsMessage)
 
     EXPECT_NE(oss.str().find("no element-wise diff available for data type: INT8"),
               std::string::npos);
-}
-
-TEST(TestAppendComparisonDiffByDataType, MatchingTensorsShowZeroMismatches)
-{
-    Tensor<float> ref({3});
-    Tensor<float> actual({3});
-
-    for(int64_t i = 0; i < 3; ++i)
-    {
-        ref.setHostValue(static_cast<float>(i), std::vector<int64_t>{i});
-        actual.setHostValue(static_cast<float>(i), std::vector<int64_t>{i});
-    }
-
-    std::ostringstream oss;
-    appendComparisonDiffByDataType(oss, DT::FLOAT, "clean", ref, actual, 1e-5f, 1e-5f);
-    const std::string output = oss.str();
-
-    EXPECT_NE(output.find("Mismatched:     0"), std::string::npos);
-    EXPECT_EQ(output.find("Worst mismatches:"), std::string::npos);
 }
 
 // =================================================================================================
@@ -135,6 +171,6 @@ TEST(TestAppendComparisonDiff, ProducesDiffOutput)
     appendComparisonDiff<float>(oss, "t", ref, actual, 0.0f, 0.0f);
     const std::string output = oss.str();
 
-    EXPECT_NE(output.find("Mismatched:     1"), std::string::npos);
+    EXPECT_TRUE(std::regex_search(output, std::regex(R"(Mismatched:\s+1\b)")));
     EXPECT_NE(output.find("Worst mismatches:"), std::string::npos);
 }

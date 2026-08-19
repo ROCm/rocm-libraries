@@ -16,6 +16,7 @@ add_executable(
     hipdnn_test_sdk_tests
     main.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
+    utilities/TestComparisonReport.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
@@ -49,7 +50,6 @@ add_executable(
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
     utilities/TestSeeds.cpp
-    utilities/TestComparisonReport.cpp
     utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
     utilities/cpu_graph_executor/TestBlockScaleDequantizePlan.cpp
