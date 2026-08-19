@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
 """Resolve the ROCm/TheRock commit a multi-arch CI run should build against.
 
-Policy (see the "Merge-base-time TheRock ref" design):
+Policy (see the "Merge-base-time TheRock ref" design, revised in response to
+the #9602 review):
 
-- On a ``pull_request`` event, pin TheRock to the tip of ``main`` as it existed
-  at the time of the PR branch's merge-base with its base branch. The pin stays
-  frozen while the author pushes new commits and only advances when they merge
-  or rebase the base branch back in. This keeps the ROCm build underneath a PR
-  stable during authoring and debugging.
+- On a ``pull_request`` event, look for the newest commit on the target
+  TheRock branch, at or before the time of the PR branch's merge-base with
+  its base branch, that TheRock's own ``multi_arch_ci.yml`` actually built
+  and passed (a health check, not just a timestamp comparison). The pin
+  stays frozen while the author pushes new commits and only advances when
+  they merge or rebase the base branch back in, keeping the ROCm build
+  underneath a PR stable during authoring and debugging. If no such
+  build-validated commit exists within the lookback window, fall back to
+  the newest commit that merely exists at or before that time, with an
+  explicit warning that the pin was not validated.
+- The target branch defaults to ``main``, but a PR targeting a
+  ``release/therock-<version>`` branch here resolves against the matching
+  TheRock release branch instead (see ``resolve_therock_branch``).
 - A caller-supplied override short-circuits everything (manual pin).
 - On any other event (push / workflow_dispatch / schedule) there is no
-  merge-base, so use the live tip of ``main`` (equivalent to the prior
-  behavior).
+  merge-base, so use the live tip of the target branch (equivalent to the
+  prior behavior).
 
-The merge-base is computed server-side by GitHub's compare API, so no deep
-clone of this repository is required. Staleness is warn-only: if the resolved
-TheRock commit is older than the threshold we surface a warning but still use
-the commit.
+The merge-base and workflow-run health check are both computed server-side
+via the GitHub REST API, so no deep clone of this repository is required.
+Staleness is warn-only: if the resolved TheRock commit is older than the
+threshold we surface a warning but still use the commit.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, Protocol
@@ -34,11 +44,36 @@ GITHUB_API = "https://api.github.com"
 DEFAULT_THEROCK_REPO = "ROCm/TheRock"
 DEFAULT_THEROCK_BRANCH = "main"
 DEFAULT_STALENESS_DAYS = 14
+DEFAULT_HEALTH_CHECK_WORKFLOW = "multi_arch_ci.yml"
+DEFAULT_HEALTH_CHECK_LOOKBACK = 20
+
+# rocm-libraries release branches are named identically to TheRock's own
+# release branches (release/therock-<version>), so a PR targeting one should
+# resolve against the matching TheRock release branch, not ``main``.
+RELEASE_BRANCH_PATTERN = re.compile(r"^release/therock-[0-9]+(?:\.[0-9]+)*$")
 
 MODE_OVERRIDE = "override"
-MODE_MERGE_BASE = "pull-request merge-base"
+MODE_MERGE_BASE = "pull-request merge-base (build-validated)"
+MODE_MERGE_BASE_UNVALIDATED = (
+    "pull-request merge-base (unvalidated - no successful build found)"
+)
 MODE_MERGE_BASE_FALLBACK = "pull-request merge-base (fell back to live tip of main)"
 MODE_LIVE_TIP = "live-tip (push/dispatch/schedule)"
+
+
+def resolve_therock_branch(
+    base_branch: str, default_branch: str = DEFAULT_THEROCK_BRANCH
+) -> str:
+    """Map this repo's PR base branch to the TheRock branch it should track.
+
+    A PR targeting a ``release/therock-<version>`` branch here should pin
+    against the matching TheRock release branch instead of ``main``, since
+    ``main`` has already moved past that release. Any other base branch
+    (``develop``, most feature branches) falls back to ``default_branch``.
+    """
+    if base_branch and RELEASE_BRANCH_PATTERN.match(base_branch):
+        return base_branch
+    return default_branch
 
 
 def parse_github_time(value: str) -> datetime:
@@ -97,6 +132,8 @@ class Resolution:
     source_repo: str = ""
     warnings: list[str] = field(default_factory=list)
     staleness_days: int = DEFAULT_STALENESS_DAYS
+    validated: bool = False
+    therock_branch: str = DEFAULT_THEROCK_BRANCH
 
 
 class GitHubClient(Protocol):
@@ -107,6 +144,15 @@ class GitHubClient(Protocol):
     def get_commit_at_or_before(
         self, repo: str, branch: str, until: datetime
     ) -> Optional[Commit]: ...
+
+    def list_successful_workflow_runs(
+        self,
+        repo: str,
+        workflow_file: str,
+        branch: str,
+        until: datetime,
+        limit: int,
+    ) -> list[Commit]: ...
 
     def get_live_tip(self, repo: str, branch: str) -> Commit: ...
 
@@ -157,6 +203,44 @@ class RestGitHubClient:
             return None
         return self._commit_from_payload(payload[0])
 
+    def list_successful_workflow_runs(
+        self,
+        repo: str,
+        workflow_file: str,
+        branch: str,
+        until: datetime,
+        limit: int,
+    ) -> list[Commit]:
+        """List commits with a passing ``workflow_file`` run on ``branch``.
+
+        Filters server-side to runs created at or before ``until`` and with a
+        successful conclusion, newest first, so the first entry (if any) is
+        the newest build-validated commit at or before that time. This reuses
+        the same "was it actually built and did it pass" signal TheRock's own
+        ``build_tools/github_actions/baseline_runs.py`` already trusts for
+        stage-reuse baselines, rather than accepting any commit that merely
+        exists at or before a timestamp.
+        """
+        payload = self._get(
+            f"/repos/{repo}/actions/workflows/{workflow_file}/runs",
+            params={
+                "branch": branch,
+                "status": "success",
+                "created": f"<={iso_utc(until)}",
+                "per_page": limit,
+            },
+        )
+        commits: list[Commit] = []
+        seen_shas: set[str] = set()
+        for run in payload.get("workflow_runs", []):
+            sha = run.get("head_sha")
+            timestamp = (run.get("head_commit") or {}).get("timestamp")
+            if not sha or not timestamp or sha in seen_shas:
+                continue
+            seen_shas.add(sha)
+            commits.append(Commit(sha=sha, committed_at=parse_github_time(timestamp)))
+        return commits
+
     def get_live_tip(self, repo: str, branch: str) -> Commit:
         payload = self._get(
             f"/repos/{repo}/commits", params={"sha": branch, "per_page": 1}
@@ -181,6 +265,8 @@ def resolve_ref(
     therock_repo: str = DEFAULT_THEROCK_REPO,
     therock_branch: str = DEFAULT_THEROCK_BRANCH,
     staleness_days: int = DEFAULT_STALENESS_DAYS,
+    health_check_workflow: str = DEFAULT_HEALTH_CHECK_WORKFLOW,
+    health_check_lookback: int = DEFAULT_HEALTH_CHECK_LOOKBACK,
     now: Optional[datetime] = None,
 ) -> Resolution:
     """Resolve which TheRock commit to build against for this run."""
@@ -196,12 +282,34 @@ def resolve_ref(
             therock_commit=commit,
             warnings=warnings,
             staleness_days=staleness_days,
+            therock_branch=therock_branch,
         )
     elif event_name == "pull_request" and base_sha and head_sha:
         merge_base = client.get_merge_base(source_repo, base_sha, head_sha)
-        commit = client.get_commit_at_or_before(
-            therock_repo, therock_branch, merge_base.committed_at
+
+        # Prefer a commit that TheRock's own multi_arch_ci.yml actually built
+        # and passed, at or before the merge-base time (health check), over
+        # one that merely exists at or before that time. This is the same
+        # run-listing + job-health signal TheRock's baseline_runs.py already
+        # trusts for stage-reuse baselines.
+        validated_commits = client.list_successful_workflow_runs(
+            therock_repo,
+            health_check_workflow,
+            therock_branch,
+            merge_base.committed_at,
+            health_check_lookback,
         )
+        commit = validated_commits[0] if validated_commits else None
+        validated = commit is not None
+
+        if commit is None:
+            # No build-validated candidate within the lookback window; fall
+            # back to "exists at or before the merge-base time" (today's
+            # behavior), but say so plainly rather than silently degrading.
+            commit = client.get_commit_at_or_before(
+                therock_repo, therock_branch, merge_base.committed_at
+            )
+
         if commit is None:
             commit = client.get_live_tip(therock_repo, therock_branch)
             warnings.append(
@@ -210,8 +318,17 @@ def resolve_ref(
                 "merge-base time; fell back to the live tip of the branch."
             )
             mode = MODE_MERGE_BASE_FALLBACK
-        else:
+        elif validated:
             mode = MODE_MERGE_BASE
+        else:
+            mode = MODE_MERGE_BASE_UNVALIDATED
+            warnings.append(
+                f"No successful {health_check_workflow} run found for "
+                f"{therock_repo}@{therock_branch} at or before the merge-base "
+                f"time within the last {health_check_lookback} runs; falling "
+                "back to a commit that exists at that time but was not "
+                "confirmed to build."
+            )
         resolution = Resolution(
             therock_ref=commit.sha,
             therock_repo=therock_repo,
@@ -220,6 +337,8 @@ def resolve_ref(
             merge_base=merge_base,
             warnings=warnings,
             staleness_days=staleness_days,
+            validated=validated,
+            therock_branch=therock_branch,
         )
     else:
         commit = client.get_live_tip(therock_repo, therock_branch)
@@ -230,6 +349,7 @@ def resolve_ref(
             therock_commit=commit,
             warnings=warnings,
             staleness_days=staleness_days,
+            therock_branch=therock_branch,
         )
 
     resolution.source_repo = source_repo
@@ -290,9 +410,9 @@ def build_summary(resolution: Resolution, now: Optional[datetime] = None) -> str
     else:
         intro = (
             "This run is built against the live tip of "
-            f"{repo}@{DEFAULT_THEROCK_BRANCH}. Merge-base pinning only applies to "
-            "`pull_request` events; other events (push, workflow_dispatch, "
-            "schedule) use the current tip."
+            f"{repo}@{resolution.therock_branch}. Merge-base pinning only "
+            "applies to `pull_request` events; other events (push, "
+            "workflow_dispatch, schedule) use the current tip."
         )
     lines.append(intro)
     lines.append("")
@@ -320,11 +440,35 @@ def build_summary(resolution: Resolution, now: Optional[datetime] = None) -> str
             f"{humanize_age(merge_base.committed_at, now)}) - the base-branch "
             "state your branch is built on."
         )
-        lines.append(
-            "- **Mapping rule:** chose the newest "
-            f"{repo}@{DEFAULT_THEROCK_BRANCH} commit at or before the merge-base "
-            "time."
-        )
+        if resolution.mode == MODE_MERGE_BASE_FALLBACK:
+            lines.append(
+                "- **Mapping rule:** no "
+                f"{repo}@{resolution.therock_branch} commit was found at or "
+                "before the merge-base time at all; used the live tip "
+                "instead (see the warning below)."
+            )
+        elif resolution.validated:
+            lines.append(
+                "- **Mapping rule:** chose the newest "
+                f"{repo}@{resolution.therock_branch} commit with a successful "
+                "`multi_arch_ci.yml` run at or before the merge-base time."
+            )
+            lines.append(
+                "- **Build validation:** confirmed - TheRock's own multi-arch "
+                "CI ran and passed against this exact commit."
+            )
+        else:
+            lines.append(
+                "- **Mapping rule:** chose the newest "
+                f"{repo}@{resolution.therock_branch} commit at or before the "
+                "merge-base time (no successful build was found for that "
+                "window; see the warning below)."
+            )
+            lines.append(
+                "- **Build validation:** not confirmed - this commit exists "
+                "at that time, but no passing multi-arch CI run was found for "
+                "it within the lookback window."
+            )
         if commit is not None:
             skew = (merge_base.committed_at - commit.committed_at).total_seconds()
             direction = "older than" if skew >= 0 else "newer than"
@@ -370,9 +514,17 @@ def main() -> None:
     head_sha = os.environ.get("HEAD_SHA", "")
     override = os.environ.get("THEROCK_REF_OVERRIDE", "").strip()
     therock_repo = os.environ.get("THEROCK_REPO", DEFAULT_THEROCK_REPO)
-    therock_branch = os.environ.get("THEROCK_BRANCH", DEFAULT_THEROCK_BRANCH)
+    base_branch = os.environ.get("BASE_BRANCH", "")
+    therock_branch_override = os.environ.get("THEROCK_BRANCH", "").strip()
+    therock_branch = therock_branch_override or resolve_therock_branch(base_branch)
     staleness_days = int(
         os.environ.get("STALENESS_THRESHOLD_DAYS", str(DEFAULT_STALENESS_DAYS))
+    )
+    health_check_workflow = os.environ.get(
+        "HEALTH_CHECK_WORKFLOW", DEFAULT_HEALTH_CHECK_WORKFLOW
+    )
+    health_check_lookback = int(
+        os.environ.get("HEALTH_CHECK_LOOKBACK", str(DEFAULT_HEALTH_CHECK_LOOKBACK))
     )
 
     client = RestGitHubClient(token)
@@ -386,6 +538,8 @@ def main() -> None:
         therock_repo=therock_repo,
         therock_branch=therock_branch,
         staleness_days=staleness_days,
+        health_check_workflow=health_check_workflow,
+        health_check_lookback=health_check_lookback,
     )
 
     set_github_output({"therock_ref": resolution.therock_ref})

@@ -27,12 +27,15 @@ class FakeClient:
         at_or_before: Optional[Commit] = None,
         live_tip: Optional[Commit] = None,
         named_commit: Optional[Commit] = None,
+        healthy_commits: Optional[list[Commit]] = None,
     ):
         self._merge_base = merge_base
         self._at_or_before = at_or_before
         self._live_tip = live_tip
         self._named_commit = named_commit
+        self._healthy_commits = healthy_commits or []
         self.calls: list[str] = []
+        self.health_check_args: list[dict] = []
 
     def get_merge_base(self, repo: str, base_sha: str, head_sha: str) -> Commit:
         self.calls.append("get_merge_base")
@@ -44,6 +47,26 @@ class FakeClient:
     ) -> Optional[Commit]:
         self.calls.append("get_commit_at_or_before")
         return self._at_or_before
+
+    def list_successful_workflow_runs(
+        self,
+        repo: str,
+        workflow_file: str,
+        branch: str,
+        until: datetime,
+        limit: int,
+    ) -> list[Commit]:
+        self.calls.append("list_successful_workflow_runs")
+        self.health_check_args.append(
+            {
+                "repo": repo,
+                "workflow_file": workflow_file,
+                "branch": branch,
+                "until": until,
+                "limit": limit,
+            }
+        )
+        return list(self._healthy_commits)
 
     def get_live_tip(self, repo: str, branch: str) -> Commit:
         self.calls.append("get_live_tip")
@@ -57,10 +80,12 @@ class FakeClient:
 
 
 class ResolveRefTest(unittest.TestCase):
-    def test_pull_request_maps_merge_base_time_to_therock_sha(self):
+    def test_pull_request_maps_merge_base_time_to_validated_therock_sha(self):
         merge_base = Commit(sha="a" * 40, committed_at=dt(2))
         chosen = Commit(sha="b" * 40, committed_at=dt(2.1))
-        client = FakeClient(merge_base=merge_base, at_or_before=chosen)
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[chosen]
+        )
 
         result = rtr.resolve_ref(
             client,
@@ -74,11 +99,66 @@ class ResolveRefTest(unittest.TestCase):
 
         self.assertEqual(result.therock_ref, "b" * 40)
         self.assertEqual(result.mode, rtr.MODE_MERGE_BASE)
+        self.assertTrue(result.validated)
         self.assertEqual(result.merge_base, merge_base)
         self.assertEqual(result.warnings, [])
         self.assertIn("get_merge_base", client.calls)
+        self.assertIn("list_successful_workflow_runs", client.calls)
+        # A validated candidate was found, so the plain-existence lookup and
+        # the live-tip fallback are never needed.
+        self.assertNotIn("get_commit_at_or_before", client.calls)
+        self.assertNotIn("get_live_tip", client.calls)
+
+    def test_pull_request_falls_back_to_unvalidated_when_no_healthy_build_found(self):
+        merge_base = Commit(sha="a" * 40, committed_at=dt(2))
+        chosen = Commit(sha="b" * 40, committed_at=dt(2.1))
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[]
+        )
+
+        result = rtr.resolve_ref(
+            client,
+            event_name="pull_request",
+            source_repo="ROCm/rocm-libraries",
+            base_sha="base",
+            head_sha="head",
+            override="",
+            now=NOW,
+        )
+
+        self.assertEqual(result.therock_ref, "b" * 40)
+        self.assertEqual(result.mode, rtr.MODE_MERGE_BASE_UNVALIDATED)
+        self.assertFalse(result.validated)
+        self.assertIn("list_successful_workflow_runs", client.calls)
         self.assertIn("get_commit_at_or_before", client.calls)
         self.assertNotIn("get_live_tip", client.calls)
+        self.assertTrue(any("not confirmed to build" in w for w in result.warnings))
+
+    def test_health_check_queries_multi_arch_ci_on_the_resolved_branch(self):
+        merge_base = Commit(sha="a" * 40, committed_at=dt(2))
+        chosen = Commit(sha="b" * 40, committed_at=dt(2.1))
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[chosen]
+        )
+
+        rtr.resolve_ref(
+            client,
+            event_name="pull_request",
+            source_repo="ROCm/rocm-libraries",
+            base_sha="base",
+            head_sha="head",
+            override="",
+            therock_branch="main",
+            now=NOW,
+        )
+
+        self.assertEqual(len(client.health_check_args), 1)
+        call = client.health_check_args[0]
+        self.assertEqual(call["repo"], rtr.DEFAULT_THEROCK_REPO)
+        self.assertEqual(call["workflow_file"], rtr.DEFAULT_HEALTH_CHECK_WORKFLOW)
+        self.assertEqual(call["branch"], "main")
+        self.assertEqual(call["until"], merge_base.committed_at)
+        self.assertEqual(call["limit"], rtr.DEFAULT_HEALTH_CHECK_LOOKBACK)
 
     def test_override_short_circuits(self):
         override_commit = Commit(sha="c" * 40, committed_at=dt(1))
@@ -139,7 +219,9 @@ class ResolveRefTest(unittest.TestCase):
     def test_staleness_warns_but_still_returns_sha(self):
         merge_base = Commit(sha="a" * 40, committed_at=dt(30))
         chosen = Commit(sha="b" * 40, committed_at=dt(30))
-        client = FakeClient(merge_base=merge_base, at_or_before=chosen)
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[chosen]
+        )
 
         result = rtr.resolve_ref(
             client,
@@ -158,7 +240,9 @@ class ResolveRefTest(unittest.TestCase):
     def test_staleness_quiet_when_fresh(self):
         merge_base = Commit(sha="a" * 40, committed_at=dt(1))
         chosen = Commit(sha="b" * 40, committed_at=dt(1))
-        client = FakeClient(merge_base=merge_base, at_or_before=chosen)
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[chosen]
+        )
 
         result = rtr.resolve_ref(
             client,
@@ -178,7 +262,9 @@ class BuildSummaryTest(unittest.TestCase):
     def _pr_resolution(self) -> rtr.Resolution:
         merge_base = Commit(sha="a" * 40, committed_at=dt(2))
         chosen = Commit(sha="b" * 40, committed_at=dt(2))
-        client = FakeClient(merge_base=merge_base, at_or_before=chosen)
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[chosen]
+        )
         return rtr.resolve_ref(
             client,
             event_name="pull_request",
@@ -202,6 +288,29 @@ class BuildSummaryTest(unittest.TestCase):
         self.assertIn("Merge-base commit", summary)
         self.assertIn("How to change this", summary)
         self.assertIn(("b" * 40)[:12], summary)
+        # Build-validation status is stated explicitly, not just implied.
+        self.assertIn("Build validation:** confirmed", summary)
+
+    def test_summary_marks_unvalidated_pin_explicitly(self):
+        merge_base = Commit(sha="a" * 40, committed_at=dt(2))
+        chosen = Commit(sha="b" * 40, committed_at=dt(2))
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[]
+        )
+        resolution = rtr.resolve_ref(
+            client,
+            event_name="pull_request",
+            source_repo="ROCm/rocm-libraries",
+            base_sha="base",
+            head_sha="head",
+            override="",
+            now=NOW,
+        )
+
+        summary = rtr.build_summary(resolution, now=NOW)
+        self.assertIn("Build validation:** not confirmed", summary)
+        self.assertIn("[!WARNING]", summary)
+        self.assertIn("not confirmed to build", summary)
 
     def test_summary_live_tip_is_not_pr_worded(self):
         tip = Commit(sha="d" * 40, committed_at=dt(0.5))
@@ -278,6 +387,58 @@ class BuildSummaryTest(unittest.TestCase):
         summary = rtr.build_summary(resolution, now=NOW)
         self.assertIn("[!WARNING]", summary)
         self.assertIn("days old", summary)
+
+
+class ResolveTherockBranchTest(unittest.TestCase):
+    def test_defaults_to_main_for_develop(self):
+        self.assertEqual(rtr.resolve_therock_branch("develop"), "main")
+
+    def test_defaults_to_main_for_empty_base_branch(self):
+        self.assertEqual(rtr.resolve_therock_branch(""), "main")
+
+    def test_defaults_to_main_for_unrelated_release_looking_name(self):
+        # Only the exact release/therock-<version> shape should map; anything
+        # else (including other release/* branches) stays on main.
+        self.assertEqual(rtr.resolve_therock_branch("release/some-other-thing"), "main")
+
+    def test_maps_matching_release_branch(self):
+        self.assertEqual(
+            rtr.resolve_therock_branch("release/therock-7.14"), "release/therock-7.14"
+        )
+
+    def test_maps_matching_release_branch_without_minor_version(self):
+        self.assertEqual(
+            rtr.resolve_therock_branch("release/therock-10"), "release/therock-10"
+        )
+
+    def test_respects_custom_default_branch(self):
+        self.assertEqual(
+            rtr.resolve_therock_branch("develop", default_branch="develop-mirror"),
+            "develop-mirror",
+        )
+
+
+class ResolveRefBranchIntegrationTest(unittest.TestCase):
+    def test_release_branch_pr_resolves_against_matching_therock_branch(self):
+        merge_base = Commit(sha="a" * 40, committed_at=dt(2))
+        chosen = Commit(sha="b" * 40, committed_at=dt(2.1))
+        client = FakeClient(
+            merge_base=merge_base, at_or_before=chosen, healthy_commits=[chosen]
+        )
+
+        result = rtr.resolve_ref(
+            client,
+            event_name="pull_request",
+            source_repo="ROCm/rocm-libraries",
+            base_sha="base",
+            head_sha="head",
+            override="",
+            therock_branch=rtr.resolve_therock_branch("release/therock-7.14"),
+            now=NOW,
+        )
+
+        self.assertEqual(result.therock_branch, "release/therock-7.14")
+        self.assertEqual(client.health_check_args[0]["branch"], "release/therock-7.14")
 
 
 if __name__ == "__main__":

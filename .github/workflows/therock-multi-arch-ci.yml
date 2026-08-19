@@ -15,15 +15,32 @@
 name: TheRock Multi-Arch CI
 
 # TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
-# for the whole run. On pull_request events it pins to the tip of TheRock@main
-# as it existed at the PR branch's merge-base time, so the pin stays stable
-# while a PR is authored and only advances when the base branch is merged/
-# rebased in (see .github/scripts/resolve_therock_ref.py). Other events use the
-# live tip of main. The setup job checks that ref out and re-exports it as
-# needs.setup.outputs.ref; every downstream build/test/summary job consumes that
-# one SHA. The `uses: ROCm/TheRock/...@main` lines below are the
-# workflow-definition ref (Actions requires a literal there) and are
-# deliberately separate from the build-source `ref:` inputs.
+# for the whole run (this is a discussion PR revising that policy in response
+# to https://github.com/ROCm/rocm-libraries/pull/9602#pullrequestreview-3900948773).
+# On pull_request events it now prefers the newest TheRock@<branch> commit, at
+# or before the PR branch's merge-base time, that TheRock's own
+# multi_arch_ci.yml actually built and passed - not merely one that exists at
+# that time (see .github/scripts/resolve_therock_ref.py). The target branch
+# defaults to `main`, or the matching `release/therock-*` branch when this PR
+# targets one. The pin stays stable while a PR is authored and only advances
+# when the base branch is merged/rebased in. Other events use the live tip of
+# the target branch. The `configure` job now depends on `resolve_therock_ref`
+# and checks its own TheRock script checkout out at that same resolved SHA
+# (previously hardcoded to `ref: main`), and `setup` checks out the build
+# source at it too, re-exporting it as needs.setup.outputs.ref for every
+# downstream build/test/summary job.
+#
+# Known limitation this PR does NOT fix: the `uses: ROCm/TheRock/...@main`
+# lines below are reusable-workflow calls, and GitHub Actions does not allow
+# expressions in the `uses:` key - it must be a literal ref - so the
+# workflow-definition code they pull in always tracks the live tip of `main`,
+# regardless of which source SHA was resolved above. That gap between
+# "workflow code version" and "source version" cannot be closed by ref-pinning
+# alone; the resolved commit's staleness warning (below) is the closest
+# available proxy, since `uses: ...@main` is always "right now", so an older
+# resolved commit means a wider gap. Closing this for real needs either a
+# separately-bumped workflow-definition pin or inlining these calls, both out
+# of scope here.
 
 on:
   pull_request:
@@ -91,41 +108,6 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
-  configure:
-    name: Configure Changed Projects
-    runs-on: ubuntu-24.04
-    outputs:
-      changed_projects: ${{ steps.configure.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure.outputs.skip_tests }}
-    steps:
-      - name: Checkout repository config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/repos-config.json
-          sparse-checkout-cone-mode: false
-
-      - name: Checkout TheRock for configure script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: main
-          path: _therock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
-
-      - name: Configure CI
-        id: configure
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
-            --event-name "${{ github.event_name }}" \
-            --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event.pull_request.base.sha }}" \
-            --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --config-path ".github/repos-config.json"
-
   resolve_therock_ref:
     name: Resolve TheRock ref
     runs-on: ubuntu-24.04
@@ -143,17 +125,58 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      # Picks one concrete TheRock SHA for the whole run. See the header comment
-      # and .github/scripts/resolve_therock_ref.py for the policy. Uses the REST
-      # API only, so no deep clone of this repository is required.
+      # Picks one concrete, build-validated TheRock SHA for the whole run.
+      # See the header comment and .github/scripts/resolve_therock_ref.py for
+      # the policy. Uses the REST API only, so no deep clone of either
+      # repository is required.
       - name: Resolve TheRock ref
         id: resolve
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
           THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
         run: python .github/scripts/resolve_therock_ref.py
+
+  configure:
+    name: Configure Changed Projects
+    needs: [resolve_therock_ref]
+    runs-on: ubuntu-24.04
+    outputs:
+      changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
+      skip_tests: ${{ steps.configure.outputs.skip_tests }}
+    steps:
+      - name: Checkout repository config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/repos-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout TheRock for configure script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          # Concrete SHA resolved once by resolve_therock_ref; previously a
+          # hardcoded `ref: main`, which could run a newer configure script
+          # against an older resolved source commit than the rest of the run.
+          ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
+          path: _therock
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Configure CI
+        id: configure
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
+            --event-name "${{ github.event_name }}" \
+            --github-repo "${{ github.repository }}" \
+            --base-sha "${{ github.event.pull_request.base.sha }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --config-path ".github/repos-config.json"
 
   setup:
     needs: [ci-env, configure, resolve_therock_ref]
