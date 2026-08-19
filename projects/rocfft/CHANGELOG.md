@@ -9,6 +9,10 @@ Documentation for rocFFT is available at
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
 
+### Resolved issues
+
+* Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
+
 ### Known issues
 
 * Function pointer callbacks specified via `rocfft_execution_info_set_load_callback` or 
@@ -51,7 +55,6 @@ Documentation for rocFFT is available at
 
 * Addressed internal issues causing multi-device plans to fall back to the least-performant code path for certain 3D real transforms (e.g., multi-device single-precision real out-of-place 3D of size 320x320x320 using slab decomposition).
 * Fixed a thread-safety issue that could cause `rocfft_plan_create` to crash when called concurrently from many threads.
-* Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
 
 ## rocFFT 1.0.38 for ROCm 7.14
 
