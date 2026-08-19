@@ -57,21 +57,23 @@ TEST(BatchedContractionTest, BinaryBatchedReturnsNotSupported)
               HIPTENSOR_STATUS_SUCCESS);
 
     hiptensorOperationDescriptor_t opDesc{};
-    EXPECT_EQ(hiptensorCreateContraction(handle,
-                                         &opDesc,
-                                         descA,
-                                         modeA,
-                                         HIPTENSOR_OP_IDENTITY,
-                                         descB,
-                                         modeB,
-                                         HIPTENSOR_OP_IDENTITY,
-                                         descD,
-                                         modeD,
-                                         HIPTENSOR_OP_IDENTITY,
-                                         descD,
-                                         modeD,
-                                         HIPTENSOR_COMPUTE_DESC_32F),
-              HIPTENSOR_STATUS_NOT_SUPPORTED);
+    auto status = hiptensorCreateContraction(handle,
+                                             &opDesc,
+                                             descA,
+                                             modeA,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descB,
+                                             modeB,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descD,
+                                             modeD,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descD,
+                                             modeD,
+                                             HIPTENSOR_COMPUTE_DESC_16F);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device";
+    EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED);
 
     hiptensorDestroyTensorDescriptor(descA);
     hiptensorDestroyTensorDescriptor(descB);
@@ -100,21 +102,23 @@ TEST(BatchedContractionTest, BinaryNonBatchedIsSupported)
               HIPTENSOR_STATUS_SUCCESS);
 
     hiptensorOperationDescriptor_t opDesc{};
-    EXPECT_EQ(hiptensorCreateContraction(handle,
-                                         &opDesc,
-                                         descA,
-                                         modeA,
-                                         HIPTENSOR_OP_IDENTITY,
-                                         descB,
-                                         modeB,
-                                         HIPTENSOR_OP_IDENTITY,
-                                         descD,
-                                         modeD,
-                                         HIPTENSOR_OP_IDENTITY,
-                                         descD,
-                                         modeD,
-                                         HIPTENSOR_COMPUTE_DESC_32F),
-              HIPTENSOR_STATUS_SUCCESS);
+    auto status = hiptensorCreateContraction(handle,
+                                             &opDesc,
+                                             descA,
+                                             modeA,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descB,
+                                             modeB,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descD,
+                                             modeD,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descD,
+                                             modeD,
+                                             HIPTENSOR_COMPUTE_DESC_16F);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device";
+    EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
 
     if(opDesc)
         hiptensorDestroyOperationDescriptor(opDesc);
@@ -149,24 +153,26 @@ TEST(BatchedContractionTest, TrinaryBatchedReturnsNotSupported)
               HIPTENSOR_STATUS_SUCCESS);
 
     hiptensorOperationDescriptor_t opDesc{};
-    EXPECT_EQ(hiptensorCreateContractionTrinary(handle,
-                                                &opDesc,
-                                                descA,
-                                                modeA,
-                                                HIPTENSOR_OP_IDENTITY,
-                                                descB,
-                                                modeB,
-                                                HIPTENSOR_OP_IDENTITY,
-                                                descC,
-                                                modeC,
-                                                HIPTENSOR_OP_IDENTITY,
-                                                nullptr,
-                                                nullptr,
-                                                HIPTENSOR_OP_IDENTITY,
-                                                descE,
-                                                modeE,
-                                                HIPTENSOR_COMPUTE_DESC_32F),
-              HIPTENSOR_STATUS_NOT_SUPPORTED);
+    auto status = hiptensorCreateContractionTrinary(handle,
+                                                    &opDesc,
+                                                    descA,
+                                                    modeA,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descB,
+                                                    modeB,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descC,
+                                                    modeC,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    nullptr,
+                                                    nullptr,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descE,
+                                                    modeE,
+                                                    HIPTENSOR_COMPUTE_DESC_16F);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device";
+    EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED);
 
     hiptensorDestroyTensorDescriptor(descA);
     hiptensorDestroyTensorDescriptor(descB);
