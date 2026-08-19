@@ -21,21 +21,6 @@ namespace hipblaslt::host_validation
 {
     using namespace ::roc::host_validation;
 
-    inline Layout comparisonLayout(int64_t rows,
-                                   int64_t columns,
-                                   int64_t leadingDimension,
-                                   int64_t batchStride,
-                                   int64_t batchCount)
-    {
-        if(rows < 0 || columns < 0 || leadingDimension < 0 || batchStride < 0 || batchCount < 0)
-            throw std::invalid_argument("hipBLASLt comparison dimensions must be non-negative.");
-        return Layout(
-            Shape{static_cast<size_t>(rows),
-                  static_cast<size_t>(columns),
-                  static_cast<size_t>(batchCount)},
-            {1, static_cast<ptrdiff_t>(leadingDimension), static_cast<ptrdiff_t>(batchStride)});
-    }
-
     enum class HostPointwiseComparison
     {
         /// Skip finite-value pointwise acceptance.
@@ -120,6 +105,23 @@ namespace hipblaslt::host_validation
 
     namespace detail
     {
+        inline Layout comparisonLayout(int64_t rows,
+                                       int64_t columns,
+                                       int64_t leadingDimension,
+                                       int64_t batchStride,
+                                       int64_t batchCount)
+        {
+            if(rows < 0 || columns < 0 || leadingDimension < 0 || batchStride < 0
+               || batchCount < 0)
+                throw std::invalid_argument(
+                    "hipBLASLt comparison dimensions must be non-negative.");
+            return Layout(
+                Shape{static_cast<size_t>(rows),
+                      static_cast<size_t>(columns),
+                      static_cast<size_t>(batchCount)},
+                {1, static_cast<ptrdiff_t>(leadingDimension), static_cast<ptrdiff_t>(batchStride)});
+        }
+
         inline ::roc::host_validation::Tensor
             comparisonTensor(const void* data, hipDataType type, const Layout& layout)
         {
@@ -177,11 +179,11 @@ namespace hipblaslt::host_validation
            && !request.computeRelativeFrobeniusError && !request.findAllCloseTolerance)
             return report;
 
-        const Layout                         layout = comparisonLayout(request.rows,
-                                                                       request.columns,
-                                                                       request.leadingDimension,
-                                                                       request.batchStride,
-                                                                       request.batchCount);
+        const Layout layout = detail::comparisonLayout(request.rows,
+                                                       request.columns,
+                                                       request.leadingDimension,
+                                                       request.batchStride,
+                                                       request.batchCount);
         const ::roc::host_validation::Tensor expected
             = detail::comparisonTensor(request.expected, request.type, layout);
         const ::roc::host_validation::Tensor observed
