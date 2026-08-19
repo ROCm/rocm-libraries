@@ -83,13 +83,13 @@ using SupportedDataTypes = ::testing::
     Types<float, double, hipdnn_data_sdk::types::half, hipdnn_data_sdk::types::bfloat16>;
 
 template <typename T>
-class TestAppendComparisonDiffByDataType : public ::testing::Test
+class ComparisonDiffByDataTypeDispatch : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(TestAppendComparisonDiffByDataType, SupportedDataTypes, );
+TYPED_TEST_SUITE(ComparisonDiffByDataTypeDispatch, SupportedDataTypes, );
 
-TYPED_TEST(TestAppendComparisonDiffByDataType, MismatchProducesSummary)
+TYPED_TEST(ComparisonDiffByDataTypeDispatch, MismatchProducesSummary)
 {
     using T = TypeParam;
     constexpr auto DATA_TYPE = DataTypeTraits<T>::DATA_TYPE;
@@ -114,7 +114,7 @@ TYPED_TEST(TestAppendComparisonDiffByDataType, MismatchProducesSummary)
     EXPECT_TRUE(std::regex_search(output, std::regex(R"(Mismatched:\s+1\b)")));
 }
 
-TYPED_TEST(TestAppendComparisonDiffByDataType, MatchingTensorsShowZeroMismatches)
+TYPED_TEST(ComparisonDiffByDataTypeDispatch, MatchingTensorsShowZeroMismatches)
 {
     using T = TypeParam;
     constexpr auto DATA_TYPE = DataTypeTraits<T>::DATA_TYPE;
@@ -140,7 +140,7 @@ TYPED_TEST(TestAppendComparisonDiffByDataType, MatchingTensorsShowZeroMismatches
 // appendComparisonDiffByDataType — unsupported type
 // =================================================================================================
 
-TEST(TestAppendComparisonDiffByDataType, UnsupportedTypeShowsMessage)
+TEST(TestComparisonDiffByDataTypeDispatch, UnsupportedTypeShowsMessage)
 {
     Tensor<float> ref({2});
     Tensor<float> actual({2});
