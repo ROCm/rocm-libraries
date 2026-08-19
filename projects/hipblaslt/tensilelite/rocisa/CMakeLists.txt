@@ -50,8 +50,7 @@ target_include_directories(rocisa-cpp
 # Device generation always owns the in-tree extension. ROCISA_BUILD_PYTHON
 # retains a root-project rocisa-only configuration; the standalone project
 # remains independently buildable by Python packaging.
-if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS OR ROCISA_STANDALONE)
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON OR ROCISA_STANDALONE)
     if(ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
