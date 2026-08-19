@@ -595,6 +595,19 @@ class Tensor {
         }
     }
 
+    Tensor reshape(Shape shape) const;
+
+    // New storage bits are zero; existing logical elements retain their encodings.
+    Tensor pad(Shape shape) const;
+
+    // destinationToSource[d] names the source dimension copied to destination dimension d.
+    Tensor permute(std::span<const size_t> destinationToSource) const;
+
+    Tensor permute(std::initializer_list<size_t> destinationToSource) const {
+        return permute(
+            std::span<const size_t>(destinationToSource.begin(), destinationToSource.size()));
+    }
+
     Tensor to(ScalarType type) const;
 
     Tensor to(ScalarType type, const ScalarConversionOptions& options) const;
@@ -619,6 +632,66 @@ class Tensor {
     Layout m_layout;
     TensorStorage m_storage;
 };
+
+inline Tensor Tensor::reshape(Shape shape) const {
+    if (shape.elementCount() != size())
+        throw std::invalid_argument("Tensor reshape requires the same logical element count.");
+    if (layout() != Layout::contiguousLastDimensionFastest(this->shape()))
+        throw std::invalid_argument(
+            "Tensor reshape requires a contiguous last-dimension-fastest layout.");
+    return alias(Layout::contiguousLastDimensionFastest(shape));
+}
+
+inline Tensor Tensor::pad(Shape shape) const {
+    if (shape.rank() != this->shape().rank())
+        throw std::invalid_argument("Tensor padding requires the same rank.");
+    for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+        if (shape[dimension] < this->shape()[dimension])
+            throw std::invalid_argument("Tensor padding cannot shrink a dimension.");
+    }
+
+    Tensor result(type(), std::move(shape));
+    const uint16_t bits = scalarTypeInfo(type()).storageBits;
+    detail::forEachIndex(this->shape(), [&](std::span<const size_t> indices, size_t) {
+        detail::copyBitRange(
+            storage(), detail::bitOffset(type(), layout().elementOffset(indices)), result.storage(),
+            detail::bitOffset(type(), result.layout().elementOffset(indices)), bits);
+    });
+    return result;
+}
+
+inline Tensor Tensor::permute(std::span<const size_t> destinationToSource) const {
+    if (destinationToSource.size() != shape().rank())
+        throw std::invalid_argument("Tensor permutation rank does not match the tensor.");
+
+    std::vector<bool> seen(shape().rank(), false);
+    std::vector<size_t> destinationDimensions(shape().rank(), 0);
+    for (size_t destinationDimension = 0; destinationDimension < shape().rank();
+         ++destinationDimension) {
+        const size_t sourceDimension = destinationToSource[destinationDimension];
+        if (sourceDimension >= shape().rank() || seen[sourceDimension])
+            throw std::invalid_argument(
+                "Tensor permutation must contain each source dimension exactly once.");
+        seen[sourceDimension] = true;
+        destinationDimensions[destinationDimension] = shape()[sourceDimension];
+    }
+
+    Tensor result(type(), Shape(std::move(destinationDimensions)));
+    std::vector<size_t> destinationIndices(shape().rank(), 0);
+    const uint16_t bits = scalarTypeInfo(type()).storageBits;
+    detail::forEachIndex(shape(), [&](std::span<const size_t> sourceIndices, size_t) {
+        for (size_t destinationDimension = 0; destinationDimension < shape().rank();
+             ++destinationDimension)
+            destinationIndices[destinationDimension] =
+                sourceIndices[destinationToSource[destinationDimension]];
+
+        detail::copyBitRange(
+            storage(), detail::bitOffset(type(), layout().elementOffset(sourceIndices)),
+            result.storage(),
+            detail::bitOffset(type(), result.layout().elementOffset(destinationIndices)), bits);
+    });
+    return result;
+}
 
 inline Tensor Tensor::to(ScalarType destinationType) const {
     return to(destinationType, detail::implicitStorageConversionOptions(destinationType));
