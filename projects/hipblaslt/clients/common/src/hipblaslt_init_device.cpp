@@ -35,7 +35,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace initialization_compatibility = hipblaslt::host_validation::compatibility;
+namespace initialization_policy = hipblaslt::host_validation::initialization;
 
 namespace
 {
@@ -793,8 +793,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                                    return make_std_complex(
                                        random_int<T_real>(idx),
                                        random_int<T_real>(idx
-                                                          + initialization_compatibility::
-                                                              legacyComplexImaginaryIndexOffset));
+                                                          + initialization_policy::
+                                                              complexImaginaryIndexOffset));
                                });
                 else
                     fill_batch(
@@ -822,8 +822,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                                        auto real_val = random_int<T_real>(idx);
                                        auto imag_val = random_int<T_real>(
                                            idx
-                                           + initialization_compatibility::
-                                               legacyComplexImaginaryIndexOffset);
+                                           + initialization_policy::
+                                               complexImaginaryIndexOffset);
                                        auto complex_val = make_std_complex(real_val, imag_val);
                                        return (i ^ j) & 1 ? complex_val : negate(complex_val);
                                    });
@@ -843,8 +843,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                                        auto real_val = random_int<T_real>(idx);
                                        auto imag_val = random_int<T_real>(
                                            idx
-                                           + initialization_compatibility::
-                                               legacyComplexImaginaryIndexOffset);
+                                           + initialization_policy::
+                                               complexImaginaryIndexOffset);
                                        auto complex_val = make_std_complex(real_val, imag_val);
                                        return (i ^ j) & 1 ? complex_val : negate(complex_val);
                                    });
@@ -910,7 +910,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                             auto real_val = sin(random_int<T_real>(arg));
                             auto imag_val = cos(random_int<T_real>(
                                 arg
-                                + initialization_compatibility::legacyComplexImaginaryIndexOffset));
+                                + initialization_policy::complexImaginaryIndexOffset));
                             if(positive_only)
                             {
                                 real_val = fabs(real_val);
@@ -938,7 +938,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                             auto real_val = sin(random_int<T_real>(arg));
                             auto imag_val = cos(random_int<T_real>(
                                 arg
-                                + initialization_compatibility::legacyComplexImaginaryIndexOffset));
+                                + initialization_policy::complexImaginaryIndexOffset));
                             if(positive_only)
                             {
                                 real_val = fabs(real_val);
@@ -1002,7 +1002,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                     [make_std_complex, positive_only] __host__ __device__(size_t idx) -> T {
                         auto real_val = random_hpl<T_real>(idx);
                         auto imag_val = random_hpl<T_real>(
-                            idx + initialization_compatibility::legacyComplexImaginaryIndexOffset);
+                            idx + initialization_policy::complexImaginaryIndexOffset);
                         if(positive_only)
                         {
                             real_val = fabs(real_val);
@@ -1107,18 +1107,18 @@ void hipblaslt_init_device(ABC_dims                 abc,
                     break;
                 }
                 unsigned int s = kNormDistOneSpecialSeed
-                                     * initialization_compatibility::oneSpecialLcgMultiplier
-                                 + initialization_compatibility::oneSpecialLcgIncrement;
+                                     * initialization_policy::oneSpecialLcgMultiplier
+                                 + initialization_policy::oneSpecialLcgIncrement;
                 size_t       special_idx = size_t(s) % size_64;
-                s                        = s * initialization_compatibility::oneSpecialLcgMultiplier
-                                           + initialization_compatibility::oneSpecialLcgIncrement;
+                s                        = s * initialization_policy::oneSpecialLcgMultiplier
+                                           + initialization_policy::oneSpecialLcgIncrement;
                 int special_type
                     = (norm_dist_one_special_type >= 0
                        && norm_dist_one_special_type
-                              < initialization_compatibility::oneSpecialValueCount)
+                              < initialization_policy::oneSpecialValueCount)
                           ? norm_dist_one_special_type
-                          : int(s >> initialization_compatibility::oneSpecialLcgValueShift)
-                                % initialization_compatibility::oneSpecialValueCount;
+                          : int(s >> initialization_policy::oneSpecialLcgValueShift)
+                                % initialization_policy::oneSpecialValueCount;
                 float special_val = (special_type == 0)   ? std::numeric_limits<float>::infinity()
                                     : (special_type == 1) ? -std::numeric_limits<float>::infinity()
                                                           : std::numeric_limits<float>::quiet_NaN();
@@ -1183,7 +1183,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                         auto i        = in_batch - j * lda;
                         auto value    = small_int_positive<T>(
                             idx
-                            + initialization_compatibility::integerExactMatrixBDeviceIndexOffset);
+                            + initialization_policy::integerExactMatrixBIndexOffset);
                         return (i ^ j) & 1 ? value : negate(value);
                     });
             }

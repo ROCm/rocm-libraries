@@ -16,7 +16,7 @@ namespace hipblaslt::host_validation
 {
     using namespace ::roc::host_validation;
 
-    enum class GroupedGemmRandomDomain : uint64_t
+    enum class GroupedGemmSequence : uint64_t
     {
         MatrixA = 0,
         MatrixB = 1,
@@ -39,24 +39,24 @@ namespace hipblaslt::host_validation
         const auto fillValues = [&](auto&                              values,
                                     int64_t                            size,
                                     const GenerationRecipe::Component& component,
-                                    GroupedGemmRandomDomain            domain) {
+                                    GroupedGemmSequence            sequence) {
             if(size < 0)
                 throw std::invalid_argument("Grouped GEMM initialization size is negative.");
             if(static_cast<size_t>(size) > values.size())
                 throw std::invalid_argument(
                     "Grouped GEMM initialization size exceeds destination storage.");
             const uint64_t recipeSeed
-                = compatibility::seedForRandomDomain(seed, static_cast<uint64_t>(domain));
+                = initialization::seedForSequence(seed, static_cast<uint64_t>(sequence));
             initializeTensor(values.data(),
                              Layout::contiguous(Shape{static_cast<size_t>(size)}),
                              GenerationRecipe::realOnly(component, {.seed = recipeSeed}));
         };
 
         const auto fillAllOperands = [&](const GenerationRecipe::Component& component) {
-            fillValues(a, sizeA, component, GroupedGemmRandomDomain::MatrixA);
-            fillValues(b, sizeB, component, GroupedGemmRandomDomain::MatrixB);
-            fillValues(c, sizeC, component, GroupedGemmRandomDomain::MatrixC);
-            fillValues(bias, sizeBias, component, GroupedGemmRandomDomain::Bias);
+            fillValues(a, sizeA, component, GroupedGemmSequence::MatrixA);
+            fillValues(b, sizeB, component, GroupedGemmSequence::MatrixB);
+            fillValues(c, sizeC, component, GroupedGemmSequence::MatrixC);
+            fillValues(bias, sizeBias, component, GroupedGemmSequence::Bias);
         };
 
         // HPL means High-Performance Linpack style: uniform values in [-0.5, 0.5].
@@ -67,23 +67,23 @@ namespace hipblaslt::host_validation
         {
             const GenerationRecipe::Component randomInteger
                 = GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
-            // Legacy grouped GEMM initialization alternates B's signs to limit reduction growth
-            // for 16-bit inputs; A, C, and bias retain the positive integer recipe.
+            // Grouped GEMM alternates B's signs to limit reduction growth for
+            // 16-bit inputs; A, C, and bias retain positive integers.
             const GenerationRecipe::Component alternatingRandom
                 = randomInteger.withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = false});
-            fillValues(a, sizeA, randomInteger, GroupedGemmRandomDomain::MatrixA);
-            fillValues(b, sizeB, alternatingRandom, GroupedGemmRandomDomain::MatrixB);
-            fillValues(c, sizeC, randomInteger, GroupedGemmRandomDomain::MatrixC);
-            fillValues(bias, sizeBias, randomInteger, GroupedGemmRandomDomain::Bias);
+            fillValues(a, sizeA, randomInteger, GroupedGemmSequence::MatrixA);
+            fillValues(b, sizeB, alternatingRandom, GroupedGemmSequence::MatrixB);
+            fillValues(c, sizeC, randomInteger, GroupedGemmSequence::MatrixC);
+            fillValues(bias, sizeBias, randomInteger, GroupedGemmSequence::Bias);
         }
         else if(initialization == hipblaslt_initialization::trig_float)
         {
             const GenerationRecipe::Component sine   = GenerationRecipe::sine();
             const GenerationRecipe::Component cosine = GenerationRecipe::cosine();
-            fillValues(a, sizeA, sine, GroupedGemmRandomDomain::MatrixA);
-            fillValues(b, sizeB, cosine, GroupedGemmRandomDomain::MatrixB);
-            fillValues(c, sizeC, sine, GroupedGemmRandomDomain::MatrixC);
-            fillValues(bias, sizeBias, sine, GroupedGemmRandomDomain::Bias);
+            fillValues(a, sizeA, sine, GroupedGemmSequence::MatrixA);
+            fillValues(b, sizeB, cosine, GroupedGemmSequence::MatrixB);
+            fillValues(c, sizeC, sine, GroupedGemmSequence::MatrixC);
+            fillValues(bias, sizeBias, sine, GroupedGemmSequence::Bias);
         }
         else if(initialization == hipblaslt_initialization::hpl)
         {
@@ -97,18 +97,19 @@ namespace hipblaslt::host_validation
         }
         else if(initialization == hipblaslt_initialization::special)
         {
-            // Legacy "special" uses the fixed binary16 edge-value pair from
-            // hipblaslt_init_alt_impl_big/small for A and B; C and bias use HPL-style values.
+            // "special" uses the fixed binary16 edge-value pair from
+            // hipblaslt_init_alt_impl_big/small for A and B; C and bias use
+            // HPL-style values.
             fillValues(a,
                        sizeA,
                        GenerationRecipe::constant({.value = specialInitializationAValue}),
-                       GroupedGemmRandomDomain::MatrixA);
+                       GroupedGemmSequence::MatrixA);
             fillValues(b,
                        sizeB,
                        GenerationRecipe::constant({.value = specialInitializationBValue}),
-                       GroupedGemmRandomDomain::MatrixB);
-            fillValues(c, sizeC, hpl, GroupedGemmRandomDomain::MatrixC);
-            fillValues(bias, sizeBias, hpl, GroupedGemmRandomDomain::Bias);
+                       GroupedGemmSequence::MatrixB);
+            fillValues(c, sizeC, hpl, GroupedGemmSequence::MatrixC);
+            fillValues(bias, sizeBias, hpl, GroupedGemmSequence::Bias);
         }
         else
         {

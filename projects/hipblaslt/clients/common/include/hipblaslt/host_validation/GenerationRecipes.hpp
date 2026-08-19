@@ -4,7 +4,7 @@
 #pragma once
 
 #include <cstdint>
-#include <hipblaslt/host_validation/GenerationCompatibility.hpp>
+#include <hipblaslt/host_validation/InitializationPolicy.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <utility>
 
@@ -123,7 +123,7 @@ namespace hipblaslt::host_validation
             type, std::move(component), configuration.complexPolicy, configuration.seed);
     }
 
-    inline GenerationRecipe legacyRandomRecipe(ScalarType type)
+    inline GenerationRecipe realOnlyRandomRecipe(ScalarType type)
     {
         if(type == ScalarType::E8M0)
             return GenerationRecipe::realOnly(
