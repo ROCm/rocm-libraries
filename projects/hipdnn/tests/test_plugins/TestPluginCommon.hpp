@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -383,6 +384,14 @@ public:
     }
 
     virtual uint32_t getNumEngines() const = 0;
+
+    /// The engine IDs `hipdnnEnginePluginGetAllEngineIds` publishes, in the order it
+    /// reports them. Defaults to the single engine `getEngineId()` names.
+    virtual std::vector<int64_t> getAllEngineIds() const
+    {
+        return {getEngineId()};
+    }
+
     virtual uint32_t getNumApplicableEngines() const = 0;
     virtual bool supportsEngineOperations() const
     {
@@ -584,10 +593,14 @@ public:
 
             *numEngines = getInstance()->getNumEngines();
 
-            if(maxEngines >= 1 && *numEngines > 0)
+            // A subclass may override getNumEngines() without overriding getAllEngineIds(),
+            // so the declared count is not a bound on the list. Clamp against both.
+            const auto publishedIds = getInstance()->getAllEngineIds();
+            const auto copied = std::min<uint32_t>(
+                {maxEngines, *numEngines, static_cast<uint32_t>(publishedIds.size())});
+            for(uint32_t i = 0; i < copied; ++i)
             {
-                assert(*numEngines == 1);
-                engineIds[0] = getInstance()->getEngineId();
+                engineIds[i] = publishedIds[i];
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);

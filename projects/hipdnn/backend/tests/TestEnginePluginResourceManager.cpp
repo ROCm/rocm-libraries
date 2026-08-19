@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <filesystem>
@@ -4206,12 +4207,45 @@ TEST(TestEnginePluginResourceManager, LyingEngineNameResolvesToHexThroughResourc
 
     auto infos = resourceManager.getEngineInfos();
 
-    // The plugin publishes exactly one engine, the one whose entry point claims
-    // success and supplies nothing. The id is not in the static registry either,
-    // so resolution has to land on the hex fallback.
-    ASSERT_EQ(infos.size(), 1);
-    EXPECT_EQ(infos[0].engineId, K_LYING_NULL_NAME_ENGINE_ID);
-    EXPECT_EQ(infos[0].engineName, "0xFFFFFFFFFFFFFFE6");
+    // The two engines whose entry point declines survive admission, ascending by id.
+    // Neither id is in the static registry either, so resolution has to land on the
+    // hex fallback.
+    ASSERT_EQ(infos.size(), 2);
+    EXPECT_EQ(infos[0].engineId, K_LYING_EMPTY_NAME_ENGINE_ID);
+    EXPECT_EQ(infos[0].engineName, "0xFFFFFFFFFFFFFFE5");
+    EXPECT_EQ(infos[1].engineId, K_LYING_NULL_NAME_ENGINE_ID);
+    EXPECT_EQ(infos[1].engineName, "0xFFFFFFFFFFFFFFE6");
+}
+
+// A status other than NOT_APPLICABLE is a defect, not a way to decline: it costs that
+// engine its place while the rest of the plugin still loads.
+TEST(TestEnginePluginResourceManager, EngineWhoseNameQueryFailsIsDroppedAtLoad)
+{
+    ASSERT_TRUE(std::filesystem::exists(LYING_ENGINE_NAME_PLUGIN_PATH))
+        << "Test precondition: lying-engine-name plugin missing at "
+        << LYING_ENGINE_NAME_PLUGIN_PATH;
+
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({LYING_ENGINE_NAME_PLUGIN_PATH}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    ASSERT_EQ(pluginManager->getPlugins().size(), 1);
+
+    const auto declared = pluginManager->getPlugins().front()->getAllEngineIds();
+    ASSERT_NE(std::find(declared.begin(), declared.end(), K_LYING_ERROR_STATUS_ENGINE_ID),
+              declared.end())
+        << "This test only proves anything while the fixture publishes the failing engine.";
+
+    const auto& live = pluginManager->liveEngines();
+    EXPECT_EQ(live.count(K_LYING_ERROR_STATUS_ENGINE_ID), 0)
+        << "An engine whose name query fails must not reach routing or dispatch";
+    EXPECT_EQ(live.count(K_LYING_NULL_NAME_ENGINE_ID), 1);
+    EXPECT_EQ(live.count(K_LYING_EMPTY_NAME_ENGINE_ID), 1);
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    EXPECT_FALSE(resourceManager.findEngineNameById(K_LYING_ERROR_STATUS_ENGINE_ID).has_value());
+    EXPECT_FALSE(resourceManager.findEngineIdByName(K_LYING_UNUSABLE_NAME).has_value())
+        << "The name handed out alongside the failure status must not be indexed";
 }
 
 // The load-time gate, through the real manager rather than a mock: a well-formed

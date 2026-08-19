@@ -16,12 +16,10 @@ thread_local char
 //   LyingEngineNamePluginEmptyName   SUCCESS with *name set to ""
 //   LyingEngineNamePluginErrorStatus a failure status with *name set anyway
 //
-// EnginePlugin::getEngineName rejects all three and reports no name, so the
-// backend falls through to the next tier of the name-resolution chain.
-//
-// Only the first id belongs to an engine this plugin publishes. The entry point is
-// keyed by engine id, so one plugin can present all three answers without
-// publishing three sets of details.
+// All three ids are published, so admission rules on each: the first two answers
+// decline and those engines load, while the failure status is a defect and costs
+// that engine its place. Only the first id backs an applicable engine -- the entry
+// point is keyed by engine id, so it needs no engine details.
 class LyingEngineNamePlugin : public TestPluginBase
 {
 public:
@@ -49,7 +47,16 @@ public:
 
     uint32_t getNumEngines() const override
     {
-        return 1;
+        return 3;
+    }
+
+    std::vector<int64_t> getAllEngineIds() const override
+    {
+        namespace constants = hipdnn_tests::plugin_constants;
+
+        return {constants::engineId<LyingEngineNamePlugin>(),
+                constants::engineId<LyingEngineNamePluginEmptyName>(),
+                constants::engineId<LyingEngineNamePluginErrorStatus>()};
     }
     uint32_t getNumApplicableEngines() const override
     {

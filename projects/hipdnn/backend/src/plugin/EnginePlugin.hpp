@@ -42,9 +42,10 @@ public:
     /**
      * @brief Queries the plugin for the canonical name of an engine.
      *
-     * Never throws. Returns `std::nullopt` when the symbol is absent, when the
-     * plugin reports any non-success status, or when the returned string is
-     * null or empty.
+     * Returns `std::nullopt` when the symbol is absent, when the plugin answers
+     * `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`, or when the returned string is null
+     * or empty. Throws `HipdnnException` on any other status: declining is
+     * spelled `NOT_APPLICABLE`, so a failure status is a defect.
      *
      * @param engineId Engine ID as reported by `getAllEngineIds()`.
      */

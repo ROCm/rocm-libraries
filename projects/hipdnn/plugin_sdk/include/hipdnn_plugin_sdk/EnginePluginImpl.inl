@@ -270,11 +270,32 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
 
     hipdnnPluginStatus_t containerStatus = HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
 
-    const auto status = hipdnn_plugin_sdk::tryCatch([&]() {
+    const auto status = hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
         hipdnn_plugin_sdk::throwIfNull(name);
 
         containerStatus
             = invokeContainerGetEngineName<HIPDNN_PLUGIN_CONTAINER_TYPE>(engineId, name);
+
+        if(containerStatus == HIPDNN_PLUGIN_STATUS_SUCCESS)
+        {
+            LOG_API_SUCCESS(apiName, "engineId=" << engineId);
+        }
+        else if(containerStatus == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+        {
+            // The ordinary answer for a container that supplies no name for this engine.
+            HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << apiName
+                                                           << "] engineId=" << engineId);
+        }
+        else
+        {
+            // A container that reports failure by returning a status rather than throwing never
+            // reaches tryCatch's catch blocks, so route it through setLastError here. Otherwise
+            // hipdnnPluginGetLastErrorString would serve a stale message from an unrelated
+            // earlier failure.
+            hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+                containerStatus,
+                "getEngineName failed for engine ID " + std::to_string(engineId));
+        }
     });
 
     if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
@@ -282,25 +303,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
         return status;
     }
 
-    if(containerStatus == HIPDNN_PLUGIN_STATUS_SUCCESS)
-    {
-        LOG_API_SUCCESS(__func__, "engineId=" << engineId);
-        return containerStatus;
-    }
-
-    // NOT_APPLICABLE is the ordinary answer for a container that supplies no name for this engine.
-    if(containerStatus == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
-    {
-        HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << __func__ << "] engineId=" << engineId);
-        return containerStatus;
-    }
-
-    // A container that reports failure by returning a status rather than throwing never reaches
-    // tryCatch's catch blocks, so route it through setLastError here. Otherwise
-    // hipdnnPluginGetLastErrorString would serve a stale message from an unrelated earlier failure.
-    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
-        containerStatus,
-        "getEngineName failed for engine ID " + std::to_string(engineId));
+    return containerStatus;
 }
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)

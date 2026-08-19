@@ -375,8 +375,10 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * Introduced in engine plugin API 1.4.0 and optional: the host keys off symbol
  * export alone, ignoring the API version the plugin reports. A plugin that does
- * not export it, or that answers with any status other than
- * HIPDNN_PLUGIN_STATUS_SUCCESS, has its engines named by the host instead.
+ * not export it, or that answers HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, has its
+ * engines named by the host instead. Any other non-success status is a defect
+ * rather than a way to decline, and costs that engine its place: the host drops
+ * it from enumeration, routing and dispatch, while the rest of the plugin loads.
  *
  * The host resolves a name from this entry point, then the built-in registry in
  * EngineNames.hpp, then a hexadecimal rendering of the engine ID. Implementing
@@ -397,11 +399,12 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *                  status other than HIPDNN_PLUGIN_STATUS_SUCCESS the value is
  *                  unspecified and the host must not read it.
  * @return HIPDNN_PLUGIN_STATUS_SUCCESS on success;
- *         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if this plugin exposes the engine
- *         but supplies no name for it — this is the generated default for
- *         containers that do not implement getEngineName;
- *         HIPDNN_PLUGIN_STATUS_BAD_PARAM if name is NULL, or if engine_id is not
- *         exposed by this plugin at all.
+ *         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if this plugin supplies no name for
+ *         engine_id — the generated default for containers that do not implement
+ *         getEngineName, and the answer to give for an engine_id the plugin does
+ *         not recognise, since it is the only penalty-free decline;
+ *         HIPDNN_PLUGIN_STATUS_BAD_PARAM if name is NULL. The host never passes
+ *         NULL, so reaching this is a defect and costs the engine its place.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetEngineName(int64_t engine_id, const char** name);
