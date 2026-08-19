@@ -353,9 +353,24 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_SOURCE "kernels/static_composable_kernel/src/*/*.cpp")
     file(GLOB_RECURSE COMPOSABLE_KERNEL_INCLUDE "legacy_composable_kernel/composable_kernel/include/*.hpp")
     file(GLOB_RECURSE COMPOSABLE_KERNEL_SOURCE "legacy_composable_kernel/composable_kernel/src/*.cpp")
-    file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_ASM_SOURCE "kernels/dynamic_igemm/*.s")
-    file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_ASM_INCLUDE "kernels/dynamic_igemm/*.inc")
-    file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_CPP_SOURCE "kernels/dynamic_igemm/*.cpp")
+
+    # dynamic_igemm (GTC ConvAsmImplicitGemmGTC* kernels) only ever applies on CDNA/MFMA
+    # targets (gfx908/gfx90a/gfx942/gfx95x) -- see solver/conv/conv_asm_implicit_gemm_gtc_*.cpp.
+    # Embedding it for RDNA-only (gfx11/gfx12) builds adds ~368MB of dead weight to MIOpen's
+    # inlined kernel data with no runtime benefit, so only glob/embed it when a gfx9 target
+    # is actually being built.
+    set(MIOPEN_HAS_CDNA_TARGET FALSE)
+    foreach(_miopen_gpu_target IN LISTS GPU_TARGETS)
+        if(_miopen_gpu_target MATCHES "^gfx9")
+            set(MIOPEN_HAS_CDNA_TARGET TRUE)
+        endif()
+    endforeach()
+
+    if(MIOPEN_HAS_CDNA_TARGET)
+        file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_ASM_SOURCE "kernels/dynamic_igemm/*.s")
+        file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_ASM_INCLUDE "kernels/dynamic_igemm/*.inc")
+        file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_CPP_SOURCE "kernels/dynamic_igemm/*.cpp")
+    endif()
     file(GLOB_RECURSE GPU_REFERENCE_KERNEL_HIP "kernels/gpu_reference_kernel/*.cpp")
     file(GLOB_RECURSE GPU_REFERENCE_KERNEL_ASM "kernels/gpu_reference_kernel/*.s")
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
