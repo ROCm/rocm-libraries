@@ -519,20 +519,6 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     if spec.pipeline == "wavelet":
         if spec.num_load_waves < 1:
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
-        _n_math = spec.warp_m * spec.warp_n
-        if spec.num_load_waves > _n_math:
-            # Not a hard error — over-provisioning
-            # load waves leaves SIMDs idle, but the kernel is still correct.
-            # Warn via the reason string while returning ok=True.
-            import warnings
-
-            warnings.warn(
-                f"pipeline='wavelet' num_load_waves={spec.num_load_waves} > "
-                f"n_math_warps={_n_math} (warp_m={spec.warp_m} × warp_n={spec.warp_n}): "
-                f"excess load waves sit idle while a single SIMD issues all WMMA. "
-                f"Recommend num_load_waves <= n_math_warps.",
-                stacklevel=3,
-            )
         if family != "wmma":
             return False, (
                 f"pipeline='wavelet' is WMMA/gfx1250 only: on MFMA (CDNA) targets "
