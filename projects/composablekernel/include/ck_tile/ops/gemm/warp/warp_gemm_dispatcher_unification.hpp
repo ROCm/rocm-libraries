@@ -119,8 +119,11 @@ struct MmaPipelineSelector<false,
 
 // UsePackedNumAccess is threaded through the dispatch chain explicitly from the pipeline level.
 // When true, operands with NumAccess > 1 use a contiguous-K layout (packed reads) instead of the
-// default strided-K layout (interleaved reads). This is needed when A and B have different
-// NumAccess values due to different data type sizes with load-transpose instructions.
+// default strided-K layout (interleaved reads). This is required by some load/transposition
+// arrangements, including, but not limited to, mixed operand types with different NumAccess values.
+// TODO: normalise NumAccess and packing into 1 unambiguous dispatcher, for clarity.
+// TODO: Replace UsePackedNumAccess with independent A/B controls if required (e.g. fp8_t/pk_fp4_t
+// 16x16x128 on gfx1250).
 template <WGAttrNumAccessEnum AttrNumAccess>
 struct get_wgattr_num_access_safe_v
 {
@@ -132,6 +135,9 @@ struct get_wgattr_num_access_safe_v<WGAttrNumAccessEnum::Default>
     static constexpr int32_t value = 1;
 };
 
+// TODO Replace IsScale16 and UseMxScale with a single MmaScaleFamily enum.
+// The new enum should distinguish dense, MX scale8 and MX scale16 selection
+// while preserving the current type-based inference for unambiguous MX input types.
 template <typename AType,
           typename BType,
           typename AccType,

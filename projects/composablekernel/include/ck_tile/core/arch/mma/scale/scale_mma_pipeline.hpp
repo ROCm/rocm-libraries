@@ -40,8 +40,8 @@ namespace ck_tile::core::arch::mma {
  * @tparam SwizzleFactor   Swizzlefactor for Tile Distribution Encoding calculation.
  * @tparam AttrNumAccessAV Extra unmerge factor for vector dimension for A vec, see amdgcn_mma.hpp.
  * @tparam AttrNumAccessBV Extra unmerge factor for vector dimension for B vec, see amdgcn_mma.hpp.
- * @tparam UsePackedNumAccess Not supported here, present for interface uniformity with
- *                         WaveWiseMmaPipeline.
+ * @tparam UsePackedNumAccess Selects contiguous-K (packed) reads instead of strided-K
+ *                         (interleaved) reads for any operand whose effective NumAccess > 1.
  * @tparam CompilerTarget  The compiler target
  * @tparam MmaOp_          Backend wrapper class that will perform the mma op
  * @tparam MmaTransforms   The set of transforms to be applied to input/output WaveTiles
@@ -97,15 +97,10 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         std::conditional_t<CTranspose, typename MmaOp::ADataType, typename MmaOp::BDataType>;
     using CDataType = typename MmaOp::CDataType;
 
-    // Unscaled MmaOp (when scale factors cannot be 0, e.g. gfx1250 WMMA)
-    using UnscaledMmaOp = typename MmaDefaultSelector<typename MmaOp::ADataType,
-                                                      typename MmaOp::BDataType,
-                                                      typename MmaOp::CDataType,
-                                                      MmaOp::kM,
-                                                      MmaOp::kN,
-                                                      MmaOp::kK,
-                                                      CompilerTarget,
-                                                      MmaOpFamily::DENSE>::SelectedOp;
+    // Dense operation used when execImpl() is called without scale factors.
+    // The pipeline keeps the scale MmaOp's layout;
+    // this type only provides the matching dense instruction.
+    using DenseFallbackMmaOp = typename MmaOpDenseFallbackSelector<MmaOp>::DenseOp;
 
     // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
     // iteration!)
@@ -314,15 +309,15 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         auto& c_buf = reinterpret_cast<CThreadBufType&>(c);
 
         // check non-scale MmaOp support
-        static_assert(MmaOpTraits<UnscaledMmaOp>::IsSupported,
-                      "No UnscaledMmaOp available for this MmaOp's type/shape");
-        // check types
+        static_assert(MmaOpTraits<DenseFallbackMmaOp>::IsSupported,
+                      "No dense fallback MmaOp available for this scale MmaOp's type/shape");
+        // check that scale op and dense fallback op have compatible vector layouts
         static_assert(
-            std::is_same_v<typename UnscaledMmaOp::AVecType, typename MmaOp::AVecType> &&
-                std::is_same_v<typename UnscaledMmaOp::BVecType, typename MmaOp::BVecType> &&
-                std::is_same_v<typename UnscaledMmaOp::CVecType, typename MmaOp::CVecType>,
-            "UnscaledMmaOp vector layout must match MmaOp's for the fragments to alias "
-            "correctly");
+            std::is_same_v<typename DenseFallbackMmaOp::AVecType, typename MmaOp::AVecType> &&
+                std::is_same_v<typename DenseFallbackMmaOp::BVecType, typename MmaOp::BVecType> &&
+                std::is_same_v<typename DenseFallbackMmaOp::CVecType, typename MmaOp::CVecType>,
+            "Dense fallback MmaOp vector layout must match scale MmaOp's for the fragments to "
+            "alias correctly");
 
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {
@@ -332,12 +327,12 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        // UnscaledMmaOp::exec is not templated on Params
-                        // (no op_sel/reuse dependency for a plain unscaled op).
+                        // DenseFallbackMmaOp::exec is not templated on Params
+                        // (no op_sel/reuse dependency for a plain dense op).
                         c_buf.at(bm * FragsN + bn) =
-                            UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                b_buf.at(bn * FragsK + bk),
-                                                c_buf.at(bm * FragsN + bn));
+                            DenseFallbackMmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                     b_buf.at(bn * FragsK + bk),
+                                                     c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
@@ -351,9 +346,9 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
                         c_buf.at(bm * FragsN + bn) =
-                            UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                b_buf.at(bn * FragsK + bk),
-                                                c_buf.at(bm * FragsN + bn));
+                            DenseFallbackMmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                     b_buf.at(bn * FragsK + bk),
+                                                     c_buf.at(bm * FragsN + bn));
                     }
                 }
             }

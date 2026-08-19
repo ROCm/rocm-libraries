@@ -1288,7 +1288,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8_gfx908_gfx90a_dummy_exec";
+        "__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8_gfx908_gfx90a_not_supported";
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -1331,7 +1331,9 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
+// Layout-only placeholder for an unsupported fp8xfp8 16x16x16 operation on gfx9.
+// Its WMMA-like layout parameters keep legacy layout/dispatch queries well-formed;
+// the missing exec() prevents it from being used as an instruction.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -1341,7 +1343,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12-like_gfx9_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx9_not_supported";
 };
 
 // Custom version of fp8xbf8 16x16x32 using dummy exec for gfx908 and gfx90a.
@@ -1354,7 +1356,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8_gfx908_gfx90a_dummy_exec";
+        "__builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8_gfx908_gfx90a_not_supported";
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -1397,7 +1399,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
+// Layout-only placeholder for an unsupported fp8xbf8 16x16x16 operation on gfx9.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -1407,7 +1409,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx12-like_gfx9_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx9_not_supported";
 };
 
 // Custom version of bf8xfp8 16x16x32 using dummy exec for gfx908 and gfx90a.
@@ -1420,7 +1422,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8_gfx908_gfx90a_dummy_exec";
+        "__builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8_gfx908_gfx90a_not_supported";
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -1463,7 +1465,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
+// Layout-only placeholder for an unsupported bf8xfp8 16x16x16 operation on gfx9.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -1473,7 +1475,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx12-like_gfx9_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx9_not_supported";
 };
 
 // Custom version of bf8xbf8 16x16x32 using dummy exec for gfx908 and gfx90a.
@@ -1486,7 +1488,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8_gfx908_gfx90a_dummy_exec";
+        "__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8_gfx908_gfx90a_not_supported";
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -1529,7 +1531,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
+// Layout-only placeholder for an unsupported bf8xbf8 16x16x16 operation on gfx9.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -1539,7 +1541,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFami
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12-like_gfx9_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx9_not_supported";
 };
 
 template <typename CompilerTarget>
