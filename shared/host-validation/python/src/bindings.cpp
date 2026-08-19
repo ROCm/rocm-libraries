@@ -96,13 +96,6 @@ struct PythonGemmRequest {
     OutputSelection outputSelection = OutputSelection::all();
 };
 
-struct PythonLayerNormResult {
-    Tensor output;
-    Tensor mean;
-    Tensor inverseVariance;
-    LayerNormRunInfo runInfo;
-};
-
 struct PythonEpilogueResult {
     Tensor output;
     std::optional<Tensor> rawOutput;
@@ -529,35 +522,17 @@ SoftmaxResult referenceSoftmaxOwned(const Tensor& input, ScalarType outputType,
     return referenceSoftmax(SoftmaxProblem(input, outputType, axis, accumulatorType));
 }
 
-PythonLayerNormResult referenceLayerNormOwned(const Tensor& input, ScalarType outputType,
-                                              ScalarType statisticsType, ScalarType accumulatorType,
-                                              size_t axis, double epsilon,
-                                              std::optional<Tensor> gamma,
-                                              std::optional<Tensor> beta) {
-    if (axis >= input.shape().rank())
-        throw std::out_of_range("Python reference_layer_norm axis exceeds input rank.");
-    std::vector<size_t> statisticsDimensions;
-    statisticsDimensions.reserve(input.shape().rank() - 1);
-    for (size_t dimension = 0; dimension < input.shape().rank(); ++dimension) {
-        if (dimension != axis) statisticsDimensions.push_back(input.shape()[dimension]);
-    }
-
-    Tensor output(outputType, input.layout());
-    Tensor mean(statisticsType, Shape(statisticsDimensions));
-    Tensor inverseVariance(statisticsType, Shape(std::move(statisticsDimensions)));
-    LayerNormProblem problem(input, output, axis, accumulatorType);
-    problem.mean = mean;
-    problem.inverseVariance = inverseVariance;
-    if (gamma) problem.gamma = gamma;
-    if (beta) problem.beta = beta;
+LayerNormResult referenceLayerNormOwned(const Tensor& input, ScalarType outputType,
+                                        ScalarType statisticsType, ScalarType accumulatorType,
+                                        size_t axis, double epsilon, std::optional<Tensor> gamma,
+                                        std::optional<Tensor> beta) {
+    LayerNormProblem problem(input, outputType, axis, accumulatorType);
+    problem.meanType = statisticsType;
+    problem.inverseVarianceType = statisticsType;
+    problem.gamma = std::move(gamma);
+    problem.beta = std::move(beta);
     problem.epsilon = epsilon;
-    const LayerNormRunInfo runInfo = referenceLayerNorm(problem);
-    return {
-        .output = std::move(output),
-        .mean = std::move(mean),
-        .inverseVariance = std::move(inverseVariance),
-        .runInfo = runInfo,
-    };
+    return referenceLayerNorm(problem);
 }
 
 PythonEpilogueResult referenceEpilogueOwned(
@@ -1125,26 +1100,20 @@ NB_MODULE(_roc_host_validation, module) {
         .def_ro("inverse_variance_elements_written",
                 &LayerNormRunInfo::inverseVarianceElementsWritten);
 
-    nb::class_<PythonLayerNormResult>(module, "LayerNormResult")
+    nb::class_<LayerNormResult>(module, "LayerNormResult")
         .def_prop_ro(
-            "output",
-            [](const PythonLayerNormResult& result) -> const Tensor& { return result.output; },
+            "output", [](const LayerNormResult& result) -> const Tensor& { return result.output; },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
-            "mean",
-            [](const PythonLayerNormResult& result) -> const Tensor& { return result.mean; },
+            "mean", [](const LayerNormResult& result) -> const Tensor& { return *result.mean; },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "inverse_variance",
-            [](const PythonLayerNormResult& result) -> const Tensor& {
-                return result.inverseVariance;
-            },
+            [](const LayerNormResult& result) -> const Tensor& { return *result.inverseVariance; },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "run_info",
-            [](const PythonLayerNormResult& result) -> const LayerNormRunInfo& {
-                return result.runInfo;
-            },
+            [](const LayerNormResult& result) -> const LayerNormRunInfo& { return result.runInfo; },
             nb::rv_policy::reference_internal);
 
     nb::class_<GemmRunInfo>(module, "GemmRunInfo")

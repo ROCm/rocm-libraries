@@ -901,15 +901,13 @@ void testReferenceLayerNorm() {
     const Tensor beta =
         Tensor::fromValues(ScalarType::BFloat16, Shape{3}, std::span<const float>(betaValues));
     Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}));
-    Tensor mean(ScalarType::Float32, Shape{2, 2});
-    Tensor inverseVariance(ScalarType::Float32, Shape{2, 2});
+    Tensor mean(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}));
+    Tensor inverseVariance(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}));
 
-    LayerNormProblem problem(input, output, 1, ScalarType::Float32);
-    problem.mean = mean;
-    problem.inverseVariance = inverseVariance;
-    problem.gamma = gamma;
-    problem.beta = beta;
-    const LayerNormRunInfo run = referenceLayerNorm(problem);
+    LayerNormRequest request(input, output, mean, inverseVariance, 1, ScalarType::Float32);
+    request.gamma = gamma;
+    request.beta = beta;
+    const LayerNormRunInfo run = referenceLayerNorm(request);
     require(run.slicesProcessed == 4 && run.outputElementsWritten == shape.elementCount() &&
                 run.meanElementsWritten == 4 && run.inverseVarianceElementsWritten == 4,
             "Reference LayerNorm run information mismatch.");
@@ -919,6 +917,59 @@ void testReferenceLayerNorm() {
             "Reference LayerNorm inverse variance mismatch.");
     require(output.loadAs<float>({0, 1, 0}) == -0.5f,
             "Reference LayerNorm affine output mismatch.");
+
+    LayerNormProblem ownedProblem(input, ScalarType::Float32, 1, ScalarType::Float32);
+    ownedProblem.meanType = ScalarType::Float32;
+    ownedProblem.inverseVarianceType = ScalarType::Float32;
+    ownedProblem.gamma = gamma;
+    ownedProblem.beta = beta;
+    const LayerNormResult owned = referenceLayerNorm(ownedProblem);
+    require(owned.output.layout() == Layout::contiguous(shape) && owned.mean &&
+                owned.mean->layout() == Layout::contiguous(Shape{2, 2}) && owned.inverseVariance &&
+                owned.inverseVariance->layout() == Layout::contiguous(Shape{2, 2}) &&
+                owned.runInfo.slicesProcessed == 4 &&
+                owned.runInfo.outputElementsWritten == shape.elementCount() &&
+                owned.runInfo.meanElementsWritten == 4 &&
+                owned.runInfo.inverseVarianceElementsWritten == 4 &&
+                owned.output.loadAs<float>({0, 1, 0}) == -0.5f,
+            "Owning reference LayerNorm result contract mismatch.");
+
+    size_t allocatorCalls = 0;
+    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
+        ++allocatorCalls;
+        return TensorStorage::allocate(bytes);
+    };
+    const LayerNormResult allocated = referenceLayerNorm(ownedProblem, allocator);
+    require(allocatorCalls == 3 && allocated.mean && allocated.inverseVariance,
+            "Owning reference LayerNorm did not allocate each requested result exactly once.");
+
+    LayerNormProblem invalidProblem = ownedProblem;
+    invalidProblem.epsilon = std::numeric_limits<double>::quiet_NaN();
+    bool rejectedBeforeAllocation = false;
+    try {
+        (void)referenceLayerNorm(invalidProblem, allocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 3,
+            "Owning reference LayerNorm allocated before validating epsilon.");
+
+    LayerNormProblem outputOnly(input, ScalarType::Float32, 1, ScalarType::Float32);
+    const LayerNormResult outputOnlyResult = referenceLayerNorm(outputOnly);
+    require(!outputOnlyResult.mean && !outputOnlyResult.inverseVariance &&
+                outputOnlyResult.runInfo.meanElementsWritten == 0 &&
+                outputOnlyResult.runInfo.inverseVarianceElementsWritten == 0,
+            "Owning reference LayerNorm created unrequested statistics.");
+
+    const std::array<float, 3> rankOneValues{1.0f, 2.0f, 3.0f};
+    LayerNormProblem rankOne(
+        Tensor::fromNativeValues<float>(Shape{3}, std::span<const float>(rankOneValues)),
+        ScalarType::Float32, 0, ScalarType::Float32);
+    rankOne.meanType = ScalarType::Float32;
+    const LayerNormResult rankOneResult = referenceLayerNorm(rankOne);
+    require(rankOneResult.mean && rankOneResult.mean->shape() == Shape{} &&
+                !rankOneResult.inverseVariance && rankOneResult.runInfo.meanElementsWritten == 1,
+            "Owning reference LayerNorm did not preserve a requested rank-zero statistic.");
 }
 
 void testActivations() {
