@@ -121,7 +121,7 @@ namespace
                 EXPECT_EQ((hipFree)(m_storage), hipSuccess);
         }
 
-        canary_workspace(const canary_workspace&)            = delete;
+        canary_workspace(const canary_workspace&) = delete;
         canary_workspace& operator=(const canary_workspace&) = delete;
 
         bool valid() const
@@ -161,7 +161,7 @@ namespace
                 EXPECT_EQ((hipFree)(m_ptr), hipSuccess);
         }
 
-        device_pointer_array(const device_pointer_array&)            = delete;
+        device_pointer_array(const device_pointer_array&) = delete;
         device_pointer_array& operator=(const device_pointer_array&) = delete;
 
         hipError_t memcheck() const
