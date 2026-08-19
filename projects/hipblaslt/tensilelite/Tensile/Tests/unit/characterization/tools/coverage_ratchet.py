@@ -165,6 +165,9 @@ def ratchet_floors(
     for path, cur_pct in current.items():
         cur_pct = round(cur_pct, _BASELINE_PRECISION)
         base_pct = existing.get(path)
+        base_pct = (
+            round(base_pct, _BASELINE_PRECISION) if base_pct is not None else None
+        )
         if base_pct is None or cur_pct >= base_pct or path in allow_lower:
             floors[path] = cur_pct
         else:
