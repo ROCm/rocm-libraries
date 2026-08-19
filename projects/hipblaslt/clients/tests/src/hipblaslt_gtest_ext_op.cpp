@@ -77,7 +77,7 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     using namespace roc::host_validation;
     using namespace hipblaslt::host_validation;
     Tensor expected(ScalarType::Float32, Shape{m, n});
-    referenceSoftmax(SoftmaxProblem(
+    referenceSoftmax(SoftmaxRequest(
         tensorFromStorage(input.data(), input.size(), Layout::contiguous(Shape{m, n})),
         expected,
         1,

@@ -8,20 +8,34 @@
 #include <utility>
 
 namespace roc::host_validation {
-// Describes a numerically stabilized softmax over one tensor axis.
-// referenceSoftmax reads input and writes every logical element of output.
+// Reusable numerically stabilized softmax descriptor. It contains the input,
+// result scalar type, axis, and arithmetic policy, but no destination storage.
 struct SoftmaxProblem {
-    SoftmaxProblem(Tensor inputValues, Tensor outputValues, size_t softmaxAxis,
+    SoftmaxProblem(Tensor inputValues, ScalarType resultType, size_t softmaxAxis,
                    ScalarType accumulator)
         : input(std::move(inputValues)),
-          output(std::move(outputValues)),
+          outputType(resultType),
           axis(softmaxAxis),
           accumulatorType(accumulator) {}
 
     Tensor input;                // Source tensor.
-    Tensor output;               // Same-shape caller-owned destination written in full.
+    ScalarType outputType;       // Scalar type of the result tensor.
     size_t axis;                 // Nonempty dimension normalized independently per slice.
     ScalarType accumulatorType;  // Float32 or Float64 arithmetic.
+};
+
+// Binds a softmax problem to caller-owned destination storage. Every logical
+// output element is overwritten; arbitrary output layouts remain supported.
+struct SoftmaxRequest : SoftmaxProblem {
+    SoftmaxRequest(Tensor inputValues, Tensor outputValues, size_t softmaxAxis,
+                   ScalarType accumulator)
+        : SoftmaxProblem(std::move(inputValues), outputValues.type(), softmaxAxis, accumulator),
+          output(std::move(outputValues)) {}
+
+    SoftmaxRequest(SoftmaxProblem problem, Tensor outputValues)
+        : SoftmaxProblem(std::move(problem)), output(std::move(outputValues)) {}
+
+    Tensor output;
 };
 
 // A slice fixes every coordinate except axis.
@@ -30,5 +44,15 @@ struct SoftmaxRunInfo {
     size_t outputElementsWritten = 0;  // output.shape().elementCount().
 };
 
-SoftmaxRunInfo referenceSoftmax(const SoftmaxProblem& problem);
+// Owning softmax result. output uses a contiguous layout; callers requiring a
+// specific destination layout use SoftmaxRequest.
+struct SoftmaxResult {
+    Tensor output;
+    SoftmaxRunInfo runInfo;
+};
+
+SoftmaxRunInfo referenceSoftmax(const SoftmaxRequest& request);
+SoftmaxResult referenceSoftmax(const SoftmaxProblem& problem);
+SoftmaxResult referenceSoftmax(const SoftmaxProblem& problem,
+                               const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

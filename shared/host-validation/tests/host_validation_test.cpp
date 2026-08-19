@@ -702,10 +702,10 @@ void testReferenceAxpby() {
         }
     }
 
-    AxpbyProblem problem(x, y, output, ScalarType::Float32);
-    problem.alpha = 2.0;
-    problem.beta = -0.5;
-    const AxpbyRunInfo run = referenceAxpby(problem);
+    AxpbyRequest request(x, y, output, ScalarType::Float32);
+    request.alpha = 2.0;
+    request.beta = -0.5;
+    const AxpbyRunInfo run = referenceAxpby(request);
     require(run.outputElementsWritten == shape.elementCount(),
             "Reference AXPBY element count mismatch.");
 
@@ -722,7 +722,7 @@ void testReferenceAxpby() {
     }
 
     Tensor yOnlyOutput(ScalarType::Float32, shape);
-    AxpbyProblem yOnly(std::nullopt, y, yOnlyOutput, ScalarType::Float32);
+    AxpbyRequest yOnly(std::nullopt, y, yOnlyOutput, ScalarType::Float32);
     yOnly.beta = 3.0;
     referenceAxpby(yOnly);
     require(yOnlyOutput.loadAs<float>({1, 0, 1}) == 3.0f * y.loadAs<float>({1, 0, 1}),
@@ -733,12 +733,54 @@ void testReferenceAxpby() {
     Tensor complexX = Tensor::fromNativeValues<std::complex<float>>(Shape{1}, complexXValues);
     Tensor complexY = Tensor::fromNativeValues<std::complex<float>>(Shape{1}, complexYValues);
     Tensor complexOutput(ScalarType::ComplexFloat32, Shape{1});
-    AxpbyProblem complexProblem(complexX, complexY, complexOutput, ScalarType::ComplexFloat32);
-    complexProblem.alpha = std::complex<double>(0.5, 1.0);
-    complexProblem.beta = -2.0;
-    referenceAxpby(complexProblem);
+    AxpbyRequest complexRequest(complexX, complexY, complexOutput, ScalarType::ComplexFloat32);
+    complexRequest.alpha = std::complex<double>(0.5, 1.0);
+    complexRequest.beta = -2.0;
+    referenceAxpby(complexRequest);
     require(complexOutput.loadAs<std::complex<float>>({0}) == std::complex<float>(-7.5f, 4.0f),
             "Complex reference AXPBY mismatch.");
+
+    AxpbyProblem ownedProblem(x, y, ScalarType::Float32, ScalarType::Float32);
+    ownedProblem.alpha = 2.0;
+    ownedProblem.beta = -0.5;
+    const AxpbyResult owned = referenceAxpby(ownedProblem);
+    require(owned.output.layout() == Layout::contiguous(shape) &&
+                owned.output.type() == ScalarType::Float32 &&
+                owned.runInfo.outputElementsWritten == shape.elementCount() &&
+                owned.output.loadAs<float>({1, 0, 1}) ==
+                    2.0f * x.loadAs<float>({1, 0, 1}) - 0.5f * y.loadAs<float>({1, 0, 1}),
+            "Owning reference AXPBY result contract mismatch.");
+
+    size_t allocatorCalls = 0;
+    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
+        ++allocatorCalls;
+        return TensorStorage::allocate(bytes);
+    };
+    const AxpbyResult allocated = referenceAxpby(ownedProblem, allocator);
+    require(allocatorCalls == 1 && allocated.output.layout() == Layout::contiguous(shape),
+            "Owning reference AXPBY did not use the supplied allocator exactly once.");
+
+    AxpbyProblem invalidProblem(std::nullopt, std::nullopt, ScalarType::Float32,
+                                ScalarType::Float32);
+    bool rejectedBeforeAllocation = false;
+    try {
+        (void)referenceAxpby(invalidProblem, allocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 1,
+            "Owning reference AXPBY allocated before validating its problem.");
+
+    AxpbyProblem invalidCoefficient(x, std::nullopt, ScalarType::Float32, ScalarType::Float32);
+    invalidCoefficient.alpha = std::complex<double>(1.0, 1.0);
+    rejectedBeforeAllocation = false;
+    try {
+        (void)referenceAxpby(invalidCoefficient, allocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 1,
+            "Owning reference AXPBY allocated before validating its coefficients.");
 }
 
 void testReferenceSoftmax() {
@@ -758,7 +800,7 @@ void testReferenceSoftmax() {
     }
 
     const SoftmaxRunInfo run =
-        referenceSoftmax(SoftmaxProblem(input, output, 1, ScalarType::Float32));
+        referenceSoftmax(SoftmaxRequest(input, output, 1, ScalarType::Float32));
     require(run.slicesProcessed == 4 && run.outputElementsWritten == shape.elementCount(),
             "Reference softmax run information mismatch.");
 
@@ -773,6 +815,33 @@ void testReferenceSoftmax() {
     require(output.loadAs<float>({0, 0, 0}) < output.loadAs<float>({0, 1, 0}) &&
                 output.loadAs<float>({0, 1, 0}) < output.loadAs<float>({0, 2, 0}),
             "Reference softmax ordering mismatch.");
+
+    const SoftmaxProblem ownedProblem(input, ScalarType::Float32, 1, ScalarType::Float32);
+    const SoftmaxResult owned = referenceSoftmax(ownedProblem);
+    require(owned.output.layout() == Layout::contiguous(shape) &&
+                owned.output.type() == ScalarType::Float32 && owned.runInfo.slicesProcessed == 4 &&
+                owned.runInfo.outputElementsWritten == shape.elementCount(),
+            "Owning reference softmax result contract mismatch.");
+
+    size_t allocatorCalls = 0;
+    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
+        ++allocatorCalls;
+        return TensorStorage::allocate(bytes);
+    };
+    const SoftmaxResult allocated = referenceSoftmax(ownedProblem, allocator);
+    require(allocatorCalls == 1 && allocated.output.layout() == Layout::contiguous(shape),
+            "Owning reference softmax did not use the supplied allocator exactly once.");
+
+    const SoftmaxProblem invalidProblem(input, ScalarType::Float32, shape.rank(),
+                                        ScalarType::Float32);
+    bool rejectedBeforeAllocation = false;
+    try {
+        (void)referenceSoftmax(invalidProblem, allocator);
+    } catch (const std::out_of_range&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 1,
+            "Owning reference softmax allocated before validating its problem.");
 }
 
 void testReferenceLayerNorm() {

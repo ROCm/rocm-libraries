@@ -50,25 +50,25 @@ int main() {
                GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 11.0})));
     if (generated.loadAs<float>({2}) != 11.0f) return 1;
 
-    Tensor axpbyOutput(ScalarType::Float32, Shape{1});
     AxpbyProblem axpby(
         Tensor::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(a)),
         Tensor::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(b)),
-        axpbyOutput, ScalarType::Float32);
+        ScalarType::Float32, ScalarType::Float32);
     axpby.alpha = 2.0;
     axpby.beta = -1.0;
-    if (referenceAxpby(axpby).outputElementsWritten != 1 || axpbyOutput.loadAs<float>({0}) != 1.0f)
+    const AxpbyResult axpbyResult = referenceAxpby(axpby);
+    if (axpbyResult.runInfo.outputElementsWritten != 1 ||
+        axpbyResult.output.loadAs<float>({0}) != 1.0f)
         return 1;
 
     const std::array<float, 2> softmaxValues{1.0f, 2.0f};
     const Tensor softmaxInput =
         Tensor::fromNativeValues<float>(Shape{1, 2}, std::span<const float>(softmaxValues));
-    Tensor softmaxOutput(ScalarType::Float32, Shape{1, 2});
-    const SoftmaxRunInfo softmax =
-        referenceSoftmax(SoftmaxProblem(softmaxInput, softmaxOutput, 1, ScalarType::Float32));
-    if (softmax.slicesProcessed != 1 || softmax.outputElementsWritten != 2 ||
-        std::abs(softmaxOutput.loadAs<float>({0, 0}) + softmaxOutput.loadAs<float>({0, 1}) - 1.0f) >
-            1e-6f)
+    const SoftmaxResult softmax =
+        referenceSoftmax(SoftmaxProblem(softmaxInput, ScalarType::Float32, 1, ScalarType::Float32));
+    if (softmax.runInfo.slicesProcessed != 1 || softmax.runInfo.outputElementsWritten != 2 ||
+        std::abs(softmax.output.loadAs<float>({0, 0}) + softmax.output.loadAs<float>({0, 1}) -
+                 1.0f) > 1e-6f)
         return 1;
 
     Tensor layerNormOutput(ScalarType::Float32, Shape{1, 2});
