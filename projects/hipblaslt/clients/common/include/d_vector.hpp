@@ -470,6 +470,15 @@ protected:
         return m_size;
     }
 
+    void reset_after_move() noexcept
+    {
+        m_size      = 0;
+        m_pad       = 0;
+        m_guard_len = 0;
+        m_bytes     = 0;
+        use_HMM     = false;
+    }
+
 public:
     bool use_HMM = false;
 
