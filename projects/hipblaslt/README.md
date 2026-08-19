@@ -79,9 +79,16 @@ and a CMake version greater than or equal to the `cmake_minimum_required` define
 # show available presets
 cmake --list-presets
 # configure
-cmake --preset default:release
+cmake -B build -S .                                  \
+      -D CMAKE_BUILD_TYPE=Release                    \
+      -D CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+      -D CMAKE_C_COMPILER=/opt/rocm/bin/amdclang     \
+      -D CMAKE_PREFIX_PATH=/opt/rocm                 \
+      -D GPU_TARGETS=gfx950
 # build
 cmake --build build --parallel
+```
+
 # install
 cmake --install build
 ```
@@ -90,7 +97,12 @@ cmake --install build
 
 ```bash
 # configure
-cmake --preset gemm-libs
+cmake -B build -S .                                  \
+      -D CMAKE_BUILD_TYPE=Release                    \
+      -D CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+      -D CMAKE_C_COMPILER=/opt/rocm/bin/amdclang     \
+      -D CMAKE_PREFIX_PATH=/opt/rocm                 \
+      -D GPU_TARGETS=gfx950
 # build
 cmake --build build --parallel
 ```

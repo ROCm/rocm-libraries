@@ -23,7 +23,7 @@
 ################################################################################
 
 if __name__ == "__main__":
-    print("This file can no longer be run as a script.  Run 'tensilelite/bin/Tensile' instead.")
+    print("This file cannot be run directly. Use 'python -m tensilelite run' instead.")
     exit(1)
 
 import ast
@@ -58,10 +58,6 @@ from . import ClientWriter
 from . import LibraryIO
 from .backends.config import parse_backend_config
 from . import LibraryLogic
-
-TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'
-TENSILE_CLIENT_PATH = TENSILE_SCRIPT_DIR.parent / TENSILE_CLIENT_PATH
 
 
 def _device_enumerator_candidates(gpu_targets, explicit):
@@ -259,8 +255,6 @@ def addCommonArguments(argParser):
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack", "msgpack-indexed"], \
         action="store", default="yaml", help="select which library format to use")
     argParser.add_argument("--client-lock", default=None)
-    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH), \
-        type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
     argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
         help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
     argParser.add_argument("--cpu-only", dest="cpuOnly", action="store_true", default=False, \
@@ -293,8 +287,6 @@ def argUpdatedGlobalParameters(args):
         rv["ValidateMetadata"] = True
     if args.client_lock:
         rv["ClientExecutionLockPath"] = args.client_lock
-    if args.prebuilt_client:
-        rv["PrebuiltClient"] = args.prebuilt_client
     if args.MXScaleFormat:
         print1("# Command-line override: MXScaleFormat")
         rv["MXScaleFormat"] = args.MXScaleFormat
