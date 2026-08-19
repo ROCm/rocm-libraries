@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include <Reference.hpp>
+#include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <roc/host_validation/adapters/tensilelite/GemmInvocationAdapter.hpp>

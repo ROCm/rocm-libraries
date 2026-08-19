@@ -39,7 +39,7 @@
 #include <vector>
 
 #include "ProgramOptions.hpp"
-#include "Reference.hpp"
+#include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
