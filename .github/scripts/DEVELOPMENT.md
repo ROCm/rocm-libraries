@@ -1,36 +1,8 @@
 # Development Guide: `.github/scripts`
 
-This guide covers how to develop, test, and validate changes to the automation
-scripts that power the CK mirror sync system — specifically:
-
-- `pr_detect_changed_subtrees.py` — detects which subtrees a merged PR touched
-- `pr_merge_sync_patches.py` — generates a patch from the merge commit and pushes it to the corresponding sub-repositories
-
-These scripts run in GitHub Actions on every merge to `develop`
-(`pr-merge-sync-patches.yml`) and can be re-triggered manually
-(`pr-merge-sync-patches-manual.yml`). **All testing and validation should be
-done locally or via dry-run before any change reaches production.**
-
----
-
-## Directory Layout
-
-```
-.github/
-├── scripts/
-│   ├── DEVELOPMENT.md              ← this file
-│   ├── config_loader.py            ← loads repos-config.json
-│   ├── github_cli_client.py        ← thin wrapper around the GitHub REST API
-│   ├── pr_detect_changed_subtrees.py
-│   ├── pr_merge_sync_patches.py
-│   ├── repo_config_model.py        ← Pydantic model for repos-config.json entries
-│   └── tests/
-│       ├── resolve_therock_ref_test.py
-│       ├── therock_configure_ci_test.py
-│       └── therock_matrix_test.py
-├── repos-config.json               ← subtree → sub-repo mapping
-└── requirements.txt                ← pydantic, requests
-```
+Python automation scripts that support CI/CD workflows for the ROCm Libraries
+monorepo. This guide covers setup, the script inventory, how to run tests, and
+script-specific guidance for contributors.
 
 ---
 
@@ -40,48 +12,120 @@ The system Python on many AMD developer machines is managed by the OS and
 rejects `pip install` without `--break-system-packages`. Use a venv instead:
 
 ```bash
-# One-time setup (from anywhere)
-python3 -m venv ~/.venv/mirror-sync
-source ~/.venv/mirror-sync/bin/activate
+# One-time setup
+python3 -m venv ~/.venv/rocm-scripts
+source ~/.venv/rocm-scripts/bin/activate
 pip install pydantic requests pytest
 ```
 
-Or, without activating:
+Or without activating:
 
 ```bash
-python3 -m venv /tmp/mirror-sync-venv
-/tmp/mirror-sync-venv/bin/pip install pydantic requests pytest
+python3 -m venv /tmp/rocm-scripts-venv
+/tmp/rocm-scripts-venv/bin/pip install pydantic requests pytest
 ```
 
 No build step is required. All scripts are plain Python 3.12 and import only
-from the standard library plus the two packages above.
+from the standard library plus the packages above.
 
 ---
 
-## Running the Unit Tests
+## Directory Layout
 
-Tests live in `.github/scripts/tests/` and use `unittest` (runnable via
-`pytest` with no configuration needed).
+```
+.github/
+├── scripts/
+│   ├── DEVELOPMENT.md                  ← this file
+│   │
+│   ├── # Shared libraries
+│   ├── ci_utils.py                     ← retry, path matching, GITHUB_OUTPUT helpers
+│   ├── config_loader.py                ← loads/validates repos-config.json
+│   ├── github_cli_client.py            ← GitHub REST API wrapper (reads GH_TOKEN)
+│   ├── repo_config_model.py            ← Pydantic model for repos-config.json entries
+│   │
+│   ├── # Mirror sync (monorepo → sub-repos)
+│   ├── pr_detect_changed_subtrees.py   ← which subtrees did a merged PR touch?
+│   ├── pr_merge_sync_patches.py        ← generate patch + push to sub-repo
+│   │
+│   ├── # TheRock / multi-arch CI
+│   ├── resolve_therock_ref.py          ← pin TheRock commit for a PR/push event
+│   ├── therock_configure_ci.py         ← select build flags and tests from subtrees
+│   ├── therock_matrix.py               ← subtree → TheRock project mapping table
+│   ├── component_ci.py                 ← per-component CI trigger flags
+│   ├── check_wheel_freshness.py        ← fail CI if nightly wheels are stale
+│   │
+│   ├── # PR automation
+│   ├── pr_category_label.py            ← add/remove category labels from changed paths
+│   ├── apply-labels.py                 ← apply labels to a PR via GitHub API
+│   ├── collect-labels.py               ← collect labels from a source repo
+│   ├── import_subrepo_prs.py           ← import sub-repo PRs into the monorepo
+│   ├── notify_teams.py                 ← route CI failure alerts to MS Teams channels
+│   │
+│   ├── # Repo maintenance
+│   ├── get_changed_projects.py         ← git-diff → validated changed project list
+│   ├── merge-codeowners.py             ← merge per-project CODEOWNERS into one file
+│   ├── merge-submodules.py             ← merge per-project .gitmodules into one file
+│   │
+│   └── tests/
+│       ├── fixtures/                   ← .patch files for commit-message tests
+│       ├── resolve_therock_ref_test.py
+│       ├── test_pr_detect_changed_subtrees.py
+│       ├── test_pr_merge_sync_patches.py
+│       ├── therock_configure_ci_test.py
+│       └── therock_matrix_test.py
+│
+├── repos-config.json                   ← subtree → sub-repo mapping (read by config_loader)
+└── requirements.txt                    ← pydantic, requests
+```
+
+---
+
+## Workflow → Script Reference
+
+| Workflow file | Script(s) invoked |
+|---|---|
+| `pr-merge-sync-patches.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
+| `pr-merge-sync-patches-manual.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
+| `therock-ci.yml` / `therock-multi-arch-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
+| `component-ci.yml` | `component_ci.py` |
+| `therock-ci-nightly.yml` | `check_wheel_freshness.py` |
+| `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |
+| `pr-import.yml` / `multiple_pr_import.yml` | `import_subrepo_prs.py` |
+| `libraries-pr-bot.yml` | `notify_teams.py` |
+| `merge-codeowners.yml` | `merge-codeowners.py` |
+| `merge-submodules.yml` | `merge-submodules.py` |
+
+---
+
+## Running the Tests
+
+Tests live in `.github/scripts/tests/` and use `unittest`, runnable via
+`pytest` with no extra configuration.
 
 ```bash
-# If your venv is activated:
+# Run everything
 pytest .github/scripts/tests/ -v
 
-# Without activating (substituting your venv path):
-/tmp/mirror-sync-venv/bin/pytest .github/scripts/tests/ -v
+# Without an activated venv (substitute your venv path)
+/tmp/rocm-scripts-venv/bin/pytest .github/scripts/tests/ -v
 
-# Run a single test file
+# Run one file
 pytest .github/scripts/tests/test_pr_merge_sync_patches.py -v
 ```
 
-**When adding a fix for any mirror-sync bug, include a corresponding test in
-`.github/scripts/tests/`.** The naming convention is
-`<script_stem>_test.py`, e.g. `pr_merge_sync_patches_test.py`.
+> **Note:** there is currently no CI job that runs these tests automatically.
+> Until one is added, run the suite locally before merging any change to a
+> script that has coverage.
 
-### Test pattern
+### Test conventions
 
-Existing tests use a `FakeClient` / mock-object pattern to avoid any real
-GitHub API calls. Follow the same pattern:
+- File naming: `<script_stem>_test.py` (pre-existing) or `test_<script_stem>.py` (new).
+- Keep tests free of real network calls. `GitHubCLIClient` is the only class
+  that makes HTTP requests — replace it with a `MagicMock` or a hand-written
+  stub in every test that reaches it.
+- Use `tempfile.TemporaryDirectory` for any test that needs real filesystem or
+  git operations.
+- Follow the import pattern used by the existing test files:
 
 ```python
 import sys, os, unittest
@@ -89,36 +133,75 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
-import pr_merge_sync_patches as sut   # "system under test"
-
-class MyTest(unittest.TestCase):
-    def test_something(self):
-        ...
+import my_script as sut   # "system under test"
 ```
-
-`GitHubCLIClient` is the only class that makes real network calls. Replace it
-with a `MagicMock` or a hand-written stub in every test that exercises code
-paths that call it.
 
 ---
 
-## Dry-Run: Safe End-to-End Validation
+## TDD Approach for Bug Fixes
 
-Both scripts accept `--dry-run`. In this mode they perform every step **except**
+When fixing a bug in an existing script:
+
+1. **Write a failing test first.** The test should assert the *desired* behavior
+   against the current (unfixed) code — it will fail.
+2. **Fix the production code** until the test passes.
+3. **Run the full suite** to confirm nothing regressed.
+
+Tests that document *current* buggy behavior (written before the fix) should
+include a comment that:
+- References the AICK ticket
+- Describes what currently happens
+- Shows what the assertion should change to after the fix
+
+```python
+def test_some_buggy_behavior(self):
+    # AICK-NNNN: <description of what currently happens>.
+    result = sut.some_function(...)
+    self.assertEqual(result, CURRENT_WRONG_VALUE)
+    # After the fix, assert:
+    #   self.assertEqual(result, CORRECT_VALUE)
+```
+
+---
+
+## Adding a CI Job for Script Tests
+
+Add a lightweight job to `pre-commit.yml` or a new `scripts-unit-tests.yml`:
+
+```yaml
+- name: Run script unit tests
+  run: |
+    pip install pydantic requests pytest
+    pytest .github/scripts/tests/ -v
+```
+
+---
+
+## Script-Specific Guidance
+
+### Mirror Sync — `pr_detect_changed_subtrees.py` + `pr_merge_sync_patches.py`
+
+These scripts run on every merge to `develop` and push changes from the
+monorepo to the corresponding sub-repositories. **Never test changes to these
+by merging to `develop`** — use the approaches below.
+
+#### Dry-run (read-only, uses real GitHub API)
+
+Both scripts accept `--dry-run --debug`. In this mode every step runs except
 writing to `GITHUB_OUTPUT` or pushing to a sub-repo. A `GH_TOKEN` with
-read-only PR access is still required.
+read-only PR access is sufficient.
 
 ```bash
-export GH_TOKEN=<your-personal-access-token>   # read:org, repo (read-only sufficient)
+export GH_TOKEN=<your-personal-access-token>
 
-# Detect which subtrees a real merged PR touched (no GITHUB_OUTPUT written)
+# Detect changed subtrees for a previously merged PR
 python .github/scripts/pr_detect_changed_subtrees.py \
   --repo ROCm/rocm-libraries \
   --pr <pr-number> \
   --require-auto-push \
   --dry-run --debug
 
-# Simulate the full patch-and-push cycle without actually pushing
+# Simulate the full patch-and-push cycle without pushing
 python .github/scripts/pr_merge_sync_patches.py \
   --repo ROCm/rocm-libraries \
   --pr <pr-number> \
@@ -126,171 +209,111 @@ python .github/scripts/pr_merge_sync_patches.py \
   --dry-run --debug
 ```
 
-Use a PR number from a **previously merged** PR that touched the subtree you
-care about. The merge commit is already on `develop`, so the script can
-generate a real patch without touching anything.
+Use the PR number of an already-merged PR. The merge commit is already on
+`develop`, so a real patch can be generated without touching anything.
 
----
+#### Local bare-repo harness (no GitHub token needed)
 
-## Local Bare-Repo Harness (for git-level bugs)
-
-For bugs that involve git behaviour (staging, patch application, push
-reliability), you can create fully local fake repositories — no GitHub token
-or network access required.
+For git-level bugs (staging, patch application, push reliability):
 
 ```bash
-# 1. Create a fake "source" commit in your working tree
-git commit --allow-empty -m "test: trigger mirror sync"
-MERGE_SHA=$(git rev-parse HEAD)
-
-# 2. Create a fake bare "sub-repo" target
+# Create a fake bare "sub-repo" target
 git init --bare /tmp/test-subrepo.git
 git clone /tmp/test-subrepo.git /tmp/test-subrepo-seed
 git -C /tmp/test-subrepo-seed commit --allow-empty -m "initial"
 git -C /tmp/test-subrepo-seed push origin main
 rm -rf /tmp/test-subrepo-seed
 
-# 3. Craft a minimal repos-config override pointing at the local bare repo
-cat > /tmp/test-repos-config.json <<'EOF'
-[
-  {
-    "name": "mylib",
-    "category": "projects",
-    "url": "local-org/mylib",
-    "branch": "main",
-    "auto_subtree_push": true,
-    "monorepo_source_of_truth": true
-  }
-]
-EOF
-
-# 4. Generate a real patch from your test commit
+# Generate a patch from a real or test commit
+MERGE_SHA=$(git rev-parse HEAD)
 git format-patch -1 "$MERGE_SHA" --relative=projects/mylib \
   --output /tmp/mylib.patch
 
-# 5. Inspect / test patch application directly
+# Apply manually to inspect behavior
 git clone /tmp/test-subrepo.git /tmp/test-apply
-git -C /tmp/test-apply apply /tmp/mylib.patch   # or apply --3way, etc.
+git -C /tmp/test-apply apply /tmp/mylib.patch
 ```
 
-This harness lets you reproduce and verify fixes for:
-
-- **AICK-2008** — files silently dropped because `git add .` honors `.gitignore`
-- **AICK-2010** — push failures not surfaced (retry / non-zero exit)
-- **AICK-2011** — patch application failing on a second run (idempotency)
-
----
-
-## Testing Each Known Bug
-
-### AICK-2007 — Commit message mangling
-
-The fix lives entirely in `_extract_commit_message_from_patch()`. Test with
-fixture `.patch` files that contain:
-
-- Multi-line folded subjects (RFC 2822 line continuation)
-- MIME-encoded words (`=?UTF-8?q?...?=`) from non-ASCII author names
-- `[PATCH 1/3]` prefixes (not just `[PATCH]`)
-- Content after the `---` separator bleeding into the subject
-
-Place fixture files under `.github/scripts/tests/fixtures/` and load them in
-the test:
-
-```python
-FIXTURES = Path(__file__).parent / "fixtures"
-
-class CommitMessageTest(unittest.TestCase):
-    def test_mime_encoded_subject_is_decoded(self):
-        patch_path = FIXTURES / "mime_encoded_subject.patch"
-        result = sut._extract_commit_message_from_patch(patch_path)
-        self.assertNotIn("=?UTF-8?", result)
-```
-
-### AICK-2008 — Force-tracked files dropped by `git add .`
-
-Write a test that:
-1. Creates a `tempfile.TemporaryDirectory()` with `git init`
-2. Commits a file that is listed in `.gitignore`
-3. Calls `_stage_changes()` (current implementation)
-4. Asserts `git status` shows the file as **not** staged (demonstrating the bug)
-5. After the fix, asserts it **is** staged
-
-Use `git add --force` or `git add -A` in the fix, and confirm the test passes.
-
-### AICK-2009 — Silent no-op when no subtrees match
-
-```python
-class NoMatchTest(unittest.TestCase):
-    def test_unmatched_subtrees_raises_or_exits_nonzero(self):
-        config = load_repo_config(".github/repos-config.json")
-        result = sut.get_subtree_info(config, ["projects/doesnotexist"])
-        # After the fix: either raises, or main() returns non-zero
-        self.assertEqual(result, [])   # replace with assertion on exit code
-```
-
-### AICK-2010 — Fire-and-forget push
-
-```python
-class PushFailureTest(unittest.TestCase):
-    @patch("pr_merge_sync_patches._run_git", side_effect=RuntimeError("push failed"))
-    def test_push_failure_propagates(self, _):
-        with self.assertRaises(RuntimeError):
-            sut._push_changes(Path("/tmp/fake"), "main")
-```
-
-After the fix (retry + re-raise), assert that the mock was called the expected
-number of times and that the exception is still propagated after exhausting
-retries.
-
-### AICK-2011 — Non-idempotent patch application
-
-Write a test that applies the same patch twice to a `git init` temp repo and
-asserts that:
-- First application succeeds
-- Second application either succeeds silently (already-synced guard) or raises
-  a clear, actionable error — **not** a confusing `git apply` conflict
-
----
-
-## Manual Workflow Re-trigger (staging equivalent)
-
-If you need to validate against a real sub-repo without modifying `develop`,
-use the **Manual Patch Rerun** workflow:
+#### Manual workflow re-trigger (nearest thing to a staging run)
 
 1. Open **Actions → Manual Patch Rerun → Run workflow**
 2. Enter the PR number of a previously merged PR that touched your subtree
-3. The workflow will detect subtrees, generate the patch, and push — using
-   real credentials but on an already-merged commit
+3. The workflow uses real credentials and pushes to the real sub-repo
 
-> ⚠️ This pushes to the real sub-repo. Only use it for PRs whose changes were
-> already intended to land. If you want a pure read-only check, add `--dry-run`
-> to the workflow's script invocation temporarily.
+> ⚠️ Only use this for PRs whose changes were already intended to land.
 
----
+#### PR checklist for mirror-sync fixes
 
-## Adding a CI Job for Script Tests
-
-There is currently no CI job that runs `.github/scripts/tests/`. When adding
-new tests, consider opening a follow-up PR to add a lightweight job to
-`pre-commit.yml` or a new `scripts-unit-tests.yml`:
-
-```yaml
-- name: Run script unit tests
-  run: pytest .github/scripts/tests/ -v
-```
-
-This ensures regressions in the mirror sync logic are caught on every PR, not
-just when someone runs the tests locally.
-
----
-
-## Checklist for Mirror-Sync Bug-Fix PRs
-
-- [ ] Root cause is identified and described in the PR body
-- [ ] Fix is in the smallest possible function (prefer pure functions over
-      side-effectful ones)
-- [ ] A unit test in `.github/scripts/tests/` reproduces the bug **before**
-      the fix and passes **after**
+- [ ] Root cause described in the PR body
+- [ ] Fix is in the smallest possible function
+- [ ] Unit test in `tests/` reproduces the bug before the fix and passes after
 - [ ] `pytest .github/scripts/tests/ -v` passes locally
 - [ ] `--dry-run --debug` smoke test passes against a real merged PR number
-- [ ] PR references the relevant AICK ticket
+- [ ] PR references the AICK ticket
+
+---
+
+### TheRock CI — `resolve_therock_ref.py`, `therock_configure_ci.py`, `therock_matrix.py`
+
+`resolve_therock_ref.py` pins the TheRock commit that a multi-arch CI run
+builds against. The resolution policy (merge-base for PRs, live tip for
+pushes) is documented in the module docstring.
+
+`therock_configure_ci.py` reads the `SUBTREES` environment variable and
+selects which build flags and tests to run. It imports from `therock_matrix.py`
+(the static subtree → project mapping) and from `pr_detect_changed_subtrees.py`.
+
+All three have test coverage in `tests/`:
+
+```bash
+pytest tests/resolve_therock_ref_test.py tests/therock_configure_ci_test.py tests/therock_matrix_test.py -v
+```
+
+These tests use an in-process `FakeClient` that stubs out all HTTP calls —
+follow the same pattern for any new tests.
+
+---
+
+### PR Automation — `pr_category_label.py`, `apply-labels.py`, `collect-labels.py`
+
+These scripts apply category labels to PRs based on changed file paths.
+`apply-labels.py` and `collect-labels.py` use raw `requests` calls rather than
+`GitHubCLIClient`. They have no unit tests yet; if you change them, add tests
+before merging.
+
+---
+
+### Notifications — `notify_teams.py`
+
+Routes CI failure alerts to the correct Microsoft Teams channel. Webhook URLs
+are stored as repository secrets and are not accessible in dry-run/local
+testing. The routing logic (PR title tag matching, component-name fallback) is
+pure Python and is independently testable without a live webhook.
+
+Use `--dry-run` to exercise the routing logic locally without sending a
+notification:
+
+```bash
+python .github/scripts/notify_teams.py \
+  --failure-stage test \
+  --log-path ./test_output.log \
+  --webhook-urls '{"miopen": "https://placeholder"}' \
+  --pr-number 123 \
+  --pr-title "[miopen] Fix something" \
+  --component-name miopen \
+  --dry-run
+```
+
+---
+
+### Repo Maintenance — `merge-codeowners.py`, `merge-submodules.py`
+
+These scripts have no external dependencies beyond the standard library and
+operate only on the local filesystem. They are safe to run locally at any time:
+
+```bash
+python .github/scripts/merge-codeowners.py   # rewrites .github/CODEOWNERS
+python .github/scripts/merge-submodules.py   # rewrites .gitmodules
+```
+
+Inspect the diff before committing. Neither script has unit tests yet.
