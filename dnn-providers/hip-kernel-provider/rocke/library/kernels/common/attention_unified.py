@@ -93,6 +93,7 @@ class UnifiedAttentionProblem:
     use_alibi: bool = False
     use_qq_bias: bool = False
     use_fp8: bool = False
+    fp8_fnuz: bool = False
     num_cus: int = 120
     # Direct device-subscription target override (concurrent workgroups / CTAs).
     # 0 => auto: derive as ``num_cus * 4``. When > 0, this takes precedence over
@@ -403,6 +404,33 @@ UNIFIED_BLOCK_SIZES: Tuple[int, ...] = (16, 32, 64)
 UNIFIED_DTYPES: Tuple[str, ...] = ("fp16", "bf16")
 
 
+def _reject_fp8_format_arch_mismatch(
+    problem: UnifiedAttentionProblem, arch: str
+) -> Optional[Tuple[bool, str]]:
+    if not problem.use_fp8:
+        return None
+    from rocke.core.arch import ArchTarget
+    from .fmha_fwd_fp8 import _FNUZ_FP8_TARGET_FAMILIES
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+    arch_is_fnuz = target.target_family in _FNUZ_FP8_TARGET_FAMILIES
+    if problem.fp8_fnuz != arch_is_fnuz:
+        native = "e4m3fnuz/e5m2fnuz" if arch_is_fnuz else "OCP e4m3fn/e5m2"
+        declared = "fnuz" if problem.fp8_fnuz else "OCP"
+        return False, (
+            f"fp8 K/V on {arch} (target_family={target.target_family!r}) "
+            f"decodes as {native}, but the problem declares {declared}-quantised "
+            f"K/V (fp8_fnuz={problem.fp8_fnuz}); the mismatch would silently "
+            f"mis-decode K/V. Quantise K/V to the arch-native format and set "
+            f"fp8_fnuz to match, or run on an arch whose native fp8 format "
+            f"matches the data."
+        )
+    return None
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
 ) -> Tuple[bool, str]:
@@ -430,6 +458,9 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
+        rejected = _reject_fp8_format_arch_mismatch(problem, _resolve_attention_arch())
+        if rejected is not None:
+            return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
             return False, f"scalar 2D kernel: unsupported q_dtype {problem.q_dtype!r}"
     elif problem.q_dtype is not None:
@@ -535,6 +566,9 @@ def supports_native_unified_attention_3d_tiled(
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
     arch = _resolve_attention_arch()
+    rejected = _reject_fp8_format_arch_mismatch(problem, arch)
+    if rejected is not None:
+        return rejected
     *_, supports_tiled_3d = _tiled_3d_impl(arch)
     return supports_tiled_3d(
         head_size=problem.head_size,
@@ -1032,6 +1066,18 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem) and problem.sliding_window > 0:
         return problem.block_size
+    # fp16 D128 single-batch sliding-window: force T=64. The generic
+    # 2*block_size tile would give T=32 at block_size=16, whose 256 outer
+    # iterations at S=8192 under-amortise the per-iter cost. T=64 halves the
+    # iteration count; measured ~1.65x on gfx950 (numerically identical --
+    # both paths max_abs 1.95e-3).
+    if (
+        _enable_single_batch_combo(problem)
+        and problem.sliding_window > 0
+        and problem.head_size == 128
+        and problem.dtype == "fp16"
+    ):
+        return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
     # Autotuner-proven KV tile per shape (gfx950, no-SW):
     #   * d128 -> T = 2 * block_size (32). The d128 winners all kept the
@@ -1632,7 +1678,10 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         them per-score, so biased single-batch prefill takes the combo path
         instead of the fallback. Only softcap/sinks are excluded (above)
         because the mask-limit shortcut can't fold them.
-      * no sliding window (the mask-once / mask-limit opts require no-SW).
+      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
+        faster here than the narrow 16x16 path (both numerically equal); other
+        SW shapes keep their existing routing, and the no-SW VALU sub-flags
+        auto-disable via _enable_transposed_subflags.
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -1648,7 +1697,21 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    if problem.sliding_window > 0:
+    # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
+    # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
+    # path; both numerically equal). Scoped to block_size==16 because that is the
+    # cohort we measured. bs in {32,64} would now also build safely under the
+    # combo -- the _enable_k_single_buffer geometry guard derives block_m <=
+    # tile_size, so the former block_m=128 > tile_size=64 collision no longer
+    # raises -- but their combo speedup is unmeasured, so they keep their
+    # existing routing. bf16 D128 SW and all other SW shapes also stay on their
+    # existing paths; the no-SW VALU sub-flags auto-disable for SW via
+    # _enable_transposed_subflags.
+    if problem.sliding_window > 0 and not (
+        problem.head_size == 128
+        and problem.dtype == "fp16"
+        and problem.block_size == 16
+    ):
         return False
     if problem.head_size not in (64, 128):
         return False

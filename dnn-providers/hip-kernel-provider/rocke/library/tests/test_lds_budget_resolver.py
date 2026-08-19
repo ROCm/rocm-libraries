@@ -151,6 +151,25 @@ class TestLdsBudgetResolver(unittest.TestCase):
         self.assertIn("single-K", msg)
         self.assertIn("T=64", msg)
 
+    def test_pin_wins_over_a_leaked_memo(self):
+        """Regression guard, stated deterministically instead of by ordering.
+
+        The original failure needed two conditions an earlier test supplies:
+        ``attention_spec_builder`` already imported, and
+        ``_RESOLVED_ATTENTION_ARCH`` holding a non-gfx950 arch. Under a bound
+        import the builder read the memo instead of the patch and handed back a
+        gfx942 spec, so every assertion in this class measured the host. Both
+        conditions are reproduced here so the guard cannot lapse when collection
+        order changes.
+        """
+        import builders.common.attention_spec_builder  # noqa: F401  (pre-import)
+
+        au._RESOLVED_ATTENTION_ARCH = "gfx942"  # restored by the autouse fixture
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
+        self.assertEqual(type(spec).__module__, "kernels.gfx950.attention_tiled_2d")
+        self.assertTrue(spec.use_k_single_buffer)
+
 
 class TestD256ProductionRouting(unittest.TestCase):
     """Production routing (``_d256_gfx950_fast`` live, not mocked): the
