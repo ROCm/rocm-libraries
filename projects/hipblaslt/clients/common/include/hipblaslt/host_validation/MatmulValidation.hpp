@@ -4,10 +4,8 @@
 #pragma once
 
 #include "hipBuffer.hpp"
-#include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_test.hpp"
 #include "norm.hpp"
-#include "utility.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -28,10 +26,25 @@ namespace hipblaslt::host_validation
         double& averageUlp;
     };
 
+    struct MatmulValidationOptions
+    {
+        bool                comparePointwise = false;
+        bool                compareNorm      = false;
+        bool                searchAllClose   = false;
+        bool                computeUlp       = false;
+        bool                assertNorm       = false;
+        bool                gradient         = false;
+        bool                usesAuxiliary    = false;
+        bool                usesBias         = false;
+        bool                outputMaximum    = false;
+        hipblasComputeType_t computeType      = HIPBLAS_COMPUTE_32F;
+        hipDataType          inputTypeA       = HIP_R_32F;
+        hipDataType          inputTypeB       = HIP_R_32F;
+    };
+
     struct MatmulValidationRequest
     {
-        hipStream_t                   stream;
-        const Arguments&              arguments;
+        MatmulValidationOptions       options;
         int32_t                       gemmCount;
         const std::vector<int64_t>&   rows;
         const std::vector<int64_t>&   columns;
@@ -45,13 +58,10 @@ namespace hipblaslt::host_validation
         std::vector<HipHostBuffer>&   observedOutput;
         std::vector<HipHostBuffer>&   expectedMaximum;
         std::vector<HipHostBuffer>&   observedMaximum;
-        std::vector<HipDeviceBuffer>& deviceMaximum;
         std::vector<HipHostBuffer>&   expectedAuxiliary;
         std::vector<HipHostBuffer>&   observedAuxiliary;
-        std::vector<HipDeviceBuffer>& deviceAuxiliary;
         std::vector<HipHostBuffer>&   expectedBias;
         std::vector<HipHostBuffer>&   observedBias;
-        std::vector<HipDeviceBuffer>& deviceBias;
         const std::vector<double>&    absoluteTolerances;
         const std::vector<double>&    symmetricRelativeTolerances;
         MatmulValidationMetrics       metrics;
@@ -64,8 +74,7 @@ namespace hipblaslt::host_validation
 
     void validateMatmulOutputs(const MatmulValidationRequest& request)
     {
-        const hipStream_t          stream               = request.stream;
-        const Arguments&           arg                  = request.arguments;
+        const auto&                options              = request.options;
         const int32_t              gemm_count           = request.gemmCount;
         const auto&                M                    = request.rows;
         const auto&                N                    = request.columns;
@@ -79,13 +88,10 @@ namespace hipblaslt::host_validation
         auto&                      hD_1                 = request.observedOutput;
         auto&                      hAmaxD_gold          = request.expectedMaximum;
         auto&                      hAmaxD               = request.observedMaximum;
-        auto&                      dAmaxD               = request.deviceMaximum;
         auto&                      hE_gold              = request.expectedAuxiliary;
         auto&                      hE                   = request.observedAuxiliary;
-        auto&                      dE                   = request.deviceAuxiliary;
         auto&                      hBias_gold           = request.expectedBias;
         auto&                      hBias                = request.observedBias;
-        auto&                      dBias                = request.deviceBias;
         const auto&                tol                  = request.absoluteTolerances;
         const auto&                symmetricRelativeTol = request.symmetricRelativeTolerances;
         double&                    hipblaslt_error      = request.metrics.relativeFrobeniusError;
@@ -99,35 +105,12 @@ namespace hipblaslt::host_validation
         const hipDataType          Tc                   = request.computeType;
         const hipblasLtBatchMode_t batchMode            = request.batchMode;
 
-        // fetch GPU
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
-
         // ULP error accumulators (sum/count are used to derive the average below)
         double ulp_sum_total   = 0.0;
         size_t ulp_count_total = 0;
 
         for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
         {
-            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-            {
-                if(!arg.gradient && arg.use_e)
-                {
-                    CHECK_HIP_ERROR(
-                        synchronize(hE[gemmIdx], dE[gemmIdx], 0, 0, 0, 0, 1, false, stream));
-                }
-
-                if(arg.amaxD)
-                {
-                    CHECK_HIP_ERROR(synchronize(
-                        hAmaxD[gemmIdx], dAmaxD[gemmIdx], 0, 0, 0, 0, 1, false, stream));
-                }
-                if(arg.gradient && arg.bias_vector)
-                {
-                    CHECK_HIP_ERROR(
-                        synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
-                }
-            }
-
             const auto compareBuffer = [&](int64_t     rows,
                                            int64_t     columns,
                                            int64_t     leadingDimension,
@@ -178,14 +161,16 @@ namespace hipblaslt::host_validation
             };
 
 #ifdef GOOGLE_TEST
-            const bool requireDSpecialValueConsistency = arg.unit_check || arg.norm_check;
-            const bool compareDPointwise               = arg.unit_check;
+            const bool requireDSpecialValueConsistency
+                = options.comparePointwise || options.compareNorm;
+            const bool compareDPointwise = options.comparePointwise;
 #else
             constexpr bool requireDSpecialValueConsistency = false;
             constexpr bool compareDPointwise               = false;
 #endif
             const bool compareD = requireDSpecialValueConsistency || compareDPointwise
-                                  || arg.norm_check || arg.allclose_check || arg.ulp_check;
+                                  || options.compareNorm || options.searchAllClose
+                                  || options.computeUlp;
 
             std::optional<HostComparisonReport> dComparison;
             std::vector<HostComparisonReport>   dBatchComparisons;
@@ -201,9 +186,9 @@ namespace hipblaslt::host_validation
                                             To,
                                             requireDSpecialValueConsistency,
                                             compareDPointwise,
-                                            arg.norm_check,
-                                            arg.allclose_check,
-                                            arg.ulp_check);
+                                            options.compareNorm,
+                                            options.searchAllClose,
+                                            options.computeUlp);
             }
             else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY && compareD)
             {
@@ -220,9 +205,9 @@ namespace hipblaslt::host_validation
                                                               To,
                                                               requireDSpecialValueConsistency,
                                                               compareDPointwise,
-                                                              arg.norm_check,
-                                                              arg.allclose_check,
-                                                              arg.ulp_check));
+                                                              options.compareNorm,
+                                                              options.searchAllClose,
+                                                              options.computeUlp));
                 }
             }
 
@@ -236,7 +221,7 @@ namespace hipblaslt::host_validation
             // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message.
             // Mirror the unit/norm-check buffer branching: pointer-array mode uses per-batch buffers,
             // so a strided read over num_batches would compare the wrong buffers / go out of bounds.
-            if(arg.unit_check || arg.norm_check)
+            if(options.comparePointwise || options.compareNorm)
             {
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
@@ -278,7 +263,7 @@ namespace hipblaslt::host_validation
                 }
             };
 #endif
-            if(arg.unit_check)
+            if(options.comparePointwise)
             {
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
@@ -297,7 +282,7 @@ namespace hipblaslt::host_validation
                 }
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
-                    if(arg.amaxD)
+                    if(options.outputMaximum)
                     {
 #ifdef GOOGLE_TEST
                         const HostComparisonReport amaxPointwiseComparison
@@ -317,7 +302,7 @@ namespace hipblaslt::host_validation
                         assertPointwiseComparison(amaxPointwiseComparison.comparison);
 #endif
                     }
-                    if(!arg.gradient && arg.use_e)
+                    if(!options.gradient && options.usesAuxiliary)
                     {
 #ifdef GOOGLE_TEST
                         const HostComparisonReport auxiliaryPointwiseComparison
@@ -337,7 +322,7 @@ namespace hipblaslt::host_validation
                         assertPointwiseComparison(auxiliaryPointwiseComparison.comparison);
 #endif
                     }
-                    if(arg.gradient && arg.bias_vector)
+                    if(options.gradient && options.usesBias)
                     {
 #ifdef GOOGLE_TEST
                         const HostComparisonReport biasPointwiseComparison
@@ -360,7 +345,7 @@ namespace hipblaslt::host_validation
                 }
             }
 
-            if(arg.norm_check)
+            if(options.compareNorm)
             {
                 double norm_error = 0.0;
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -376,14 +361,17 @@ namespace hipblaslt::host_validation
                     }
                 }
                 hipblaslt_error += norm_error;
-                if(arg.norm_check_assert)
+                if(options.assertNorm)
                 {
-                    CHECK_SUCCESS(
-                        norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+                    CHECK_SUCCESS(norm_check(norm_error,
+                                             To,
+                                             options.computeType,
+                                             options.inputTypeA,
+                                             options.inputTypeB));
                 }
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
-                    if(arg.amaxD)
+                    if(options.outputMaximum)
                     {
                         const HostComparisonReport amaxFrobeniusComparison
                             = compareBuffer(1,
@@ -402,10 +390,10 @@ namespace hipblaslt::host_validation
                         double norm_error
                             = std::abs(amaxFrobeniusComparison.relativeFrobeniusError);
                         hipblaslt_error += norm_error;
-                        if(arg.norm_check_assert)
+                        if(options.assertNorm)
                             CHECK_SUCCESS(norm_check(norm_error, Tc));
                     }
-                    if(!arg.gradient && arg.use_e)
+                    if(!options.gradient && options.usesAuxiliary)
                     {
                         const HostComparisonReport auxiliaryFrobeniusComparison
                             = compareBuffer(M[gemmIdx],
@@ -424,13 +412,16 @@ namespace hipblaslt::host_validation
                         double norm_error
                             = std::abs(auxiliaryFrobeniusComparison.relativeFrobeniusError);
                         hipblaslt_error += norm_error;
-                        if(arg.norm_check_assert)
+                        if(options.assertNorm)
                         {
-                            CHECK_SUCCESS(norm_check(
-                                norm_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
+                            CHECK_SUCCESS(norm_check(norm_error,
+                                                     Taux,
+                                                     options.computeType,
+                                                     options.inputTypeA,
+                                                     options.inputTypeB));
                         }
                     }
-                    if(arg.gradient && arg.bias_vector)
+                    if(options.gradient && options.usesBias)
                     {
                         const HostComparisonReport biasFrobeniusComparison
                             = compareBuffer(M[gemmIdx],
@@ -449,7 +440,7 @@ namespace hipblaslt::host_validation
                         double norm_error
                             = std::abs(biasFrobeniusComparison.relativeFrobeniusError);
                         hipblaslt_error += norm_error;
-                        if(arg.norm_check_assert)
+                        if(options.assertNorm)
                         {
                             CHECK_SUCCESS(norm_check(norm_error, Tbias));
                         }
@@ -457,7 +448,7 @@ namespace hipblaslt::host_validation
                 }
             }
 
-            if(arg.allclose_check)
+            if(options.searchAllClose)
             {
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
@@ -492,7 +483,7 @@ namespace hipblaslt::host_validation
                 }
             }
 
-            if(arg.ulp_check)
+            if(options.computeUlp)
             {
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
@@ -516,7 +507,7 @@ namespace hipblaslt::host_validation
             }
         }
 
-        if(arg.ulp_check && ulp_count_total > 0)
+        if(options.computeUlp && ulp_count_total > 0)
             hipblaslt_avg_ulp = ulp_sum_total / ulp_count_total;
     }
 } // namespace hipblaslt::host_validation
