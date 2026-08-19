@@ -558,7 +558,7 @@ void testStructuredSparsity() {
     pattern.axis = 1;
     pattern.fixedPositions = {1, 3};
     const StructuredSparsityRunInfo run = applyStructuredSparsity(
-        StructuredSparsityProblem(input, pruned, compressed, retainedIndices, pattern));
+        StructuredSparsityRequest(input, pruned, compressed, retainedIndices, pattern));
     require(run.groupsProcessed == 4 && run.prunedElementsWritten == 16 &&
                 run.compressedElementsWritten == 8,
             "Structured sparsity run information mismatch.");
@@ -587,7 +587,7 @@ void testStructuredSparsity() {
 
     Tensor metadata(ScalarType::UInt8, Shape{2, 1});
     const TwoOfFourMetadataRunInfo metadataRun =
-        encodeTwoOfFourMetadata(TwoOfFourMetadataProblem(retainedIndices, metadata, 1));
+        encodeTwoOfFourMetadata(TwoOfFourMetadataRequest(retainedIndices, metadata, 1));
     require(metadataRun.sparsityGroupsEncoded == 4 && metadataRun.metadataBytesWritten == 2,
             "Two-of-four metadata run information mismatch.");
     require(metadata.loadAs<uint8_t>({0, 0}) == 0xdd && metadata.loadAs<uint8_t>({1, 0}) == 0xdd,
@@ -596,12 +596,12 @@ void testStructuredSparsity() {
     Tensor fusedPruned(ScalarType::Float32, Shape{2, 8});
     Tensor fusedCompressed(ScalarType::Float32, Shape{2, 4});
     Tensor fusedMetadata(ScalarType::UInt8, Shape{2, 1});
-    StructuredSparsityProblem fusedProblem(input, fusedPruned, fusedCompressed, pattern);
-    fusedProblem.twoOfFourMetadata = fusedMetadata;
+    StructuredSparsityRequest fusedRequest(input, fusedPruned, fusedCompressed, std::nullopt,
+                                           fusedMetadata, pattern);
     const StructuredSparsityRunInfo firstFusedRun =
-        applyStructuredSparsity(fusedProblem, {.firstSlice = 0, .sliceCount = 1});
+        applyStructuredSparsity(fusedRequest, {.firstSlice = 0, .sliceCount = 1});
     const StructuredSparsityRunInfo secondFusedRun =
-        applyStructuredSparsity(fusedProblem, {.firstSlice = 1, .sliceCount = 1});
+        applyStructuredSparsity(fusedRequest, {.firstSlice = 1, .sliceCount = 1});
     require(
         firstFusedRun.groupsProcessed == 2 && secondFusedRun.groupsProcessed == 2 &&
             firstFusedRun.retainedIndicesWritten == 0 &&
@@ -616,10 +616,99 @@ void testStructuredSparsity() {
     pattern.axis = 0;
     pattern.fixedPositions = {0, 2};
     applyStructuredSparsity(
-        StructuredSparsityProblem(inPlace, inPlace, inPlaceCompressed, inPlaceIndices, pattern));
+        StructuredSparsityRequest(inPlace, inPlace, inPlaceCompressed, inPlaceIndices, pattern));
     require(inPlace.loadAs<float>({0}) == 1 && inPlace.loadAs<float>({1}) == 0 &&
                 inPlace.loadAs<float>({2}) == 3 && inPlace.loadAs<float>({3}) == 0,
             "In-place structured sparsity mismatch.");
+
+    const std::array<float, 12> ownedValues{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    StructuredSparsityPattern ownedPattern;
+    ownedPattern.axis = 0;
+    ownedPattern.fixedPositions = {0, 2};
+    StructuredSparsityProblem ownedProblem(
+        Tensor::fromNativeValues<float>(Shape{12}, std::span<const float>(ownedValues)),
+        ownedPattern, {.retainedIndices = true, .twoOfFourMetadata = true});
+    size_t allocatorCalls = 0;
+    const TensorStorageAllocator nonzeroAllocator = [&allocatorCalls](size_t bytes) {
+        ++allocatorCalls;
+        TensorStorage storage = TensorStorage::allocate(bytes);
+        std::fill(storage.mutableBytes().begin(), storage.mutableBytes().end(), std::byte{0xa5});
+        return storage;
+    };
+    const StructuredSparsityResult owned = applyStructuredSparsity(ownedProblem, nonzeroAllocator);
+    require(allocatorCalls == 4 && owned.pruned.layout() == Layout::contiguous(Shape{12}) &&
+                owned.compressed.layout() == Layout::contiguous(Shape{6}) &&
+                owned.retainedIndices &&
+                owned.retainedIndices->layout() == Layout::contiguous(Shape{6}) &&
+                owned.twoOfFourMetadata &&
+                owned.twoOfFourMetadata->layout() == Layout::contiguous(Shape{2}) &&
+                owned.runInfo.groupsProcessed == 3,
+            "Owning structured-sparsity result contract mismatch.");
+    require(owned.twoOfFourMetadata->loadAs<uint8_t>({0}) == 0x88 &&
+                owned.twoOfFourMetadata->loadAs<uint8_t>({1}) == 0x08,
+            "Owning structured-sparsity metadata retained allocator-dependent bits.");
+
+    StructuredSparsityPattern invalidMetadataPattern = ownedPattern;
+    invalidMetadataPattern.retainedElements = 1;
+    invalidMetadataPattern.fixedPositions = {0};
+    StructuredSparsityProblem invalidMetadataProblem(
+        ownedProblem.input, invalidMetadataPattern,
+        {.retainedIndices = false, .twoOfFourMetadata = true});
+    bool rejectedBeforeAllocation = false;
+    try {
+        (void)applyStructuredSparsity(invalidMetadataProblem, nonzeroAllocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 4,
+            "Owning structured sparsity allocated before validating metadata policy.");
+
+    TensorStorage overlappingStorage = TensorStorage::allocate(ownedProblem.input.storage().size());
+    size_t overlappingAllocatorCalls = 0;
+    const TensorStorageAllocator overlappingAllocator = [&overlappingStorage,
+                                                         &overlappingAllocatorCalls](size_t) {
+        ++overlappingAllocatorCalls;
+        return overlappingStorage;
+    };
+    bool rejectedOverlap = false;
+    try {
+        (void)applyStructuredSparsity(ownedProblem, overlappingAllocator);
+    } catch (const std::invalid_argument&) {
+        rejectedOverlap = true;
+    }
+    require(rejectedOverlap && overlappingAllocatorCalls == 4,
+            "Owning structured sparsity accepted overlapping allocator results.");
+
+    const TwoOfFourMetadataResult ownedMetadata = encodeTwoOfFourMetadata(
+        TwoOfFourMetadataProblem(*owned.retainedIndices, 0), nonzeroAllocator);
+    require(allocatorCalls == 5 && ownedMetadata.metadata.shape() == Shape{2} &&
+                ownedMetadata.metadata.loadAs<uint8_t>({0}) == 0x88 &&
+                ownedMetadata.metadata.loadAs<uint8_t>({1}) == 0x08,
+            "Owning two-of-four metadata result contract mismatch.");
+
+    const std::array<uint8_t, 2> invalidRetainedValues{2, 1};
+    const TwoOfFourMetadataProblem invalidRetained(
+        Tensor::fromNativeValues<uint8_t>(Shape{2},
+                                          std::span<const uint8_t>(invalidRetainedValues)),
+        0);
+    rejectedBeforeAllocation = false;
+    try {
+        (void)encodeTwoOfFourMetadata(invalidRetained, nonzeroAllocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 5,
+            "Owning two-of-four metadata allocated before validating retained positions.");
+
+    StructuredSparsityPattern widePattern;
+    widePattern.axis = 0;
+    widePattern.groupSize = 257;
+    widePattern.retainedElements = 1;
+    widePattern.fixedPositions = {0};
+    const StructuredSparsityResult wide = applyStructuredSparsity(
+        StructuredSparsityProblem(Tensor(ScalarType::Float32, Shape{257}), widePattern));
+    require(wide.compressed.shape() == Shape{1} && !wide.retainedIndices,
+            "Structured sparsity imposed the UInt8 index limit without an index output.");
 }
 
 void testIndexedGeneration() {

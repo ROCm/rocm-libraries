@@ -21,6 +21,7 @@ namespace roc::host_validation {
 namespace detail {
 struct StructuredSparsityPlan {
     Shape compressedShape;
+    std::optional<Shape> metadataShape;
     size_t groupsPerLine = 0;
     size_t lineCount = 0;
     std::vector<std::vector<size_t>> retainedPositionSets;
@@ -44,7 +45,8 @@ inline void enumerateRetainedPositionSets(size_t groupSize, size_t retainedEleme
     }
 }
 
-inline StructuredSparsityPlan validateStructuredSparsity(const StructuredSparsityProblem& problem) {
+inline StructuredSparsityPlan validateStructuredSparsityProblem(
+    const StructuredSparsityProblem& problem) {
     const Shape& inputShape = problem.input.shape();
     if (inputShape.rank() == 0)
         throw std::invalid_argument("Structured sparsity requires a rank-one or higher tensor.");
@@ -56,7 +58,7 @@ inline StructuredSparsityPlan validateStructuredSparsity(const StructuredSparsit
         problem.pattern.retainedElements > problem.pattern.groupSize)
         throw std::invalid_argument(
             "Structured sparsity retained-element count must be in [1, group size].");
-    if (problem.pattern.groupSize > 256)
+    if (problem.outputs.retainedIndices && problem.pattern.groupSize > 256)
         throw std::invalid_argument(
             "Structured sparsity UInt8 retained indices require group size at most 256.");
     if (inputShape[problem.pattern.axis] == 0)
@@ -67,51 +69,36 @@ inline StructuredSparsityPlan validateStructuredSparsity(const StructuredSparsit
     if (scalarTypeInfo(problem.input.type()).category == ScalarCategory::Scale)
         throw std::invalid_argument(
             "Structured sparsity does not accept scale-only scalar encodings.");
-
-    if (problem.pruned.type() != problem.input.type() ||
-        problem.compressed.type() != problem.input.type())
-        throw std::invalid_argument(
-            "Structured sparsity input, pruned, and compressed scalar types must match.");
-    if (problem.pruned.shape() != inputShape)
-        throw std::invalid_argument("Structured sparsity pruned tensor shape mismatch.");
+    if (problem.pattern.selection != StructuredSparsitySelection::Fixed &&
+        problem.pattern.selection != StructuredSparsitySelection::Random)
+        throw std::invalid_argument("Structured sparsity selection is invalid.");
+    if (problem.pattern.indexOrder != LogicalIndexOrder::FirstDimensionFastest &&
+        problem.pattern.indexOrder != LogicalIndexOrder::LastDimensionFastest)
+        throw std::invalid_argument("Structured sparsity index order is invalid.");
 
     std::vector<size_t> compressedDimensions(inputShape.dimensions().begin(),
                                              inputShape.dimensions().end());
-    compressedDimensions[problem.pattern.axis] = inputShape[problem.pattern.axis] /
-                                                 problem.pattern.groupSize *
-                                                 problem.pattern.retainedElements;
+    const size_t groupsPerLine = inputShape[problem.pattern.axis] / problem.pattern.groupSize;
+    if (groupsPerLine > std::numeric_limits<size_t>::max() / problem.pattern.retainedElements)
+        throw std::overflow_error("Structured sparsity compressed axis extent overflows.");
+    compressedDimensions[problem.pattern.axis] = groupsPerLine * problem.pattern.retainedElements;
     const Shape compressedShape(std::move(compressedDimensions));
-    if (problem.compressed.shape() != compressedShape)
-        throw std::invalid_argument("Structured sparsity compressed tensor shape mismatch.");
-    if (problem.retainedIndices) {
-        if (problem.retainedIndices->type() != ScalarType::UInt8)
-            throw std::invalid_argument("Structured sparsity retained indices must use UInt8.");
-        if (problem.retainedIndices->shape() != compressedShape)
-            throw std::invalid_argument(
-                "Structured sparsity retained-index tensor shape mismatch.");
-    }
-    if (problem.twoOfFourMetadata) {
+
+    std::optional<Shape> metadataShape;
+    if (problem.outputs.twoOfFourMetadata) {
         if (problem.pattern.groupSize != 4 || problem.pattern.retainedElements != 2)
             throw std::invalid_argument(
                 "Two-of-four metadata output requires a two-of-four sparsity pattern.");
-        if (problem.twoOfFourMetadata->type() != ScalarType::UInt8)
-            throw std::invalid_argument("Two-of-four metadata output must use UInt8.");
         std::vector<size_t> metadataDimensions(inputShape.dimensions().begin(),
                                                inputShape.dimensions().end());
-        metadataDimensions[problem.pattern.axis] =
-            (inputShape[problem.pattern.axis] / problem.pattern.groupSize + 1) / 2;
-        if (problem.twoOfFourMetadata->shape() != Shape(std::move(metadataDimensions)))
-            throw std::invalid_argument("Structured sparsity two-of-four metadata shape mismatch.");
+        metadataDimensions[problem.pattern.axis] = (groupsPerLine + 1) / 2;
+        metadataShape.emplace(std::move(metadataDimensions));
     }
-
-    if (problem.input.storage().data() == problem.pruned.storage().data() &&
-        problem.input.layout() != problem.pruned.layout())
-        throw std::invalid_argument(
-            "In-place structured sparsity requires identical input and pruned layouts.");
 
     StructuredSparsityPlan plan;
     plan.compressedShape = compressedShape;
-    plan.groupsPerLine = inputShape[problem.pattern.axis] / problem.pattern.groupSize;
+    plan.metadataShape = std::move(metadataShape);
+    plan.groupsPerLine = groupsPerLine;
     plan.lineCount = inputShape.elementCountExcluding(problem.pattern.axis);
 
     if (problem.pattern.selection == StructuredSparsitySelection::Fixed) {
@@ -137,6 +124,87 @@ inline StructuredSparsityPlan validateStructuredSparsity(const StructuredSparsit
                   });
     }
 
+    return plan;
+}
+
+inline bool tensorStorageOverlaps(const Tensor& left, const Tensor& right) {
+    if (left.storage().empty() || right.storage().empty()) return false;
+    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
+    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
+    const uintptr_t leftEnd = leftBegin + left.storage().size();
+    const uintptr_t rightEnd = rightBegin + right.storage().size();
+    return leftBegin < rightEnd && rightBegin < leftEnd;
+}
+
+inline void rejectTensorStorageOverlap(const Tensor& left, const Tensor& right,
+                                       const char* message) {
+    if (tensorStorageOverlaps(left, right)) throw std::invalid_argument(message);
+}
+
+inline StructuredSparsityPlan validateStructuredSparsityRequest(
+    const StructuredSparsityRequest& request) {
+    StructuredSparsityPlan plan = validateStructuredSparsityProblem(request);
+    if (request.pruned.type() != request.input.type() ||
+        request.compressed.type() != request.input.type())
+        throw std::invalid_argument(
+            "Structured sparsity input, pruned, and compressed scalar types must match.");
+    if (request.pruned.shape() != request.input.shape())
+        throw std::invalid_argument("Structured sparsity pruned tensor shape mismatch.");
+    if (request.compressed.shape() != plan.compressedShape)
+        throw std::invalid_argument("Structured sparsity compressed tensor shape mismatch.");
+    if (request.retainedIndices.has_value() != request.outputs.retainedIndices)
+        throw std::invalid_argument(
+            "Structured sparsity retained-index destination does not match the problem.");
+    if (request.twoOfFourMetadata.has_value() != request.outputs.twoOfFourMetadata)
+        throw std::invalid_argument(
+            "Structured sparsity metadata destination does not match the problem.");
+    if (request.retainedIndices) {
+        if (request.retainedIndices->type() != ScalarType::UInt8)
+            throw std::invalid_argument("Structured sparsity retained indices must use UInt8.");
+        if (request.retainedIndices->shape() != plan.compressedShape)
+            throw std::invalid_argument(
+                "Structured sparsity retained-index tensor shape mismatch.");
+    }
+    if (request.twoOfFourMetadata) {
+        if (request.twoOfFourMetadata->type() != ScalarType::UInt8)
+            throw std::invalid_argument("Two-of-four metadata output must use UInt8.");
+        if (request.twoOfFourMetadata->shape() != *plan.metadataShape)
+            throw std::invalid_argument("Structured sparsity two-of-four metadata shape mismatch.");
+    }
+    const bool inputPrunedOverlap = tensorStorageOverlaps(request.input, request.pruned);
+    const bool exactInPlace = request.input.storage().data() == request.pruned.storage().data() &&
+                              request.input.layout() == request.pruned.layout();
+    if (inputPrunedOverlap && !exactInPlace)
+        throw std::invalid_argument(
+            "In-place structured sparsity requires identical input and pruned layouts.");
+    rejectTensorStorageOverlap(request.input, request.compressed,
+                               "Structured sparsity compressed output overlaps the input storage.");
+    rejectTensorStorageOverlap(
+        request.pruned, request.compressed,
+        "Structured sparsity compressed output overlaps the pruned storage.");
+    if (request.retainedIndices) {
+        rejectTensorStorageOverlap(
+            request.input, *request.retainedIndices,
+            "Structured sparsity retained indices overlap the input storage.");
+        rejectTensorStorageOverlap(
+            request.pruned, *request.retainedIndices,
+            "Structured sparsity retained indices overlap the pruned storage.");
+        rejectTensorStorageOverlap(
+            request.compressed, *request.retainedIndices,
+            "Structured sparsity retained indices overlap the compressed storage.");
+    }
+    if (request.twoOfFourMetadata) {
+        rejectTensorStorageOverlap(request.input, *request.twoOfFourMetadata,
+                                   "Structured sparsity metadata overlaps the input storage.");
+        rejectTensorStorageOverlap(request.pruned, *request.twoOfFourMetadata,
+                                   "Structured sparsity metadata overlaps the pruned storage.");
+        rejectTensorStorageOverlap(request.compressed, *request.twoOfFourMetadata,
+                                   "Structured sparsity metadata overlaps the compressed storage.");
+        if (request.retainedIndices)
+            rejectTensorStorageOverlap(
+                *request.retainedIndices, *request.twoOfFourMetadata,
+                "Structured sparsity metadata overlaps the retained-index storage.");
+    }
     return plan;
 }
 
@@ -205,7 +273,7 @@ inline void zeroEncodedElement(ScalarType type, std::span<std::byte> destination
     for (uint64_t bit = 0; bit < bits; ++bit) setBit(destination, destinationBit + bit, false);
 }
 
-inline size_t retainedPositionSetIndexForGroup(const StructuredSparsityProblem& problem,
+inline size_t retainedPositionSetIndexForGroup(const StructuredSparsityRequest& problem,
                                                const StructuredSparsityPlan& plan,
                                                size_t groupLinearIndex) {
     if (problem.pattern.selection == StructuredSparsitySelection::Fixed) return 0;
@@ -217,7 +285,7 @@ inline size_t retainedPositionSetIndexForGroup(const StructuredSparsityProblem& 
 }
 
 inline const std::vector<size_t>& retainedPositionsForGroup(
-    const StructuredSparsityProblem& problem, const StructuredSparsityPlan& plan,
+    const StructuredSparsityRequest& problem, const StructuredSparsityPlan& plan,
     size_t groupLinearIndex) {
     return plan
         .retainedPositionSets[retainedPositionSetIndexForGroup(problem, plan, groupLinearIndex)];
@@ -264,7 +332,7 @@ inline std::vector<TwoOfFourPositionSet> makeTwoOfFourPositionSets(
 }
 
 template <size_t BytesPerElement, bool RandomSelection>
-inline StructuredSparsityRunInfo applyTwoOfFourByteAligned(const StructuredSparsityProblem& problem,
+inline StructuredSparsityRunInfo applyTwoOfFourByteAligned(const StructuredSparsityRequest& problem,
                                                            const StructuredSparsityPlan& plan,
                                                            size_t firstSlice, size_t endSlice) {
     const size_t axis = problem.pattern.axis;
@@ -370,7 +438,7 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAligned(const StructuredSpars
 
 template <size_t BytesPerElement, bool RandomSelection>
 inline StructuredSparsityRunInfo applyTwoOfFourByteAlignedStrided(
-    const StructuredSparsityProblem& problem, const StructuredSparsityPlan& plan, size_t firstSlice,
+    const StructuredSparsityRequest& problem, const StructuredSparsityPlan& plan, size_t firstSlice,
     size_t endSlice) {
     const size_t axis = problem.pattern.axis;
     const std::vector<TwoOfFourPositionSet> positionSets = makeTwoOfFourPositionSets(plan);
@@ -495,7 +563,7 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAlignedStrided(
 
 template <size_t BytesPerElement>
 inline StructuredSparsityRunInfo applyTwoOfFourByteAlignedBySelection(
-    const StructuredSparsityProblem& problem, const StructuredSparsityPlan& plan, size_t firstSlice,
+    const StructuredSparsityRequest& problem, const StructuredSparsityPlan& plan, size_t firstSlice,
     size_t endSlice, bool contiguousAxis) {
     if (problem.pattern.selection == StructuredSparsitySelection::Random) {
         return contiguousAxis ? applyTwoOfFourByteAligned<BytesPerElement, true>(
@@ -510,7 +578,7 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAlignedBySelection(
 }
 
 inline std::optional<StructuredSparsityRunInfo> tryTwoOfFourByteAligned(
-    const StructuredSparsityProblem& problem, const StructuredSparsityPlan& plan, size_t firstSlice,
+    const StructuredSparsityRequest& problem, const StructuredSparsityPlan& plan, size_t firstSlice,
     size_t endSlice) {
     if (problem.pattern.groupSize != 4 || problem.pattern.retainedElements != 2 ||
         scalarTypeInfo(problem.input.type()).storageBits % 8 != 0)
@@ -545,10 +613,9 @@ inline std::optional<StructuredSparsityRunInfo> tryTwoOfFourByteAligned(
     }
 }
 
-inline Shape validateTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem) {
-    if (problem.retainedIndices.type() != ScalarType::UInt8 ||
-        problem.metadata.type() != ScalarType::UInt8)
-        throw std::invalid_argument("Two-of-four metadata input/output types must be UInt8.");
+inline Shape validateTwoOfFourMetadataProblem(const TwoOfFourMetadataProblem& problem) {
+    if (problem.retainedIndices.type() != ScalarType::UInt8)
+        throw std::invalid_argument("Two-of-four metadata input type must be UInt8.");
     if (problem.retainedIndices.shape().rank() == 0)
         throw std::invalid_argument("Two-of-four metadata requires a rank-one or higher tensor.");
     if (problem.axis >= problem.retainedIndices.shape().rank())
@@ -562,8 +629,36 @@ inline Shape validateTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem) 
                                            problem.retainedIndices.shape().dimensions().end());
     metadataDimensions[problem.axis] = (sparsityGroups + 1) / 2;
     const Shape metadataShape(std::move(metadataDimensions));
-    if (problem.metadata.shape() != metadataShape)
+
+    const size_t lineCount = problem.retainedIndices.shape().elementCountExcluding(problem.axis);
+    std::vector<size_t> retainedCoordinates(problem.retainedIndices.shape().rank(), 0);
+    const ptrdiff_t retainedAxisStride = problem.retainedIndices.layout().strides()[problem.axis];
+    for (size_t line = 0; line < lineCount; ++line) {
+        coordinatesForLine(line, problem.retainedIndices.shape(), problem.axis,
+                           LogicalIndexOrder::FirstDimensionFastest, retainedCoordinates);
+        const ptrdiff_t retainedBase =
+            problem.retainedIndices.layout().elementOffset(retainedCoordinates);
+        for (size_t group = 0; group < sparsityGroups; ++group) {
+            const ptrdiff_t firstOffset =
+                retainedBase + static_cast<ptrdiff_t>(group * 2) * retainedAxisStride;
+            const uint8_t first = decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+                problem.retainedIndices.storage(), firstOffset);
+            const uint8_t second = decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+                problem.retainedIndices.storage(), firstOffset + retainedAxisStride);
+            (void)twoOfFourMetadataNibble(first, second);
+        }
+    }
+    return metadataShape;
+}
+
+inline Shape validateTwoOfFourMetadataRequest(const TwoOfFourMetadataRequest& request) {
+    const Shape metadataShape = validateTwoOfFourMetadataProblem(request);
+    if (request.metadata.type() != ScalarType::UInt8)
+        throw std::invalid_argument("Two-of-four metadata output type must be UInt8.");
+    if (request.metadata.shape() != metadataShape)
         throw std::invalid_argument("Two-of-four metadata output shape mismatch.");
+    rejectTensorStorageOverlap(request.retainedIndices, request.metadata,
+                               "Two-of-four metadata output overlaps the retained-index storage.");
     return metadataShape;
 }
 
@@ -575,9 +670,9 @@ inline uint8_t twoOfFourMetadataNibble(uint8_t first, uint8_t second) {
 }
 }  // namespace detail
 
-StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityProblem& problem,
+StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityRequest& problem,
                                                   StructuredSparsitySliceRange sliceRange) {
-    const detail::StructuredSparsityPlan plan = detail::validateStructuredSparsity(problem);
+    const detail::StructuredSparsityPlan plan = detail::validateStructuredSparsityRequest(problem);
     const auto [firstSlice, endSlice] =
         detail::validateStructuredSparsitySliceRange(plan, sliceRange);
     if (const auto fastRun = detail::tryTwoOfFourByteAligned(problem, plan, firstSlice, endSlice))
@@ -692,8 +787,53 @@ StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityProble
     };
 }
 
-TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem) {
-    const Shape metadataShape = detail::validateTwoOfFourMetadata(problem);
+StructuredSparsityResult applyStructuredSparsity(const StructuredSparsityProblem& problem) {
+    const detail::StructuredSparsityPlan plan = detail::validateStructuredSparsityProblem(problem);
+    Tensor pruned(problem.input.type(), problem.input.shape());
+    Tensor compressed(problem.input.type(), plan.compressedShape);
+    std::optional<Tensor> retainedIndices;
+    std::optional<Tensor> twoOfFourMetadata;
+    if (problem.outputs.retainedIndices)
+        retainedIndices.emplace(ScalarType::UInt8, plan.compressedShape);
+    if (problem.outputs.twoOfFourMetadata)
+        twoOfFourMetadata.emplace(ScalarType::UInt8, *plan.metadataShape);
+    StructuredSparsityRequest request(problem, pruned, compressed, retainedIndices,
+                                      twoOfFourMetadata);
+    const StructuredSparsityRunInfo runInfo = applyStructuredSparsity(request);
+    return {
+        .pruned = std::move(pruned),
+        .compressed = std::move(compressed),
+        .retainedIndices = std::move(retainedIndices),
+        .twoOfFourMetadata = std::move(twoOfFourMetadata),
+        .runInfo = runInfo,
+    };
+}
+
+StructuredSparsityResult applyStructuredSparsity(const StructuredSparsityProblem& problem,
+                                                 const TensorStorageAllocator& allocator) {
+    const detail::StructuredSparsityPlan plan = detail::validateStructuredSparsityProblem(problem);
+    Tensor pruned(problem.input.type(), problem.input.shape(), allocator);
+    Tensor compressed(problem.input.type(), plan.compressedShape, allocator);
+    std::optional<Tensor> retainedIndices;
+    std::optional<Tensor> twoOfFourMetadata;
+    if (problem.outputs.retainedIndices)
+        retainedIndices.emplace(ScalarType::UInt8, plan.compressedShape, allocator);
+    if (problem.outputs.twoOfFourMetadata)
+        twoOfFourMetadata.emplace(ScalarType::UInt8, *plan.metadataShape, allocator);
+    StructuredSparsityRequest request(problem, pruned, compressed, retainedIndices,
+                                      twoOfFourMetadata);
+    const StructuredSparsityRunInfo runInfo = applyStructuredSparsity(request);
+    return {
+        .pruned = std::move(pruned),
+        .compressed = std::move(compressed),
+        .retainedIndices = std::move(retainedIndices),
+        .twoOfFourMetadata = std::move(twoOfFourMetadata),
+        .runInfo = runInfo,
+    };
+}
+
+TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataRequest& problem) {
+    const Shape metadataShape = detail::validateTwoOfFourMetadataRequest(problem);
     const size_t sparsityGroups = problem.retainedIndices.shape()[problem.axis] / 2;
     const size_t metadataGroups = metadataShape[problem.axis];
     const size_t lineCount = problem.retainedIndices.shape().elementCountExcluding(problem.axis);
@@ -739,5 +879,22 @@ TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem&
         .sparsityGroupsEncoded = lineCount * sparsityGroups,
         .metadataBytesWritten = lineCount * metadataGroups,
     };
+}
+
+TwoOfFourMetadataResult encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem) {
+    const Shape metadataShape = detail::validateTwoOfFourMetadataProblem(problem);
+    Tensor metadata(ScalarType::UInt8, metadataShape);
+    TwoOfFourMetadataRequest request(problem, metadata);
+    const TwoOfFourMetadataRunInfo runInfo = encodeTwoOfFourMetadata(request);
+    return {.metadata = std::move(metadata), .runInfo = runInfo};
+}
+
+TwoOfFourMetadataResult encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem,
+                                                const TensorStorageAllocator& allocator) {
+    const Shape metadataShape = detail::validateTwoOfFourMetadataProblem(problem);
+    Tensor metadata(ScalarType::UInt8, metadataShape, allocator);
+    TwoOfFourMetadataRequest request(problem, metadata);
+    const TwoOfFourMetadataRunInfo runInfo = encodeTwoOfFourMetadata(request);
+    return {.metadata = std::move(metadata), .runInfo = runInfo};
 }
 }  // namespace roc::host_validation
