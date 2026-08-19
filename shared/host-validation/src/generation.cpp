@@ -372,7 +372,7 @@ uint64_t GenerationRecipe::seed() const noexcept {
     return settings_.seed;
 }
 
-LogicalIndexOrder GenerationRecipe::indexOrder() const noexcept {
+IndexOrder GenerationRecipe::indexOrder() const noexcept {
     return settings_.indexOrder;
 }
 

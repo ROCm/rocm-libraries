@@ -27,8 +27,6 @@ void registerGenerationBindings(nb::module_& module) {
     nb::enum_<IndexOrder>(module, "IndexOrder")
         .value("FirstDimensionFastest", IndexOrder::FirstDimensionFastest)
         .value("LastDimensionFastest", IndexOrder::LastDimensionFastest);
-    module.attr("LogicalIndexOrder") = module.attr("IndexOrder");
-    module.attr("ComparisonIndexOrder") = module.attr("IndexOrder");
 
     nb::class_<GenerationRecipeSettings>(
         module, "GenerationRecipeSettings",

@@ -24,7 +24,7 @@ namespace rocRoller::HostNumerics
         using roc::host_validation::GenerationRecipe;
         using roc::host_validation::GenerationRecipeSettings;
         using roc::host_validation::Layout;
-        using roc::host_validation::LogicalIndexOrder;
+        using roc::host_validation::IndexOrder;
         using roc::host_validation::MxGenerationMode;
         using roc::host_validation::MxGenerationProblem;
         using roc::host_validation::MxGenerationRecipe;
@@ -130,22 +130,22 @@ namespace rocRoller::HostNumerics
             }
         }
 
-        LogicalIndexOrder indexOrder(TensorDescriptor const& descriptor)
+        IndexOrder indexOrder(TensorDescriptor const& descriptor)
         {
             if(descriptor.dimensions() != 2)
                 throw std::invalid_argument("rocRoller GEMM generation requires rank-two tensors.");
             if(descriptor.stride(0) == descriptor.stride(1))
             {
                 if(descriptor.size(0) == 1)
-                    return LogicalIndexOrder::LastDimensionFastest;
+                    return IndexOrder::LastDimensionFastest;
                 if(descriptor.size(1) == 1)
-                    return LogicalIndexOrder::FirstDimensionFastest;
+                    return IndexOrder::FirstDimensionFastest;
                 throw std::invalid_argument(
                     "rocRoller GEMM generation requires non-overlapping matrix strides.");
             }
             return descriptor.stride(0) < descriptor.stride(1)
-                       ? LogicalIndexOrder::FirstDimensionFastest
-                       : LogicalIndexOrder::LastDimensionFastest;
+                       ? IndexOrder::FirstDimensionFastest
+                       : IndexOrder::LastDimensionFastest;
         }
 
         GenerationRecipe generationRecipe(TensorDescriptor const&   descriptor,
