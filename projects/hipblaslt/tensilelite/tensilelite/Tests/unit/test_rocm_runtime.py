@@ -14,11 +14,6 @@ from tensilelite import _rocm, _runtime
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture(autouse=True)
-def enable_runtime_validation(monkeypatch):
-    monkeypatch.setattr(_rocm, "_ENABLE_PYTHON_ROCM_RUNTIME", True)
-
-
 def _root(tmp_path: Path, version: str = "7.2.4") -> Path:
     root = tmp_path / "rocm"
     (root / ".info").mkdir(parents=True)
