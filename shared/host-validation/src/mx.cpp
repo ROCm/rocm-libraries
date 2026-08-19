@@ -12,6 +12,7 @@
 #include <roc/host_validation/mx.hpp>
 #include <stdexcept>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "detail/data_generation.hpp"
@@ -25,7 +26,200 @@ constexpr uint64_t boundedScaleRandomDomain = 0xa24baed4963ee407ULL;
 constexpr uint64_t unboundedDataRandomDomain = 0xd1b54a32d192ed03ULL;
 constexpr uint64_t unboundedScaleRandomDomain = 0x94d049bb133111ebULL;
 constexpr double twoPi = 6.28318530717958647692528676655900576;
+}  // namespace
 
+MxDataRecipe::MxDataRecipe(Kind kind, Parameters parameters)
+    : kind_(kind), parameters_(std::move(parameters)) {}
+
+MxDataRecipe MxDataRecipe::bounded(MxBoundedDataParameters parameters) {
+    if (!std::isfinite(parameters.lower) || !std::isfinite(parameters.upper) ||
+        !(parameters.lower < parameters.upper))
+        throw std::invalid_argument("MX bounded data requires finite lower < upper.");
+    return MxDataRecipe(Kind::Bounded, parameters);
+}
+
+MxDataRecipe MxDataRecipe::boundedAlternatingSign(MxAlternatingSignDataParameters parameters) {
+    if (!std::isfinite(parameters.maximumMagnitude) || parameters.maximumMagnitude < 0.0)
+        throw std::invalid_argument(
+            "MX alternating-sign data requires a finite nonnegative maximum magnitude.");
+    return MxDataRecipe(Kind::BoundedAlternatingSign, parameters);
+}
+
+MxDataRecipe MxDataRecipe::unbounded() {
+    return MxDataRecipe(Kind::Unbounded);
+}
+
+MxDataRecipe MxDataRecipe::identity() {
+    return MxDataRecipe(Kind::Identity);
+}
+
+MxDataRecipe MxDataRecipe::constant(double value) {
+    if (!std::isfinite(value))
+        throw std::invalid_argument("MX constant data requires a finite value.");
+    return MxDataRecipe(Kind::Constant, value);
+}
+
+MxDataRecipe MxDataRecipe::sequential() {
+    return MxDataRecipe(Kind::Sequential);
+}
+
+MxDataRecipe MxDataRecipe::rowIndex() {
+    return MxDataRecipe(Kind::RowIndex);
+}
+
+MxDataRecipe MxDataRecipe::columnIndex() {
+    return MxDataRecipe(Kind::ColumnIndex);
+}
+
+MxDataRecipe MxDataRecipe::checkerboard() {
+    return MxDataRecipe(Kind::Checkerboard);
+}
+
+MxDataRecipe MxDataRecipe::scaledDiagonal() {
+    return MxDataRecipe(Kind::ScaledDiagonal);
+}
+
+MxDataRecipe MxDataRecipe::typeMaximum() {
+    return MxDataRecipe(Kind::TypeMaximum);
+}
+
+MxDataRecipe MxDataRecipe::typeDenormalMinimum() {
+    return MxDataRecipe(Kind::TypeDenormalMinimum);
+}
+
+MxDataRecipe MxDataRecipe::typeDenormalMaximum() {
+    return MxDataRecipe(Kind::TypeDenormalMaximum);
+}
+
+MxDataRecipe MxDataRecipe::typeNaN() {
+    return MxDataRecipe(Kind::TypeNaN);
+}
+
+MxDataRecipe MxDataRecipe::typeInfinity() {
+    return MxDataRecipe(Kind::TypeInfinity);
+}
+
+MxDataRecipe MxDataRecipe::trigonometric() {
+    return MxDataRecipe(Kind::Trigonometric);
+}
+
+MxDataRecipe MxDataRecipe::normal(MxNormalDataParameters parameters) {
+    if (!std::isfinite(parameters.mean) || !std::isfinite(parameters.standardDeviation) ||
+        parameters.standardDeviation < 0.0)
+        throw std::invalid_argument(
+            "MX normal data requires a finite mean and nonnegative finite standard deviation.");
+    return MxDataRecipe(Kind::Normal, parameters);
+}
+
+MxDataRecipe MxDataRecipe::uniformInteger(MxUniformIntegerDataParameters parameters) {
+    if (parameters.lower > parameters.upper)
+        throw std::invalid_argument("MX integer data lower bound exceeds upper bound.");
+    return MxDataRecipe(Kind::UniformInteger, parameters);
+}
+
+namespace detail {
+struct MxDataRecipeAccess {
+    static bool isUnbounded(const MxDataRecipe& recipe) {
+        return recipe.kind_ == MxDataRecipe::Kind::Unbounded;
+    }
+
+    static bool isTypeInfinity(const MxDataRecipe& recipe) {
+        return recipe.kind_ == MxDataRecipe::Kind::TypeInfinity;
+    }
+
+    static bool allowsLargerScale(const MxDataRecipe& recipe) {
+        return recipe.kind_ == MxDataRecipe::Kind::Bounded ||
+               recipe.kind_ == MxDataRecipe::Kind::BoundedAlternatingSign;
+    }
+
+    static std::optional<std::pair<double, double>> outputInterval(const MxDataRecipe& recipe) {
+        switch (recipe.kind_) {
+            case MxDataRecipe::Kind::Bounded: {
+                const auto& parameters = std::get<MxBoundedDataParameters>(recipe.parameters_);
+                return std::pair{parameters.lower, parameters.upper};
+            }
+            case MxDataRecipe::Kind::BoundedAlternatingSign: {
+                const double maximum =
+                    std::get<MxAlternatingSignDataParameters>(recipe.parameters_).maximumMagnitude;
+                return std::pair{-maximum, maximum};
+            }
+            default:
+                return std::nullopt;
+        }
+    }
+
+    static double value(const MxDataRecipe& recipe, const MxGenerationProblem& problem, size_t row,
+                        size_t column, size_t logicalIndex) {
+        switch (recipe.kind_) {
+            case MxDataRecipe::Kind::Bounded: {
+                const auto& parameters = std::get<MxBoundedDataParameters>(recipe.parameters_);
+                const double unit =
+                    indexedUniformUnit(problem.seed, dataRandomDomain, logicalIndex);
+                return parameters.lower + unit * (parameters.upper - parameters.lower);
+            }
+            case MxDataRecipe::Kind::BoundedAlternatingSign: {
+                const double maximum =
+                    std::get<MxAlternatingSignDataParameters>(recipe.parameters_).maximumMagnitude;
+                const double magnitude =
+                    maximum * indexedUniformUnit(problem.seed, dataRandomDomain, logicalIndex);
+                return (logicalIndex & 1U) == 0 ? magnitude : -magnitude;
+            }
+            case MxDataRecipe::Kind::Unbounded:
+                throw std::logic_error("Unbounded MX generation uses raw encodings.");
+            case MxDataRecipe::Kind::Identity:
+                return row == column ? 1.0 : 0.0;
+            case MxDataRecipe::Kind::Constant:
+                return std::get<double>(recipe.parameters_);
+            case MxDataRecipe::Kind::Sequential:
+                return static_cast<double>(
+                    ((row % 256U) * (problem.shape[1] % 256U) + column % 256U) % 256U);
+            case MxDataRecipe::Kind::RowIndex:
+                return static_cast<double>(row % 256U);
+            case MxDataRecipe::Kind::ColumnIndex:
+                return static_cast<double>(column % 256U);
+            case MxDataRecipe::Kind::Checkerboard:
+                return ((row + column) & 1U) == 0 ? 1.0 : 0.0;
+            case MxDataRecipe::Kind::ScaledDiagonal:
+                return row == column ? static_cast<double>(row + 1U) : 0.0;
+            case MxDataRecipe::Kind::TypeMaximum:
+                return typeMaximum(problem.dataType);
+            case MxDataRecipe::Kind::TypeDenormalMinimum:
+                return typeDenormalMinimum(problem.dataType);
+            case MxDataRecipe::Kind::TypeDenormalMaximum:
+                return typeDenormalMaximum(problem.dataType);
+            case MxDataRecipe::Kind::TypeNaN:
+                return std::numeric_limits<double>::quiet_NaN();
+            case MxDataRecipe::Kind::TypeInfinity:
+                return std::numeric_limits<double>::infinity();
+            case MxDataRecipe::Kind::Trigonometric: {
+                const double angle =
+                    twoPi * indexedUniformUnit(problem.seed, dataRandomDomain, logicalIndex);
+                return std::cos(angle);
+            }
+            case MxDataRecipe::Kind::Normal: {
+                const auto& parameters = std::get<MxNormalDataParameters>(recipe.parameters_);
+                const uint64_t firstIndex = static_cast<uint64_t>(logicalIndex) * 2U;
+                const double first =
+                    indexedUniformUnit(problem.seed, normalRandomDomain, firstIndex);
+                const double second =
+                    indexedUniformUnit(problem.seed, normalRandomDomain, firstIndex + 1U);
+                const double standardNormal =
+                    std::sqrt(-2.0 * std::log(first)) * std::cos(twoPi * second);
+                return parameters.mean + parameters.standardDeviation * standardNormal;
+            }
+            case MxDataRecipe::Kind::UniformInteger: {
+                const auto& parameters =
+                    std::get<MxUniformIntegerDataParameters>(recipe.parameters_);
+                return indexedUniformInteger(problem.seed, dataRandomDomain, logicalIndex,
+                                             parameters.lower, parameters.upper);
+            }
+        }
+        throw std::invalid_argument("Invalid MX data recipe.");
+    }
+};
+}  // namespace detail
+
+namespace {
 size_t checkedMultiply(size_t first, size_t second, const char* message) {
     if (first != 0 && second > std::numeric_limits<size_t>::max() / first)
         throw std::overflow_error(message);
@@ -166,96 +360,9 @@ std::optional<uint8_t> explicitScaleRaw(const MxGenerationProblem& problem) {
     throw std::invalid_argument("Invalid MX scale generation mode.");
 }
 
-std::optional<uint8_t> selectedConstantScale(const MxGenerationProblem& problem) {
-    if (const auto explicitScale = explicitScaleRaw(problem)) return explicitScale;
-
-    switch (problem.data.mode) {
-        case MxGenerationMode::Zeros:
-            return scaleRawForValue(problem.scaleType, 0.0);
-        case MxGenerationMode::NaN:
-            return scaleRawForValue(problem.scaleType, std::numeric_limits<double>::quiet_NaN());
-        case MxGenerationMode::Bounded:
-        case MxGenerationMode::BoundedAlternatingSign:
-        case MxGenerationMode::Unbounded:
-        case MxGenerationMode::Trigonometric:
-        case MxGenerationMode::Normal:
-            return std::nullopt;
-        default:
-            return scaleRawForValue(problem.scaleType, 1.0);
-    }
-}
-
 double generatedValue(const MxGenerationProblem& problem, size_t row, size_t column,
                       size_t logicalIndex) {
-    const MxGenerationRecipe& recipe = problem.data;
-    switch (recipe.mode) {
-        case MxGenerationMode::Bounded: {
-            const double unit =
-                detail::indexedUniformUnit(problem.seed, dataRandomDomain, logicalIndex);
-            return recipe.parameter0 + unit * (recipe.parameter1 - recipe.parameter0);
-        }
-        case MxGenerationMode::BoundedAlternatingSign: {
-            const double maximumMagnitude =
-                std::max(std::abs(recipe.parameter0), std::abs(recipe.parameter1));
-            const double magnitude =
-                maximumMagnitude *
-                detail::indexedUniformUnit(problem.seed, dataRandomDomain, logicalIndex);
-            return (logicalIndex & 1U) == 0 ? magnitude : -magnitude;
-        }
-        case MxGenerationMode::Unbounded:
-            throw std::logic_error("Unbounded MX generation uses raw encodings.");
-        case MxGenerationMode::Identity:
-            return row == column ? 1.0 : 0.0;
-        case MxGenerationMode::Ones:
-            return 1.0;
-        case MxGenerationMode::Zeros:
-            return 0.0;
-        case MxGenerationMode::Sequential:
-            return static_cast<double>(((row % 256U) * (problem.shape[1] % 256U) + column % 256U) %
-                                       256U);
-        case MxGenerationMode::RowIndex:
-            return static_cast<double>(row % 256U);
-        case MxGenerationMode::ColumnIndex:
-            return static_cast<double>(column % 256U);
-        case MxGenerationMode::Checkerboard:
-            return ((row + column) & 1U) == 0 ? 1.0 : 0.0;
-        case MxGenerationMode::ScaledDiagonal:
-            return row == column ? static_cast<double>(row + 1U) : 0.0;
-        case MxGenerationMode::Twos:
-            return 2.0;
-        case MxGenerationMode::NegativeOnes:
-            return -1.0;
-        case MxGenerationMode::Maximum:
-            return detail::typeMaximum(problem.dataType);
-        case MxGenerationMode::DenormalMinimum:
-            return detail::typeDenormalMinimum(problem.dataType);
-        case MxGenerationMode::DenormalMaximum:
-            return detail::typeDenormalMaximum(problem.dataType);
-        case MxGenerationMode::NaN:
-            return std::numeric_limits<double>::quiet_NaN();
-        case MxGenerationMode::Infinity:
-            return std::numeric_limits<double>::infinity();
-        case MxGenerationMode::Trigonometric: {
-            const double angle =
-                twoPi * detail::indexedUniformUnit(problem.seed, dataRandomDomain, logicalIndex);
-            return std::cos(angle);
-        }
-        case MxGenerationMode::Normal: {
-            const uint64_t firstIndex = static_cast<uint64_t>(logicalIndex) * 2U;
-            const double first =
-                detail::indexedUniformUnit(problem.seed, normalRandomDomain, firstIndex);
-            const double second =
-                detail::indexedUniformUnit(problem.seed, normalRandomDomain, firstIndex + 1U);
-            const double standardNormal =
-                std::sqrt(-2.0 * std::log(first)) * std::cos(twoPi * second);
-            return recipe.parameter0 + recipe.parameter1 * standardNormal;
-        }
-        case MxGenerationMode::UniformInteger:
-            return indexedUniformInteger(problem.seed, dataRandomDomain, logicalIndex,
-                                         static_cast<int>(recipe.parameter0),
-                                         static_cast<int>(recipe.parameter1));
-    }
-    throw std::invalid_argument("Unsupported MX generation mode.");
+    return detail::MxDataRecipeAccess::value(problem.data, problem, row, column, logicalIndex);
 }
 
 std::vector<uint8_t> finiteDataRawCandidates(ScalarType dataType) {
@@ -351,12 +458,24 @@ std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_
     return storage;
 }
 
+Tensor tensorFromStorage(ScalarType type, Layout layout, std::span<const std::byte> storage,
+                         const TensorStorageAllocator& allocator) {
+    if (!allocator) throw std::invalid_argument("MX Tensor storage allocator is empty.");
+    TensorStorage allocated = allocator(storage.size());
+    if (allocated.size() < storage.size())
+        throw std::invalid_argument("MX Tensor storage allocator returned too few bytes.");
+    Tensor result = Tensor::wrapStorage(type, std::move(layout), std::move(allocated));
+    std::ranges::copy(storage, result.storage().begin());
+    return result;
+}
+
 template <typename Native>
-Tensor nativeTensor(ScalarType type, Layout layout, const std::vector<Native>& values) {
-    std::vector<std::byte> storage(
-        checkedMultiply(values.size(), sizeof(Native), "MX native tensor storage overflow."));
-    std::memcpy(storage.data(), values.data(), storage.size());
-    return Tensor::fromStorage(type, std::move(layout), std::move(storage));
+Tensor nativeTensor(ScalarType type, Layout layout, const std::vector<Native>& values,
+                    const TensorStorageAllocator& allocator) {
+    const size_t bytes =
+        checkedMultiply(values.size(), sizeof(Native), "MX native tensor storage overflow.");
+    return tensorFromStorage(type, std::move(layout),
+                             {reinterpret_cast<const std::byte*>(values.data()), bytes}, allocator);
 }
 
 void generateUnbounded(const MxGenerationProblem& problem, const ScaleBlocking& blocking,
@@ -366,7 +485,7 @@ void generateUnbounded(const MxGenerationProblem& problem, const ScaleBlocking& 
     (void)threadCount;
     const std::vector<uint8_t> dataCandidates = finiteDataRawCandidates(problem.dataType);
     const std::vector<double> dataValues = decodedDataValues(problem.dataType);
-    const std::optional<uint8_t> fixedScale = selectedConstantScale(problem);
+    const std::optional<uint8_t> fixedScale = explicitScaleRaw(problem);
     const std::vector<ScaleCandidate> scaleCandidates =
         fixedScale ? std::vector<ScaleCandidate>{}
                    : finiteNonzeroScaleCandidates(problem.scaleType);
@@ -412,7 +531,7 @@ void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& 
     const size_t leadingDimension =
         problem.leadingDimension == 0 ? rows : static_cast<size_t>(problem.leadingDimension);
 
-    const std::optional<uint8_t> fixedScale = selectedConstantScale(problem);
+    const std::optional<uint8_t> fixedScale = explicitScaleRaw(problem);
     const std::vector<ScaleCandidate> scaleCandidates =
         fixedScale ? std::vector<ScaleCandidate>{}
                    : finiteNonzeroScaleCandidates(problem.scaleType);
@@ -447,8 +566,7 @@ void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& 
                     scaleRaw = scaleRawForValue(problem.scaleType, 1.0);
                 } else {
                     const bool allowLargerCandidate =
-                        problem.data.mode == MxGenerationMode::Bounded ||
-                        problem.data.mode == MxGenerationMode::BoundedAlternatingSign;
+                        detail::MxDataRecipeAccess::allowsLargerScale(problem.data);
                     scaleRaw = scaleAtLeast(maximumMagnitude / maximumDataValue, scaleCandidates,
                                             allowLargerCandidate, problem.seed, scaleIndex);
                 }
@@ -466,17 +584,10 @@ void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& 
                 const double scaledValue =
                     sourceValue == 0.0 ? sourceValue : sourceValue / scaleValue;
                 uint8_t dataRaw = dataRawForValue(problem.dataType, scaledValue);
-                if (problem.data.mode == MxGenerationMode::Bounded) {
-                    dataRaw = constrainDataRawToInterval(problem.dataType, dataRaw, scaleValue,
-                                                         problem.data.parameter0,
-                                                         problem.data.parameter1, dataValues);
-                } else if (problem.data.mode == MxGenerationMode::BoundedAlternatingSign) {
-                    const double maximumMagnitude = std::max(std::abs(problem.data.parameter0),
-                                                             std::abs(problem.data.parameter1));
+                if (const auto interval = detail::MxDataRecipeAccess::outputInterval(problem.data))
                     dataRaw =
                         constrainDataRawToInterval(problem.dataType, dataRaw, scaleValue,
-                                                   -maximumMagnitude, maximumMagnitude, dataValues);
-                }
+                                                   interval->first, interval->second, dataValues);
                 dataRawValues[physicalIndex] = dataRaw;
                 scaleIndexValues[logicalIndex] = static_cast<uint32_t>(scaleIndex);
                 referenceValues[logicalIndex] =
@@ -515,33 +626,8 @@ void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& 
 #endif
 }
 
-void validateRecipe(const MxGenerationProblem& problem) {
-    const MxGenerationRecipe& recipe = problem.data;
-    if (recipe.mode == MxGenerationMode::Bounded) {
-        if (!std::isfinite(recipe.parameter0) || !std::isfinite(recipe.parameter1) ||
-            !(recipe.parameter0 < recipe.parameter1))
-            throw std::invalid_argument("MX bounded generation requires finite minimum < maximum.");
-    }
-    if (recipe.mode == MxGenerationMode::BoundedAlternatingSign &&
-        (!std::isfinite(recipe.parameter0) || !std::isfinite(recipe.parameter1)))
-        throw std::invalid_argument("MX alternating bounded generation requires finite bounds.");
-    if (recipe.mode == MxGenerationMode::Normal) {
-        if (!std::isfinite(recipe.parameter0) || !std::isfinite(recipe.parameter1) ||
-            recipe.parameter1 < 0.0)
-            throw std::invalid_argument(
-                "MX normal generation requires a finite mean and nonnegative finite standard "
-                "deviation.");
-    }
-    if (recipe.mode == MxGenerationMode::UniformInteger) {
-        if (!std::isfinite(recipe.parameter0) || !std::isfinite(recipe.parameter1) ||
-            recipe.parameter0 < std::numeric_limits<int>::min() ||
-            recipe.parameter0 > std::numeric_limits<int>::max() ||
-            recipe.parameter1 < std::numeric_limits<int>::min() ||
-            recipe.parameter1 > std::numeric_limits<int>::max() ||
-            static_cast<int>(recipe.parameter0) > static_cast<int>(recipe.parameter1))
-            throw std::invalid_argument("MX integer generation bounds are invalid.");
-    }
-    if (recipe.mode == MxGenerationMode::Infinity &&
+void validateRecipeForType(const MxGenerationProblem& problem) {
+    if (detail::MxDataRecipeAccess::isTypeInfinity(problem.data) &&
         !scalarTypeInfo(problem.dataType).supportsInfinity)
         throw std::invalid_argument("MX data type has no infinity encoding.");
 }
@@ -570,11 +656,12 @@ void validateProblem(const MxGenerationProblem& problem) {
         throw std::invalid_argument("Unsupported MX scale scalar type.");
     if (!isSupportedTypePair(problem.dataType, problem.scaleType))
         throw std::invalid_argument("Unsupported MX data/scale scalar type combination.");
-    validateRecipe(problem);
+    validateRecipeForType(problem);
 }
 }  // namespace
 
-MxGenerationResult generateMx(const MxGenerationProblem& problem) {
+MxGenerationResult generateMx(const MxGenerationProblem& problem,
+                              const TensorStorageAllocator& allocator) {
     validateProblem(problem);
     const size_t rows = problem.shape[0];
     const size_t columns = problem.shape[1];
@@ -597,26 +684,32 @@ MxGenerationResult generateMx(const MxGenerationProblem& problem) {
     const int threadCount =
         detail::operationThreadCount(std::max(logicalElementCount, physicalElementCount));
 
-    if (problem.data.mode == MxGenerationMode::Unbounded)
+    if (detail::MxDataRecipeAccess::isUnbounded(problem.data))
         generateUnbounded(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,
                           referenceValues, threadCount);
     else
         generateQuantized(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,
                           referenceValues, threadCount);
 
-    Tensor data = Tensor::fromStorage(
+    const std::vector<std::byte> dataStorage =
+        packRawValues(dataRawValues, scalarTypeInfo(problem.dataType).storageBits, threadCount);
+    Tensor data = tensorFromStorage(
         problem.dataType, Layout(problem.shape, {1, static_cast<ptrdiff_t>(leadingDimension)}),
-        packRawValues(dataRawValues, scalarTypeInfo(problem.dataType).storageBits, threadCount));
+        dataStorage, allocator);
     std::vector<std::byte> scaleStorage(scaleRawValues.size());
     std::memcpy(scaleStorage.data(), scaleRawValues.data(), scaleRawValues.size());
-    Tensor scales = Tensor::fromStorage(
-        problem.scaleType, Layout::contiguous(Shape{blocking.scaleCount}), std::move(scaleStorage));
+    Tensor scales = tensorFromStorage(
+        problem.scaleType, Layout::contiguous(Shape{blocking.scaleCount}), scaleStorage, allocator);
     Tensor scaleIndices =
         nativeTensor(ScalarType::UInt32, Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
-                     scaleIndexValues);
+                     scaleIndexValues, allocator);
     Tensor reference =
         nativeTensor(ScalarType::Float32, Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
-                     referenceValues);
+                     referenceValues, allocator);
     return {std::move(data), std::move(scales), std::move(scaleIndices), std::move(reference)};
+}
+
+MxGenerationResult generateMx(const MxGenerationProblem& problem) {
+    return generateMx(problem, TensorStorage::allocate);
 }
 }  // namespace roc::host_validation
