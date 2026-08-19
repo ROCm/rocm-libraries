@@ -167,10 +167,17 @@ Since rocFFT uses a code generator and hipRTC to produce device kernels, device-
 is nonsensical.
 
 Host-side code coverage is useful in showing testing gaps, but the effectiveness of a
-percent-coverage target is controversial, particularly in the context of Goodhart's law.  rocFFT
-tests include randomization (by design), and the library covers single-gpu, single-proc multi-gpu,
-and multi-proc multigpu transforms; code coverage must combine results from these use cases.  There
-is a gap in TheRock CI in this aspect due to infrastructure issues.
+percent-coverage target is controversial, particularly in the context of Goodhart's law.  For
+example, we also need to be able to handle failures in the hip runtime.  If hipMalloc fails, then
+this needs to be handled, but that code is never tested; in order to satisfy code coverage targets,
+developers are incentivized to reduce or eliminate code that handles hipMalloc errors.  This issue
+can be alleviated by mocking the hip runtime so that we can inject errors, but such infrastructure
+does not exist, which constitutes a gap in testing.  Similar mocking is also unavailable for the
+compiler and driver.
+
+rocFFT tests include randomization (by design), and the library covers single-gpu, single-proc
+multi-gpu, and multi-proc multigpu transforms; code coverage must combine results from these use
+cases.  There is a gap in TheRock CI in this aspect due to infrastructure issues.
 
 
 ### Benchmarking and Performance Validation
