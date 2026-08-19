@@ -37,6 +37,15 @@ public:
                                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const
         = 0;
+
+    /// The verified buffer this graph is a view over, for callers that need to
+    /// retain the graph beyond the caller's storage. Copying these bytes is a
+    /// single contiguous memcpy and yields a buffer that GetRoot() reads
+    /// directly -- unlike UnPack(), which deep-copies into a GraphT whose nodes,
+    /// strings and attribute unions each heap-allocate.
+    ///
+    /// Empty when the graph is not valid.
+    virtual SerializedBlobView bytes() const = 0;
 };
 
 class GraphWrapper : public IGraph
@@ -51,6 +60,9 @@ public:
             {
                 _shallowGraph
                     = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(buffer);
+                // Retained only once the verifier has accepted it, so bytes() can
+                // never hand out a buffer getGraph() would refuse to read.
+                _bytes = SerializedBlobView{static_cast<const uint8_t*>(buffer), size};
             }
         }
     }
@@ -66,6 +78,11 @@ public:
     {
         const auto view = extractGraphBlob(buffer, size);
         return GraphWrapper(view.data, view.size);
+    }
+
+    SerializedBlobView bytes() const override
+    {
+        return _bytes;
     }
 
     const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
@@ -197,6 +214,10 @@ private:
     // Pointer to the flatbuffer representation of the graph. We do not own this memory
     // as were just reading from the buffer passed during construction.
     const hipdnn_flatbuffers_sdk::data_objects::Graph* _shallowGraph = nullptr;
+
+    // The same non-owned buffer, kept as a view so callers that must outlive it
+    // can copy it wholesale rather than reconstructing the graph.
+    SerializedBlobView _bytes;
 
     //lazy init state;
     mutable std::unordered_map<int64_t,

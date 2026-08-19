@@ -91,6 +91,11 @@ public:
         return true;
     }
 
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {_builder.GetBufferPointer(), _builder.GetSize()};
+    }
+
     uint32_t nodeCount() const override
     {
         return 0;
