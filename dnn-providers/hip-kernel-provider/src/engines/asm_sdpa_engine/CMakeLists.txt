@@ -70,6 +70,7 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/asm/PluginModuleDir.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlan.cpp
@@ -81,15 +82,10 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 )
 
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
-target_compile_definitions(hip_kernel_provider_impl PRIVATE
-    AITER_ASM_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
-)
 
-# Copy ASM kernel binaries to build directory for local testing
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/
-     DESTINATION ${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels
-     FILES_MATCHING PATTERN "*.co"
-)
+# kpack C runtime library linkage is in src/CMakeLists.txt (find_package must
+# run in a scope visible to all three link targets: _impl, _private, and the
+# shared hip_kernel_provider).
 
 # ============================================================================
 # Kpack Packing (Phase 1 — build-time .co → .kpack)
@@ -182,19 +178,26 @@ add_custom_target(asm_kernel_kpack ALL
     COMMENT "Pack ASM SDPA .co kernels into .kpack archives"
 )
 add_dependencies(asm_kernel_kpack asm_kernel_codegen)
+# Ensure .kpack archives are packed before the provider (and transitively its tests) links
+add_dependencies(hip_kernel_provider_impl asm_kernel_kpack)
 
-# --- Copy .kpack files to build directory for local testing ---
+# --- Copy .kpack files next to the plugin .so for local testing ---
+# PluginModuleDir::currentPluginDirectory() resolves to the .so's directory,
+# so .kpack files must sit at <plugin_dir>/asm_kernels/.kpack/.
 foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
     set(_SRC "${ASM_KPACK_OUTPUT_DIR}/hip_kernel_provider_sdpa_${ARCH}.kpack")
-    set(_DST "${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels/.kpack/")
+    set(_DST "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/asm_kernels/.kpack/")
     add_custom_command(TARGET asm_kernel_kpack POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_DST}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_SRC}" "${_DST}"
-        COMMENT "Copying ${ARCH} .kpack to build dir"
+        COMMENT "Copying ${ARCH} .kpack to build dir (next to plugin .so)"
     )
 endforeach()
 
-# --- Install .kpack archives (Phase 2 runtime will load from these) ---
+# --- Install .kpack archives next to the plugin .so ---
+# Runtime resolves: currentPluginDirectory() / "asm_kernels/.kpack/<arch>.kpack"
+# The plugin .so is installed to HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR,
+# so .kpack files go one level deeper under asm_kernels/.kpack/.
 install(FILES ${ASM_KPACK_OUTPUTS}
-    DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels/.kpack
+    DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/asm_kernels/.kpack
 )
