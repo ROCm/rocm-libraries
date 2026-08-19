@@ -34,7 +34,9 @@ const GemmBackendImplementation* pythonGemmBackendImplementation(GemmBackend bac
 }
 
 GemmResult referenceGemmRequestBound(const GemmRequest& request, const GemmExecution& execution) {
-    return referenceGemm(request, execution, pythonGemmBackendImplementation(execution.backend));
+    GemmRunInfo runInfo =
+        referenceGemm(request, execution, pythonGemmBackendImplementation(execution.backend));
+    return {.output = request.d, .runInfo = std::move(runInfo)};
 }
 
 GemmResult referenceGemmProblemOwned(const GemmProblem& problem, const GemmOutputOptions& output,

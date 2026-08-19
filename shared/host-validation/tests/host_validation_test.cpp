@@ -53,14 +53,10 @@ void testRuntimeReferenceGemm() {
     GemmExecution execution;
     require(static_cast<bool>(queryGemmSupport(problem, execution)),
             "Runtime reference GEMM request support mismatch.");
-    const GemmResult result = referenceGemm(problem, execution);
-    require(result.runInfo.backendUsed == GemmBackend::Pointwise &&
-                result.runInfo.outputElementsWritten == 4 &&
-                result.runInfo.outputElementsCovered == 4,
+    const GemmRunInfo runInfo = referenceGemm(problem, execution);
+    require(runInfo.backendUsed == GemmBackend::Pointwise && runInfo.outputElementsWritten == 4 &&
+                runInfo.outputElementsCovered == 4,
             "Runtime reference GEMM run information mismatch.");
-    require(result.output.shape() == Shape{2, 2} &&
-                result.output.storage().data() == d.storage().data(),
-            "Runtime reference GEMM result did not retain shared output storage.");
 
     const std::array<float, 4> expected{
         58 * 2 * 5 + 1 + 1,
@@ -76,9 +72,8 @@ void testRuntimeReferenceGemm() {
     execution.backend = GemmBackend::Blocked;
     require(!queryGemmSupport(problem, execution),
             "Runtime reference GEMM request unexpectedly supports a missing backend.");
-    const GemmResult fallback = referenceGemm(problem, execution);
-    require(fallback.runInfo.backendUsed == GemmBackend::Pointwise &&
-                fallback.runInfo.fallbackReason.has_value(),
+    const GemmRunInfo fallback = referenceGemm(problem, execution);
+    require(fallback.backendUsed == GemmBackend::Pointwise && fallback.fallbackReason.has_value(),
             "Runtime reference GEMM backend fallback mismatch.");
 
     const GemmProblem owningProblem = problem;
@@ -282,12 +277,12 @@ void testPointwiseRoutes() {
     Tensor automaticOutput =
         Tensor::fromNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
     GemmRequest automaticProblem = makeProblem(automaticOutput);
-    const GemmResult automatic = referenceGemm(automaticProblem);
+    const GemmRunInfo automatic = referenceGemm(automaticProblem);
 
     Tensor pointwiseOutput =
         Tensor::fromNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
     GemmRequest pointwiseProblem = makeProblem(pointwiseOutput);
-    const GemmResult pointwise =
+    const GemmRunInfo pointwise =
         referenceGemm(pointwiseProblem, {
                                             .backend = GemmBackend::Pointwise,
                                             .requireRequestedBackend = true,
@@ -298,13 +293,11 @@ void testPointwiseRoutes() {
     require(
         compare(automaticOutput, expected).passed() && compare(pointwiseOutput, expected).passed(),
         "Automatic and explicit Pointwise routes diverged.");
-    require(automatic.runInfo.backendUsed == GemmBackend::Pointwise &&
-                pointwise.runInfo.backendUsed == GemmBackend::Pointwise &&
-                automatic.runInfo.outputElementsWritten == 1 &&
-                pointwise.runInfo.outputElementsWritten == 1 &&
-                automatic.runInfo.outputElementsCovered == 1 &&
-                pointwise.runInfo.outputElementsCovered == 1 && !automatic.runInfo.fallbackReason &&
-                !pointwise.runInfo.fallbackReason,
+    require(automatic.backendUsed == GemmBackend::Pointwise &&
+                pointwise.backendUsed == GemmBackend::Pointwise &&
+                automatic.outputElementsWritten == 1 && pointwise.outputElementsWritten == 1 &&
+                automatic.outputElementsCovered == 1 && pointwise.outputElementsCovered == 1 &&
+                !automatic.fallbackReason && !pointwise.fallbackReason,
             "Pointwise route information changed.");
 }
 
@@ -408,8 +401,8 @@ void testOutputSelection() {
         Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(c)), d,
         ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
-    const GemmResult result = referenceGemm(problem);
-    require(result.runInfo.outputElementsWritten == 2 && result.runInfo.outputElementsCovered == 2,
+    const GemmRunInfo runInfo = referenceGemm(problem);
+    require(runInfo.outputElementsWritten == 2 && runInfo.outputElementsCovered == 2,
             "Selected-output GEMM reported the wrong element count.");
     require(d.loadAs<float>({0, 0}) == 19 && d.loadAs<float>({0, 1}) == -99 &&
                 d.loadAs<float>({1, 0}) == -99 && d.loadAs<float>({1, 1}) == 50,
