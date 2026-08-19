@@ -43,6 +43,7 @@ ComparisonOptions allCloseComparisonOptions(double absoluteTolerance, double rel
     options.absoluteTolerance = absoluteTolerance;
     options.relativeTolerance = relativeTolerance;
     options.equalNaNs = equalNaNs;
+    options.complexPointwiseMode = ComplexPointwiseMode::Magnitude;
     return options;
 }
 
@@ -210,10 +211,16 @@ class ComparisonAccumulator {
             signedZeroMatches && !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
             if (m_options.computePointwiseStatistics) {
-                m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed.real));
-                if (complexValue)
-                    m_result.matchedInfinities +=
-                        static_cast<size_t>(std::isinf(observed.imaginary));
+                if (complexValue &&
+                    m_options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
+                    m_result.matchedInfinities += static_cast<size_t>(
+                        std::isinf(observed.real) || std::isinf(observed.imaginary));
+                } else {
+                    m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed.real));
+                    if (complexValue)
+                        m_result.matchedInfinities +=
+                            static_cast<size_t>(std::isinf(observed.imaginary));
+                }
             }
             return;
         }
@@ -222,32 +229,55 @@ class ComparisonAccumulator {
         const ComponentResult imaginary =
             complexValue ? compareComponent(observed.imaginary, expected.imaginary, m_options)
                          : ComponentResult{.close = true};
+        const bool magnitudeMode =
+            complexValue && m_options.complexPointwiseMode == ComplexPointwiseMode::Magnitude;
+        const ComponentResult magnitude =
+            magnitudeMode ? compareComplexMagnitude(observed, expected, m_options)
+                          : ComponentResult{.close = true};
 
-        const bool close = pointwiseDecision.value_or(real.close && imaginary.close);
-        const bool nonFiniteMismatch = real.nonFiniteMismatch || imaginary.nonFiniteMismatch;
+        const bool close = pointwiseDecision.value_or(
+            magnitudeMode ? magnitude.close : real.close && imaginary.close);
+        const bool nonFiniteMismatch = magnitudeMode
+                                           ? magnitude.nonFiniteMismatch
+                                           : real.nonFiniteMismatch || imaginary.nonFiniteMismatch;
 
         if (m_options.computePointwiseStatistics) {
-            m_result.matchedNaNs +=
-                static_cast<size_t>(real.matchedNaN) + static_cast<size_t>(imaginary.matchedNaN);
-            m_result.matchedInfinities += static_cast<size_t>(real.matchedInfinity) +
-                                          static_cast<size_t>(imaginary.matchedInfinity);
+            if (magnitudeMode) {
+                m_result.matchedNaNs += static_cast<size_t>(magnitude.matchedNaN);
+                m_result.matchedInfinities += static_cast<size_t>(magnitude.matchedInfinity);
+            } else {
+                m_result.matchedNaNs += static_cast<size_t>(real.matchedNaN) +
+                                        static_cast<size_t>(imaginary.matchedNaN);
+                m_result.matchedInfinities += static_cast<size_t>(real.matchedInfinity) +
+                                              static_cast<size_t>(imaginary.matchedInfinity);
+            }
             m_result.nonFiniteMismatches += nonFiniteMismatch;
             m_result.signedZeroMismatches +=
-                real.signedZeroMismatch || imaginary.signedZeroMismatch;
+                magnitudeMode ? magnitude.signedZeroMismatch
+                              : real.signedZeroMismatch || imaginary.signedZeroMismatch;
         }
 
-        double difference =
-            complexValue ? std::hypot(real.difference, imaginary.difference) : real.difference;
+        double difference = magnitudeMode
+                                ? magnitude.difference
+                                : (complexValue ? std::hypot(real.difference, imaginary.difference)
+                                                : real.difference);
         if (nonFiniteMismatch) difference = std::numeric_limits<double>::infinity();
 
         if (m_options.computePointwiseStatistics) {
             m_result.maxAbsoluteDifference = std::max(m_result.maxAbsoluteDifference, difference);
-            m_result.maxRelativeDifference =
-                std::max({m_result.maxRelativeDifference, real.relativeDifference,
-                          imaginary.relativeDifference});
-            m_result.maxSymmetricRelativeDifference =
-                std::max({m_result.maxSymmetricRelativeDifference, real.symmetricRelativeDifference,
-                          imaginary.symmetricRelativeDifference});
+            if (magnitudeMode) {
+                m_result.maxRelativeDifference =
+                    std::max(m_result.maxRelativeDifference, magnitude.relativeDifference);
+                m_result.maxSymmetricRelativeDifference = std::max(
+                    m_result.maxSymmetricRelativeDifference, magnitude.symmetricRelativeDifference);
+            } else {
+                m_result.maxRelativeDifference =
+                    std::max({m_result.maxRelativeDifference, real.relativeDifference,
+                              imaginary.relativeDifference});
+                m_result.maxSymmetricRelativeDifference = std::max(
+                    {m_result.maxSymmetricRelativeDifference, real.symmetricRelativeDifference,
+                     imaginary.symmetricRelativeDifference});
+            }
         }
 
         if (m_options.computeFrobenius) {
@@ -304,7 +334,7 @@ class ComparisonAccumulator {
                 observed.imaginary,
                 expected.imaginary,
                 difference,
-                std::max(real.tolerance, imaginary.tolerance),
+                magnitudeMode ? magnitude.tolerance : std::max(real.tolerance, imaginary.tolerance),
                 close,
             };
             if (reportComparison) m_result.reportedComparisons.push_back(sample);
@@ -536,6 +566,8 @@ bool knownPointwiseDecision(const Tensor& observed, ptrdiff_t observedOffset,
             loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
         const ComparisonValue expectedValue =
             loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
+        if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude)
+            return compareComplexMagnitude(observedValue, expectedValue, options).close;
         return pointwiseValuesClose(observedValue.real, expectedValue.real, options) &&
                pointwiseValuesClose(observedValue.imaginary, expectedValue.imaginary, options);
     } else {
@@ -633,9 +665,14 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                             loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
                         const ComparisonValue expectedValue =
                             loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
-                        close = predicate(observedValue.real, expectedValue.real);
-                        close =
-                            close && predicate(observedValue.imaginary, expectedValue.imaginary);
+                        if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
+                            close = compareComplexMagnitude(observedValue, expectedValue, options)
+                                        .close;
+                        } else {
+                            close = predicate(observedValue.real, expectedValue.real);
+                            close = close &&
+                                    predicate(observedValue.imaginary, expectedValue.imaginary);
+                        }
                     } else {
                         close = predicate(
                             loadFastComparisonReal<Tag>(observed.storage(), observedOffset),
@@ -659,8 +696,14 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                         loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
                     const ComparisonValue expectedValue =
                         loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
-                    close = predicate(observedValue.real, expectedValue.real);
-                    close = close && predicate(observedValue.imaginary, expectedValue.imaginary);
+                    if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
+                        close =
+                            compareComplexMagnitude(observedValue, expectedValue, options).close;
+                    } else {
+                        close = predicate(observedValue.real, expectedValue.real);
+                        close =
+                            close && predicate(observedValue.imaginary, expectedValue.imaginary);
+                    }
                 } else {
                     close =
                         predicate(loadFastComparisonReal<Tag>(observed.storage(), observedOffset),
