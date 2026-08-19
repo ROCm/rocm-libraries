@@ -295,6 +295,7 @@ class StateValues:
   lastVgprForReads: int                  = 0
   startVgpr: int                         = 0
   startVgprAddressDbg: int               = -1
+  startVgprAsanTmp: int                  = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
   startVgprSKConsts: int                 = -1
@@ -311,6 +312,8 @@ class StateValues:
   numSgprAddressScaleC: int              = 0
   numSgprAddressScaleD: int              = 0
   numSgprAddressDbg: int                 = 0
+  numSgprAsanReportBuf: int              = 0
+  numSgprAsanTmp: int                    = 0
 
   firstInitSgpr: int                     = -1
   # Abs SW instruction prefetch base: low index of 3 contiguous SGPRs (even-aligned pair
@@ -6839,6 +6842,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # s_wait_xcnt drains to order them.
                                "RequiresXCntForVolatileVMEM": bool(
                                    self.states.archCaps["RequiresXCntForVolatileVMEM"]),
+                               # Debug-only OOB detection: reuses real ASan shadow memory
+                               # (valid only when the launching client is itself built with
+                               # -fsanitize=address) to bounds-check A/B/C/D/bias accesses;
+                               # inserted by InsertAsanCheckPass in Gfx1250Backend.
+                               "AsanInstrument": bool(self.debugConfig.asanInstrument),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
@@ -8475,6 +8483,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       GNLCOInit('Metadata')
 
       numVgprAddressDbg = self.states.rpga if self.debugConfig.debugKernel else 0
+      # 8 VGPRs for InsertAsanCheckPass: [0:1] VA/shadow-address pair (computed
+      # then overwritten in place), [2] shadow-byte load destination, [3:4] report
+      # buffer address (copied from sgprAsanReportBuf), [5:6] PC (copied from
+      # s_getpc_b64's SGPR result, since a FLAT store's data operand must be a VGPR).
+      numVgprAsanTmp = 8 if self.debugConfig.asanInstrument else 0
 
       ####################################
       # num vgprs: c write address
@@ -8950,6 +8963,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.startVgprAddressDbg = vgprIdx
       vgprIdx += numVgprAddressDbg
 
+      # Must be even-aligned: InsertAsanCheckPass forms 64-bit VGPR pairs off
+      # this base, and AMDGPU rejects a misaligned 64-bit VGPR operand
+      # (e.g. v[53:54] fails to assemble).
+      if numVgprAsanTmp:
+        vgprIdx = ((vgprIdx + 1) // 2) * 2
+      self.states.startVgprAsanTmp = vgprIdx
+      vgprIdx += numVgprAsanTmp
+
       # for cgemm or zgemm + MIAV case, allocate 2 or 4 vgpr for alpha calculation (cannot use tmp vgpr in write batch)
       if kernel["ProblemType"]["DataType"].isComplex() \
         and kernel["MIArchVgpr"]:
@@ -9328,6 +9349,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.numActivationArgSize = max(1, int(kernel["ProblemType"]["DestDataType"].numRegisters()))
     self.states.numactivationArgTotalSize = self.states.numActivationArgSize * kernel["ProblemType"]["ActivationType"].getAdditionalArgNum()
     self.states.numSgprAddressDbg = self.states.rpga if self.debugConfig.debugKernel else 0
+    self.states.numSgprAsanReportBuf = self.states.rpga if self.debugConfig.asanInstrument else 0
+    self.states.numSgprAsanTmp = 2 if self.debugConfig.asanInstrument else 0
 
     ####################################
     # num sgprs: global read increments
@@ -9460,6 +9483,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
       self.defineSgpr("DebugKernelItems", 1)
+
+    if self.debugConfig.asanInstrument:
+      self.defineSgpr("AsanReportBuf", self.states.numSgprAsanReportBuf)
+      self.defineSgpr("AsanTmp", self.states.numSgprAsanTmp)
 
     # the sgprs overlap with wg ids
     # TODO: For subtileimpl, consider shadowInit param as well

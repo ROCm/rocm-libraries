@@ -148,6 +148,8 @@ class SignatureDefault(Signature):
 
         if writer.debugConfig.debugKernel:
             signature.addArg("AddressDbg", SVK.SIG_GLOBALBUFFER, "struct", "generic")
+        if writer.debugConfig.asanInstrument:
+            signature.addArg("AsanReportBuf", SVK.SIG_GLOBALBUFFER, "u32", "generic")
         signature.addArg("D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
         signature.addArg("C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
         signature.addArg("A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")

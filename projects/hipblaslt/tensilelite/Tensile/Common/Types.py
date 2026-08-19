@@ -50,6 +50,11 @@ class DebugConfig(NamedTuple):
                              the kernel. Useful to examine and debug overflow errors.
         printSolutionRejectionReason: Print why a solution is marked as invalid.
         printIndexAssignmentInfo: Print the tensor index assignment info.
+        asanInstrument: gfx1250 only. Kernel gets a report buffer + StinkyTofu emits an
+                        ASan-shadow-memory bounds check before A/B/C/D/bias global memory
+                        accesses; on violation, writes a record and traps. Sourced from
+                        AsanBuild (only meaningful when the launching client is itself
+                        built with -fsanitize=address).
 
     """
     enableAsserts: bool=False
@@ -63,6 +68,7 @@ class DebugConfig(NamedTuple):
     printSolutionRejectionReason: bool=False
     splitGSU: bool=False
     printIndexAssignmentInfo: bool=False
+    asanInstrument: bool=False
 
 
 def makeDebugConfig(config: dict) -> DebugConfig:
@@ -78,6 +84,7 @@ def makeDebugConfig(config: dict) -> DebugConfig:
     printSolutionRejectionReason = False
     splitGSU = False
     printIndexAssignmentInfo = False
+    asanInstrument = False
 
     if "EnableAsserts" in config:
         enableAsserts = config["EnableAsserts"]
@@ -101,6 +108,8 @@ def makeDebugConfig(config: dict) -> DebugConfig:
         splitGSU = config["SplitGSU"]
     if "PrintIndexAssignmentInfo" in config:
         printIndexAssignmentInfo = config["PrintIndexAssignmentInfo"]
+    if "AsanBuild" in config:
+        asanInstrument = config["AsanBuild"]
 
     return DebugConfig(
                enableAsserts,
@@ -114,4 +123,5 @@ def makeDebugConfig(config: dict) -> DebugConfig:
                printSolutionRejectionReason,
                splitGSU,
                printIndexAssignmentInfo,
+               asanInstrument,
             )

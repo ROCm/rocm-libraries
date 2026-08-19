@@ -150,6 +150,46 @@ def hip_check(result):
         raise RuntimeError(f"HIP error {result}")
 
 
+# ---- ASan shadow-check report buffer (see stinkytofu InsertAsanCheckPass) ----
+# Debug-only host-side counterpart to Tensile's AsanBuild / AsanInstrument:
+# a kernel built with AsanBuild=True expects an "AsanReportBuf" kernarg -- a
+# pointer to an 8-byte device buffer it writes the failing PC into (via
+# global_store_b64, ordered before s_trap by an explicit s_wait_storecnt) when
+# a shadow-memory check catches an out-of-bounds A/B/C/D access. This helper
+# is the test-harness-side allocation + readback; there is no production
+# (ContractionSolution/rocBLASLt) integration -- see the plan doc for why.
+
+ASAN_REPORT_BUF_SIZE = 8  # AsanReportBuf[0:1] = failing PC (u64)
+
+
+def alloc_asan_report_buffer():
+    """Allocate and zero the device buffer for the AsanReportBuf kernarg.
+
+    Returns the device pointer to pass as that kernarg to an
+    AsanBuild-instrumented kernel.
+    """
+    buf = hip_check(hip.hipMalloc(ASAN_REPORT_BUF_SIZE))
+    hip_check(hip.hipMemset(buf, 0, ASAN_REPORT_BUF_SIZE))
+    return buf
+
+
+def check_asan_report_buffer(buf):
+    """Read back an AsanReportBuf after the kernel launch has completed.
+
+    Caller must hipDeviceSynchronize() (or otherwise know the kernel finished)
+    before calling this -- the pass's s_wait_storecnt only orders the report
+    write ahead of the trap within the wave, not ahead of the host read.
+
+    Returns the failing PC as an int if a shadow-poison violation was
+    recorded, else None.
+    """
+    raw = ctypes.create_string_buffer(ASAN_REPORT_BUF_SIZE)
+    hip_check(hip.hipMemcpy(ctypes.addressof(raw), buf, ASAN_REPORT_BUF_SIZE,
+                            hip.hipMemcpyKind.hipMemcpyDeviceToHost))
+    pc = struct.unpack("<Q", raw.raw)[0]
+    return pc if pc != 0 else None
+
+
 # ---- Mock / setup helpers ----
 
 def _mock_dtype(num_bytes=2):

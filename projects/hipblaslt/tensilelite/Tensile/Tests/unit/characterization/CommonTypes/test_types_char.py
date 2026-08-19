@@ -77,6 +77,7 @@ def test_make_debug_config_full(snapshot):
         "PrintSolutionRejectionReason": True,
         "SplitGSU": True,
         "PrintIndexAssignmentInfo": True,
+        "AsanBuild": True,
     }
     assert makeDebugConfig(cfg)._asdict() == snapshot
 
