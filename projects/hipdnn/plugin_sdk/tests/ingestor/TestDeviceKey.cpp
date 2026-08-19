@@ -42,7 +42,7 @@ TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)
     EXPECT_EQ(DeviceKey{propertiesFor("gfx942")}, DeviceKey{propertiesFor("gfx942")});
 }
 
-// The reason C6 keys on the whole struct rather than the arch string: two parts reporting
+// Why the key folds the whole struct rather than the arch string: two parts reporting
 // the same arch can differ in compute units, and a kernel timed on one is not necessarily
 // the winner on the other.
 TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInComputeUnitsCompareUnequal)

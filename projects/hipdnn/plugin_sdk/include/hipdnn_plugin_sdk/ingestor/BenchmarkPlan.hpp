@@ -257,9 +257,9 @@ private:
             ranked.emplace_back(*timeMs, index);
         }
 
-        // stable_sort, not sort: today's strict `<` comparison leaves ties resolving to
-        // the lowest candidate index, and micro-kernels do tie. An unstable sort would
-        // reorder equal times arbitrarily and silently change which kernel wins.
+        // stable_sort, not sort: ties must resolve to the lowest candidate index. A plain
+        // std::sort would reorder equal times arbitrarily and silently change which
+        // kernel wins -- and micro-kernels at a few microseconds do tie.
         std::stable_sort(ranked.begin(), ranked.end(), [](const auto& lhs, const auto& rhs) {
             return lhs.first < rhs.first;
         });
