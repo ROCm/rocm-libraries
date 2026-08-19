@@ -49,6 +49,7 @@ set(roclapack_test_source
   lapack/sytrs2_gtest.cpp
   lapack/geblttrf_gtest.cpp
   # orthogonal factorizations
+  lapack/cholqr_gtest.cpp
   lapack/geqr2_geqrf_gtest.cpp
   lapack/gerq2_gerqf_gtest.cpp
   lapack/geql2_geqlf_gtest.cpp
@@ -115,6 +116,8 @@ set(rocauxiliary_test_source
   auxiliary/stebz_gtest.cpp
   auxiliary/stein_gtest.cpp
   auxiliary/latrd_gtest.cpp
+  # hessenberg matrices
+  auxiliary/lahr2_gtest.cpp
   # symmetric matrices
   auxiliary/lasyf_gtest.cpp
   # triangular matrices
@@ -234,8 +237,10 @@ target_compile_definitions(rocsolver-test PRIVATE
   ROCSOLVER_CLIENTS_TEST
 )
 
-# Mirror the library's 64-bit eigensolver feature flag so the tests assert the
-# correct behavior (real run when ON, rocblas_status_not_implemented when OFF).
+# Mirror feature flags to test behaviour
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
 if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
   target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
