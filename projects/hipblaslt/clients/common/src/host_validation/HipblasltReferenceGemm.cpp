@@ -53,11 +53,10 @@ namespace
     }
 
     template <typename Tc>
-    constexpr ScalarType compatibilityAccumulatorType()
+    constexpr ScalarType referenceAccumulatorType()
     {
-        // Preserve the established client-reference policy while the public
-        // compute-mode contract is clarified independently: I32 uses wide
-        // host arithmetic and F16 compute uses an F32 host accumulator.
+        // I32 reference GEMM uses wide host arithmetic to avoid intermediate
+        // overflow. F16 coefficients use an F32 host accumulator.
         if constexpr(std::is_same_v<Tc, int32_t>)
             return ScalarType::Float64;
         else if constexpr(std::is_same_v<Tc, hipblasLtHalf>)
@@ -66,7 +65,7 @@ namespace
             return hipblaslt::host_validation::scalarType<Tc>();
     }
 
-    ScalarType compatibilityComputeType(hipDataType type)
+    ScalarType referenceComputeType(hipDataType type)
     {
         if(type == HIP_R_32I)
             return ScalarType::Float64;
@@ -167,14 +166,12 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
         TciA == HIP_R_32I ? HIP_R_64F : TciA;
     const hipDataType computeTypeB =
         TciB == HIP_R_32I ? HIP_R_64F : TciB;
-    // The former bridge only applied compute-input conversion when the
-    // requested encoding was narrower than storage. Keep that observable
-    // policy for this extraction; same-width cross-format quantization can be
-    // corrected as a separately reviewed semantic change.
-    if(realDataTypeSize(TiA) > realDataTypeSize(computeTypeA))
-        operandA.computeType = compatibilityComputeType(computeTypeA);
-    if(realDataTypeSize(TiB) > realDataTypeSize(computeTypeB))
-        operandB.computeType = compatibilityComputeType(computeTypeB);
+    const ScalarType computeScalarTypeA = referenceComputeType(computeTypeA);
+    const ScalarType computeScalarTypeB = referenceComputeType(computeTypeB);
+    if(computeScalarTypeA != typeA)
+        operandA.computeType = computeScalarTypeA;
+    if(computeScalarTypeB != typeB)
+        operandB.computeType = computeScalarTypeB;
 
     if(scaleAVec != nullptr && !isScaleAMXFormat)
         operandA.preQuantizationScales.push_back(
@@ -193,7 +190,7 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                         std::move(operandB),
                         tensorFromStorage(C, typeC, layoutC),
                         output,
-                        compatibilityAccumulatorType<Tc>());
+                        referenceAccumulatorType<Tc>());
     request.epilogue.alpha = runtimeScalar(alpha);
     request.epilogue.beta = runtimeScalar(beta);
     request.epilogue.outputScale = runtimeScalar(scaleD);

@@ -102,8 +102,8 @@ namespace
             this->a = reinterpret_cast<DType*>(aBase + (allocSize - bufSize));
             this->b = reinterpret_cast<DType*>(bBase + (allocSize - bufSize));
             this->c = reinterpret_cast<DType*>(cBase + (allocSize - bufSize));
-            init(this->a, m * n * b, InitializationDomain::MatrixA);
-            init(this->b, m * n * b, InitializationDomain::MatrixB);
+            init(this->a, m * n * b, InitializationSequence::MatrixA);
+            init(this->b, m * n * b, InitializationSequence::MatrixB);
         }
 
         ~TypedMatrixTransformIO() override
@@ -137,19 +137,19 @@ namespace
         }
 
     private:
-        enum class InitializationDomain : std::uint64_t
+        enum class InitializationSequence : std::uint64_t
         {
             MatrixA = 0,
             MatrixB = 1,
         };
 
-        void init(DType* buf, size_t len, InitializationDomain domain)
+        void init(DType* buf, size_t len, InitializationSequence sequence)
         {
             std::vector<DType> ref(len);
             const uint64_t     recipeSeed
-                = hipblaslt::host_validation::compatibility::seedForRandomDomain(
+                = hipblaslt::host_validation::initialization::seedForSequence(
                     hipblaslt::host_validation::defaultInitializationSeed,
-                    static_cast<std::uint64_t>(domain));
+                    static_cast<std::uint64_t>(sequence));
             const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
                 roc::host_validation::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
                 {.seed = recipeSeed});

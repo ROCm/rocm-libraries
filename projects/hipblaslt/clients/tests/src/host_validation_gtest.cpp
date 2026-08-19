@@ -127,7 +127,7 @@ TEST(HostValidationDataInitializationBridge, ComplexRandomUsesTypedCartesianDoma
     }
 }
 
-TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleDomainsAndDefaultSeed)
+TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAndDefaultSeed)
 {
     std::vector<float> a(5);
     std::vector<float> b(7);
@@ -145,30 +145,36 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleDomainsAnd
                                                       hipblaslt_initialization::rand_int);
 
     constexpr uint64_t seed = hipblaslt::host_validation::defaultInitializationSeed;
+    const auto expected = [seed](uint64_t sequence, size_t index) {
+        return roc::host_validation::indexedUniformInteger(
+            hipblaslt::host_validation::initialization::seedForSequence(seed, sequence),
+            roc::host_validation::generation_random_domain_version_1::realComponent,
+            index,
+            1,
+            10);
+    };
     for(size_t index = 0; index < a.size(); ++index)
-        EXPECT_EQ(a[index], roc::host_validation::indexedUniformInteger(seed, 0, index, 1, 10));
+        EXPECT_EQ(a[index], expected(0, index));
     for(size_t index = 0; index < b.size(); ++index)
     {
-        const int magnitude = roc::host_validation::indexedUniformInteger(seed, 1, index, 1, 10);
+        const int magnitude = expected(1, index);
         EXPECT_EQ(b[index], (index & 1U) == 0 ? -magnitude : magnitude);
     }
     for(size_t index = 0; index < c.size(); ++index)
-        EXPECT_EQ(c[index], roc::host_validation::indexedUniformInteger(seed, 2, index, 1, 10));
+        EXPECT_EQ(c[index], expected(2, index));
     for(size_t index = 0; index < bias.size(); ++index)
-        EXPECT_EQ(bias[index], roc::host_validation::indexedUniformInteger(seed, 3, index, 1, 10));
+        EXPECT_EQ(bias[index], expected(3, index));
 }
 
-TEST(HostValidationDataInitializationBridge, CompatibilitySeedPreservesSingleLegacyDomain)
+TEST(HostValidationDataInitializationBridge, InitializationSeedDependsOnSeedAndSequence)
 {
-    using hipblaslt::host_validation::compatibility::seedForRandomDomain;
-    using roc::host_validation::generation_random_domain_version_1::realComponent;
+    using hipblaslt::host_validation::initialization::seedForSequence;
 
-    constexpr uint64_t seed         = 0x123456789abcdef0ULL;
-    constexpr uint64_t domain       = 0x1020304050607080ULL;
-    const uint64_t     remappedSeed = seedForRandomDomain(seed, domain);
-    for(uint64_t index = 0; index < 32; ++index)
-        EXPECT_EQ(roc::host_validation::counterRandom(remappedSeed, realComponent, index),
-                  roc::host_validation::counterRandom(seed, domain, index));
+    constexpr uint64_t seed     = 0x123456789abcdef0ULL;
+    constexpr uint64_t sequence = 0x1020304050607080ULL;
+    EXPECT_EQ(seedForSequence(seed, sequence), seedForSequence(seed, sequence));
+    EXPECT_NE(seedForSequence(seed, sequence), seedForSequence(seed, sequence + 1));
+    EXPECT_NE(seedForSequence(seed, sequence), seedForSequence(seed + 1, sequence));
 }
 
 TEST(HostValidationDataInitializationBridge, GroupedGemmPropagatesCallerSeed)
@@ -190,20 +196,28 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmPropagatesCallerSeed)
                                                       hipblaslt_initialization::rand_int,
                                                       seed);
 
+    const auto expected = [seed](uint64_t sequence, size_t index) {
+        return roc::host_validation::indexedUniformInteger(
+            hipblaslt::host_validation::initialization::seedForSequence(seed, sequence),
+            roc::host_validation::generation_random_domain_version_1::realComponent,
+            index,
+            1,
+            10);
+    };
     for(size_t index = 0; index < a.size(); ++index)
-        EXPECT_EQ(a[index], roc::host_validation::indexedUniformInteger(seed, 0, index, 1, 10));
+        EXPECT_EQ(a[index], expected(0, index));
     for(size_t index = 0; index < b.size(); ++index)
     {
-        const int magnitude = roc::host_validation::indexedUniformInteger(seed, 1, index, 1, 10);
+        const int magnitude = expected(1, index);
         EXPECT_EQ(b[index], (index & 1U) == 0 ? -magnitude : magnitude);
     }
     for(size_t index = 0; index < c.size(); ++index)
-        EXPECT_EQ(c[index], roc::host_validation::indexedUniformInteger(seed, 2, index, 1, 10));
+        EXPECT_EQ(c[index], expected(2, index));
     for(size_t index = 0; index < bias.size(); ++index)
-        EXPECT_EQ(bias[index], roc::host_validation::indexedUniformInteger(seed, 3, index, 1, 10));
+        EXPECT_EQ(bias[index], expected(3, index));
 }
 
-TEST(HostValidationDataInitializationBridge, GroupedGemmDefinesHplAndLegacySpecialRecipes)
+TEST(HostValidationDataInitializationBridge, GroupedGemmDefinesHplAndSpecialRecipes)
 {
     std::vector<float> a(4);
     std::vector<float> b(4);
@@ -519,7 +533,7 @@ TEST(HostValidationDataInitializationBridge, DeviceNormalGenerationIsRepeatable)
     EXPECT_EQ(hipFree(secondDevice), hipSuccess);
 }
 
-TEST(HostValidationDataInitializationBridge, LegacyHostEntryPointsUseTensorLayouts)
+TEST(HostValidationDataInitializationBridge, HostEntryPointsUseTensorLayouts)
 {
     using Complex = std::complex<float>;
     std::array<Complex, 8> values;
@@ -540,7 +554,7 @@ TEST(HostValidationDataInitializationBridge, LegacyHostEntryPointsUseTensorLayou
     EXPECT_EQ(values[2], Complex(-99, -99));
 }
 
-TEST(HostValidationDataInitializationBridge, LegacyRandomHelpersUseComponentRecipes)
+TEST(HostValidationDataInitializationBridge, RandomHelpersUseComponentRecipes)
 {
     std::array<float, 8> values;
     values.fill(-99);
@@ -586,7 +600,7 @@ TEST(HostValidationDataInitializationBridge, LegacyRandomHelpersUseComponentReci
         EXPECT_TRUE(std::isnan(value));
 }
 
-TEST(HostValidationDataInitializationBridge, LegacyDispatchSupportsEveryFp8Encoding)
+TEST(HostValidationDataInitializationBridge, RuntimeDispatchSupportsEveryFp8Encoding)
 {
     constexpr std::array<hipDataType, 4> fp8Types{
         HIP_R_8F_E4M3_FNUZ,
@@ -625,12 +639,14 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
             {
                 const float  value        = exactView.loadAs<float>({row, column, batch});
                 const size_t logicalIndex = row + 2 * (column + 3 * batch);
-                const int    magnitude
-                    = indexedUniformInteger(defaultInitializationSeed,
-                                            compatibility::integerExactMatrixBRandomDomain,
-                                            logicalIndex,
-                                            0,
-                                            2);
+                const uint64_t sequenceSeed = initialization::seedForSequence(
+                    defaultInitializationSeed, initialization::integerExactMatrixBSequence);
+                const int magnitude = indexedUniformInteger(
+                    sequenceSeed,
+                    generation_random_domain_version_1::realComponent,
+                    logicalIndex,
+                    0,
+                    2);
                 const int expected = ((row ^ column) & 1U) == 0 ? -magnitude : magnitude;
                 EXPECT_EQ(value, expected);
                 EXPECT_EQ(value, std::trunc(value));
@@ -848,6 +864,44 @@ TEST(HostValidationCblasBridge, QuantizesCombinedOperandScaleAndAlphaVector)
 
     const float expected = static_cast<float>(hipblaslt_f8(a[0] * scaleA[0] * alphaVector[0]));
     EXPECT_FLOAT_EQ(d[0], expected);
+}
+
+TEST(HostValidationCblasBridge, AppliesSameWidthCrossFormatComputeQuantization)
+{
+    const std::array<hipblaslt_f8, 1> a{hipblaslt_f8(1.125f)};
+    const std::array<float, 1>        b{1.0f};
+    std::array<float, 1>              d{};
+
+    hipblaslt_reference_gemm<float>(HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    1,
+                                    1,
+                                    1,
+                                    1.0f,
+                                    a.data(),
+                                    1,
+                                    b.data(),
+                                    1,
+                                    0.0f,
+                                    d.data(),
+                                    1,
+                                    d.data(),
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1.0f,
+                                    false,
+                                    false,
+                                    HIP_R_8F_E4M3,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_8F_E5M2,
+                                    HIP_R_32F);
+
+    EXPECT_FLOAT_EQ(d[0], static_cast<float>(hipblaslt_bf8(static_cast<float>(a[0]))));
 }
 
 TEST(HostValidationCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
