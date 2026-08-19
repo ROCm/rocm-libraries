@@ -23,6 +23,65 @@
 
 namespace ck_tile {
 
+namespace detail {
+
+template <typename T>
+struct is_right_pad_transform : std::false_type
+{
+};
+template <typename L, typename R, bool S>
+struct is_right_pad_transform<right_pad<L, R, S>> : std::true_type
+{
+};
+
+// TDM programs its hardware out-of-bounds extent from the tensor descriptor.
+// pad_tensor_view widens that descriptor, and handing the widened length to the
+// engine makes it DMA real neighbouring memory into the padded region instead of
+// leaving zeros there -- silently corrupting any reduction over the padded axis
+// (measured: every multiple-of-8 head dim below the tile head dim in fmha bwd).
+// right_pad retains the true extent in low_length_, so recover it here.
+//
+// pad_tensor_view appends exactly one 1->1 transform per top dimension, so those
+// occupy the last NDim slots of the chain (anything the underlying naive view
+// contributed, e.g. an embed, comes first). Each candidate is accepted only if
+// its upper length matches that dimension's length; otherwise, and for any chain
+// shorter than NDim, we return get_lengths() unchanged -- preserving the previous
+// behaviour for descriptors this cannot analyse.
+template <typename TensorDesc>
+CK_TILE_HOST_DEVICE constexpr auto tdm_real_lengths(const TensorDesc& desc)
+{
+    const auto lengths      = desc.get_lengths();
+    const auto& transforms  = desc.get_transforms();
+    constexpr index_t kNDim = remove_cvref_t<decltype(lengths)>::size();
+    constexpr index_t kNT   = remove_cvref_t<decltype(transforms)>::size();
+    if constexpr(kNT >= kNDim)
+    {
+        return generate_tuple(
+            [&](auto idim) {
+                const auto& tf = transforms[number<kNT - kNDim + idim>{}];
+                if constexpr(is_right_pad_transform<remove_cvref_t<decltype(tf)>>::value)
+                {
+                    return (static_cast<index_t>(tf.get_upper_lengths()[number<0>{}]) ==
+                            static_cast<index_t>(lengths[idim]))
+                               ? static_cast<index_t>(tf.low_length_)
+                               : static_cast<index_t>(lengths[idim]);
+                }
+                else
+                {
+                    return static_cast<index_t>(lengths[idim]);
+                }
+            },
+            number<kNDim>{});
+    }
+    else
+    {
+        return lengths;
+    }
+}
+
+} // namespace detail
+
+
 /**
  * @brief This class provides tile (windowed) view and access to the device memory.
  *
@@ -908,7 +967,7 @@ struct tile_window_with_static_distribution
             // This prevents out-of-bounds access when window_origin + bottom_index > tensor_length
             auto&& tensor_dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
                 transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                 glb_tensor_descriptor.get_lengths() - this->get_window_origin() -
+                                 detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
                                      window_adaptor_thread_coord.get_bottom_index())));
             tensor_dims[0] /= Traits::PackedSize;
             // Assert that both window origins have the same dimensionality
@@ -1060,7 +1119,7 @@ struct tile_window_with_static_distribution
             // This prevents out-of-bounds access when window_origin + bottom_index > tensor_length
             auto&& tensor_dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
                 transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                 glb_tensor_descriptor.get_lengths() - this->get_window_origin() -
+                                 detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
                                      window_adaptor_thread_coord.get_bottom_index())));
             tensor_dims[0] /= Traits::PackedSize;
 
@@ -1309,7 +1368,7 @@ struct tile_window_with_static_distribution
             // tensor_length
             auto&& tensor_dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
                 transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                 glb_tensor_descriptor.get_lengths() - this->get_window_origin() -
+                                 detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
                                      window_adaptor_thread_coord.get_bottom_index())));
             tensor_dims[0] /= Traits::PackedSize;
 
