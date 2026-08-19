@@ -3,7 +3,7 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
-## MIOpen 3.6.0 for ROCm 10.1.0
+## MIOpen 3.6.1 for ROCm 10.1.0
 
 ### Resolved Issues
 * [Conv] Fixed silently incorrect results from the grouped backward-weights CK xdlops solver when a tensor's element extent exceeds INT_MAX but its individual lengths and strides still fit int32; such problems now use a large-tensor (int64) CK instance instead of overflowing int32 indexing.
