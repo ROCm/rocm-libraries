@@ -90,7 +90,34 @@ TEST(TestIngestorDeviceKey, StdHashAgreesWithTheKeysOwnHash)
 {
     const DeviceKey key{propertiesFor("gfx942")};
 
-    EXPECT_EQ(std::hash<DeviceKey>{}(key), static_cast<size_t>(key.hash));
+    EXPECT_EQ(std::hash<DeviceKey>{}(key), static_cast<size_t>(key.hash()));
+}
+
+/// The hash narrows; the fields decide. Constructed so the two keys carry the SAME hash
+/// while describing different devices -- if `operator==` ever regresses to comparing the
+/// fold alone, a ranking measured on one device would be served for the other, and this
+/// is the only test that would notice.
+TEST(TestIngestorDeviceKey, EqualHashesWithDifferentPropertiesStillCompareUnequal)
+{
+    struct CollidingKey : DeviceKey
+    {
+        using DeviceKey::DeviceKey;
+
+        // Force the narrowing half to agree, leaving only the field comparison.
+        static CollidingKey with(DeviceProperties properties, uint64_t forcedHash)
+        {
+            CollidingKey key{std::move(properties)};
+            key.forceHash(forcedHash);
+            return key;
+        }
+    };
+
+    auto first = CollidingKey::with(propertiesFor("gfx942"), 0xABCD);
+    auto second = CollidingKey::with(propertiesFor("gfx950"), 0xABCD);
+
+    ASSERT_EQ(first.hash(), second.hash()) << "the collision must actually be forced";
+    EXPECT_NE(static_cast<const DeviceKey&>(first), static_cast<const DeviceKey&>(second))
+        << "a hash collision with differing properties must resolve to a miss";
 }
 
 } // namespace

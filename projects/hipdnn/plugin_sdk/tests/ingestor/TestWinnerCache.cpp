@@ -311,6 +311,46 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
         << "a covering record must decide the order, not the heuristic";
 }
 
+/// The production sequence, on ONE manager: sort (heuristic, memoized), then record, then
+/// sort again. The earlier test uses a fresh manager, which proves the mechanism but
+/// skips the ordering that actually occurs -- a benchmark sweep always writes its record
+/// *after* the buildPlan that already sorted and cached the catalog. Before
+/// `Catalog::orderedFromRecord`, the second call short-circuited on `isSorted` and the
+/// measured order was never adopted.
+TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlreadySorted)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xE7));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    // First sort: no record exists, so this is the heuristic order, and it is memoized.
+    const auto heuristicOrder = manager->sortedDefinitions(context);
+    ASSERT_GE(heuristicOrder.size(), 2U) << "this test needs at least two candidates";
+
+    // The sweep finishes and writes a record that reverses that order.
+    WinnerRecord reversed;
+    double time = 1.0;
+    for(auto entry = heuristicOrder.rbegin(); entry != heuristicOrder.rend(); ++entry)
+    {
+        reversed.push_back(entryFor(*entry, time));
+        time += 1.0;
+    }
+    manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}}, reversed);
+
+    // Second sort, same manager: the measured order must now win.
+    const auto measuredOrder = manager->sortedDefinitions(context);
+
+    ASSERT_EQ(measuredOrder.size(), heuristicOrder.size());
+    EXPECT_EQ(measuredOrder.front().kernelId, heuristicOrder.back().kernelId)
+        << "a memoized heuristic order must yield to a measurement that arrives later";
+
+    // And a third call is stable: once ordered from a record, it stays that way.
+    const auto thirdCall = manager->sortedDefinitions(context);
+    EXPECT_EQ(thirdCall.front().kernelId, measuredOrder.front().kernelId);
+}
+
 /// Check 1 fails on a partial record: the heuristic still ranks, because interleaving
 /// measured entries with unmeasured ones would invent an order nobody took.
 TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderIntact)
