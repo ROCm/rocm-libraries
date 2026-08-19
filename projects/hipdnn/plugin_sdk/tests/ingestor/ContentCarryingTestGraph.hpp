@@ -76,6 +76,11 @@ public:
             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         std::optional<int64_t> preferredEngineId;
         bool isOverrideShapeEnabled = false;
+        /// The backend derives this from isOverrideShapeEnabled and three tensor facts
+        /// (PluginVersionConstants.hpp:58-93), and the generated operator== compares it,
+        /// so a fixture that cannot set it cannot reproduce what production does. Two
+        /// graphs differing only in the flag really do carry different versions.
+        std::optional<hipdnn_data_sdk::utilities::Version> minRequiredApiVersion;
         std::vector<TensorSpec> tensors{TensorSpec{1}, TensorSpec{2}};
         std::vector<NodeSpec> nodes{NodeSpec{}};
     };
@@ -194,6 +199,12 @@ private:
             uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*_spec.graphId);
         }
 
+        hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion apiVersion{};
+        if(_spec.minRequiredApiVersion.has_value())
+        {
+            apiVersion = hipdnn_plugin_sdk::toEngineApiVersion(*_spec.minRequiredApiVersion);
+        }
+
         GraphBuilder graphBuilder(_builder);
         graphBuilder.add_name(name);
         graphBuilder.add_compute_data_type(_spec.computeDataType);
@@ -205,6 +216,10 @@ private:
         if(_spec.preferredEngineId.has_value())
         {
             graphBuilder.add_preferred_engine_id(*_spec.preferredEngineId);
+        }
+        if(_spec.minRequiredApiVersion.has_value())
+        {
+            graphBuilder.add_min_required_engine_api_version(&apiVersion);
         }
         if(uuid.has_value())
         {

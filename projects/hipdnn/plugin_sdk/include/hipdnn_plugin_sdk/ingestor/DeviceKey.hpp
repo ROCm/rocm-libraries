@@ -36,23 +36,55 @@ namespace hipdnn_plugin_sdk::ingestor
 /// structured binding that fails to compile when the struct grows, which is the reminder.
 struct DeviceKey
 {
-    uint64_t hash = 0;
-
     DeviceKey() = default;
 
-    explicit DeviceKey(const DeviceProperties& properties)
-        : hash(fold(properties))
+    /// Copies @p properties rather than referencing them: a key outlives the
+    /// `MatchContext` that produced it (records live in the cache indefinitely), and
+    /// `MatchContext` holds `DeviceProperties` by reference, so borrowing here would
+    /// dangle the moment the plan went away.
+    explicit DeviceKey(DeviceProperties properties)
+        : _properties(std::move(properties))
+        , _hash(fold(_properties))
     {
     }
 
+    uint64_t hash() const
+    {
+        return _hash;
+    }
+
+    const DeviceProperties& properties() const
+    {
+        return _properties;
+    }
+
+    /// Hash first as a cheap reject, then a **full field comparison** -- the same
+    /// narrow-then-confirm shape as GraphContentKey and as the pre-existing CatalogKey,
+    /// which compares all 16 UUID bytes rather than trusting its own fold.
+    ///
+    /// Comparing the hash alone would mean two genuinely different devices whose folds
+    /// collide compare equal, and a ranking measured on one would be served for the
+    /// other. The struct is three small fields, so there is no reason to accept that.
     bool operator==(const DeviceKey& other) const
     {
-        return hash == other.hash;
+        return _hash == other._hash && _properties.gcnArchName == other._properties.gcnArchName
+               && _properties.warpSize == other._properties.warpSize
+               && _properties.multiProcessorCount == other._properties.multiProcessorCount;
     }
 
     bool operator!=(const DeviceKey& other) const
     {
         return !(*this == other);
+    }
+
+protected:
+    /// Test seam: overrides the narrowing hash so a collision can be forced. Nothing in
+    /// production calls this -- the point of the tests that do is to prove `operator==`
+    /// still rejects on the fields when the hash agrees, which is unobservable otherwise
+    /// because a real FNV-1a collision cannot be produced on demand.
+    void forceHash(uint64_t hash)
+    {
+        _hash = hash;
     }
 
 private:
@@ -78,6 +110,9 @@ private:
         const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
         stream.insert(stream.end(), bytes, bytes + sizeof(T));
     }
+
+    DeviceProperties _properties;
+    uint64_t _hash = 0;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor
@@ -90,7 +125,7 @@ struct hash<hipdnn_plugin_sdk::ingestor::DeviceKey>
 {
     size_t operator()(const hipdnn_plugin_sdk::ingestor::DeviceKey& key) const noexcept
     {
-        return static_cast<size_t>(key.hash);
+        return static_cast<size_t>(key.hash());
     }
 };
 

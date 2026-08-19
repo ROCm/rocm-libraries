@@ -78,6 +78,43 @@ TEST(TestIngestorGraphContentKey, ADifferentOverrideShapeFlagStillComparesEqual)
               keyFor(ContentCarryingTestGraph{disabled}));
 }
 
+/// The production shape of the case above, which the fixture could not express until
+/// `Spec::minRequiredApiVersion` existed. The backend derives the stamped version from
+/// `is_override_shape_enabled` (PluginVersionConstants.hpp:58-93), so two real graphs
+/// differing only in that flag carry *different* versions -- and the generated
+/// operator== compares the version. Without clearing it, the exclusion above is defeated
+/// in production while its test still passes. This is the test that would have caught it.
+TEST(TestIngestorGraphContentKey, TheDerivedApiVersionDoesNotDefeatTheOverrideShapeExclusion)
+{
+    Spec withOverride;
+    withOverride.isOverrideShapeEnabled = true;
+    withOverride.minRequiredApiVersion = hipdnn_data_sdk::utilities::Version{1, 1, 0};
+
+    Spec without;
+    without.isOverrideShapeEnabled = false;
+    without.minRequiredApiVersion = hipdnn_data_sdk::utilities::Version{1, 0, 0};
+
+    EXPECT_EQ(keyFor(ContentCarryingTestGraph{withOverride}),
+              keyFor(ContentCarryingTestGraph{without}))
+        << "a measurement transfers across the override-shape flag, so the version it "
+           "stamps must not split the key";
+}
+
+/// The version is excluded because it is *derived*, not because versions are
+/// unimportant: its content-bearing inputs (pass-by-value, ragged offsets, alignment)
+/// are each compared directly on the tensors that carry them.
+TEST(TestIngestorGraphContentKey, ADifferentApiVersionAloneDoesNotSplitTheKey)
+{
+    Spec early;
+    early.minRequiredApiVersion = hipdnn_data_sdk::utilities::Version{1, 0, 0};
+    Spec later;
+    later.minRequiredApiVersion = hipdnn_data_sdk::utilities::Version{9, 9, 9};
+
+    EXPECT_EQ(keyFor(ContentCarryingTestGraph{early}), keyFor(ContentCarryingTestGraph{later}))
+        << "the version is a derived summary; the facts it summarises are compared on "
+           "their own";
+}
+
 TEST(TestIngestorGraphContentKey, ADifferentTensorShapeComparesUnequal)
 {
     Spec narrow;
