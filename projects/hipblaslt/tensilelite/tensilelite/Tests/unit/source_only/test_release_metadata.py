@@ -22,6 +22,15 @@ def test_distribution_version_comes_from_explicit_base_version():
     assert metadata["distribution_version"]("7.2.4") == "5.0.0+rocm7.2.4"
 
 
+def test_distribution_version_preserves_development_publication_identity():
+    metadata = runpy.run_path(str(_SOURCE_ROOT / "release_metadata.py"))
+
+    assert (
+        metadata["distribution_version"]("10.1.0.dev0+0123456789abcdef")
+        == "5.0.0+devrocm10.1.0.dev0.0123456789abcdef"
+    )
+
+
 def test_compatibility_setup_uses_canonical_metadata():
     metadata = runpy.run_path(str(_SOURCE_ROOT / "release_metadata.py"))
 
