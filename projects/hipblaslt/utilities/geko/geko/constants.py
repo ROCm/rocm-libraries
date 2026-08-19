@@ -4,7 +4,7 @@
 """Data type definitions and field mappings for GEMM operations.
 
 Defines constants for:
-- Data type mappings between hipBLASLt and Tensile formats.
+- Data type mappings between hipBLASLt and TensileLite formats.
 - GEMM operation field definitions and categorizations.
 - Log file field specifications.
 - Index type mappings for different data formats.
