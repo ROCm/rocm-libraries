@@ -22,6 +22,15 @@ enum class UlpComparisonMode {
     EncodedDistance,
 };
 
+enum class ComplexPointwiseMode {
+    /// Compare real and imaginary components independently. Both component comparisons must pass.
+    Componentwise,
+
+    /// Compare the complex-difference magnitude against a tolerance scaled by the expected
+    /// complex-value magnitude.
+    Magnitude,
+};
+
 /// Selects logical tensor elements before any comparison criterion, evidence, or reporting is
 /// evaluated. `first` and `stride` are linear logical indices in `indexOrder`; `maxElements`
 /// limits the number of selected indices. `stride` must be nonzero.
@@ -49,9 +58,18 @@ struct ComparisonSelection {
 /// asymmetric real-valued isclose rule: expected is the reference value. The symmetric term and
 /// strict inequality are legacy host-validation behavior, not NumPy behavior.
 ///
-/// Complex values preserve the existing componentwise policy: the real and imaginary components
-/// are tested independently and both must pass. NumPy instead applies its rule to the magnitude of
-/// the complex difference. Changing that policy requires an explicit compatibility decision.
+/// In `ComplexPointwiseMode::Magnitude`, the finite-value rule instead uses
+///
+///   difference = |observed - expected|
+///   tolerance = absoluteTolerance + relativeTolerance * |expected|
+///               + symmetricRelativeTolerance * (|observed| + |expected| + 1)
+///
+/// where each absolute value is a complex magnitude. This is NumPy's finite complex `isclose`
+/// formula when the symmetric term is zero and the comparison is non-strict. Magnitude mode
+/// decodes both complex components to double before evaluating the formula, so storage-type
+/// rounding at a tolerance boundary can differ from NumPy. A complex value containing any NaN is
+/// one logical NaN; when `equalNaNs` is true, two such values match before signed-zero and infinity
+/// classification. Non-NaN infinities match only when both complex components are exactly equal.
 ///
 /// Pass/fail criteria are:
 ///
@@ -71,6 +89,7 @@ struct ComparisonOptions {
     bool strictTolerance = false;
     bool equalNaNs = false;
     bool equalSignedZero = true;
+    ComplexPointwiseMode complexPointwiseMode = ComplexPointwiseMode::Componentwise;
 
     // Evidence. These fields do not affect pass/fail by themselves.
     /// Collect non-finite/signed-zero counters and maximum pointwise differences.
@@ -103,8 +122,8 @@ struct ComparisonValue {
 /// One reported logical tensor element. `index` is the selected element's linear logical index in
 /// `ComparisonOptions::selection.indexOrder`; `coordinates` are tensor coordinates; offsets are
 /// element offsets from the start of each tensor's storage, not byte offsets. For a complex value,
-/// `absoluteDifference` is the Euclidean magnitude of the component differences and `tolerance`
-/// is the larger component tolerance.
+/// `absoluteDifference` is the complex-difference magnitude. `tolerance` is the larger component
+/// tolerance in componentwise mode and the complex-value tolerance in magnitude mode.
 struct Mismatch {
     size_t index = 0;
     std::vector<size_t> coordinates;
@@ -131,11 +150,13 @@ struct ComparisonResult {
     /// Number of logical elements that failed the pointwise criterion; zero if it was disabled.
     size_t mismatches = 0;
 
-    // Pointwise evidence. matchedNaNs and matchedInfinities count real components;
-    // nonFiniteMismatches and signedZeroMismatches count logical elements. For complex values,
-    // maxAbsoluteDifference uses the Euclidean component difference, while both relative maxima
-    // use the maximum component ratio. Relative evidence uses expected as the reference;
-    // symmetric-relative evidence uses |observed - expected| / (|observed| + |expected| + 1).
+    // Pointwise evidence. matchedNaNs and matchedInfinities count real components in componentwise
+    // mode and logical values in magnitude mode. nonFiniteMismatches and signedZeroMismatches
+    // always count logical values. For complex values, maxAbsoluteDifference uses the
+    // complex-difference magnitude. The relative maxima use the maximum component ratio in
+    // componentwise mode and the complex-magnitude ratio in magnitude mode. Relative evidence uses
+    // expected as the reference; symmetric-relative evidence divides by
+    // |observed| + |expected| + 1 using the corresponding component or complex magnitudes.
     size_t matchedNaNs = 0;
     size_t matchedInfinities = 0;
     size_t nonFiniteMismatches = 0;
@@ -253,9 +274,9 @@ ComparisonOptions defaultComparisonOptions(
 /// Absolute-only pointwise comparison with equal NaNs. This is not NumPy's default policy.
 ComparisonOptions nearComparisonOptions(double absoluteTolerance);
 
-/// NumPy-compatible real-valued allclose options. Arguments remain absolute-then-relative for API
-/// compatibility; the defaults are NumPy's `atol=1e-8` and `rtol=1e-5`. Complex comparison remains
-/// componentwise as documented on `ComparisonOptions`.
+/// NumPy-formula finite-value allclose options. Arguments remain absolute-then-relative for API
+/// compatibility; the defaults are NumPy's `atol=1e-8` and `rtol=1e-5`. Complex values use
+/// double-precision magnitude comparison as documented on `ComparisonOptions`.
 ComparisonOptions allCloseComparisonOptions(double absoluteTolerance = 1e-8,
                                             double relativeTolerance = 1e-5,
                                             bool equalNaNs = false);
@@ -271,12 +292,12 @@ ComparisonResult compare(const Tensor& observed, const Tensor& expected,
 
 /// Returns the first candidate pair, in absolute-major then relative-minor input order, for which
 /// all enabled criteria pass. The search sets the asymmetric absolute and relative tolerances and
-/// clears `symmetricRelativeTolerance`; all other supplied options remain active.
-std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
-                                                         const Tensor& expected,
-                                                         std::span<const double> absoluteCandidates,
-                                                         std::span<const double> relativeCandidates,
-                                                         ComparisonOptions options = {});
+/// clears `symmetricRelativeTolerance`; all other supplied options remain active. The default uses
+/// `allCloseComparisonOptions()`, including magnitude comparison for complex values.
+std::optional<ComparisonTolerance> findAllCloseTolerance(
+    const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
+    std::span<const double> relativeCandidates,
+    ComparisonOptions options = allCloseComparisonOptions());
 
 /// Checks `[firstElement, firstElement + elementCount)` for the type's unwritten sentinel and
 /// reports absolute storage element indices. Signed integers use the lowest value; unsigned

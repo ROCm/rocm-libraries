@@ -317,6 +317,25 @@ TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
     EXPECT_EQ(report.allCloseTolerance->relative, 1e-4);
 }
 
+TEST(HostValidationComparisonBridge, UsesMagnitudeForComplexAllcloseToleranceSearch)
+{
+    const std::complex<float> expected{0.0f, 0.0f};
+    const std::complex<float> observed{0.09f, 0.09f};
+
+    hipblaslt::host_validation::HostComparisonRequest request;
+    request.rows                  = 1;
+    request.columns               = 1;
+    request.leadingDimension      = 1;
+    request.batchStride           = 1;
+    request.batchCount            = 1;
+    request.expected              = &expected;
+    request.observed              = &observed;
+    request.type                  = HIP_C_32F;
+    request.findAllCloseTolerance = true;
+
+    EXPECT_FALSE(hipblaslt::host_validation::compareHost(request).allCloseTolerance);
+}
+
 TEST(HostValidationComparisonBridge, ComputesRelativeFrobeniusEvidence)
 {
     std::array<double, 2>                             expected{3.0, 4.0};

@@ -836,6 +836,102 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(selected_report.compared, len(selected_indices))
         self.assertEqual(selected_report.mismatches, int(selected_mismatches))
 
+    def test_complex_allclose_modes_match_numpy_magnitude_policy(self):
+        observed_values = np.asarray([1.0 + 1.0j], dtype=np.complex128)
+        expected_values = np.asarray([0.0 + 0.0j], dtype=np.complex128)
+        observed = hv.from_numpy(observed_values)
+        expected = hv.from_numpy(expected_values)
+
+        magnitude = hv.allclose_comparison_options(1.0, 0.0)
+        self.assertEqual(
+            magnitude.complex_pointwise_mode,
+            hv.ComplexPointwiseMode.Magnitude,
+        )
+        self.assertFalse(hv.compare(observed, expected, magnitude).passed)
+        self.assertEqual(
+            hv.compare(observed, expected, magnitude).passed,
+            bool(np.allclose(observed_values, expected_values, atol=1.0, rtol=0.0)),
+        )
+
+        componentwise = hv.allclose_comparison_options(1.0, 0.0)
+        componentwise.complex_pointwise_mode = hv.ComplexPointwiseMode.Componentwise
+        self.assertTrue(hv.compare(observed, expected, componentwise).passed)
+
+        magnitude.compute_pointwise_statistics = False
+        magnitude.compute_frobenius = False
+        self.assertFalse(hv.compare(observed, expected, magnitude).passed)
+
+        boundary_observed_values = np.asarray([0.0 + 0.0j], dtype=np.complex128)
+        boundary_expected_values = np.asarray([3.0 + 4.0j], dtype=np.complex128)
+        boundary = hv.allclose_comparison_options(0.0, 1.0)
+        boundary_result = hv.compare(
+            hv.from_numpy(boundary_observed_values),
+            hv.from_numpy(boundary_expected_values),
+            boundary,
+        )
+        reverse_result = hv.compare(
+            hv.from_numpy(boundary_expected_values),
+            hv.from_numpy(boundary_observed_values),
+            boundary,
+        )
+        self.assertEqual(
+            boundary_result.passed,
+            bool(
+                np.allclose(
+                    boundary_observed_values,
+                    boundary_expected_values,
+                    atol=0.0,
+                    rtol=1.0,
+                )
+            ),
+        )
+        self.assertEqual(
+            reverse_result.passed,
+            bool(
+                np.allclose(
+                    boundary_expected_values,
+                    boundary_observed_values,
+                    atol=0.0,
+                    rtol=1.0,
+                )
+            ),
+        )
+
+        nan_observed = hv.from_numpy(
+            np.asarray([complex(np.nan, 1.0)], dtype=np.complex128)
+        )
+        nan_expected = hv.from_numpy(
+            np.asarray([complex(1.0, np.nan)], dtype=np.complex128)
+        )
+        equal_nan = hv.allclose_comparison_options(0.0, 0.0, True)
+        nan_result = hv.compare(nan_observed, nan_expected, equal_nan)
+        self.assertTrue(nan_result.passed)
+        self.assertEqual(nan_result.matched_nans, 1)
+
+        search_observed = hv.from_numpy(np.asarray([0.09 + 0.09j], dtype=np.complex128))
+        search_expected = hv.from_numpy(np.asarray([0.0 + 0.0j], dtype=np.complex128))
+        self.assertIsNone(
+            hv.find_allclose_tolerance(
+                search_observed,
+                search_expected,
+                [0.1],
+                [0.0],
+            )
+        )
+        componentwise_search = hv.allclose_comparison_options()
+        componentwise_search.complex_pointwise_mode = (
+            hv.ComplexPointwiseMode.Componentwise
+        )
+        self.assertIsNotNone(
+            hv.find_allclose_tolerance(
+                search_observed,
+                search_expected,
+                [0.1],
+                [0.0],
+                componentwise_search,
+            )
+        )
+
     def test_comparison_nonfinite_ulp_and_sentinel(self):
         expected_values = np.asarray([np.inf, np.nan, 1.0], dtype=np.float64)
         observed_values = expected_values.copy()

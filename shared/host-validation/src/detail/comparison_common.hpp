@@ -186,6 +186,66 @@ inline ComponentResult compareComponent(double observed, double expected,
     return result;
 }
 
+inline ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
+                                               const ComparisonValue& expected,
+                                               const ComparisonOptions& options) {
+    ComponentResult result;
+    const bool observedNaN = std::isnan(observed.real) || std::isnan(observed.imaginary);
+    const bool expectedNaN = std::isnan(expected.real) || std::isnan(expected.imaginary);
+    if (observedNaN || expectedNaN) {
+        result.matchedNaN = options.equalNaNs && observedNaN && expectedNaN;
+        result.close = result.matchedNaN;
+        result.nonFiniteMismatch = !result.close;
+        result.difference = result.close ? 0.0 : std::numeric_limits<double>::infinity();
+        result.relativeDifference = result.difference;
+        result.symmetricRelativeDifference = result.difference;
+        return result;
+    }
+
+    const bool signedZeroMismatch =
+        !options.equalSignedZero && (oppositeZeroSigns(observed.real, expected.real) ||
+                                     oppositeZeroSigns(observed.imaginary, expected.imaginary));
+    if (signedZeroMismatch) {
+        result.signedZeroMismatch = true;
+        return result;
+    }
+
+    const bool exactlyEqual =
+        observed.real == expected.real && observed.imaginary == expected.imaginary;
+    if (exactlyEqual) {
+        result.close = true;
+        result.matchedInfinity = std::isinf(observed.real) || std::isinf(observed.imaginary);
+        return result;
+    }
+
+    const bool nonFinite = std::isinf(observed.real) || std::isinf(observed.imaginary) ||
+                           std::isinf(expected.real) || std::isinf(expected.imaginary);
+    if (nonFinite) {
+        result.nonFiniteMismatch = true;
+        result.difference = std::numeric_limits<double>::infinity();
+        result.relativeDifference = result.difference;
+        result.symmetricRelativeDifference = result.difference;
+        return result;
+    }
+
+    const double observedMagnitude = std::hypot(observed.real, observed.imaginary);
+    const double expectedMagnitude = std::hypot(expected.real, expected.imaginary);
+    result.difference =
+        std::hypot(observed.real - expected.real, observed.imaginary - expected.imaginary);
+    result.tolerance =
+        options.absoluteTolerance + options.relativeTolerance * expectedMagnitude +
+        options.symmetricRelativeTolerance * (observedMagnitude + expectedMagnitude + 1.0);
+    result.relativeDifference =
+        expectedMagnitude == 0.0
+            ? (result.difference == 0.0 ? 0.0 : std::numeric_limits<double>::infinity())
+            : result.difference / expectedMagnitude;
+    result.symmetricRelativeDifference =
+        result.difference / (observedMagnitude + expectedMagnitude + 1.0);
+    result.close = options.strictTolerance ? result.difference < result.tolerance
+                                           : result.difference <= result.tolerance;
+    return result;
+}
+
 inline bool pointwiseStatisticsOnlyComparison(const ComparisonOptions& options) {
     return options.computePointwiseStatistics && !options.computeFrobenius && !options.computeUlp &&
            !options.relativeFrobeniusTolerance && !options.maximumUlpTolerance;
