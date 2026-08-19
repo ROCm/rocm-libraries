@@ -65,7 +65,8 @@ grid sync).
 | Environment variable | Default | Effect |
 |----------------------|---------|--------|
 | `LATRD_COOP_SWITCH_SIZE=N` | 8192 | Use the fused kernel only when `n < N`. Set to 0 to force the multi-kernel path for all sizes without setting `LATRD_MULTI_KERNEL`. |
-| `LATRD_COOP_GRID_X=N` | `n/2` (capped by occupancy) | Override the number of thread blocks for the fused cooperative kernel. The default (`n/2`) is generally too large; values in the range 64-256 tend to perform better in practice. |
+| `LATRD_COOP_GRID_X=N` | `n/2` (capped by occupancy) | **Hard override**: use exactly `N` thread blocks regardless of `n`. Applies uniformly across all SYTRD panel iterations. Preferred when benchmarking a fixed grid size for standalone LATRD. |
+| `LATRD_COOP_GRID_X_MAX=N` | `n/2` (capped by occupancy) | **Soft cap**: use `min(N, n/2)` thread blocks. As SYTRD iterates and `n` decreases, the grid shrinks naturally below the cap. Preferred for SYTRD tuning: set a maximum for large panels while allowing smaller panels to use their natural `n/2`. |
 
 ### Diagnostic
 

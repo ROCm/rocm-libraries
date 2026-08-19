@@ -3628,17 +3628,26 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                                                                    FUSED_THDS, lmemsize_fused));
             rocblas_int max_total_blocks = (max_blocks_per_sm)*props->multiProcessorCount;
             rocblas_int max_grid_x = std::max(1, max_total_blocks / batch_count);
-            // LATRD_COOP_GRID_X allows GPU-specific tuning of grid width.
+            // LATRD_COOP_GRID_X: hard override — use exactly this many blocks regardless of n.
+            // LATRD_COOP_GRID_X_MAX: soft cap — use min(cap, n/2) so grid shrinks naturally
+            //   as n decreases across SYTRD panel iterations (preferred for SYTRD tuning).
+            // If neither is set, the default is n/2.
             static const rocblas_int env_grid_x = []() {
                 const char* v = std::getenv("LATRD_COOP_GRID_X");
                 return v ? std::atoi(v) : -1;
             }();
-            rocblas_int want_grid_x = env_grid_x;
-            if(want_grid_x < 1)
-            {
-                // Pick default block size (needs tunning)
-                want_grid_x = std::max(1, n / 2);
-            }
+            static const rocblas_int env_grid_x_max = []() {
+                const char* v = std::getenv("LATRD_COOP_GRID_X_MAX");
+                return v ? std::atoi(v) : -1;
+            }();
+            rocblas_int default_grid_x = std::max(1, n / 2);
+            rocblas_int want_grid_x;
+            if(env_grid_x >= 1)
+                want_grid_x = env_grid_x;
+            else if(env_grid_x_max >= 1)
+                want_grid_x = std::min(env_grid_x_max, default_grid_x);
+            else
+                want_grid_x = default_grid_x;
             rocblas_int grid_x = std::min(want_grid_x, max_grid_x);
 
             // Allocate software grid-sync buffer when LATRD_SW_GRID_SYNC or LATRD_SW_RAW_SYNC is set.
@@ -3661,9 +3670,9 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
 
             if(print_debug_messages_latrd_forsytrd)
                 std::fprintf(
-                    stderr, "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d sw_grid_sync=%d sw_raw_sync=%d\n",
+                    stderr, "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d sw_grid_sync=%d sw_raw_sync=%d (env_grid_x=%d env_grid_x_max=%d)\n",
                     n, max_blocks_per_sm, max_total_blocks, grid_x, (int)latrd_sw_grid_sync,
-                    (int)latrd_sw_raw_sync);
+                    (int)latrd_sw_raw_sync, env_grid_x, env_grid_x_max);
 
             HIP_TRACE(hipLaunchCooperativeKernel(kernel_fn, dim3(grid_x, 1, batch_count),
                                                  dim3(FUSED_THDS), kernelArgs, lmemsize_fused,
