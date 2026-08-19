@@ -48,6 +48,7 @@ from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
+from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
@@ -55,7 +56,7 @@ from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -2873,17 +2874,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.graUnrollOffsets(kernel, tensorParametersB))
 
       # Free sgpr that will not be used
-      if kernel["Multicast"] and kernel["TDMInst"] != 0:
-        tdmA: bool = kernel["enableTDMA"]
-        tdmB: bool = kernel["enableTDMB"]
-        tdmM: bool = kernel["enableTDMMetadata"]
-        if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-          module.add(self.undefineSgpr("MulticastMask"))
-        else:
-          module.add(self.undefineSgpr("MulticastMaskA"))
-          module.add(self.undefineSgpr("MulticastMaskB"))
-        if tdmM:
-          module.add(self.undefineSgpr("MulticastMaskMetadata"))
+      clusterComp = ClusterLoadTDM.find(self)
+      if clusterComp:
+        module.add(clusterComp.undeclareSgprs(self, kernel))
 
       # tile edges
       if kernel["EdgeType"] == "ShiftPtr" and not tdmA and not tdmB:
@@ -3027,7 +3020,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
 
       # WaveIdx already freed for subtile (before graWorkGroup above)
-      # TDM StaggerU also reads wave parity from WaveIdx
+      # TDM StaggerU reads wave parity from WaveIdx through calculateStagger below,
+      # so its release is deferred to releaseWaveIdxAfterStagger.
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
           and not kernel.get("UseSubtileImpl") \
           and not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
@@ -3087,6 +3081,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.calculateStagger(kernel,tPM))
         # Calculate stagger B(MXSB)
         module.add(self.calculateStagger(kernel, tensorParametersB))
+
+      # WaveIdx sits at a very low physical index, and checkOutAligned scans the pool
+      # from 0, so holding it past the prologue both removes a slot and fragments the
+      # low pool for the unroll loop's aligned temps -- enough to push the tightest
+      # gfx1250 StreamK configs over MaxSgpr. Release it here: the stagger prologue
+      # above is its last cheap-parity consumer, everything later recomputes parity
+      # from vgpr("Serial").
+      module.add(self.releaseWaveIdxAfterStagger(kernel))
+
       # LRO and LWA as assigned
       # init lds read pointers before each unrolled loop
       module.addComment0("local read addresses: init pointers a")
@@ -5571,6 +5574,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["PrefetchGlobalRead"] >= 2:
         for idxPgr in range(1, kernel["PrefetchGlobalRead"]):
           module.add(self.openPrefetchGlobalRead2orMore(kernel, idxPgr))
+          # StreamKMulticast: the cooperative-multicast loads emitted below for
+          # this prefetch stage sit inside the single-iteration guard branch,
+          # past the generic per-load cluster-barrier bracketing boundary.
+          # Bracket them with a self-contained cluster-scope handshake so every
+          # multicast load stays synchronized and signal/wait counts stay
+          # balanced. Gated on StreamKMulticast (only ever set on the StreamK=3
+          # component), so the emitted code is unchanged for every other path.
+          if streamKMulticast(kernel):
+            module.add(skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
           # In scheduling, we always schedule lwa first then lwb second,
           # Putting lwb in lwa's code object can easily change the order.
@@ -6799,7 +6811,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
-                               # PrefetchGlobalRead (PGR) for Tensile scheduling. Defaults to 1.
+                               # StreamKMulticast gates the per-iteration cooperative-broadcast
+                               # drain in InsertClusterBarrierPass Rule 3 (mainloop): with PGR>=2
+                               # an `s_wait_tensorcnt 0` is emitted after the cooperative
+                               # tensor_load group so the broadcast retires before the back edge.
+                               # Defaults off; no-op for every other kernel.
+                               "StreamKMulticast": bool(streamKMulticast(kernel)),
+                               # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
+                               # between an urgent and a deferrable tensor_load group.
+                               # Off by default.
+                               "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
+                               # PrefetchGlobalRead (PGR) for Tensile scheduling, and the
+                               # InsertClusterBarrierPass Rule 3 drain threshold. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
@@ -9330,6 +9353,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # - no staggerUCode
       # - TLUA false for A, TLUB false for B
       # - numSgprGlobalReadIncs is 1
+      # - the MX scale layout is not swizzled: a swizzled (HostPreSwizzle /
+      #   InMemorySwizzle) scale block advances by Size{tile}*DepthU/MXBlock*bpe
+      #   per unroll step (see GSU.graIncrements), which is only known at runtime,
+      #   so those increments must stay in SGPRs. Subtile is exempt: it builds its
+      #   own descriptors and never reads GlobalReadIncs, so holding the SGPR there
+      #   only costs registers that MX kernels, which Solution forces onto subtile
+      #   on gfx950, cannot spare.
+      mxSwizzledScale = kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle") \
+                        and not kernel["UseSubtileImpl"]
       if kernel["StreamK"] and (not self.states.staggerUCode):
         if kernel["ProblemType"]["TLUA"] == False:
           if self.states.a.numSgprGlobalReadIncs == 1:
@@ -9337,7 +9369,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.states.a.useConstSgprGlobalReadIncs = True
             # do not allocate GRInc sgpr
             self.states.a.numSgprGlobalReadIncs = 0
-          if kernel["ProblemType"]["MXBlockA"]:
+          if kernel["ProblemType"]["MXBlockA"] and not mxSwizzledScale:
             if self.states.mxsa.numSgprGlobalReadIncs == 1:
               # use const GR Inc
               self.states.mxsa.useConstSgprGlobalReadIncs = True
@@ -9349,7 +9381,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.states.b.useConstSgprGlobalReadIncs = True
             # do not allocate GRInc sgpr
             self.states.b.numSgprGlobalReadIncs = 0
-          if kernel["ProblemType"]["MXBlockB"]:
+          if kernel["ProblemType"]["MXBlockB"] and not mxSwizzledScale:
             if self.states.mxsb.numSgprGlobalReadIncs == 1:
               # use const GR Inc
               self.states.mxsb.useConstSgprGlobalReadIncs = True
@@ -9375,20 +9407,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["enableTDMA"] or kernel["enableTDMB"]:
       self.defineSgpr("WaveIdx", 1)
 
-    if kernel["Multicast"]:
-      tdmA: bool = kernel["enableTDMA"]
-      tdmB: bool = kernel["enableTDMB"]
-      tdmM: bool = kernel["enableTDMMetadata"]
-      # Subtile issues both A and B loads on every wave (no wave-parity load
-      # split), so the single parity MulticastMask is wrong there -- it would
-      # OR one tensor's mask into both descriptors. Use the split A/B masks.
-      if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-        self.defineSgpr("MulticastMask", 1)
-      else:
-        self.defineSgpr("MulticastMaskA", 1)
-        self.defineSgpr("MulticastMaskB", 1)
-      if tdmM:
-        self.defineSgpr("MulticastMaskMetadata", 1)
+    clusterComp = ClusterLoadTDM.find(self)
+    if clusterComp:
+      clusterComp.declareSgprs(self, kernel)
 
     # SGPR above are user SGPR which are set by GPU hardware when the kernel is launched
     self.states.firstInitSgpr = self.sgprPool.size()
@@ -10950,7 +10971,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier):
+        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]:
+          # Pass-2 rebuilds only workgroup-scope barriers from token-state
+          # transitions, so only those are cleared here. Cluster-scope split
+          # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
+          # prologue arrive, are placed deliberately by other components and
+          # carry no LDS token, so preserve them rather than dropping a half of
+          # a cluster handshake.
           removedCount += 1
           continue
         else:

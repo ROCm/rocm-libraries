@@ -6,12 +6,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -22,6 +24,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/detail/error_recorder.h>
+#include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>
 #include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
 #include <hipdnn_frontend/Graph.hpp>
 
@@ -40,6 +43,33 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
 // NOLINTBEGIN(readability-identifier-naming): the whole class mirrors cuDNN's
 // snake_case public spelling for source compatibility.
 
+#define HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR()       \
+    do                                                  \
+    {                                                   \
+        if(auto err = getRecordedError(); err.is_bad()) \
+        {                                               \
+            return err;                                 \
+        }                                               \
+    } while(0)
+
+#define HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH() \
+    do                                                        \
+    {                                                         \
+        if(!hasOperationGraphState())                         \
+        {                                                     \
+            return noExecutionPlanError();                    \
+        }                                                     \
+    } while(0)
+
+#define HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH() \
+    do                                                   \
+    {                                                    \
+        if(!hasOperationGraphState())                    \
+        {                                                \
+            return {};                                   \
+        }                                                \
+    } while(0)
+
 class Graph : public ErrorRecorder<Graph>
 {
 public:
@@ -51,10 +81,7 @@ public:
 
     error_t validate()
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         CHECK_CUDNN_FRONTEND_ERROR(validateOwnedTensors());
         if(hasOperationGraphState())
@@ -67,10 +94,7 @@ public:
 
     error_t build_operation_graph(cudnnHandle_t handle)
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         CHECK_CUDNN_FRONTEND_ERROR(validateOwnedTensors());
         if(!hasOperationGraphState())
@@ -89,10 +113,7 @@ public:
 
     error_t build_operation_graph()
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         CHECK_CUDNN_FRONTEND_ERROR(validateOwnedTensors());
         if(!hasOperationGraphState())
@@ -106,35 +127,38 @@ public:
 
     error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
-        if(auto err = getRecordedError(); err.is_bad())
+        for(const auto mode : modes)
+        {
+            if(mode != HeurMode_t::FALLBACK)
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
+                                   << hipdnn_frontend::to_string(mode)
+                                   << " is accepted but not honored; hipDNN uses fallback "
+                                      "selection. Plan choice may differ from cuDNN.");
+            }
+        }
+
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+
+        HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
+
+        auto err = _graph.create_execution_plans(modes);
+        if(err.is_bad())
         {
             return err;
         }
 
-        if(!hasOperationGraphState())
-        {
-            return {};
-        }
-
-        auto err = _graph.create_execution_plans(modes);
-        if(err.is_good())
-        {
-            _stage = Stage::PlansCreated;
-        }
+        _planCreationModes = modes;
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(_planCreationModes));
+        _stage = Stage::PlansCreated;
         return err;
     }
 
     error_t check_support()
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
-        if(!hasOperationGraphState())
-        {
-            return {};
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
         return _graph.check_support();
     }
@@ -152,24 +176,29 @@ public:
         {
             CUDNN_FE_LOG_LABEL("Ignoring multithreaded-build hint; this shim builds serially");
         }
-        if(auto err = getRecordedError(); err.is_bad())
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+
+        HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
+
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
+
+        // Native build_plans(HEURISTICS_CHOICE) only ever inspects the active
+        // plan, so a filter that bars the top-ranked engine fails the build
+        // outright. cuDNN instead narrows the candidate set, so retarget onto the
+        // top-ranked survivor first.
+        if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE)
         {
-            return err;
+            int64_t survivingIndex = -1;
+            CHECK_CUDNN_FRONTEND_ERROR(findPlanIndexIfActiveBarred(survivingIndex));
+            if(survivingIndex >= 0)
+            {
+                CHECK_CUDNN_FRONTEND_ERROR(_graph.build_plan_at_index(survivingIndex));
+                _stage = Stage::PlansBuilt;
+                return {};
+            }
         }
 
-        if(policy == BuildPlanPolicy_t::ALL)
-        {
-            recordError(error_code_t::INVALID_VALUE,
-                        "Building all execution plans is unsupported by this shim");
-            return getRecordedError();
-        }
-
-        if(!hasOperationGraphState())
-        {
-            return {};
-        }
-
-        auto err = _graph.build_plans();
+        auto err = _graph.build_plans(policy);
         if(err.is_good())
         {
             _stage = Stage::PlansBuilt;
@@ -187,31 +216,18 @@ public:
 
     error_t build_plan_at_index(int64_t index)
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
-        if(!hasOperationGraphState())
-        {
-            return noExecutionPlanError();
-        }
-
-        if(index != 0)
-        {
-            return {error_code_t::INVALID_VALUE, "Execution plan index is invalid"};
-        }
-
-        if(stageAtLeast(Stage::PlansBuilt))
-        {
-            return {};
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
 
         if(!stageAtLeast(Stage::PlansCreated))
         {
             CHECK_CUDNN_FRONTEND_ERROR(create_execution_plans());
         }
-        return build_plans();
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.build_plan_at_index(index));
+        _stage = Stage::PlansBuilt;
+        return {};
     }
 
     error_t build_plan_at_index(const cudnnHandle_t& handle, int64_t index)
@@ -222,7 +238,131 @@ public:
 
     int64_t get_execution_plan_count() const
     {
-        return hasOperationGraphState() && stageAtLeast(Stage::PlansCreated) ? 1 : 0;
+        if(hasOperationGraphState())
+        {
+            return _graph.get_execution_plan_count();
+        }
+        return stageAtLeast(Stage::PlansCreated) ? 1 : 0;
+    }
+
+    error_t get_engine_count(int64_t& count)
+    {
+        count = 0;
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
+
+        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap());
+        count = static_cast<int64_t>(_engineIndexToNativeEngineId.size());
+        return {};
+    }
+
+    error_t get_knobs_for_engine(int64_t engineIndex, std::vector<Knob>& knobs)
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        if(!hasOperationGraphState())
+        {
+            knobs.clear();
+            return noExecutionPlanError();
+        }
+        int64_t nativeEngineId = -1;
+        CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId));
+
+        std::vector<hipdnn_frontend::Knob> nativeKnobs;
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_knobs_for_engine(nativeEngineId, nativeKnobs));
+        hipdnn_frontend::compatibility::cudnn_frontend::detail::projectNativeKnobs(nativeKnobs,
+                                                                                   knobs);
+        return {};
+    }
+
+    error_t create_execution_plan(int64_t engineIndex,
+                                  const std::unordered_map<KnobType_t, int64_t>& knobs)
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+
+        int64_t nativeEngineId = -1;
+        CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId));
+
+        // Resolve the cuDNN knob enums against this engine's own knob ids; an
+        // unresolved choice is an error, never a silently dropped setting.
+        std::vector<hipdnn_frontend::KnobSetting> settings;
+        if(!knobs.empty())
+        {
+            std::vector<hipdnn_frontend::Knob> nativeKnobs;
+            CHECK_CUDNN_FRONTEND_ERROR(_graph.get_knobs_for_engine(nativeEngineId, nativeKnobs));
+            CHECK_CUDNN_FRONTEND_ERROR(
+                hipdnn_frontend::compatibility::cudnn_frontend::detail::makeNativeKnobSettings(
+                    knobs, nativeKnobs, settings));
+        }
+
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.create_execution_plan_ext(nativeEngineId, settings));
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters());
+        _stage = Stage::PlansCreated;
+        return {};
+    }
+
+    error_t get_plan_name(std::string& name) const
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        return _graph.get_plan_name(name);
+    }
+
+    error_t get_plan_name_at_index(int64_t index, std::string& name) const
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        return _graph.get_plan_name_at_index(index, name);
+    }
+
+    error_t get_workspace_size_plan_at_index(int64_t index, int64_t& workspaceSize) const
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        return _graph.get_workspace_size_plan_at_index(index, workspaceSize);
+    }
+
+    int64_t get_workspace_size_plan_at_index(int64_t index) const
+    {
+        int64_t workspaceSize = 0;
+        auto err = get_workspace_size_plan_at_index(index, workspaceSize);
+        if(err.is_bad())
+        {
+            CUDNN_FE_LOG_LABEL("ERROR: Querying workspace for plan failed: " << err.get_message());
+            return 0;
+        }
+        return workspaceSize;
+    }
+
+    error_t get_behavior_notes(std::vector<BehaviorNote_t>& notes) const
+    {
+        notes.clear();
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+
+        int64_t engineId = -1;
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_execution_plan_engine_id(engineId));
+        return _graph.get_behavior_notes_for_engine(engineId, notes);
+    }
+
+    error_t get_behavior_notes_for_plan_at_index(int64_t index,
+                                                 std::vector<BehaviorNote_t>& notes) const
+    {
+        notes.clear();
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+
+        std::string planName;
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_plan_name_at_index(index, planName));
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(planName))
+        {
+            return {error_code_t::INVALID_VALUE,
+                    "Cannot resolve engine id for plan '" + planName
+                        + "'; per-plan behavior-note query is unsupported for unknown engines"};
+        }
+
+        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(planName);
+        return _graph.get_behavior_notes_for_engine(engineId, notes);
     }
 
     error_t build(const cudnnHandle_t& handle,
@@ -350,6 +490,140 @@ public:
         static_cast<void>(deviceProperties);
         CUDNN_FE_LOG_LABEL("ERROR: Device properties are unsupported by this shim");
         recordError(error_code_t::INVALID_VALUE, "Device properties are unsupported by this shim");
+        return *this;
+    }
+
+    // --- Plan-selection note filters ---------------------------------------
+    //
+    // Inline triage: advisory filters warn-and-ignore, while exclusions that
+    // request a numerical guarantee hipDNN cannot prove record an error.
+
+    Graph& select_numeric_notes(const std::vector<NumericalNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note != NumericalNote_t::NOT_SET)
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring select_numeric_notes("
+                                   << hipdnn_frontend::to_string(note)
+                                   << "); hipDNN exposes no per-plan numerical-note metadata.");
+            }
+        }
+        return *this;
+    }
+
+    Graph& deselect_numeric_notes(const std::vector<NumericalNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note == NumericalNote_t::NOT_SET)
+            {
+                continue;
+            }
+
+            if(note == NumericalNote_t::NONDETERMINISTIC
+               || note == NumericalNote_t::REDUCED_PRECISION_REDUCTION)
+            {
+                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                            std::string{"deselect_numeric_notes("}
+                                + hipdnn_frontend::to_string(note)
+                                + ") requests a guarantee this shim cannot enforce; refusing to "
+                                  "run rather than return a plan the caller excluded");
+                continue;
+            }
+
+            HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_numeric_notes("
+                               << hipdnn_frontend::to_string(note)
+                               << "); hipDNN exposes no per-plan numerical-note metadata.");
+        }
+        return *this;
+    }
+
+    Graph& select_behavior_notes(const std::vector<BehaviorNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note == BehaviorNote_t::NOT_SET)
+            {
+                continue;
+            }
+            if(hipdnn_frontend::isKnownBehaviorNote(note))
+            {
+                _selectedBehaviorNotes.push_back(note);
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] select_behavior_notes("
+                                   << hipdnn_frontend::to_string(note)
+                                   << ") will filter hipDNN engines by behavior metadata.");
+            }
+            else
+            {
+                // Selecting a note no hipDNN engine can emit is unsatisfiable:
+                // record an error rather than return a plan that ignores the
+                // request. Deselecting the same note is a safe no-op (below).
+                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                            "select_behavior_notes requested a behavior note that no hipDNN "
+                            "engine reports; the request cannot be satisfied");
+            }
+        }
+        return *this;
+    }
+
+    Graph& deselect_behavior_notes(const std::vector<BehaviorNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note == BehaviorNote_t::NOT_SET)
+            {
+                continue;
+            }
+            if(hipdnn_frontend::isKnownBehaviorNote(note))
+            {
+                _deselectedBehaviorNotes.push_back(note);
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] deselect_behavior_notes("
+                                   << hipdnn_frontend::to_string(note)
+                                   << ") will filter hipDNN engines by behavior metadata.");
+            }
+            else
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_behavior_notes("
+                                   << hipdnn_frontend::to_string(note)
+                                   << "); hipDNN engines do not report this cuDNN behavior note.");
+            }
+        }
+        return *this;
+    }
+
+    Graph& deselect_workspace_greater_than(int64_t workspace)
+    {
+        _maxWorkspaceAllowed = workspace;
+        _graph.deselect_workspace_greater_than(workspace);
+        return *this;
+    }
+
+    Graph& deselect_shared_mem_greater_than(int64_t sharedMem)
+    {
+        if(sharedMem != 0)
+        {
+            recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                        "deselect_shared_mem_greater_than requires per-plan shared-memory "
+                        "metadata that hipDNN does not expose yet");
+        }
+        return *this;
+    }
+
+    Graph& deselect_engines(const std::vector<std::string>& engineNames)
+    {
+        _barredEngineNames.insert(_barredEngineNames.end(), engineNames.begin(), engineNames.end());
+        _graph.deselect_engines(engineNames);
+        return *this;
+    }
+
+    Graph& deselect_engines(const std::vector<int64_t>& engineIndices)
+    {
+        // Store cuDNN-shaped indices only. Translation to native engine IDs needs
+        // the ranked engine list, which does not exist until the operation graph
+        // is built, so it is deferred to applyPendingPlanFilters() after build.
+        _barredEngineIndices.insert(
+            _barredEngineIndices.end(), engineIndices.begin(), engineIndices.end());
         return *this;
     }
 
@@ -855,15 +1129,9 @@ public:
                 std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorToPointerMap,
                 void* workspace) const
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
-        if(!hasOperationGraphState())
-        {
-            return noExecutionPlanError();
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
         return _graph.execute(handle, tensorToPointerMap, workspace);
     }
 
@@ -871,15 +1139,9 @@ public:
                     std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
                     void* workspace) const
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
-        if(!hasOperationGraphState())
-        {
-            return noExecutionPlanError();
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
         return _graph.execute(handle, tensorUidToPointerMap, workspace);
     }
 
@@ -890,15 +1152,9 @@ public:
                     const std::vector<std::vector<int64_t>>& overrideShapes,
                     const std::vector<std::vector<int64_t>>& overrideStrides) const
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
-        if(!hasOperationGraphState())
-        {
-            return noExecutionPlanError();
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
 
 #ifdef HIPDNN_ENABLE_SDPA
         return _graph.execute(handle,
@@ -919,29 +1175,143 @@ public:
 
     error_t execute(cudnnHandle_t handle, void** sortedUserPtrs, int nUser, void* workspace) const
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         static_cast<void>(handle);
         static_cast<void>(sortedUserPtrs);
         static_cast<void>(nUser);
         static_cast<void>(workspace);
-        if(!hasOperationGraphState())
-        {
-            return noExecutionPlanError();
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
         return {error_code_t::INVALID_VALUE,
                 "Flat pointer-array execute is unsupported by this shim"};
     }
 
+    error_t execute_plan_at_index(cudnnHandle_t handle,
+                                  std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
+                                  void* workspace,
+                                  int64_t planIndex) const
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        return _graph.execute_plan_at_index(handle, tensorUidToPointerMap, workspace, planIndex);
+    }
+
+    error_t execute_plan_at_index(
+        cudnnHandle_t handle,
+        std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
+        void* workspace,
+        int64_t planIndex) const
+    {
+        std::unordered_map<int64_t, void*> uidMap;
+        uidMap.reserve(tensorMap.size());
+        for(const auto& [tensor, pointer] : tensorMap)
+        {
+            if(!tensor || !tensor->has_uid())
+            {
+                return {error_code_t::INVALID_VALUE,
+                        "Tensor-keyed execute_plan_at_index requires every tensor to have a UID"};
+            }
+            uidMap.emplace(tensor->get_uid(), pointer);
+        }
+        return execute_plan_at_index(handle, uidMap, workspace, planIndex);
+    }
+
+    error_t autotune(cudnnHandle_t handle,
+                     std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
+                     void* workspace,
+                     void* userImpl = nullptr)
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        return _graph.autotune(handle, tensorUidToPointerMap, workspace, userImpl);
+    }
+
+    error_t autotune(cudnnHandle_t handle,
+                     std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
+                     void* workspace,
+                     void* userImpl = nullptr)
+    {
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+        HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        return _graph.autotune(handle, tensorMap, workspace, userImpl);
+    }
+
+    // NOLINTNEXTLINE(readability-make-member-function-const)
+    error_t warmup(cudnnHandle_t handle,
+                   std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
+                   void* workspace)
+    {
+        return execute_plan_at_index(handle, tensorUidToPointerMap, workspace, 0);
+    }
+
+    // NOLINTNEXTLINE(readability-make-member-function-const)
+    error_t warmup(cudnnHandle_t handle,
+                   std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
+                   void* workspace)
+    {
+        return execute_plan_at_index(handle, tensorMap, workspace, 0);
+    }
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    error_t populate_cuda_graph(cudnnHandle_t handle,
+                                std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
+                                void* workspace,
+                                cudaGraph_t cudnnCudaGraph) const
+    {
+        static_cast<void>(handle);
+        static_cast<void>(tensorUidToPointerMap);
+        static_cast<void>(workspace);
+        static_cast<void>(cudnnCudaGraph);
+        return {error_code_t::GRAPH_NOT_SUPPORTED,
+                "populate_cuda_graph is unsupported by this shim"};
+    }
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    error_t populate_cuda_graph(
+        cudnnHandle_t handle,
+        std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
+        void* workspace,
+        cudaGraph_t cudnnCudaGraph) const
+    {
+        static_cast<void>(handle);
+        static_cast<void>(tensorMap);
+        static_cast<void>(workspace);
+        static_cast<void>(cudnnCudaGraph);
+        return {error_code_t::GRAPH_NOT_SUPPORTED,
+                "populate_cuda_graph is unsupported by this shim"};
+    }
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    error_t update_cuda_graph(cudnnHandle_t handle,
+                              std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
+                              void* workspace,
+                              cudaGraph_t cudnnCudaGraph) const
+    {
+        static_cast<void>(handle);
+        static_cast<void>(tensorUidToPointerMap);
+        static_cast<void>(workspace);
+        static_cast<void>(cudnnCudaGraph);
+        return {error_code_t::GRAPH_NOT_SUPPORTED, "update_cuda_graph is unsupported by this shim"};
+    }
+
+    // NOLINTBEGIN(readability-convert-member-functions-to-static)
+    error_t
+        update_cuda_graph(cudnnHandle_t handle,
+                          std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
+                          void* workspace,
+                          cudaGraph_t cudnnCudaGraph) const
+    {
+        static_cast<void>(handle);
+        static_cast<void>(tensorMap);
+        static_cast<void>(workspace);
+        static_cast<void>(cudnnCudaGraph);
+        return {error_code_t::GRAPH_NOT_SUPPORTED, "update_cuda_graph is unsupported by this shim"};
+    }
+    // NOLINTEND(readability-convert-member-functions-to-static)
+
     error_t get_workspace_size(int64_t& workspaceSize) const
     {
-        if(auto err = getRecordedError(); err.is_bad())
-        {
-            return err;
-        }
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         if(!hasOperationGraphState())
         {
@@ -1042,6 +1412,15 @@ private:
 
     hipdnn_frontend::graph::Graph _graph;
     std::vector<std::shared_ptr<Tensor_attributes>> _ownedTensors;
+    std::optional<int64_t> _maxWorkspaceAllowed;
+    std::vector<int64_t> _barredEngineIndices;
+    std::vector<HeurMode_t> _planCreationModes = {HeurMode_t::FALLBACK};
+    std::vector<std::string> _barredEngineNames;
+    std::vector<int64_t> _engineIndexToNativeEngineId;
+    std::vector<BehaviorNote_t> _selectedBehaviorNotes;
+    std::vector<BehaviorNote_t> _deselectedBehaviorNotes;
+    std::unordered_set<int64_t> _shimBarredEngineIds;
+
     Mode _mode = Mode::Empty;
     Stage _stage = Stage::Described;
 
@@ -1055,6 +1434,190 @@ private:
         return static_cast<int>(_stage) >= static_cast<int>(stage);
     }
 
+    error_t refreshEngineIndexMap(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    {
+        _engineIndexToNativeEngineId.clear();
+        HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
+        return _graph.get_ranked_engine_ids(_engineIndexToNativeEngineId, modes);
+    }
+
+    error_t mapEngineIndex(int64_t engineIndex,
+                           int64_t& nativeEngineId,
+                           const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    {
+        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap(modes));
+        if(engineIndex < 0
+           || static_cast<size_t>(engineIndex) >= _engineIndexToNativeEngineId.size())
+        {
+            return {error_code_t::INVALID_VALUE,
+                    "Engine index " + std::to_string(engineIndex)
+                        + " is out of bounds for this operation graph (have "
+                        + std::to_string(_engineIndexToNativeEngineId.size()) + " engines)"};
+        }
+
+        nativeEngineId = _engineIndexToNativeEngineId[static_cast<size_t>(engineIndex)];
+        return {};
+    }
+
+    error_t mapEngineIndices(const std::vector<int64_t>& engineIndices,
+                             std::vector<int64_t>& nativeEngineIds,
+                             const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    {
+        nativeEngineIds.clear();
+        nativeEngineIds.reserve(engineIndices.size());
+        for(const auto engineIndex : engineIndices)
+        {
+            int64_t nativeEngineId = -1;
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId, modes));
+            nativeEngineIds.push_back(nativeEngineId);
+        }
+        return {};
+    }
+
+    error_t applyPendingFiltersForCreatedPlans()
+    {
+        if(!stageAtLeast(Stage::PlansCreated))
+        {
+            return {};
+        }
+        return applyPendingPlanFilters(_planCreationModes);
+    }
+
+    error_t applyPendingPlanFilters(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    {
+        // create_execution_plans() clears the native graph's filter state, so the
+        // shim's record of what it barred is rebuilt on every pass rather than
+        // accumulated.
+        _shimBarredEngineIds.clear();
+
+        if(_maxWorkspaceAllowed.has_value())
+        {
+            _graph.deselect_workspace_greater_than(*_maxWorkspaceAllowed);
+        }
+        if(!_barredEngineNames.empty())
+        {
+            _graph.deselect_engines(_barredEngineNames);
+            for(const auto& name : _barredEngineNames)
+            {
+                _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameToId(name));
+            }
+        }
+        if(!_barredEngineIndices.empty())
+        {
+            std::vector<int64_t> nativeEngineIds;
+            CHECK_CUDNN_FRONTEND_ERROR(
+                mapEngineIndices(_barredEngineIndices, nativeEngineIds, modes));
+            _graph.deselect_engines(nativeEngineIds);
+            _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
+        }
+
+        return applyBehaviorNoteFilters(modes);
+    }
+
+    error_t applyBehaviorNoteFilters(const std::vector<HeurMode_t>& modes)
+    {
+        if(_selectedBehaviorNotes.empty() && _deselectedBehaviorNotes.empty())
+        {
+            return {};
+        }
+        HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
+
+        std::vector<int64_t> engineIds;
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_ranked_engine_ids(engineIds, modes));
+        if(engineIds.empty())
+        {
+            return {};
+        }
+
+        std::vector<int64_t> enginesToBar;
+        enginesToBar.reserve(engineIds.size());
+        for(const auto engineId : engineIds)
+        {
+            std::vector<BehaviorNote_t> engineNotes;
+            CHECK_CUDNN_FRONTEND_ERROR(_graph.get_behavior_notes_for_engine(engineId, engineNotes));
+            if(!behaviorNotesMatch(engineNotes))
+            {
+                enginesToBar.push_back(engineId);
+            }
+        }
+
+        if(enginesToBar.size() == engineIds.size())
+        {
+            return {error_code_t::GRAPH_NOT_SUPPORTED,
+                    "Behavior-note filters removed every applicable hipDNN engine"};
+        }
+        if(!enginesToBar.empty())
+        {
+            _graph.deselect_engines(enginesToBar);
+            _shimBarredEngineIds.insert(enginesToBar.begin(), enginesToBar.end());
+        }
+        return {};
+    }
+
+    // Report the top-ranked plan that survives this shim's own engine filters, or
+    // -1 when the active plan already survives and native can build it directly.
+    // Plan order is not guaranteed to match ranked-engine order, so each plan's
+    // engine is resolved through its own name.
+    error_t findPlanIndexIfActiveBarred(int64_t& survivingIndex)
+    {
+        survivingIndex = -1;
+        if(_shimBarredEngineIds.empty())
+        {
+            return {};
+        }
+
+        int64_t activeEngineId = -1;
+        if(_graph.get_execution_plan_engine_id(activeEngineId).is_bad()
+           || _shimBarredEngineIds.count(activeEngineId) == 0)
+        {
+            return {};
+        }
+
+        const int64_t planCount = _graph.get_execution_plan_count();
+        for(int64_t index = 0; index < planCount; ++index)
+        {
+            std::string planName;
+            if(_graph.get_plan_name_at_index(index, planName).is_bad())
+            {
+                continue;
+            }
+            // An engine whose name does not resolve cannot be matched against the
+            // barred set. Treat it as a survivor: only ids this shim explicitly
+            // barred are known to be excluded, and native re-checks its own filter
+            // before building.
+            if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(planName)
+               || _shimBarredEngineIds.count(hipdnn_data_sdk::utilities::engineNameToId(planName))
+                      == 0)
+            {
+                survivingIndex = index;
+                return {};
+            }
+        }
+
+        return {error_code_t::GRAPH_NOT_SUPPORTED,
+                "Engine filters removed every applicable hipDNN execution plan"};
+    }
+
+    bool behaviorNotesMatch(const std::vector<BehaviorNote_t>& engineNotes) const
+    {
+        for(const auto required : _selectedBehaviorNotes)
+        {
+            if(required != BehaviorNote_t::NOT_SET
+               && std::find(engineNotes.begin(), engineNotes.end(), required) == engineNotes.end())
+            {
+                return false;
+            }
+        }
+        for(const auto excluded : _deselectedBehaviorNotes)
+        {
+            if(excluded != BehaviorNote_t::NOT_SET
+               && std::find(engineNotes.begin(), engineNotes.end(), excluded) != engineNotes.end())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
     template <typename T>
     std::shared_ptr<Tensor_attributes> scalarTensor(const T& scalar, ScalarType scalarType)
     {
@@ -1120,6 +1683,13 @@ private:
     void clearWrapperGraphState()
     {
         _ownedTensors.clear();
+        _maxWorkspaceAllowed.reset();
+        _barredEngineIndices.clear();
+        _planCreationModes = {HeurMode_t::FALLBACK};
+        _barredEngineNames.clear();
+        _engineIndexToNativeEngineId.clear();
+        _selectedBehaviorNotes.clear();
+        _deselectedBehaviorNotes.clear();
         _recordedError.reset();
         _mode = Mode::Empty;
         _stage = Stage::Described;
@@ -1127,5 +1697,9 @@ private:
 };
 
 // NOLINTEND(readability-identifier-naming)
+
+#undef HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH
+#undef HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH
+#undef HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph

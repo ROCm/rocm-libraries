@@ -288,6 +288,8 @@ stinkytofu::DPPModifiers convertDPPModifiers(const rocisa::DPPModifiers& rocMod)
     } else if (rocMod.quad_perm.size() == 4) {
         ctrl = stinkytofu::dppQuadPerm(rocMod.quad_perm[0], rocMod.quad_perm[1],
                                        rocMod.quad_perm[2], rocMod.quad_perm[3]);
+    } else if (rocMod.row_xmask != kUnset) {
+        ctrl = stinkytofu::dppRowXmask(rocMod.row_xmask);
     }
 
     // bound_ctrl is {0, 1}. Anything else (unset -1, or stray) -> default 0.

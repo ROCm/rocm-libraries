@@ -224,6 +224,7 @@ TEST(TestJson, GraphToJsonAndBack)
             graphBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid resample bwd graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());

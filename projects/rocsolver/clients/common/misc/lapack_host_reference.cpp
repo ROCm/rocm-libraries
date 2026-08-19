@@ -902,6 +902,38 @@ void zlatrd_(char* uplo,
              rocblas_double_complex* W,
              int* ldw);
 
+void slahr2_(int* n, int* k, int* nb, float* A, int* lda, float* tau, float* T, int* ldt, float* Y, int* ldy);
+void dlahr2_(int* n,
+             int* k,
+             int* nb,
+             double* A,
+             int* lda,
+             double* tau,
+             double* T,
+             int* ldt,
+             double* Y,
+             int* ldy);
+void clahr2_(int* n,
+             int* k,
+             int* nb,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* tau,
+             rocblas_float_complex* T,
+             int* ldt,
+             rocblas_float_complex* Y,
+             int* ldy);
+void zlahr2_(int* n,
+             int* k,
+             int* nb,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* tau,
+             rocblas_double_complex* T,
+             int* ldt,
+             rocblas_double_complex* Y,
+             int* ldy);
+
 void slabrd_(int* m,
              int* n,
              int* nb,
@@ -3818,6 +3850,67 @@ void cpu_labrd<rocblas_double_complex, double>(rocblas_int m,
                                                rocblas_int ldy)
 {
     zlabrd_(&m, &n, &nb, A, &lda, D, E, tauq, taup, X, &ldx, Y, &ldy);
+}
+
+// lahr2
+template <>
+void cpu_lahr2<float>(rocblas_int n,
+                      rocblas_int k,
+                      rocblas_int nb,
+                      float* A,
+                      rocblas_int lda,
+                      float* tau,
+                      float* T_,
+                      rocblas_int ldt,
+                      float* Y,
+                      rocblas_int ldy)
+{
+    slahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
+}
+
+template <>
+void cpu_lahr2<double>(rocblas_int n,
+                       rocblas_int k,
+                       rocblas_int nb,
+                       double* A,
+                       rocblas_int lda,
+                       double* tau,
+                       double* T_,
+                       rocblas_int ldt,
+                       double* Y,
+                       rocblas_int ldy)
+{
+    dlahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
+}
+
+template <>
+void cpu_lahr2<rocblas_float_complex>(rocblas_int n,
+                                      rocblas_int k,
+                                      rocblas_int nb,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_float_complex* tau,
+                                      rocblas_float_complex* T_,
+                                      rocblas_int ldt,
+                                      rocblas_float_complex* Y,
+                                      rocblas_int ldy)
+{
+    clahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
+}
+
+template <>
+void cpu_lahr2<rocblas_double_complex>(rocblas_int n,
+                                       rocblas_int k,
+                                       rocblas_int nb,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_double_complex* tau,
+                                       rocblas_double_complex* T_,
+                                       rocblas_int ldt,
+                                       rocblas_double_complex* Y,
+                                       rocblas_int ldy)
+{
+    zlahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
 }
 
 // orgqr & ungqr
