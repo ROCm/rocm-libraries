@@ -114,6 +114,7 @@ namespace TensileLite
             int numRotationModules();
 
         private:
+            hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 
             std::mutex m_access;
