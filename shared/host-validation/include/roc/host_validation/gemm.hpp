@@ -32,6 +32,9 @@ enum class AccumulationRounding {
 
 // Associates a rank-two scale tensor with its reduction-dimension block width.
 struct BlockScaleBinding {
+    BlockScaleBinding(Tensor tensor, size_t reductionBlockSize)
+        : values(std::move(tensor)), blockSize(reductionBlockSize) {}
+
     Tensor values;     // [free dimension, reduction block].
     size_t blockSize;  // Number of consecutive K elements sharing one scale.
 };
@@ -100,6 +103,12 @@ struct GemmRequest : GemmProblem {
         : GemmProblem(std::move(aOperand), std::move(bOperand), std::move(cTensor), dTensor.type(),
                       accumulator),
           d(std::move(dTensor)) {}
+
+    GemmRequest(GemmProblem problem, Tensor dTensor,
+                OutputSelection selection = OutputSelection::all())
+        : GemmProblem(std::move(problem)),
+          d(std::move(dTensor)),
+          outputSelection(std::move(selection)) {}
 
     Tensor d;  // Rank-two [M,N] destination; selected coordinates are overwritten.
     OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.

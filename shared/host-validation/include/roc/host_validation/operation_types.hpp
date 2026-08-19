@@ -59,6 +59,9 @@ enum class OutputConversion {
 
 // Associates a rank-one tensor with its row- or column-broadcasting rule.
 struct VectorBinding {
+    VectorBinding(Tensor tensor, MatrixAxis selectedAxis = MatrixAxis::Row)
+        : values(std::move(tensor)), axis(selectedAxis) {}
+
     Tensor values;
     MatrixAxis axis = MatrixAxis::Row;
 };
