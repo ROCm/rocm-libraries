@@ -40,7 +40,7 @@ from .Common import ensurePath, printExit
 from .Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
 from .Common.GlobalParameters import assignGlobalParameters
 from .SolutionStructs import ProblemSizes
-from .Toolchain.Validators import ToolchainDefaults, validateToolchain
+from .Toolchain.Validators import ToolchainDefaults, deviceEnumeratorCandidates, validateToolchain
 
 
 def createLibraryForBenchmark(logicPath, libraryPath, currentPath):
@@ -65,9 +65,9 @@ def GenerateSummations(userArgs):
     inputLogicPath = userArgs[0]
     outputPath = userArgs[1]
     isaInfoMap = assignGlobalParameters({})
-    cxxCompiler, cCompiler, enumerator = validateToolchain(ToolchainDefaults.CXX_COMPILER,
-                                                           ToolchainDefaults.C_COMPILER,
-                                                           ToolchainDefaults.DEVICE_ENUMERATOR)
+    cxxCompiler, cCompiler = validateToolchain(ToolchainDefaults.CXX_COMPILER,
+                                               ToolchainDefaults.C_COMPILER)
+    enumerator = deviceEnumeratorCandidates()
 
     currentISA = detectGlobalCurrentISA(0, enumerator)
     gfxName = isaToGfx(currentISA)
