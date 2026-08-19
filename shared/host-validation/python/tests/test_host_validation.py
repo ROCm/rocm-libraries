@@ -1965,6 +1965,12 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(result.run_info.output_elements_written, expected.size)
         self.assertEqual(result.run_info.output_elements_covered, expected.size)
 
+        automatic = hv.reference_gemm_result(
+            request, hv.GemmExecution(hv.GemmBackend.Automatic)
+        )
+        np.testing.assert_array_equal(hv.to_numpy(automatic.output), expected)
+        self.assertEqual(automatic.run_info.backend_used, hv.GemmBackend.Blocked)
+
         storage = np.frombuffer(result.output.storage, dtype=np.float32)
         expected_storage = np.zeros(15, dtype=np.float32)
         expected_storage[[1, 3, 5, 10, 12, 14]] = expected.reshape(-1)

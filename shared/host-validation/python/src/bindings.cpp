@@ -388,10 +388,8 @@ GemmEpilogue gemmEpilogue(const PythonGemmEpilogue& epilogue, ScalarType accumul
     return result;
 }
 
-const GemmBackendImplementation* pythonGemmBackendImplementation(
-    GemmBackend backend, bool useBlockedForAutomatic = false) {
-    if (backend == GemmBackend::Blocked ||
-        (backend == GemmBackend::Automatic && useBlockedForAutomatic)) {
+const GemmBackendImplementation* pythonGemmBackendImplementation(GemmBackend backend) {
+    if (backend == GemmBackend::Automatic || backend == GemmBackend::Blocked) {
         static const BlockedGemmBackend blocked;
         return &blocked;
     }
@@ -484,7 +482,7 @@ PythonGemmResult referenceGemmOwned(
         .requireRequestedBackend = backend == GemmBackend::Blocked,
     };
     GemmRunInfo runInfo =
-        referenceGemm(request, execution, pythonGemmBackendImplementation(backend, true)).runInfo;
+        referenceGemm(request, execution, pythonGemmBackendImplementation(backend)).runInfo;
     return {.output = std::move(d), .runInfo = std::move(runInfo)};
 }
 
@@ -1178,7 +1176,7 @@ NB_MODULE(_roc_host_validation, module) {
                "output_conversion"_a = OutputConversion::Default,
                "accumulation_rounding"_a = AccumulationRounding::TypeDefault);
     module.def("reference_gemm_result", &referenceGemmRequestOwned, "request"_a,
-               "execution"_a = GemmExecution{});
+               "execution"_a = GemmExecution{.backend = GemmBackend::Pointwise});
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
