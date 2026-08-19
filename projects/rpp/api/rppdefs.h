@@ -533,9 +533,14 @@ struct RpptDesc {
 
     RpptDesc(Rpp32u n, Rpp32u c, Rpp32u h, Rpp32u w, RpptDataType dataType, RpptLayout layout,
              Rpp32u offsetInBytes, RpptStrides strides)
-        : offsetInBytes(offsetInBytes), dataType(dataType), n(n), c(c), h(h), w(w),
-          strides(strides), layout(layout) {
-    }
+        : offsetInBytes(offsetInBytes),
+          dataType(dataType),
+          n(n),
+          c(c),
+          h(h),
+          w(w),
+          strides(strides),
+          layout(layout) {}
 };
 typedef RpptDesc* RpptDescPtr;
 
