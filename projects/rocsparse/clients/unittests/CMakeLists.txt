@@ -137,6 +137,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_precond_direct.cpp
   unit_test_internal_hostblocks_bitops.cpp
   unit_test_internal_hostblocks_csrmm_alg.cpp
+  #10152: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_csrgemm.cpp
   unit_test_internal_hostblocks_indextype.cpp
   unit_test_internal_hostblocks_itilu0.cpp
   #10153: distinct anchor to avoid stacked-branch merge conflicts
@@ -151,6 +153,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collective_extras_elementwise.cpp
   unit_test_internal_collective_extras_nontemporal.cpp
   unit_test_internal_collective_extras_lower_bound.cpp
+  #10155: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_precond_itilu0.cpp
   unit_test_internal_collective_extras_insert.cpp
   unit_test_internal_primitives_host_extras.cpp
   # Host-path C-API coverage for previously-untested in-scope routines. These
@@ -158,6 +162,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # in librocsparse (already coverage-instrumented) is counted. They link
   # roc::rocsparse directly, so they need no compile-in library TUs.
   unit_test_internal_util_checkmatrix.cpp
+  #10149: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_conversion_bsr.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_extra_geam.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
