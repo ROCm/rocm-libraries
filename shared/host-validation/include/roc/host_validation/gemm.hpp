@@ -142,6 +142,12 @@ struct GemmExecution {
     bool requireRequestedBackend = false;
 };
 
+// Output allocation and logical-write policy for an owning GEMM call.
+struct GemmOutputOptions {
+    std::optional<Layout> layout;  // Null selects contiguous [M,N] storage.
+    OutputSelection selection = OutputSelection::all();
+};
+
 // referenceGemm returns the request's D tensor as output; it aliases the same
 // storage rather than copying the destination.
 struct GemmResult {
@@ -167,5 +173,15 @@ GemmSupportInfo queryGemmSupport(const GemmRequest& request, const GemmExecution
 // Executes the request, mutates selected D coordinates, and returns D's alias
 // plus completed-work metadata.
 GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execution = {},
+                         const GemmBackendImplementation* backendImplementation = nullptr);
+
+// Allocates and zero-initializes D, then delegates to the caller-owned request
+// path. Unselected logical coordinates remain zero.
+GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output = {},
+                         const GemmExecution& execution = {},
+                         const GemmBackendImplementation* backendImplementation = nullptr);
+GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
+                         const TensorStorageAllocator& allocator,
+                         const GemmExecution& execution = {},
                          const GemmBackendImplementation* backendImplementation = nullptr);
 }  // namespace roc::host_validation

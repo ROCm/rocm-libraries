@@ -1,13 +1,58 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "detail/reference_gemm.hpp"
 
 namespace roc::host_validation {
+namespace {
+bool gemmTensorStorageOverlaps(const Tensor& left, const Tensor& right) {
+    if (left.storage().empty() || right.storage().empty()) return false;
+    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
+    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
+    const uintptr_t leftEnd = leftBegin + left.storage().size();
+    const uintptr_t rightEnd = rightBegin + right.storage().size();
+    return leftBegin < rightEnd && rightBegin < leftEnd;
+}
+
+void validateOwnedGemmStorage(const GemmProblem& problem, const Tensor& output) {
+    std::vector<const Tensor*> inputs{
+        &problem.a.values,
+        &problem.b.values,
+        &problem.c,
+    };
+    for (const VectorBinding& binding : problem.a.preQuantizationScales)
+        inputs.push_back(&binding.values);
+    for (const VectorBinding& binding : problem.b.preQuantizationScales)
+        inputs.push_back(&binding.values);
+    if (problem.a.blockScale) inputs.push_back(&problem.a.blockScale->values);
+    if (problem.b.blockScale) inputs.push_back(&problem.b.blockScale->values);
+    if (problem.epilogue.bias) inputs.push_back(&problem.epilogue.bias->values);
+    if (problem.epilogue.scaleAlpha) inputs.push_back(&problem.epilogue.scaleAlpha->values);
+    if (problem.epilogue.scaleA) inputs.push_back(&*problem.epilogue.scaleA);
+    if (problem.epilogue.scaleB) inputs.push_back(&*problem.epilogue.scaleB);
+
+    for (const Tensor* input : inputs) {
+        if (gemmTensorStorageOverlaps(output, *input))
+            throw std::invalid_argument("Owning reference GEMM output overlaps an input tensor.");
+    }
+}
+
+void initializeOwnedGemmOutput(const Tensor& output, size_t requiredStorageBytes) {
+    std::fill(output.storage().begin(), output.storage().begin() + requiredStorageBytes,
+              std::byte{0});
+    detail::forEachIndex(output.shape(), [&](std::span<const size_t> indices, size_t) {
+        output.storeFrom(indices, 0.0);
+    });
+}
+}  // namespace
+
 GemmSupportInfo queryGemmSupport(const GemmRequest& request, const GemmExecution& execution,
                                  const GemmBackendImplementation* backendImplementation) {
     try {
@@ -85,6 +130,31 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
         .output = request.d,
         .runInfo = std::move(runInfo),
     };
+}
+
+GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
+                         const GemmExecution& execution,
+                         const GemmBackendImplementation* backendImplementation) {
+    return referenceGemm(problem, output, TensorStorage::allocate, execution,
+                         backendImplementation);
+}
+
+GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
+                         const TensorStorageAllocator& allocator, const GemmExecution& execution,
+                         const GemmBackendImplementation* backendImplementation) {
+    detail::validateRuntimeGemmProblem(problem);
+    const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
+    const Layout outputLayout = output.layout.value_or(Layout::contiguous(outputShape));
+    if (outputLayout.shape() != outputShape)
+        throw std::invalid_argument("Owning reference GEMM output layout shape mismatch.");
+    (void)output.selection.selectedCount(outputShape.elementCount());
+    const size_t requiredStorageBytes = storageBytesForLayout(problem.outputType, outputLayout);
+
+    Tensor destination(problem.outputType, outputLayout, allocator);
+    validateOwnedGemmStorage(problem, destination);
+    initializeOwnedGemmOutput(destination, requiredStorageBytes);
+    GemmRequest request(problem, destination, output.selection);
+    return referenceGemm(request, execution, backendImplementation);
 }
 
 }  // namespace roc::host_validation
