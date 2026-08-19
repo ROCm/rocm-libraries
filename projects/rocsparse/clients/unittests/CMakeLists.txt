@@ -133,6 +133,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_shfl.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
+  #10156: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_precond_direct.cpp
   unit_test_internal_hostblocks_bitops.cpp
   unit_test_internal_hostblocks_csrmm_alg.cpp
   unit_test_internal_hostblocks_indextype.cpp
