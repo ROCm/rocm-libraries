@@ -1,12 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
-macro(hipblaslt_find_python python_dev_component)
-    find_package(Python3 3.8 COMPONENTS Interpreter ${python_dev_component} REQUIRED)
+macro(hipblaslt_find_python minimum_version python_dev_components)
+    find_package(Python3 ${minimum_version} COMPONENTS Interpreter ${python_dev_components} REQUIRED)
     set(Python_EXECUTABLE "${Python3_EXECUTABLE}")
-    find_package(Python 3.8 COMPONENTS Interpreter ${python_dev_component} REQUIRED)
+    find_package(Python ${minimum_version} COMPONENTS Interpreter ${python_dev_components} REQUIRED)
     if(NOT "${Python_EXECUTABLE}" STREQUAL "${Python3_EXECUTABLE}")
-        message(WARNING "FindPython and FindPython3 found different executables. You may need to pin -DPython_EXECUTABLE and -DPython3_EXECUTABLE (${Python_EXECUTABLE} vs ${Python3_EXECUTABLE})")
+        message(WARNING
+            "FindPython and FindPython3 found different executables. Pin "
+            "-DPython_EXECUTABLE and -DPython3_EXECUTABLE if needed "
+            "(${Python_EXECUTABLE} vs ${Python3_EXECUTABLE})")
     endif()
 endmacro()
 
@@ -22,7 +25,8 @@ function(hipblaslt_resolve_build_rocm_root output)
     elseif(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
         set(_root "$ENV{ROCM_PATH}")
     elseif(WIN32)
-        message(FATAL_ERROR "A standalone Windows build requires ROCM_PATH to select the build SDK")
+        message(FATAL_ERROR
+            "A standalone Windows build requires ROCM_PATH to select the build SDK")
     else()
         set(_root "/opt/rocm")
     endif()
@@ -51,38 +55,47 @@ function(hipblaslt_resolve_build_rocm_version output)
     set(${output} "${_version}" PARENT_SCOPE)
 endfunction()
 
-# Sets the HIPBLASLT_PYTHON_COMMAND variable in the parent scope such that it
-# can invoke the Python interpreter valid for the build parameters. Because
-# this may involve a multi token list, it must be used without quotes in
-# COMMAND lists.
-function(hipblaslt_configure_bundled_python_command python_binary_dir asan_options)
-    # Set up a python command which sets PYTHONPATH and copies the current
-    # PATH to the build time invocation.
-    if(WIN32)
-        set(_ds "$<SEMICOLON>")
-    else()
-        set(_ds ":")
+function(hipblaslt_configure_tensilelite_python asan_options)
+    if(NOT HIPBLASLT_ENABLE_DEVICE)
+        set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}" PARENT_SCOPE)
+        set(HIPBLASLT_PYTHON_DEPS "" PARENT_SCOPE)
+        return()
     endif()
-    set(_python_path
-        "${python_binary_dir}"
-        "${hipblaslt_SOURCE_DIR}/tensilelite"
-    )
-    list(JOIN _python_path "${_ds}" _python_path)
 
-    # Capture the configure time path so that the build environment is always
-    # fixed to what we saw at configure time.
-    set(_path "$ENV{PATH}")
-    if(WIN32)
-        string(REPLACE ";" "${_ds}" _path "${_path}")
+    if(NOT TARGET _rocisa)
+        message(FATAL_ERROR
+            "Device generation requires the in-tree _rocisa target")
     endif()
+
+    set(_canonical_wheel
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-release-wheels/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
+    set(_install_stamp "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-install.stamp")
+    add_custom_command(
+        OUTPUT "${_install_stamp}"
+        COMMAND "${Python3_EXECUTABLE}" -m pip install
+            --disable-pip-version-check --force-reinstall --no-deps
+            "${_canonical_wheel}"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_install_stamp}"
+        DEPENDS "${_canonical_wheel}"
+        COMMENT "Installing the canonical TensileLite wheel into the build Python"
+        VERBATIM
+        USES_TERMINAL
+    )
+    add_custom_target(tensilelite-python-build-environment
+        DEPENDS "${_install_stamp}" _rocisa)
+
     set(_python_command
         "${CMAKE_COMMAND}" -E env
-        "PYTHONPATH=${_python_path}"
-        "PATH=${_path}"
-        "${asan_options}"
-        --
-        "${Python3_EXECUTABLE}"
+        "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+        "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
+        "PYTHONPATH=$<TARGET_FILE_DIR:_rocisa>/.."
     )
-    message(VERBOSE "Python command: ${_python_command}")
+    if(asan_options)
+        list(APPEND _python_command ${asan_options})
+    endif()
+    list(APPEND _python_command --
+        "${Python3_EXECUTABLE}")
+
     set(HIPBLASLT_PYTHON_COMMAND "${_python_command}" PARENT_SCOPE)
+    set(HIPBLASLT_PYTHON_DEPS "tensilelite-python-build-environment" PARENT_SCOPE)
 endfunction()
