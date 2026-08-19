@@ -190,29 +190,51 @@ public:
                 // genuinely measured, so they beat the heuristic front, and the flag is
                 // per-execution-context so this run cannot re-benchmark anyway. Declining
                 // would discard real measurements for a guess on every unflagged run.
-                if(const auto ranked = orderByRecord(*record, filtered); !ranked.empty())
+                // Walk the ranked list rather than committing to its front: constructing
+                // a GenericPlan runs provider code -- workspaceBytes() and prepare() --
+                // and throws when prepare() returns null (GenericPlan.hpp:33-41). The
+                // benchmarking branch below already treats that as a per-candidate loss
+                // rather than a plan-level failure, and a cache hit must not be stricter:
+                // without this, a record whose winner cannot prepare would fail a
+                // buildPlan that an empty cache would have satisfied from filtered.front().
+                const auto ranked = orderByRecord(*record, filtered);
+                for(size_t rank = 0; rank < ranked.size(); ++rank)
                 {
-                    HIPDNN_PLUGIN_LOG_INFO(
-                        "ingestor: engine '"
-                        << _engine.name << "' served kernel " << toString(ranked.front().kernelId)
-                        << " from a benchmarked record of " << record->size() << " entry(s) for "
-                        << filtered.size() << " candidate(s)"
-                        << (covered ? ""
-                                    : " (partial coverage: the record does not carry every "
-                                      "candidate, and benchmarking is disabled)")
-                        << (ranked.size() == filtered.size()
-                                ? ""
-                                : " (some candidates were skipped as absent from the record or no "
-                                  "longer agreeing on pack and dispatch)"));
+                    try
+                    {
+                        auto plan = std::make_unique<GenericPlan<THandle>>(
+                            _stateManager.getDispatchDetails(ranked[rank]), context, catalog.bound);
 
-                    executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
-                        _stateManager.getDispatchDetails(ranked.front()), context, catalog.bound));
-                    return;
+                        HIPDNN_PLUGIN_LOG_INFO(
+                            "ingestor: engine '"
+                            << _engine.name << "' served kernel " << toString(ranked[rank].kernelId)
+                            << " at rank " << rank << " from a benchmarked record of "
+                            << record->size() << " entry(s) for " << filtered.size()
+                            << " candidate(s)"
+                            << (covered ? ""
+                                        : " (partial coverage: the record does not carry every "
+                                          "candidate, and benchmarking is disabled)")
+                            << (ranked.size() == filtered.size()
+                                    ? ""
+                                    : " (some candidates were skipped as absent from the record "
+                                      "or no longer agreeing on pack and dispatch)"));
+
+                        executionContext.setPlan(std::move(plan));
+                        return;
+                    }
+                    catch(const std::exception& error)
+                    {
+                        HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                               << _engine.name << "' could not build a plan for "
+                                               << toString(ranked[rank].kernelId) << " at rank "
+                                               << rank << ": " << error.what()
+                                               << "; trying the next ranked entry");
+                    }
                 }
 
-                // Every ranked entry is stale or absent. Not an error: fall through to
-                // today's behaviour rather than serve a kernel the record no longer
-                // describes.
+                // Every ranked entry is stale, absent, or unbuildable. Not an error: fall
+                // through to today's behaviour rather than serve a kernel the record no
+                // longer describes.
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                        << _engine.name
                                        << "' found a benchmarked record whose entries no longer "
@@ -276,7 +298,7 @@ public:
         // The callback is the write-back channel, already bound to the key: it captures
         // the state manager by reference, which the engine owns and which strictly
         // outlives every plan it hands out.
-        executionContext.setPlan(std::make_unique<BenchmarkPlan<THandle>>(
+        executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
             typename BenchmarkPlan<THandle>::Timer{},
@@ -285,6 +307,29 @@ public:
             }));
     }
 
+protected:
+    /// Constructs the sampling plan. Virtual purely as a **test seam**, mirroring
+    /// BenchmarkPlan::sampleCandidate's: production always gets a BenchmarkPlan, and this
+    /// changes no behaviour.
+    ///
+    /// It exists because the write-back path is otherwise untestable without a device.
+    /// The seam on sampleCandidate lets a subclass return deterministic times, but a test
+    /// cannot reach it through this builder while the concrete type is hardcoded here --
+    /// and executing the real plan on a device-less runner scores every candidate
+    /// unusable, so the callback is correctly never invoked and the assertions would be
+    /// green while proving nothing. Overriding this lets a test supply a deterministic
+    /// plan built from the *same* arguments, so the real captured callback and the real
+    /// winner key are what run.
+    virtual std::unique_ptr<IPlan<THandle>>
+        makeBenchmarkPlan(std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates,
+                          const THandle& handle,
+                          typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking) const
+    {
+        return std::make_unique<BenchmarkPlan<THandle>>(
+            std::move(candidates), handle, std::move(recordRanking));
+    }
+
+public:
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
         getCustomKnobs(const THandle& handle, const IGraph& opGraph) const override
