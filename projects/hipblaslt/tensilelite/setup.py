@@ -24,12 +24,21 @@ def _build_rocm_version() -> str:
     from an ambient ROCm installation.
     """
     explicit_rocm_version = os.environ.get("TENSILELITE_ROCM_VERSION")
-    if not explicit_rocm_version:
-        raise RuntimeError(
-            "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
-            "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
-        )
-    return explicit_rocm_version
+    if explicit_rocm_version:
+        return explicit_rocm_version
+    if os.environ.get("TOX_ENV_NAME"):
+        version_file = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / ".info" / "version"
+        try:
+            return version_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError(
+                "Tox package setup requires TENSILELITE_ROCM_VERSION or a selected "
+                f"ROCM_PATH containing {version_file.relative_to(version_file.parent.parent)}."
+            ) from exc
+    raise RuntimeError(
+        "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
+        "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
+    )
 
 
 class CleanBuildPy(build_py):
