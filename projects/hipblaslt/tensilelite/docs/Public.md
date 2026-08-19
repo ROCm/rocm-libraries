@@ -46,9 +46,15 @@ python -m tensilelite
 
 The packaged command surface should be defined and completed as part of this transition:
 
+- `tensilelite benchmark-cluster`
 - `tensilelite create-library`
+- `tensilelite generate-summations`
 - `tensilelite logic`
+- `tensilelite logic-to-yaml`
+- `tensilelite merge-library`
+- `tensilelite retune-library`
 - `tensilelite run`
+- `tensilelite update-library`
 
 `tensilelite run` covers the benchmark and tuning workflow. Its command contract should be the current `Tensile` command contract, moved behind the new package CLI rather than redesigned during this migration. Making it public means this transition must also fix the compiled client artifact contract: `tensilelite-client` should be installed under `ROCM_PATH`, the Python package should find it there, and `--prebuilt-client` should become an override rather than the normal packaged path.
 
