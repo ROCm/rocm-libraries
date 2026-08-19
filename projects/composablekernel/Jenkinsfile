@@ -746,7 +746,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx950")) {
                                 deleteDir()
-                                ck.runDispatcherTestsGfx950(params.BUILD_COMPILER)
+                                ck.runDispatcherTests("gfx950", params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }

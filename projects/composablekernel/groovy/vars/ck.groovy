@@ -1524,7 +1524,19 @@ def runDispatcherGemmTests(String compiler) {
         python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
         python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx gfx942 && \
         python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx gfx942"""
-    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+    try {
+        buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+    } finally {
+        // finally, not a trailing call: a red lane is exactly when the per-kernel
+        // JSON is worth having, and buildAndTest throws on failure. Same path
+        // reasoning as runDispatcherTests: execute_cmd runs from
+        // projects/composablekernel/build while archiveArtifacts resolves against
+        // the workspace root, so the build-relative path is spelled out in full.
+        archiveArtifacts artifacts: "projects/composablekernel/build/gemm_universal_results.json," +
+                                    "projects/composablekernel/build/batched_gemm_results.json," +
+                                    "projects/composablekernel/build/batched_contraction_results.json",
+                         allowEmptyArchive: true
+    }
 }
 
 // Which GEMM variants of test_gemm_search_space.py each arch can run. Bounded by
@@ -1624,10 +1636,6 @@ def runDispatcherTests(String arch, String compiler) {
         archiveArtifacts artifacts: "projects/composablekernel/build/dispatcher_*_results.json",
                          allowEmptyArchive: true
     }
-}
-
-def runDispatcherTestsGfx950(String compiler) {
-    runDispatcherTests("gfx950", compiler)
 }
 
 def runBuildCKAndTests(String arch) {
