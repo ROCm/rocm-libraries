@@ -530,21 +530,80 @@ def test_row_six_without_a_divergent_pair_requires_sia_zero(
     assert "TDMFuse=6 without a divergent decoupled pair requires ScheduleIterAlg=0" in out
 
 
-def test_row_six_at_sia_four_with_a_divergent_pair_is_refused_earlier(
+def test_row_six_at_sia_four_with_a_divergent_pair_is_admitted(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
-    """The reason row 6's SIA clause is allowed to exempt divergent pairs.
+    """Row 6's SIA clause exempts divergent pairs, and the exemption is now live.
 
-    divergentPairUnsupportedReason already refuses every ScheduleIterAlg but 0,
-    and it runs first, so the exemption cannot admit anything. Pinned because
-    the exemption reads like a hole: if that earlier reject were relaxed, this
-    test fails and says so, rather than a wrong-results kernel appearing at
-    SIA=4.
+    This combination was refused until the guard ahead of it was corrected, and
+    this test pinned that refusal. divergentPairUnsupportedReason read the RAW
+    ScheduleIterAlg, so it rejected every level but 0 and it runs first, which
+    made row 6's exemption unreachable. It now reads the DERIVED
+    _ScheduleIterAlg, which is 0 at SIA=4 because
+    assignProblemIndependentDerivedParameters remaps the level to StinkyTofu
+    OptLevel 3 over the SIA0 loop. The premise changed, not the exemption.
+
+    What makes it safe to admit is the barrier fix rather than the key flip. At
+    OptLevel 3 postMainLoopBarrierCheckAndReset discarded every barrier and
+    rebuilt placement module by module, and the wave-parity guard around a
+    de-aliased fill is opened in a different module from the fill it guards, so
+    a rebuilt barrier landed inside the guarded region and half the workgroup
+    skipped it. The rebuild now walks the whole tree and places such a barrier
+    ahead of the branch that opens it.
+
+    Why row 6 belongs with row 0. Counting barriers that sit inside a live
+    wave-parity region, per arm, on the F8F4 MT64x512 DepthU 256 sweep: before
+    the barrier fix both f6 divergent arms carry 3 and both f0 divergent arms
+    carry 3, f5 carries none, and with the fix every arm reads 0. Same defect,
+    same repair, so refusing row 6 while admitting row 0 would be arbitrary
+    rather than protective.
+
+    What this does not claim is that the kernel is right. Row 6 divergent at
+    SIA=4 is exactly as un-silicon-validated after the barrier fix as the other
+    five arms the guard now returns -- no better, no worse. The failure that
+    motivated row 6's own clause was measured on the EQUAL pair, which this row
+    still refuses, and the one divergent row-6 failure on record was measured
+    before the fix. It is admitted on the consistency argument with row 0, not
+    on a passing silicon run, and it should be validated there before anyone
+    tunes against it.
     """
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=6, ScheduleIterAlg=4,
                        PrefetchGlobalReadA=1, PrefetchGlobalReadB=2)
-    assert sol.get("Valid") is False
-    assert "only ScheduleIterAlg=0 places the fill where it can be moved" in out
+    assert sol.get("Valid") is True, f"rejected with: {out!r}"
+    # The exemption did the admitting, so row 6's own clause stayed silent...
     assert "TDMFuse=6 without a divergent decoupled pair" not in out
+    # ...and so did the guard that used to refuse this ahead of it.
+    assert "only ScheduleIterAlg=0 places the fill where it can be moved" not in out
+
+
+# The half of the old tripwire that is still load-bearing, and the reason the
+# test above is not just a flipped assertion. SIA=4 is admitted because it
+# derives to 0, not because the level was relaxed, so the hazard the refusal
+# guarded still needs pinning: 1, 2 and 3 are different schedulers and none of
+# them can host the relocated fill. 3 is the sharp one -- with the clause taken
+# out it emits the relocation wrapping four empty `.header` modules and both
+# early-return guards pass spuriously, so the kernel builds, fits and computes
+# wrong results from K = 2*DepthU instead of coming back refused.
+#
+# The clause differs at 2 because SIA=2 derives 1LDSBuffer=1, and that
+# contradiction with a (1,2) pair is caught before the divergent guard is
+# consulted. Pinning each message rather than just the refusal is what keeps
+# that precedence visible: a widening of the derived-key read fails at 1 and 3
+# here, and 2 keeps saying which guard is actually holding it.
+@pytest.mark.parametrize(
+    "sia, clause",
+    [
+        (1, "only ScheduleIterAlg=0 places the fill where it can be moved"),
+        (2, "1LDSBuffer=1 gives every tensor one shared LDS block"),
+        (3, "only ScheduleIterAlg=0 places the fill where it can be moved"),
+    ],
+)
+def test_row_six_with_a_divergent_pair_is_still_refused_below_sia_four(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, sia, clause):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=6,
+                       ScheduleIterAlg=sia,
+                       PrefetchGlobalReadA=1, PrefetchGlobalReadB=2)
+    assert sol.get("Valid") is False, sia
+    assert clause in out
 
 
 def test_row_six_accepts_every_pair_spelling_at_sia_zero(
