@@ -126,7 +126,7 @@ class HelperKernelCache:
     Construct a fresh instance per build call to pick up the current environment.
     """
 
-    _DEFAULT_DIR = Path.home() / ".tensile" / "helper_cache"
+    _DEFAULT_DIR = Path.home() / ".tensilelite" / "helper_cache"
     _MAX_AGE_DAYS = 30
 
     def __init__(self):

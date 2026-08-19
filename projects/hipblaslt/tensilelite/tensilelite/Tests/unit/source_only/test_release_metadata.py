@@ -91,3 +91,11 @@ def test_tox_package_bootstrap_reads_the_selected_rocm_identity(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "5.0.0+rocm7.2.4"
+
+def test_distribution_version_preserves_development_publication_identity():
+    metadata = runpy.run_path(str(_SOURCE_ROOT / "release_metadata.py"))
+
+    assert (
+        metadata["distribution_version"]("10.1.0.dev0+0123456789abcdef")
+        == "5.0.0+devrocm10.1.0.dev0.0123456789abcdef"
+    )
