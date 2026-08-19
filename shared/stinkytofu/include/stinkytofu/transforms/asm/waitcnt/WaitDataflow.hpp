@@ -65,7 +65,7 @@ struct StinkyInstruction;
 namespace waitcnt {
 
 /// Hardware counters we track. Index matches arrays in DataflowState.
-enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Count = 4 };
+enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Async = 4, CK_Count = 5 };
 
 /// Map a tracked async memop to its hardware counter. Returns CK_Count when
 /// `inst` is not tracked by the waitcnt pass.
@@ -97,7 +97,7 @@ struct PerPredQueue {
 /// that counter (e.g. all incoming sources were VALU).
 struct PhiSummary {
     int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused, WaitCountSpec::kUnused,
-                           WaitCountSpec::kUnused};
+                           WaitCountSpec::kUnused, WaitCountSpec::kUnused};
 
     bool operator==(const PhiSummary& other) const {
         for (int c = 0; c < CK_Count; ++c) {

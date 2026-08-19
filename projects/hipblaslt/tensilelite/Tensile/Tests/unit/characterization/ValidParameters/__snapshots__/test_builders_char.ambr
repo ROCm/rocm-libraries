@@ -1489,6 +1489,7 @@
     'SwapGlobalReadOrder',
     'TDMInst',
     'TDMIterateMode',
+    'TDMLoadWaveSync',
     'TDMSplit',
     'TailloopInNll',
     'TemporalHint',
@@ -2655,6 +2656,14 @@
         1,
       ]),
       'len': 5,
+      'type': 'list',
+    }),
+    'TDMLoadWaveSync': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'TDMSplit': dict({

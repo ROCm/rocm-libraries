@@ -131,6 +131,14 @@
             }
         },
         {
+            "name": "hipdnn-python",
+            "description": "Build hipdnn and the Python frontend bindings",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-python"
+            }
+        },
+        {
             "name": "hipdnn-samples",
             "description": "Build hipdnn, all supported providers, integration tests, and samples",
             "inherits": ["default:release"],
@@ -143,7 +151,7 @@
             "description": "Build hipdnn, all providers (including some unsupported), integration tests, and samples",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hip-kernel-provider;hipdnn-samples"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hip-kernel-provider;hipdnn-samples;hipdnn-python"
             }
         }
     ],
