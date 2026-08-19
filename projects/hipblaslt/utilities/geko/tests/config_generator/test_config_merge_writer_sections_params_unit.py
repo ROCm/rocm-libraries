@@ -156,10 +156,16 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     assert "#kernels 3" in cfg_log.read_text(encoding="utf-8")
 
     hip = tmp_path / "hip"
-    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
+    hip.mkdir()
     script = tmp_path / "e1.sh"
-    ow.write_run_script(script, "e1", hip, client_path=hip / "client")
+    client = tmp_path / "build/tensilelite/client/tensilelite-client"
+    ow.write_run_script(script, "e1", hip, client_path=client)
     assert script.is_file()
+    script_text = script.read_text(encoding="utf-8")
+    assert f"--ensure-client {client}" in script_text
+    assert "-m tensilelite run" in script_text
+    assert "PYTHONPATH" not in script_text
+    assert "--prebuilt-client" not in script_text
 
     writer = ow.EntityOutputWriter(tmp_path / "out", "HHS_NN", hip, write_shell_scripts=False)
     (tmp_path / "out").mkdir(parents=True, exist_ok=True)
@@ -168,7 +174,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
         "GlobalParameters": {"A": 1},
         "BenchmarkProblems": [[{"OperationType": "GEMM"}, {"InitialSolutionParameters": "", "BenchmarkCommonParameters": [], "ForkParameters": entry.fork_params, "BenchmarkJoinParameters": "", "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": "[ 16, 16, 1, 16 ]"}]}]}]],
         "LibraryLogic": {"ScheduleName": '"gfx950"'},
-        "Backend": {"Name": "Tensile"},
+        "Backend": {"Name": "tensile"},
     }
     writer.write_entity_files_only(entry, config, "# h\n", "e1")
     writer.append_aggregate_metadata("e1", entry, progress="1/1")
@@ -177,7 +183,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
 
 
 def _section_cfg(dtype="H", epilogues=True, backend="tensile", search_space="heuristic"):
-    gt = GemmType.from_tensile("N", "N", dtype, dtype, "S" if dtype != "D" else "D")
+    gt = GemmType.from_tensilelite("N", "N", dtype, dtype, "S" if dtype != "D" else "D")
     return {
         "GemmProblem": GemmConfig(gt, [[16, 16, 1, 16]]),
         "ARCH": "gfx950",
@@ -236,8 +242,8 @@ def test_config_sections_generator_paths(monkeypatch) -> None:
 def test_gfx942_params_branches(monkeypatch) -> None:
     from geko.config_generator.fork_params import optimization_param as opt_param
 
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
-    gt = GemmType.from_tensile("N", "T", "H", "H", "S")
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
+    gt = GemmType.from_tensilelite("N", "T", "H", "H", "S")
     cfg = {
         "ARCH": "gfx942",
         "CUs": 304,
@@ -267,7 +273,7 @@ def test_gfx942_params_branches(monkeypatch) -> None:
 
 def _section_cfg_mx(dtype="F4", mx=True, epilogues=True, arch="gfx950"):
     dest = "S" if dtype not in ("D",) else "D"
-    gt = GemmType.from_tensile("T", "N", dtype, dest, "S")
+    gt = GemmType.from_tensilelite("T", "N", dtype, dest, "S")
     return {
         "GemmProblem": GemmConfig(gt, [[16, 16, 1, 16]], mx=mx),
         "ARCH": arch,

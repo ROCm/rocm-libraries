@@ -4,3 +4,4 @@ pandas
 numpy
 tqdm
 pytest>=7.0.0
+tensilelite
