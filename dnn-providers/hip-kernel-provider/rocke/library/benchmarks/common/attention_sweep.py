@@ -149,8 +149,12 @@ def record_sweep_entries(rec, sweep_entries, *, tri_out, tri_ms, tol, compare, b
             "engines": ent["engines"],
             "kernel": ent.get("kernel"),
         }
-        if s_ok and (best is None or s_spd > best[1]):
-            best = (vname, s_spd)
+        # Track the winner by ms (lower = faster), the SAME unit the prod/single-
+        # kernel lane uses for `best` -- so a mixed `--variants prod sweep` run
+        # compares like with like. (Within a sweep-only run this is equivalent to
+        # ranking by speedup, since speedup = tri_ms / s_ms with tri_ms fixed.)
+        if s_ok and (best is None or s_ms < best[1]):
+            best = (vname, s_ms)
     return best
 
 
