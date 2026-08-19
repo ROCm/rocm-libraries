@@ -111,7 +111,7 @@ const std::vector<std::string> ranked_gemm_3d_grp_bwd_navi = {
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
     const ProblemDescription& problem)
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -232,7 +232,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValidValue() const
 bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValid(
     const ProblemDescription& problem) const
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 

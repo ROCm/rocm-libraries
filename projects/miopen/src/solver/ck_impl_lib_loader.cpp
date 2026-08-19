@@ -24,9 +24,24 @@
 #endif
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CK_LIB_PATH)
+MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEVICE_ARCH)
 
 namespace miopen {
 namespace solver {
+
+std::string GetOfflineOrCurrentDeviceName()
+{
+    // In offline / dbsync mode (MIOPEN_DEVICE_ARCH set, no kernels launched) the
+    // requested arch selects which per-arch CK grouped-conv library and its
+    // applicability checks are used, so validation does not require matching
+    // physical hardware. Otherwise fall back to the real device. Mirrors the
+    // MIOPEN_DEVICE_ARCH override in TargetProperties::Init; real runtime is
+    // unaffected because MIOPEN_DEVICE_ARCH is unset there.
+    const auto& arch = env::value(MIOPEN_DEVICE_ARCH);
+    if(!arch.empty())
+        return arch;
+    return GetCurrentDeviceName();
+}
 
 namespace {
 

@@ -31,7 +31,7 @@ void PerformanceConfigConvDepthwiseFwd2D::HeuristicInit(
     if(data_type != miopenHalf && data_type != miopenBFloat16)
         return;
 
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -76,7 +76,7 @@ bool PerformanceConfigConvDepthwiseFwd2D::IsValid(
     if(kernel_id.empty())
         return false;
 
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -202,7 +202,7 @@ void PerformanceConfigConvDepthwiseBwdData2D::HeuristicInit(
     const auto data_type = problem.GetInDataType();
     if(data_type != miopenHalf && data_type != miopenBFloat16)
         return;
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
     valid_kernels =
@@ -245,7 +245,7 @@ bool PerformanceConfigConvDepthwiseBwdData2D::IsValid(
 #if MIOPEN_BACKEND_HIP
     if(kernel_id.empty())
         return false;
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
     const auto data_type = problem.GetInDataType();

@@ -64,6 +64,14 @@ inline std::string GetCurrentDeviceName()
 #endif
 }
 
+/// Returns the architecture name the CK grouped-conv loader should use.
+/// When MIOPEN_DEVICE_ARCH is set (offline / dbsync mode, where no kernels are
+/// launched) this returns that arch, so the correct per-arch CK library and its
+/// host-side applicability checks are selected without matching physical
+/// hardware. Otherwise it falls back to GetCurrentDeviceName() (the real
+/// device). Real runtime is unaffected because MIOPEN_DEVICE_ARCH is unset there.
+MIOPEN_INTERNALS_EXPORT std::string GetOfflineOrCurrentDeviceName();
+
 class CkImplLibLoader
 {
 public:

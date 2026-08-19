@@ -112,7 +112,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyTokenKTN(
             kernel_id = valid_kernels[heuristic_indexes[0]] + "+" + value;
             index     = heuristic_indexes[0];
 
-            const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+            const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
             bool valid_split_k =
                 loader.IsLoaded() && loader.IsArgsSupported(CKSolverType::GrpConvWrw,
                                                             problem,
@@ -291,7 +291,7 @@ std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 
 void PerformanceConfigHipImplicitGemmGroupWrwXdlops::InitValidKernels(
     const ProblemDescription& problem)
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -399,7 +399,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+        const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
         if(!loader.IsLoaded())
             return false;
 
@@ -465,7 +465,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
 
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -499,7 +499,7 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsValidPerformanceConfig(
 size_t
 ConvHipImplicitGemmGroupWrwXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return 0;
 

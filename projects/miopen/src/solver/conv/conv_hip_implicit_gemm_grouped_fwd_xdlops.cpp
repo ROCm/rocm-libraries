@@ -277,7 +277,7 @@ static const std::vector<std::string> ranked_gemm_grp_fwd_navi = {
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitValidKernels(
     const ProblemDescription& problem)
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -377,7 +377,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
+        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
         if(!loader.IsLoaded())
             return false;
 
@@ -411,7 +411,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValidValue() const
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 

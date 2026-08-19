@@ -77,7 +77,7 @@ namespace {
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
     const ProblemDescription& problem)
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -432,7 +432,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValidValue() const
 bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(
     const ProblemDescription& problem) const
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
