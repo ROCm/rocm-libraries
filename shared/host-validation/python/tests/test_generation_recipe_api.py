@@ -174,7 +174,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
             )
         )
 
-    def test_legacy_generation_bags_are_not_exposed(self):
+    def test_mutable_generation_bags_are_not_exposed(self):
         for name in (
             "GenerationOptions",
             "GenerationPattern",

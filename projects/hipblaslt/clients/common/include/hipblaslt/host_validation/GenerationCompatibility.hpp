@@ -23,9 +23,8 @@ namespace hipblaslt::host_validation
         inline constexpr unsigned oneSpecialLcgValueShift = 16;
         inline constexpr int      oneSpecialValueCount    = 3;
 
-        // A typed recipe fixes its component domains. Folding a former
-        // compatibility domain into the seed preserves every counter-random
-        // value for one bound component.
+        // Adjusts the seed so changing the random stream ID does not change
+        // the generated values.
         inline constexpr uint64_t seedForRandomDomain(
             uint64_t seed,
             uint64_t sourceDomain,

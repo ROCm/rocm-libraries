@@ -13,11 +13,11 @@
 #include <vector>
 
 namespace roc::host_validation {
-// Selects whether every N:M group retains fixed positions or a deterministic
-// counter-random position set.
+// Selects fixed positions or a reproducible pseudo-random set for each N:M
+// group.
 enum class StructuredSparsitySelection {
     Fixed,   // Uses fixedPositions for every group.
-    Random,  // Counter-randomly selects one increasing retained-position set per group.
+    Random,  // Selects a sorted set from the seed and group index.
 };
 
 // Describes logical N:M pruning along one tensor axis. Each groupSize-element

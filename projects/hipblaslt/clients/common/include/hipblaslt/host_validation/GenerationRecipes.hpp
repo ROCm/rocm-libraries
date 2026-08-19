@@ -33,9 +33,6 @@ namespace hipblaslt::host_validation
         Cartesian,
     };
 
-    // Cartesian uses the shared typed real/imaginary domains. A single recipe
-    // seed cannot also reproduce a former independently selected domain pair.
-
     struct RandomIntegerRecipeConfiguration
     {
         bool                    small         = false;
