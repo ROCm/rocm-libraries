@@ -72,7 +72,7 @@ namespace hipblaslt::host_validation
         hipblasLtBatchMode_t          batchMode = HIPBLASLT_BATCH_MODE_STRIDED;
     };
 
-    void validateMatmulOutputs(const MatmulValidationRequest& request)
+    inline void validateMatmulOutputs(const MatmulValidationRequest& request)
     {
         const auto&                options              = request.options;
         const int32_t              gemm_count           = request.gemmCount;
@@ -347,28 +347,29 @@ namespace hipblaslt::host_validation
 
             if(options.compareNorm)
             {
-                double norm_error = 0.0;
+                const auto recordOutputNorm = [&](double relativeFrobeniusError) {
+                    const double normError = std::abs(relativeFrobeniusError);
+                    hipblaslt_error += normError;
+                    if(options.assertNorm)
+                    {
+                        CHECK_SUCCESS(norm_check(normError,
+                                                 To,
+                                                 options.computeType,
+                                                 options.inputTypeA,
+                                                 options.inputTypeB));
+                    }
+                };
+
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
-                    norm_error = std::abs(dComparison->relativeFrobeniusError);
+                    recordOutputNorm(dComparison->relativeFrobeniusError);
                 }
                 else
                 {
                     for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
-                    {
-                        norm_error = std::abs(dBatchComparisons[batch].relativeFrobeniusError);
-                        hipblaslt_error += norm_error;
-                    }
+                        recordOutputNorm(dBatchComparisons[batch].relativeFrobeniusError);
                 }
-                hipblaslt_error += norm_error;
-                if(options.assertNorm)
-                {
-                    CHECK_SUCCESS(norm_check(norm_error,
-                                             To,
-                                             options.computeType,
-                                             options.inputTypeA,
-                                             options.inputTypeB));
-                }
+
                 if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
                     if(options.outputMaximum)
