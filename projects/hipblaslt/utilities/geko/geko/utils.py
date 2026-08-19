@@ -1,22 +1,19 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 from __future__ import annotations
 
-"""Common utility functions for the GEKO framework."""
-
-import subprocess
-import shutil
-import sys
-import logging
 import hashlib
+import logging
 import os
+import shutil
+import subprocess
+import sys
 
-from typing import List
-from pathlib import Path
 from datetime import date
-from importlib.util import find_spec
 from datetime import datetime, timezone
+from importlib.util import find_spec
+from pathlib import Path
+from typing import List
 
 logger = logging.getLogger("GEKO")
 
@@ -31,7 +28,6 @@ def compute_file_sha256(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-
 def _rocm_subprocess_env() -> dict[str, str]:
     """Return env with ROCm tools on PATH for invoke / Tensile subprocesses."""
     env = os.environ.copy()
@@ -43,7 +39,9 @@ def _rocm_subprocess_env() -> dict[str, str]:
     return env
 
 
-def run_silent_command(cmd: List[str], cwd: str | Path = None, env: dict[str, str] | None = None) -> None:
+def run_silent_command(
+    cmd: List[str], cwd: str | Path = None, env: dict[str, str] | None = None
+) -> None:
     """Execute a shell command with silent stdout and error handling.
 
     Args:
@@ -118,11 +116,13 @@ def build_tensilelite_client(
         f"default_build_dir={default_build_dir}"
     )
 
-    if build_dir is None:
+    uses_default_build_dir = build_dir is None
+    if uses_default_build_dir:
         build_dir = default_build_dir
 
     build_dir = Path(build_dir).resolve()
-    client_path = build_dir / "tensilelite/client/tensilelite-client"
+    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
+    client_path = build_dir / "tensilelite" / "client" / executable
     hash_file_path = build_dir / "hash.txt"
 
     build = True
@@ -156,11 +156,54 @@ def build_tensilelite_client(
         with open(hash_file_path, "w") as f:
             f.write(current_hash)
     else:
-        logger.debug(f"Skipping tensilelite client build, using cached client at '{client_path}'")
+        logger.debug(f"Skipping TensileLite client build, using cached binary at '{client_path}'")
 
-    return client_path if build_dir != default_build_dir else None
+    run_silent_command(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-build-isolation",
+            "--no-deps",
+            "--editable",
+            tensilelite_path,
+        ],
+        env=_tensilelite_build_environment(),
+    )
+    run_silent_command(
+        [
+            sys.executable,
+            "-m",
+            "tensilelite_configure_client",
+            "--ensure-client",
+            client_path,
+        ]
+    )
+    return None if uses_default_build_dir else client_path
 
-
+def _tensilelite_build_environment() -> dict[str, str]:
+    """Return the active interpreter environment with an explicit ROCm identity."""
+    environment = os.environ.copy()
+    if environment.get("TENSILELITE_ROCM_VERSION"):
+        return environment
+    if "ROCM_PATH" in environment and not environment["ROCM_PATH"]:
+        raise RuntimeError(
+            "GEKO cannot build TensileLite with ROCM_PATH set but empty; "
+            "set ROCM_PATH to a ROCm installation or unset it."
+        )
+    rocm_root = Path(environment.get("ROCM_PATH", "/opt/rocm"))
+    version_file = rocm_root / ".info" / "version"
+    try:
+        environment["TENSILELITE_ROCM_VERSION"] = version_file.read_text(
+            encoding="utf-8"
+        ).strip()
+    except OSError as exc:
+        raise RuntimeError(
+            "GEKO could not determine the ROCm identity for its TensileLite editable install; "
+            f"set TENSILELITE_ROCM_VERSION or provide {version_file}."
+        ) from exc
+    return environment
 def parse_devices(devices: str | list[int]) -> List[int]:
     """Parse device specification into a list of device IDs.
 
