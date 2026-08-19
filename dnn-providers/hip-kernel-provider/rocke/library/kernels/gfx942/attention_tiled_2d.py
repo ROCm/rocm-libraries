@@ -5698,14 +5698,20 @@ def build_unified_attention_2d_tiled(
 # standalone (experiments/d256_4warp_gqa/build_e2e_T3_ragged_bf16o.py): parity+
 # with AITER at Sq4096/8192. Wired for the ``_d256_gfx942_fast`` cohort only.
 _4WGQA_LOG2E = 1.4426950408889634
+# Head size the lean natural-QK body has been GPU-validated for. It is a
+# validation gate, not an algorithmic limit: the schedule reads every head-dim
+# extent off ``spec.head_size``, so this only pins the cohort proven correct on
+# real hardware. Widen it (and re-bless golden IR) once another head size is
+# validated end-to-end.
+_4WGQA_LEAN_HEAD_SIZE = 256
 
 
-def _build_gfx942_4warp_gqa_d256_lean(
+def _build_gfx942_4warp_gqa_lean(
     spec: UnifiedAttention2DTiledSpec,
     *,
     arch: str = "gfx942",
 ) -> KernelDef:
-    """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
+    """Emit the gfx942 4-warp GQA lean natural-QK paged-attention ``KernelDef``."""
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
@@ -5713,8 +5719,11 @@ def _build_gfx942_4warp_gqa_d256_lean(
         raise NotImplementedError("4-warp GQA kernel is bf16-only")
     dtype = spec.dtype_ir
     HD = spec.head_size
-    if HD != 256:
-        raise NotImplementedError("4-warp GQA kernel is head_size=256 only")
+    if HD != _4WGQA_LEAN_HEAD_SIZE:
+        raise NotImplementedError(
+            f"4-warp GQA lean body is validated for head_size="
+            f"{_4WGQA_LEAN_HEAD_SIZE} only"
+        )
     H = spec.num_query_heads
     HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
@@ -5791,7 +5800,7 @@ def _build_gfx942_4warp_gqa_d256_lean(
     ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
         b.ret()
 
-    V_lds = b.smem_alloc(dtype, [64, 256], name_hint="Vlds")
+    V_lds = b.smem_alloc(dtype, [BN, HD], name_hint="Vlds")
     q_desc = TensorDescriptor.naive(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
@@ -5829,8 +5838,8 @@ def _build_gfx942_4warp_gqa_d256_lean(
         b.sync()  # WAR: prev iter's PV reads of V_lds must finish before this tile overwrites it
         for c in range(8):
             lin = b.add(b.mul(tid, b.const_i32(64)), b.const_i32(c * 8))
-            key = b.div(lin, b.const_i32(256))
-            hd = b.mod(lin, b.const_i32(256))
+            key = b.div(lin, b.const_i32(HD))
+            hd = b.mod(lin, b.const_i32(HD))
             pk = phys_key(kv, key)
             velem = b.add(
                 b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
@@ -5962,8 +5971,8 @@ def build_gfx942_4warp_gqa(
     HD = spec.head_size
     if HD not in (128, 256):
         raise NotImplementedError("4-warp GQA kernel supports head_size in {128, 256}")
-    if HD == 256:
-        return _build_gfx942_4warp_gqa_d256_lean(spec, arch=arch)
+    if HD == _4WGQA_LEAN_HEAD_SIZE:
+        return _build_gfx942_4warp_gqa_lean(spec, arch=arch)
     H = spec.num_query_heads
     HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
