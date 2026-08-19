@@ -930,6 +930,239 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
 }
 
 // ---------------------------------------------------------------------------
+// Check 2: the winner-cache coverage gate and ranked walk at the lookup site
+// ---------------------------------------------------------------------------
+
+/// Workspace size is the observable proxy for "which kernel was selected": the three
+/// fixture kernels report 64, 128 and 256, and the heuristic ties every score so
+/// priority puts kernel_64 (workspace 64) at the front. A record naming kernel_256
+/// therefore proves the cache decided, not the heuristic -- with no timing involved.
+WinnerKey winnerKeyFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                       const DeviceProperties& properties)
+{
+    return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
+}
+
+RankedEntry rankedEntryFor(const KernelDefinition& kernel, double timeMs)
+{
+    return RankedEntry{kernel.kernelId, kernel.packId, kernel.dispatchId, timeMs};
+}
+
+/// Every kernel the manager admits for this graph, in catalog order.
+template <typename THandle>
+std::vector<KernelDefinition>
+    catalogFor(const KernelIngestorStateManager<THandle>& manager,
+               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+               const DeviceProperties& properties)
+{
+    return manager.sortedDefinitions(MatchContext{graph, 0, properties});
+}
+
+TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutBenchmarking)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xD1));
+    const auto properties = testDeviceProperties();
+
+    // Rank kernel_256 first -- the opposite of what the heuristic would choose.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    WinnerRecord record;
+    for(const auto& kernel : catalog)
+    {
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        record.push_back(rankedEntryFor(kernel, blockSize == 256 ? 0.1 : 9.0));
+    }
+    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    manager->recordWinner(winnerKeyFor(graph, properties), record);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 256)
+        << "the measured winner must beat the heuristic front";
+}
+
+/// D7's mirror, half one: benchmark wide, then run narrow. The narrower candidate set is
+/// fully covered by the wider record, so the run is served -- no re-benchmarking.
+TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    // Narrow to kernel_128 alone, while the record covers all three.
+    const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 128);
+    const TestGraph graph(makeGraphId(0xD2));
+    const auto properties = testDeviceProperties();
+
+    WinnerRecord record;
+    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    {
+        record.push_back(rankedEntryFor(kernel, 1.0));
+    }
+    ASSERT_EQ(record.size(), 3U);
+    manager->recordWinner(winnerKeyFor(graph, properties), record);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128)
+        << "the knob filter still decides which candidates are eligible";
+}
+
+/// D7's mirror, half two: a record covering only part of the filtered set, with
+/// benchmarking OFF. It must serve the best covered entry rather than decline -- those
+/// entries were genuinely measured, and this run cannot re-benchmark.
+TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffStillServesWhatItCovers)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xD3));
+    const auto properties = testDeviceProperties();
+
+    // Only kernel_256 was ever measured; the other two candidates are uncovered.
+    WinnerRecord record;
+    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        {
+            record.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    ASSERT_EQ(record.size(), 1U);
+    manager->recordWinner(winnerKeyFor(graph, properties), record);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 256)
+        << "a real measurement beats the heuristic guess even under partial coverage";
+}
+
+/// A record whose entries no longer resolve is not an error: selection falls back to the
+/// heuristic front rather than serving a kernel the record no longer describes.
+TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelection)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xD4));
+    const auto properties = testDeviceProperties();
+
+    // Right kernel ids, wrong pack: every entry fails the staleness cross-check.
+    WinnerRecord record;
+    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    {
+        auto entry = rankedEntryFor(kernel, 0.1);
+        entry.packId = testId(0xEE);
+        record.push_back(entry);
+    }
+    manager->recordWinner(winnerKeyFor(graph, properties), record);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "a stale record must degrade to today's behaviour, never throw or serve blind";
+}
+
+/// A record keyed on a different device must never be served here. This is why the key
+/// folds the whole DeviceProperties struct rather than the arch string alone.
+TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xD5));
+    const auto properties = testDeviceProperties();
+
+    auto otherDevice = properties;
+    otherDevice.multiProcessorCount = properties.multiProcessorCount + 1;
+
+    WinnerRecord record;
+    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        {
+            record.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    manager->recordWinner(winnerKeyFor(graph, otherDevice), record);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "a record measured on another device must not decide this one's kernel";
+}
+
+// ---------------------------------------------------------------------------
 // HIPDNN_FORCE_BENCHMARKING composes as value_or, never an OR
 // ---------------------------------------------------------------------------
 

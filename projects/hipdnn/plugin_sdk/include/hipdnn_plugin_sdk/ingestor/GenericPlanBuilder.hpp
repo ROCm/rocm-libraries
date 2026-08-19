@@ -22,6 +22,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -172,6 +173,62 @@ public:
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
+        }
+
+        // Check 2. Check 1 already offered `catalog` a measured order if a record covered
+        // the whole of it; this asks the same coverage question of the knob-filtered
+        // candidates, which is a different and usually smaller set. The two are
+        // independent: Check 1 can fail on a partial record and Check 2 still pass, when
+        // the filter happens to narrow the candidates down to kernels the record carries.
+        const WinnerKey winnerKey{GraphContentKey{opGraph}, DeviceKey{context.deviceProperties}};
+        if(const auto record = _stateManager.winnerFor(winnerKey); record.has_value())
+        {
+            const bool covered = recordCovers(*record, filtered);
+            if(covered || !settings.benchmarkingEnabled)
+            {
+                // Uncovered with benchmarking off still serves: those entries were
+                // genuinely measured, so they beat the heuristic front, and the flag is
+                // per-execution-context so this run cannot re-benchmark anyway. Declining
+                // would discard real measurements for a guess on every unflagged run.
+                if(const auto ranked = orderByRecord(*record, filtered); !ranked.empty())
+                {
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "ingestor: engine '"
+                        << _engine.name << "' served kernel " << toString(ranked.front().kernelId)
+                        << " from a benchmarked record of " << record->size() << " entry(s) for "
+                        << filtered.size() << " candidate(s)"
+                        << (covered ? ""
+                                    : " (partial coverage: the record does not carry every "
+                                      "candidate, and benchmarking is disabled)")
+                        << (ranked.size() == filtered.size()
+                                ? ""
+                                : " (some candidates were skipped as absent from the record or no "
+                                  "longer agreeing on pack and dispatch)"));
+
+                    executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
+                        _stateManager.getDispatchDetails(ranked.front()), context, catalog.bound));
+                    return;
+                }
+
+                // Every ranked entry is stale or absent. Not an error: fall through to
+                // today's behaviour rather than serve a kernel the record no longer
+                // describes.
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                       << _engine.name
+                                       << "' found a benchmarked record whose entries no longer "
+                                          "resolve; falling back to normal selection");
+            }
+            else
+            {
+                // Uncovered with benchmarking on: ignore the record entirely and measure
+                // all of `filtered` afresh. Sampling only the uncovered candidates and
+                // merging by time is precisely what must not happen -- it would order
+                // entries by timings taken in different runs under different load.
+                HIPDNN_PLUGIN_LOG_INFO(
+                    "ingestor: engine '"
+                    << _engine.name << "' has a benchmarked record covering only part of "
+                    << filtered.size() << " candidate(s); re-benchmarking all of them");
+            }
         }
 
         if(!settings.benchmarkingEnabled)
