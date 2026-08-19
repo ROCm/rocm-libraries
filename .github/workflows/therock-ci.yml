@@ -306,6 +306,13 @@ jobs:
       # MIOpen build for this family may not have uploaded its artifact yet. Retries on a "Found
       # no artifacts matching [...]" failure with a bounded budget instead of depending on
       # therock-ci-linux's full completion (which would also wait on unrelated components' tests).
+      #
+      # The retry condition checks for build/bin/miopen_gtest explicitly, NOT just the script's own
+      # exit code -- confirmed live (run 32204574647) that install_rocm_from_artifacts.py exits 0
+      # as soon as ANY artifacts exist at this run's S3 prefix, which happens as soon as ANY OTHER
+      # project bundle sharing this family (e.g. hipkernelprovider, rpp, hiptensor) finishes
+      # uploading its "generic" (architecture-independent) pieces -- well before MIOpen's own bundle
+      # (still in_progress at that point) has uploaded miopen_gtest.
       - name: Fetch artifact (source-CK build for ${{ matrix.family }})
         timeout-minutes: 50
         env:
@@ -321,16 +328,17 @@ jobs:
                 --run-github-repo="${{ github.repository }}" \
                 --artifact-group="${AMDGPU_FAMILIES}" \
                 --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
-                --blas --miopen --rand --tests; then
-              echo "Fetched artifact after $((SECONDS - start))s"
+                --blas --miopen --rand --tests \
+                && [ -f "${OUTPUT_ARTIFACTS_DIR}/bin/miopen_gtest" ]; then
+              echo "Fetched artifact (miopen_gtest present) after $((SECONDS - start))s"
               break
             fi
             elapsed=$((SECONDS - start))
             if [ "${elapsed}" -ge "${max_wait_seconds}" ]; then
-              echo "::error::Timed out after ${elapsed}s waiting for the ${AMDGPU_FAMILIES} artifact (run ${ARTIFACT_RUN_ID})"
+              echo "::error::Timed out after ${elapsed}s waiting for miopen_gtest in the ${AMDGPU_FAMILIES} artifact (run ${ARTIFACT_RUN_ID})"
               exit 1
             fi
-            echo "Artifact not ready yet (${elapsed}s elapsed) -- retrying in ${poll_interval_seconds}s"
+            echo "miopen_gtest not present yet (${elapsed}s elapsed) -- retrying in ${poll_interval_seconds}s"
             sleep "${poll_interval_seconds}"
           done
 
