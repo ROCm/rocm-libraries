@@ -16,13 +16,11 @@
 namespace roc::host_validation {
 namespace detail {
 struct GenerationRecipeAccess;
-struct GenerationRecipeCompatibilityAccess;
 }  // namespace detail
 
 struct GenerationRecipeSettings {
-    // Counter-random recipes are functions of this seed, an internal component
-    // domain, and the logical element index. Traversal order and thread count
-    // do not change generated values.
+    // The same seed and logical element index always produce the same value,
+    // regardless of traversal order or thread count.
     uint64_t seed = 0;
 
     // Indexed recipes and generateAt use this coordinate-to-index mapping.
@@ -34,8 +32,8 @@ struct ConstantGenerationParameters {
 };
 
 struct CandidateSetGenerationParameters {
-    // Position is counterRandom(...) % values.size(). Repeated values increase
-    // that value's selection frequency.
+    // Values are selected deterministically from the list. Repeated entries
+    // make that value appear more often.
     std::vector<double> values;
 };
 
@@ -231,7 +229,6 @@ class GenerationRecipe {
 
         friend class GenerationRecipe;
         friend struct detail::GenerationRecipeAccess;
-        friend struct detail::GenerationRecipeCompatibilityAccess;
     };
 
     GenerationRecipe(const GenerationRecipe&) = default;
@@ -331,7 +328,6 @@ class GenerationRecipe {
     ComplexPolicy complexPolicy_;
 
     friend struct detail::GenerationRecipeAccess;
-    friend struct detail::GenerationRecipeCompatibilityAccess;
 };
 
 struct GenerationRunInfo {

@@ -48,13 +48,6 @@ namespace TensileLite::Client
         using roc::host_validation::StructuredSparsitySelection;
         using roc::host_validation::StructuredSparsitySliceRange;
         using roc::host_validation::Tensor;
-        using roc::host_validation::tensilelite_adapter::LegacyCartesianGenerationStreams;
-
-        struct DataInitializationRecipe
-        {
-            GenerationRecipe                                recipe;
-            std::optional<LegacyCartesianGenerationStreams> legacyCartesianStreams;
-        };
 
         std::optional<ScalarType> generationScalarType(rocisa::DataType type)
         {
@@ -89,38 +82,29 @@ namespace TensileLite::Client
             }
         }
 
-        std::optional<DataInitializationRecipe> generationRecipe(rocisa::DataType dataType,
-                                                                 InitMode         mode,
-                                                                 bool             problemDependent,
-                                                                 std::uint64_t    seed,
-                                                                 std::uint64_t    legacyRealStream,
-                                                                 std::optional<double> freeValue
-                                                                 = std::nullopt)
+        std::optional<GenerationRecipe> generationRecipe(rocisa::DataType      dataType,
+                                                         InitMode              mode,
+                                                         bool                  problemDependent,
+                                                         std::uint64_t         seed,
+                                                         std::uint64_t         sequence,
+                                                         std::optional<double> freeValue
+                                                         = std::nullopt)
         {
             using namespace roc::host_validation;
             using namespace roc::host_validation::tensilelite_adapter;
 
-            const GenerationRecipeSettings settings
-                = settingsForLegacyGenerationStream(seed, legacyRealStream);
+            const GenerationRecipeSettings settings = dataInitializationSettings(seed, sequence);
             auto realOnly = [settings](GenerationRecipe::Component component) {
-                return DataInitializationRecipe{
-                    .recipe = GenerationRecipe::realOnly(std::move(component), settings)};
+                return GenerationRecipe::realOnly(std::move(component), settings);
             };
             auto replicated = [settings](GenerationRecipe::Component component) {
-                return DataInitializationRecipe{
-                    .recipe = GenerationRecipe::replicated(std::move(component), settings)};
+                return GenerationRecipe::replicated(std::move(component), settings);
             };
-            auto cartesian
-                = [settings, seed, legacyRealStream](GenerationRecipe::Component component) {
-                      GenerationRecipe::Component imaginary = component;
-                      return DataInitializationRecipe{
-                          .recipe = GenerationRecipe::cartesian(
-                              std::move(component), std::move(imaginary), settings),
-                          .legacyCartesianStreams = LegacyCartesianGenerationStreams{
-                              .seed            = seed,
-                              .realStream      = legacyRealStream,
-                              .imaginaryStream = legacyRealStream + 1}};
-                  };
+            auto cartesian = [settings](GenerationRecipe::Component component) {
+                GenerationRecipe::Component imaginary = component;
+                return GenerationRecipe::cartesian(
+                    std::move(component), std::move(imaginary), settings);
+            };
 
             switch(mode)
             {
@@ -203,12 +187,8 @@ namespace TensileLite::Client
             case InitMode::RandomNarrow:
                 if(dataType == rocisa::DataType::E8 || dataType == rocisa::DataType::E5M3
                    || dataType == rocisa::DataType::Float4)
-                    return generationRecipe(dataType,
-                                            InitMode::Random,
-                                            problemDependent,
-                                            seed,
-                                            legacyRealStream,
-                                            freeValue);
+                    return generationRecipe(
+                        dataType, InitMode::Random, problemDependent, seed, sequence, freeValue);
                 if(dataType == rocisa::DataType::Int8 || dataType == rocisa::DataType::Int32
                    || dataType == rocisa::DataType::Int64)
                 {
@@ -340,11 +320,7 @@ namespace TensileLite::Client
             {
             case PruneSparseMode::PruneRandom:
                 pattern.selection = StructuredSparsitySelection::Random;
-                pattern.seed
-                    = roc::host_validation::tensilelite_adapter::seedForLegacyGenerationStream(
-                        roc::host_validation::tensilelite_adapter::sparsePruningCompatibilitySeed,
-                        roc::host_validation::tensilelite_adapter::
-                            sparsePruningCompatibilityStream);
+                pattern.seed      = roc::host_validation::tensilelite_adapter::sparsePruningSeed;
                 break;
             case PruneSparseMode::PruneXX00:
                 pattern.fixedPositions = {0, 1};
@@ -378,25 +354,14 @@ namespace TensileLite::Client
                       DataInitializationKey key,
                       std::optional<double> freeValue = std::nullopt)
         {
-            const std::optional<ScalarType>               type = generationScalarType(dataType);
-            const std::uint64_t                           legacyRealStream = 2 * key.semanticStream;
-            const std::optional<DataInitializationRecipe> recipe           = generationRecipe(
-                dataType, mode, problemDependent, key.seed, legacyRealStream, freeValue);
+            const std::optional<ScalarType>       type   = generationScalarType(dataType);
+            const std::optional<GenerationRecipe> recipe = generationRecipe(
+                dataType, mode, problemDependent, key.seed, key.semanticStream, freeValue);
             if(!type || !recipe)
                 return false;
 
             Tensor generated(*type, std::move(layout), storage);
-            if(recipe->legacyCartesianStreams
-               && roc::host_validation::scalarTypeInfo(*type).category
-                      == roc::host_validation::ScalarCategory::Complex)
-            {
-                roc::host_validation::tensilelite_adapter::generateWithLegacyCartesianStreams(
-                    generated, recipe->recipe, *recipe->legacyCartesianStreams);
-            }
-            else
-            {
-                roc::host_validation::generate(generated, recipe->recipe);
-            }
+            roc::host_validation::generate(generated, *recipe);
             std::ranges::copy(generated.storage(), storage.begin());
             return true;
         }
@@ -484,8 +449,8 @@ namespace TensileLite::Client
 
         const auto uniformRealRecipe = roc::host_validation::GenerationRecipe::realOnly(
             roc::host_validation::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
-            roc::host_validation::tensilelite_adapter::settingsForLegacyGenerationStream(
-                key.seed, 2 * key.semanticStream));
+            roc::host_validation::tensilelite_adapter::dataInitializationSettings(key.seed,
+                                                                                  key.semanticStream));
 
         Tensor generated(ScalarType::Float64, Shape{1});
         roc::host_validation::generate(generated, uniformRealRecipe);

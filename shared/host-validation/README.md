@@ -250,9 +250,7 @@ Complex construction is explicit:
 
 Random values are counter-based, so a tensor element depends only on the seed,
 internal domain, and logical index. Loop order and thread count do not affect
-the result. `GenerationOptions` and `GenerationPatternSpec` remain as a
-compatibility surface for existing product adapters and translate to
-`GenerationRecipe` before execution.
+the result.
 
 `generateAt` applies the same recipe to one logical element. Its coordinate is
 decoded with the recipe's index order, so callers do not reproduce
