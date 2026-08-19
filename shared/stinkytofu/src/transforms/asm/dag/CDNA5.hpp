@@ -377,10 +377,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
         return cfg > 0 ? cfg : hw_.lds.readQueueDepth;
     }
+    // Barrier-timing only (computeBarrierAfterThresholds): the cycles a barrier must wait for
+    // its dependent ds_reads to return. 0 means "derive dynamically from the matching
+    // ds_read count and target ds_read latency." Queue occupancy / pacing uses
+    // dsReadThrottleLatency, not this.
     int dsReadDrainLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
         return cfg > 0 ? cfg : hw_.lds.readDrainLatency;
     }
+    // Lifetime of one in-flight ds_read credit; also sets the saturated-queue issue interval
+    // (dsReadThrottleLatency/dsReadQueueDepth cycles per ds_read).
     int dsReadThrottleLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
         return cfg > 0 ? cfg : hw_.lds.readThrottleLatency;
@@ -959,7 +965,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
     // is applied only while a WMMA is pending. When the DS queue reaches depth,
-    // ds_load can still issue, but is throttled to dsReadDrainLatency/dsReadQueueDepth.
+    // ds_load can still issue, but is throttled to dsReadThrottleLatency/dsReadQueueDepth.
     int windowCap = maxDsPerWmmaWindow_;
     if (!dsTargetPerWindow_.empty()) {
         const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
@@ -1111,8 +1117,9 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 }
 
 // WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS cap. When the
-// count exceeds the DS read queue depth, the queue stalls to drain, so add enough extra
-// windows to cover that drain latency.
+// count exceeds the DS read queue depth, the queue is saturated and the extra ds_reads are
+// paced at dsReadThrottleLatency/dsReadQueueDepth cycles each, so add enough extra windows
+// to cover that pacing cost.
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
@@ -1139,8 +1146,8 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //  Step 4 — threshold N = max(lastOverlap, wmmaWindowsNeeded) + latencyWmmaBudget;
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS per-WMMA cap.
-//            use dsReadDrainLatency when matchingDsLoadCount > dsReadQueueDepth(), else
-//            targetDSLoadLatency from the latest matching ds_read.
+//            latency = dsReadDrainLatency when it is configured (> 0), else
+//            computeDynamicDrainLatency(hw, matchingDsLoadCount, targetDSLoadLatency, numWaves).
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1200,11 +1207,17 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
 
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency) + 1.
-        // When matching ds_load count exceeds queue depth, use dsReadDrainLatency; otherwise
-        // use the latest matching ds_read latency.
-        const int latencyForAfterThreshold = matchingDsLoadCount > dsReadQueueDepth()
-                                                 ? dsReadDrainLatency()
-                                                 : (int)targetDSLoadLatency;
+        // A positive dsReadDrainLatency pins the latency. A non-positive value
+        // (default 0) means "use dynamic drain latency," derived from the matching
+        // ds_load count and the latest matching ds_read latency by the HWModel helper,
+        // keyed by this pass context's NumWaves.
+        const int configuredDrainLatency = dsReadDrainLatency();
+        const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
+        const int latencyForAfterThreshold =
+            configuredDrainLatency > 0
+                ? configuredDrainLatency
+                : computeDynamicDrainLatency(hw_, matchingDsLoadCount, (int)targetDSLoadLatency,
+                                             numWaves);
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
@@ -1220,6 +1233,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                              << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
                              << " latencyWmmaBudget=" << latencyWmmaBudget << " wmmaWindowsNeeded="
                              << wmmaWindowsNeeded << " overlapOrWindowBase=" << overlapOrWindowBase
+                             << " latencyForAfterThreshold=" << latencyForAfterThreshold
                              << " lastOverlap=" << lastOverlap << "\n");
     }
 
@@ -1412,7 +1426,8 @@ CDNA5ReadyQueue::computeBarrierBeforeThresholds(IRList::iterator regionStart,
         //   beforeN — remaining latency after the last consumer WMMA
         //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency / WMMA latency)
         //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads); when
-        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from dsReadDrainLatency.
+        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from
+        //       dsReadThrottleLatency.
         int beforeThreshold =
             std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
                                               std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));

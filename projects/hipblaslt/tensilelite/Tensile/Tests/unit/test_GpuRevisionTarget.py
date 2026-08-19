@@ -15,12 +15,26 @@ import sys
 
 from unittest import mock
 
+import pytest
+
 # tasks.py lives at the tensilelite root (unit -> Tests -> Tensile -> tensilelite).
+#
+# tensilelite/tasks.py is dev-only tooling that is NOT shipped in ROCm test
+# artifacts (the packaged tree under build/share/.../tensilelite has no tasks.py).
+# Skip the whole module when it cannot be imported so the packaged test run is
+# not aborted at collection; a source checkout still exercises every test.
 _TENSILELITE_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(_TENSILELITE_ROOT) not in sys.path:
     sys.path.insert(0, str(_TENSILELITE_ROOT))
 
-import tasks  # noqa: E402
+try:
+    import tasks  # noqa: E402  (tensilelite/tasks.py)
+except ImportError:
+    pytest.skip(
+        "tensilelite/tasks.py is dev-only tooling and is absent from packaged "
+        "test artifacts; GpuRevisionTarget tests require a source checkout.",
+        allow_module_level=True,
+    )
 
 
 class TestRevisionToGpuTarget:

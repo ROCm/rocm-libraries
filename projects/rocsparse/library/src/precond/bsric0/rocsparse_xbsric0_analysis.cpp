@@ -86,7 +86,6 @@ namespace rocsparse
         auto bsric0_info = (info != nullptr) ? info->get_bsric0_info() : nullptr;
 
         _rocsparse_spmat_descr bsr(rocsparse_format_bsr,
-                                   false,
                                    static_cast<int64_t>(1),
                                    mb,
                                    mb,
