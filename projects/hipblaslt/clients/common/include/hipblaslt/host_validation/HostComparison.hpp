@@ -11,14 +11,30 @@
 #include <cstddef>
 #include <cstdint>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_validation/Comparison.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <optional>
+#include <roc/host_validation/comparison.hpp>
 #include <span>
 #include <stdexcept>
 
 namespace hipblaslt::host_validation
 {
     using namespace ::roc::host_validation;
+
+    inline Layout comparisonLayout(int64_t rows,
+                                   int64_t columns,
+                                   int64_t leadingDimension,
+                                   int64_t batchStride,
+                                   int64_t batchCount)
+    {
+        if(rows < 0 || columns < 0 || leadingDimension < 0 || batchStride < 0 || batchCount < 0)
+            throw std::invalid_argument("hipBLASLt comparison dimensions must be non-negative.");
+        return Layout(
+            Shape{static_cast<size_t>(rows),
+                  static_cast<size_t>(columns),
+                  static_cast<size_t>(batchCount)},
+            {1, static_cast<ptrdiff_t>(leadingDimension), static_cast<ptrdiff_t>(batchStride)});
+    }
 
     enum class HostPointwiseComparison
     {
@@ -104,6 +120,19 @@ namespace hipblaslt::host_validation
 
     namespace detail
     {
+        inline ::roc::host_validation::Tensor
+            comparisonTensor(const void* data, hipDataType type, const Layout& layout)
+        {
+            const ScalarType scalar       = scalarType(type);
+            const size_t     storageBytes = storageBytesForLayout(scalar, layout);
+            if(data == nullptr && storageBytes != 0)
+                throw std::invalid_argument("hipBLASLt comparison buffer is null.");
+            return ::roc::host_validation::Tensor(
+                scalar,
+                layout,
+                std::span<const std::byte>(static_cast<const std::byte*>(data), storageBytes));
+        }
+
         inline ComparisonOptions unitComparisonOptions(hipDataType type)
         {
             const ScalarType  scalar = scalarType(type);
@@ -142,6 +171,22 @@ namespace hipblaslt::host_validation
             return report;
         }
 
+        const bool runPrimaryComparison = request.pointwise != HostPointwiseComparison::Disabled
+                                          || request.requireSpecialValueConsistency;
+        if(!runPrimaryComparison && !request.computeUnitsInLastPlace
+           && !request.computeRelativeFrobeniusError && !request.findAllCloseTolerance)
+            return report;
+
+        const Layout                         layout = comparisonLayout(request.rows,
+                                                                       request.columns,
+                                                                       request.leadingDimension,
+                                                                       request.batchStride,
+                                                                       request.batchCount);
+        const ::roc::host_validation::Tensor expected
+            = detail::comparisonTensor(request.expected, request.type, layout);
+        const ::roc::host_validation::Tensor observed
+            = detail::comparisonTensor(request.observed, request.type, layout);
+
         ComparisonOptions options;
         switch(request.pointwise)
         {
@@ -169,26 +214,15 @@ namespace hipblaslt::host_validation
             options.maxReportedMismatches      = 0;
             break;
         }
+        options.selection.indexOrder = IndexOrder::FirstDimensionFastest;
 
         if(request.requireSpecialValueConsistency)
         {
             options.equalNaNs                  = true;
             options.computePointwiseStatistics = true;
         }
-        const bool runPrimaryComparison = request.pointwise != HostPointwiseComparison::Disabled
-                                          || request.requireSpecialValueConsistency;
         if(runPrimaryComparison)
-        {
-            report.comparison = compareBuffers(request.rows,
-                                               request.columns,
-                                               request.leadingDimension,
-                                               request.batchStride,
-                                               request.expected,
-                                               request.observed,
-                                               request.batchCount,
-                                               request.type,
-                                               options);
-        }
+            report.comparison = compare(observed, expected, options);
 
         if(request.computeUnitsInLastPlace)
         {
@@ -199,25 +233,16 @@ namespace hipblaslt::host_validation
             unitsInLastPlaceOptions.computeUlp                 = true;
             unitsInLastPlaceOptions.ulpType                    = scalarType(request.type);
             unitsInLastPlaceOptions.maxReportedMismatches      = 0;
-            report.unitsInLastPlaceComparison                  = compareBuffers(request.rows,
-                                                               request.columns,
-                                                               request.leadingDimension,
-                                                               request.batchStride,
-                                                               request.expected,
-                                                               request.observed,
-                                                               request.batchCount,
-                                                               request.type,
-                                                               unitsInLastPlaceOptions);
+            unitsInLastPlaceOptions.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
+            report.unitsInLastPlaceComparison
+                = compare(observed, expected, unitsInLastPlaceOptions);
         }
 
         if(request.computeRelativeFrobeniusError)
         {
-            const ScalarType scalar      = scalarType(request.type);
-            const size_t     storageBits = scalarTypeInfo(scalar).storageBits;
-            if(storageBits % 8 != 0)
+            if(scalarTypeInfo(scalarType(request.type)).storageBits % 8 != 0)
                 throw std::invalid_argument(
                     "hipBLASLt norm comparison requires byte-addressable output storage.");
-            const size_t elementBytes = storageBits / 8;
 
             ComparisonOptions frobeniusOptions;
             frobeniusOptions.pointwise                  = false;
@@ -225,38 +250,33 @@ namespace hipblaslt::host_validation
             frobeniusOptions.computePointwiseStatistics = false;
             frobeniusOptions.computeFrobenius           = true;
             frobeniusOptions.maxReportedMismatches      = 0;
+            frobeniusOptions.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
 
             for(int64_t batch = 0; batch < request.batchCount; ++batch)
             {
-                const size_t byteOffset
-                    = static_cast<size_t>(batch * request.batchStride) * elementBytes;
-                const auto* expected = static_cast<const std::byte*>(request.expected) + byteOffset;
-                const auto* observed = static_cast<const std::byte*>(request.observed) + byteOffset;
-                const ComparisonResult batchReport = compareBuffers(request.rows,
-                                                                    request.columns,
-                                                                    request.leadingDimension,
-                                                                    0,
-                                                                    expected,
-                                                                    observed,
-                                                                    1,
-                                                                    request.type,
-                                                                    frobeniusOptions);
+                const std::array<size_t, 3> batchCoordinates{
+                    0,
+                    0,
+                    static_cast<size_t>(batch),
+                };
+                const ptrdiff_t batchOffset = layout.elementOffset(batchCoordinates);
+                const Layout    batchLayout(
+                    Shape{static_cast<size_t>(request.rows), static_cast<size_t>(request.columns)},
+                    {1, static_cast<ptrdiff_t>(request.leadingDimension)},
+                    batchOffset);
+                const ComparisonResult batchReport = compare(
+                    observed.alias(batchLayout), expected.alias(batchLayout), frobeniusOptions);
                 report.relativeFrobeniusError += batchReport.relativeFrobeniusError;
             }
         }
 
         if(request.findAllCloseTolerance)
         {
-            const Layout      layout = comparisonLayout(request.rows,
-                                                   request.columns,
-                                                   request.leadingDimension,
-                                                   request.batchStride,
-                                                   request.batchCount);
-            ComparisonOptions allCloseOptions = allCloseComparisonOptions();
+            ComparisonOptions allCloseOptions          = allCloseComparisonOptions();
             allCloseOptions.computePointwiseStatistics = false;
             allCloseOptions.computeFrobenius           = false;
             allCloseOptions.maxReportedMismatches      = 0;
-            allCloseOptions.selection.indexOrder = IndexOrder::FirstDimensionFastest;
+            allCloseOptions.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
 
             constexpr std::array<double, 6> candidates{
                 1e-6,
@@ -266,12 +286,11 @@ namespace hipblaslt::host_validation
                 1e-2,
                 1e-1,
             };
-            report.allCloseTolerance
-                = findAllCloseTolerance(comparisonTensor(request.observed, request.type, layout),
-                                        comparisonTensor(request.expected, request.type, layout),
-                                        std::span<const double>(candidates),
-                                        std::span<const double>(candidates),
-                                        allCloseOptions);
+            report.allCloseTolerance = findAllCloseTolerance(observed,
+                                                             expected,
+                                                             std::span<const double>(candidates),
+                                                             std::span<const double>(candidates),
+                                                             allCloseOptions);
         }
 
         return report;
