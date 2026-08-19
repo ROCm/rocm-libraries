@@ -65,26 +65,34 @@ namespace rocsparse
         __shared__ T shared_B[BSR_BLOCK_DIM * (BLK_SIZE_Y * UNROLL_SIZE_Y)];
         __shared__ T shared_A[BSR_BLOCK_DIM * BSR_BLOCK_DIM];
 
-        T sum[UNROLL_SIZE_Y];
-        J cols[UNROLL_SIZE_Y];
-        for(uint32_t l = 0; l < UNROLL_SIZE_Y; ++l)
-        {
-            cols[l] = (tidy + BLK_SIZE_Y * l) + hipBlockIdx_y * (BLK_SIZE_Y * UNROLL_SIZE_Y);
-        }
-
         const int block_row       = hipBlockIdx_x;
         const I   block_row_start = (block_row < Mb) ? (bsr_row_ptr[block_row] - idx_base) : 0;
         const I   block_row_end   = (block_row < Mb) ? (bsr_row_ptr[block_row + 1] - idx_base) : 0;
-
-        for(uint32_t l = 0; l < UNROLL_SIZE_Y; ++l)
-        {
-            sum[l] = static_cast<T>(0);
-        }
 
         const J    block_dim_sqr = block_dim * block_dim;
         const bool is_tidx       = tidx < block_dim;
         const bool is_tidy       = tidy < block_dim;
         const bool is_tidx_tidy  = is_tidx && is_tidy;
+
+        // grid.y is capped at 65,535, so grid-stride over the dense column panels
+        // (each panel is BLK_SIZE_Y * UNROLL_SIZE_Y columns wide) to cover all of N. The
+        // loop bound is uniform across the block so every thread reaches the
+        // __syncthreads below.
+        constexpr uint32_t COL_PANEL = BLK_SIZE_Y * UNROLL_SIZE_Y;
+        for(J col_panel = hipBlockIdx_y * COL_PANEL; col_panel < N;
+            col_panel += hipGridDim_y * COL_PANEL)
+        {
+        T sum[UNROLL_SIZE_Y];
+        J cols[UNROLL_SIZE_Y];
+        for(uint32_t l = 0; l < UNROLL_SIZE_Y; ++l)
+        {
+            cols[l] = (tidy + BLK_SIZE_Y * l) + col_panel;
+        }
+
+        for(uint32_t l = 0; l < UNROLL_SIZE_Y; ++l)
+        {
+            sum[l] = static_cast<T>(0);
+        }
 
         for(I k = block_row_start; k < block_row_end; k++)
         {
@@ -177,6 +185,7 @@ namespace rocsparse
                     }
                 }
             }
+        }
         }
     }
 }

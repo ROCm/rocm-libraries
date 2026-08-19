@@ -68,7 +68,13 @@ namespace rocsparse
         __shared__ B shared_B[BSR_BLOCK_DIM * BLK_SIZE_Y];
         __shared__ A shared_A[BSR_BLOCK_DIM * BSR_BLOCK_DIM];
 
-        const J global_col = tidy + hipBlockIdx_y * BLK_SIZE_Y;
+        // grid.y is capped at 65,535, so grid-stride over the dense column panels
+        // (each panel is BLK_SIZE_Y columns wide) to cover all of N. The loop bound is
+        // uniform across the block so every thread reaches the __syncthreads below.
+        for(J col_panel = hipBlockIdx_y * BLK_SIZE_Y; col_panel < N;
+            col_panel += hipGridDim_y * BLK_SIZE_Y)
+        {
+        const J global_col = tidy + col_panel;
 
         for(J x = 0; x < block_dim; x += BSR_BLOCK_DIM)
         {
@@ -154,6 +160,7 @@ namespace rocsparse
                     }
                 }
             }
+        }
         }
     }
 }

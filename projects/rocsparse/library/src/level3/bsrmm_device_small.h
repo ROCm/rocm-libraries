@@ -65,9 +65,6 @@ namespace rocsparse
         const J       gid  = hipBlockIdx_x * hipBlockDim_x + tid;
         const int32_t lid  = gid & (WF_SIZE - 1);
         const J       nwfb = hipGridDim_x * hipBlockDim_x / (WF_SIZE * BSR_BLOCK_DIM);
-        const J       col  = lid + hipBlockIdx_y * WF_SIZE;
-
-        const int64_t colB = col * ldb;
 
         // global row
         const J global_row = (gid / WF_SIZE);
@@ -75,8 +72,18 @@ namespace rocsparse
         // local row within block row
         const J local_row = (gid / WF_SIZE) % BSR_BLOCK_DIM;
 
-        for(J block_row = gid / (WF_SIZE * BSR_BLOCK_DIM); block_row < Mb; block_row += nwfb)
+        // grid.y is capped at 65,535, so grid-stride over the dense column panels
+        // (each panel is WF_SIZE columns wide) to cover all of N. The loop bound is
+        // uniform across the wavefront so every lane participates in the shfls below.
+        for(J col_panel = hipBlockIdx_y * WF_SIZE; col_panel < N;
+            col_panel += hipGridDim_y * WF_SIZE)
         {
+            const J       col  = lid + col_panel;
+            const int64_t colB = col * ldb;
+
+            for(J block_row = gid / (WF_SIZE * BSR_BLOCK_DIM); block_row < Mb;
+                block_row += nwfb)
+            {
             const I block_row_start = bsr_row_ptr[block_row] - idx_base;
             const I block_row_end   = bsr_row_ptr[block_row + 1] - idx_base;
 
@@ -208,6 +215,7 @@ namespace rocsparse
                     }
                 }
             }
+        }
         }
     }
 
