@@ -3106,19 +3106,39 @@ class Solution(collections.abc.Mapping):
         # StinkyTofu at OptLevel 3, whose postMainLoopBarrierCheckAndReset
         # discards every barrier and rebuilds placement from tensor_load/ds_read
         # tokens; with A and B de-aliased into their own descriptor sets it
-        # rebuilds too few, and validation on gfx1250 silicon fails from K=1024
-        # at DepthU 256 while passing at 384 and 512 -- the write-after-read
-        # signature. SIA=0 passes at every K measured. A divergent pair is
-        # exempt on purpose: divergentPairUnsupportedReason admits
-        # ScheduleIterAlg=4, whose _ScheduleIterAlg is 0, so its unrolled loop
-        # and its relocated fill are scheduled exactly as they are at SIA=0.
+        # MISPLACES one -- the rebuilt barrier lands inside the wave-parity guard
+        # around the de-aliased fill, so half the workgroup skips it -- and the
+        # kernel computes wrong results. Measured on gfx1250 silicon (MI450 B0)
+        # on the tree before the whole-tree barrier rebuild: FAILED at K=1024
+        # with 212638 of 262144 elements wrong, and at K=1152 with 261736, both
+        # at DepthU 256, in b8-3:~/_pgrval19/val.log.
+        #
+        # Those are the K values it was OBSERVED at, not a threshold, and the
+        # distinction is the point: this defect is a race. The same defect class
+        # was seen FAILING and then PASSING at the SAME K on one unchanged tree,
+        # code object and client binary, both at num-elements-to-validate=-1
+        # (b8-3, 2026-08-19 morning vs evening). Reading these numbers as a
+        # threshold between K=1152 and K=1536 was withdrawn as one sample of
+        # that race. So a green run at any K is not evidence that a
+        # configuration is safe, and low K is NOT a safe region. SIA=0 is safe
+        # for a structural reason rather than a measured one:
+        # postMainLoopBarrierCheckAndReset is gated on _StinkyTofuOptLevel==3,
+        # which only SIA=4 derives, so at SIA=0 the rebuild never runs at all.
+        #
+        # A divergent pair is exempt on purpose: divergentPairUnsupportedReason
+        # admits ScheduleIterAlg=4, whose _ScheduleIterAlg is 0, so its unrolled
+        # loop and its relocated fill are scheduled exactly as they are at
+        # SIA=0.
         decoupled, blkA, blkB = decouplePgrBlocks(state)
         if not (decoupled and blkA != blkB) and state["ScheduleIterAlg"] == 4:
           reject(state, printRejectionReason,
                  "TDMFuse=6 without a divergent decoupled pair requires ScheduleIterAlg=0: at "
-                 "ScheduleIterAlg=4 the StinkyTofu OptLevel-3 barrier rebuild does not account "
-                 "for the de-aliased A/B descriptor sets and the kernel computes wrong results "
-                 "from K = 4*DepthU")
+                 "ScheduleIterAlg=4 the StinkyTofu OptLevel-3 barrier rebuild misplaces a barrier "
+                 "inside the wave-parity guard around the de-aliased A/B descriptor sets, so half "
+                 "the workgroup skips it and the kernel computes wrong results. Measured wrong at "
+                 "K=1024 and K=1152 at DepthU 256; the failure is intermittent rather than "
+                 "threshold-gated, so a run that passes at a lower K does not make this "
+                 "configuration safe")
           return
         # These guards must stay exactly tdmDealiasAB's preconditions; if they
         # drift, decline rather than accept a name the writer will not honour.
@@ -5609,7 +5629,10 @@ class Solution(collections.abc.Mapping):
         # sub-iteration between the last local read and the pre-read sync.
         # divergentPairUnsupportedReason holds the conditions under which that
         # slot exists and can be reached; outside them the kernel would compute
-        # wrong results from K = 2*DepthU, or would not build at all.
+        # wrong results from K = 2*DepthU, or would not build at all. That K is a
+        # trip-count consequence rather than an observed sample -- see
+        # divergentPairUnsupportedReason -- so it does not carry the intermittency
+        # of the SIA4 barrier defect above.
         dcpUnsupported = divergentPairUnsupportedReason(state)
         if dcpUnsupported:
           reject(state, printRejectionReason,
@@ -5622,6 +5645,12 @@ class Solution(collections.abc.Mapping):
       # results from K = 2*DepthU: 12 of 24 rows wrong on an FFM sweep, the
       # boundary sitting between K=992 and K=1024 at DepthU 512, and on silicon
       # every OAI K at DepthU 256 and 512 wrong in almost every element.
+      #
+      # This K really is a threshold, unlike the SIA4 barrier defect's: the FFM
+      # boundary lands exactly where the trip-count argument below predicts
+      # (2*512 = 1024), FFM is a deterministic emulator, and silicon reports
+      # almost every element wrong rather than a marginal miss. Deliberately
+      # NOT withdrawn with the intermittent barrier claim.
       #
       # The mechanism that makes the divergent case correct does not carry over:
       # _dcpScheduleSingleBufferedFillLate relocates the single-buffered tensor's

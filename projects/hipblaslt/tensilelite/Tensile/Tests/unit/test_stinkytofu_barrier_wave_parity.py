@@ -36,7 +36,12 @@ module could not see that branch, so it put the barrier after it.
 The invariant is asserted, not the count. The broken pass emitted exactly the
 right NUMBER of barriers -- three of them in a divergent decoupled-PGR kernel
 were simply executed by half the workgroup -- so a test on the count would have
-passed while gfx1250 silicon returned wrong results from K = 4*DepthU.
+passed while gfx1250 silicon returned wrong results. That silicon failure is
+intermittent rather than K-gated: it was observed at K=1024 and K=1152 at DepthU
+256 (b8-3:~/_pgrval19/val.log), and the same defect class failed and then passed
+at the SAME K on one unchanged tree and code object. No K is a safe region and no
+single green run settles anything, which is exactly why this test pins the
+invariant instead of a pass count.
 
 The last test is the other half of the invariant: a workgroup-uniform branch must
 NOT move a barrier, because the unroll loop is itself skipped by one of those and

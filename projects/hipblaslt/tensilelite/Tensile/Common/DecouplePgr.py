@@ -117,7 +117,12 @@ def divergentPairUnsupportedReason(ks):
     tensor's fill into a sub-iteration between the last local read of its block
     and the pre-read sync. These are the conditions under which that slot exists
     and can be reached; outside them the kernel computes wrong results from
-    K = 2*DepthU, or does not build at all.
+    K = 2*DepthU, or does not build at all. That threshold is derived rather
+    than sampled: two trips through the unrolled loop are needed before a fill
+    can overwrite a block a previous trip is still reading, so it is
+    deterministic by construction. Do not read it as the same kind of claim as
+    the SIA4 StinkyTofu barrier defect, which is a race and has no K threshold
+    at all.
 
     Assumes the pair is divergent and both tensors are on the TDM, which the
     caller has already established. Returns the clause its reject frames, so the

@@ -519,10 +519,10 @@ def test_row_six_without_a_divergent_pair_requires_sia_zero(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, pair, label):
     """The clause is about the absence of a divergent pair, not its presence.
 
-    ScheduleIterAlg=4 runs StinkyTofu at OptLevel 3, whose barrier rebuild does
-    not account for de-aliased A/B descriptor sets. An equal pair resolves away
-    to its legacy scalar before this point, so both spellings arrive here as the
-    same solution and both have to be refused.
+    ScheduleIterAlg=4 runs StinkyTofu at OptLevel 3, whose barrier rebuild
+    misplaces a barrier around de-aliased A/B descriptor sets. An equal pair
+    resolves away to its legacy scalar before this point, so both spellings
+    arrive here as the same solution and both have to be refused.
     """
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        TDMFuse=6, ScheduleIterAlg=4, **pair)
