@@ -70,7 +70,6 @@ add_executable(MIOpenDriver
 if(WIN32)
     # Refer to https://en.cppreference.com/w/cpp/language/types for details.
     target_compile_options(MIOpenDriver PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
-    miopen_workaround_amdhip64_missing(MIOpenDriver)
 endif()
 # miopen.h:6221 declares `miopenTensorArgumentIsScalar = 1U << 31` in an enum with no
 # explicit underlying type. Clang widens via the MS extension, which is exactly what

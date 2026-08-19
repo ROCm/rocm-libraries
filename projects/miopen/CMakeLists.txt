@@ -114,8 +114,6 @@ if(WIN32)
     endif()
 endif()
 
-include(cmake/AmdHip64.cmake)
-
 # When MIOpen is consumed via add_subdirectory in a parent superbuild, the parent
 # typically owns the CTest lifecycle. include(CTest) at the top of the project
 # would also unconditionally set BUILD_TESTING=ON, which may not be what the

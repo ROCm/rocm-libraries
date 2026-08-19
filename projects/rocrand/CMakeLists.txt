@@ -46,8 +46,8 @@ cmake_dependent_option(RUN_SLOW_TESTS "Run extra tests with CTest. These cover n
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 
 if (NOT DEFINED ENV{ROCM_PATH})
-    #Path to ROCm installation
-    set(ENV{ROCM_PATH} "/opt/rocm")
+#Path to ROCm installation
+  set(ENV{ROCM_PATH} "/opt/rocm")
 endif()
 
 if(NOT WIN32)
@@ -139,7 +139,6 @@ if(WIN32)
     endif()
 endif()
 
-include(cmake/AmdHip64.cmake)
 include(cmake/HaveASMIncbin.cmake)
 
 rocrand_check_have_asm_incbin(ROCRAND_HAVE_ASM_INCBIN)

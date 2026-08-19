@@ -50,7 +50,6 @@ add_executable(benchmark_rocrand_tuning
   benchmark_tuning_xorwow.cpp
 )
 target_link_libraries(benchmark_rocrand_tuning PRIVATE rocrand benchmark::benchmark hip::device)
-rocrand_workaround_amdhip64_missing(benchmark_rocrand_tuning)
 target_include_directories(benchmark_rocrand_tuning PRIVATE
   "${CMAKE_BINARY_DIR}/benchmark"
   "${PROJECT_SOURCE_DIR}/benchmark"

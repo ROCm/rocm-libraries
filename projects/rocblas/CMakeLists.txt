@@ -102,7 +102,6 @@ endif()
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 include(build-options) # library and client
 include(toolchain-options)
-include(amdhip64)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -197,32 +196,23 @@ set_property(CACHE GPU_TARGETS PROPERTY STRINGS
   all
   ${SUPPORTED_TARGETS})
 
-if(WIN32)
-  # Workaround for missing amdhip64.lib - do not check for supported targets, assume they exist
-  if(GPU_TARGETS STREQUAL "all")
-    set(target_list "${SUPPORTED_TARGETS}")
-  else()
-    set(target_list "${GPU_TARGETS}")
-  endif()
+# Detect if target ID syntax if supported for default all GPU_TARGETS list
+# Sets the GPU_TARGETS with backward compatibility
+if (GPU_TARGETS STREQUAL "all")
+  rocm_check_target_ids(target_list TARGETS "${SUPPORTED_TARGETS}")
 else()
-  # Detect if target ID syntax if supported for default all GPU_TARGETS list
-  # Sets the GPU_TARGETS with backward compatibility
-  if (GPU_TARGETS STREQUAL "all")
-    rocm_check_target_ids(target_list TARGETS "${SUPPORTED_TARGETS}")
-  else()
-    rocm_check_target_ids(target_list TARGETS "${GPU_TARGETS}")
-  endif()
+  rocm_check_target_ids(target_list TARGETS "${GPU_TARGETS}")
 endif()
 
 # if 'target_list' is empty, then compile does not support the gpu arch passed as an argument.
-if (target_list STREQUAL "")
+if(target_list STREQUAL "")
   message(FATAL_ERROR "Unsupported target ${GPU_TARGETS} by compiler, List of supported targets: ${SUPPORTED_TARGETS}")
-endif ()
+endif()
 
 # set GPU_TARGETS and AMDGPU_TARGETS before any find_package( hip ...), via tensile or in this file
 # to set --offload-arch flags via hip-config.cmake hip::device dependency
 set( GPU_TARGETS "${target_list}" CACHE STRING "List of GPUs (gfx targets) to support" FORCE )
-set( AMDGPU_TARGETS "${target_list}" CACHE STRING "List of GPUs (gfx targets) to support" FORCE ) # for old hip cmake files backward compatibility
+set( AMDGPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of GPUs (gfx targets) to support" FORCE ) # for old hip cmake files backward compatibility
 
 option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
@@ -255,10 +245,7 @@ if(NOT SKIP_LIBRARY)
   if( BUILD_WITH_TENSILE )
     # we will have expanded "all" for tensile to ensure consistency as we have local rules
     set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
-    # GPUEP: disabled for Windows build
-    if(NOT WIN32)
-      list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
-    endif()
+    list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
 
     set( TENSILE_VERSION 4.47.0 CACHE STRING "The version of Tensile to be used")
 

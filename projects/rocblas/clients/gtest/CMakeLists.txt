@@ -130,7 +130,6 @@ if( BUILD_FORTRAN_CLIENTS )
   target_link_libraries( rocblas-test PRIVATE rocblas_fortran_client )
 endif( )
 target_link_libraries( rocblas-test PRIVATE roc::rocblas hip::host hip::device )
-rocblas_workaround_amdhip64_missing( rocblas-test )
 
 if (NOT WIN32)
   list( APPEND COMMON_LINK_LIBS "-lm -lstdc++fs" )
