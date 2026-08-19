@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <roc/host_validation/axpby.hpp>
+#include <roc/host_validation/epilogue.hpp>
 #include <roc/host_validation/gemm.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <roc/host_validation/layer_norm.hpp>
@@ -31,6 +32,17 @@ int main() {
     if (!queryGemmSupport(problem)) return 1;
     referenceGemm(problem);
     if (d.loadAs<float>({0, 0}) != 6) return 1;
+
+    EpilogueProblem epilogue(
+        Tensor::fromNativeValues<float>(Shape{1, 1}, std::array<float, 1>{-2.0f}),
+        ScalarType::Float32, ScalarType::Float32);
+    epilogue.activation = Activation::Relu;
+    epilogue.amaxType = ScalarType::Float32;
+    const EpilogueResult epilogueResult = referenceEpilogue(epilogue);
+    if (epilogueResult.output.loadAs<float>({0, 0}) != 0 || !epilogueResult.amax ||
+        epilogueResult.amax->loadAs<float>({0}) != 0 ||
+        epilogueResult.runInfo.outputElementsWritten != 1)
+        return 1;
 
     const std::array<float, 3> reductionInput{-1, 4, -3};
     const ReductionResult maximumAbsolute =

@@ -70,7 +70,7 @@ namespace TensileLite::Client::reference_adapter
         std::optional<roc::host_validation::Tensor> biasWorkspace;
 
         std::optional<roc::host_validation::GemmRequest>      gemmRequest;
-        std::optional<roc::host_validation::EpilogueProblem>  epilogue;
+        std::optional<roc::host_validation::EpilogueRequest>  epilogue;
         std::optional<roc::host_validation::ReductionRequest> biasReduction;
         std::vector<CopyBack>                                 copyBacks;
     };
