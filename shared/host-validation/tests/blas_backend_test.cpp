@@ -124,16 +124,15 @@ void testPartialOutputSelection() {
                 .passed(),
             "Rejected BLAS execution modified output.");
 
-    const GemmResult fallback = referenceGemm(problem,
-                                              {
-                                                  .backend = GemmBackend::Blas,
-                                                  .requireRequestedBackend = false,
-                                              },
-                                              &backend);
-    require(fallback.runInfo.backendUsed == GemmBackend::Pointwise &&
-                fallback.runInfo.fallbackReason == support.reason &&
-                fallback.runInfo.outputElementsWritten == 2 &&
-                fallback.runInfo.outputElementsCovered == 2,
+    const GemmRunInfo fallback = referenceGemm(problem,
+                                               {
+                                                   .backend = GemmBackend::Blas,
+                                                   .requireRequestedBackend = false,
+                                               },
+                                               &backend);
+    require(fallback.backendUsed == GemmBackend::Pointwise &&
+                fallback.fallbackReason == support.reason && fallback.outputElementsWritten == 2 &&
+                fallback.outputElementsCovered == 2,
             "Partial-output BLAS request did not report pointwise fallback.");
     require(d.loadAs<float>({0, 0}) == 58 && d.loadAs<float>({1, 0}) == -99 &&
                 d.loadAs<float>({0, 1}) == -99 && d.loadAs<float>({1, 1}) == 154,
@@ -192,14 +191,13 @@ int main() {
                              &backend)
                 .supported,
             "BLAS backend unexpectedly rejected F32 GEMM.");
-    const GemmResult result = referenceGemm(problem,
-                                            {
-                                                .backend = GemmBackend::Blas,
-                                                .requireRequestedBackend = true,
-                                            },
-                                            &backend);
-    require(result.runInfo.backendUsed == GemmBackend::Blas,
-            "BLAS backend run information mismatch.");
+    const GemmRunInfo runInfo = referenceGemm(problem,
+                                              {
+                                                  .backend = GemmBackend::Blas,
+                                                  .requireRequestedBackend = true,
+                                              },
+                                              &backend);
+    require(runInfo.backendUsed == GemmBackend::Blas, "BLAS backend run information mismatch.");
     require(d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
                 d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
             "BLAS backend F32 result mismatch.");
@@ -207,7 +205,7 @@ int main() {
     const Tensor ones = Tensor::fromNative<float>(
         d.layout(), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
     d.copyFrom(ones);
-    const GemmRunInfo automatic = referenceGemm(problem, {}, &backend).runInfo;
+    const GemmRunInfo automatic = referenceGemm(problem, {}, &backend);
     require(automatic.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 119 &&
                 d.loadAs<float>({1, 0}) == 281 && d.loadAs<float>({0, 1}) == 131 &&
                 d.loadAs<float>({1, 1}) == 311,
@@ -215,7 +213,7 @@ int main() {
 
     d.copyFrom(ones);
     problem.epilogue.activation = Activation::Relu;
-    const GemmRunInfo fallback = referenceGemm(problem, {}, &backend).runInfo;
+    const GemmRunInfo fallback = referenceGemm(problem, {}, &backend);
     require(fallback.backendUsed == GemmBackend::Pointwise && fallback.fallbackReason.has_value() &&
                 d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
                 d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,

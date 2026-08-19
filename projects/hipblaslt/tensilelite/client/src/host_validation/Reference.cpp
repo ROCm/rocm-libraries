@@ -124,8 +124,7 @@ namespace TensileLite
                     = queryGemmSupport(request, execution, &blockedGemmBackend());
                 if(support)
                 {
-                    recorder.record(
-                        referenceGemm(request, execution, &blockedGemmBackend()).runInfo);
+                    recorder.record(referenceGemm(request, execution, &blockedGemmBackend()));
                     return true;
                 }
                 if(policy.requiresBlockedBackend())
@@ -139,13 +138,13 @@ namespace TensileLite
                                             && problem.f32XdlMathOp() == rocisa::DataType::XFloat32
                                         ? MathMode::XFloat32
                                         : MathMode::Default;
-                GemmResult result = referenceGemm(request,
-                                                  {
-                                                      .backend = GemmBackend::Pointwise,
-                                                      .requireRequestedBackend = true,
-                                                  });
-                result.runInfo.fallbackReason = support.reason;
-                recorder.record(result.runInfo);
+                GemmRunInfo runInfo = referenceGemm(request,
+                                                    {
+                                                        .backend = GemmBackend::Pointwise,
+                                                        .requireRequestedBackend = true,
+                                                    });
+                runInfo.fallbackReason = support.reason;
+                recorder.record(runInfo);
                 return true;
             }
 
@@ -153,8 +152,7 @@ namespace TensileLite
                                           {
                                               .backend                 = GemmBackend::Pointwise,
                                               .requireRequestedBackend = true,
-                                          })
-                                .runInfo);
+                                          }));
             return true;
         }
 

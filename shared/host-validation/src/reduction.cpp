@@ -66,11 +66,19 @@ ReductionResult referenceSum(const ReductionProblem& problem,
     return referenceReduce(problem, allocator);
 }
 
+ReductionRunInfo referenceMaximumAbsolute(const ReductionRequest& request) {
+    if (request.operation != ReductionOperation::MaximumAbsolute)
+        throw std::invalid_argument(
+            "referenceMaximumAbsolute requires a maximum-absolute reduction problem.");
+    return referenceReduce(request);
+}
+
 ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType) {
     std::vector<size_t> axes(input.shape().rank());
     std::iota(axes.begin(), axes.end(), 0);
-    return referenceReduce(ReductionRequest(std::move(input), std::move(output), accumulatorType,
-                                            std::move(axes), ReductionOperation::MaximumAbsolute));
+    return referenceMaximumAbsolute(ReductionRequest(std::move(input), std::move(output),
+                                                     accumulatorType, std::move(axes),
+                                                     ReductionOperation::MaximumAbsolute));
 }
 
 ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
