@@ -356,7 +356,7 @@ def test_dispatch_list_loader_error_returns_one(monkeypatch: pytest.MonkeyPatch,
 
 def test_dispatch_inline_value_error_returns_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
-    monkeypatch.setattr(cli.GemmType, "from_tensile", lambda *_a, **_k: (_ for _ in ()).throw(ValueError("bad inline")))
+    monkeypatch.setattr(cli.GemmType, "from_tensilelite", lambda *_a, **_k: (_ for _ in ()).throw(ValueError("bad inline")))
 
     args = cli.CliArgs(
         tune=False,
