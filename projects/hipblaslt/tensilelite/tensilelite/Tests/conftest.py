@@ -34,11 +34,8 @@ except ImportError:
         return None
 
 testdir = os.path.dirname(__file__)
-moddir = os.path.dirname(testdir)
-rootdir = os.path.dirname(moddir)
 if testdir not in sys.path:
     sys.path.insert(0, testdir)
-sys.path.append(rootdir)
 
 
 def pytest_report_header(config):
@@ -57,8 +54,6 @@ def pytest_report_header(config):
 def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
-    parser.addoption("--prebuilt-client")
-    parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
     parser.addoption("--gpu-targets", default=None,
@@ -245,11 +240,6 @@ def clear_ffm_memfile_per_test():
      pass
    except OSError as e:
      print(f"warn: could not unlink {memfile}: {e}", file=sys.stderr)
-
-@pytest.fixture
-def tensile_script_path():
-    return os.path.join(moddir, 'bin', 'Tensile')
-
 @pytest.fixture
 def worker_lock_instance(worker_lock_path):
     if not worker_lock_path:
