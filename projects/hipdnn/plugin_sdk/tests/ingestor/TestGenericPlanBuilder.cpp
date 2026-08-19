@@ -1033,6 +1033,15 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
 
 /// D7's mirror, half one: benchmark wide, then run narrow. The narrower candidate set is
 /// fully covered by the wider record, so the run is served -- no re-benchmarking.
+///
+/// The candidate set must have MORE than one member for this to test anything. An earlier
+/// version narrowed the knob filter to kernel_128 alone, which made the served answer
+/// identical to the no-cache answer (`filtered.front()` of a one-element list) -- it
+/// passed with the cache switched off entirely. Here the record is wider than the
+/// catalog in the dimension that matters: it carries an extra entry for a kernel this
+/// engine no longer admits, while still covering all three live candidates. Coverage must
+/// hold, and the served kernel must be the record's front (kernel_256), not the
+/// heuristic's (kernel_64, pinned by priority).
 TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1045,17 +1054,26 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     flatbuffers::FlatBufferBuilder fbb;
-    // Narrow to kernel_128 alone, while the record covers all three.
-    const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 128);
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
     const TestGraph graph(makeGraphId(0xD2));
     const auto properties = testDeviceProperties();
 
     WinnerRecord record;
     for(const auto& kernel : catalogFor(*manager, graph, properties))
     {
-        record.push_back(rankedEntryFor(kernel, 1.0));
+        record.push_back(
+            rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 256 ? 0.1 : 9.0));
     }
     ASSERT_EQ(record.size(), 3U);
+
+    // An entry for a kernel this engine does not admit -- what a prior, wider run would
+    // have left behind. It must be skipped without failing coverage: entries present in
+    // the record but absent from the candidate set are ordinary skip-and-fall-back, never
+    // a re-benchmark trigger.
+    record.push_back(RankedEntry{testId(0xAA), testId(0xF0), testId(0xD0), 0.05});
+    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
     manager->recordWinner(winnerKeyFor(graph, properties), record);
 
     KnobFilterSettings settings;
@@ -1065,8 +1083,9 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     context.setExecutionSettings(settings);
     builder.buildPlan(0, graph, engineConfig, context);
 
-    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128)
-        << "the knob filter still decides which candidates are eligible";
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 256)
+        << "a record wider than the filtered set still covers it and must be served; "
+           "64 would mean the cache was skipped and the heuristic front used";
 }
 
 /// D7's mirror, half two: a record covering only part of the filtered set, with

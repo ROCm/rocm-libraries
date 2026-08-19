@@ -117,6 +117,17 @@ public:
         return !(*this == other);
     }
 
+protected:
+    /// Test seam: overrides the narrowing hash so a collision can be forced. Nothing in
+    /// production calls this. It exists because the header's central claim -- the hash
+    /// only narrows, the content decides -- is unobservable otherwise: `operator==`
+    /// short-circuits on a hash mismatch, so the structural comparison it promises can
+    /// never be reached in a test unless the hashes are made to agree deliberately.
+    void forceHash(uint64_t hash)
+    {
+        _hash = hash;
+    }
+
 private:
     /// Unpacks into an owned object so the excluded fields can simply be cleared. The
     /// generated `operator==` compares `id` (graph_generated.h:1313) and both policy

@@ -417,44 +417,64 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEn
     }
 }
 
-/// Check 1 runs inside sortedCatalog, which is itself reached concurrently. Reading
-/// through it while writers populate the cache must stay consistent and never crash.
-TEST(TestIngestorWinnerCacheStateManager, ConcurrentSortedCatalogAndWriteBackStayConsistent)
+/// Readers and writers contend on ONE key, which is what makes this a lock test rather
+/// than a crash canary. An earlier version had every thread touch its own disjoint key,
+/// so no reader ever looked up an entry a writer was mutating and the test passed with
+/// the mutex deleted.
+///
+/// The assertion is that a reader never observes a torn record: `winnerFor` returns a
+/// copy taken under the lock, so every read must be one of the whole records written,
+/// never a mixture of two.
+TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRecord)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    const TestGraph graph(makeGraphId(0xE3));
-    const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto contended = keyForIndex(graph, 0);
 
-    const auto expected = manager->sortedDefinitions(context);
-    ASSERT_FALSE(expected.empty());
+    // Two records of different lengths and contents. A torn read would show a length or
+    // an id belonging to neither.
+    const WinnerRecord shortRecord{entryFor(definitionFor(0x01), 1.0)};
+    const WinnerRecord longRecord{entryFor(definitionFor(0x02), 1.0),
+                                  entryFor(definitionFor(0x03), 2.0),
+                                  entryFor(definitionFor(0x04), 3.0)};
+    manager->recordWinner(contended, shortRecord);
 
+    std::atomic<bool> torn{false};
+    std::atomic<int> reads{0};
     std::vector<std::thread> threads;
-    std::atomic<bool> mismatched{false};
     threads.reserve(8);
 
-    for(int thread = 0; thread < 4; ++thread)
+    for(int writer = 0; writer < 4; ++writer)
     {
-        threads.emplace_back([&]() {
-            for(int index = 0; index < 200; ++index)
+        threads.emplace_back([&, writer]() {
+            for(int index = 0; index < 500; ++index)
             {
-                const auto ordered = manager->sortedDefinitions(context);
-                if(ordered.size() != expected.size())
-                {
-                    mismatched = true;
-                }
+                manager->recordWinner(contended,
+                                      (writer + index) % 2 == 0 ? shortRecord : longRecord);
             }
         });
     }
-    for(int thread = 0; thread < 4; ++thread)
+    for(int reader = 0; reader < 4; ++reader)
     {
-        threads.emplace_back([&, thread]() {
-            const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
-            for(int index = 0; index < 200; ++index)
+        threads.emplace_back([&]() {
+            for(int index = 0; index < 500; ++index)
             {
-                manager->recordWinner(keyForIndex(ContentCarryingTestGraph{}, thread * 200 + index),
-                                      record);
+                const auto seen = manager->winnerFor(contended);
+                if(!seen.has_value())
+                {
+                    torn = true;
+                    continue;
+                }
+                reads.fetch_add(1, std::memory_order_relaxed);
+
+                const bool isShort = seen->size() == 1 && seen->front().kernelId == testId(0x01);
+                const bool isLong = seen->size() == 3 && seen->front().kernelId == testId(0x02)
+                                    && seen->back().kernelId == testId(0x04);
+                if(!isShort && !isLong)
+                {
+                    torn = true;
+                }
             }
         });
     }
@@ -463,7 +483,8 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentSortedCatalogAndWriteBackSta
         thread.join();
     }
 
-    EXPECT_FALSE(mismatched) << "sortedCatalog must stay consistent while the cache is written";
+    EXPECT_FALSE(torn) << "every read must be one whole record, never a mixture";
+    EXPECT_EQ(reads.load(), 2000) << "the key exists throughout, so no read may miss";
 }
 
 } // namespace
