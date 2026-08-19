@@ -90,6 +90,19 @@ namespace rocRoller::HostNumerics
                                                  size_t                  blockedDimension,
                                                  size_t                  blockSize);
 
+    /**
+     * Generates one real-valued rocRoller tensor from a typed host-validation
+     * recipe. The caller supplies only the random seed; component random
+     * domains remain an implementation detail, and ordinary generation uses
+     * explicit real-only complex semantics. Descriptor strides select the
+     * logical index order so fixed seeds remain stable for row- and
+     * column-major matrices.
+     *
+     * Bounded modes use minimum and maximum. Other modes use their named
+     * definition and DataInitialization parameters. When blockScale is set,
+     * generation delegates to the shared MX API and returns natural-order
+     * scales plus an optional decoded Float32 reference.
+     */
     GeneratedTensor generateHostTensor(TensorDescriptor const&             descriptor,
                                        DataInitialization const&           initialization,
                                        std::optional<BlockScaleGeneration> blockScale,

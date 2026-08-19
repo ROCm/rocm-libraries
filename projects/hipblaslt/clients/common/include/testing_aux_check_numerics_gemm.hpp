@@ -39,9 +39,9 @@
 #include <roc/host_validation/generation.hpp>
 
 #include <cmath>
-#include <cstring>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -120,24 +120,23 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         hipStream_t stream = nullptr;
         CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
-        std::vector<float>                      A_clean(M * K);
-        std::vector<float>                      B_h(K * N);
-        roc::host_validation::GenerationOptions ones;
-        ones.real.pattern    = roc::host_validation::GenerationPattern::Constant;
-        ones.real.parameter0 = 1.0;
-        roc::host_validation::Tensor cleanTensor = roc::host_validation::generate(
-            roc::host_validation::ScalarType::Float32,
-            roc::host_validation::Shape{A_clean.size()},
-            ones);
+        std::vector<float> A_clean(M * K);
+        std::vector<float> B_h(K * N);
+        const auto         ones = roc::host_validation::GenerationRecipe::realOnly(
+            roc::host_validation::GenerationRecipe::constant({.value = 1.0}));
+        roc::host_validation::Tensor cleanTensor
+            = roc::host_validation::generate(roc::host_validation::ScalarType::Float32,
+                                             roc::host_validation::Shape{A_clean.size()},
+                                             ones);
         std::memcpy(A_clean.data(), cleanTensor.storage().data(), cleanTensor.storage().size());
-        roc::host_validation::Tensor bTensor = roc::host_validation::generate(
-            roc::host_validation::ScalarType::Float32,
-            roc::host_validation::Shape{B_h.size()},
-            ones);
+        roc::host_validation::Tensor bTensor
+            = roc::host_validation::generate(roc::host_validation::ScalarType::Float32,
+                                             roc::host_validation::Shape{B_h.size()},
+                                             ones);
         std::memcpy(B_h.data(), bTensor.storage().data(), bTensor.storage().size());
-        std::vector<float>                      A_dirty = A_clean;
-        roc::host_validation::GenerationOptions nan;
-        nan.real.pattern = roc::host_validation::GenerationPattern::TypeNaN;
+        std::vector<float> A_dirty = A_clean;
+        const auto         nan     = roc::host_validation::GenerationRecipe::realOnly(
+            roc::host_validation::GenerationRecipe::typeNaN());
         roc::host_validation::Tensor dirtyTensor = cleanTensor.clone();
         roc::host_validation::generateAt(dirtyTensor, 0, nan);
         std::memcpy(A_dirty.data(), dirtyTensor.storage().data(), dirtyTensor.storage().size());
@@ -176,10 +175,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         // 1 MiB is plenty and keeps per-scenario hipMalloc cheap.
         uint64_t ws_size = 1ull * 1024ull * 1024ull;
         EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulPreferenceSetAttribute(pref,
-                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                  &ws_size,
-                                                  sizeof(ws_size)),
+            hipblasLtMatmulPreferenceSetAttribute(
+                pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &ws_size, sizeof(ws_size)),
             HIPBLAS_STATUS_SUCCESS);
 
         hipblasLtMatmulHeuristicResult_t heur[1]{};

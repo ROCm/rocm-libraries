@@ -8,10 +8,12 @@
 #include <complex>
 #include <cstdint>
 #include <limits>
+#include <roc/host_validation/scalar.hpp>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -19,14 +21,19 @@ namespace {
 using roc::host_validation::convertScalar;
 using roc::host_validation::IntegerOverflow;
 using roc::host_validation::IntegerRounding;
+using roc::host_validation::isConcreteScalarType;
 using roc::host_validation::Layout;
+using roc::host_validation::nativeScalarType;
 using roc::host_validation::Scalar;
 using roc::host_validation::ScalarCategory;
 using roc::host_validation::ScalarConversionOptions;
 using roc::host_validation::ScalarType;
+using roc::host_validation::scalarTypeCount;
 using roc::host_validation::scalarTypeInfo;
+using roc::host_validation::scalarTypeInfos;
 using roc::host_validation::Shape;
 using roc::host_validation::Tensor;
+using roc::host_validation::visitScalarType;
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -173,6 +180,39 @@ float expectedBinaryDecode(ScalarType type, uint32_t raw) {
 }
 
 void testScalarTypeInfoContract() {
+    static_assert(nativeScalarType<bool> == ScalarType::Boolean);
+    static_assert(nativeScalarType<float> == ScalarType::Float32);
+    static_assert(nativeScalarType<std::complex<double>> == ScalarType::ComplexFloat64);
+
+    require(scalarTypeCount == scalarTypeInfos.size(),
+            "Scalar type count and metadata table size differ.");
+    for (size_t index = 0; index < scalarTypeCount; ++index) {
+        const ScalarType type = static_cast<ScalarType>(index);
+        require(isConcreteScalarType(type), "Concrete scalar type was classified as a sentinel.");
+        require(visitScalarType(type, [type]<typename Tag>() { return Tag::type == type; }),
+                "Scalar type visitor and dense enum ordering differ.");
+    }
+    require(!isConcreteScalarType(ScalarType::Count),
+            "ScalarType::Count was classified as a concrete scalar type.");
+    requireThrows<std::invalid_argument>([] { (void)scalarTypeInfo(ScalarType::Count); },
+                                         "Scalar metadata accepted the Count sentinel.");
+    requireThrows<std::invalid_argument>(
+        [] { (void)visitScalarType(ScalarType::Count, []<typename>() { return true; }); },
+        "Scalar visitor accepted the Count sentinel.");
+
+    require(visitScalarType(ScalarType::Float32,
+                            []<typename Tag>() {
+                                return Tag::type == ScalarType::Float32 &&
+                                       std::is_same_v<typename Tag::Storage, float>;
+                            }),
+            "Runtime scalar tag dispatch mismatch.");
+    require(visitScalarType(ScalarType::Int4,
+                            []<typename Tag>() {
+                                return Tag::type == ScalarType::Int4 &&
+                                       std::is_void_v<typename Tag::Storage>;
+                            }),
+            "Packed scalar tag dispatch mismatch.");
+
     const auto& boolean = scalarTypeInfo(ScalarType::Boolean);
     require(boolean.name == "bool" && boolean.category == ScalarCategory::Boolean &&
                 boolean.storageBits == 8 && boolean.exponentBits == 0 &&

@@ -33,9 +33,9 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
-#include <numeric>
 #include <hipblaslt/host_validation/MatrixTransformReference.hpp>
 #include <hipblaslt/host_validation/Types.hpp>
+#include <numeric>
 #include <roc/host_validation/generation.hpp>
 #include <sstream>
 #include <tuple>
@@ -72,29 +72,38 @@ namespace
             auto err = hipMalloc(&this->aBase, allocSize);
             if(err != hipSuccess)
             {
-                fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
-                        hipGetErrorString(err), __FILE__, __LINE__);
+                fprintf(stderr,
+                        "hipMalloc failed: %s at %s:%d\n",
+                        hipGetErrorString(err),
+                        __FILE__,
+                        __LINE__);
                 abort();
             }
             err = hipMalloc(&this->bBase, allocSize);
             if(err != hipSuccess)
             {
-                fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
-                        hipGetErrorString(err), __FILE__, __LINE__);
+                fprintf(stderr,
+                        "hipMalloc failed: %s at %s:%d\n",
+                        hipGetErrorString(err),
+                        __FILE__,
+                        __LINE__);
                 abort();
             }
             err = hipMalloc(&this->cBase, allocSize);
             if(err != hipSuccess)
             {
-                fprintf(stderr, "hipMalloc failed: %s at %s:%d\n",
-                        hipGetErrorString(err), __FILE__, __LINE__);
+                fprintf(stderr,
+                        "hipMalloc failed: %s at %s:%d\n",
+                        hipGetErrorString(err),
+                        __FILE__,
+                        __LINE__);
                 abort();
             }
             this->a = reinterpret_cast<DType*>(aBase + (allocSize - bufSize));
             this->b = reinterpret_cast<DType*>(bBase + (allocSize - bufSize));
             this->c = reinterpret_cast<DType*>(cBase + (allocSize - bufSize));
-            init(this->a, m * n * b, InitializationStream::MatrixA);
-            init(this->b, m * n * b, InitializationStream::MatrixB);
+            init(this->a, m * n * b, InitializationDomain::MatrixA);
+            init(this->b, m * n * b, InitializationDomain::MatrixB);
         }
 
         ~TypedMatrixTransformIO() override
@@ -107,8 +116,11 @@ namespace
             cBase    = nullptr;
             if(err != hipSuccess)
             {
-                fprintf(stderr, "hipFree failed: %s at %s:%d\n",
-                        hipGetErrorString(err), __FILE__, __LINE__);
+                fprintf(stderr,
+                        "hipFree failed: %s at %s:%d\n",
+                        hipGetErrorString(err),
+                        __FILE__,
+                        __LINE__);
                 abort();
             }
         }
@@ -125,26 +137,27 @@ namespace
         }
 
     private:
-        enum class InitializationStream : std::uint64_t
+        enum class InitializationDomain : std::uint64_t
         {
             MatrixA = 0,
             MatrixB = 1,
         };
 
-        void init(DType* buf, size_t len, InitializationStream stream)
+        void init(DType* buf, size_t len, InitializationDomain domain)
         {
-            std::vector<DType>                      ref(len);
-            roc::host_validation::GenerationOptions options;
-            options.seed = hipblaslt::host_validation::defaultInitializationSeed;
-            options.real.pattern    = roc::host_validation::GenerationPattern::UniformInteger;
-            options.real.parameter0 = -3;
-            options.real.parameter1 = 3;
-            options.real.stream     = static_cast<std::uint64_t>(stream);
-            auto generated          = hipblaslt::host_validation::tensorFromMutableStorage(
+            std::vector<DType> ref(len);
+            const uint64_t     recipeSeed
+                = hipblaslt::host_validation::compatibility::seedForRandomDomain(
+                    hipblaslt::host_validation::defaultInitializationSeed,
+                    static_cast<std::uint64_t>(domain));
+            const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
+                roc::host_validation::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
+                {.seed = recipeSeed});
+            auto generated = hipblaslt::host_validation::tensorFromMutableStorage(
                 ref.data(),
                 ref.size(),
                 roc::host_validation::Layout::contiguous(roc::host_validation::Shape{ref.size()}));
-            roc::host_validation::generate(generated, options);
+            roc::host_validation::generate(generated, recipe);
             hipblaslt::host_validation::copyTensorStorageTo(ref.data(), ref.size(), generated);
 
             auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
@@ -259,11 +272,9 @@ namespace
         arguments.beta                         = beta;
         arguments.comparison.absoluteTolerance = 1e-5;
 
-        const auto result
-            = hipblaslt::host_validation::referenceMatrixTransform(arguments);
+        const auto         result = hipblaslt::host_validation::referenceMatrixTransform(arguments);
         std::ostringstream diagnostics;
-        hipblaslt::host_validation::reportMatrixTransformMismatches(diagnostics,
-                                                                    result.comparison);
+        hipblaslt::host_validation::reportMatrixTransformMismatches(diagnostics, result.comparison);
         ASSERT_TRUE(result.comparison.passed()) << diagnostics.str();
     }
 }
@@ -944,8 +955,8 @@ TEST(MatrixTransformTest, ScalarsOnDevice)
 
 TEST(MatrixTransformTest, MultipleDevices)
 {
-    int numDevices{};
-    int curDevice{};
+    int  numDevices{};
+    int  curDevice{};
     auto hipErr = hipGetDeviceCount(&numDevices);
     EXPECT_EQ(hipErr, hipSuccess);
     hipErr = hipGetDevice(&curDevice);
@@ -953,7 +964,7 @@ TEST(MatrixTransformTest, MultipleDevices)
     // acquire at most 2 devices
     numDevices = std::min<int>(numDevices, 2);
 
-    for (int deviceId = 0; deviceId < numDevices; ++deviceId)
+    for(int deviceId = 0; deviceId < numDevices; ++deviceId)
     {
         hipErr = hipSetDevice(deviceId);
         EXPECT_EQ(hipErr, hipSuccess);
@@ -991,9 +1002,9 @@ TEST(MatrixTransformTest, MultipleDevices)
         void* dC     = inputs->getBuf(2);
 
         hipblasLtMatrixTransformDesc_t desc;
-        auto                   hipblasLtErr = hipblasLtMatrixTransformDescCreate(&desc, scaleDatatype);
-        hipblasLtPointerMode_t pMode        = HIPBLASLT_POINTER_MODE_HOST;
-        hipblasLtErr                        = hipblasLtMatrixTransformDescSetAttribute(
+        auto hipblasLtErr            = hipblasLtMatrixTransformDescCreate(&desc, scaleDatatype);
+        hipblasLtPointerMode_t pMode = HIPBLASLT_POINTER_MODE_HOST;
+        hipblasLtErr                 = hipblasLtMatrixTransformDescSetAttribute(
             desc,
             hipblasLtMatrixTransformDescAttributes_t::HIPBLASLT_MATRIX_TRANSFORM_DESC_POINTER_MODE,
             &pMode,

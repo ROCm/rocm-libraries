@@ -71,8 +71,8 @@ SoftmaxRunInfo referenceSoftmaxTyped(const SoftmaxProblem& problem) {
     }
 
     return {
-        .slicesComputed = slices,
-        .elementsComputed = problem.input.shape().elementCount(),
+        .slicesProcessed = slices,
+        .outputElementsWritten = problem.output.shape().elementCount(),
     };
 }
 }  // namespace detail

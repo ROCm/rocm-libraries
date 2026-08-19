@@ -8,7 +8,7 @@ find_package(ROCHostValidation REQUIRED CONFIG COMPONENTS Core)
 
 foreach(unexpected_target
         roc::host-validation
-        roc::host-validation-tiled
+        roc::host-validation-blocked
         roc::host-validation-blas
         roc::host-validation-mx
         roc::host-validation-amd-gpu-layout)
