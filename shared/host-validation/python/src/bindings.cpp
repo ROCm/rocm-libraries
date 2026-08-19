@@ -301,6 +301,12 @@ GemmResult referenceGemmRequestBound(const GemmRequest& request, const GemmExecu
     return referenceGemm(request, execution, pythonGemmBackendImplementation(execution.backend));
 }
 
+GemmResult referenceGemmProblemOwned(const GemmProblem& problem, const GemmOutputOptions& output,
+                                     const GemmExecution& execution) {
+    return referenceGemm(problem, output, execution,
+                         pythonGemmBackendImplementation(execution.backend));
+}
+
 GemmResult referenceGemmOwned(
     const Tensor& a, const Tensor& b, const Tensor& c, ScalarType outputType,
     ScalarType accumulatorType, std::complex<double> alpha, std::complex<double> beta,
@@ -315,7 +321,6 @@ GemmResult referenceGemmOwned(
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
-    Tensor d(outputType, Shape{a.shape()[0], b.shape()[1]});
     GemmOperand operandA(a);
     GemmOperand operandB(b);
     operandA.computeType = computeTypeA;
@@ -341,22 +346,22 @@ GemmResult referenceGemmOwned(
         operandA.blockScale = BlockScaleBinding{*blockScaleA, blockSizeA};
         operandB.blockScale = BlockScaleBinding{*blockScaleB, blockSizeB};
     }
-    GemmRequest request(std::move(operandA), std::move(operandB), c, d, accumulatorType);
-    request.accumulationRounding = accumulationRounding;
-    request.mathMode = mathMode;
-    request.epilogue.alpha = alpha;
-    request.epilogue.beta = beta;
-    request.epilogue.outputScale = outputScale;
-    request.epilogue.outputConversion = outputConversion;
-    request.epilogue.activation = activation;
-    request.epilogue.activationParameter0 = activationParameter0;
-    request.epilogue.activationParameter1 = activationParameter1;
-    request.outputSelection = std::move(outputSelection);
+    GemmProblem problem(std::move(operandA), std::move(operandB), c, outputType, accumulatorType);
+    problem.accumulationRounding = accumulationRounding;
+    problem.mathMode = mathMode;
+    problem.epilogue.alpha = alpha;
+    problem.epilogue.beta = beta;
+    problem.epilogue.outputScale = outputScale;
+    problem.epilogue.outputConversion = outputConversion;
+    problem.epilogue.activation = activation;
+    problem.epilogue.activationParameter0 = activationParameter0;
+    problem.epilogue.activationParameter1 = activationParameter1;
     const GemmExecution execution{
         .backend = backend,
         .requireRequestedBackend = backend == GemmBackend::Blocked,
     };
-    return referenceGemm(request, execution, pythonGemmBackendImplementation(backend));
+    return referenceGemm(problem, {.layout = std::nullopt, .selection = std::move(outputSelection)},
+                         execution, pythonGemmBackendImplementation(backend));
 }
 
 AxpbyResult referenceAxpbyOwned(std::optional<Tensor> x, std::optional<Tensor> y,
@@ -690,6 +695,12 @@ NB_MODULE(_roc_host_validation, module) {
         .def(nb::init<GemmBackend, bool>(), "backend"_a, "require_requested_backend"_a = false)
         .def_rw("backend", &GemmExecution::backend)
         .def_rw("require_requested_backend", &GemmExecution::requireRequestedBackend);
+
+    nb::class_<GemmOutputOptions>(module, "GemmOutputOptions",
+                                  "Owning GEMM output layout and logical-coordinate selection.")
+        .def(nb::init<>())
+        .def_rw("layout", &GemmOutputOptions::layout)
+        .def_rw("selection", &GemmOutputOptions::selection);
 
     nb::class_<GemmProblem>(module, "GemmProblem", "Reusable numerical GEMM descriptor.")
         .def(nb::init<GemmOperand, GemmOperand, Tensor, ScalarType, ScalarType>(), "a"_a, "b"_a,
@@ -1081,6 +1092,9 @@ NB_MODULE(_roc_host_validation, module) {
                "output_conversion"_a = OutputConversion::Default,
                "accumulation_rounding"_a = AccumulationRounding::TypeDefault);
     module.def("reference_gemm_result", &referenceGemmRequestBound, "request"_a,
+               "execution"_a = GemmExecution{.backend = GemmBackend::Pointwise});
+    module.def("reference_gemm_result", &referenceGemmProblemOwned, "problem"_a,
+               "output"_a = GemmOutputOptions{},
                "execution"_a = GemmExecution{.backend = GemmBackend::Pointwise});
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
