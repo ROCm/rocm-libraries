@@ -507,8 +507,8 @@ typedef struct {
  * \ingroup group_rppdefs
  */
 struct RpptDesc {
-    RppSize_t numDims;
-    Rpp32u offsetInBytes;
+    RppSize_t numDims = 4;
+    Rpp32u offsetInBytes = 0;
     RpptDataType dataType;
     Rpp32u n, c, h, w;
     RpptStrides strides;
@@ -517,7 +517,7 @@ struct RpptDesc {
     RpptDesc() = default;
 
     RpptDesc(Rpp32u n, Rpp32u c, Rpp32u h, Rpp32u w, RpptDataType dataType, RpptLayout layout)
-        : numDims(4), offsetInBytes(0), dataType(dataType), n(n), c(c), h(h), w(w), layout(layout) {
+        : dataType(dataType), n(n), c(c), h(h), w(w), layout(layout) {
         if (layout == NCHW) {
             strides.nStride = c * h * w;
             strides.cStride = h * w;
@@ -533,7 +533,7 @@ struct RpptDesc {
 
     RpptDesc(Rpp32u n, Rpp32u c, Rpp32u h, Rpp32u w, RpptDataType dataType, RpptLayout layout,
              Rpp32u offsetInBytes, RpptStrides strides)
-        : numDims(4), offsetInBytes(offsetInBytes), dataType(dataType), n(n), c(c), h(h), w(w),
+        : offsetInBytes(offsetInBytes), dataType(dataType), n(n), c(c), h(h), w(w),
           strides(strides), layout(layout) {
     }
 };
