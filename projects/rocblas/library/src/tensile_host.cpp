@@ -1244,15 +1244,18 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) >= 4 && !std::is_same_v<Ti, float>)
+    if constexpr(sizeof(Ti) >= 4)
     {
+        // MI300X (304 CUs) and MI300A (228 CUs) both are gfx942.
+        // Only MI300X uses hipBLASLt for F32; all other types and MI300A fall back to Tensile.
         // TODO remove after tuning
         if((rocblas_internal_get_arch(prob.handle) == 950
             || rocblas_internal_get_arch(prob.handle) == 942)
+           && (!std::is_same_v<Ti, float>
+               || (rocblas_internal_get_arch(prob.handle) == 942
+                   && prob.handle->device_properties.multiProcessorCount != 304))
            && !prob.handle->isHipBLASLtForcedOn())
-        {
             return false;
-        }
     }
 
     bool batched = !prob.strided_batch;
