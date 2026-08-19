@@ -133,8 +133,8 @@ namespace hipblaslt::host_validation
                 {
                     component = component.withAlternatingSign(
                         {.dimensions = {0, 1}, .negativeWhenOdd = false});
-                    recipeSeed = compatibility::seedForRandomDomain(
-                        defaultInitializationSeed, compatibility::integerExactMatrixBRandomDomain);
+                    recipeSeed = initialization::seedForSequence(
+                        defaultInitializationSeed, initialization::integerExactMatrixBSequence);
                 }
                 return GenerationRecipe::realOnly(std::move(component), {.seed = recipeSeed});
             }
@@ -189,17 +189,17 @@ namespace hipblaslt::host_validation
                 return;
 
             uint32_t     state              = static_cast<uint32_t>(oneSpecialInitializationSeed)
-                                                  * compatibility::oneSpecialLcgMultiplier
-                                              + compatibility::oneSpecialLcgIncrement;
+                                                  * initialization::oneSpecialLcgMultiplier
+                                              + initialization::oneSpecialLcgIncrement;
             const size_t specialLinearIndex = size_t(state) % logicalElements;
-            state                           = state * compatibility::oneSpecialLcgMultiplier
-                                              + compatibility::oneSpecialLcgIncrement;
+            state                           = state * initialization::oneSpecialLcgMultiplier
+                                              + initialization::oneSpecialLcgIncrement;
             const int specialType
                 = requestedSpecialType >= 0
-                          && requestedSpecialType < compatibility::oneSpecialValueCount
+                          && requestedSpecialType < initialization::oneSpecialValueCount
                       ? requestedSpecialType
-                      : int(state >> compatibility::oneSpecialLcgValueShift)
-                            % compatibility::oneSpecialValueCount;
+                      : int(state >> initialization::oneSpecialLcgValueShift)
+                            % initialization::oneSpecialValueCount;
 
             const GenerationRecipe::Component component
                 = specialType == static_cast<int>(OneSpecialValue::PositiveInfinity)

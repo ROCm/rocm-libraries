@@ -177,14 +177,14 @@ namespace hipblaslt::host_validation::detail
 /* ============================================================================================ */
 /*! \brief  matrix/vector initialization: */
 // for vector x (M=1, N=lengthX, lda=incx);
-// Legacy signatures are retained; product recipes define complex components explicitly.
+// Existing signatures initialize caller-provided matrix storage through Tensor layouts.
 
 // Initialize matrices with random values
 template <typename T>
 inline void
     hipblaslt_init(T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto recipe = hipblaslt::host_validation::legacyRandomRecipe(
+    const auto recipe = hipblaslt::host_validation::realOnlyRandomRecipe(
         hipblaslt::host_validation::scalarType<T>());
     hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
@@ -218,7 +218,7 @@ inline void hipblaslt_init(void*       A,
         "hipblaslt_init",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::legacyRandomRecipe(scalar);
+            return hipblaslt::host_validation::realOnlyRandomRecipe(scalar);
         });
 }
 
