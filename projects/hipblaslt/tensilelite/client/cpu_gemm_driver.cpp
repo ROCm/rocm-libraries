@@ -162,7 +162,7 @@ namespace
 
         const auto recipe
             = GenerationRecipe::realOnly(std::move(component),
-                                         tensilelite_adapter::settingsForLegacyGenerationStream(
+                                         tensilelite_adapter::dataInitializationSettings(
                                              42, static_cast<uint64_t>(stream)));
 
         Tensor generated(toHostValidationScalarType(TypeTraits<T>::value),
@@ -607,7 +607,7 @@ int runGemm(size_t             m,
                 const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
                     roc::host_validation::GenerationRecipe::randomEncodedExponent(
                         {.lowerUnbiasedExponent = 0, .upperUnbiasedExponent = 7}),
-                    roc::host_validation::tensilelite_adapter::settingsForLegacyGenerationStream(
+                    roc::host_validation::tensilelite_adapter::dataInitializationSettings(
                         42, stream));
                 roc::host_validation::generate(generated, recipe);
                 std::memcpy(values.data(), generated.storage().data(), generated.storage().size());

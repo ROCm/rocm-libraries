@@ -221,11 +221,11 @@ TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
         EXPECT_LE(value, 100);
     }
 
-    std::array<uint8_t, 64> legacyE8{};
+    std::array<uint8_t, 64> e8Values{};
     ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::E8,
                                             InitMode::RandomNegPosLimited,
-                                            legacyE8.data(),
-                                            legacyE8.size(),
+                                            e8Values.data(),
+                                            e8Values.size(),
                                             fixedInitializationKey));
 
     std::array<TensileLite::E5M3, 64> unsignedScale{};
@@ -260,50 +260,38 @@ TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
 #endif
 }
 
-TEST(HostValidationDataInitialization, DerivedSeedsPreserveLegacyRealStreams)
+TEST(HostValidationDataInitialization, ComplexRandomValuesAreRepeatableAndIndependent)
 {
-    using namespace roc::host_validation;
-    using namespace roc::host_validation::tensilelite_adapter;
+    std::array<std::complex<float>, 32> first{};
+    std::array<std::complex<float>, 32> repeat{};
+    std::array<std::complex<float>, 32> other{};
 
-    constexpr uint64_t seed = 0x1020304050607080ULL;
-    for(const uint64_t stream : {0ULL, 1ULL, 202ULL, 0xfedcba9876543210ULL})
+    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::ComplexFloat,
+                                            InitMode::Random,
+                                            first.data(),
+                                            first.size(),
+                                            firstRandomInitializationKey));
+    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::ComplexFloat,
+                                            InitMode::Random,
+                                            repeat.data(),
+                                            repeat.size(),
+                                            firstRandomInitializationKey));
+    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::ComplexFloat,
+                                            InitMode::Random,
+                                            other.data(),
+                                            other.size(),
+                                            secondRandomInitializationKey));
+
+    EXPECT_EQ(first, repeat);
+    EXPECT_NE(first, other);
+    EXPECT_TRUE(std::ranges::any_of(
+        first, [](const std::complex<float>& value) { return value.real() != value.imag(); }));
+    for(const std::complex<float>& value : first)
     {
-        const uint64_t derivedSeed = seedForLegacyGenerationStream(seed, stream);
-        for(uint64_t index = 0; index < 16; ++index)
-        {
-            EXPECT_EQ(counterRandom(
-                          derivedSeed, generation_random_domain_version_1::realComponent, index),
-                      counterRandom(seed, stream, index));
-        }
-    }
-}
-
-TEST(HostValidationDataInitialization, IsolatesLegacyCartesianStreamCompatibility)
-{
-    using namespace roc::host_validation;
-    using namespace roc::host_validation::tensilelite_adapter;
-
-    constexpr uint64_t seed            = 91;
-    constexpr uint64_t realStream      = 204;
-    constexpr uint64_t imaginaryStream = 205;
-    constexpr int      lower           = -9;
-    constexpr int      upper           = 9;
-
-    const auto component = GenerationRecipe::uniformInteger({.lower = lower, .upper = upper});
-    const auto recipe    = GenerationRecipe::cartesian(
-        component, component, settingsForLegacyGenerationStream(seed, realStream));
-    Tensor generated(ScalarType::ComplexFloat32, Shape{16});
-    generateWithLegacyCartesianStreams(
-        generated,
-        recipe,
-        {.seed = seed, .realStream = realStream, .imaginaryStream = imaginaryStream});
-
-    for(size_t index = 0; index < 16; ++index)
-    {
-        const std::complex<float> expected{
-            static_cast<float>(indexedUniformInteger(seed, realStream, index, lower, upper)),
-            static_cast<float>(indexedUniformInteger(seed, imaginaryStream, index, lower, upper))};
-        EXPECT_EQ(generated.loadAs<std::complex<float>>({index}), expected);
+        EXPECT_GE(value.real(), -3);
+        EXPECT_LE(value.real(), 3);
+        EXPECT_GE(value.imag(), -3);
+        EXPECT_LE(value.imag(), 3);
     }
 }
 
@@ -323,7 +311,7 @@ namespace
     }
 }
 
-TEST(HostValidationDataInitialization, TypeDerivedSpecialValuesMatchLegacyEncoding)
+TEST(HostValidationDataInitialization, TypeDerivedSpecialValuesMatchTensileEncoding)
 {
     expectComponentInitializationBytes<int8_t>(
         rocisa::DataType::Int8, InitMode::Max, std::numeric_limits<int8_t>::max());
@@ -389,13 +377,13 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     for(size_t index = 0; index < original.size(); ++index)
         original[index] = static_cast<int8_t>(index + 1);
 
-    std::vector<int8_t>  legacyPruned = original;
-    std::vector<int8_t>  legacyCompressed(compressedDescriptor.totalAllocatedElements());
-    std::vector<uint8_t> legacyMetadata(metadataDescriptor.totalAllocatedElements());
+    std::vector<int8_t>  adapterPruned = original;
+    std::vector<int8_t>  adapterCompressed(compressedDescriptor.totalAllocatedElements());
+    std::vector<uint8_t> adapterMetadata(metadataDescriptor.totalAllocatedElements());
     initCPUSparseInput(PruneSparseMode::PruneXX00,
-                       legacyPruned.data(),
-                       legacyCompressed.data(),
-                       legacyMetadata.data(),
+                       adapterPruned.data(),
+                       adapterCompressed.data(),
+                       adapterMetadata.data(),
                        denseDescriptor,
                        compressedDescriptor,
                        metadataDescriptor,
@@ -410,8 +398,8 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     using namespace roc::host_validation;
     const ScalarType     scalarType = toHostValidationScalarType(denseDescriptor.dataType());
     std::vector<int8_t>  componentPruned(original.size());
-    std::vector<int8_t>  componentCompressed(legacyCompressed.size());
-    std::vector<uint8_t> componentMetadata(legacyMetadata.size());
+    std::vector<int8_t>  componentCompressed(adapterCompressed.size());
+    std::vector<uint8_t> componentMetadata(adapterMetadata.size());
     const Shape          logicalMetadataShape{
         denseDescriptor.sizes()[0], denseDescriptor.sizes()[1] / 8, denseDescriptor.sizes()[2]};
     const Layout logicalMetadataLayout(logicalMetadataShape,
@@ -451,9 +439,9 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
                 componentMetadataTensor.storage().data(),
                 componentMetadataTensor.storage().size());
 
-    EXPECT_EQ(componentPruned, legacyPruned);
-    EXPECT_EQ(componentCompressed, legacyCompressed);
-    EXPECT_EQ(componentMetadata, legacyMetadata);
+    EXPECT_EQ(componentPruned, adapterPruned);
+    EXPECT_EQ(componentCompressed, adapterCompressed);
+    EXPECT_EQ(componentMetadata, adapterMetadata);
 }
 
 TEST(HostValidationStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparseSides)
@@ -563,13 +551,13 @@ TEST(HostValidationStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparse
                         uint32_t selectedMode = static_cast<uint32_t>(mode);
                         if(mode == PruneSparseMode::PruneRandom)
                         {
-                            selectedMode = static_cast<uint32_t>(
-                                roc::host_validation::tensilelite_adapter::indexedUniformInteger(
-                                    roc::host_validation::tensilelite_adapter::
-                                        sparsePruningCompatibilityStream,
-                                    slice * groupsPerSlice + group,
-                                    1,
-                                    static_cast<int>(PruneSparseMode::MaxPruneMode) - 1));
+                            const int selectedSet = roc::host_validation::indexedUniformInteger(
+                                roc::host_validation::tensilelite_adapter::sparsePruningSeed,
+                                0,
+                                slice * groupsPerSlice + group,
+                                0,
+                                static_cast<int>(PruneSparseMode::MaxPruneMode) - 2);
+                            selectedMode = 1 + static_cast<uint32_t>(selectedSet);
                         }
                         const std::array<size_t, 2>& retained = retainedPositionSets[selectedMode];
                         const uint8_t                expectedMetadata

@@ -73,7 +73,7 @@ namespace
 
         const auto recipe = GenerationRecipe::realOnly(
             std::move(component),
-            tensilelite_adapter::settingsForLegacyGenerationStream(seed, stream));
+            tensilelite_adapter::dataInitializationSettings(seed, stream));
         Tensor generated(type, Layout::contiguous(Shape{values.size()}));
         generate(generated, recipe);
 
