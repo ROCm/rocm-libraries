@@ -101,16 +101,17 @@ rocsparse_status rocsparse::bsrgemm_scal_core(rocsparse_handle          handle,
     // Copy column entries, if D != C
     if(bsr_col_ind_C != bsr_col_ind_D)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrgemm_copy<BSRGEMM_DIM>),
-                                           dim3((nnzb_D - 1) / BSRGEMM_DIM + 1),
-                                           dim3(BSRGEMM_DIM),
-                                           0,
-                                           stream,
-                                           nnzb_D,
-                                           bsr_col_ind_D,
-                                           bsr_col_ind_C,
-                                           descr_D->base,
-                                           descr_C->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrgemm_copy<BSRGEMM_DIM>),
+            rocsparse::csrgemm_scal_copy_blocks<BSRGEMM_DIM>(handle, nnzb_D),
+            dim3(BSRGEMM_DIM),
+            0,
+            stream,
+            nnzb_D,
+            bsr_col_ind_D,
+            bsr_col_ind_C,
+            descr_D->base,
+            descr_C->base);
     }
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrgemm_copy_scale<BSRGEMM_DIM>),
