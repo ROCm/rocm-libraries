@@ -44,7 +44,7 @@ namespace fusion {
 void PerformanceConfigConvCKIgemmGrpFwdActivFused::HeuristicInit(
     const FusionDescription& fdesc_problem)
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -89,7 +89,7 @@ bool PerformanceConfigConvCKIgemmGrpFwdActivFused::IsValidValue() const
 bool PerformanceConfigConvCKIgemmGrpFwdActivFused::IsValid(
     const FusionContext&, const FusionDescription& fdesc_problem) const
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 

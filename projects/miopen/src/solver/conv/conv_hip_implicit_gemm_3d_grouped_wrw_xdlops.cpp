@@ -55,7 +55,7 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
     const ::miopen::conv::ProblemDescription& problem)
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -284,7 +284,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
 
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -348,7 +348,7 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsValidPerformanceConfig(
 size_t ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(
     const ::miopen::conv::ProblemDescription& problem) const
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return 0;
 

@@ -257,7 +257,7 @@ std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 3
 void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitValidKernels(
     const ProblemDescription& problem)
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -365,7 +365,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
+        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
         if(!loader.IsLoaded())
             return false;
 
@@ -430,7 +430,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
 
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -465,7 +465,7 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
 size_t
 ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return 0;
 

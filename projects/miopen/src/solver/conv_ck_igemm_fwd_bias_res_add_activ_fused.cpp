@@ -47,7 +47,7 @@ void PerfConfigConvCKIgemmFwdBiasResAddActivFused::HeuristicInit(
     index     = 0;
     kernel_id = "";
 
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -92,7 +92,7 @@ bool PerfConfigConvCKIgemmFwdBiasResAddActivFused::IsValidValue() const
 bool PerfConfigConvCKIgemmFwdBiasResAddActivFused::IsValid(
     const FusionContext&, const FusionDescription& fdesc_problem) const
 {
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetOfflineOrCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
