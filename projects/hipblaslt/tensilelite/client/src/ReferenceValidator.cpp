@@ -356,7 +356,7 @@ namespace TensileLite
             ComparisonOptions options
                 = validationComparisonOptions(tensor.dataType(), threshold);
             options.selection.indexOrder
-                = ComparisonIndexOrder::FirstDimensionFastest;
+                = IndexOrder::FirstDimensionFastest;
             options.selection.stride = validationStride;
             options.computePointwiseStatistics = false;
             options.computeFrobenius = false;

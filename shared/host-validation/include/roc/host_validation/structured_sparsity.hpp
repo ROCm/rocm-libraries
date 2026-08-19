@@ -41,7 +41,7 @@ struct StructuredSparsityPattern {
     uint64_t seed = 0;
 
     // Defines how groups on the non-sparsity axes receive linear random indices.
-    LogicalIndexOrder indexOrder = LogicalIndexOrder::FirstDimensionFastest;
+    IndexOrder indexOrder = IndexOrder::FirstDimensionFastest;
 };
 
 struct StructuredSparsityOutputs {

@@ -910,12 +910,12 @@ void testIndexedGeneration() {
 
     generateAt(point, 3,
                GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 7.0}),
-                                          {.indexOrder = LogicalIndexOrder::LastDimensionFastest}));
+                                          {.indexOrder = IndexOrder::LastDimensionFastest}));
     require(point.loadAs<float>({0, 1, 1}) == 7.0f,
             "Last-dimension-fast point generation mismatch.");
 
-    for (const LogicalIndexOrder order :
-         {LogicalIndexOrder::FirstDimensionFastest, LogicalIndexOrder::LastDimensionFastest}) {
+    for (const IndexOrder order :
+         {IndexOrder::FirstDimensionFastest, IndexOrder::LastDimensionFastest}) {
         Tensor whole(ScalarType::Float4E2M1, Shape{2, 3, 2});
         Tensor elementwise(ScalarType::Float4E2M1, Shape{2, 3, 2});
         const GenerationRecipe exactRecipe =
@@ -1391,7 +1391,7 @@ void testComparisonProgram() {
     emptyOptions.computePointwiseStatistics = false;
     emptyOptions.computeFrobenius = false;
     emptyOptions.maxReportedMismatches = 0;
-    emptyOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    emptyOptions.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     const auto compareEmpty = [&](const ComparisonOptions& options) {
         return compare(Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
                        Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
@@ -1471,7 +1471,7 @@ void testComparisonProgram() {
     const Layout layout(Shape{2, 3}, {1, 3});
 
     ComparisonOptions selected;
-    selected.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    selected.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     selected.selection.stride = 2;
     selected.computeFrobenius = false;
     const auto selectedResult =
@@ -1488,7 +1488,7 @@ void testComparisonProgram() {
     paddedMetrics.computePointwiseStatistics = false;
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
-    paddedMetrics.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    paddedMetrics.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     const auto paddedMetricResult =
         compare(Tensor::fromNative(layout, std::span<const float>(observedStorage)),
                 Tensor::fromNative(layout, std::span<const float>(expectedStorage)), paddedMetrics);
@@ -1654,7 +1654,7 @@ void testComparisonProgram() {
     ComparisonOptions magnitudePointwiseOnly = allCloseComparisonOptions(1.0, 0.0);
     magnitudePointwiseOnly.computePointwiseStatistics = false;
     magnitudePointwiseOnly.computeFrobenius = false;
-    magnitudePointwiseOnly.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    magnitudePointwiseOnly.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     require(
         !compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
                  Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),

@@ -346,14 +346,6 @@ class TensorStorage {
    public:
     TensorStorage() = default;
 
-    // Compatibility constructor. Use wrap() where an existing allocation is
-    // retained and allocate() for vector-backed storage.
-    TensorStorage(std::shared_ptr<void> owner, std::span<std::byte> bytes)
-        : m_owner(std::move(owner)), m_bytes(bytes) {
-        if (!m_owner && !m_bytes.empty())
-            throw std::invalid_argument("Nonempty TensorStorage requires an owner.");
-    }
-
     static TensorStorage wrap(std::shared_ptr<void> owner, std::span<std::byte> bytes) {
         return TensorStorage(std::move(owner), bytes);
     }
@@ -376,6 +368,12 @@ class TensorStorage {
     }
 
    private:
+    TensorStorage(std::shared_ptr<void> owner, std::span<std::byte> bytes)
+        : m_owner(std::move(owner)), m_bytes(bytes) {
+        if (!m_owner && !m_bytes.empty())
+            throw std::invalid_argument("Nonempty TensorStorage requires an owner.");
+    }
+
     std::shared_ptr<void> m_owner;
     std::span<std::byte> m_bytes;
 };
@@ -417,11 +415,6 @@ class Tensor {
 
     static Tensor wrapStorage(ScalarType type, Layout layout, TensorStorage storage) {
         return Tensor(type, std::move(layout), std::move(storage));
-    }
-
-    // Compatibility name for wrapStorage().
-    static Tensor fromStorage(ScalarType type, Layout layout, TensorStorage storage) {
-        return wrapStorage(type, std::move(layout), std::move(storage));
     }
 
     static Tensor fromStorage(ScalarType type, Layout layout, std::vector<std::byte> storage) {
@@ -614,7 +607,7 @@ class Tensor {
 
     static TensorStorage storageFromVector(std::vector<std::byte> storage) {
         auto owner = std::make_shared<std::vector<std::byte>>(std::move(storage));
-        return TensorStorage(owner, std::span<std::byte>(*owner));
+        return TensorStorage::wrap(owner, std::span<std::byte>(*owner));
     }
 
     void validateStorage() const {
