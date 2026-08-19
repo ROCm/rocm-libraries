@@ -26,14 +26,16 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
+#include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 
-#include "TensorDataManipulation.hpp"
 #include "datatype_interface.hpp"
 #include "helper.h"
 
@@ -65,23 +67,39 @@ void calculateKforSwizzling(hipDataType datatype, size_t& MiK, size_t& MiKv, siz
 template <typename T>
 void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
 {
-    using Tensor = Tensor::Manipulation::Tensor;
-    size_t MiM   = 16;
+    using Storage = std::conditional_t<
+        sizeof(T) == 1,
+        std::uint8_t,
+        std::conditional_t<sizeof(T) == 2,
+                           std::uint16_t,
+                           std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
+    static_assert(sizeof(T) == sizeof(Storage));
+
+    using roc::host_validation::Layout;
+    using roc::host_validation::Shape;
+    using roc::host_validation::Tensor;
+
+    size_t MiM = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(hipblaslt_type2datatype<T>(), MiK, MiKv, PackK);
-    auto tmpTensor = Tensor::create<T>({m, k});
-    std::copy(src, src + m * k, static_cast<T*>(tmpTensor.template as<void>()));
 
+    std::vector<Storage> nativeStorage(m * k);
+    const auto           sourceBytes = std::as_bytes(std::span(src, m * k));
+    auto                 nativeBytes = std::as_writable_bytes(std::span(nativeStorage));
+    std::copy(sourceBytes.begin(), sourceBytes.end(), nativeBytes.begin());
+
+    const Shape sourceShape = colMaj ? Shape{k, m} : Shape{m, k};
+    Tensor      tmpTensor   = Tensor::fromNative(Layout::contiguous(sourceShape),
+                                                 std::span<const Storage>(nativeStorage));
     if(colMaj)
-    {
-        auto orgTensor = Tensor::create<T>({k, m});
-        std::copy(src, src + m * k, static_cast<T*>(orgTensor.template as<void>()));
-        tmpTensor = permute(orgTensor, {1, 0});
-    }
+        tmpTensor = tmpTensor.permute({1, 0});
 
-    tmpTensor.reshape({m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor permuted = permute(tmpTensor, {0, 2, 3, 1, 4});
-    std::copy(static_cast<const T*>(permuted.template as<void>()), static_cast<const T*>(permuted.template as<void>()) + m * k, dst);
+    const Tensor permuted
+        = tmpTensor.reshape(Shape{m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .permute({0, 2, 3, 1, 4});
+    const std::span<const std::byte> swizzledBytes = permuted.storage();
+    auto destinationBytes                          = std::as_writable_bytes(std::span(dst, m * k));
+    std::copy(swizzledBytes.begin(), swizzledBytes.end(), destinationBytes.begin());
 }
 
 template <typename T>

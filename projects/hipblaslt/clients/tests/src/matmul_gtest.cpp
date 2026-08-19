@@ -56,6 +56,61 @@ TEST(HostValidationDataInitializationBridge, RuntimeRangeUsesTensorLayoutOffset)
     EXPECT_EQ(values, (std::array<float, 6>{1, 2, 0, 0, 0, 6}));
 }
 
+TEST(HostValidationTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
+{
+    constexpr size_t rows             = 18;
+    constexpr size_t columns          = 17;
+    constexpr size_t leadingDimension = 20;
+    constexpr size_t tileRows         = 16;
+    constexpr size_t tileColumns      = 16;
+    constexpr size_t paddedRows       = 32;
+    constexpr size_t paddedColumns    = 32;
+    constexpr size_t columnGroups     = 4;
+    constexpr size_t valuesPerGroup   = 4;
+
+    std::vector<float> source(rows * leadingDimension, -1.0f);
+    for(size_t row = 0; row < rows; ++row)
+        for(size_t column = 0; column < columns; ++column)
+            source[row * leadingDimension + column]
+                = static_cast<float>(1000 * row + column);
+
+    std::vector<float> observed(paddedRows * paddedColumns, -1.0f);
+    Arguments          arguments;
+    arguments.compute_type = HIPBLAS_COMPUTE_32F;
+    swizzle_tensor(observed.data(),
+                   source.data(),
+                   HIP_R_32F,
+                   arguments,
+                   1,
+                   rows,
+                   columns,
+                   leadingDimension,
+                   false);
+
+    std::vector<float> expected(paddedRows * paddedColumns, 0.0f);
+    const size_t       rowTileCount    = paddedRows / tileRows;
+    const size_t       columnTileCount = paddedColumns / tileColumns;
+    for(size_t row = 0; row < rows; ++row)
+        for(size_t column = 0; column < columns; ++column)
+        {
+            const size_t rowTile     = row / tileRows;
+            const size_t rowInTile   = row % tileRows;
+            const size_t columnTile  = column / tileColumns;
+            const size_t columnGroup = (column % tileColumns) / valuesPerGroup;
+            const size_t valueInGroup = column % valuesPerGroup;
+            const size_t destination
+                = (((rowTile * columnTileCount + columnTile) * columnGroups + columnGroup)
+                       * tileRows
+                   + rowInTile)
+                      * valuesPerGroup
+                  + valueInGroup;
+            ASSERT_LT(rowTile, rowTileCount);
+            expected[destination] = source[row * leadingDimension + column];
+        }
+
+    EXPECT_EQ(observed, expected);
+}
+
 TEST(HostValidationEpilogueBridge, DelegatesToProductIndependentComponent)
 {
     std::array<float, 4> input{-2, 1, 3, -4};
