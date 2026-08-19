@@ -97,69 +97,76 @@ namespace TensileLite
             return coFilename;
         }
 
+        static void logCodeObjectLoadError(std::string const& path, hipError_t error)
+        {
+            std::cerr << "hipModuleLoad failed: " << path << std::endl
+                      << " error: " << hipGetErrorString(error) << std::endl;
+        }
+
         hipError_t SolutionAdapter::loadCodeObjectFile(std::string const& path)
         {
-            Debug::Instance().markerStart("loadCodeObjectFile", path);
-            hipModule_t module;
+            hipError_t error = loadCodeObjectFileOnce(path);
+            if(error == hipSuccess)
+                return error;
 
-            hipError_t error = hipModuleLoad(&module, path.c_str());
-            // Large problem sizes may cause global memory to run out of space 
-            // when loading the module, which can lead to hipErrorLaunchFailure or hipErrorNoBinaryForGpu.
-            if(error == hipErrorLaunchFailure || error == hipErrorNoBinaryForGpu)
+            if(error != hipErrorLaunchFailure && error != hipErrorNoBinaryForGpu)
             {
-                std::string lazyArch;
-                std::string lazyDir;
-                {
-                    std::lock_guard<std::mutex> guard(m_access);
-                    lazyArch = m_lazyLoadArchitecture;
-                    lazyDir  = m_codeObjectDirectory;
-                }
+                logCodeObjectLoadError(path, error);
+                return error;
+            }
 
-                // The first primary code-object load can fail before a caller
-                // initializes lazy helper loading. Preserve that HIP error
-                // rather than masking it with an empty-architecture helper
-                // lookup such as Kernels.so-000-.hsaco.
-                if(lazyArch.empty() || lazyDir.empty())
-                    return error;
+            std::string lazyArch;
+            std::string lazyDir;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                lazyArch = m_lazyLoadArchitecture;
+                lazyDir  = m_codeObjectDirectory;
+            }
 
-                // Reset the error code from previous hipModuleLoad failure
-                (void)hipGetLastError();
-                std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
-                for(auto m_module : m_modules)
+            // Without an architecture, helper recovery would probe an invalid
+            // name such as Kernels.so-000-.hsaco and hide the primary error.
+            if(lazyArch.empty())
+            {
+                logCodeObjectLoadError(path, error);
+                return error;
+            }
+
+            // Reset the error code from the failed hipModuleLoad.
+            (void)hipGetLastError();
+            std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
+            for(auto module : m_modules)
+            {
+                HIP_CHECK_PRINT(hipModuleUnload(module),
+                    [&](hipError_t error_t) {
+                        std::cerr << "hipModuleUnload failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    }
+                );
+            }
+
+            // Extra rotation copies are not recreated by recovery.
+            if(!m_extraModuleCopies.empty())
+            {
+                std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
+                          << m_extraModuleCopies.size()
+                          << " rotation copy set(s); I-cache rotation is now disabled "
+                          << "until loadCodeObjectFileExtraCopies() is called again." << std::endl;
+            }
+            for(auto const& copyModules : m_extraModuleCopies)
+            {
+                for(auto module : copyModules)
                 {
-                    HIP_CHECK_PRINT(hipModuleUnload(m_module),
+                    HIP_CHECK_PRINT(hipModuleUnload(module),
                         [&](hipError_t error_t) {
                             std::cerr << "hipModuleUnload failed: " << std::endl
                                       << " error: " << hipGetErrorString(error_t) << std::endl;
                         }
                     );
                 }
-                // Also unload the extra rotation copies; otherwise we leak
-                // their device memory and leave rotation state inconsistent
-                // after the retry below. These are NOT reloaded on retry, so
-                // warn that I-cache rotation is disabled after this recovery.
-                if(!m_extraModuleCopies.empty())
-                {
-                    std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
-                              << m_extraModuleCopies.size()
-                              << " rotation copy set(s); I-cache rotation is now disabled "
-                              << "until loadCodeObjectFileExtraCopies() is called again."
-                              << std::endl;
-                }
-                for(auto const& copyModules : m_extraModuleCopies)
-                {
-                    for(auto m_module : copyModules)
-                    {
-                        HIP_CHECK_PRINT(hipModuleUnload(m_module),
-                            [&](hipError_t error_t) {
-                                std::cerr << "hipModuleUnload failed: " << std::endl
-                                          << " error: " << hipGetErrorString(error_t) << std::endl;
-                            }
-                        );
-                    }
-                }
-                // Need to clean up all these old modules' data structures, otherwise next problem will getKernel failed
-                m_access.lock();
+            }
+
+            {
+                std::lock_guard<std::mutex> guard(m_access);
                 m_modules.clear();
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
@@ -167,25 +174,32 @@ namespace TensileLite
                 m_extraModuleCopies.clear();
                 m_extraKernels.clear();
                 m_currentRotationCopy.store(0);
-                m_access.unlock();
-                // Need to re-run lazy-loading for hsaco(helper kernels) module reload
-                HIP_CHECK_RETURN_WITH_LOG(initializeLazyLoading(lazyArch, lazyDir),
-                    [&](hipError_t error_t) {
-                        std::cerr << "initializeLazyLoading after module clear failed: " << std::endl
-                                  << " error: " << hipGetErrorString(error_t) << std::endl;
-                    }
-                );
-                HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
-                    [&](hipError_t error_t) {
-                        std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
-                                  << " error: " << hipGetErrorString(error_t) << std::endl;
-                    }
-                );
             }
-            else if(error)
+
+            hipError_t lazyLoadingError = initializeLazyLoading(lazyArch, lazyDir);
+            if(lazyLoadingError != hipSuccess)
             {
-                std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
-                          << " error: " << hipGetErrorString(error) << std::endl;
+                std::cerr << "initializeLazyLoading after module clear failed; preserving "
+                             "the original hipModuleLoad error: "
+                          << hipGetErrorString(error) << std::endl;
+                return error;
+            }
+
+            error = loadCodeObjectFileOnce(path);
+            if(error != hipSuccess)
+                logCodeObjectLoadError(path, error);
+            return error;
+        }
+
+        hipError_t SolutionAdapter::loadCodeObjectFileOnce(std::string const& path)
+        {
+            Debug::Instance().markerStart("loadCodeObjectFile", path);
+            hipModule_t module;
+
+            hipError_t error = hipModuleLoad(&module, path.c_str());
+            if(error != hipSuccess)
+            {
+                Debug::Instance().markerStop();
                 return error;
             }
 
@@ -454,18 +468,11 @@ namespace TensileLite
         // avoid separating construction and initialization
         void SolutionAdapter::codeObjectDir(std::string codeObjDir)
         {
+            if(!codeObjDir.empty() && codeObjDir.back() != '/')
+                codeObjDir += '/';
 
-            if(!codeObjDir.empty())
-            {
-                if(codeObjDir.back() != '/')
-                {
-                    codeObjDir += '/';
-                }
-            }
-
-            m_access.lock();
-            m_codeObjectDirectory = codeObjDir;
-            m_access.unlock();
+            std::lock_guard<std::mutex> guard(m_access);
+            m_codeObjectDirectory = std::move(codeObjDir);
         }
 
         void SolutionAdapter::setLazyLoadingContext(std::string arch, std::string codeObjDir)
@@ -508,13 +515,15 @@ namespace TensileLite
                 for(auto ver : {"", "-xnack-", "-xnack+"})
                 {
                     std::string modifiedCOName = "Kernels.so-000-" + lazyArch + ver + ".hsaco";
-                    err                        = loadCodeObjectFile(lazyDir + modifiedCOName);
+                    err = loadCodeObjectFileOnce(lazyDir + modifiedCOName);
 
                     if(err == hipSuccess)
                     {
                         return err;
                     }
-                    else if(err == hipErrorFileNotFound)
+
+                    logCodeObjectLoadError(lazyDir + modifiedCOName, err);
+                    if(err == hipErrorFileNotFound)
                     {
                         // We expect that we could fail for cases when we have xnack variations
                         // so clear hipErrorFileNotFound between iterations.
