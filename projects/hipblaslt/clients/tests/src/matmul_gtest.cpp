@@ -47,6 +47,15 @@ TEST(HostValidationTypeBridge, ConvergesOnScalarType)
     EXPECT_FALSE(tryScalarType(static_cast<hipDataType>(-1)));
 }
 
+TEST(HostValidationTypeBridge, ValidatesComputeInputTypeBWhenAIsUnset)
+{
+    Arguments arguments;
+    arguments.compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
+    arguments.compute_input_typeB = HIP_R_64F;
+
+    EXPECT_THROW(derive_unset_compute_input_type(arguments), std::invalid_argument);
+}
+
 TEST(HostValidationDataInitializationBridge, RuntimeRangeUsesTensorLayoutOffset)
 {
     std::array<float, 6> values{1, 2, 3, 4, 5, 6};
