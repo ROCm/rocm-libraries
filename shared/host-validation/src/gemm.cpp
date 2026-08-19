@@ -88,19 +88,15 @@ GemmSupportInfo queryGemmSupport(const GemmRequest& request, const GemmExecution
     return {.supported = false, .reason = "Invalid reference GEMM backend."};
 }
 
-GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execution,
-                         const GemmBackendImplementation* backendImplementation) {
+GemmRunInfo referenceGemm(const GemmRequest& request, const GemmExecution& execution,
+                          const GemmBackendImplementation* backendImplementation) {
     GemmBackend backend = execution.backend;
     std::optional<std::string> fallbackReason;
     if (backend == GemmBackend::Automatic) {
         if (backendImplementation != nullptr) {
             const GemmSupportInfo implementationSupport = queryGemmSupport(
                 request, {.backend = backendImplementation->backend()}, backendImplementation);
-            if (implementationSupport)
-                return {
-                    .output = request.d,
-                    .runInfo = backendImplementation->run(request),
-                };
+            if (implementationSupport) return backendImplementation->run(request);
             fallbackReason = implementationSupport.reason;
         }
         backend = GemmBackend::Pointwise;
@@ -113,12 +109,8 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
         if (backend == GemmBackend::Pointwise) throw std::invalid_argument(requestedSupport.reason);
         fallbackReason = requestedSupport.reason;
         backend = GemmBackend::Pointwise;
-    } else if (backend != GemmBackend::Pointwise) {
-        return {
-            .output = request.d,
-            .runInfo = backendImplementation->run(request),
-        };
-    }
+    } else if (backend != GemmBackend::Pointwise)
+        return backendImplementation->run(request);
 
     const GemmSupportInfo pointwiseSupport =
         queryGemmSupport(request, {.backend = GemmBackend::Pointwise});
@@ -126,10 +118,7 @@ GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execut
 
     GemmRunInfo runInfo = detail::runPointwiseGemm(request);
     runInfo.fallbackReason = std::move(fallbackReason);
-    return {
-        .output = request.d,
-        .runInfo = std::move(runInfo),
-    };
+    return runInfo;
 }
 
 GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
@@ -154,7 +143,8 @@ GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& ou
     validateOwnedGemmStorage(problem, destination);
     initializeOwnedGemmOutput(destination, requiredStorageBytes);
     GemmRequest request(problem, destination, output.selection);
-    return referenceGemm(request, execution, backendImplementation);
+    GemmRunInfo runInfo = referenceGemm(request, execution, backendImplementation);
+    return {.output = std::move(destination), .runInfo = std::move(runInfo)};
 }
 
 }  // namespace roc::host_validation

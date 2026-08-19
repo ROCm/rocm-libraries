@@ -73,6 +73,7 @@ ReductionResult referenceSum(const ReductionProblem& problem);
 ReductionResult referenceSum(const ReductionProblem& problem,
                              const TensorStorageAllocator& allocator);
 
+ReductionRunInfo referenceMaximumAbsolute(const ReductionRequest& request);
 ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType);
 ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
                                          ScalarType accumulatorType);
