@@ -27,13 +27,16 @@
 #pragma once
 
 #include <atomic>
-#include <iostream>
+#include <cmath>
+#include <limits>
 #include <set>
 #include <vector>
 
-#include <Tensile/Debug.hpp>
-#include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/UtilsOrigami.hpp>
+
+#if ORIGAMI_ENABLE_NN
+#  include <origami/nn/nn.hpp>
+#endif
 
 #include <tensilelitehost/export.h>
 
@@ -53,6 +56,10 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+
+#if ORIGAMI_ENABLE_NN
+        origami::nn::library_models_t nn_models;
+#endif
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -144,6 +151,8 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
+            if(numSolutions == 0)
+                return rv;
             size_t                     m     = 1;
             size_t                     n     = 1;
             size_t                     k     = 1;
@@ -167,68 +176,71 @@ namespace TensileLite
 
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            const bool debug = Debug::Instance().printPropertyEvaluation();
+            const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
 
-            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
-                const bool hwMatch   = (*(solution->hardwarePredicate))(hardware);
-                const bool probMatch = (*(solution->problemPredicate))(problem);
-                const bool predicateMatch = hwMatch && probMatch;
-
-                if(debug)
-                {
-                    PredicateDebugger::printHeader(
-                        std::cout, "Prediction: " + solution->name());
-                    solution->hardwarePredicate->debugEval(hardware, std::cout);
-                    solution->problemPredicate->debugEval(problem, std::cout);
-                    PredicateDebugger::printFooter(std::cout, predicateMatch);
-                }
-
-                if(predicateMatch)
-                {
-                    rv.emplace_back(solution);
-                }
+            if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
+                miDataType = origami::data_type_t::XFloat32;
+            origami::problem_t origami_problem = {
+                .size        = {m, n, k},
+                .batch       = batch,
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                .mi_dtype    = miDataType,
+                .a_mx_block_size = 0, // MX Data types come from rocroller
+                .b_mx_block_size = 0, // MX Data types come from rocroller
             };
 
-            if(pAMDGPU && pAMDGPU->analyticalHardware)
+            origami::rank_options_t rank_options;
+#if ORIGAMI_ENABLE_NN
+            rank_options.library_models = &nn_models;
+            const std::size_t nnDepth   = numSolutions < 0
+                                              ? std::numeric_limits<std::size_t>::max()
+                                              : static_cast<std::size_t>(numSolutions);
+            rank_options.nn.min_scored  = nnDepth;
+#endif
+            auto prediction_result = origami::rank_configs(
+                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
+
+            for(const auto& r : prediction_result)
             {
-                auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
-
-                if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
-                    miDataType = origami::data_type_t::XFloat32;
-                origami::problem_t origami_problem = {
-                    .size        = {m, n, k},
-                    .batch       = batch,
-                    // CU budget hint; 0 = use all CUs.
-                    .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
-                    .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
-                    .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
-                    .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                    .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
-                    .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
-                    .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
-                    .mi_dtype    = miDataType,
-                    .a_mx_block_size = 0, // MX Data types come from rocroller
-                    .b_mx_block_size = 0, // MX Data types come from rocroller
-                };
-
-                auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
-
-                for(const auto& r : prediction_result)
+                if(std::isnan(r.latency))
+                    continue;
+                auto& solution = solution_list[r.config.index].second;
+                if((*(solution->hardwarePredicate))(hardware)
+                   && (*(solution->problemPredicate))(problem))
                 {
-                    if(r.config.index >= solution_list.size())
-                    {
-                        continue;
-                    }
-                    considerSolution(solution_list[r.config.index].second);
-                    if(rv.size() == numSolutions)
+                    rv.emplace_back(solution);
+                    if(rv.size() == static_cast<std::size_t>(numSolutions))
                     {
                         break;
                     }
                 }
             }
+
+            if(rv.empty())
+            {
+                for(const auto& r : prediction_result)
+                {
+                    auto& solution = solution_list[r.config.index].second;
+                    if((*(solution->hardwarePredicate))(hardware)
+                       && (*(solution->problemPredicate))(problem))
+                    {
+                        rv.emplace_back(solution);
+                        if(rv.size() == static_cast<std::size_t>(numSolutions))
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+
             // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
+            lastFindTopRetAll = (rv.size() < static_cast<std::size_t>(numSolutions));
             return rv;
         }
 
