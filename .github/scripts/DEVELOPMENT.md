@@ -149,13 +149,13 @@ When fixing a bug in an existing script:
 
 Tests that document *current* buggy behavior (written before the fix) should
 include a comment that:
-- References the AICK ticket
+- References the relevant issue or PR
 - Describes what currently happens
 - Shows what the assertion should change to after the fix
 
 ```python
 def test_some_buggy_behavior(self):
-    # AICK-NNNN: <description of what currently happens>.
+    # BUG: <description of what currently happens>.
     result = sut.some_function(...)
     self.assertEqual(result, CURRENT_WRONG_VALUE)
     # After the fix, assert:
@@ -249,7 +249,7 @@ git -C /tmp/test-apply apply /tmp/mylib.patch
 - [ ] Unit test in `tests/` reproduces the bug before the fix and passes after
 - [ ] `pytest .github/scripts/tests/ -v` passes locally
 - [ ] `--dry-run --debug` smoke test passes against a real merged PR number
-- [ ] PR references the AICK ticket
+- [ ] PR references the issue being fixed (link or description in PR body)
 
 ---
 

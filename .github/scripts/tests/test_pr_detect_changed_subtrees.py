@@ -4,7 +4,7 @@ Baseline unit tests for pr_detect_changed_subtrees.py.
 
 These tests document the CURRENT behavior of every testable function,
 including known-buggy behavior. Tests that capture a known bug are marked
-with a comment referencing the AICK ticket. When a bug is fixed:
+with a BUG comment. When a bug is fixed:
   1. Update the test to assert the DESIRED behavior (it will fail).
   2. Fix the production code until the test passes.
 """

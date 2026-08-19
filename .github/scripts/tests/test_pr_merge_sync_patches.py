@@ -4,7 +4,7 @@ Baseline unit tests for pr_merge_sync_patches.py.
 
 These tests document the CURRENT behavior of every testable function,
 including known-buggy behavior. Tests that capture a known bug are marked
-with a comment referencing the AICK ticket and describe WHAT CURRENTLY HAPPENS.
+with a BUG comment describing WHAT CURRENTLY HAPPENS.
 When a bug is fixed:
   1. Update the marked test to assert the DESIRED behavior (it will fail).
   2. Fix the production code until the test passes.
@@ -111,9 +111,9 @@ class GetSubtreeInfoTest(unittest.TestCase):
         self.assertEqual(result[0].name, "tensile")
 
     def test_unmatched_subtree_returns_empty_list(self):
-        # AICK-2009: when no subtrees match the config, the function returns []
-        # and logs a warning. The caller (main) then silently exits 0 — no error
-        # is surfaced. After the fix this should raise or trigger a non-zero exit.
+        # BUG: when no subtrees match the config, the function returns [] and
+        # logs a warning. The caller (main) then silently exits 0 — no error is
+        # surfaced. After the fix this should raise or trigger a non-zero exit.
         result = sut.get_subtree_info(self.config, ["projects/doesnotexist"])
         self.assertEqual(result, [])
 
@@ -147,22 +147,22 @@ class ExtractCommitMessageTest(unittest.TestCase):
     """
     Tests for _extract_commit_message_from_patch(patch_path: Path) -> str.
 
-    Each test documents current behavior. Tests marked AICK-2007 capture
-    the known bugs in commit-message extraction.
+    Each test documents current behavior. Tests marked BUG capture
+    known bugs in commit-message extraction.
 
     Fixtures (tests/fixtures/):
       simple.patch          - clean [PATCH] prefix + (#42) PR ref, multi-line body,
                               full diff section. The baseline happy-path input.
       no_pr_ref.patch       - [PATCH] prefix with no (#NN) suffix. Confirms the
                               PR-ref regex doesn't corrupt clean subjects.
-      multi_part.patch      - [PATCH 2/5] prefix. Exposes AICK-2007: only the bare
+      multi_part.patch      - [PATCH 2/5] prefix. Exposes BUG: only the bare
                               "[PATCH]" token is stripped; "[PATCH N/M]" leaks through.
-      mime_encoded.patch    - Subject encoded as =?UTF-8?q?...?=. Exposes AICK-2007:
+      mime_encoded.patch    - Subject encoded as =?UTF-8?q?...?=. Exposes BUG:
                               no MIME decoding is performed.
       folded_subject.patch  - Long subject folded across two lines (RFC 2822).
-                              Exposes AICK-2007: only the first line is captured.
+                              Exposes BUG: only the first line is captured.
       body_with_dashes.patch - Commit body contains a "---...---" visual separator.
-                              Exposes AICK-2007: any line starting with "---" stops
+                              Exposes BUG: any line starting with "---" stops
                               extraction, truncating the rest of the body.
     """
 
@@ -191,7 +191,7 @@ class ExtractCommitMessageTest(unittest.TestCase):
         self.assertTrue(result.startswith("Fix the thing without a PR ref"))
 
     def test_multi_part_patch_prefix_is_NOT_stripped(self):
-        # AICK-2007: [PATCH N/M] prefixes are NOT stripped by the current code.
+        # BUG: [PATCH N/M] prefixes are NOT stripped by the current code.
         # Only the literal string "[PATCH]" is matched. "[PATCH 2/5]" is left in.
         result = sut._extract_commit_message_from_patch(FIXTURES / "multi_part.patch")
         self.assertIn("[PATCH 2/5]", result)
@@ -199,8 +199,8 @@ class ExtractCommitMessageTest(unittest.TestCase):
         #   self.assertFalse(result.startswith("[PATCH"))
 
     def test_mime_encoded_subject_is_NOT_decoded(self):
-        # AICK-2007: MIME-encoded words (=?UTF-8?q?...?=) in the Subject line
-        # are left as raw encoded text. The current code performs no MIME decoding.
+        # BUG: MIME-encoded words (=?UTF-8?q?...?=) in the Subject line are left
+        # as raw encoded text. The current code performs no MIME decoding.
         result = sut._extract_commit_message_from_patch(FIXTURES / "mime_encoded.patch")
         self.assertIn("=?UTF-8?q?", result)
         # After the fix, the result should be plain text:
@@ -208,11 +208,11 @@ class ExtractCommitMessageTest(unittest.TestCase):
         #   self.assertIn("mémoire", result)
 
     def test_folded_subject_continuation_is_included_verbatim(self):
-        # AICK-2007: When git folds a long Subject across multiple lines (RFC 2822),
+        # BUG: when git folds a long Subject across multiple lines (RFC 2822),
         # the current code reads only the first line of the Subject header. The
         # continuation line (leading whitespace) is then picked up as body text,
-        # NOT joined into the subject. This produces a two-line "subject" where
-        # the second element is the raw continuation with its leading space.
+        # NOT joined into the subject. This produces a truncated subject where
+        # the remainder appears as the first line of the body.
         result = sut._extract_commit_message_from_patch(
             FIXTURES / "folded_subject.patch"
         )
@@ -233,9 +233,9 @@ class ExtractCommitMessageTest(unittest.TestCase):
         self.assertNotIn("\n---\n", result)
 
     def test_body_stops_at_first_line_starting_with_dashes(self):
-        # AICK-2007 (--- truncation): any line that starts with "---" is treated
-        # as the patch separator and stops extraction — even "------- separator"
-        # lines inside the commit body. This can truncate legitimate body content.
+        # BUG: any line that starts with "---" is treated as the patch separator
+        # and stops extraction — even "------- separator" lines inside the commit
+        # body. This can truncate legitimate body content.
         result = sut._extract_commit_message_from_patch(
             FIXTURES / "body_with_dashes.patch"
         )
@@ -445,9 +445,9 @@ class StageChangesTest(unittest.TestCase):
         self.assertIn("README.md", self._staged_files())
 
     def test_gitignored_file_is_NOT_staged(self):
-        # AICK-2008: `git add .` respects .gitignore and silently drops files
-        # that match ignore patterns, even if they were previously force-tracked.
-        # After the fix, the file SHOULD appear in staged files.
+        # BUG: `git add .` respects .gitignore and silently drops new untracked
+        # files that match ignore patterns. After the fix, the file SHOULD appear
+        # in staged files.
         (self.repo / ".gitignore").write_text("*.log\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -482,7 +482,7 @@ class StageChangesTest(unittest.TestCase):
         self.assertIn("generated/output.h", self._staged_files())
 
     def test_new_gitignored_file_added_by_patch_is_NOT_staged(self):
-        # AICK-2008: the real failure mode. If a patch introduces a brand-new file
+        # BUG: the real failure mode. If a patch introduces a brand-new file
         # whose path matches .gitignore (e.g. a generated header), `git add .`
         # silently skips it. The sync appears to succeed but the file is never
         # committed to the sub-repo.
@@ -552,7 +552,7 @@ class ApplyPatchTest(unittest.TestCase):
         self.assertIn("line2 modified", content)
 
     def test_applying_same_patch_twice_raises(self):
-        # AICK-2011: applying a patch a second time (when the changes are already
+        # BUG: applying a patch a second time (when the changes are already
         # present) raises a RuntimeError. There is no already-synced guard and
         # no --3way flag, so the second apply errors out instead of being a no-op.
         sut._apply_patch(self.repo, self.patch_file)
@@ -579,7 +579,7 @@ class ApplyPatchTest(unittest.TestCase):
 class PushChangesTest(unittest.TestCase):
 
     def test_push_failure_propagates_as_runtime_error(self):
-        # AICK-2010: push failures are not retried — they propagate immediately.
+        # BUG: push failures are not retried — they propagate immediately.
         # After the fix there should be retry logic before the error propagates.
         with patch.object(sut, "_run_git", side_effect=RuntimeError("push rejected")):
             with self.assertRaises(RuntimeError):
@@ -594,7 +594,7 @@ class PushChangesTest(unittest.TestCase):
         )
 
     def test_no_post_push_verification_performed(self):
-        # AICK-2010: after a successful push there is no verification step
+        # BUG: after a successful push there is no verification step
         # (e.g., fetching the remote to confirm the commit landed). The current
         # code calls _run_git exactly once (the push itself) and then returns.
         #
