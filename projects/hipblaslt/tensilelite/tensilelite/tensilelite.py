@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import GENERATOR_VERSION
+from . import GENERATOR_VERSION as __version__
 from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
@@ -51,7 +51,7 @@ from .Common.GlobalParameters import globalParameters, assignGlobalParameters, \
 from .Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from .Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from .Toolchain.Source import SourceToolchain, makeSourceToolchain
-from .Toolchain.Validators import validateToolchain, ToolchainDefaults
+from .Toolchain.Validators import deviceEnumeratorCandidates, validateToolchain, ToolchainDefaults
 from .Utilities.Decorators.Profile import profile
 from . import BenchmarkProblems
 from . import ClientWriter
@@ -511,7 +511,7 @@ def tensilelite(userArgs):
     print1("")
     print1(HR)
     print1("#")
-    print1("#  TensileLite v%s" % (GENERATOR_VERSION))
+    print1("#  TensileLite v%s" % (__version__))
 
     argParser = argparse.ArgumentParser(prog="tensilelite run")
     argParser.add_argument("ConfigFile", type=os.path.realpath, nargs="+",
@@ -519,7 +519,7 @@ def tensilelite(userArgs):
     argParser.add_argument("OutputPath", \
             help="Path to conduct benchmark and write output files")
     argParser.add_argument("--version", action="version", \
-            version="%(prog)s {version}".format(version=GENERATOR_VERSION))
+            version="%(prog)s {version}".format(version=__version__))
     argParser.add_argument("--alternate-format", dest="AlternateFormat", action="store_true",
             help="Alternate format for config_file(s): first file is alternate config "
             "and optional second file is size list")
@@ -673,7 +673,7 @@ def tensilelite(userArgs):
     if args.gpuTargets:
         enumerator = None  # not needed — ISA comes from --gpu-targets
     else:
-        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR if args.rocm_agent_enumerator is None else args.rocm_agent_enumerator)
+        enumerator = deviceEnumeratorCandidates(args.rocm_agent_enumerator)
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
