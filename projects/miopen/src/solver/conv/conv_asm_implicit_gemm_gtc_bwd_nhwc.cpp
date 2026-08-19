@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/conv/solvers.hpp>
+#include <iostream>
 #include <miopen/env.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/conv/invokers/impl_gemm_dynamic.hpp>
@@ -1009,6 +1010,10 @@ bool ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC::IsApplicable(
     // solver off such shapes; a large-tensor-capable solver is selected instead.
     {
         constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        std::cerr << "GATE_DEBUG bwd in=" << problem.GetIn().GetNumBytes()
+                  << " out=" << problem.GetOut().GetNumBytes()
+                  << " wei=" << problem.GetWeights().GetNumBytes()
+                  << " max=" << max_int32 << std::endl;
         if(problem.GetIn().GetNumBytes() > max_int32 ||
            problem.GetOut().GetNumBytes() > max_int32 ||
            problem.GetWeights().GetNumBytes() > max_int32)
