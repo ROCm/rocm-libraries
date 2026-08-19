@@ -75,15 +75,18 @@ namespace TensileLite::Client::reference_adapter
         std::vector<CopyBack>                                 copyBacks;
     };
 
-    class GemmProblemAdapter
+    // Move-only translation plan for one TensileLite invocation. The adapter
+    // borrows the problem and input descriptors supplied to
+    // translateGemmInvocation and must not outlive either object.
+    class GemmInvocationAdapter
     {
     public:
-        ~GemmProblemAdapter();
-        GemmProblemAdapter(GemmProblemAdapter&&) noexcept;
-        GemmProblemAdapter& operator=(GemmProblemAdapter&&) noexcept;
+        ~GemmInvocationAdapter();
+        GemmInvocationAdapter(GemmInvocationAdapter&&) noexcept;
+        GemmInvocationAdapter& operator=(GemmInvocationAdapter&&) noexcept;
 
-        GemmProblemAdapter(const GemmProblemAdapter&)            = delete;
-        GemmProblemAdapter& operator=(const GemmProblemAdapter&) = delete;
+        GemmInvocationAdapter(const GemmInvocationAdapter&)            = delete;
+        GemmInvocationAdapter& operator=(const GemmInvocationAdapter&) = delete;
 
         size_t batchCount() const;
 
@@ -97,18 +100,18 @@ namespace TensileLite::Client::reference_adapter
     private:
         struct State;
 
-        explicit GemmProblemAdapter(std::unique_ptr<const State> state);
+        explicit GemmInvocationAdapter(std::unique_ptr<const State> state);
 
-        friend std::variant<GemmProblemAdapter, TranslationFailure>
-            translateGemmProblem(ContractionProblemGemm const& problem,
-                                 ContractionInputs const&      inputs,
-                                 size_t                        elementsToValidate);
+        friend std::variant<GemmInvocationAdapter, TranslationFailure>
+            translateGemmInvocation(ContractionProblemGemm const& problem,
+                                    ContractionInputs const&      inputs,
+                                    size_t                        elementsToValidate);
 
         std::unique_ptr<const State> m_state;
     };
 
-    std::variant<GemmProblemAdapter, TranslationFailure>
-        translateGemmProblem(ContractionProblemGemm const& problem,
-                             ContractionInputs const&      inputs,
-                             size_t                        elementsToValidate);
+    std::variant<GemmInvocationAdapter, TranslationFailure>
+        translateGemmInvocation(ContractionProblemGemm const& problem,
+                                ContractionInputs const&      inputs,
+                                size_t                        elementsToValidate);
 } // namespace TensileLite::Client::reference_adapter

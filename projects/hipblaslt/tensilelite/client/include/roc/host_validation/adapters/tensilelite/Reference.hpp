@@ -51,7 +51,7 @@ namespace TensileLite
                                                        size_t elementsToValidate);
 
         // Compatibility wrappers around the structured product-private
-        // GemmProblemAdapter. Returns false without modifying outputs when
+        // GemmInvocationAdapter. Returns false without modifying outputs when
         // descriptor translation or the requested backend is unsupported.
         bool tryRuntimePointwiseGemm(ContractionProblemGemm const& problem,
                                      ContractionInputs const&      inputs,
