@@ -34,7 +34,7 @@ namespace rocsparse
 {
 #define LAUNCH_BSRSV_GTHR_DIM(bsize, wfsize, dim)                                            \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>), \
-                                       dim3((wfsize * nnzb - 1) / bsize + 1),                \
+                                       dim3((static_cast<int64_t>(wfsize) * nnzb - 1) / bsize + 1), \
                                        dim3(wfsize, bsize / wfsize),                         \
                                        0,                                                    \
                                        stream,                                               \
@@ -95,7 +95,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_LOWER_SHARED(bsize, wfsize, dim, arch)           \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_lower_shared<bsize, wfsize, dim, arch>),               \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
@@ -118,7 +118,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_UPPER_SHARED(bsize, wfsize, dim, arch)           \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_upper_shared<bsize, wfsize, dim, arch>),               \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
@@ -170,7 +170,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_LOWER_GENERAL(bsize, wfsize, arch)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_lower_general<bsize, wfsize, arch>),                   \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
@@ -193,7 +193,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_UPPER_GENERAL(bsize, wfsize, arch)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_upper_general<bsize, wfsize, arch>),                   \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
