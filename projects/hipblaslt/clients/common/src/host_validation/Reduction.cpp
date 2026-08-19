@@ -51,7 +51,7 @@ namespace hipblaslt::host_validation
 
         Tensor output(
             outputType, outputLayout, mutableStorage(arguments.output, outputType, outputLayout));
-        const ReductionRunInfo run = roc::host_validation::referenceSum(ReductionProblem(
+        const ReductionRunInfo run = roc::host_validation::referenceSum(ReductionRequest(
             Tensor(inputType, inputLayout, constStorage(arguments.input, inputType, inputLayout)),
             output,
             accumulatorType,
