@@ -27,10 +27,22 @@ precondition, not an alternative, to what follows.
 From that DoD ([`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md)), the steps a diff-only read misses —
 check each explicitly: **on-GPU numeric** test (not spec-only geometry), **dispatcher
 registration**, **end-user visibility** (the support matrix), **docs discoverability**
-([`instances/index.md`](platform/dsl_docs/instances/index.md)), and promote-to-`platform` for
-reusable optimizations. Run the local check runner green on each affected arch — a separate run
+([`instances/index.md`](platform/dsl_docs/instances/index.md)), **algorithm docs for a new
+pipeline** (the note below), and promote-to-`platform` for reusable optimizations. Run the local
+check runner green on each affected arch — a separate run
 per device, as the numeric lane only covers the visible GPU (see the *Local testing matrix* in
 [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md)).
+
+**Docs discoverability means the algorithm, not just the catalog row.** A *new pipeline* — a
+distinct schedule or data-movement strategy, not merely a knob — must be documented in its arch's
+builder docs (`library/builders/<arch>/<op>/ALGORITHM.md` for what it computes and *why it is
+shaped that way*, plus the `README.md`), per Process D in
+[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md). This is easiest to miss exactly when the pipeline
+lands *inside an existing kernel module* — a second self-contained builder/lowering body in the
+same `.py` reads like a variant of an already-documented family, so the diff looks doc-complete
+while a reader who did not write it cannot find what the new schedule does or when it is selected.
+The smell: a diff that adds a self-contained builder or lowering body but touches no
+`builders/**/{ALGORITHM,README}.md`.
 
 Four review-time notes that sit *on top of* the byte-identity contract and are easy to get wrong:
 
