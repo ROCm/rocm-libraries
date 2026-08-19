@@ -10,7 +10,12 @@ canonical reference sha256:
   (stable across incidental SSA-id renumbering), again from the Python
   reference.
 
-Recorded from a verified-good state:
+Recorded from a verified-good state. The counts below are **historical** — what
+the blessing run saw, not a description of the current tree. Families have been
+added since, and `RANGE_DRIFT` now fails the gate rather than being waived, so
+the two `RANGE_DRIFT` families here blessed fewer configs than a clean run
+would. For what the tree does today, run the gate; do not read these as a
+target. Re-blessing from a green run will replace them.
 - `--mode ll`: 62 GREEN / 2 RANGE_DRIFT / 0 DRIFT
 - `--mode ir --canonical`: 61 GREEN / 1 DRIFT / 2 RANGE_DRIFT
   (the single DRIFT, `gfx950_attention_tiled_2d_fastkv_regp`, is a known
@@ -26,6 +31,11 @@ Recorded from a verified-good state:
 Both must print `GOLDEN OK` (exit 0). A non-zero exit with `UNBLESSED CHANGE`
 or `MISSING` means an emitted `.ll` / canonical-ir changed for a blessed config
 — i.e. a behavioral change.
+
+`GOLDEN OK` answers *"does output match the blessed shas"*, and nothing else.
+It is not the parity verdict: the golden anchors the **Python** reference shas,
+so a C++-side divergence leaves them unchanged. A run can print its
+`=== GATE FAILURES ===` block and still exit 0 here. Read both.
 
 ## Re-bless (only with a reviewed, intended output change)
 

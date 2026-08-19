@@ -260,13 +260,13 @@ class ConfigSectionGenerator:
             GSU = metadata.get("GSU", 1)
             wave = metadata["wave"]
 
-            _, _, _, _, _, TilesPerCU, _, _, totalGranularity = MIDesign.calculate_granularities(
+            granular_metrics = MIDesign.calculate_granularities(
                 MT0, MT1, size[0], size[1], size[2],
                 self.config['CUs'], LSU, GSU, wave)
 
-            ceil_tpcu = math.ceil(TilesPerCU)
-            tile_term = ceil_tpcu - TilesPerCU
-            gran_term = 1.0 - totalGranularity
+            ceil_tpcu = math.ceil(granular_metrics.TilesPerCU)
+            tile_term = ceil_tpcu - granular_metrics.TilesPerCU
+            gran_term = 1.0 - granular_metrics.totalGranularity
             # GSU term is normalized across groups to prevent scale issues with tile/granularity terms.
             gsu_term = 1.0 - (GSU - gsu_min) / gsu_span
 

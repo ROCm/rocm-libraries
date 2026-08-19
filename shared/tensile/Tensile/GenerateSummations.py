@@ -33,7 +33,7 @@ import glob
 from shutil import copyfile
 from copy import deepcopy
 
-from .Utilities.ConditionalImports import yamlLoader
+from .Utilities.ConditionalImports import SafeLoader
 from . import LibraryIO
 
 from . import ClientWriter
@@ -141,7 +141,7 @@ def GenerateSummations(userArgs):
         tensileLibraryFile = os.path.join(libPath, "library", "TensileLibrary.yaml")
 
         stream = open(tensileLibraryFile, "r")
-        tensileLibrary = yaml.load(stream, yamlLoader)
+        tensileLibrary = yaml.load(stream, SafeLoader)
         stream.close()
 
         libSolutions = tensileLibrary["solutions"]
