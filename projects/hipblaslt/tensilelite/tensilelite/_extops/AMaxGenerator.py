@@ -40,7 +40,7 @@ from tensilelite.Common.Architectures import detectGlobalCurrentISA, isaToGfx, g
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
 from tensilelite.Common.Types import IsaVersion
-from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from tensilelite.Toolchain.Validators import ToolchainDefaults, deviceEnumeratorCandidates, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnack: bool = False):
     vgpr = ((vgpr+7)//8)*8
@@ -883,7 +883,7 @@ if __name__ == '__main__':
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
         assignGlobalParameters({})
-        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
+        enumerator = deviceEnumeratorCandidates()
         isa = detectGlobalCurrentISA(0, enumerator)
         arch = isaToGfx(isa)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
