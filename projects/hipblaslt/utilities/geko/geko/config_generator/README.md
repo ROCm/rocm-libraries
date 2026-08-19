@@ -20,7 +20,7 @@ python3 scripts/config_generator.py [--hipblaslt PATH] [--config PATH] [--output
 - **`--verbose` / `-v`:** `0` = WARNING, `1` = INFO (default `1`).
 - **`--no-shell-scripts`:** emit YAML and config log only (skip per-entity `.sh` and `run_*_all.sh`).
 
-The driver uses TensileLite installed in the active Python environment. When shell scripts are enabled (default), it may build and bind the TensileLite client via `geko.utils.build_tensilelite_client` (optional YAML key `BUILD_DIR` overrides the build directory). YAML-only runs (`write_shell_scripts=False`) skip the client build.
+TensileLite is consumed through its installed Python package. When shell scripts are enabled (default), the driver may build and bind the TensileLite client via `geko.utils.build_tensilelite_client` (optional YAML key `BUILD_DIR` overrides the build directory). YAML-only runs (`write_shell_scripts=False`) skip the client build.
 
 ### Python API
 
