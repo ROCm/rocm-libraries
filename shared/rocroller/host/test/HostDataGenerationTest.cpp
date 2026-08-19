@@ -22,7 +22,7 @@ namespace
     using namespace rocRoller;
     using namespace rocRoller::HostNumerics;
     using roc::host_validation::Layout;
-    using roc::host_validation::MxGenerationMode;
+    using roc::host_validation::MxDataRecipe;
     using roc::host_validation::MxGenerationProblem;
     using roc::host_validation::ScalarType;
     using roc::host_validation::Shape;
@@ -274,7 +274,7 @@ namespace
         problem.leadingDimension = leadingDimension;
         problem.blockAxis        = blockAxis;
         problem.blockSize        = 4;
-        problem.data.mode        = MxGenerationMode::Unbounded;
+        problem.data             = MxDataRecipe::unbounded();
         problem.seed             = seed;
         return problem;
     }
