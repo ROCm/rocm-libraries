@@ -80,7 +80,6 @@ public:
 
         auto [yTensorAttr, invRmsOut]
             = graphObj.rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
-        yTensorAttr->set_data_type(yType);
 
         if(testCase.isTraining)
         {
@@ -88,7 +87,7 @@ public:
         }
 
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
 
         if(activTestCase.reluLowerClip.has_value())
         {
