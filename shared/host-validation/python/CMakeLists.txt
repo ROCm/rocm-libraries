@@ -21,7 +21,9 @@ nanobind_add_module(
     host-validation-python
     NB_STATIC
     src/bindings.cpp
+    src/comparison_bindings.cpp
     src/generation_bindings.cpp
+    src/gemm_bindings.cpp
     src/mx_bindings.cpp
 )
 target_link_libraries(
