@@ -170,8 +170,7 @@ int main()
     if(rocfft_plan_description_create(&desc) != rocfft_status_success)
         throw std::runtime_error("failed to create plan description");
 
-    if(rocfft_plan_description_set_load_callback(
-           desc, "load_callback", code.data(), code.size(), cbdatas.data(), 0)
+    if(rocfft_plan_description_set_load_callback(desc, "load_callback", code.data(), code.size(), 0)
        != rocfft_status_success)
         throw std::runtime_error("failed to set load callback");
 
@@ -206,6 +205,10 @@ int main()
            != rocfft_status_success)
             throw std::runtime_error("rocfft_execution_info_set_work_buffer failed.");
     }
+
+    if(rocfft_execution_info_set_load_callback_data(info, cbdatas.data(), cbdatas.size())
+       != rocfft_status_success)
+        throw std::runtime_error("rocfft_execution_info_set_load_callback_data failed");
 
     // Execute plan
     if(rocfft_execute(plan, (void**)&x, nullptr, info) != rocfft_status_success)
