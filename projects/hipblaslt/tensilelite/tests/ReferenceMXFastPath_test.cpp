@@ -105,7 +105,7 @@ namespace
         inputs.mxsa = mxsa.data();
         inputs.mxsb = mxsb.data();
 
-        ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
+        ASSERT_TRUE(tryReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
         EXPECT_EQ(d, (std::vector<float>{128, 128, 128, 128}));
     }
 #endif
@@ -133,7 +133,7 @@ TEST(ReferenceMXFastPath, SupportsMixedInputTypesWithMXFP4)
     inputs.mxsa = mxsa.data();
     inputs.mxsb = mxsb.data();
 
-    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
     EXPECT_EQ(d[0], 64);
 }
 
@@ -187,8 +187,8 @@ TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
     inputsBlocked.mxsa = mxsa.data();
     inputsBlocked.mxsb = mxsb.data();
 
-    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
-    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputsBlocked, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
 
     const auto comparison = roc::host_validation::compare(
         roc::host_validation::Tensor::fromNative(std::span<const float>(dBlocked)),
@@ -250,8 +250,8 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
     inputsBlocked.mxsb = mxsb.data();
     inputsBlocked.bias = bias.data();
 
-    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
-    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputsBlocked, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
 
     const auto comparison = roc::host_validation::compare(
         roc::host_validation::Tensor::fromNative(std::span<const float>(dBlocked)),

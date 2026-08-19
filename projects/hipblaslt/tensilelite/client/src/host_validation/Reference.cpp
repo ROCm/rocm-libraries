@@ -26,25 +26,19 @@ namespace TensileLite
         using Client::reference_adapter::GemmInvocationAdapter;
         using Client::reference_adapter::TranslatedGemmBatch;
         using Client::reference_adapter::TranslationFailure;
+        using Client::ReferenceGemmExecution;
 
-        enum class RuntimeGemmExecution
-        {
-            Pointwise,
-            BlockedPreferred,
-            BlockedRequired,
-        };
-
-        class RuntimeGemmPolicy
+        class ReferenceGemmPolicy
         {
         public:
-            explicit RuntimeGemmPolicy(RuntimeGemmExecution execution)
+            explicit ReferenceGemmPolicy(ReferenceGemmExecution execution)
                 : m_execution(execution)
             {
             }
 
             ScalarType accumulatorType(ScalarType operationType) const
             {
-                if(m_execution != RuntimeGemmExecution::Pointwise
+                if(m_execution != ReferenceGemmExecution::Pointwise
                    && (operationType == ScalarType::Float16
                        || operationType == ScalarType::BFloat16))
                     return ScalarType::Float32;
@@ -53,16 +47,16 @@ namespace TensileLite
 
             bool requestsBlockedBackend() const
             {
-                return m_execution != RuntimeGemmExecution::Pointwise;
+                return m_execution != ReferenceGemmExecution::Pointwise;
             }
 
             bool requiresBlockedBackend() const
             {
-                return m_execution == RuntimeGemmExecution::BlockedRequired;
+                return m_execution == ReferenceGemmExecution::BlockedRequired;
             }
 
         private:
-            RuntimeGemmExecution m_execution;
+            ReferenceGemmExecution m_execution;
         };
 
         BlockedGemmBackend const& blockedGemmBackend()
@@ -74,43 +68,39 @@ namespace TensileLite
         class RunInfoRecorder
         {
         public:
-            explicit RunInfoRecorder(GemmRunInfo* combined)
-                : m_combined(combined)
-            {
-                if(m_combined != nullptr)
-                    *m_combined = {};
-            }
-
             void record(const GemmRunInfo& runInfo)
             {
-                if(m_combined == nullptr)
-                    return;
                 if(!m_hasRunInfo)
                 {
-                    m_combined->backendUsed    = runInfo.backendUsed;
-                    m_combined->fallbackReason = runInfo.fallbackReason;
+                    m_combined.backendUsed    = runInfo.backendUsed;
+                    m_combined.fallbackReason = runInfo.fallbackReason;
                     m_hasRunInfo               = true;
                 }
-                else if(m_combined->backendUsed != runInfo.backendUsed)
+                else if(m_combined.backendUsed != runInfo.backendUsed)
                 {
                     throw std::runtime_error(
                         "Reference GEMM batches selected different host backends.");
                 }
-                m_combined->outputElementsWritten += runInfo.outputElementsWritten;
-                m_combined->outputElementsCovered += runInfo.outputElementsCovered;
-                if(!m_combined->fallbackReason && runInfo.fallbackReason)
-                    m_combined->fallbackReason = runInfo.fallbackReason;
+                m_combined.outputElementsWritten += runInfo.outputElementsWritten;
+                m_combined.outputElementsCovered += runInfo.outputElementsCovered;
+                if(!m_combined.fallbackReason && runInfo.fallbackReason)
+                    m_combined.fallbackReason = runInfo.fallbackReason;
+            }
+
+            GemmRunInfo result() const
+            {
+                return m_combined;
             }
 
         private:
-            GemmRunInfo* m_combined   = nullptr;
-            bool         m_hasRunInfo = false;
+            GemmRunInfo m_combined;
+            bool        m_hasRunInfo = false;
         };
 
         bool executeGemmBatch(ContractionProblemGemm const& problem,
                               GemmInvocationAdapter const&  adapter,
                               TranslatedGemmBatch&          translated,
-                              RuntimeGemmPolicy const&      policy,
+                              ReferenceGemmPolicy const&    policy,
                               RunInfoRecorder&              recorder)
         {
             GemmRequest& request = translated.gemm();
@@ -156,60 +146,52 @@ namespace TensileLite
             return true;
         }
 
-        bool tryRuntimeGemm(ContractionProblemGemm const&      problem,
-                            ContractionInputs const&           inputs,
-                            size_t                             elementsToValidate,
-                            RuntimeGemmExecution               execution,
-                            roc::host_validation::GemmRunInfo* combinedRunInfo = nullptr)
+        std::optional<GemmRunInfo> tryTranslatedGemm(ContractionProblemGemm const& problem,
+                                                     ContractionInputs const&      inputs,
+                                                     size_t elementsToValidate,
+                                                     ReferenceGemmExecution execution)
         {
             using namespace Client::reference_adapter;
 
             auto translation = translateGemmInvocation(problem, inputs, elementsToValidate);
             if(std::holds_alternative<TranslationFailure>(translation))
-                return false;
+                return std::nullopt;
             GemmInvocationAdapter adapter = std::move(std::get<GemmInvocationAdapter>(translation));
 
-            const RuntimeGemmPolicy policy(execution);
-            const ScalarType        accumulatorType
+            const ReferenceGemmPolicy policy(execution);
+            const ScalarType          accumulatorType
                 = policy.accumulatorType(adapter.operationAccumulatorType());
-            RunInfoRecorder recorder(combinedRunInfo);
+            RunInfoRecorder recorder;
 
             for(size_t batch = 0; batch < adapter.batchCount(); ++batch)
             {
                 auto batchTranslation = adapter.translateBatch(batch, accumulatorType);
                 if(std::holds_alternative<TranslationFailure>(batchTranslation))
-                    return false;
+                    return std::nullopt;
                 TranslatedGemmBatch translated
                     = std::move(std::get<TranslatedGemmBatch>(batchTranslation));
 
                 if(!executeGemmBatch(problem, adapter, translated, policy, recorder))
-                    return false;
+                    return std::nullopt;
                 if(translated.epilogue)
                     referenceEpilogue(*translated.epilogue);
                 if(translated.biasReduction)
                     referenceSum(*translated.biasReduction);
                 translated.copyOutputs();
             }
-            return true;
+            return recorder.result();
         }
     } // namespace
 
     namespace Client
     {
-        bool tryRuntimePointwiseGemm(ContractionProblemGemm const& problem,
-                                     ContractionInputs const&      inputs,
-                                     size_t                        elementsToValidate)
+        std::optional<roc::host_validation::GemmRunInfo>
+            tryReferenceGemm(ContractionProblemGemm const& problem,
+                             ContractionInputs const&      inputs,
+                             size_t                        elementsToValidate,
+                             ReferenceGemmExecution        execution)
         {
-            return tryRuntimeGemm(
-                problem, inputs, elementsToValidate, RuntimeGemmExecution::Pointwise);
-        }
-
-        bool tryRuntimeBlockedGemm(ContractionProblemGemm const& problem,
-                                   ContractionInputs const&      inputs,
-                                   size_t                        elementsToValidate)
-        {
-            return tryRuntimeGemm(
-                problem, inputs, elementsToValidate, RuntimeGemmExecution::BlockedRequired);
+            return tryTranslatedGemm(problem, inputs, elementsToValidate, execution);
         }
 
         roc::host_validation::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
@@ -226,23 +208,21 @@ namespace TensileLite
                   && (problem.computeType() == rocisa::DataType::Half
                       || problem.computeType() == rocisa::DataType::BFloat16);
 
-            GemmRunInfo runInfo;
             if(!preserveStepwiseAccumulator)
             {
                 ScopedTimer timer("solve_cpu_fast");
-                if(tryRuntimeGemm(problem,
-                                  inputs,
-                                  elementsToValidate,
-                                  RuntimeGemmExecution::BlockedPreferred,
-                                  &runInfo))
-                    return runInfo;
+                if(const auto runInfo = tryReferenceGemm(problem,
+                                                        inputs,
+                                                        elementsToValidate,
+                                                        ReferenceGemmExecution::BlockedPreferred))
+                    return *runInfo;
             }
-            else if(tryRuntimeGemm(problem,
-                                   inputs,
-                                   elementsToValidate,
-                                   RuntimeGemmExecution::Pointwise,
-                                   &runInfo))
-                return runInfo;
+            else if(const auto runInfo
+                    = tryReferenceGemm(problem,
+                                       inputs,
+                                       elementsToValidate,
+                                       ReferenceGemmExecution::Pointwise))
+                return *runInfo;
 
             throw std::runtime_error(
                 concatenate("Unsupported host-validation GEMM descriptor: ",

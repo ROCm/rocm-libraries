@@ -21,7 +21,7 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
     most eight threads by default; `OMP_NUM_THREADS` overrides the cap.
     Consumers do not inherit OpenMP compile definitions or include `omp.h`.
 - `roc::host-validation`
-  - Transitional validation operations layered on the tensor core.
+  - Compiled validation operations layered on the tensor core.
   - Exports `axpby.hpp`, `comparison.hpp`, `epilogue.hpp`, `generation.hpp`,
     `gemm.hpp`, `layer_norm.hpp`, `reduction.hpp`, `softmax.hpp`,
     `structured_sparsity.hpp`, and the convenience umbrella `validation.hpp`.
@@ -214,9 +214,10 @@ synthetic packed Int4 and Int12 encodings.
 tag. Operations should dispatch at their boundary and run typed inner loops;
 they should not switch on `ScalarType` for every element.
 
-Everything else currently exposed through `validation.hpp` is transitional
-and may be renamed or replaced as the operation and runtime scalar-type APIs
-mature.
+Operation headers use one stable vocabulary: reusable `Problem` descriptors,
+caller-owned `Request` invocations, owning `Result` values, and `RunInfo`
+metadata. `validation.hpp` is only a convenience umbrella over those focused
+headers.
 
 ## Deterministic tensor generation
 
@@ -651,7 +652,7 @@ Consumers should need one of only these focused includes:
 ```cpp
 #include <roc/host_validation/tensor.hpp>      // stable tensor core
 #include <roc/host_validation/comparison.hpp>  // host comparison plan/report
-#include <roc/host_validation/validation.hpp>  // transitional validation operations
+#include <roc/host_validation/validation.hpp>  // all validation operations
 ```
 
 Installed consumers can use:
@@ -761,8 +762,7 @@ ctest --test-dir build/host-validation --output-on-failure
 ```
 
 An optional development benchmark compares the fused component path with a
-legacy-shaped two-pass 2:4 implementation using a Tensile-like column-major
-layout:
+baseline two-pass 2:4 implementation using a Tensile-like column-major layout:
 
 ```bash
 cmake -S shared/host-validation -B build/host-validation-benchmark \
