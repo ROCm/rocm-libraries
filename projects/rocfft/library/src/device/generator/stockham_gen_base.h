@@ -150,7 +150,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // lds storage buffer
     Variable lds_real{"lds_real", "real_type_t<scalar_type>", true, true};
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
-    Variable lds_row_padding{"lds_row_padding", "unsigned int"};
+    Variable lds_row_padding{"lds_row_padding", rtc_index_type(IndexType::_32BIT)};
 
     // hip thread grid dim
     Variable grid_dim{"gridDim.x", rtc_index_type(IndexType::_32BIT)};

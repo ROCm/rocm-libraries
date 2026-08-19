@@ -69,12 +69,12 @@ public:
     Variable data_elem{"data_elem", "scalar_type"};
     Variable length_N_blue{"length_N_blue", "const size_t"};
     Variable length_M_blue{"length_M_blue", "const size_t"};
-    Variable global_stride_in_0{"global_stride_in_0", "const size_t"};
-    Variable global_stride_in_1{"global_stride_in_1", "const size_t"};
-    Variable global_idist{"global_idist", "const size_t"};
-    Variable global_stride_out_0{"global_stride_out_0", "const size_t"};
-    Variable global_stride_out_1{"global_stride_out_1", "const size_t"};
-    Variable global_odist{"global_odist", "const size_t"};
+    Variable global_stride_in_0{"global_stride_in_0", "const index_type"};
+    Variable global_stride_in_1{"global_stride_in_1", "const index_type"};
+    Variable global_idist{"global_idist", "const index_type"};
+    Variable global_stride_out_0{"global_stride_out_0", "const index_type"};
+    Variable global_stride_out_1{"global_stride_out_1", "const index_type"};
+    Variable global_odist{"global_odist", "const index_type"};
     Variable transform_idx{"transform_idx", "const size_t"};
 
     //
