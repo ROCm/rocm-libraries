@@ -91,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ARG",
         help=(
             "Single GEMM: M N batch_count K DataType DestDataType ComputeDataType transA transB [MX]. "
-            "DataType/DestDataType/ComputeDataType are Tensile letters (e.g. B B S). "
+            "DataType/DestDataType/ComputeDataType are TensileLite letters (e.g. B B S). "
             "transA/transB: N, T, or C (conjugate-transpose, complex only). "
             "Optional 10th arg 'MX' enables Microscaling mode (only for F8/F4); requires --arch. "
             "Example: --inline 1024 1024 1 1024 F8 S S N T MX --arch gfx950"
@@ -372,7 +372,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
         m, n, batch_count, k, data_t, dest_t, comp_t, trans_a, trans_b, inline_mx = args.inline
         mx_scale = HARDWARE_MAP[args.arch]["mx_scale"] if args.arch and args.arch in HARDWARE_MAP else 3
         try:
-            gtype = GemmType.from_tensile(trans_a, trans_b, data_t, dest_t, comp_t)
+            gtype = GemmType.from_tensilelite(trans_a, trans_b, data_t, dest_t, comp_t)
             gconfig = GemmConfig(gtype, [[m, n, batch_count, k]], mx=inline_mx)
             if args.arch is not None:
                 validate_mx_arch_support([gconfig], args.arch)

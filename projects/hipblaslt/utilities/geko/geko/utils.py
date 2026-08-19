@@ -116,8 +116,7 @@ def build_tensilelite_client(
         f"default_build_dir={default_build_dir}"
     )
 
-    uses_default_build_dir = build_dir is None
-    if uses_default_build_dir:
+    if build_dir is None:
         build_dir = default_build_dir
 
     build_dir = Path(build_dir).resolve()
@@ -180,7 +179,7 @@ def build_tensilelite_client(
             client_path,
         ]
     )
-    return None if uses_default_build_dir else client_path
+    return client_path
 
 def _tensilelite_build_environment() -> dict[str, str]:
     """Return the active interpreter environment with an explicit ROCm identity."""
