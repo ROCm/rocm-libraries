@@ -80,6 +80,78 @@ void testRuntimeReferenceGemm() {
     require(fallback.runInfo.backendUsed == GemmBackend::Pointwise &&
                 fallback.runInfo.fallbackReason.has_value(),
             "Runtime reference GEMM backend fallback mismatch.");
+
+    const GemmProblem owningProblem = problem;
+    const Layout owningLayout(Shape{2, 2}, {7, 2}, 1);
+    const GemmOutputOptions owningOutput{
+        .layout = owningLayout,
+        .selection = OutputSelection::explicitIndices({0, 1}),
+    };
+    size_t allocatorCalls = 0;
+    const TensorStorageAllocator nonzeroAllocator = [&allocatorCalls](size_t bytes) {
+        ++allocatorCalls;
+        TensorStorage storage = TensorStorage::allocate(bytes);
+        std::fill(storage.mutableBytes().begin(), storage.mutableBytes().end(), std::byte{0xa5});
+        return storage;
+    };
+    const GemmResult owned = referenceGemm(owningProblem, owningOutput, nonzeroAllocator,
+                                           {.backend = GemmBackend::Pointwise});
+    require(allocatorCalls == 1 && owned.output.layout() == owningLayout &&
+                owned.runInfo.outputElementsWritten == 2 &&
+                owned.output.loadAs<float>({0, 0}) == expected[0] &&
+                owned.output.loadAs<float>({0, 1}) == expected[2] &&
+                owned.output.loadAs<float>({1, 0}) == 0 && owned.output.loadAs<float>({1, 1}) == 0,
+            "Owning reference GEMM result contract mismatch.");
+    std::array<float, 11> ownedStorage;
+    std::memcpy(ownedStorage.data(), owned.output.storage().data(), sizeof(ownedStorage));
+    std::array<float, 11> expectedOwnedStorage{};
+    expectedOwnedStorage[1] = expected[0];
+    expectedOwnedStorage[3] = expected[2];
+    require(ownedStorage == expectedOwnedStorage,
+            "Owning reference GEMM retained allocator-dependent storage.");
+
+    bool rejectedBeforeAllocation = false;
+    try {
+        (void)referenceGemm(
+            owningProblem,
+            {.layout = Layout::contiguous(Shape{1, 1}), .selection = OutputSelection::all()},
+            nonzeroAllocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 1,
+            "Owning reference GEMM allocated before validating its output layout.");
+
+    TensorStorage overlappingStorage = TensorStorage::allocate(4 * sizeof(float));
+    Tensor overlappingA = Tensor::wrapStorage(ScalarType::Float32, Layout::contiguous(Shape{2, 2}),
+                                              overlappingStorage);
+    overlappingA.storeFrom({0, 0}, 1.0f);
+    overlappingA.storeFrom({0, 1}, 2.0f);
+    overlappingA.storeFrom({1, 0}, 3.0f);
+    overlappingA.storeFrom({1, 1}, 4.0f);
+    const std::array<float, 4> overlapB{1, 0, 0, 1};
+    const std::array<float, 4> overlapC{};
+    GemmProblem overlapProblem(
+        GemmOperand(overlappingA),
+        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                              std::span<const float>(overlapB))),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                  std::span<const float>(overlapC)),
+        ScalarType::Float32, ScalarType::Float32);
+    size_t overlappingAllocatorCalls = 0;
+    const TensorStorageAllocator overlappingAllocator = [&overlappingStorage,
+                                                         &overlappingAllocatorCalls](size_t) {
+        ++overlappingAllocatorCalls;
+        return overlappingStorage;
+    };
+    bool rejectedOverlap = false;
+    try {
+        (void)referenceGemm(overlapProblem, {}, overlappingAllocator);
+    } catch (const std::invalid_argument&) {
+        rejectedOverlap = true;
+    }
+    require(rejectedOverlap && overlappingAllocatorCalls == 1,
+            "Owning reference GEMM accepted output storage that overlaps an input.");
 }
 
 void testZeroGemmScalarsSuppressNonFiniteOperands() {
