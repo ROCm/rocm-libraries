@@ -1819,12 +1819,16 @@ class TensorAndGemmTests(unittest.TestCase):
             operand_b.pre_quantization_scales = [
                 hv.VectorBinding(hv.from_numpy(pre_scale_b), hv.MatrixAxis.Column)
             ]
-            request = hv.GemmRequest(
+            problem = hv.GemmProblem(
                 operand_a,
                 operand_b,
                 hv.from_numpy(c_values),
                 output_type=hv.ScalarType.Float32,
                 accumulator_type=hv.ScalarType.Float32,
+            )
+            request = hv.GemmRequest(
+                problem,
+                hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 2])),
             )
             request.epilogue.alpha = 0.5
             request.epilogue.beta = -1.0
@@ -1862,24 +1866,29 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(hv.to_numpy(hv.reference_gemm(request)), expected)
         self.assertEqual(result.run_info.backend_used, hv.GemmBackend.Pointwise)
 
-    def test_gemm_object_api_optional_c_requires_zero_beta(self):
+    def test_gemm_object_api_requires_explicit_c_and_d(self):
         a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         b_values = np.asarray([[5.0], [6.0]], dtype=np.float32)
+        operand_a = hv.GemmOperand(hv.from_numpy(a_values))
+        operand_b = hv.GemmOperand(hv.from_numpy(b_values))
         request = hv.GemmRequest(
-            hv.GemmOperand(hv.from_numpy(a_values)),
-            hv.GemmOperand(hv.from_numpy(b_values)),
-            output_type=hv.ScalarType.Float32,
+            operand_a,
+            operand_b,
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 1])),
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 1])),
             accumulator_type=hv.ScalarType.Float32,
         )
 
-        self.assertIsNone(request.c)
         np.testing.assert_array_equal(
             hv.to_numpy(hv.reference_gemm(request)), a_values @ b_values
         )
 
         request.epilogue.beta = 1.0
-        with self.assertRaisesRegex(ValueError, "requires C"):
-            hv.reference_gemm(request)
+        np.testing.assert_array_equal(
+            hv.to_numpy(hv.reference_gemm(request)), a_values @ b_values
+        )
+        with self.assertRaises(TypeError):
+            hv.GemmRequest(operand_a, operand_b)
 
     def test_gemm_object_api_operand_quantization_and_block_scales(self):
         operand_a = hv.GemmOperand(
@@ -1913,7 +1922,8 @@ class TensorAndGemmTests(unittest.TestCase):
         request = hv.GemmRequest(
             operand_a,
             operand_b,
-            output_type=hv.ScalarType.Float32,
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1])),
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1])),
             accumulator_type=hv.ScalarType.Float32,
         )
         np.testing.assert_array_equal(
@@ -1932,7 +1942,8 @@ class TensorAndGemmTests(unittest.TestCase):
         request = hv.GemmRequest(
             operand_a,
             hv.GemmOperand(hv.from_numpy(b_values)),
-            output_type=hv.ScalarType.ComplexFloat32,
+            hv.Tensor(hv.ScalarType.ComplexFloat32, hv.Shape([2, 1])),
+            hv.Tensor(hv.ScalarType.ComplexFloat32, hv.Shape([2, 1])),
             accumulator_type=hv.ScalarType.ComplexFloat32,
         )
 
@@ -1950,9 +1961,9 @@ class TensorAndGemmTests(unittest.TestCase):
         request = hv.GemmRequest(
             hv.GemmOperand(hv.from_numpy(a_values)),
             hv.GemmOperand(hv.from_numpy(b_values)),
-            output_type=hv.ScalarType.Float32,
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3])),
+            hv.Tensor(hv.ScalarType.Float32, output_layout),
             accumulator_type=hv.ScalarType.Float32,
-            output_layout=output_layout,
         )
         execution = hv.GemmExecution(hv.GemmBackend.Blocked, True)
 

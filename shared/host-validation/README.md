@@ -420,31 +420,32 @@ Consumers construct this runtime API without passing product-specific types.
 The former typed reference GEMM and its function-pointer quantization bridge
 have been removed.
 
-Python exposes owning objects with the same numerical vocabulary:
+Python exposes the native caller-owned request model:
 
 ```python
 import roc_host_validation as hv
 
 a = hv.GemmOperand(hv.from_numpy(array_a))
 b = hv.GemmOperand(hv.from_numpy(array_b))
+d = hv.Tensor(hv.ScalarType.Float32, hv.Shape([m, n]))
 request = hv.GemmRequest(
     a,
     b,
-    c=hv.from_numpy(array_c),
-    output_type=hv.ScalarType.Float32,
+    hv.from_numpy(array_c),
+    d,
     accumulator_type=hv.ScalarType.Float32,
 )
 request.epilogue.alpha = 2.0
 result = hv.reference_gemm_result(request)
 ```
 
-The Python request retains Tensors and allocates a fresh output using
-`output_type` and an optional affine `output_layout`. C may be omitted only
-when beta is exactly zero. C++ requests retain shallow Tensor handles, so
-inputs, outputs, aliases, and allocator-backed storage remain alive for the
-synchronous call. The flat Python
+Python `VectorBinding`, `BlockScaleBinding`, `GemmOperand`, `GemmEpilogue`,
+`GemmProblem`, `GemmRequest`, and `GemmResult` are direct bindings of the C++
+types. C and D are explicit tensors; the result aliases D. Requests retain
+shallow Tensor handles, so inputs, outputs, aliases, and allocator-backed
+storage remain alive for the synchronous call. The flat Python
 `reference_gemm_result(a, b, c, ...)` overload remains as a compatibility
-wrapper while consumers migrate to the object API.
+wrapper that allocates a contiguous output.
 
 The optional `BlasGemmBackend` implements the same interface for dense
 F32/F64/complex GEMM and is selected through `GemmExecution`.

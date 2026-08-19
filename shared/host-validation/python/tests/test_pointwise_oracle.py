@@ -114,9 +114,8 @@ class PointwiseOracleTests(unittest.TestCase):
             hv.GemmOperand(hv.from_numpy(left)),
             hv.GemmOperand(hv.from_numpy(right)),
             hv.from_numpy(initial),
-            output_type=hv.ScalarType.Int32,
+            hv.Tensor(hv.ScalarType.Int32, output_layout),
             accumulator_type=hv.ScalarType.Int32,
-            output_layout=output_layout,
         )
         request.epilogue.alpha = alpha
         request.epilogue.beta = beta
@@ -196,7 +195,8 @@ class PointwiseOracleTests(unittest.TestCase):
         request = hv.GemmRequest(
             operand_a,
             operand_b,
-            output_type=hv.ScalarType.Float32,
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3])),
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3])),
             accumulator_type=hv.ScalarType.Float32,
         )
         request.output_selection = hv.OutputSelection.explicit_indices(selected)
@@ -260,9 +260,8 @@ class PointwiseOracleTests(unittest.TestCase):
                 strides=[5, 2],
                 offset=1,
             ),
-            output_type=hv.ScalarType.ComplexFloat32,
+            hv.Tensor(hv.ScalarType.ComplexFloat32, output_layout),
             accumulator_type=hv.ScalarType.ComplexFloat32,
-            output_layout=output_layout,
         )
         request.epilogue.alpha = complex(alpha)
         request.epilogue.beta = complex(beta)
