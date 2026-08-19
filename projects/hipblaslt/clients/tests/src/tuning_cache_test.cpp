@@ -682,8 +682,8 @@ namespace
     }
 
     // A tuned row must carry everything a later lookup rebuilds the key from,
-    // plus the identity and baseline fields.
-    TEST_F(TuningCache, TuneWritesRowWithIdentityAndBaseline)
+    // plus the identity fields validation depends on.
+    TEST_F(TuningCache, TuneWritesRowWithIdentityAndKeyFields)
     {
         enterMode("tune", m_path);
         ASSERT_TRUE(runGemm(1024, 512, 1024));
@@ -698,9 +698,13 @@ namespace
 
         EXPECT_TRUE(fileHasColumn(m_path, "kernel_name"));
         EXPECT_TRUE(fileHasColumn(m_path, "schema_version"));
-        EXPECT_TRUE(fileHasColumn(m_path, "baseline_index"));
         EXPECT_TRUE(fileHasColumn(m_path, "compute_input_type_a"));
         EXPECT_TRUE(fileHasColumn(m_path, "gcnArchName"));
+
+        // Nothing reads these back, so writing them would commit the format to
+        // data with no consumer.
+        EXPECT_FALSE(fileHasColumn(m_path, "baseline_index"));
+        EXPECT_FALSE(fileHasColumn(m_path, "baseline_us"));
     }
 
     // Exercise the shipping-default exhaustive enumeration independently from

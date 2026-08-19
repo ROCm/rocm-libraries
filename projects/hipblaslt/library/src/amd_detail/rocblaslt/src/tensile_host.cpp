@@ -3240,29 +3240,6 @@ TensileLite::ProblemOverride
     po.archName        = device.archName;
     po.cuCount         = device.cuCount;
 
-    // Behind its own switch, not the general info level. This runs on every key
-    // build, which is every heuristic call on the hit path, and the formatting
-    // alone measured a 7.7x slowdown when info logging was enabled.
-    static const bool dumpKeys = getenv("HIPBLASLT_TUNING_DEBUG_KEY") != nullptr;
-    if(dumpKeys && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
-    {
-        std::ostringstream msg;
-        msg << "tuning-cache: key hash=" << std::hash<TensileLite::ProblemOverride>{}(po)
-            << " mnk=" << po.m << "x" << po.n << "x" << po.k << " ld=" << po.colStrideA << ","
-            << po.colStrideB << "," << po.colStrideC << "," << po.colStrideD
-            << " st=" << po.batchStrideA << "," << po.batchStrideB << "," << po.batchStrideC << ","
-            << po.batchStrideD << " epi=" << po.epilogue << " bias=" << po.hasBias
-            << " biasT=" << po.biasType << " auxT=" << po.auxType << " bm=" << po.batchMode
-            << " sk=" << po.streamkTileScheduling << " sm=" << po.smCountTarget
-            << " tci=" << po.computeInputTypeA << "," << po.computeInputTypeB
-            << " types=" << (int)po.inputTypeA << "," << (int)po.inputTypeB << ","
-            << (int)po.outputTypeC << "," << (int)po.outputTypeD << "," << (int)po.computeType
-            << " scale=" << po.scaleAFormat << "," << po.scaleBFormat << "," << po.hasScaleA
-            << po.hasScaleB << po.hasScaleC << po.hasScaleD << po.hasScaleE
-            << po.hasScaleAlphaVec << " amax=" << po.hasAmaxD << " grad=" << po.gradient;
-        log_info(__func__, msg.str());
-    }
-
     return po;
 }
 

@@ -868,9 +868,7 @@ namespace TensileLite
         else
             entry.requiredWorkspaceBytes
                 = static_cast<size_t>(std::max<int64_t>(0, num(row, "required_workspace")));
-        entry.winnerTimeUs           = real(row, "us");
-        entry.baselineIndex          = static_cast<int32_t>(num(row, "baseline_index", -1));
-        entry.baselineTimeUs         = real(row, "baseline_us");
+        entry.winnerTimeUs = real(row, "us");
 
         return std::make_pair(po, entry);
     }
@@ -1034,13 +1032,6 @@ namespace TensileLite
         column("kernel_name", entry.kernelName.value_or(std::string{}));
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
-
-        // Recorded but not read back in this milestone. What default selection
-        // would have chosen, and how fast it was, cannot be reconstructed after
-        // the fact, and without it the only answer to "has the default caught
-        // up with my tuned entry" is to re-tune everything.
-        column("baseline_index", entry.baselineIndex);
-        column("baseline_us", entry.baselineTimeUs);
 
         out << "    " << names.str() << "\n" << values.str() << std::endl;
 

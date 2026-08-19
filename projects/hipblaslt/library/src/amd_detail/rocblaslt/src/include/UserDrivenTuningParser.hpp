@@ -450,13 +450,14 @@ namespace TensileLite
         // budget differs rather than only accept or reject.
         size_t requiredWorkspaceBytes = 0;
 
-        // Measurement of the winner, and of what default selection would have
-        // chosen at tuning time. Nothing reads the baseline yet; it is recorded
-        // because it cannot be reconstructed later and it is what a future
-        // "re-tune only entries now slower than default" would need.
-        double  winnerTimeUs      = 0.0;
-        int32_t baselineIndex     = -1;
-        double  baselineTimeUs    = 0.0;
+        // Measurement of the winner, which is persisted, and of what default
+        // selection would have chosen at tuning time, which is not: the baseline
+        // pair only carries the numbers from the benchmarker out to the level-4
+        // diagnostic that compares them. Persisting a column nothing reads would
+        // commit the file format to data with no consumer.
+        double  winnerTimeUs   = 0.0;
+        int32_t baselineIndex  = -1;
+        double  baselineTimeUs = 0.0;
     };
 
     std::optional<std::pair<ProblemOverride, TunedEntry>>
