@@ -106,7 +106,22 @@ namespace TensileLite
             // Large problem sizes may cause global memory to run out of space 
             // when loading the module, which can lead to hipErrorLaunchFailure or hipErrorNoBinaryForGpu.
             if(error == hipErrorLaunchFailure || error == hipErrorNoBinaryForGpu)
-            {        
+            {
+                std::string lazyArch;
+                std::string lazyDir;
+                {
+                    std::lock_guard<std::mutex> guard(m_access);
+                    lazyArch = m_lazyLoadArchitecture;
+                    lazyDir  = m_codeObjectDirectory;
+                }
+
+                // The first primary code-object load can fail before a caller
+                // initializes lazy helper loading. Preserve that HIP error
+                // rather than masking it with an empty-architecture helper
+                // lookup such as Kernels.so-000-.hsaco.
+                if(lazyArch.empty() || lazyDir.empty())
+                    return error;
+
                 // Reset the error code from previous hipModuleLoad failure
                 (void)hipGetLastError();
                 std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
@@ -154,10 +169,6 @@ namespace TensileLite
                 m_currentRotationCopy.store(0);
                 m_access.unlock();
                 // Need to re-run lazy-loading for hsaco(helper kernels) module reload
-                std::string lazyArch;
-                std::string lazyDir;
-                lazyArch = m_lazyLoadArchitecture;
-                lazyDir  = m_codeObjectDirectory;
                 HIP_CHECK_RETURN_WITH_LOG(initializeLazyLoading(lazyArch, lazyDir),
                     [&](hipError_t error_t) {
                         std::cerr << "initializeLazyLoading after module clear failed: " << std::endl
@@ -457,35 +468,38 @@ namespace TensileLite
             m_access.unlock();
         }
 
-        hipError_t SolutionAdapter::initializeLazyLoading(std::string arch,
-                                                          std::string codeObjDir)
+        void SolutionAdapter::setLazyLoadingContext(std::string arch, std::string codeObjDir)
         {
-            //Ensure there's a slash at the end of the path
-            if(!codeObjDir.empty())
-            {
-                if(codeObjDir.back() != '/')
-                {
-                    codeObjDir += '/';
-                }
-            }
+            if(!codeObjDir.empty() && codeObjDir.back() != '/')
+                codeObjDir += '/';
 
-            //Remove xnack and sramecc qualifiers
+            // Remove xnack and sramecc qualifiers.
             size_t loc = arch.find(":");
             if(loc != std::string::npos)
                 arch.resize(loc);
 
-            std::string helperKernelName = std::string("Kernels.so-000-") + arch;
+            std::lock_guard<std::mutex> guard(m_access);
+            m_lazyLoadArchitecture = std::move(arch);
+            m_codeObjectDirectory  = std::move(codeObjDir);
+        }
 
-            m_access.lock();
+        hipError_t SolutionAdapter::initializeLazyLoading(std::string arch,
+                                                          std::string codeObjDir)
+        {
+            setLazyLoadingContext(std::move(arch), std::move(codeObjDir));
 
-            // Record for module reload
-            m_lazyLoadArchitecture = arch;
-            m_codeObjectDirectory  = codeObjDir;
-
-            //If required code object file hasn't yet been loaded, load it now
-            bool loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
-                          != m_loadedCOFiles.end();
-            m_access.unlock();
+            std::string lazyArch;
+            std::string lazyDir;
+            bool        loaded;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                lazyArch = m_lazyLoadArchitecture;
+                lazyDir  = m_codeObjectDirectory;
+                std::string helperKernelName = std::string("Kernels.so-000-") + lazyArch;
+                // If required code object file hasn't yet been loaded, load it now.
+                loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
+                         != m_loadedCOFiles.end();
+            }
 
             if(!loaded)
             {
@@ -493,8 +507,8 @@ namespace TensileLite
                 //Try xnack variations
                 for(auto ver : {"", "-xnack-", "-xnack+"})
                 {
-                    std::string modifiedCOName = helperKernelName + ver + ".hsaco";
-                    err                        = loadCodeObjectFile(codeObjDir + modifiedCOName);
+                    std::string modifiedCOName = "Kernels.so-000-" + lazyArch + ver + ".hsaco";
+                    err                        = loadCodeObjectFile(lazyDir + modifiedCOName);
 
                     if(err == hipSuccess)
                     {
