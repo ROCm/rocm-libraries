@@ -1084,7 +1084,7 @@ namespace TensileLite::Client::reference_adapter
 
             if(m_state->useStandaloneEpilogue)
             {
-                EpilogueProblem epilogue(*translated.intermediate, productOutput, accumulatorType);
+                EpilogueRequest epilogue(*translated.intermediate, productOutput, accumulatorType);
                 if(!m_state->problem.useGradient())
                     epilogue.bias = source.bias;
                 epilogue.activation           = m_state->activation;
@@ -1101,9 +1101,12 @@ namespace TensileLite::Client::reference_adapter
                     translated.biasWorkspace.emplace(accumulatorType,
                                                      Shape{m_state->m, m_state->n});
                     epilogue.rawOutput = *translated.biasWorkspace;
+                    epilogue.rawOutputType = epilogue.rawOutput->type();
                 }
                 epilogue.auxiliaryInput  = source.auxiliaryInput;
                 epilogue.auxiliaryOutput = source.auxiliaryOutput;
+                if(epilogue.auxiliaryOutput)
+                    epilogue.auxiliaryOutputType = epilogue.auxiliaryOutput->type();
                 if(m_state->problem.useGradient())
                 {
                     epilogue.activationApplication = ActivationApplication::Gradient;
@@ -1118,6 +1121,7 @@ namespace TensileLite::Client::reference_adapter
                 if(m_state->amax)
                 {
                     epilogue.amax           = m_state->amax;
+                    epilogue.amaxType       = epilogue.amax->type();
                     epilogue.accumulateAmax = batch != 0;
                 }
                 translated.epilogue.emplace(std::move(epilogue));

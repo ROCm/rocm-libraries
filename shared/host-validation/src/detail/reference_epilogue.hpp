@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <optional>
 #include <roc/host_validation/epilogue.hpp>
 #include <stdexcept>
@@ -66,17 +68,87 @@ Accumulator activationGradientFactor(Activation activation, Accumulator value,
     throw std::invalid_argument("Unsupported epilogue activation.");
 }
 
-inline void validateEpilogue(const EpilogueProblem& problem) {
+struct EpiloguePlan {
+    size_t selectedElements = 0;
+};
+
+inline void validateEpilogueValueType(ScalarType type, const char* name) {
+    if (!isConcreteScalarType(type))
+        throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                    " type is invalid.");
+    const ScalarCategory category = scalarTypeInfo(type).category;
+    if (category == ScalarCategory::Complex || category == ScalarCategory::Scale)
+        throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                    " must use a real arithmetic scalar type.");
+}
+
+inline void validateEpilogueActivation(const EpilogueProblem& problem) {
+    switch (problem.activationApplication) {
+        case ActivationApplication::Forward:
+        case ActivationApplication::Gradient:
+            break;
+        default:
+            throw std::invalid_argument("Reference epilogue activation application is invalid.");
+    }
+    switch (problem.activation) {
+        case Activation::None:
+        case Activation::Absolute:
+        case Activation::ClippedRelu:
+        case Activation::Relu:
+        case Activation::Gelu:
+        case Activation::GeluDerivative:
+        case Activation::GeluScaling:
+        case Activation::LeakyRelu:
+        case Activation::ReluDerivative:
+        case Activation::Sigmoid:
+        case Activation::Tanh:
+        case Activation::Silu:
+        case Activation::Swish:
+        case Activation::Clamp:
+            break;
+        default:
+            throw std::invalid_argument("Reference epilogue activation is invalid.");
+    }
+    if (problem.activationApplication == ActivationApplication::Gradient &&
+        (problem.activation == Activation::GeluDerivative ||
+         problem.activation == Activation::ReluDerivative))
+        throw std::invalid_argument(
+            "Gradient application does not accept an explicit derivative activation.");
+}
+
+template <typename Accumulator>
+inline void validateEpilogueScalars(const EpilogueProblem& problem) {
+    (void)runtimeScalar<Accumulator>(problem.outputScale, "output scale");
+    (void)runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
+    (void)runtimeScalar<Accumulator>({problem.activationParameter0, 0.0}, "activation parameter 0");
+    (void)runtimeScalar<Accumulator>({problem.activationParameter1, 0.0}, "activation parameter 1");
+}
+
+inline EpiloguePlan validateEpilogueProblem(const EpilogueProblem& problem) {
     requireRank(problem.input.shape(), 2, "Reference epilogue", "input");
-    requireRank(problem.output.shape(), 2, "Reference epilogue", "output");
-    if (problem.input.shape() != problem.output.shape())
-        throw std::invalid_argument("Reference epilogue input/output shape mismatch.");
+    validateEpilogueValueType(problem.input.type(), "input");
+    validateEpilogueValueType(problem.outputType, "output");
+    if (problem.rawOutputType) validateEpilogueValueType(*problem.rawOutputType, "raw output");
+    if (problem.auxiliaryOutputType)
+        validateEpilogueValueType(*problem.auxiliaryOutputType, "auxiliary output");
+    if (problem.amaxType) validateEpilogueValueType(*problem.amaxType, "AMax output");
+
     if (problem.computeType != ScalarType::Float32 && problem.computeType != ScalarType::Float64 &&
         problem.computeType != ScalarType::Int32)
         throw std::invalid_argument("Reference epilogue supports F32, F64, and I32 compute types.");
-    if (scalarTypeInfo(problem.input.type()).category == ScalarCategory::Complex ||
-        scalarTypeInfo(problem.output.type()).category == ScalarCategory::Complex)
-        throw std::invalid_argument("Reference epilogue does not support complex tensors.");
+    validateEpilogueActivation(problem);
+    switch (problem.outputConversion) {
+        case OutputConversion::Default:
+            break;
+        case OutputConversion::SaturatingInt8:
+            if (problem.outputType != ScalarType::Int8)
+                throw std::invalid_argument(
+                    "Saturating output conversion requires an Int8 output tensor.");
+            break;
+        default:
+            throw std::invalid_argument("Reference epilogue output conversion is invalid.");
+    }
+
     if (problem.computeType == ScalarType::Int32) {
         switch (problem.activation) {
             case Activation::None:
@@ -91,36 +163,127 @@ inline void validateEpilogue(const EpilogueProblem& problem) {
                 throw std::invalid_argument(
                     "Int32 reference epilogue does not support floating-point activation.");
         }
-        if (problem.amax)
+        if (problem.amaxType)
             throw std::invalid_argument("Int32 reference epilogue does not support AMax.");
+        validateEpilogueScalars<int32_t>(problem);
+    } else if (problem.computeType == ScalarType::Float32) {
+        validateEpilogueScalars<float>(problem);
+    } else {
+        validateEpilogueScalars<double>(problem);
     }
 
     auto validateMatrix = [&](const auto& view, const char* name) {
         requireRank(view.shape(), 2, "Reference epilogue", name);
-        if (view.shape() != problem.output.shape())
+        if (view.shape() != problem.input.shape())
             throw std::invalid_argument(std::string("Reference epilogue ") + name +
                                         " shape mismatch.");
+        validateEpilogueValueType(view.type(), name);
     };
-    if (problem.rawOutput) validateMatrix(*problem.rawOutput, "raw output");
-    if (problem.auxiliaryOutput) validateMatrix(*problem.auxiliaryOutput, "auxiliary output");
     if (problem.auxiliaryInput) validateMatrix(*problem.auxiliaryInput, "auxiliary input");
     if (problem.gateResidual) validateMatrix(*problem.gateResidual, "gate residual");
     if (problem.activationApplication == ActivationApplication::Gradient && !problem.auxiliaryInput)
         throw std::invalid_argument("Gradient epilogue requires an auxiliary input tensor.");
     if (problem.bias) {
+        if (problem.bias->axis != MatrixAxis::Row && problem.bias->axis != MatrixAxis::Column)
+            throw std::invalid_argument("Reference epilogue bias axis is invalid.");
         const size_t expected =
-            axisExtent(problem.bias->axis, problem.output.shape()[0], problem.output.shape()[1]);
+            axisExtent(problem.bias->axis, problem.input.shape()[0], problem.input.shape()[1]);
         validateRuntimeVector(problem.bias->values, expected, "Reference epilogue", "bias");
-        if (scalarTypeInfo(problem.bias->values.type()).category == ScalarCategory::Complex)
-            throw std::invalid_argument("Reference epilogue bias must be real.");
+        validateEpilogueValueType(problem.bias->values.type(), "bias");
     }
-    if (problem.amax && problem.amax->shape().elementCount() != 1)
-        throw std::invalid_argument("Reference epilogue AMax output must contain one element.");
-    (void)problem.outputSelection.selectedCount(problem.output.shape().elementCount());
+    return {
+        .selectedElements =
+            problem.outputSelection.selectedCount(problem.input.shape().elementCount()),
+    };
+}
+
+inline EpiloguePlan validateEpilogueRequest(const EpilogueRequest& request) {
+    EpiloguePlan plan = validateEpilogueProblem(request);
+    requireRank(request.output.shape(), 2, "Reference epilogue", "output");
+    if (request.output.shape() != request.input.shape())
+        throw std::invalid_argument("Reference epilogue input/output shape mismatch.");
+    if (request.output.type() != request.outputType)
+        throw std::invalid_argument("Reference epilogue output type differs from the problem.");
+    if (request.rawOutput.has_value() != request.rawOutputType.has_value())
+        throw std::invalid_argument(
+            "Reference epilogue raw-output destination does not match the problem.");
+    if (request.auxiliaryOutput.has_value() != request.auxiliaryOutputType.has_value())
+        throw std::invalid_argument(
+            "Reference epilogue auxiliary-output destination does not match the problem.");
+    if (request.amax.has_value() != request.amaxType.has_value())
+        throw std::invalid_argument(
+            "Reference epilogue AMax destination does not match the problem.");
+
+    auto validateOutputMatrix = [&](const std::optional<Tensor>& tensor,
+                                    const std::optional<ScalarType>& type, const char* name) {
+        if (!tensor) return;
+        requireRank(tensor->shape(), 2, "Reference epilogue", name);
+        if (tensor->shape() != request.input.shape())
+            throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                        " shape mismatch.");
+        if (tensor->type() != *type)
+            throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                        " type differs from the problem.");
+    };
+    validateOutputMatrix(request.rawOutput, request.rawOutputType, "raw output");
+    validateOutputMatrix(request.auxiliaryOutput, request.auxiliaryOutputType, "auxiliary output");
+    if (request.amax) {
+        if (request.amax->shape().elementCount() != 1)
+            throw std::invalid_argument("Reference epilogue AMax output must contain one element.");
+        if (request.amax->type() != *request.amaxType)
+            throw std::invalid_argument("Reference epilogue AMax type differs from the problem.");
+    } else if (request.accumulateAmax) {
+        throw std::invalid_argument("Reference epilogue cannot accumulate an absent AMax output.");
+    }
+    return plan;
+}
+
+inline bool epilogueTensorStorageOverlaps(const Tensor& left, const Tensor& right) {
+    if (left.storage().empty() || right.storage().empty()) return false;
+    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
+    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
+    const uintptr_t leftEnd = leftBegin + left.storage().size();
+    const uintptr_t rightEnd = rightBegin + right.storage().size();
+    return leftBegin < rightEnd && rightBegin < leftEnd;
+}
+
+inline void validateOwnedEpilogueStorage(const EpilogueRequest& request) {
+    const std::array<const Tensor*, 4> outputs{
+        &request.output,
+        request.rawOutput ? &*request.rawOutput : nullptr,
+        request.auxiliaryOutput ? &*request.auxiliaryOutput : nullptr,
+        request.amax ? &*request.amax : nullptr,
+    };
+    const std::array<const Tensor*, 4> inputs{
+        &request.input,
+        request.auxiliaryInput ? &*request.auxiliaryInput : nullptr,
+        request.gateResidual ? &*request.gateResidual : nullptr,
+        request.bias ? &request.bias->values : nullptr,
+    };
+    for (const Tensor* output : outputs) {
+        if (!output) continue;
+        for (const Tensor* input : inputs) {
+            if (input && epilogueTensorStorageOverlaps(*output, *input))
+                throw std::invalid_argument(
+                    "Owning reference epilogue output overlaps an input tensor.");
+        }
+    }
+    for (size_t left = 0; left < outputs.size(); ++left) {
+        if (!outputs[left]) continue;
+        for (size_t right = left + 1; right < outputs.size(); ++right) {
+            if (outputs[right] && epilogueTensorStorageOverlaps(*outputs[left], *outputs[right]))
+                throw std::invalid_argument("Owning reference epilogue result tensors overlap.");
+        }
+    }
+}
+
+inline void initializeOwnedEpilogueTensor(Tensor tensor) {
+    forEachIndex(tensor.shape(),
+                 [&](std::span<const size_t> indices, size_t) { tensor.storeFrom(indices, 0.0); });
 }
 
 template <typename Accumulator>
-EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
+EpilogueRunInfo referenceEpilogueTyped(const EpilogueRequest& problem) {
     const RuntimeMatrixReader<Accumulator> input(problem.input);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.output, problem.outputConversion);
     std::optional<RuntimeMatrixWriter<Accumulator>> rawOutput;

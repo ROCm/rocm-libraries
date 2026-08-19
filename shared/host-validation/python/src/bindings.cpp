@@ -96,13 +96,6 @@ struct PythonGemmRequest {
     OutputSelection outputSelection = OutputSelection::all();
 };
 
-struct PythonEpilogueResult {
-    Tensor output;
-    std::optional<Tensor> rawOutput;
-    std::optional<Tensor> auxiliaryOutput;
-    std::optional<Tensor> amax;
-};
-
 std::vector<size_t> dimensions(const Shape& shape) {
     return {shape.dimensions().begin(), shape.dimensions().end()};
 }
@@ -522,7 +515,7 @@ LayerNormResult referenceLayerNormOwned(const Tensor& input, ScalarType outputTy
     return referenceLayerNorm(problem);
 }
 
-PythonEpilogueResult referenceEpilogueOwned(
+EpilogueResult referenceEpilogueOwned(
     const Tensor& input, ScalarType outputType, ScalarType computeType, std::optional<Tensor> bias,
     MatrixAxis biasAxis, Activation activation, ActivationApplication activationApplication,
     std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
@@ -530,20 +523,12 @@ PythonEpilogueResult referenceEpilogueOwned(
     std::complex<double> auxiliaryScale, double activationParameter0, double activationParameter1,
     OutputConversion outputConversion, bool includeRawOutput, bool includeAmax,
     OutputSelection outputSelection) {
-    Tensor output(outputType, input.shape());
-    std::optional<Tensor> rawOutput;
-    std::optional<Tensor> auxiliaryOutput;
-    std::optional<Tensor> amax;
-    if (includeRawOutput) rawOutput.emplace(computeType, input.shape());
-    if (auxiliaryOutputType) auxiliaryOutput.emplace(*auxiliaryOutputType, input.shape());
-    if (includeAmax) amax.emplace(computeType, Shape{1});
-
-    EpilogueProblem problem(input, output, computeType);
-    if (rawOutput) problem.rawOutput = rawOutput;
-    if (auxiliaryOutput) problem.auxiliaryOutput = auxiliaryOutput;
-    if (auxiliaryInput) problem.auxiliaryInput = auxiliaryInput;
-    if (gateResidual) problem.gateResidual = gateResidual;
-    if (amax) problem.amax = amax;
+    EpilogueProblem problem(input, outputType, computeType);
+    if (includeRawOutput) problem.rawOutputType = computeType;
+    problem.auxiliaryOutputType = auxiliaryOutputType;
+    if (includeAmax) problem.amaxType = computeType;
+    problem.auxiliaryInput = std::move(auxiliaryInput);
+    problem.gateResidual = std::move(gateResidual);
     if (bias) problem.bias = VectorBinding{*bias, biasAxis};
     problem.outputScale = outputScale;
     problem.auxiliaryScale = auxiliaryScale;
@@ -553,13 +538,7 @@ PythonEpilogueResult referenceEpilogueOwned(
     problem.activationParameter0 = activationParameter0;
     problem.activationParameter1 = activationParameter1;
     problem.outputSelection = std::move(outputSelection);
-    referenceEpilogue(problem);
-    return {
-        .output = std::move(output),
-        .rawOutput = std::move(rawOutput),
-        .auxiliaryOutput = std::move(auxiliaryOutput),
-        .amax = std::move(amax),
-    };
+    return referenceEpilogue(problem);
 }
 
 Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType accumulatorType,
@@ -1066,28 +1045,38 @@ NB_MODULE(_roc_host_validation, module) {
             [](const PythonGemmResult& result) -> const GemmRunInfo& { return result.runInfo; },
             nb::rv_policy::reference_internal);
 
-    nb::class_<PythonEpilogueResult>(module, "EpilogueResult")
+    nb::class_<EpilogueRunInfo>(module, "EpilogueRunInfo")
+        .def_ro("output_elements_written", &EpilogueRunInfo::outputElementsWritten)
+        .def_ro("raw_output_elements_written", &EpilogueRunInfo::rawOutputElementsWritten)
+        .def_ro("auxiliary_output_elements_written",
+                &EpilogueRunInfo::auxiliaryOutputElementsWritten)
+        .def_ro("amax_elements_written", &EpilogueRunInfo::amaxElementsWritten);
+
+    nb::class_<EpilogueResult>(module, "EpilogueResult")
         .def_prop_ro(
-            "output",
-            [](const PythonEpilogueResult& result) -> const Tensor& { return result.output; },
+            "output", [](const EpilogueResult& result) -> const Tensor& { return result.output; },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "raw_output",
-            [](const PythonEpilogueResult& result) -> const std::optional<Tensor>& {
+            [](const EpilogueResult& result) -> const std::optional<Tensor>& {
                 return result.rawOutput;
             },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "auxiliary_output",
-            [](const PythonEpilogueResult& result) -> const std::optional<Tensor>& {
+            [](const EpilogueResult& result) -> const std::optional<Tensor>& {
                 return result.auxiliaryOutput;
             },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "amax",
-            [](const PythonEpilogueResult& result) -> const std::optional<Tensor>& {
+            [](const EpilogueResult& result) -> const std::optional<Tensor>& {
                 return result.amax;
             },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "run_info",
+            [](const EpilogueResult& result) -> const EpilogueRunInfo& { return result.runInfo; },
             nb::rv_policy::reference_internal);
 
     module.def("scalar_type_info", [](ScalarType type) { return scalarTypeInfo(type); });
