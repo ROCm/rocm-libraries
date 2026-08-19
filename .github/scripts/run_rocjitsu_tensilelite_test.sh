@@ -23,6 +23,10 @@ REPORT_DIR="${REPORT_DIR:-${PWD}/rocjitsu-tensilelite-reports}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 PER_TEST_TIMEOUT="${PER_TEST_TIMEOUT:-2700}"
+# xdist worker count. Emulation is CPU-bound and ~15-20 min/test; serial
+# execution of the full gfx1250 suite exceeds the workflow step timeout. Local
+# validation used 12-16 workers. Override via PYTEST_WORKERS.
+PYTEST_WORKERS="${PYTEST_WORKERS:-16}"
 TIMING_FILE="${REPORT_DIR}/timing.tsv"
 
 select_rocjitsu_target() {
@@ -36,11 +40,11 @@ select_rocjitsu_target() {
       ;;
     gfx950*)
       ROCJITSU_GPU_TARGET="gfx950"
-      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json"
       ;;
     gfx125*)
       ROCJITSU_GPU_TARGET="gfx1250"
-      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx1250.json"
+      default_config="${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json"
       ;;
     *)
       echo "Unsupported rocjitsu target: ${target_selector}" >&2
@@ -222,14 +226,16 @@ run_tensilelite_tests() {
   local junit_dir="${REPORT_DIR}/junit"
   mkdir -p "${junit_dir}"
 
-  # pytest-timeout handles per-test kills. No outer timeout here — the workflow
-  # step timeout (160 min) is the process-tree kill backstop.
+  # pytest-timeout handles per-test kills; xdist (-n) runs tests concurrently so
+  # the suite fits inside the workflow step timeout. The step timeout is the
+  # process-tree kill backstop.
   "${ROCJITSU_BIN}" \
       --config "${ROCJITSU_CONFIG}" \
       -- "${PYTHON}" -m pytest \
         "${TENSILELITE_ROOT}/Tensile/Tests/common" \
         -m "${ROCJITSU_GPU_TARGET}" \
         -v -s \
+        -n "${PYTEST_WORKERS}" \
         --timeout="${PER_TEST_TIMEOUT}" \
         --junit-xml="${junit_dir}/tensilelite.xml" \
         --prebuilt-client="${TENSILELITE_CLIENT}" \
