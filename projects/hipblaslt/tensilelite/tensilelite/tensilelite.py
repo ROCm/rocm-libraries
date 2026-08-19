@@ -61,7 +61,7 @@ from tensilelite import LibraryLogic
 
 ###############################################################################
 # Execute Steps in Config
-# called from Tensile() below
+# called from tensilelite() below
 # calls
 #   BenchmarkProblems.main() to run benchmark steps
 #   LibraryLogic.main() to analyse final benchmark data and produce logic/yaml
