@@ -39,11 +39,16 @@ inline constexpr uint64_t integerMaximumRaw(uint32_t bits, bool signedDestinatio
     return signedDestination ? signedIntegerMinimumRaw(bits) - 1 : integerMask(bits);
 }
 
-inline constexpr ScalarConversionOptions legacyNativeScalarConversionOptions() {
+// No-options conversion to a native C++ integer truncates fractional values
+// and defines out-of-range conversion by reducing modulo the destination width.
+inline constexpr ScalarConversionOptions implicitNativeConversionOptions() {
     return {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
 }
 
-inline constexpr ScalarConversionOptions legacyScalarConversionOptions(ScalarType destination) {
+// No-options storage conversion follows the native policy for byte-addressable
+// integers. Synthetic packed integers saturate because they have no native C++
+// cast whose behavior can define the conversion.
+inline constexpr ScalarConversionOptions implicitStorageConversionOptions(ScalarType destination) {
     const IntegerOverflow overflow =
         destination == ScalarType::Int4 || destination == ScalarType::Int12
             ? IntegerOverflow::Saturate
@@ -689,7 +694,7 @@ Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOf
 template <ScalarType Type, typename Target>
 Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
     return decodeScalarKnown<Type, Target>(storage, logicalOffset,
-                                           legacyNativeScalarConversionOptions());
+                                           implicitNativeConversionOptions());
 }
 
 template <typename Target>
@@ -702,8 +707,7 @@ Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff
 
 template <typename Target>
 Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
-    return decodeScalar<Target>(type, storage, logicalOffset,
-                                legacyNativeScalarConversionOptions());
+    return decodeScalar<Target>(type, storage, logicalOffset, implicitNativeConversionOptions());
 }
 
 template <ScalarType Type, typename Source>
@@ -769,7 +773,7 @@ void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, So
 template <ScalarType Type, typename Source>
 void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, Source source) {
     encodeScalarKnown<Type>(storage, logicalOffset, std::move(source),
-                            legacyScalarConversionOptions(Type));
+                            implicitStorageConversionOptions(Type));
 }
 
 template <typename Source>
@@ -784,6 +788,6 @@ template <typename Source>
 void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logicalOffset,
                   Source source) {
     encodeScalar(type, storage, logicalOffset, std::move(source),
-                 legacyScalarConversionOptions(type));
+                 implicitStorageConversionOptions(type));
 }
 }  // namespace roc::host_validation::detail
