@@ -678,7 +678,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 0
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
@@ -2031,7 +2031,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 0
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 1
@@ -4063,7 +4063,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 2
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 1
@@ -5757,7 +5757,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 0
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 1
@@ -7111,7 +7111,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 2
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
@@ -8467,7 +8467,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 0
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 1
@@ -11515,7 +11515,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 2
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 1
@@ -11854,7 +11854,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 2
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 1
@@ -13888,7 +13888,7 @@
     SwapGlobalReadOrder: 0
     TDMInst: 3
     TDMIterateMode: 0
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
@@ -14566,7 +14566,7 @@
     SynchronizerSizeCheck: 1
     TDMInst: 3
     TDMIterateMode: 1
-    TDMSplit: true
+    TDMSplit: false
     TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
