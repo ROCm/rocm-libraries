@@ -46,7 +46,8 @@ extern "C" {
 *    op(A) = \left\{
 *    \begin{array}{ll}
 *        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose}
+*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
+*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
 *    \end{array}
 *    \right.
 *  \f]
@@ -83,7 +84,8 @@ extern "C" {
 *  The \ref rocsparse_spsv_stage_preprocess stage is blocking with respect to the host.
 *
 *  \note
-*  Currently, only \p trans == \ref rocsparse_operation_none and \p trans == \ref rocsparse_operation_transpose is supported.
+*  Currently, only \p trans == \ref rocsparse_operation_none, \p trans == \ref rocsparse_operation_transpose,
+*  and \p trans == \ref rocsparse_operation_conjugate_transpose is supported.
 *
 *  \note
 *  Only the \ref rocsparse_spsv_stage_buffer_size stage and the \ref rocsparse_spsv_stage_compute stage

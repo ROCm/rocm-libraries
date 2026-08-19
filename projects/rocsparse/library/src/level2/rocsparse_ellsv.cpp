@@ -587,6 +587,7 @@ namespace rocsparse
     static rocsparse_status ellsv_check(rocsparse_const_spmat_descr A)
     {
         rocsparse_mat_descr descr = A->descr;
+        ROCSPARSE_CHECKARG(2, A, (A->rows != A->cols), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(2,
                            descr,
                            (descr->type != rocsparse_matrix_type_general
