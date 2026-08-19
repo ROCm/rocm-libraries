@@ -3533,15 +3533,31 @@ def _rocmShimReporting(tmp_path, arch):
     architecture the caller asked for.
     """
     root = tmp_path / "rocm"
+    # The package resolves its toolchain from the ROCm install alone (PATH is not
+    # searched), so the shim links the real compiler tools in. The detection tools
+    # are shimmed below and, being written second, replace any same-named link.
+    realRoot = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
+    for sub in ("bin", "lib/llvm/bin"):
+        realDir = realRoot / sub
+        if realDir.is_dir():
+            (root / sub).mkdir(parents=True, exist_ok=True)
+            for entry in realDir.iterdir():
+                if entry.is_file() and os.access(entry, os.X_OK):
+                    (root / sub / entry.name).symlink_to(entry)
     for relative, body in (
+        ("bin/offload-arch", f"echo {arch}"),
+        ("lib/llvm/bin/offload-arch", f"echo {arch}"),
         ("bin/rocm_agent_enumerator", f"echo {arch}"),
         ("lib/llvm/bin/amdgpu-arch", f"echo {arch}"),
         ("bin/rocminfo", f'echo "  Name:                    {arch}"'),
     ):
         tool = root / relative
         tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.unlink(missing_ok=True)
         tool.write_text(f"#!/bin/sh\n{body}\n")
         tool.chmod(tool.stat().st_mode | stat.S_IEXEC)
+    (root / ".info").mkdir(parents=True, exist_ok=True)
+    (root / ".info" / "version").write_text("7.2.4\n", encoding="utf-8")
     return root
 
 
