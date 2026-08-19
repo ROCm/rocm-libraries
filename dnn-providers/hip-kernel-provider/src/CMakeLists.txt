@@ -46,6 +46,27 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
+if(ENABLE_HIP_FLASH2_ENGINE)
+    # Precompiled-kernel engine: compile the host-side engine/plan sources into the
+    # provider object library. HipFlash2FwdPlan.hip is intentionally excluded (it is
+    # the offline source for the shipped .co files and needs rocWMMA headers).
+    target_sources(hip_kernel_provider_impl PRIVATE
+        engines/hip_flash2_engine/HipFlash2Engine.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlan.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.cpp)
+    target_compile_definitions(hip_kernel_provider_impl PRIVATE
+        HIPDNN_ENGINE_HIP_FLASH2
+        HIP_FLASH2_KERNEL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels")
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_FLASH2=1)
+    # Defect E fix: copy .co files to build tree so build-tree test runs work without
+    # manual HIP_FLASH2_KERNEL_DIR export (mirrors asm_sdpa_engine pattern)
+    file(COPY
+        ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels)
+    # Override HIP_FLASH2_KERNEL_DIR at test time to point to build tree
+    set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"
+        CACHE STRING "Build-tree path for Flash2 .co kernels (for test runs)")
+endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
 endif()

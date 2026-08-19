@@ -75,6 +75,23 @@ else()
     message(STATUS "ASM SDPA engine disabled")
 endif()
 
+option(ENABLE_HIP_FLASH2_ENGINE "Build the HIP Flash-Attention 2 SDPA engine (FP16, gfx942)" OFF)
+if(ENABLE_HIP_FLASH2_ENGINE)
+    message(STATUS "HIP Flash2 SDPA engine enabled")
+    # Engine sources and compile definitions are wired onto the provider's object
+    # library in src/CMakeLists.txt (hip_kernel_provider target does not exist yet
+    # at this point -- it is created by add_subdirectory(src) below).
+    # The Flash2 kernel is shipped as a precompiled .co file (gfx942).
+    # HipFlash2FwdPlan.hip is NOT compiled here -- it is the offline source for
+    # the .co files and requires rocWMMA headers.
+    # At runtime the .co is loaded via hipModuleLoad in HipFlash2KernelUtils.hpp.
+    install(FILES
+        src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+        DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels)
+else()
+    message(STATUS "HIP Flash2 SDPA engine disabled")
+endif()
+
 if(ENABLE_HIP_MLOPS_ENGINE)
     message(STATUS "HIP kernel engine enabled")
 else()
