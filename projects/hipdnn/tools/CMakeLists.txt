@@ -65,12 +65,19 @@ endif()
             "${CMAKE_CURRENT_BINARY_DIR}/ListEnginesSmokeTest.cmake"
     )
 
+    # The tool only enumerates engines, so anything past a few seconds is a hang -- most likely in
+    # plugin dlopen/LoadLibrary. Fail fast rather than sitting until ctest's 1500 s default.
+    set_tests_properties(hipdnn_list_engines_smoke PROPERTIES TIMEOUT 120)
+
     # add_hipdnn_test() assumes a gtest executable registered as the test command; this test runs a
     # CMake driver script instead, so its two run-time prerequisites -- the tool binary and the
     # plugin it discovers -- are appended to CHECK_DEPENDS_GLOBAL by hand.
     #
     # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are deliberately not touched: both
-    # assume a gtest executable installed under its own test name.
+    # assume a gtest executable installed under its own test name. HIPDNN_TEST_TARGETS is what
+    # install_hipdnn_ctest_files() iterates, so this test is build-tree only -- the driver script
+    # and the plugin it discovers are not installed either. Its test_categories.yaml entry
+    # therefore labels it for `ctest` in the build tree and has no effect on the install tree.
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_list_engines
                              ${TEST_GOOD_DEFAULT_PLUGIN_NAME}
         CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
