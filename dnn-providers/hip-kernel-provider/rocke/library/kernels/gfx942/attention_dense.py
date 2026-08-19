@@ -81,7 +81,7 @@ Implementation status (the optimization plan holds the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
-  * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast for
+  * P2  exp2_fast + fused rescale .............................. DONE (exp2_fast for
         ALL configs incl. bf16 D128; fused rescale bit-identical, and is what
         enabled bf16 D64 exp2_fast)
   * P3  occupancy: waves-per-eu tune (bf16 D64 -> wpe4 = 2 WG/CU),
@@ -1455,7 +1455,7 @@ def _build_attention_dense_single_buffer(
             exp2 = b.exp2_fast if tuning.resolved_use_exp2_fast(spec) else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 
-            # P2 fused/lazy rescale: compute each exp2 inline, accumulate l_local, and
+            # P2 fused rescale: compute each exp2 inline, accumulate l_local, and
             # cast->pack it into the PV B-operand in ONE pass. The f32 p value dies
             # after its two uses (the l_local fadd + the dtype cast) instead of
             # staying live across the whole l_local reduction AND a separate cast/pack

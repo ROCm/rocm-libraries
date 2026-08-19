@@ -903,7 +903,7 @@ def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype, use_exp2_fast)
     "head_size, dtype", [(128, "fp16"), (64, "fp16"), (64, "bf16"), (128, "bf16")]
 )
 def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
-    """P2 fused/lazy rescale: exp2 -> l_local accumulate -> cast -> pack in one pass.
+    """P2 fused rescale: exp2 -> l_local accumulate -> cast -> pack in one pass.
 
     The pre-P2 code built a full f32 ``p_vals`` matrix (N_SUB*16 values), reduced it
     into ``l_local``, THEN cast+packed it in a separate ``relayout_p`` pass -- holding
