@@ -288,15 +288,6 @@ namespace TensileLite::Client
             }
         }
 
-        Layout tensorLayout(const TensorDescriptor& descriptor)
-        {
-            std::vector<ptrdiff_t> strides;
-            strides.reserve(descriptor.strides().size());
-            for(const size_t stride : descriptor.strides())
-                strides.push_back(static_cast<ptrdiff_t>(stride));
-            return Layout(Shape(descriptor.sizes()), std::move(strides));
-        }
-
         Layout logicalSparseMetadataLayout(const TensorDescriptor& dense,
                                            const TensorDescriptor& metadata,
                                            size_t                  sparseAxis,
@@ -318,7 +309,8 @@ namespace TensileLite::Client
             std::vector<size_t> logicalDimensions = dense.sizes();
             logicalDimensions[sparseAxis]         = (dense.sizes()[sparseAxis] / 4 + 1) / 2;
             std::vector<ptrdiff_t> logicalStrides(dense.dimensions());
-            logicalStrides[sparseAxis] = static_cast<ptrdiff_t>(metadata.strides()[metadataAxis]);
+            logicalStrides[sparseAxis]
+                = checkedHostValidationPtrdiff(metadata.strides()[metadataAxis]);
             if(metadata.sizes()[metadataAxis] != logicalDimensions[sparseAxis])
                 throw std::invalid_argument("TensileLite sparse metadata axis extent mismatch.");
 
@@ -534,8 +526,8 @@ namespace TensileLite::Client
                                                tensorC.totalAllocatedBytes());
         std::span<std::byte> metadataStorage(static_cast<std::byte*>(dstMeta),
                                              tensorMeta.totalAllocatedBytes());
-        const Layout         denseLayout          = tensorLayout(tensor);
-        const Layout         compressedLayout     = tensorLayout(tensorC);
+        const Layout         denseLayout          = hostValidationLayout(tensor);
+        const Layout         compressedLayout     = hostValidationLayout(tensorC);
         const Layout         metadataTensorLayout = logicalSparseMetadataLayout(
             tensor, tensorMeta, dim, static_cast<size_t>(metadataLayout));
         Tensor prunedTensor(scalarType, denseLayout, prunedStorage);
@@ -548,7 +540,7 @@ namespace TensileLite::Client
                                           metadataTensor,
                                           sparsePattern(mode, dim));
 
-        const size_t sliceCount = tensor.totalLogicalElements() / tensor.sizes()[dim];
+        const size_t sliceCount = denseLayout.shape().elementCountExcluding(dim);
         if(sliceCount == 0)
             return;
         const size_t requestedWorkers
