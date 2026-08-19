@@ -558,6 +558,20 @@ class TensorAndGemmTests(unittest.TestCase):
             np.float32(3.0) * y_values,
         )
 
+        padded_x = hv.Tensor.from_storage(
+            hv.ScalarType.Float32,
+            [2, 2],
+            np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
+            strides=[3, 1],
+        )
+        contiguous = hv.reference_axpby(x=padded_x)
+        self.assertEqual(contiguous.output.strides, [2, 1])
+        self.assertEqual(contiguous.output.offset, 0)
+        np.testing.assert_array_equal(
+            hv.to_numpy(contiguous.output),
+            np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        )
+
     def test_reference_softmax_matches_numpy(self):
         source = np.asarray(
             [
@@ -592,6 +606,16 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(result.run_info.output_elements_written, source.size)
         with self.assertRaises(IndexError):
             hv.reference_softmax(input_tensor, axis=source.ndim)
+
+        padded_input = hv.Tensor.from_storage(
+            hv.ScalarType.Float32,
+            [2, 2],
+            np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
+            strides=[3, 1],
+        )
+        contiguous = hv.reference_softmax(padded_input, axis=1)
+        self.assertEqual(contiguous.output.strides, [2, 1])
+        self.assertEqual(contiguous.output.offset, 0)
 
     def test_reference_layer_norm_matches_numpy(self):
         source = np.asarray(
