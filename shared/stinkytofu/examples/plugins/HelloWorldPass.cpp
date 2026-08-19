@@ -3,6 +3,7 @@
 
 #include "HelloWorldPass.hpp"
 
+#include "stinkytofu/Version.h"
 #include "stinkytofu/bindings/python/Module.hpp"
 
 namespace stinkytofu {
@@ -53,6 +54,10 @@ void registerHelloWorldPassPlugin() {
 #endif
 
 extern "C" {
+PLUGIN_EXPORT const char* stinkytofuPluginVersion() {
+    return STINKYTOFU_FULL_VERSION;
+}
+
 PLUGIN_EXPORT void registerPlugin() {
     stinkytofu::registerHelloWorldPassPlugin();
 }
