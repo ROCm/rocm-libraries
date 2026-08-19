@@ -14,24 +14,39 @@ enum class ReductionOperation {
     MaximumAbsolute,  // Ignores NaN magnitudes and returns the largest remaining magnitude.
 };
 
-// Describes a reduction from input into the caller-owned output. Output shape
-// is input shape with axes removed, preserving the remaining dimension order.
-// referenceReduce writes every logical output element.
+// Reusable reduction descriptor. The output shape is the input shape with
+// axes removed, preserving the remaining dimension order.
 struct ReductionProblem {
-    ReductionProblem(Tensor inputTensor, Tensor outputTensor, ScalarType accumulator,
+    ReductionProblem(Tensor inputTensor, ScalarType resultType, ScalarType accumulator,
                      std::vector<size_t> reductionAxes,
                      ReductionOperation reductionOperation = ReductionOperation::Sum)
         : input(std::move(inputTensor)),
-          output(std::move(outputTensor)),
+          outputType(resultType),
           accumulatorType(accumulator),
           axes(std::move(reductionAxes)),
           operation(reductionOperation) {}
 
     Tensor input;                  // Source tensor read once per output/reduction coordinate pair.
-    Tensor output;                 // Caller-owned reduced destination written in full.
+    ScalarType outputType;         // Scalar type of the reduced result.
     ScalarType accumulatorType;    // Arithmetic type used before output conversion.
     std::vector<size_t> axes;      // Unique input dimensions removed by the reduction.
     ReductionOperation operation;  // Reduction applied to each output coordinate.
+};
+
+// Binds a reduction problem to caller-owned destination storage. Every logical
+// output element is overwritten; arbitrary output layouts remain supported.
+struct ReductionRequest : ReductionProblem {
+    ReductionRequest(Tensor inputTensor, Tensor outputTensor, ScalarType accumulator,
+                     std::vector<size_t> reductionAxes,
+                     ReductionOperation reductionOperation = ReductionOperation::Sum)
+        : ReductionProblem(std::move(inputTensor), outputTensor.type(), accumulator,
+                           std::move(reductionAxes), reductionOperation),
+          output(std::move(outputTensor)) {}
+
+    ReductionRequest(ReductionProblem problem, Tensor outputTensor)
+        : ReductionProblem(std::move(problem)), output(std::move(outputTensor)) {}
+
+    Tensor output;
 };
 
 // Counts logical output writes and logical input reads. inputElementsRead is
@@ -41,7 +56,27 @@ struct ReductionRunInfo {
     size_t inputElementsRead = 0;      // Logical reads performed by the nested reduction loops.
 };
 
-ReductionRunInfo referenceReduce(const ReductionProblem& problem);
-ReductionRunInfo referenceSum(const ReductionProblem& problem);
+// Owning reduction result. output uses a contiguous layout; callers requiring
+// a specific destination layout use ReductionRequest.
+struct ReductionResult {
+    Tensor output;
+    ReductionRunInfo runInfo;
+};
+
+ReductionRunInfo referenceReduce(const ReductionRequest& request);
+ReductionResult referenceReduce(const ReductionProblem& problem);
+ReductionResult referenceReduce(const ReductionProblem& problem,
+                                const TensorStorageAllocator& allocator);
+
+ReductionRunInfo referenceSum(const ReductionRequest& request);
+ReductionResult referenceSum(const ReductionProblem& problem);
+ReductionResult referenceSum(const ReductionProblem& problem,
+                             const TensorStorageAllocator& allocator);
+
 ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType);
+ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
+                                         ScalarType accumulatorType);
+ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
+                                         ScalarType accumulatorType,
+                                         const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

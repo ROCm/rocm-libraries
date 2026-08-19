@@ -32,11 +32,11 @@ int main() {
     if (d.loadAs<float>({0, 0}) != 6) return 1;
 
     const std::array<float, 3> reductionInput{-1, 4, -3};
-    Tensor maximumAbsolute(ScalarType::Float32, Shape{});
-    referenceMaximumAbsolute(Tensor::fromNative<float>(Layout::contiguous(Shape{3}),
-                                                       std::span<const float>(reductionInput)),
-                             maximumAbsolute, ScalarType::Float32);
-    if (maximumAbsolute.loadAs<float>({}) != 4) return 1;
+    const ReductionResult maximumAbsolute =
+        referenceMaximumAbsolute(Tensor::fromNative<float>(Layout::contiguous(Shape{3}),
+                                                           std::span<const float>(reductionInput)),
+                                 ScalarType::Float32, ScalarType::Float32);
+    if (maximumAbsolute.output.loadAs<float>({}) != 4) return 1;
 
     Tensor generated =
         generate(ScalarType::Float32, Shape{4},
