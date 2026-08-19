@@ -544,8 +544,3 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
     _runtime.initialize()
 
     assert _runtime.client_executable() == client
-
-
-@pytest.fixture(autouse=True)
-def enable_runtime_validation(monkeypatch):
-    monkeypatch.setattr(_rocm, "_ENABLE_PYTHON_ROCM_RUNTIME", True)
