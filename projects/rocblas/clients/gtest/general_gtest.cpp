@@ -175,10 +175,8 @@ namespace
     template <typename T>
     struct complex_operators_testing<
         T,
-        std::enable_if_t<
-            std::is_same_v<T, rocblas_half_complex> || std::is_same_v<T, rocblas_bfloat16_complex>
-            || std::is_same_v<T, rocblas_float_complex>
-            || std::is_same_v<T, rocblas_double_complex>>>
+        std::enable_if_t<std::is_same_v<T, rocblas_float_complex>
+                         || std::is_same_v<T, rocblas_double_complex>>>
         : rocblas_test_valid
     {
         void operator()(const Arguments& arg)

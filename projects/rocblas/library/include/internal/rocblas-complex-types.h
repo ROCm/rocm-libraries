@@ -165,13 +165,25 @@ class ROCBLAS_EXPORT rocblas_complex_num
         return rocblas_bfloat16{::sqrtf(float(x))};
     }
 
+    // Tag dispatch: prefer direct T(value) when T is constructible from U
+    template <typename U>
+    static __forceinline__ __device__ __host__ T
+        convert_low_precision_input_impl(const U& value, std::true_type)
+    {
+        return T(value);
+    }
+
+    template <typename U>
+    static __forceinline__ __device__ __host__ T
+        convert_low_precision_input_impl(const U& value, std::false_type)
+    {
+        return T(float(value));
+    }
+
     template <typename U>
     static __forceinline__ __device__ __host__ T convert_low_precision_input(const U& value)
     {
-        if constexpr(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
-            return T(float(value));
-        else
-            return T(value);
+        return convert_low_precision_input_impl(value, std::is_constructible<T, U>{});
     }
 
 public:
@@ -194,11 +206,12 @@ public:
 
     template <typename U,
               typename V,
-              std::enable_if_t<(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
-                                   && std::is_constructible_v<float, U>
-                                   && std::is_constructible_v<float, V>
-                                   && (!std::is_same_v<std::decay_t<U>, T>
-                                       || !std::is_same_v<std::decay_t<V>, T>),
+              std::enable_if_t<(std::is_same<T, rocblas_half>::value
+                                || std::is_same<T, rocblas_bfloat16>::value)
+                                   && std::is_constructible<float, U>::value
+                                   && std::is_constructible<float, V>::value
+                                   && (!std::is_same<std::decay_t<U>, T>::value
+                                       || !std::is_same<std::decay_t<V>, T>::value),
                                int> = 0>
     __device__ __host__ rocblas_complex_num(U r, V i)
         : x{convert_low_precision_input(r)}
@@ -215,9 +228,10 @@ public:
     }
 
     template <typename U,
-              std::enable_if_t<(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
-                                   && std::is_constructible_v<float, U>
-                                   && !std::is_same_v<std::decay_t<U>, T>,
+              std::enable_if_t<(std::is_same<T, rocblas_half>::value
+                                || std::is_same<T, rocblas_bfloat16>::value)
+                                   && std::is_constructible<float, U>::value
+                                   && !std::is_same<std::decay_t<U>, T>::value,
                                int> = 0>
     __device__ __host__ rocblas_complex_num(U r)
         : x{convert_low_precision_input(r)}
