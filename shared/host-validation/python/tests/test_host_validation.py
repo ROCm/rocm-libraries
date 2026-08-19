@@ -2858,6 +2858,56 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray(0.0, dtype=np.float32),
         )
 
+    def test_native_operation_problem_and_request_bindings(self):
+        values = np.arange(6, dtype=np.float32).reshape(2, 3)
+        input_tensor = hv.from_numpy(values)
+        reduction_problem = hv.ReductionProblem(
+            input_tensor,
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            [1],
+            hv.ReductionOperation.Sum,
+        )
+        reduction_result = hv.reference_reduce(reduction_problem)
+        np.testing.assert_array_equal(
+            hv.to_numpy(reduction_result.output),
+            np.sum(values, axis=1, dtype=np.float32),
+        )
+        self.assertEqual(reduction_result.run_info.output_elements_written, 2)
+        self.assertEqual(reduction_result.run_info.input_elements_read, 6)
+
+        reduction_output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2]))
+        reduction_request = hv.ReductionRequest(
+            reduction_problem,
+            reduction_output,
+        )
+        reduction_run = hv.reference_reduce(reduction_request)
+        self.assertEqual(reduction_run.output_elements_written, 2)
+        np.testing.assert_array_equal(
+            hv.to_numpy(reduction_output),
+            np.sum(values, axis=1, dtype=np.float32),
+        )
+
+        layer_norm_problem = hv.LayerNormProblem(
+            input_tensor,
+            hv.ScalarType.Float32,
+            1,
+            hv.ScalarType.Float32,
+        )
+        layer_norm_result = hv.reference_layer_norm(layer_norm_problem)
+        self.assertIsNone(layer_norm_result.mean)
+        self.assertIsNone(layer_norm_result.inverse_variance)
+
+        pattern = hv.StructuredSparsityPattern()
+        pattern.axis = 0
+        sparse_problem = hv.StructuredSparsityProblem(
+            hv.from_numpy(np.arange(1, 9, dtype=np.float32)),
+            pattern,
+        )
+        sparse_result = hv.apply_structured_sparsity(sparse_problem)
+        self.assertIsNone(sparse_result.retained_indices)
+        self.assertIsNone(sparse_result.two_of_four_metadata)
+
     def test_structured_sparsity_all_fixed_two_of_four_patterns(self):
         values = np.arange(1, 17, dtype=np.float32).reshape(2, 8)
         retained_position_sets = (
