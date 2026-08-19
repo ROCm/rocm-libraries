@@ -33,6 +33,7 @@
 #include <Tensile/ContractionProblem.hpp>
 
 #include <Tensile/DataTypes.hpp>
+#include <optional>
 #include <roc/host_validation/gemm.hpp>
 
 namespace TensileLite
@@ -50,15 +51,21 @@ namespace TensileLite
                                                        ContractionInputs const&      inputs,
                                                        size_t elementsToValidate);
 
-        // Compatibility wrappers around the structured product-private
-        // GemmInvocationAdapter. Returns false without modifying outputs when
-        // descriptor translation or the requested backend is unsupported.
-        bool tryRuntimePointwiseGemm(ContractionProblemGemm const& problem,
-                                     ContractionInputs const&      inputs,
-                                     size_t                        elementsToValidate);
-        bool tryRuntimeBlockedGemm(ContractionProblemGemm const& problem,
-                                   ContractionInputs const&      inputs,
-                                   size_t                        elementsToValidate);
+        enum class ReferenceGemmExecution
+        {
+            Pointwise,
+            BlockedPreferred,
+            BlockedRequired,
+        };
+
+        // Translates and executes one ungrouped GEMM. No value means descriptor
+        // translation or the required backend was unsupported; outputs remain
+        // unchanged in that case.
+        std::optional<roc::host_validation::GemmRunInfo>
+            tryReferenceGemm(ContractionProblemGemm const& problem,
+                             ContractionInputs const&      inputs,
+                             size_t                        elementsToValidate,
+                             ReferenceGemmExecution execution = ReferenceGemmExecution::Pointwise);
 
     } // namespace Client
 } // namespace TensileLite
