@@ -10,7 +10,7 @@ Builds the batched-contraction dispatcher .so (fp16 / rcr / num_d_tensors=0 —
 the PassThrough v1 signature Old-TE's batched_contraction argparse validates),
 runs a small contraction on-device via GpuBatchedContractionRunner, and compares
 the GPU output to an fp32 numpy einsum reference within an fp16-appropriate
-tolerance. Skips cleanly (exit 0) when no GPU / hipcc is available.
+tolerance. Skips cleanly (exit 77) when no GPU / hipcc is available.
 
 The kernel computes:
     E[g,m,n] = sum_k A[g,m,k] * B[g,n,k]
@@ -50,6 +50,11 @@ TOLERANCE = 1e-2
 
 PASS = "PASS"
 FAIL = "FAIL"
+
+# ctest reports this as "skipped" rather than passed; see SKIP_RETURN_CODE in
+# dispatcher/tests/CMakeLists.txt. Returning 0 here would make a CPU-only runner
+# report a green PASS for a test that never touched the GPU.
+SKIP_EXIT = 77
 
 
 def _has_gpu() -> bool:
@@ -137,7 +142,7 @@ def main() -> int:
 
     if not _has_gpu():
         print("SKIP: no supported GPU detected (rocminfo); contraction GPU test skipped")
-        return 0
+        return SKIP_EXIT
 
     gfx = _validate_arch(args.gfx) if args.gfx else _get_arch()
     log.info("Running batched-contraction GPU correctness on %s", gfx)

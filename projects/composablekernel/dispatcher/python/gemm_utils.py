@@ -2396,6 +2396,12 @@ def expand_sweep(
             tm // m_div, tn // n_div, wtm, wtn
         ):
             continue
+        # Stream-K supports only the cshuffle epilogue, and the codegen skips
+        # anything else (unified_gemm_codegen.py, GemmVariant.STREAM_K branch).
+        # Without this gate expand_sweep hands back configs whose header is
+        # never emitted, which surfaces downstream as a spurious build failure.
+        if variant == "stream_k" and epi != "cshuffle":
+            continue
 
         for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:
             for ew_op, md_nd in md_combos:

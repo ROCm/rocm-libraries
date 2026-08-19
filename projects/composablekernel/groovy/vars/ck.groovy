@@ -1527,6 +1527,47 @@ def runDispatcherGemmTests(String compiler) {
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
+// Which GEMM variants of test_gemm_search_space.py each arch can run. Bounded by
+// the tile_engine CMake arch guards -- the dispatcher cannot cover more archs
+// than the kernels it selects are built for. stream_k is gfx942-only until the
+// "TODO: add gfx950" in the stream-K CMakeLists is resolved.
+//
+// gfx1201 is absent on purpose, and the Jenkinsfile has no gfx1201 dispatcher
+// stage for the same reason: gemm_utils._SUPPORTED_ARCHES is
+// (gfx90a, gfx942, gfx950), so test_gemm_search_space.py raises
+//   ValueError: Unsupported GPU architecture 'gfx1201'
+// before it ever reaches the GPU. Widening that guard does not help -- with it
+// widened, expand_sweep returns 0 configs for gfx1201 in all 16 dtype x layout
+// strata of default_ci_config.json, because RDNA4 is warp_size 32 and every
+// warp tile that config names is 64 wide, and the runner then exits 1 on "no
+// configs to run". Covering RDNA4 needs real gfx1201 tile coverage first.
+def dispatcherGemmVariantsFor(String arch) {
+    switch (arch) {
+        case "gfx942":  return ["grouped", "multi_d", "multi_abd", "stream_k"]
+        case "gfx950":  return ["grouped", "multi_d", "multi_abd"]
+        default:        return []
+    }
+}
+
+// One test_gemm_search_space.py invocation for a non-standard GEMM variant.
+//
+// dtypes/layouts are deliberately omitted: the runner picks per-variant defaults
+// (multi_d/multi_abd are fp16/rcrr-only, so naming the standard 4x4 matrix here
+// would enumerate configs that variant cannot build). multi_d likewise takes the
+// runner's default --elementwise-op PassThrough. The budget is well under the
+// standard lane's 500 because each variant JIT-compiles its own .so set and
+// these run in addition to, not instead of, the standard sweep.
+def dispatcherVariantCmd(String arch, String variant) {
+    return """python3 ../dispatcher/tests/test_gemm_search_space.py \
+                --variant ${variant} \
+                --arch ${arch} \
+                --budget 64 \
+                --warmup 5 \
+                --repeat 5 \
+                --size 1024 \
+                --json dispatcher_${variant}_results.json"""
+}
+
 def runDispatcherTests(String arch, String compiler) {
     def execute_cmd = """
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
@@ -1549,23 +1590,33 @@ def runDispatcherTests(String arch, String compiler) {
         python3 ../dispatcher/tests/test_gemm_parity.py && \
         python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch}"""
+    dispatcherGemmVariantsFor(arch).each { variant ->
+        execute_cmd += " && \\\n        " + dispatcherVariantCmd(arch, variant)
+    }
+    // Stream-K has its own registry-level driver test; its defaults are the
+    // full 4x4 matrix (48 driver compiles / 96 GPU runs), so CI pins one
+    // dtype/layout. Note it takes --arch, not --gfx.
+    if (arch == "gfx942") {
+        execute_cmd += """ && \
+        python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr"""
+    }
+    // mx_gemm has no expand_sweep -- mx_gemm_utils exposes only
+    // default_fp8_config()/default_fp4_config() -- so it cannot join the
+    // --variant sweep above and instead runs the two-config smoke test merged
+    // in #10132. That test is unittest-based and self-gates to gfx950, so it
+    // takes no --gfx (unlike test_bquant, which does).
+    if (arch == "gfx950") {
+        execute_cmd += """ && \
+        python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
+        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
+    }
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
-    archiveArtifacts artifacts: "dispatcher_gemm_results.json", allowEmptyArchive: true
+    // Glob, not a single name: each variant writes its own dispatcher_<v>_results.json.
+    archiveArtifacts artifacts: "dispatcher_*_results.json", allowEmptyArchive: true
 }
 
 def runDispatcherTestsGfx950(String compiler) {
-    def arch = "gfx950"
-    def execute_cmd = """
-        cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-            -D CMAKE_CXX_COMPILER="${compiler}" \
-            -D CMAKE_BUILD_TYPE=Release \
-            -D GPU_TARGETS="${arch}" \
-            -D CK_TILE_DISPATCHER=ON \
-            -D BUILD_DISPATCHER_BINDINGS=ON \
-            -D DISPATCHER_RULE_SET=tests .. && \
-        ninja -j${nthreads()} ck_tile_dispatcher dispatcher_gemm_lib && \
-        python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch}"""
-    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+    runDispatcherTests("gfx950", compiler)
 }
 
 def runBuildCKAndTests(String arch) {

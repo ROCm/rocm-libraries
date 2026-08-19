@@ -15,7 +15,7 @@ add_test(
     NAME dispatcher_test_batched_gemm_gpu_correctness
     # Run the script directly: this module is script-style (a parameterized
     # function + main() guard), not unittest.TestCase, so `unittest discover`
-    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # would collect 0 tests and pass vacuously. main() skips (exit 77) without a
     # GPU/built lib and returns nonzero only on a real correctness failure.
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_gemm_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -23,6 +23,9 @@ add_test(
 set_tests_properties(dispatcher_test_batched_gemm_gpu_correctness PROPERTIES
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
+    # Without this a CPU-only runner reports a green PASS for a test that never
+    # reached the GPU; 77 makes ctest record it as skipped instead.
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
@@ -31,7 +34,7 @@ add_test(
     NAME dispatcher_test_batched_contraction_gpu_correctness
     # Run the script directly: this module is script-style (a parameterized
     # function + main() guard), not unittest.TestCase, so `unittest discover`
-    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # would collect 0 tests and pass vacuously. main() skips (exit 77) without a
     # GPU/built lib and returns nonzero only on a real correctness failure.
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_batched_contraction_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -39,6 +42,9 @@ add_test(
 set_tests_properties(dispatcher_test_batched_contraction_gpu_correctness PROPERTIES
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
+    # Without this a CPU-only runner reports a green PASS for a test that never
+    # reached the GPU; 77 makes ctest record it as skipped instead.
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 

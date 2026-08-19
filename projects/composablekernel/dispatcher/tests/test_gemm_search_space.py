@@ -3,19 +3,32 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """
-Dispatcher universal GEMM search space runner.
+Dispatcher GEMM search space runner (all bridged GEMM variants).
 
-Enumerates the full GemmKernelConfig search space by calling expand_sweep
-with the tile_engine default_ci_config.json across all (dtype, layout) strata,
-samples a budget-limited subset with a daily rotating seed, compiles each
-config via the bridge, runs on GPU, and reports correctness + TFLOPS.
+Enumerates the GemmKernelConfig search space by calling expand_sweep with the
+tile_engine default_ci_config.json across all (dtype, layout) strata, samples a
+budget-limited subset with a daily rotating seed, compiles each config via the
+bridge, runs on GPU, and reports correctness + TFLOPS.
 
-This is the dispatcher equivalent of tile_engine's gemm_universal_benchmark.py
-driven with TILE_ENGINE_SAMPLING_TIER=daily.
+One runner covers every variant expand_sweep understands -- standard, grouped,
+multi_d, multi_abd and stream_k -- because they share the same enumerate/sample/
+build/report machinery and differ only in which Gpu*Runner to drive and how the
+numpy reference is computed. Select with --variant.
+
+This is the dispatcher equivalent of tile_engine's per-op benchmark scripts
+driven with TILE_ENGINE_SAMPLING_TIER=daily, with one deliberate difference:
+those scripts never verify numerics and always exit 0. This one validates every
+kernel against a numpy reference and exits 1 on any mismatch.
+
+Exit codes: 0 = all pass, 1 = failure, 77 = skipped (no GPU) per the ctest
+SKIP_RETURN_CODE convention.
 
 Usage:
     python3 test_gemm_search_space.py --arch gfx942 --budget 500
-    python3 test_gemm_search_space.py --dtypes fp16,bf16 --layouts rcr,rrr
+    python3 test_gemm_search_space.py --variant grouped --groups 4
+    python3 test_gemm_search_space.py --variant multi_abd   # fp16/rcrr only
+    python3 test_gemm_search_space.py --variant multi_d     # PassThrough epilogue
+    python3 test_gemm_search_space.py --variant multi_d --elementwise-op MultiDAdd
     python3 test_gemm_search_space.py --budget 0   # full space, no cap
     python3 test_gemm_search_space.py --budget 500 --seed 42 --json results.json
 """
@@ -26,6 +39,7 @@ import json
 import random
 import sys
 import time
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -35,7 +49,19 @@ sys.path.insert(0, str(_DISPATCHER / "python"))
 import numpy as np
 
 from ctypes_utils import detect_gpu_arch
-from gemm_utils import GemmProblem, GpuGemmRunner, expand_sweep, setup_multiple_gemm_dispatchers
+from gemm_utils import (
+    GemmProblem,
+    GpuGemmRunner,
+    GpuGroupedGemmRunner,
+    GpuMultiABDRunner,
+    GpuMultiDGemmRunner,
+    GroupedGemmProblem,
+    MultiDGemmProblem,
+    _cde_reference,
+    expand_sweep,
+    numpy_dtype_for,
+    setup_multiple_gemm_dispatchers,
+)
 
 _CI_CONFIG = (
     _DISPATCHER.parent / "tile_engine/ops/gemm/configs/default_ci_config.json"
@@ -43,6 +69,19 @@ _CI_CONFIG = (
 _DTYPES = ["fp16", "bf16", "fp8", "bf8"]
 _LAYOUTS = ["rcr", "rrr", "crr", "ccr"]
 _RTOL = 2e-2
+_SKIP = 77
+
+# Per-variant defaults for --dtypes / --layouts. multi_abd and multi_d are
+# fp16-only end-to-end (codegen, ctypes lib and runner all assume fp16) and take
+# the 4-char (A,B,C/E,D) layout code rather than the 3-char one.
+_VARIANT_DEFAULTS = {
+    "standard": (_DTYPES, _LAYOUTS),
+    "grouped": (_DTYPES, _LAYOUTS),
+    "stream_k": (_DTYPES, _LAYOUTS),
+    "multi_d": (["fp16"], ["rcrr"]),
+    "multi_abd": (["fp16"], ["rcrr"]),
+}
+_VARIANTS = tuple(_VARIANT_DEFAULTS)
 
 
 def _daily_seed() -> int:
@@ -50,18 +89,31 @@ def _daily_seed() -> int:
 
 
 def _sample(strata: dict, budget: int, seed: int) -> list:
-    """Stratified budget-limited sample: equal share per non-empty stratum."""
+    """Stratified budget-limited sample: equal share per non-empty stratum.
+
+    Strata are visited in sorted order so the sample is reproducible from the
+    seed alone. Each gets floor(budget/n), with the first ``budget % n`` strata
+    taking one extra; a stratum smaller than its share releases the difference
+    to a final top-up draw, so the full budget is used whenever the space allows.
+    """
     nonempty = {k: v for k, v in strata.items() if v}
-    if not nonempty:
+    if not nonempty or budget <= 0:
         return []
     rng = random.Random(seed)
-    n = len(nonempty)
-    per = max(1, budget // n)
-    remainder = budget - per * n
-    selected = []
-    for i, (_, configs) in enumerate(nonempty.items()):
-        alloc = min(per + (remainder if i == n - 1 else 0), len(configs))
-        selected.extend(rng.sample(configs, alloc))
+    per, remainder = divmod(budget, len(nonempty))
+    selected, leftover = [], []
+    for i, (_, configs) in enumerate(sorted(nonempty.items())):
+        # Clamp to the stratum size: budget < n makes `per` 0, and a stratum
+        # smaller than its share would otherwise ask random.sample for more
+        # items than exist.
+        alloc = min(per + (1 if i < remainder else 0), len(configs))
+        # Sample indices, not objects: it makes "which ones were not picked"
+        # exact without relying on object identity or equality.
+        picked = set(rng.sample(range(len(configs)), alloc)) if alloc > 0 else set()
+        selected.extend(configs[j] for j in picked)
+        leftover.extend(configs[j] for j in range(len(configs)) if j not in picked)
+    if len(selected) < budget and leftover:
+        selected.extend(rng.sample(leftover, min(budget - len(selected), len(leftover))))
     rng.shuffle(selected)
     return selected[:budget]
 
@@ -78,15 +130,141 @@ def _max_rel(out: np.ndarray, ref: np.ndarray) -> float:
     return float(np.max(np.abs(out - ref))) / (float(np.max(np.abs(ref))) + 1e-12)
 
 
+def _quantize(x: np.ndarray, dtype: str) -> np.ndarray:
+    """Round-trip fp32 through the kernel's host operand dtype.
+
+    The grouped/multi_d runners cast operands with ``numpy_dtype_for`` (fp16 or
+    an ml_dtypes bf16/fp8-FNUZ/bf8-FNUZ type), so the reference must see the same
+    quantized values the kernel does.
+    """
+    return x.astype(numpy_dtype_for(dtype)).astype(np.float32)
+
+
+def _layout_code(cfg, n: int) -> str:
+    """``rcr``/``rcrr`` style code from a config's row/col layout words."""
+    words = [cfg.layout_a, cfg.layout_b, cfg.layout_c, getattr(cfg, "layout_d", "row")]
+    return "".join(w[0] for w in words[:n])
+
+
+class _Operands:
+    """Shared host operands for one sweep, generated once and reused per kernel."""
+
+    def __init__(self, size: int, seed: int, groups: int, num_d: int):
+        rng = np.random.default_rng(seed)
+        self.size = size
+        self.seed = seed
+        self.A = (rng.standard_normal((size, size)) * 0.1).astype(np.float32)
+        self.B = (rng.standard_normal((size, size)) * 0.1).astype(np.float32)
+        self.problem = GemmProblem(M=size, N=size, K=size)
+
+        # Grouped: deliberately NON-uniform M so a kernel that mishandles the
+        # per-group offsets fails instead of silently passing. All Ms stay
+        # multiples of 64 (the CI config's only tile_m) because pad_m is false.
+        step = max(64, size // 4)
+        ms = [max(64, size - i * step) for i in range(groups)]
+        self.groups = [(m, size, size) for m in ms]
+        self.grouped_problem = GroupedGemmProblem(groups=self.groups)
+        self.A_list = [self.A[:m] for m in ms]
+        self.B_list = [self.B for _ in ms]
+
+        # Multi-D: D tensors are MxN, stored fp16 by the runner.
+        self.Ds = [
+            (rng.standard_normal((size, size)) * 0.1).astype(np.float16)
+            for _ in range(max(num_d, 1))
+        ]
+
+
+def _make_runner(variant: str, cfg, so: Path):
+    if variant == "grouped":
+        return GpuGroupedGemmRunner(
+            lib_path=so, dtype=cfg.dtype_a, layout=_layout_code(cfg, 3)
+        )
+    if variant == "multi_d":
+        return GpuMultiDGemmRunner(lib_path=so)
+    if variant == "multi_abd":
+        return GpuMultiABDRunner(
+            lib_path=so,
+            layout4=_layout_code(cfg, 4),
+            a_elementwise_op=cfg.a_elementwise_op,
+            b_elementwise_op=cfg.b_elementwise_op,
+            cde_elementwise_op=cfg.cde_elementwise_op,
+        )
+    # standard and stream_k share the single-problem C ABI.
+    return GpuGemmRunner(lib_path=so)
+
+
+def _invoke(variant: str, runner, ops: _Operands):
+    """One timed launch. Returns an object with .success/.time_ms."""
+    if variant == "grouped":
+        return runner.run(ops.A_list, ops.B_list, ops.grouped_problem)
+    if variant == "multi_d":
+        nd = runner.num_d_tensors
+        return runner.run(
+            ops.A, ops.B, ops.Ds[:nd],
+            MultiDGemmProblem(M=ops.size, N=ops.size, K=ops.size, num_d=nd),
+        )
+    if variant == "multi_abd":
+        # Verification is a separate final call (see _verify): keeping it off the
+        # timed path avoids recomputing a full fp32 reference on every repeat.
+        return runner.run(ops.problem, seed=ops.seed, verify=False)
+    return runner.run(ops.A, ops.B, ops.problem)
+
+
+def _verify(variant: str, cfg, runner, result, ops: _Operands) -> float:
+    """max_rel of the GPU result against a numpy reference."""
+    if variant == "multi_abd":
+        # The runner generates its own operands, so it also owns the reference
+        # (mirroring ck_tile::reference_gemm_multiple_abd). One extra launch.
+        verified = runner.run(ops.problem, seed=ops.seed, verify=True, verify_tol=_RTOL)
+        if verified.max_rel is None:
+            raise RuntimeError(f"multi_abd verification did not run (status={verified.status})")
+        return verified.max_rel
+
+    # Only GemmResult carries max_rel; the grouped/multi_d result types do not.
+    if getattr(result, "max_rel", None) is not None:
+        return result.max_rel
+
+    dtype = cfg.dtype_a
+    if variant == "grouped":
+        worst = 0.0
+        Bq = _quantize(ops.B, dtype)
+        for out, A_g in zip(result.outputs, ops.A_list):
+            ref = _quantize(A_g, dtype) @ Bq
+            worst = max(worst, _max_rel(np.asarray(out).astype(np.float32), ref))
+        return worst
+
+    if variant == "multi_d":
+        # multi_d's fused epilogue op lives in `elementwise_op`; the similarly
+        # named `cde_elementwise_op` is the multi_abd field and stays at its
+        # PassThrough default here, so reading it would reference the wrong op.
+        # Read it rather than hard-coding --elementwise-op: under the default
+        # PassThrough the epilogue is E = C and _cde_reference drops the D
+        # tensors, which is only correct because both sides agree on the op.
+        nd = runner.num_d_tensors
+        acc = _quantize(ops.A, dtype) @ _quantize(ops.B, dtype)
+        ref = _cde_reference(cfg.elementwise_op, acc, ops.Ds[:nd])
+        return _max_rel(result.output.astype(np.float32), ref)
+
+    # standard / stream_k
+    ref = _emulate(_emulate(ops.A, dtype) @ _emulate(ops.B, dtype), dtype)
+    return _max_rel(result.output, ref)
+
+
 def run(args) -> int:
     arch = args.arch or detect_gpu_arch()
-    dtypes = [d.strip() for d in args.dtypes.split(",")]
-    layouts = [l.strip() for l in args.layouts.split(",")]
+    if not arch:
+        print("SKIP: no GPU detected and --arch not given")
+        return _SKIP
+
+    variant = args.variant
+    def_dtypes, def_layouts = _VARIANT_DEFAULTS[variant]
+    dtypes = [d.strip() for d in args.dtypes.split(",")] if args.dtypes else def_dtypes
+    layouts = [l.strip() for l in args.layouts.split(",")] if args.layouts else def_layouts
     budget = args.budget
     seed = args.seed if args.seed is not None else _daily_seed()
     size = args.size
 
-    print(f"arch={arch}  dtypes={dtypes}  layouts={layouts}")
+    print(f"variant={variant}  arch={arch}  dtypes={dtypes}  layouts={layouts}")
     print(f"budget={budget if budget > 0 else 'unlimited'}  seed={seed}  size={size}")
 
     # --- Enumerate: same JSON config as tile_engine, across all strata ---
@@ -95,8 +273,16 @@ def run(args) -> int:
     strata = {}
     for dtype in dtypes:
         for layout in layouts:
-            configs = expand_sweep(str(_CI_CONFIG), arch=arch,
-                                   dtype=dtype, layout=layout)
+            configs = expand_sweep(str(_CI_CONFIG), arch=arch, dtype=dtype,
+                                   layout=layout, variant=variant)
+            if variant == "multi_d":
+                # default_ci_config.json carries no multi_d_config, so expand_sweep
+                # falls back to its own MultiDAdd default. Pin the epilogue op here
+                # instead: the config dataclass derives .name (and the codegen's
+                # elementwise_ops list) from this field, so replacing it is enough
+                # to select a different kernel -- no separate JSON is needed.
+                configs = [replace(c, elementwise_op=args.elementwise_op)
+                           for c in configs]
             strata[f"{dtype}/{layout}"] = configs
     total = sum(len(v) for v in strata.values())
     print(f"  {total} valid configs across {len(strata)} strata ({time.time()-t0:.1f}s)")
@@ -126,10 +312,11 @@ def run(args) -> int:
     # --- Run ---
     print(f"\nRunning {build_ok} kernels on GPU (M=N=K={size}, "
           f"warmup={args.warmup}, repeat={args.repeat})...")
-    problem = GemmProblem(M=size, N=size, K=size)
-    rng = np.random.default_rng(seed)
-    A = (rng.standard_normal((size, size)) * 0.1).astype(np.float32)
-    B = (rng.standard_normal((size, size)) * 0.1).astype(np.float32)
+    # num_d is per-kernel, but every config in a sweep shares the same operand
+    # shapes, so generate the largest D set once and slice per kernel.
+    max_num_d = max((getattr(c, "num_d_tensors", 0) for c in configs), default=0)
+    ops = _Operands(size=size, seed=seed, groups=args.groups, num_d=max_num_d)
+    flops = ops.grouped_problem.flops if variant == "grouped" else ops.problem.flops
 
     results = []
     n_pass = n_fail = n_build_fail = 0
@@ -140,13 +327,13 @@ def run(args) -> int:
             results.append({"name": cfg.name, "status": "build_fail"})
             continue
         try:
-            runner = GpuGemmRunner(lib_path=so)
+            runner = _make_runner(variant, cfg, so)
             for _ in range(args.warmup):
-                runner.run(A, B, problem)
+                _invoke(variant, runner, ops)
             times = []
             result = None
             for _ in range(max(1, args.repeat)):
-                result = runner.run(A, B, problem)
+                result = _invoke(variant, runner, ops)
                 if result.success:
                     times.append(result.time_ms)
         except Exception as exc:
@@ -161,15 +348,15 @@ def run(args) -> int:
         # Use avg TFLOPS from timed repeat runs; fall back to result.tflops (single run).
         if times:
             avg_ms = sum(times) / len(times)
-            tflops = (2.0 * size * size * size / (avg_ms * 1e-3)) / 1e12
+            tflops = (flops / (avg_ms * 1e-3)) / 1e12
         else:
             tflops = result.tflops
-        # Use max_rel from runner if already computed; otherwise compute it here.
-        if result.max_rel is not None:
-            mr = result.max_rel
-        else:
-            ref = _emulate(_emulate(A, cfg.dtype_a) @ _emulate(B, cfg.dtype_a), cfg.dtype_a)
-            mr = _max_rel(result.output, ref)
+        try:
+            mr = _verify(variant, cfg, runner, result, ops)
+        except Exception as exc:
+            n_fail += 1
+            results.append({"name": cfg.name, "status": "verify_error", "error": str(exc)})
+            continue
         ok = mr <= _RTOL
         n_pass += ok
         n_fail += not ok
@@ -182,9 +369,9 @@ def run(args) -> int:
           f"/ {len(configs)} total")
 
     if args.json:
-        out = {"arch": arch, "size": size, "seed": seed, "budget": budget,
-               "total_configs": total, "n_pass": n_pass, "n_fail": n_fail,
-               "n_build_fail": n_build_fail, "kernels": results}
+        out = {"variant": variant, "arch": arch, "size": size, "seed": seed,
+               "budget": budget, "total_configs": total, "n_pass": n_pass,
+               "n_fail": n_fail, "n_build_fail": n_build_fail, "kernels": results}
         Path(args.json).write_text(json.dumps(out, indent=2))
         print(f"Results written to {args.json}")
 
@@ -200,15 +387,27 @@ def run(args) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="Dispatcher universal GEMM search space runner",
+        description="Dispatcher GEMM search space runner (all bridged variants)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument("--variant", default="standard", choices=_VARIANTS,
+                   help="GEMM variant to sweep (default: standard)")
     p.add_argument("--arch", default=None,
                    help="GPU arch (default: auto-detect via rocminfo)")
-    p.add_argument("--dtypes", default=",".join(_DTYPES),
-                   help=f"Comma-separated dtypes (default: {','.join(_DTYPES)})")
-    p.add_argument("--layouts", default=",".join(_LAYOUTS),
-                   help=f"Comma-separated layouts (default: {','.join(_LAYOUTS)})")
+    p.add_argument("--dtypes", default=None,
+                   help="Comma-separated dtypes (default: per-variant; "
+                        f"{','.join(_DTYPES)} for standard/grouped/stream_k, "
+                        "fp16 for multi_d/multi_abd)")
+    p.add_argument("--layouts", default=None,
+                   help="Comma-separated layouts (default: per-variant; "
+                        f"{','.join(_LAYOUTS)} for standard/grouped/stream_k, "
+                        "rcrr for multi_d/multi_abd)")
+    p.add_argument("--groups", type=int, default=4,
+                   help="Sub-problem count for --variant grouped (default: 4)")
+    p.add_argument("--elementwise-op", default="PassThrough",
+                   choices=("PassThrough", "MultiDAdd", "MultiDMultiply"),
+                   help="Epilogue op for --variant multi_d (default: PassThrough). "
+                        "Ignored by every other variant.")
     p.add_argument("--budget", type=int, default=500,
                    help="Max configs to run; 0 = no cap (default: 500)")
     p.add_argument("--seed", type=int, default=None,

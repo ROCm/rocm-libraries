@@ -6,7 +6,9 @@
 """
 GPU correctness tests for BQuant GEMM dispatcher — C4 and H3 coverage.
 
-Requires a gfx950 GPU (MI350X / MI355X) and hipcc in PATH.
+Requires a gfx950 GPU (MI350X / MI355X) and hipcc in PATH. Skips cleanly
+(exit 77) when no GPU is visible or the detected arch is not gfx950, so it is
+safe to invoke unconditionally from a CI lane.
 
 Tests:
   C4 — fp8, bf8: GPU output is non-zero and within 5% max-relative-error
@@ -173,6 +175,28 @@ def _max_rel_err(C_gpu: np.ndarray, C_ref: np.ndarray) -> float:
 
 PASS = "PASS"
 FAIL = "FAIL"
+
+# ctest reports this as "skipped" rather than passed. Without it, a CPU-only or
+# non-gfx950 runner would report every BQuant test as a hard FAIL for a reason
+# that has nothing to do with the code under test.
+SKIP_EXIT = 77
+
+# BQuant needs the gfx950 (MI350X/MI355X) block-scale MFMA path.
+SUPPORTED_ARCHS = ("gfx950",)
+
+
+def _detect_arch() -> str | None:
+    """Detected gfx arch, or None when no GPU is visible.
+
+    The empty fallback keeps absence detectable; detect_gpu_arch would otherwise
+    invent a default and turn "no GPU" into a confusing build failure.
+    """
+    try:
+        from dispatcher_common import detect_gpu_arch
+
+        return detect_gpu_arch(fallback="") or None
+    except Exception:
+        return None
 
 
 def _run_one(label: str, config, M: int, N: int, K: int,
@@ -380,7 +404,10 @@ TESTS = [
 
 def main():
     parser = argparse.ArgumentParser(description="BQuant GPU correctness tests (C4 + H3)")
-    parser.add_argument("--gfx", default="gfx950", help="GPU arch (default: gfx950)")
+    # No hardcoded default: it must stay possible to tell "user asked for
+    # gfx950" from "we are on an unrelated box", so the skip below can fire.
+    parser.add_argument("--gfx", default=None,
+                        help="GPU arch override (default: auto-detect; gfx950 only)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -390,6 +417,14 @@ def main():
         format="%(levelname)s: %(message)s",
     )
 
+    gfx = args.gfx or _detect_arch()
+    if not gfx:
+        print("SKIP: no supported GPU detected (rocminfo); BQuant GPU tests skipped")
+        return SKIP_EXIT
+    if gfx not in SUPPORTED_ARCHS:
+        print(f"SKIP: BQuant is {'/'.join(SUPPORTED_ARCHS)}-only; detected {gfx}")
+        return SKIP_EXIT
+
     out_dir = args.output_dir or Path(tempfile.mkdtemp(prefix="bquant_gpu_test_"))
     log.info("Kernel output dir: %s", out_dir)
 
@@ -397,7 +432,7 @@ def main():
     for name, fn in TESTS:
         log.info("--- Running %s ---", name)
         try:
-            status, detail = fn(out_dir, args.gfx)
+            status, detail = fn(out_dir, gfx)
         except Exception as exc:
             status, detail = FAIL, f"{name}: exception: {exc}"
         results.append((name, status, detail))
