@@ -323,6 +323,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
         GRAPH_MATCH_SYMBOL,
+        "engine 'test fixture'",
         cacheCapacity);
 }
 
@@ -592,6 +593,7 @@ inline std::unique_ptr<StateManager>
         std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
         std::make_shared<NativeKernelHeuristic>(scoreSymbol),
         "test.graph",
+        "engine 'test fixture'",
         cacheCapacity);
 }
 

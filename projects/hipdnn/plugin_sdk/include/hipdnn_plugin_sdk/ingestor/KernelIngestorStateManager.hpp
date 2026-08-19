@@ -78,18 +78,25 @@ public:
     /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
     /// one excludes this engine at construction instead of throwing later from
     /// isApplicable().
+    ///
+    /// @param describedBy Names the engine in the graph_match resolution failure, which
+    ///        is the only one of the three that has no descriptor of its own to name:
+    ///        the symbol lives on the UED, so without this the diagnostic would carry
+    ///        the symbol string alone.
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
                                std::vector<KernelDescriptorPack> packs,
                                std::shared_ptr<IKernelHeuristic> heuristic,
                                const std::string& graphMatchSymbol,
+                               const std::string& describedBy = {},
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY)
         : _schema(std::move(schema))
         , _packs(std::move(packs))
         , _heuristic(std::move(heuristic))
-        , _graphMatchFn(graphMatchSymbol.empty() ? nullptr
-                                                 : GraphMatchRegistry::resolve(graphMatchSymbol))
+        , _graphMatchFn(graphMatchSymbol.empty()
+                            ? nullptr
+                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
         , _catalogCache(catalogCacheCapacity)
     {
         if(_heuristic == nullptr)

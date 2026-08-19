@@ -462,18 +462,31 @@ TEST(TestKernelIngestorStateManager, AnEngineWithNoGraphMatchStillMatchesOnItsCr
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredGraphMatchSymbol)
 {
     // Same eager-resolution contract the matcher and dispatch symbols get: a misspelled
-    // graph_match excludes the engine at construction, not at the first query.
+    // graph_match excludes the engine at construction, not at the first query. And the
+    // failure names the engine, as the matcher and dispatch failures name their own
+    // descriptors -- graph_match has no descriptor of its own, so the caller-supplied
+    // description is the only thing that can point at the file to fix.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    EXPECT_THROW(
-        StateManager(makeSchema(),
-                     std::vector<MatchDescriptor>{
-                         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
-                     makeTestDispatches(),
-                     {makePack({KERNEL_MATCHER_ID})},
-                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-                     "test.graph.not_registered"),
-        std::runtime_error);
+    try
+    {
+        const StateManager manager(
+            makeSchema(),
+            std::vector<MatchDescriptor>{
+                {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+            makeTestDispatches(),
+            {makePack({KERNEL_MATCHER_ID})},
+            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+            "test.graph.not_registered",
+            "engine 'test:misspelled_graph_match'");
+        FAIL() << "expected an unresolved-symbol failure";
+    }
+    catch(const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("test.graph.not_registered"), std::string::npos) << message;
+        EXPECT_NE(message.find("test:misspelled_graph_match"), std::string::npos) << message;
+    }
 }
 
 TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)

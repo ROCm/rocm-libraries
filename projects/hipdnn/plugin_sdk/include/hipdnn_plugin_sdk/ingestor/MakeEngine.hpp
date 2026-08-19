@@ -24,9 +24,9 @@ namespace hipdnn_plugin_sdk::ingestor
 /// builds the set once.
 /// @param graphMatchSymbol The engine's `graph_match` native symbol; empty means the
 ///        engine declares none and binds no tokens.
-/// @param describedBy Names the engine if it ships no heuristic and one is warned
-///        about. Defaulted from @p set, but a caller that already moved
-///        `set.engine` out must pass it, or the warning names nothing.
+/// @param describedBy Names the engine in the graph_match resolution failure and in the
+///        warning an engine shipping no heuristic gets. Defaulted from @p set, but a
+///        caller that already moved `set.engine` out must pass it, or both name nothing.
 template <typename THandle>
 std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(
     DescriptorSet set, const std::string& graphMatchSymbol, std::string describedBy = {})
@@ -41,7 +41,8 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(
                                                                  std::move(set.dispatches),
                                                                  std::move(set.packs),
                                                                  std::move(heuristic),
-                                                                 graphMatchSymbol);
+                                                                 graphMatchSymbol,
+                                                                 describedBy);
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a
