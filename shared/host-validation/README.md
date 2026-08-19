@@ -380,6 +380,19 @@ GemmSupportInfo support = queryGemmSupport(request, execution);
 GemmResult result = referenceGemm(request, execution);
 ```
 
+An owning call uses the same numerical descriptor:
+
+```cpp
+GemmProblem problem(a, b, cTensor, ScalarType::Float32, ScalarType::Float32);
+GemmOutputOptions output;
+output.selection = OutputSelection::explicitIndices({0, 3});
+GemmResult owned = referenceGemm(problem, output, execution);
+```
+
+The owning overload accepts an optional `TensorStorageAllocator`, validates the
+output layout and selection before allocation, and zero-initializes D so
+unselected logical coordinates and affine-layout gaps are deterministic.
+
 The normalized shapes are A `[M,K]`, B `[K,N]`, and C/D `[M,N]`.
 Transpose, leading dimensions, padding, and adjusted base locations are
 represented by `Layout`; no product transpose or matrix-layout enum crosses
@@ -444,8 +457,9 @@ Python `VectorBinding`, `BlockScaleBinding`, `GemmOperand`, `GemmEpilogue`,
 types. C and D are explicit tensors; the result aliases D. Requests retain
 shallow Tensor handles, so inputs, outputs, aliases, and allocator-backed
 storage remain alive for the synchronous call. The flat Python
-`reference_gemm_result(a, b, c, ...)` overload remains as a compatibility
-wrapper that allocates a contiguous output.
+`reference_gemm_result(a, b, c, ...)` overload delegates to the native owning
+path with a contiguous output. `GemmProblem` plus `GemmOutputOptions` exposes
+the same path with an affine output layout or partial logical selection.
 
 The optional `BlasGemmBackend` implements the same interface for dense
 F32/F64/complex GEMM and is selected through `GemmExecution`.
