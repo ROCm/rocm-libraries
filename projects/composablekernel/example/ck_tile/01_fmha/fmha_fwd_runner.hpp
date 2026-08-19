@@ -67,12 +67,13 @@ auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
 template <>
 auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
 {
-    using TypeConfig  = FmhaFwdTypeConfig<FmhaFwdFp8>;
-    using ODataType   = typename TypeConfig::ODataType;
-    float o_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<ODataType>::max());
-    double rtol       = 0;
-    double atol       = 16 * (o_dtype_max > 240 ? 2 : 1);
-    return ck_tile::make_tuple(rtol, atol);
+    // ODataType is fp8_t, so check_err() resolves to its fp8 overload whose fourth
+    // parameter is max_rounding_point_distance, a count of fp8 grid steps, not rtol.
+    // One step is ~2^-3 relative; accumulation order was measured never to exceed one
+    // step at n up to 65536, so two leaves a full step of margin.
+    double max_rounding_point_distance = 2;
+    double atol                        = 0;
+    return ck_tile::make_tuple(max_rounding_point_distance, atol);
 }
 
 template <>
@@ -2557,11 +2558,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
             else if(o_perm) o_host_result.ForEach([&](auto& self, auto idx) { self(idx) = o_host(b_idx, idx[0], idx[1] + query_offset, idx[2]); });
             else       o_host_result.ForEach([&](auto& self, auto idx) { self(idx) = o_host(b_idx, idx[1] + query_offset, idx[0], idx[2]); });
             // clang-format on
-            auto [rtol, atol] = get_elimit<DataTypeConfig>(init_method);
+            // For an fp8 ODataType the 4th argument is a ULP count, not rtol.
+            auto [tol0, atol] = get_elimit<DataTypeConfig>(init_method);
             bool cur_pass     = ck_tile::check_err(o_host_result,
                                                o_host_ref,
                                                std::string("OUT Error: Incorrect results!"),
-                                               rtol,
+                                               tol0,
                                                atol);
             pass &= cur_pass;
             if(!cur_pass)
