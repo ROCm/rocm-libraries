@@ -31,6 +31,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "IngestorMocks.hpp"
@@ -184,6 +185,26 @@ public:
     }
 };
 
+/// Reports a device (deviceId != NO_DEVICE) whose properties are unresolved: models
+/// a HIP query that "succeeds" but returns a device the ingestor cannot identify by
+/// arch, distinct from ThrowingDeviceResolver's outright query failure above.
+class UnresolvedArchDeviceResolver : public IDeviceResolver<TestHandle>
+{
+public:
+    DeviceId deviceId(const TestHandle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
+    {
+        return _properties;
+    }
+
+private:
+    DeviceProperties _properties;
+};
+
 std::optional<BoundTokens> throwingGraphMatcher(const MatchContext& /*context*/)
 {
     throw std::runtime_error("a matcher threw while deciding applicability");
@@ -202,6 +223,55 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceResolverTh
     const TestGraph graph(makeGraphId(0x92));
 
     EXPECT_FALSE(builder.isApplicable(0, graph));
+}
+
+// contextFor's D10 guard rejects a device whose gcnArchName is empty; isApplicable's
+// existing catch-all (unchanged) must still turn that throw into a decline with a
+// logged error, exactly as it does for ThrowingDeviceResolver above.
+TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnresolved)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const UnresolvedArchDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x94));
+
+    EXPECT_FALSE(builder.isApplicable(0, graph));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, engine.name))
+        << recorder.getRecordedLogsAsString();
+}
+
+// The other side of the same guard: a caller that actually needs a plan gets a loud
+// failure, not a plan built for a device nobody identified.
+TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceArchIsUnresolved)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const UnresolvedArchDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0x95));
+    KnobFilterContext context;
+
+    // The status, not merely the type: D10 specifies INTERNAL_ERROR, and a guard that
+    // threw some other plugin status would still satisfy EXPECT_THROW.
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
 }
 
 TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenAMatcherThrows)
