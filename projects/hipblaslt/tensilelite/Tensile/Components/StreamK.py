@@ -3500,11 +3500,18 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SCBranchSCC1(labelName=skUpdateDone.getLabelName(), comment="Done update"))
         # if sTmp+1 > sTmp+3 and StreamKIter < sTmp+3, switch from DP to SK (add dpShift)
         # Per-tile extras when skGrid % skTiles == 0.
-        # Park dpSectionSize so the 4-wide SKMappingTemp is not live across
-        # extra-iters mapping (gfx1250 TDM Stream-K is already SGPR-budget tight).
-        with writer.allocTmpSgpr(1, tag="dpSectionSize") as dpRes:
-            sDp = dpRes.idx
+        # Release the 4-wide SKMappingTemp across extra-iters mapping (gfx1250
+        # TDM Stream-K is SGPR-budget tight). skIndexToWG below still needs the
+        # *current* tile index in sTmp+0 — that is the DP tile this WG is
+        # finishing, not the SK range skAssignIters just wrote. Park it with
+        # dpSectionSize so the re-checkout does not hand skIndexToWG a fresh
+        # uninitialized SGPR (batched two-tile SK3: one DP tile per WG, so
+        # every DP tile took this path and wrote the wrong output tile).
+        with writer.allocTmpSgpr(2, tag="dpSectionAndTileIdx") as parkRes:
+            sDp = parkRes.idx
+            sTile = parkRes.idx + 1
             module.add(SMovB32(dst=sgpr(sDp), src=sgpr(sTmp+3), comment="park dpSectionSize"))
+            module.add(SMovB32(dst=sgpr(sTile), src=sgpr(sTmp), comment="park current tile idx"))
             writer.sgprPool.checkIn(sTmp)
             with writer.allocTmpSgpr(1, tag="extraIters") as extraItersRes, \
                  writer.allocTmpSgpr(2, alignment=1, tag="SKIter") as skIterRes:
@@ -3513,6 +3520,7 @@ class StreamKTwoTileDPFirst(StreamK):
                 module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIter)) # sIter used as tmp
                 self.skAssignIters(writer, kernel, module, sSkExtraIters, sIter, skConstsInVgprs)
             sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
+            module.add(SMovB32(dst=sgpr(sTmp), src=sgpr(sTile), comment="restore current tile idx"))
             module.add(SAddU32(dst=sgpr(sTmp+1), src0=sgpr("StreamKIter"), src1=sgpr(sDp), comment="Offset to start of SK section"))
             module.add(SAddU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sDp), comment="Offset to start of SK section"))
         with writer.allocTmpSgpr(1, tag="TotalIters") as tmpTotalIters:
