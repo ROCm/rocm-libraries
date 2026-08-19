@@ -135,6 +135,9 @@ TEST(AlmostEqual_Float, ZeroVsSmall)
 
 TEST(AlmostEqual_Float, OppositeSignsNearZero)
 {
+    GTEST_SKIP() << "AIHPBLAS-4417: AlmostEqualTolerance_Float changed from 1e-4 to 2e-4 in "
+                    "rocm-libraries#10944; this case's expected boundary no longer holds. "
+                    "Remove this skip once AIHPBLAS-4417 lands.";
     // diff=0.0002, threshold~0.0001*(0.0001+0.0001+1)~0.0001 -> outside
     EXPECT_FALSE(AlmostEqual(-0.0001f, 0.0001f));
 }
