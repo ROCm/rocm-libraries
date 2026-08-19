@@ -103,9 +103,9 @@ def test_ceil_divide_negative_and_zero(capsys):
 
 
 def test_version_is_compatible():
-    from tensilelite import __version__
-    assert U.versionIsCompatible(__version__) is True
-    major = int(__version__.split(".")[0])
+    from tensilelite import GENERATOR_VERSION
+    assert U.versionIsCompatible(GENERATOR_VERSION) is True
+    major = int(GENERATOR_VERSION.split(".")[0])
     assert U.versionIsCompatible(f"{major + 1}.0.0") is False   # major mismatch
     assert U.versionIsCompatible("9999.0.0" if major != 9999 else "0.0.0") is False
 
