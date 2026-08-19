@@ -45,62 +45,6 @@ GemmResult referenceGemmProblemOwned(const GemmProblem& problem, const GemmOutpu
                          pythonGemmBackendImplementation(execution.backend));
 }
 
-GemmResult referenceGemmOwned(
-    const Tensor& a, const Tensor& b, const Tensor& c, ScalarType outputType,
-    ScalarType accumulatorType, std::complex<double> alpha, std::complex<double> beta,
-    std::optional<ScalarType> computeTypeA, std::optional<ScalarType> computeTypeB,
-    MathMode mathMode, Activation activation, double activationParameter0,
-    double activationParameter1, OutputSelection outputSelection, GemmBackend backend,
-    std::optional<Tensor> blockScaleA, std::optional<Tensor> blockScaleB, size_t blockSizeA,
-    size_t blockSizeB, std::vector<Tensor> preQuantizationScalesA,
-    std::vector<MatrixAxis> preQuantizationAxesA, std::vector<Tensor> preQuantizationScalesB,
-    std::vector<MatrixAxis> preQuantizationAxesB, std::complex<double> outputScale,
-    OutputConversion outputConversion, AccumulationRounding accumulationRounding) {
-    if (a.shape().rank() != 2 || b.shape().rank() != 2)
-        throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
-
-    GemmOperand operandA(a);
-    GemmOperand operandB(b);
-    operandA.computeType = computeTypeA;
-    operandB.computeType = computeTypeB;
-    auto addPreQuantizationScales = [](GemmOperand& operand, const std::vector<Tensor>& scales,
-                                       const std::vector<MatrixAxis>& axes, MatrixAxis defaultAxis,
-                                       const char* name) {
-        if (!axes.empty() && axes.size() != scales.size())
-            throw std::invalid_argument(std::string("Python reference_gemm ") + name +
-                                        " scale/axis counts differ.");
-        for (size_t index = 0; index < scales.size(); ++index)
-            operand.preQuantizationScales.push_back(
-                VectorBinding{scales[index], axes.empty() ? defaultAxis : axes[index]});
-    };
-    addPreQuantizationScales(operandA, preQuantizationScalesA, preQuantizationAxesA,
-                             MatrixAxis::Row, "A pre-quantization");
-    addPreQuantizationScales(operandB, preQuantizationScalesB, preQuantizationAxesB,
-                             MatrixAxis::Column, "B pre-quantization");
-    if (blockScaleA || blockScaleB) {
-        if (!blockScaleA || !blockScaleB || blockSizeA == 0 || blockSizeB == 0)
-            throw std::invalid_argument(
-                "Python reference_gemm block scales require both tensors and nonzero sizes.");
-        operandA.blockScale = BlockScaleBinding{*blockScaleA, blockSizeA};
-        operandB.blockScale = BlockScaleBinding{*blockScaleB, blockSizeB};
-    }
-    GemmProblem problem(std::move(operandA), std::move(operandB), c, outputType, accumulatorType);
-    problem.accumulationRounding = accumulationRounding;
-    problem.mathMode = mathMode;
-    problem.epilogue.alpha = alpha;
-    problem.epilogue.beta = beta;
-    problem.epilogue.outputScale = outputScale;
-    problem.epilogue.outputConversion = outputConversion;
-    problem.epilogue.activation = activation;
-    problem.epilogue.activationParameter0 = activationParameter0;
-    problem.epilogue.activationParameter1 = activationParameter1;
-    const GemmExecution execution{
-        .backend = backend,
-        .requireRequestedBackend = backend == GemmBackend::Blocked,
-    };
-    return referenceGemm(problem, {.layout = std::nullopt, .selection = std::move(outputSelection)},
-                         execution, pythonGemmBackendImplementation(backend));
-}
 }  // namespace
 
 void registerGemmBindings(nb::module_& module) {
@@ -222,21 +166,6 @@ void registerGemmBindings(nb::module_& module) {
             [](const GemmResult& result) -> const GemmRunInfo& { return result.runInfo; },
             nb::rv_policy::reference_internal);
 
-    module.def("reference_gemm_result", &referenceGemmOwned, "a"_a, "b"_a, "c"_a, "output_type"_a,
-               "accumulator_type"_a, "alpha"_a = 1.0, "beta"_a = 0.0,
-               "compute_type_a"_a = std::optional<ScalarType>{},
-               "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
-               "activation"_a = Activation::None, "activation_parameter0"_a = 0.0,
-               "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all(),
-               "backend"_a = GemmBackend::Pointwise, "block_scale_a"_a = std::optional<Tensor>{},
-               "block_scale_b"_a = std::optional<Tensor>{}, "block_size_a"_a = 0,
-               "block_size_b"_a = 0, "pre_quantization_scales_a"_a = std::vector<Tensor>{},
-               "pre_quantization_axes_a"_a = std::vector<MatrixAxis>{},
-               "pre_quantization_scales_b"_a = std::vector<Tensor>{},
-               "pre_quantization_axes_b"_a = std::vector<MatrixAxis>{},
-               "output_scale"_a = std::complex<double>(1.0, 0.0),
-               "output_conversion"_a = OutputConversion::Default,
-               "accumulation_rounding"_a = AccumulationRounding::TypeDefault);
     module.def("reference_gemm_result", &referenceGemmRequestBound, "request"_a,
                "execution"_a = GemmExecution{.backend = GemmBackend::Pointwise});
     module.def("reference_gemm_result", &referenceGemmProblemOwned, "problem"_a,
