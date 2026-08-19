@@ -525,16 +525,17 @@ The component also owns the elementwise host epilogue used after reference
 GEMM:
 
 ```cpp
-EpilogueProblem problem(inputView, outputView, ScalarType::Float32);
+EpilogueProblem problem(
+    inputTensor, ScalarType::Float32, ScalarType::Float32);
 problem.bias = VectorBinding{biasView, MatrixAxis::Row};
 problem.activation = Activation::Gelu;
-problem.auxiliaryOutput = auxiliaryView;
-problem.rawOutput = rawOutputView;
-problem.amax = amaxView;
+problem.auxiliaryOutputType = ScalarType::Float32;
+problem.rawOutputType = ScalarType::Float32;
+problem.amaxType = ScalarType::Float32;
 problem.outputScale = 2.0;
 problem.auxiliaryScale = 3.0;
 
-EpilogueRunInfo run = referenceEpilogue(problem);
+EpilogueResult result = referenceEpilogue(problem);
 ```
 
 The current operation supports runtime input/output/bias/auxiliary types, F32,
@@ -542,6 +543,12 @@ F64, and I32 compute, explicit bias axes, forward and gradient activation,
 auxiliary E input/output, scale-D, scale-E, raw output, and AMax. The
 hipBLASLt pointer and `hipDataType` translation lives in its private client
 adapter and is not compiled by this component.
+
+The owning overload returns contiguous outputs, accepts an optional
+`TensorStorageAllocator`, and initializes every unselected logical output to
+numeric zero independently of allocator contents. `EpilogueRequest` binds
+existing destinations, preserves unselected coordinates, and optionally
+accumulates into an existing AMax value.
 
 An optional gate-residual tensor applies `gate * value + gate` after output
 scaling. `rawOutput`, when requested, captures the scaled value before the

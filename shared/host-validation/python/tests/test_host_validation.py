@@ -2565,6 +2565,10 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(
             hv.to_numpy(result.amax), np.asarray([5.0], dtype=np.float32)
         )
+        self.assertEqual(result.run_info.output_elements_written, 4)
+        self.assertEqual(result.run_info.raw_output_elements_written, 4)
+        self.assertEqual(result.run_info.auxiliary_output_elements_written, 4)
+        self.assertEqual(result.run_info.amax_elements_written, 1)
 
         gate = np.asarray([[0.5, 2.0], [-1.0, 0.25]], dtype=np.float32)
         gated = hv.reference_epilogue(
@@ -2595,6 +2599,8 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(selected.raw_output),
             np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
         )
+        self.assertEqual(selected.run_info.output_elements_written, 2)
+        self.assertEqual(selected.run_info.raw_output_elements_written, 2)
 
         int8_values = np.asarray([[-200.0, -128.5], [126.5, 300.0]], dtype=np.float32)
         saturated = hv.reference_epilogue(

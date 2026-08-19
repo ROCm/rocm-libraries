@@ -15,24 +15,21 @@ enum class ActivationApplication {
     Gradient,  // Multiplies input by activation'(auxiliaryInput).
 };
 
-// Describes the standalone elementwise program applied to a rank-two input.
-// referenceEpilogue writes the selected coordinates of output and every
-// present per-element output. If amax is present, it writes that scalar once
-// after processing the selection.
+// Reusable standalone elementwise program applied to a rank-two input.
+// Optional result types request owned per-element or AMax outputs.
 struct EpilogueProblem {
-    EpilogueProblem(Tensor inputTensor, Tensor outputTensor, ScalarType compute)
-        : input(std::move(inputTensor)), output(std::move(outputTensor)), computeType(compute) {}
+    EpilogueProblem(Tensor inputTensor, ScalarType resultType, ScalarType compute)
+        : input(std::move(inputTensor)), outputType(resultType), computeType(compute) {}
 
-    Tensor input;            // Rank-two source read at selected output coordinates.
-    Tensor output;           // Caller-owned destination written at selected coordinates.
-    ScalarType computeType;  // Type used for bias, activation, scaling, and gate arithmetic.
-    std::optional<Tensor> rawOutput;        // Scaled pre-gate values at selected coordinates.
-    std::optional<Tensor> auxiliaryOutput;  // Pre-activation values times auxiliaryScale.
-    std::optional<Tensor> auxiliaryInput;   // Activation inputs required by Gradient mode.
-    std::optional<Tensor> gateResidual;     // Applies gate * value + gate after outputScale.
-    std::optional<Tensor> amax;         // One-element output for max(abs(pre-scale activation)).
-    bool accumulateAmax = false;        // Includes the existing amax value in the maximum.
-    std::optional<VectorBinding> bias;  // Row- or column-indexed pre-activation addend.
+    Tensor input;            // Rank-two source read at selected coordinates.
+    ScalarType outputType;   // Scalar type of the primary result.
+    ScalarType computeType;  // Bias, activation, scaling, and gate arithmetic type.
+    std::optional<ScalarType> rawOutputType;        // Scaled pre-gate result type.
+    std::optional<ScalarType> auxiliaryOutputType;  // Pre-activation auxiliary result type.
+    std::optional<ScalarType> amaxType;             // Max-absolute scalar result type.
+    std::optional<Tensor> auxiliaryInput;           // Activation inputs required by Gradient mode.
+    std::optional<Tensor> gateResidual;  // Applies gate * value + gate after outputScale.
+    std::optional<VectorBinding> bias;   // Row- or column-indexed pre-activation addend.
     std::complex<double> outputScale = {1.0, 0.0};                  // Applied after activation.
     std::complex<double> auxiliaryScale = {1.0, 0.0};               // Applied to auxiliaryOutput.
     OutputConversion outputConversion = OutputConversion::Default;  // Final output encoding.
@@ -43,6 +40,43 @@ struct EpilogueProblem {
     OutputSelection outputSelection = OutputSelection::all();  // Coordinates to mutate.
 };
 
+// Binds an epilogue problem to caller-owned destinations. Unselected output
+// coordinates are preserved. accumulateAmax includes an existing AMax value.
+struct EpilogueRequest : EpilogueProblem {
+    EpilogueRequest(Tensor inputTensor, Tensor outputTensor, ScalarType compute)
+        : EpilogueProblem(std::move(inputTensor), outputTensor.type(), compute),
+          output(std::move(outputTensor)) {}
+
+    EpilogueRequest(Tensor inputTensor, Tensor outputTensor, std::optional<Tensor> rawOutputTensor,
+                    std::optional<Tensor> auxiliaryOutputTensor, std::optional<Tensor> amaxTensor,
+                    ScalarType compute)
+        : EpilogueProblem(std::move(inputTensor), outputTensor.type(), compute),
+          output(std::move(outputTensor)),
+          rawOutput(std::move(rawOutputTensor)),
+          auxiliaryOutput(std::move(auxiliaryOutputTensor)),
+          amax(std::move(amaxTensor)) {
+        if (rawOutput) rawOutputType = rawOutput->type();
+        if (auxiliaryOutput) auxiliaryOutputType = auxiliaryOutput->type();
+        if (amax) amaxType = amax->type();
+    }
+
+    EpilogueRequest(EpilogueProblem problem, Tensor outputTensor,
+                    std::optional<Tensor> rawOutputTensor = std::nullopt,
+                    std::optional<Tensor> auxiliaryOutputTensor = std::nullopt,
+                    std::optional<Tensor> amaxTensor = std::nullopt)
+        : EpilogueProblem(std::move(problem)),
+          output(std::move(outputTensor)),
+          rawOutput(std::move(rawOutputTensor)),
+          auxiliaryOutput(std::move(auxiliaryOutputTensor)),
+          amax(std::move(amaxTensor)) {}
+
+    Tensor output;                          // Primary selected-coordinate destination.
+    std::optional<Tensor> rawOutput;        // Scaled pre-gate selected-coordinate destination.
+    std::optional<Tensor> auxiliaryOutput;  // Pre-activation selected-coordinate destination.
+    std::optional<Tensor> amax;             // One-element max-absolute destination.
+    bool accumulateAmax = false;
+};
+
 // Counts writes to each caller-owned output.
 struct EpilogueRunInfo {
     size_t outputElementsWritten = 0;           // Selected primary output coordinates.
@@ -51,5 +85,18 @@ struct EpilogueRunInfo {
     size_t amaxElementsWritten = 0;             // One when amax is present; zero otherwise.
 };
 
-EpilogueRunInfo referenceEpilogue(const EpilogueProblem& problem);
+// Owning result tensors are contiguous and initialized to semantic zero before
+// selected coordinates are computed. Initialization is not included in runInfo.
+struct EpilogueResult {
+    Tensor output;
+    std::optional<Tensor> rawOutput;
+    std::optional<Tensor> auxiliaryOutput;
+    std::optional<Tensor> amax;
+    EpilogueRunInfo runInfo;
+};
+
+EpilogueRunInfo referenceEpilogue(const EpilogueRequest& request);
+EpilogueResult referenceEpilogue(const EpilogueProblem& problem);
+EpilogueResult referenceEpilogue(const EpilogueProblem& problem,
+                                 const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation
