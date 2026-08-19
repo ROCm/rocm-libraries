@@ -207,15 +207,15 @@ migration. See [Coverage](#coverage) for the full breakdown.
 A third category sits outside the unit/characterization split: checks that validate the *entire
 production logic YAML corpus* for cross-file naming and metadata invariants, rather than exercising a
 fixture or pinning current behavior. In spirit this is closer to
-[`TensileLogic --check-all`](#build-time-validation-of-library-logic) than to a unit test: both
+[`tensilelite logic --check-all`](#build-time-validation-of-library-logic) than to a unit test: both
 validate tuning data rather than code, and where each one lives follows from that.
 
 One of these checks, sibling-`DeviceNames` consistency, is implemented in
 `tensilelite.tensilelite_logic.valid_corpus_consistency` and runs unconditionally inside
-`TensileLogic --check-all`, so every kernel-generating build checks it regardless of which test lane
+`tensilelite logic --check-all`, so every kernel-generating build checks it regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy also lives in
-[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/test_PlaceholderMerge.py), as redundant confirmation
+[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/source_only/test_PlaceholderMerge.py), as redundant confirmation
 wherever the real corpus happens to be on disk, not the enforcement point. (A second check, on the
 shape of the gfx1250v0 logic overlay, was retired together with that overlay in
 [PR #11777](https://github.com/ROCm/rocm-libraries/pull/11777).)
@@ -303,7 +303,7 @@ of the rocisa package. See [Where these tests actually run](#where-these-tests-a
 
 ## Build-Time Validation of Library Logic
 
-**What it does.** `TensileLogic --check-all` validates the library logic YAML before any of it is
+**What it does.** `tensilelite logic --check-all` validates the library logic YAML before any of it is
 compiled. It checks chip IDs, matrix instructions, work-group shapes, the XCC work-group mapping, and
 custom kernel declarations, one file at a time. It reads YAML only, so it needs no GPU and no compiled
 kernels, and it is fast. A failure stops the build. It is the only mechanism in the component that
@@ -381,11 +381,11 @@ of one specific incident.
 ### Why it runs in the build
 
 Relative to the build, the logic YAML is compiler input rather than build output:
-`TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
+`tensilelite create-library` consumes it and emits kernels from it. Validating it is front-end analysis
 rather than testing, and running codegen over input already known to be invalid produces output nobody
 should trust. So the check is wired in as a CMake custom command in
 [`hipblaslt_codegen.cmake`](../cmake/hipblaslt_codegen.cmake) that runs ahead of
-`TensileCreateLibrary` and writes a stamp file. A failure stops the build.
+`tensilelite create-library` and writes a stamp file. A failure stops the build.
 
 That placement buys good reach. It runs on every build that generates kernels, including every
 developer's local one, so a bad entry surfaces in the edit-build loop instead of a CI round trip
@@ -402,7 +402,7 @@ whole-corpus validation was dominating incremental build time on single-arch bui
 minutes locally for a gfx1151 build, validating the full multi-arch logic set when only a few dozen
 files were relevant), so the CMake step now passes `--architecture "${GPU_TARGETS}"` to
 `TensileLogic`, and only logic files matching the build's own target architectures are checked.
-`TensileLogic --check-all` still defaults to validating the whole
+`tensilelite logic --check-all` still defaults to validating the whole
 corpus when a developer runs it by hand with no `--architecture` argument; it is only the build-wired
 invocation that is now scoped down. The trade was deliberate and reasonable for build time, but it is
 worth naming plainly: a single-architecture CI build no longer catches a broken entry in an
@@ -810,9 +810,9 @@ testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 | As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | On gfx942 and gfx950, TheRock's `tensilelite-common` runs `common` as its own job on every pull request, so a unit failure there no longer hides it; gfx90a and gfx12 still depend on `preliminary`'s ordering | AIHPBLAS-3354 |
 | `Tests/common` (real codegen, build, execution) runs in TheRock only on gfx90a/gfx942/gfx950/gfx120X, and only gfx942 and gfx950 on the pull-request path. gfx1250 and any family whose configs declare no `skip-gfxNNNN` for it (gfx1103, gfx115X) get none (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) | Medium | High if hit | Math CI's `preliminary` runs it per PR on `gfx90a`/`gfx942`/`gfx950`/`gfx12`; TheRock's `tensilelite-common` adds installed-artifact coverage on the same families | [#12491](https://github.com/ROCm/rocm-libraries/issues/12491) |
 | The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation | AIHPBLAS-3354 |
-| A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`. Of the logic-corpus consistency checks, that leaves the whole-corpus chip-ID-arch-lock check unrun on that path; sibling-`DeviceNames` runs via `TensileLogic --check-all` regardless | Medium | Medium | `TensileLogic --check-all` checks sibling-`DeviceNames` in every kernel-generating build; Math CI's pytest suite still runs the chip-ID-arch-lock check on any PR that also touches `tensilelite/` | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
-| The `_needs_logic_dir` skipif (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) always skips in TheRock CI, because the installed tree does not ship the corpus, so the corpus-backed pytest checks never execute there. Only the chip-ID-arch-lock check is actually exposed to this; sibling-`DeviceNames` runs via `TensileLogic --check-all` regardless | Low | Medium | `TensileLogic --check-all` covers sibling-`DeviceNames` regardless; Math CI's pytest suite can still catch a chip-ID-arch-lock violation when it runs, and the hermetic version runs everywhere but checks only gfx950 and gfx942 | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
-| gfx1250 gets no TheRock Test stage at all: the CI configuration overlay leaves its runner empty, and the `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. That includes the pytest copies of the logic-corpus checks. Sibling-`DeviceNames` still gets build-time coverage there via `TensileLogic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the missing runner | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
+| A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`. Of the logic-corpus consistency checks, that leaves the whole-corpus chip-ID-arch-lock check unrun on that path; sibling-`DeviceNames` runs via `tensilelite logic --check-all` regardless | Medium | Medium | `tensilelite logic --check-all` checks sibling-`DeviceNames` in every kernel-generating build; Math CI's pytest suite still runs the chip-ID-arch-lock check on any PR that also touches `tensilelite/` | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
+| The `_needs_logic_dir` skipif (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) always skips in TheRock CI, because the installed tree does not ship the corpus, so the corpus-backed pytest checks never execute there. Only the chip-ID-arch-lock check is actually exposed to this; sibling-`DeviceNames` runs via `tensilelite logic --check-all` regardless | Low | Medium | `tensilelite logic --check-all` covers sibling-`DeviceNames` regardless; Math CI's pytest suite can still catch a chip-ID-arch-lock violation when it runs, and the hermetic version runs everywhere but checks only gfx950 and gfx942 | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
+| gfx1250 gets no TheRock Test stage at all: the CI configuration overlay leaves its runner empty, and the `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. That includes the pytest copies of the logic-corpus checks. Sibling-`DeviceNames` still gets build-time coverage there via `tensilelite logic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `tensilelite logic --check-all` runs as a build step, unaffected by the missing runner | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
 | TheRock's `Test tensilelite` job runs the whole unit tree on one worker in every tier: `quick` and `standard` select the same tests in [`test_categories.yaml`](test_categories.yaml), and `quick` runs under a 15-minute step cap. Several unit tests read the embedded metadata of every shipped custom kernel, some at collection time, so the job's wall time grows with each custom kernel added. The gfx950 rocRoller kernels carry about 13k lines of metadata each, and adding 69 of them took the job from 11 to 14 minutes to 17 to 21 minutes | Medium | Medium | Metadata is parsed with libyaml (`CSafeLoader`). `readCustomKernelConfig` parses only the `custom.config` entry, and `getCustomKernelConfig` parses the whole block (for `amdhsa.kernels`) only for a kernel without an explicit `CustomKernel` block. `standard` runs under a 30-minute cap | [#14049](https://github.com/ROCm/rocm-libraries/issues/14049) |
 
 ### Known bugs and flaky tests
