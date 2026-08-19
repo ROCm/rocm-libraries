@@ -143,6 +143,9 @@ jobs:
           # Create logs directory
           mkdir -p ./test_logs
 
+          # Debug: show what artifact flattening placed in build/lib
+          echo "=== build/lib contents ===" && find build/lib -maxdepth 3 -type d 2>&1 || echo "build/lib does not exist"
+
           # Run test and capture output (still display to console)
           python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
