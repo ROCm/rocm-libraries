@@ -56,7 +56,7 @@ To use the `tensile_config_generator.py` script, follow these steps:
 
 4. Tune GEMM kernels using the generated YAML files:
    ```
-   HIP_FORCE_DEV_KERNARG=1 ./tensilelite/tensilelite/bin/Tensile <generated yaml path> <tune result directory>
+   HIP_FORCE_DEV_KERNARG=1 tensilelite run <generated yaml path> <tune result directory>
    ```
 
 5. Merge tune results:
@@ -64,12 +64,12 @@ To use the `tensile_config_generator.py` script, follow these steps:
    gfx942:
 
    ```
-   python3 ./tensilelite/tensilelite/Utilities/merge.py --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/
+   TensileMergeLibrary --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/
    ```
    gfx90a:
 
    ```
-   python3 ./tensilelite/tensilelite/Utilities/merge.py --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/
+   TensileMergeLibrary --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/
    ```
 
 6. Rebuild hipBLASLt with the merged results:
