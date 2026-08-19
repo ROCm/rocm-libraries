@@ -126,7 +126,6 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                               hipDataType              TiB,
                               hipDataType              TiC,
                               hipDataType              To,
-                              hipDataType              Tc_enum,
                               hipDataType              TciA,
                               hipDataType              TciB,
                               bool                     isScaleAMXFormat,
@@ -221,8 +220,6 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     const size_t outputBytes = storageBytesForLayout(outputType, layoutD);
     if(outputBytes != 0)
         std::memcpy(D, output.storage().data(), outputBytes);
-
-    (void)Tc_enum;
 }
 
 void hipblaslt_reference_gemm(hipblasOperation_t   transA,
@@ -286,7 +283,6 @@ void hipblaslt_reference_gemm(hipblasOperation_t   transA,
                                     tiB,
                                     tiC,
                                     to,
-                                    tc,
                                     computeInputA,
                                     computeInputB,
                                     isScaleAMXFormat,
@@ -358,7 +354,6 @@ void hipblaslt_reference_gemm(hipblasOperation_t   transA,
                                                 hipDataType        TiB,                      \
                                                 hipDataType        TiC,                      \
                                                 hipDataType        To,                       \
-                                                hipDataType        Tc_enum,                  \
                                                 hipDataType        TciA,                     \
                                                 hipDataType        TciB,                     \
                                                 bool               isScaleAMXFormat,         \
