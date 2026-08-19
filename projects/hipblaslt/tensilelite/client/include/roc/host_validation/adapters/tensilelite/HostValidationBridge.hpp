@@ -165,7 +165,6 @@ namespace TensileLite::Client
         compareHostBuffers(rocisa::DataType                               type,
                            const void*                                    observed,
                            const void*                                    expected,
-                           size_t                                         storageElements,
                            const roc::host_validation::Layout&            layout,
                            const roc::host_validation::ComparisonOptions& options)
     {
@@ -175,7 +174,6 @@ namespace TensileLite::Client
             throw std::invalid_argument("TensileLite observed comparison buffer is null.");
         if(expected == nullptr && bytes != 0)
             throw std::invalid_argument("TensileLite expected comparison buffer is null.");
-        (void)storageElements;
         return roc::host_validation::compare(
             roc::host_validation::Tensor(
                 scalarType,
