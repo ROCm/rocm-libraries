@@ -417,6 +417,30 @@ def main():
         ),
     )
     parser.add_argument(
+        "--environment-modification",
+        action="append",
+        default=[],
+        dest="environment_modification",
+        help=(
+            "Additional ENVIRONMENT_MODIFICATION entry (e.g. "
+            "PATH=path_list_prepend:<dir>) applied to every generated suite. May "
+            "be repeated. Used to extend PATH for runtime DLL discovery without "
+            "clobbering the inherited value."
+        ),
+    )
+    parser.add_argument(
+        "--fixtures-required",
+        action="append",
+        default=[],
+        dest="fixtures_required",
+        help=(
+            "CTest FIXTURES_REQUIRED entry applied to every generated suite (e.g. "
+            "a setup fixture that must run before the suite). May be repeated. "
+            "Currently applied only to the build tree; not emitted into the install "
+            "tree, since no use case requires it there yet."
+        ),
+    )
+    parser.add_argument(
         "--use-rtest-driver",
         action="store_true",
         dest="use_rtest_driver",
@@ -516,6 +540,14 @@ def main():
         env_dict.update(cli_env_overrides)
         env_string = (
             ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
+        )
+        env_mod_string = (
+            ";".join(args.environment_modification)
+            if args.environment_modification
+            else None
+        )
+        fixtures_string = (
+            ";".join(args.fixtures_required) if args.fixtures_required else None
         )
         exclude_gpu_config = config.get("exclude_gpu", {})
 
@@ -628,6 +660,10 @@ def main():
             print(f"  TIMEOUT {timeout}")
             if env_string:
                 print(f'  ENVIRONMENT "{env_string}"')
+            if env_mod_string:
+                print(f'  ENVIRONMENT_MODIFICATION "{env_mod_string}"')
+            if fixtures_string:
+                print(f'  FIXTURES_REQUIRED "{fixtures_string}"')
             if resource_group:
                 print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
             print(")")
@@ -652,8 +688,15 @@ def main():
                         )
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
+                    env_mod_prop = (
+                        f' ENVIRONMENT_MODIFICATION "{env_mod_string}"'
+                        if env_mod_string
+                        else ""
+                    )
+                    # FIXTURES_REQUIRED currently applies only to the build tree; no
+                    # use case requires it in the install tree yet.
                     install_file_handle.write(
-                        f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{resource_groups_prop})\n\n"
+                        f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
                     )
                     install_file_handle.flush()
                 except OSError as e:
@@ -798,6 +841,10 @@ def main():
                 print(f"  TIMEOUT {timeout}")
                 if env_string:
                     print(f'  ENVIRONMENT "{env_string}"')
+                if env_mod_string:
+                    print(f'  ENVIRONMENT_MODIFICATION "{env_mod_string}"')
+                if fixtures_string:
+                    print(f'  FIXTURES_REQUIRED "{fixtures_string}"')
                 if resource_group:
                     print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
                 print(")")
@@ -823,8 +870,15 @@ def main():
                             )
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
+                        env_mod_prop = (
+                            f' ENVIRONMENT_MODIFICATION "{env_mod_string}"'
+                            if env_mod_string
+                            else ""
+                        )
+                        # FIXTURES_REQUIRED currently applies only to the build tree; no
+                        # use case requires it in the install tree yet.
                         install_file_handle.write(
-                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{resource_groups_prop})\n\n"
+                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
                         )
                         install_file_handle.flush()
                     except OSError as e:

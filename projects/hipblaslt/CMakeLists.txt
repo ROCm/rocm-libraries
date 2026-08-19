@@ -177,34 +177,48 @@ endif()
 
 if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
     if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-        execute_process(
-            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
-            OUTPUT_VARIABLE ASAN_LIB_PATH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
-        # rather than /path/to/libclang_rt.asan-x86_64.so then
-        # we failed to locate it and HAS_PARENT_PATH is false.
-        cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
-        if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+        set(_suffix "asan")
+        set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+        foreach(_clang_rt_name ${_clang_rt_names})
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=${_clang_rt_name}
+                OUTPUT_VARIABLE _clang_rt_path
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            # If _clang_rt_path is libclang_rt.asan-x86_64.so
+            # rather than /path/to/libclang_rt.asan-x86_64.so then
+            # we failed to locate it.
+            if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+                set(ASAN_LIB_PATH "${_clang_rt_path}")
+                break()
+            endif()
+        endforeach()
+        if(NOT ASAN_LIB_PATH)
+            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so or libclang_rt.asan.so")
         endif()
         # Disable a few asan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0,malloc_context_size=0,quarantine_size_mb=0")
     elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
-        execute_process(
-            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan-x86_64.so
-            OUTPUT_VARIABLE TSAN_LIB_PATH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        # If TSAN_LIB_PATH is libclang_rt.tsan-x86_64.so
-        # rather than /path/to/libclang_rt.tsan-x86_64.so then
-        # we failed to locate it and HAS_PARENT_PATH is false.
-        cmake_path(HAS_PARENT_PATH TSAN_LIB_PATH result)
-        if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so ")
+        set(_suffix "tsan")
+        set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+        foreach(_clang_rt_name ${_clang_rt_names})
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=${_clang_rt_name}
+                OUTPUT_VARIABLE _clang_rt_path
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            # If _clang_rt_path is libclang_rt.tsan-x86_64.so
+            # rather than /path/to/libclang_rt.tsan-x86_64.so then
+            # we failed to locate it.
+            if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+                set(TSAN_LIB_PATH "${_clang_rt_path}")
+                break()
+            endif()
+        endforeach()
+        if(NOT TSAN_LIB_PATH)
+            message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so or libclang_rt.tsan.so")
         endif()
         # Disable a few tsan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${TSAN_LIB_PATH}" "TSAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
@@ -656,6 +670,15 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
             "${_tensilelite_src}/scripts/analyze_timing.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
+        COMPONENT tests
+    )
+
+    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
+    # ship at the tensilelite root, not under scripts/.
+    install(
+        FILES
+            "${_tensilelite_src}/AMaxGenerator.py"
+        DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
     )
     # Preserve executable permissions on entry points

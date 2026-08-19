@@ -262,7 +262,7 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatrixLayoutDestroy");
     auto status = RocBlasLtStatusToHIPStatus(
-        rocblaslt_matrix_layout_destory((const rocblaslt_matrix_layout)descr));
+        rocblaslt_matrix_layout_destroy((const rocblaslt_matrix_layout)descr));
     rocblaslt::Debug::Instance().markerStop();
     return status;
 }

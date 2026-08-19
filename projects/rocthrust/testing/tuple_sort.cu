@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -54,30 +54,30 @@ struct TestTupleStableSort
 
     // zip up the data
     host_vector<tuple<T, T>> h_tuples(n);
-    thrust::transform(h_keys.begin(), h_keys.end(), h_values.begin(), h_tuples.begin(), MakeTupleFunctor());
+    transform(h_keys.begin(), h_keys.end(), h_values.begin(), h_tuples.begin(), MakeTupleFunctor());
 
     // copy to device
     device_vector<tuple<T, T>> d_tuples = h_tuples;
 
     // sort on host
-    thrust::stable_sort(h_tuples.begin(), h_tuples.end());
+    stable_sort(h_tuples.begin(), h_tuples.end());
 
     // sort on device
-    thrust::stable_sort(d_tuples.begin(), d_tuples.end());
+    stable_sort(d_tuples.begin(), d_tuples.end());
 
-    ASSERT_EQUAL(true, thrust::is_sorted(d_tuples.begin(), d_tuples.end()));
+    ASSERT_EQUAL(true, is_sorted(d_tuples.begin(), d_tuples.end()));
 
     // select keys
-    thrust::transform(h_tuples.begin(), h_tuples.end(), h_keys.begin(), GetFunctor<0>());
+    transform(h_tuples.begin(), h_tuples.end(), h_keys.begin(), GetFunctor<0>());
 
     device_vector<T> d_keys(h_keys.size());
-    thrust::transform(d_tuples.begin(), d_tuples.end(), d_keys.begin(), GetFunctor<0>());
+    transform(d_tuples.begin(), d_tuples.end(), d_keys.begin(), GetFunctor<0>());
 
     // select values
-    thrust::transform(h_tuples.begin(), h_tuples.end(), h_values.begin(), GetFunctor<1>());
+    transform(h_tuples.begin(), h_tuples.end(), h_values.begin(), GetFunctor<1>());
 
     device_vector<T> d_values(h_values.size());
-    thrust::transform(d_tuples.begin(), d_tuples.end(), d_values.begin(), GetFunctor<1>());
+    transform(d_tuples.begin(), d_tuples.end(), d_values.begin(), GetFunctor<1>());
 
     ASSERT_ALMOST_EQUAL(h_keys, d_keys);
     ASSERT_ALMOST_EQUAL(h_values, d_values);

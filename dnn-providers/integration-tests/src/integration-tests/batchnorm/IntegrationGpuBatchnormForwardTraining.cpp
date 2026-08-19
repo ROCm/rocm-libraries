@@ -216,7 +216,7 @@ public:
 
     BatchnormForwardTraining()
     {
-        this->synthesis()
+        this->inputFillRecipes()
             .setRange(BatchnormFwdTrainingTensorIds::X_UID, -1.0f, 1.0f)
             .setRange(BatchnormFwdTrainingTensorIds::SCALE_UID, -2.0f, 2.0f)
             .setRange(BatchnormFwdTrainingTensorIds::BIAS_UID, -2.0f, 2.0f)
@@ -252,7 +252,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis()
+        this->inputFillRecipes()
             .setSeed(BatchnormFwdTrainingTensorIds::X_UID, bnTestCase.seed)
             .setSeed(BatchnormFwdTrainingTensorIds::SCALE_UID, bnTestCase.seed + 1)
             .setSeed(BatchnormFwdTrainingTensorIds::BIAS_UID, bnTestCase.seed + 2)

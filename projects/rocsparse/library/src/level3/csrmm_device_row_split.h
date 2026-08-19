@@ -52,7 +52,8 @@ namespace rocsparse
                                                               int64_t              ldc,
                                                               int64_t              batch_stride_C,
                                                               rocsparse_order      order_C,
-                                                              rocsparse_index_base idx_base)
+                                                              rocsparse_index_base idx_base,
+                                                              int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -64,8 +65,6 @@ namespace rocsparse
         const uint32_t lid = gid & (WF_SIZE - 1);
         const J        row = gid / WF_SIZE;
         const J        col = lid + hipBlockIdx_y * WF_SIZE;
-
-        const J batch = hipBlockIdx_z;
 
         if(row >= M)
         {
@@ -161,7 +160,8 @@ namespace rocsparse
                                                        int64_t              ldc,
                                                        int64_t              batch_stride_C,
                                                        rocsparse_order      order_C,
-                                                       rocsparse_index_base idx_base)
+                                                       rocsparse_index_base idx_base,
+                                                       int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -173,8 +173,6 @@ namespace rocsparse
         const uint32_t lid  = gid & (WF_SIZE - 1);
         const J        row  = gid / WF_SIZE;
         const J        colB = offset + LOOPS * hipBlockIdx_y;
-
-        const J batch = hipBlockIdx_z;
 
         if(row >= M)
         {
@@ -285,7 +283,8 @@ namespace rocsparse
                                                           rocsparse_order      order_C,
                                                           rocsparse_index_base idx_base,
                                                           bool                 conj_A,
-                                                          bool                 conj_B)
+                                                          bool                 conj_B,
+                                                          int64_t              batch)
     {
         const uint32_t tid = hipThreadIdx_x;
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
@@ -294,8 +293,6 @@ namespace rocsparse
 
         const uint32_t slid = lid & (SUBWFSIZE - 1);
         const uint32_t swid = lid / SUBWFSIZE;
-
-        const J batch = hipBlockIdx_y;
 
         if(row >= M)
         {
@@ -445,7 +442,8 @@ namespace rocsparse
                                                   int64_t              ldc,
                                                   int64_t              batch_stride_C,
                                                   rocsparse_order      order_C,
-                                                  rocsparse_index_base idx_base)
+                                                  rocsparse_index_base idx_base,
+                                                  int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -461,8 +459,6 @@ namespace rocsparse
 
         const uint32_t slid = lid & (SUB_WF_SIZE - 1);
         const uint32_t swid = lid / SUB_WF_SIZE;
-
-        const J batch = hipBlockIdx_y;
 
         if(row >= M)
         {
@@ -594,7 +590,8 @@ namespace rocsparse
         rocsparse_order      order_C,
         rocsparse_index_base idx_base,
         bool                 conj_A,
-        bool                 conj_B)
+        bool                 conj_B,
+        int64_t              batch)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(SUBWFSIZE > 0 && (SUBWFSIZE & (SUBWFSIZE - 1)) == 0,
@@ -621,8 +618,6 @@ namespace rocsparse
             slid_swf[iswf] = lid & (SUBWFSIZES[iswf] - 1);
             swid_swf[iswf] = lid / SUBWFSIZES[iswf];
         }
-
-        const J batch = hipBlockIdx_y;
 
         if(row >= M)
         {
@@ -842,7 +837,8 @@ namespace rocsparse
                                                        int64_t              ldc,
                                                        int64_t              batch_stride_C,
                                                        rocsparse_order      order_C,
-                                                       rocsparse_index_base idx_base)
+                                                       rocsparse_index_base idx_base,
+                                                       int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -855,8 +851,6 @@ namespace rocsparse
         const uint32_t wid = tid / WF_SIZE;
 
         const J row = gid / WF_SIZE;
-
-        const J batch = hipBlockIdx_z;
 
         if(row >= M)
         {
@@ -935,7 +929,8 @@ namespace rocsparse
                                                        int64_t              ldc,
                                                        int64_t              batch_stride_C,
                                                        rocsparse_order      order_C,
-                                                       rocsparse_index_base idx_base)
+                                                       rocsparse_index_base idx_base,
+                                                       int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -949,8 +944,6 @@ namespace rocsparse
 
         const J row = gid / WF_SIZE;
         const J cid = lid + hipBlockIdx_y * WF_SIZE;
-
-        const J batch = hipBlockIdx_z;
 
         if(row >= M)
         {

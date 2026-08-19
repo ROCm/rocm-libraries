@@ -79,7 +79,7 @@ from ...helpers.schedule import SchedulePolicy
 from ...helpers.tensor_view import (
     make_buffer_resource,
 )
-from ...helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
+from ...helpers.transforms import TensorDescriptor, pad, unmerge_magic
 from ._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for callers
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -263,6 +263,16 @@ class ImplicitGemmConvSpec:
         )
 
     def validate(self) -> None:
+        # ``ImplicitGemmConvSpec.groups`` (the legacy P86 field) must not
+        # contradict the authoritative ``problem.groups``. The kernel body reads
+        # the problem's grouping; the spec field is kept for back-compat and, if
+        # set, must agree.
+        if self.groups != 1 and self.groups != self.problem.groups:
+            raise ValueError(
+                f"spec.groups={self.groups} contradicts problem.groups="
+                f"{self.problem.groups}; set them consistently (problem.groups "
+                f"is authoritative)"
+            )
         if self.tile_m % (self.warp_m * self.warp_tile_m) != 0:
             raise ValueError(
                 f"tile_m {self.tile_m} not divisible by warp_m * warp_tile_m "
@@ -397,14 +407,18 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         )
 
     # Check global store vector size and disable default epilogue for
-    # vec_size_c > 1
-    if (
-        spec.vector_size_c is not None
-        and spec.vector_size_c > 1
-        and spec.epilogue == "default"
-    ):
+    # vec_size_c > 1 — whether set explicitly or auto-derived from K.
+    _eff_vec_c = (
+        spec.vector_size_c
+        if spec.vector_size_c is not None
+        else ImplicitGemmConvSpec.default_vector_sizes(
+            spec.problem.C, spec.problem.K, spec.data.dtype_d
+        )[2]
+    )
+    _is_wmma_arch = target.wave_size == 32
+    if _eff_vec_c > 1 and spec.epilogue == "default":
         return False, (
-            f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
+            f"default epilogue is not supported with vector size c: {_eff_vec_c}"
         )
 
     # The MMA *family* is selected from the target's wave size: CDNA (wave64)
@@ -412,7 +426,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # shape thus resolves to an MFMA op_id on gfx942/gfx950 and a WMMA op_id on
     # gfx1151. ``spec.wave_size`` is baked into ``block_size``, so it must match
     # the target's wave size or the lane geometry is wrong on hardware.
-    family = "wmma" if target.wave_size == 32 else "mma"
+    family = "wmma" if _is_wmma_arch else "mma"
     if spec.wave_size != target.wave_size:
         return False, (
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
@@ -458,12 +472,21 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
-    # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
-    # 16x16x16 atom (gfx11/gfx12) or 16x16x32 atom (gfx1250) with the simple
-    # ``mem`` pipeline + ``default`` epilogue and synchronous descriptor-driven
-    # loads. The richer MFMA-shaped paths (compv3/compv4 scheduler interleave,
-    # cshuffle LDS-staged C, async DMA, K-unroll, chiplet swizzle, grouped conv)
-    # are gated off until ported.
+    # basic pipeline uses the split emit_global_read/emit_lds_write path which
+    # is only available on the sync (non-async-DMA) CoalescedTileLoader path.
+    # async_dma uses raw_ptr_buffer_load_lds which atomically loads directly
+    # into LDS with no VGPR staging, making the split impossible.
+    if spec.pipeline == "basic" and spec.async_dma:
+        return False, "pipeline='basic' is incompatible with async_dma=True"
+
+    # WMMA (wave32) coverage: the 16x16x4 / 16x16x16 (gfx11/gfx12) or 16x16x32
+    # (gfx1250) atom with the simple ``mem`` pipeline + ``default``/``cshuffle``
+    # epilogue and synchronous descriptor-driven loads. The generic catalog check
+    # above already rejects an atom the *specific* arch lacks (e.g. 16x16x32 on
+    # gfx1151). The richer MFMA-shaped paths (compv3/compv4 scheduler interleave,
+    # async DMA, K-unroll, chiplet swizzle) remain gated off on WMMA until ported;
+    # grouped conv IS supported (the grid-per-group group index + group-aware
+    # epilogue are family-neutral).
     if family == "wmma":
         if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
             return (
@@ -487,8 +510,6 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         ):
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
-        if spec.groups != 1:
-            return False, f"WMMA conv supports only groups=1 (got {spec.groups})"
 
     return True, "ok"
 
@@ -528,130 +549,24 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
     return op
 
 
+def implicit_gemm_conv_grid(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int]:
+    """Launch grid for one implicit-GEMM conv instance: ``(gn, gm, groups)``.
+
+    ``x`` = N-tiles over the *per-group* GEMM N (``N_gemm = kpg``), ``y`` =
+    M-tiles, ``z`` = group (CK-style grid-per-group; the kernel reads the group
+    from ``blockIdx.z``). ``groups == 1`` gives the historical 2-D grid with a
+    trivial ``z = 1``. When ``tile_n > kpg`` (e.g. cardinality-grouped g32/cpg8)
+    ``gn == 1`` and the surplus N lanes are masked by the epilogue bound check.
+    """
+    p = spec.problem
+    gm = (p.M + spec.tile_m - 1) // spec.tile_m
+    gn = (p.N_gemm + spec.tile_n - 1) // spec.tile_n
+    return (gn, gm, p.groups)
+
+
 # ---------------------------------------------------------------------
 # Descriptor builders (the user-visible "transform-DAG" surface)
 # ---------------------------------------------------------------------
-
-
-def make_a_descriptor(
-    p: ConvProblem, decompose_m: bool = True, dtype: str = "fp16"
-) -> TensorDescriptor:
-    """Build the (m, k) -> N[D]HWC linear-offset descriptor for the input.
-
-    2-D DAG  (``p.is_3d`` is False):
-      naive(NHWC):                       (n, hi, wi, c)
-      + unmerge('m' -> n, ho, wo):       (hi, wi, c, m, ho, wo) intermediate
-      + embed((ho, y) -> hi):            (wi, c, m, y, wo)      intermediate
-      + embed((wo, x) -> wi):            (c, m, y, x)           intermediate
-      + unmerge('k' -> y, x, c):         (m, k)                 user-facing
-      + pad('y' lo=0 hi=Y):              boundary check
-      + pad('x' lo=0 hi=X):              boundary check
-
-    3-D DAG  (``p.is_3d`` is True):
-      naive(NDHWC):                      (n, di, hi, wi, c)
-      + unmerge('m' -> n, do, ho, wo)
-      + embed((do, z) -> di)
-      + embed((ho, y) -> hi)
-      + embed((wo, x) -> wi)
-      + unmerge('k' -> z, y, x, c)
-      + pad('z'), pad('y'), pad('x')
-
-    When ``decompose_m`` is ``False`` the leading ``unmerge('m' -> ...)``
-    is dropped and the user-facing upper coords become ``(n, ho, wo, k)``
-    directly. This is a strict win for callers that already hold ``(ho, wo)``
-    cheaply (e.g. computed via shift/mask from the tile row): the default
-    chain would re-decompose ``m = ho*Wo + wo`` back into ``(n, ho, wo)`` via
-    two magic divisions (~10 VALU per A coord) — a pure round-trip. Feeding
-    ``(n, ho, wo)`` straight in produces a bit-identical offset while skipping
-    both the caller-side flatten and the descriptor-side magic unmerge.
-
-    The ``embed`` transforms encode the convolution affine maps
-    ``hi = ho*sH - pH + y*dH`` and ``wi = wo*sW - pW + x*dW``, with the
-    convolution boundary check baked into the descriptor's validity predicate.
-    The ``pad`` transforms add per-coord bound checks on ``y`` and ``x``: when
-    ``K_gemm`` is not divisible by the block ``tile_k``, the K-loop loads past
-    ``K_gemm-1`` and the unmerge produces ``y >= Y`` or ``x >= X``. Without
-    these ``pad`` transforms the kernel would read valid-looking offsets that
-    *cross* into adjacent weight rows and blend wrong weights into the
-    accumulator.
-    """
-    transforms = []
-    if p.is_3d:
-        if decompose_m:
-            transforms.append(
-                unmerge_magic(
-                    "m", into=["n", "do", "ho", "wo"], dims=[p.N, p.Do, p.Ho, p.Wo]
-                )
-            )
-        transforms += [
-            embed(
-                upper=["do", "z"],
-                into="di",
-                strides=[p.sD, p.dD],
-                offset=-p.pD,
-                lo=0,
-                hi=p.Di,
-            ),
-            embed(
-                upper=["ho", "y"],
-                into="hi",
-                strides=[p.sH, p.dH],
-                offset=-p.pH,
-                lo=0,
-                hi=p.Hi,
-            ),
-            embed(
-                upper=["wo", "x"],
-                into="wi",
-                strides=[p.sW, p.dW],
-                offset=-p.pW,
-                lo=0,
-                hi=p.Wi,
-            ),
-            unmerge_magic("k", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
-            pad("z", lo=0, hi=p.Z),
-            pad("y", lo=0, hi=p.Y),
-            pad("x", lo=0, hi=p.X),
-        ]
-        return TensorDescriptor.naive(
-            "A_ndhwc",
-            lengths=[p.N, p.Di, p.Hi, p.Wi, p.C],
-            dtype=_ir_dtype(dtype),
-            coord_names=["n", "di", "hi", "wi", "c"],
-        ).transform(*transforms)
-    else:
-        if decompose_m:
-            transforms.append(
-                unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo])
-            )
-        transforms += [
-            embed(
-                upper=["ho", "y"],
-                into="hi",
-                strides=[p.sH, p.dH],
-                offset=-p.pH,
-                lo=0,
-                hi=p.Hi,
-            ),
-            embed(
-                upper=["wo", "x"],
-                into="wi",
-                strides=[p.sW, p.dW],
-                offset=-p.pW,
-                lo=0,
-                hi=p.Wi,
-            ),
-            unmerge_magic(upper="k", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
-            # pad('y'/'x'): guard against partial K-tile overruns into adjacent weight rows.
-            pad("y", lo=0, hi=p.Y),
-            pad("x", lo=0, hi=p.X),
-        ]
-        return TensorDescriptor.naive(
-            "A_nhwc",
-            lengths=[p.N, p.Hi, p.Wi, p.C],
-            dtype=_ir_dtype(dtype),
-            coord_names=["n", "hi", "wi", "c"],
-        ).transform(*transforms)
 
 
 def make_b_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
@@ -682,15 +597,21 @@ def make_b_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
     partial K-tile the MFMA contribution is 0 regardless of B. Padding B here
     is defense-in-depth so a future A-load change doesn't silently regress.
     """
+    # Weight is stored per-group: KYXC / KZYXC with the channel extent equal to
+    # ``cpg = C / groups`` (== C when groups == 1, so byte-identical to the
+    # pre-groups kernel). The absolute output filter ``k_out = g*kpg + k_in_group``
+    # is threaded in by the caller, so the group is folded into the ``k_out`` row
+    # index and needs no descriptor coord here (mirrors CK's per-group weight
+    # slab GKYXC == KYXC with C = cpg).
     if p.is_3d:
         return TensorDescriptor.naive(
             "B_kzyxc",
-            lengths=[p.K, p.Z, p.Y, p.X, p.C],
+            lengths=[p.K, p.Z, p.Y, p.X, p.cpg],
             dtype=_ir_dtype(dtype),
             coord_names=["k_out", "z", "y", "x", "c"],
         ).transform(
             unmerge_magic(
-                "k_gemm", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]
+                "k_gemm", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.cpg]
             ),
             pad("z", lo=0, hi=p.Z),
             pad("y", lo=0, hi=p.Y),
@@ -698,11 +619,11 @@ def make_b_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
         )
     return TensorDescriptor.naive(
         "B_kyxc",
-        lengths=[p.K, p.Y, p.X, p.C],
+        lengths=[p.K, p.Y, p.X, p.cpg],
         dtype=_ir_dtype(dtype),
         coord_names=["k_out", "y", "x", "c"],
     ).transform(
-        unmerge_magic(upper="k_gemm", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
+        unmerge_magic(upper="k_gemm", into=["y", "x", "c"], dims=[p.Y, p.X, p.cpg]),
         pad("y", lo=0, hi=p.Y),
         pad("x", lo=0, hi=p.X),
     )
@@ -908,6 +829,20 @@ def build_implicit_gemm_conv(
         block_m_off_v = grid.block_m_off
         block_n_off_v = grid.block_n_off
 
+    # Grouped conv (groups > 1): the group index lives on grid.z (CK Tile puts
+    # the group on the grid and offsets per-group). Each block computes one
+    # group's per-group GEMM: N_gemm = kpg, K_gemm = [Z]*Y*X*cpg. The group
+    # selects A's input-channel slab (via the descriptor's ``group`` coord) and
+    # the absolute output-filter base ``k_out = g*kpg + n`` for B and D. For
+    # groups == 1 nothing is emitted, keeping the kernel byte-identical.
+    grouped = p.groups > 1
+    if grouped:
+        group_idx = b.block_id_z()
+        k_out_group_base = b.mul(group_idx, b.const_i32(p.kpg))
+    else:
+        group_idx = None
+        k_out_group_base = None
+
     # LDS bank-conflict avoidance for the sync path: pad each K-row
     # by 8 halves so the stride is `block_k + 8` not `block_k`.
     # Adjacent lanes reading `ds_read_b128` (16 bytes = 4 banks each)
@@ -973,13 +908,27 @@ def build_implicit_gemm_conv(
     # (``c_threads``, ``c_load_vec``, ``c_cols_per_vec``) once per
     # ``load()`` invocation, which the AMDGPU backend constant-folds.
 
-    # The two descriptors used for global loads. The A descriptor is
-    # the conv-coord-transform DAG; B is a simple naive (KYXC) +
-    # unmerge for K_gemm.
-    A_desc = make_a_descriptor(
-        p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a
-    )
-    B_desc = make_b_descriptor(p, dtype=spec.data.dtype_b)
+    # For pointwise convolutions (Y=X=1, stride 1, pad 0) A, B, D are truly
+    # flat 2-D matrices: A[M,C], B[K,C], D[M,K] with M = N*Ho*Wo (pre-multiplied
+    # compile-time constant).  We skip the TensorDescriptor DAG entirely and
+    # compute offsets as plain multiplications — no magic divisions, no pad
+    # guards, no embed arithmetic.
+    if p.is_pointwise:
+        A_desc = None
+        B_desc = None
+        _c_M = p.M  # compile-time constant for bounds check
+        _c_C = p.cpg  # per-group C (== C for groups=1)
+        _c_K = p.kpg  # per-group K
+        _c_C_ir = b.const_i32(_c_C)
+        _c_K_ir = b.const_i32(_c_K)
+        _c_M_ir = b.const_i32(_c_M)
+        _always_valid = b.const_i32(1)  # no pad guard needed
+    else:
+        A_desc = make_a_descriptor(
+            p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a
+        )
+        B_desc = make_b_descriptor(p, dtype=spec.data.dtype_b)
+        _c_M_ir = _c_C_ir = _c_K_ir = _always_valid = None
 
     # CK Tile-style buffer views over A / B / D. ``make_buffer_resource``
     # wraps ``b.buffer_rsrc(ptr, num_bytes)`` and pre-binds a zero
@@ -1005,23 +954,42 @@ def build_implicit_gemm_conv(
     # `(row, col)` are in the (tile_local M, tile_local K halves)
     # coordinate system. The descriptor returns
     # `(element_offset, valid_predicate)`.
+    # Grouped conv threads the group index as A's ``group`` upper coord (selects
+    # the input-channel slab) and folds it into B/D's absolute output filter
+    # ``k_out``. ``_a_group_kw`` is empty for groups == 1 so the offset call is
+    # unchanged (byte-identical).
+    _a_group_kw = {"group": group_idx} if grouped else {}
+
     def a_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_val = b_.add(k_off_capture[0], col)
+        if p.is_pointwise:
+            # Flat: offset = m * C + c,  valid = (m < M) & (c < C)
+            m_val = b_.add(block_m_off_v, row)
+            off = b_.add(b_.mul(m_val, _c_C_ir), k_val)
+            m_ok = b_.cmp_lt(m_val, _c_M_ir)
+            c_ok = b_.cmp_lt(k_val, _c_C_ir)
+            return off, b_.land(m_ok, c_ok)
         if a_mhw_index_fn is not None:
-            # Decomposed A descriptor: feed (n, ho, wo) straight in, skipping
-            # the m-flatten -> magic-unmerge round-trip (see make_a_descriptor).
             n_v, ho_v, wo_v = a_mhw_index_fn(b_, row, grid)
-            return A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val)
+            return A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val, **_a_group_kw)
         m_val = (
             m_index_fn(b_, row, grid)
             if m_index_fn is not None
             else b_.add(block_m_off_v, row)
         )
-        return A_desc.offset(b_, m=m_val, k=k_val)
+        return A_desc.offset(b_, m=m_val, k=k_val, **_a_group_kw)
 
     def b_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_out = b_.add(block_n_off_v, row)
+        if grouped:
+            k_out = b_.add(k_out_group_base, k_out)
         kg = b_.add(k_off_capture[0], col)
+        if p.is_pointwise:
+            # Flat: offset = k_out * C + c,  valid = (k_out < K) & (c < C)
+            off = b_.add(b_.mul(k_out, _c_C_ir), kg)
+            k_ok = b_.cmp_lt(k_out, _c_K_ir)
+            c_ok = b_.cmp_lt(kg, _c_C_ir)
+            return off, b_.land(k_ok, c_ok)
         return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
 
     # `k_off_capture` lets the closures pick up the current k0 from
@@ -1154,6 +1122,36 @@ def build_implicit_gemm_conv(
             descriptor=b_descriptor,
             rsrc=b_rsrc,
         )
+
+    def emit_global_read(k_off: Value) -> tuple:
+        """Issue only the global memory reads (buffer_load_vN) for one K tile.
+
+        Returns ``(k_off, a_staged, b_staged)`` — the tile offset and the two
+        lists of ``(row, col, v)`` triples from :meth:`CoalescedTileLoader.load_global`.
+        The caller must later call :func:`emit_lds_write` to commit these values
+        to LDS. Only valid on the sync (non-async-DMA) path; CK pipeline_basic
+        uses this to overlap VMEM latency with MFMA compute.
+        """
+        k_off_capture[0] = k_off
+        a_staged = a_sync_loader.load_global(
+            b, tid=tid, descriptor=a_descriptor, rsrc=a_rsrc
+        )
+        b_staged = b_sync_loader.load_global(
+            b, tid=tid, descriptor=b_descriptor, rsrc=b_rsrc
+        )
+        return k_off, a_staged, b_staged
+
+    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
+        """Commit previously-staged VGPR values to LDS (smem_store_vN).
+
+        ``staged_tuple`` is the value returned by :func:`emit_global_read`.
+        Restores ``k_off_capture`` so the descriptor sees the correct k offset
+        even though the global read and LDS write happen in different loop positions.
+        """
+        k_off, a_staged, b_staged = staged_tuple
+        k_off_capture[0] = k_off
+        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
+        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
 
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
@@ -1318,24 +1316,29 @@ def build_implicit_gemm_conv(
         return new_accs
 
     # ---- the K loop ----
-    # Two code paths:
+    # The K-loop *structure* determines the branch — not the pipeline string.
+    # "mem", "compv3", and "compv4" all share the same scf.for_iter shape;
+    # their differences (scheduling hints, double-buffering) are handled inside
+    # emit_mfma_phase and the LDS allocation, not by the K-loop itself.
+    # A new branch is only introduced when the loop structure itself changes.
     #
-    # 1) Sync path (`async_dma=False`): emit a single `scf.for_iter`
-    #    body that runs the load + barrier + MFMA + barrier sequence.
-    #    No software pipelining; each iter waits for its own load.
+    # 1) unroll_k: Python-unroll + double-buffer ping-pong (no scf.for_iter).
+    #    Stage tile t+1 into the alternate buffer while MFMA runs on tile t.
     #
-    # 2) Async path (`async_dma=True`): Python-unroll the K loop and
-    #    ping-pong between `A_smem`/`A_smem2` (and `B_smem`/`B_smem2`)
-    #    so that the load for iter `t+1` is issued while the MFMA for
-    #    iter `t` runs. This is the runbook §8.1 software-pipeline
-    #    pattern. The `s_waitcnt(vmcnt=0)` drains only the *previous*
-    #    iter's DMA before consumers read its LDS buffer; the next
-    #    iter's DMA is already in flight against the other buffer.
+    # 2) pipeline="basic": Python-unroll + single buffer + split global_read /
+    #    lds_write (no scf.for_iter). buffer_load_vN for tile t+1 is issued
+    #    before sync+mfma, smem_store_vN is deferred until after the second
+    #    sync. Overlaps VMEM latency with compute without double-buffering.
     #
+    # 3) not async_dma (mem/compv3/compv4): single scf.for_iter with
+    #    emit_load_phase -> sync -> emit_mfma_phase -> sync per tile.
+    #
+    # 4) async_dma: Python-unroll the K loop and ping-pong between
+    #    A_smem/A_smem2 via SoftwarePipeline.run_ping_pong. The
+    #    s_waitcnt(vmcnt=0) drains only the previous iter's DMA;
+    #    the next iter's DMA is in flight against the other buffer.
     #    K_gemm / block_k is the number of unrolled iters; for the
-    #    bake-off shape this is 9 (576 / 64), generating ~9x more IR
-    #    but staying well under the 160 KiB LDS budget and the
-    #    per-kernel ISA size limits.
+    #    bake-off shape this is 9 (576 / 64), generating ~9x more IR.
     if spec.unroll_k:
         # Double-buffered Python-unrolled K-loop software pipeline.
         #
@@ -1369,6 +1372,53 @@ def build_implicit_gemm_conv(
             k_off_capture[0] = b.const_i32(it * block_k)
             current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
             b.sync()
+
+        final_accs = current_accs
+    elif spec.pipeline == "basic":
+        # CK pipeline_basic: single-buffer, global-read/compute overlap.
+        #
+        # The buffer_load_vN for tile k+1 is issued before the sync+mfma for
+        # tile k so VMEM latency is hidden behind compute. The LDS write
+        # (smem_store_vN) is deferred until AFTER the second sync (after all
+        # ds_reads for tile k have drained), using the split emit_global_read /
+        # emit_lds_write helpers. Only one LDS buffer is needed.
+        #
+        # Per-iteration instruction order:
+        #   emit_global_read(k+1)         buffer_load_vN (VMEM, in flight)
+        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
+        #                                 (drains prior ds_write; tile k RAW-safe)
+        #   k_off_capture = k             (descriptor uses tile k's offset)
+        #   emit_mfma_phase               ds_read(A_smem,B_smem) + mfma
+        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
+        #                                 (drains ds_reads; A_smem WAR-safe)
+        #   emit_lds_write(staged_k+1)    smem_store_vN (now safe to write)
+        K_iters = (p.K_gemm + block_k - 1) // block_k
+        current_accs = [v for _, v in accs]
+
+        # Prologue: global read for tile 0 then immediately write to LDS.
+        # (No prior ds_reads to drain, so lds_write can follow immediately.)
+        staged0 = emit_global_read(b.const_i32(0))
+        emit_lds_write(staged0, A_smem, B_smem)
+
+        pending_staged = None  # staged tuple for the tile whose ds_write is next
+
+        for it in range(K_iters):
+            # Issue buffer_load for tile it+1 BEFORE the sync. The VMEM latency
+            # (~300-600 cycles) overlaps with the mfma stream that follows.
+            if it + 1 < K_iters:
+                pending_staged = emit_global_read(b.const_i32((it + 1) * block_k))
+            # Drain the current tile's ds_write (prologue or previous iter's
+            # emit_lds_write), then barrier all waves.
+            b.sync()
+            # Set k offset so descriptors address tile it during mfma.
+            k_off_capture[0] = b.const_i32(it * block_k)
+            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+            # Drain ds_reads before the next ds_write can overwrite A_smem/B_smem.
+            b.sync()
+            # Now safe to commit the next tile's staged VGPRs to LDS.
+            if pending_staged is not None:
+                emit_lds_write(pending_staged, A_smem, B_smem)
+                pending_staged = None
 
         final_accs = current_accs
     elif not spec.async_dma:
@@ -1463,10 +1513,25 @@ def _emit_direct_epilogue(
     coordinate-transform DAG.
     """
     p = spec.problem
-    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+    if p.is_pointwise:
+        _c_K_ir = b.const_i32(p.kpg)
 
-    def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return D_desc.offset(b_, m=m_val, k_out=n_val)
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return b_.add(b_.mul(m_val, _c_K_ir), n_val), b.const_i32(1)
+
+    else:
+        D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+        # Grouped conv: the per-warp N coord is within-group (n_val < kpg); recover the
+        # absolute NHWK output filter k_out = g*kpg + n_val. Byte-identical for groups==1.
+        k_out_group_base = (
+            b.mul(b.block_id_z(), b.const_i32(p.kpg)) if p.groups > 1 else None
+        )
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            k_out = (
+                n_val if k_out_group_base is None else b_.add(k_out_group_base, n_val)
+            )
+            return D_desc.offset(b_, m=m_val, k_out=k_out)
 
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
@@ -1508,7 +1573,15 @@ def _emit_direct_epilogue_wmma(
 
     c_M = b.const_i32(p.M)
     c_N = b.const_i32(p.N_gemm)
-    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+    _c_K_wmma = b.const_i32(p.kpg) if p.is_pointwise else None
+    D_desc = None if p.is_pointwise else make_d_descriptor(p, dtype=spec.data.dtype_d)
+    # Grouped conv: bounds-check n_val against per-group N_gemm (= kpg) but map to
+    # the absolute output filter k_out = g*kpg + n_val. None for groups==1 or pointwise.
+    k_out_group_base = (
+        b.mul(b.block_id_z(), b.const_i32(p.kpg))
+        if (not p.is_pointwise and p.groups > 1)
+        else None
+    )
     c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
@@ -1536,7 +1609,15 @@ def _emit_direct_epilogue_wmma(
                 ok = b.land(m_ok, n_ok)
 
                 v_f32 = b.vec_extract(acc, i)
-                d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
+                if p.is_pointwise:
+                    d_off_elems = b.add(b.mul(m_val, _c_K_wmma), n_val)
+                else:
+                    k_out = (
+                        n_val
+                        if k_out_group_base is None
+                        else b.add(k_out_group_base, n_val)
+                    )
+                    d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=k_out)
                 d_off_bytes = b.mul(d_off_elems, b.const_i32(_elem_bytes))
                 safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
                 if _fp32_out:
@@ -1585,14 +1666,26 @@ def _emit_cshuffle_epilogue(
     ``op.c_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
     """
     p = spec.problem
-    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+    if p.is_pointwise:
+        _c_K_ir = b.const_i32(p.kpg)
 
-    def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return D_desc.offset(b_, m=m_val, k_out=n_val)
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return b_.add(b_.mul(m_val, _c_K_ir), n_val), b.const_i32(1)
+
+    else:
+        D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+        k_out_group_base = (
+            b.mul(b.block_id_z(), b.const_i32(p.kpg)) if p.groups > 1 else None
+        )
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            k_out = (
+                n_val if k_out_group_base is None else b_.add(k_out_group_base, n_val)
+            )
+            return D_desc.offset(b_, m=m_val, k_out=k_out)
 
     _cshuffle_kwargs: dict = {
         "out_dtype": spec.data.dtype_d,
-        "no_alias": spec.cshuffle_no_alias,
     }
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c

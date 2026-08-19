@@ -117,7 +117,7 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
  *  \brief Create a descriptor for matrix
  *  \details
  *  \p rocblaslt_matrix_layout_create creates a matrix descriptor It initializes
- *  It should be destroyed at the end using rocblaslt_matrix_layout_destory().
+ *  It should be destroyed at the end using rocblaslt_matrix_layout_destroy().
  *
  *  @param[out]
  *  matDescr   the pointer to the matrix descriptor
@@ -136,7 +136,7 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
  *  \brief Destroy a matrix descriptor
  *
  *  \details
- *  \p rocblaslt_matrix_layout_destory destroys a matrix descriptor and releases
+ *  \p rocblaslt_matrix_layout_destroy destroys a matrix descriptor and releases
  * all resources used by the descriptor
  *
  *  @param[in]
@@ -145,7 +145,7 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
  *  \retval rocblaslt_status_success the operation completed successfully.
  *  \retval rocblaslt_status_invalid_pointer \p descr is invalid.
  */
-rocblaslt_status rocblaslt_matrix_layout_destory(const rocblaslt_matrix_layout descr);
+rocblaslt_status rocblaslt_matrix_layout_destroy(const rocblaslt_matrix_layout descr);
 
 rocblaslt_status rocblaslt_matrix_layout_set_attribute(rocblaslt_matrix_layout           matLayout,
                                                        rocblaslt_matrix_layout_attribute attr,
@@ -187,7 +187,7 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
  *  \brief Destroy a matrix multiplication descriptor
  *
  *  \details
- *  \p rocblaslt_matrix_layout_destory destroys a multiplication matrix descr.
+ *  \p rocblaslt_matrix_layout_destroy destroys a multiplication matrix descr.
  *
  *  @param[in]
  *  descr   the matrix multiplication descriptor

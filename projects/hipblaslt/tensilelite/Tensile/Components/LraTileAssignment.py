@@ -256,6 +256,16 @@ class LraTileAssignmentTransposedMFMAFP32(LraTileAssignmentTransposedMFMA):
                   "DataType": DataType("s")
               }}
 
+class LraTileAssignmentTransposedMFMAFP32C(LraTileAssignmentTransposedMFMA):
+    # complex has no LDS-transpose path (numBytes=8); __call__ delegates to
+    # LraTileAssignmentMFMA, matching the non-LDSTr arch (e.g. gfx950) complex path.
+    kernel = {"EnableMatrixInstruction": True,
+              "DirectToVgprA": False,
+              "DirectToVgprB": False,
+              "ProblemType": {
+                  "DataType": DataType("c")
+              }}
+
 class LraTileAssignmentTransposedMFMAFP16(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
@@ -870,11 +880,14 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
         # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
         segILWaveSpansComp = False
-        if kernel.get("LDSSegmentInterleave") == 1 and tc in ("A", "B"):
+        # bcontig: B keeps its baseline wave stride (not interleaved) -> only A gets the override.
+        if kernel.get("LDSSegmentInterleave") == 1 and (
+                tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False))):
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
             segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
-            if segILWaveSpansComp:
-                strideWave = kernel["LDSSegInterleaveOffsets"]["readWaveStride"]
+            # portSplitA (fine A): the A0->A1 segment jump is carried on the wave stride, so force it on.
+            if tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False):
+                segILWaveSpansComp = True
 
         lsu              = kernel["LocalSplitU"]
 

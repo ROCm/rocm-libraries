@@ -198,7 +198,7 @@ TEST(TestLoadGraphAndTensors, Valid)
     SKIP_IF_NO_DEVICES();
 
     const std::filesystem::path filepath = getCurrentExecutableDirectory()
-                                           / "../lib/integration_test_bundles/quick/"
+                                           / "../lib/integration-test-bundles/quick/"
                                              "BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
@@ -250,7 +250,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
     const std::filesystem::path filepath = getCurrentExecutableDirectory()
-                                           / "../lib/integration_test_bundles/quick/"
+                                           / "../lib/integration-test-bundles/quick/"
                                              "BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed

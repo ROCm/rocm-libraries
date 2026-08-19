@@ -781,7 +781,7 @@ static void op_tile_buffer_rsrc(rocke_lower_t* L, const rocke_op_t* op)
     const char* nb_text;
     int word3;
     rocke_ll_need(L, "make.buffer.rsrc.p1");
-    if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM22)
+    if(rocke_ll_flavor_is_modern(L->flavor))
     {
         const char* nb_ty = rocke_ll_llvm_type(L, num_bytes->type);
         const char* nb_arg;
@@ -1224,6 +1224,33 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 /* tile.* async / global DRAM->LDS DMA                                    */
 /* ====================================================================== */
 
+/* Operand text for an intrinsic's "ptr addrspace(3)" LDS argument.
+ *
+ * At the builder level an LDS "pointer" is an i64 address -- that is what
+ * smem_addr_of returns, and no builder op produces an addrspace(3) pointer
+ * value -- while these intrinsics declare ptr addrspace(3). Convert rather
+ * than relabel the i64: LLVM rejects the module with "defined with type
+ * 'i64' but expected 'ptr addrspace(3)'". */
+static const char* ll_lds_ptr_operand(rocke_lower_t* L, const char* op_name, const rocke_value_t* v)
+{
+    const char* ty = rocke_ll_llvm_type(L, v->type);
+    const char* name;
+    if(strcmp(ty, "ptr addrspace(3)") == 0)
+        return rocke_ll_operand(L, v);
+    if(strcmp(ty, "i64") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: LDS argument must be an i64 LDS address (from "
+                      "smem_addr_of) or a ptr addrspace(3), got %s",
+                      op_name,
+                      ty);
+    }
+    name = rocke_ll_fresh(L, "lds_ptr");
+    rocke_ll_emitf(L, "  %s = inttoptr i64 %s to ptr addrspace(3)", name, rocke_ll_operand(L, v));
+    return name;
+}
+
 static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1259,17 +1286,132 @@ static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op
     int64_t dwords = ll_attr_int(op, "dwords", 0);
     int64_t bytes_per_lane = dwords * 4;
     int64_t aux = ll_attr_int(op, "aux", 0);
+    const char* lds;
     rocke_ll_need(L, "raw.ptr.buffer.load.lds");
+    lds = ll_lds_ptr_operand(L, "async_buffer_load_lds", lds_ptr);
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
                    "i32 0, i32 %lld)",
                    rocke_ll_operand(L, rsrc),
-                   rocke_ll_operand(L, lds_ptr),
+                   lds,
                    (long long)bytes_per_lane,
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset),
                    (long long)aux);
+}
+
+static void op_tile_buffer_load_lds_async(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* lds_ptr = op->operands[1];
+    const rocke_value_t* voffset = op->operands[2];
+    const rocke_value_t* soffset = op->operands[3];
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
+    int64_t bytes_per_lane = dwords * 4;
+    int64_t aux = ll_attr_int(op, "aux", 0);
+    const char* lds;
+    rocke_ll_need(L, "raw.ptr.buffer.load.async.lds");
+    lds = ll_lds_ptr_operand(L, "buffer_load_lds_async", lds_ptr);
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.raw.ptr.buffer.load.async.lds("
+                   "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
+                   "i32 0, i32 %lld)",
+                   rocke_ll_operand(L, rsrc),
+                   lds,
+                   (long long)bytes_per_lane,
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset),
+                   (long long)aux);
+}
+
+static void op_tile_global_load_async_to_lds(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* src_ptr = op->operands[0];
+    const rocke_value_t* src_index = op->operands[1];
+    const rocke_value_t* lds_smem = op->operands[2];
+    int64_t width = ll_attr_int(op, "width_bytes", 0);
+    int64_t cpol = ll_attr_int(op, "cpol", 0);
+    int64_t ioff = ll_attr_int(op, "offset_bytes", 0);
+    const char* suffix;
+    const char* need_key;
+    const char* intrin;
+    const rocke_type_t* stype = NULL;
+    const char* gname;
+    const char* base_ptr;
+    const char* agg_ty;
+    const char* gep_s;
+    const char* gep_l;
+    const char* src_elem_ty;
+    const char* idx_ty;
+    rocke_strbuf_t gep;
+    int i;
+
+    if(width == 1)
+        suffix = "b8";
+    else if(width == 4)
+        suffix = "b32";
+    else if(width == 8)
+        suffix = "b64";
+    else if(width == 16)
+        suffix = "b128";
+    else
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "global_load_async_to_lds: bad width_bytes %lld", (long long)width);
+
+    need_key = rocke_arena_printf(&L->arena, "global.load.async.to.lds.%s", suffix);
+    intrin = rocke_arena_printf(&L->arena, "llvm.amdgcn.global.load.async.to.lds.%s", suffix);
+
+    if(src_ptr->type->kind != ROCKE_TYPE_PTR || !src_ptr->type->pointee)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_load_async_to_lds: src_ptr not a pointer");
+    }
+    src_elem_ty = rocke_ll_llvm_type(L, src_ptr->type->pointee);
+    idx_ty = rocke_ll_llvm_type(L, src_index->type);
+    gep_s = rocke_ll_fresh(L, "async_src");
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
+                   gep_s,
+                   src_elem_ty,
+                   rocke_ll_operand(L, src_ptr),
+                   idx_ty,
+                   rocke_ll_operand(L, src_index));
+
+    gname = rocke_ll_smem_global_name(L, lds_smem, &stype);
+    if(!rocke_ll_live(L))
+        return;
+    base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+    agg_ty = rocke_ll_smem_storage_type(L, stype);
+    gep_l = rocke_ll_fresh(L, "async_dst");
+    if(rocke_strbuf_init(&gep, 96) != 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "global_load_async_to_lds: strbuf OOM");
+    }
+    rocke_strbuf_appendf(&gep,
+                         "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, i32 0",
+                         gep_l,
+                         agg_ty,
+                         base_ptr);
+    for(i = 3; i < op->num_operands; ++i)
+    {
+        rocke_strbuf_appendf(&gep, ", i32 %s", rocke_ll_operand(L, op->operands[i]));
+    }
+    if(gep.oom)
+    {
+        rocke_strbuf_free(&gep);
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "global_load_async_to_lds: strbuf OOM");
+    }
+    rocke_ll_emit(L, rocke_strbuf_cstr(&gep));
+    rocke_strbuf_free(&gep);
+
+    rocke_ll_need(L, need_key);
+    rocke_ll_emitf(L,
+                   "  call void @%s(ptr addrspace(1) %s, ptr addrspace(3) %s, i32 %lld, i32 %lld)",
+                   intrin,
+                   gep_s,
+                   gep_l,
+                   (long long)ioff,
+                   (long long)cpol);
 }
 
 static void op_tile_global_load_lds(rocke_lower_t* L, const rocke_op_t* op)
@@ -1351,6 +1493,8 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, op_tile_async_buffer_load_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,
                          op_tile_async_buffer_load_lds_addr);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC, op_tile_buffer_load_lds_async);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, op_tile_global_load_async_to_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_LDS, op_tile_global_load_lds);
 }
 

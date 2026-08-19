@@ -100,7 +100,7 @@ int main(int argc, char** argv) noexcept
                   "Set --allow-bundles or HIPDNN_TEST_ALLOW_BUNDLES=1 env var to enable.");
         parser.add_argument("--gd", "--golden-data-dir")
             .help("Path to the integration test bundle data directory. "
-                  "Defaults to <exe>/../lib/integration_test_bundles/. "
+                  "Defaults to <exe>/../lib/integration-test-bundles/. "
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
         // --verification-mode governs BUNDLE tests (how the engine's output is
         // verified). It is independent of --reference-executor, which governs the

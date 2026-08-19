@@ -3,15 +3,26 @@
 
 #include "bindings.hpp"
 
+#include <hipdnn_backend.h>
 #include <hipdnn_frontend.hpp>
 #include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <stdexcept>
+#include <vector>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
+
+struct EngineInfo
+{
+    int64_t engineId;
+    std::string engineName;
+    std::string pluginName;
+    std::string version;
+    std::string type;
+};
 
 class HandleWrapper
 {
@@ -86,10 +97,79 @@ public:
         }
         return reinterpret_cast<uintptr_t>(stream);
     }
+    EngineInfo getEngineInfo(int64_t engineId) const
+    {
+        checkNotDestroyed();
+        size_t count = 0;
+        if(hipdnnGetEngineCount_ext(get(), &count) != HIPDNN_STATUS_SUCCESS)
+        {
+            throw std::runtime_error("Failed to query loaded engine count");
+        }
+        for(size_t index = 0; index < count; ++index)
+        {
+            int64_t candidateId = 0;
+            size_t engineNameLen = 0;
+            size_t pluginNameLen = 0;
+            size_t versionLen = 0;
+            size_t typeLen = 0;
+            if(hipdnnGetEngineInfo_ext(get(),
+                                       index,
+                                       &candidateId,
+                                       nullptr,
+                                       &engineNameLen,
+                                       nullptr,
+                                       &pluginNameLen,
+                                       nullptr,
+                                       &versionLen,
+                                       nullptr,
+                                       &typeLen)
+               != HIPDNN_STATUS_SUCCESS)
+            {
+                throw std::runtime_error("Failed to query loaded engine metadata sizes");
+            }
+            if(candidateId != engineId)
+            {
+                continue;
+            }
+            std::vector<char> engineName(engineNameLen);
+            std::vector<char> pluginName(pluginNameLen);
+            std::vector<char> version(versionLen);
+            std::vector<char> type(typeLen);
+            if(hipdnnGetEngineInfo_ext(get(),
+                                       index,
+                                       &candidateId,
+                                       engineName.data(),
+                                       &engineNameLen,
+                                       pluginName.data(),
+                                       &pluginNameLen,
+                                       version.data(),
+                                       &versionLen,
+                                       type.data(),
+                                       &typeLen)
+               != HIPDNN_STATUS_SUCCESS)
+            {
+                throw std::runtime_error("Failed to query loaded engine metadata");
+            }
+
+            return {candidateId,
+                    std::string(engineName.data()),
+                    std::string(pluginName.data()),
+                    std::string(version.data()),
+                    std::string(type.data())};
+        }
+        throw std::out_of_range("Engine ID is not loaded");
+    }
 };
 
 void handleBindings(nb::module_& m)
 {
+    nb::class_<EngineInfo>(m, "EngineInfo")
+        .def_ro("engine_id", &EngineInfo::engineId)
+        .def_ro("engine_name", &EngineInfo::engineName)
+        .def_ro("plugin_name", &EngineInfo::pluginName)
+        .def_ro("version", &EngineInfo::version)
+        .def_ro("type", &EngineInfo::type);
+
     nb::class_<HandleWrapper>(m, "Handle")
         .def(nb::init<>(), "Create a new hipdnn handle")
         .def(nb::init<uintptr_t>(), nb::arg("stream"), "Create a handle with a stream")
@@ -102,6 +182,10 @@ void handleBindings(nb::module_& m)
              nb::arg("stream"),
              "Set the HIP stream (as integer pointer)")
         .def("get_stream", &HandleWrapper::getStream, "Get the HIP stream (as integer pointer)")
+        .def("get_engine_info",
+             &HandleWrapper::getEngineInfo,
+             nb::arg("engine_id"),
+             "Return metadata for a loaded engine ID")
         .def("__int__", [](const HandleWrapper& h) { return reinterpret_cast<uintptr_t>(h.get()); })
         .def("__index__",
              [](const HandleWrapper& h) { return reinterpret_cast<uintptr_t>(h.get()); })

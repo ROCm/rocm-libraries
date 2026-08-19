@@ -96,6 +96,90 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
 }
 
 /* ===================================================================== *
+ * rocke_conv_emit_kloop_basic
+ *
+ * CK pipeline_basic: single-buffer, global-read/compute overlap.
+ * Mirrors the Python ``elif spec.pipeline == "basic":`` branch.
+ *
+ * Per-iteration order (byte-identical to Python):
+ *   emit_global_read(it+1)   buffer_load_vN (VMEM, in flight)
+ *   sync()                   s_waitcnt(lgkmcnt=0) + s_barrier
+ *                            (drains prior ds_write; tile it RAW-safe)
+ *   k_off_capture = it       descriptor uses tile it's offset for mfma
+ *   emit_mfma_phase          ds_read(A_smem,B_smem) + mfma
+ *   sync()                   s_waitcnt(lgkmcnt=0) + s_barrier
+ *                            (drains ds_reads; A_smem WAR-safe)
+ *   emit_lds_write(staged)   smem_store_vN (safe to write now)
+ * ===================================================================== */
+void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_conv_problem_t* p = ctx->p;
+    int block_k = ctx->block_k;
+    int K_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int num_accs = ctx->num_accs;
+    int it, i;
+
+    rocke_value_t* current_accs[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+
+    /* pending_staged_{a,b}: staging buffers for the next tile's VGPRs.
+     * has_pending mirrors Python `pending_staged is not None`. */
+    rocke_ctl_staged_t pending_a;
+    rocke_ctl_staged_t pending_b;
+    rocke_value_t* pending_k_off;
+    int has_pending;
+
+    /* staged_{a,b}_0: prologue staging buffers (tile 0). */
+    rocke_ctl_staged_t staged_a0;
+    rocke_ctl_staged_t staged_b0;
+    rocke_value_t* k0_val;
+
+    for(i = 0; i < num_accs; ++i)
+        current_accs[i] = ctx->acc_inits[i];
+
+    /* Prologue: global read for tile 0 then write to LDS immediately.
+     *   staged0 = emit_global_read(b.const_i32(0))
+     *   emit_lds_write(staged0, A_smem, B_smem) */
+    k0_val = rocke_b_const_i32(b, 0);
+    rocke_conv_emit_global_read(ctx, k0_val, &staged_a0, &staged_b0);
+    rocke_conv_emit_lds_write(ctx, k0_val, &staged_a0, &staged_b0, ctx->A_smem, ctx->B_smem);
+
+    has_pending = 0;
+    pending_k_off = NULL;
+
+    for(it = 0; it < K_iters; ++it)
+    {
+        /* Issue buffer_load for tile it+1 BEFORE the sync. */
+        if(it + 1 < K_iters)
+        {
+            pending_k_off = rocke_b_const_i32(b, (int64_t)(it + 1) * block_k);
+            rocke_conv_emit_global_read(ctx, pending_k_off, &pending_a, &pending_b);
+            has_pending = 1;
+        }
+        /* Drain prior ds_write then barrier. */
+        rocke_b_sync(b);
+        /* Set k offset for mfma descriptors. */
+        ctx->k_off_capture = rocke_b_const_i32(b, (int64_t)it * block_k);
+        /* ds_read + mfma for the current tile. */
+        rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, current_accs, num_accs, new_accs);
+        for(i = 0; i < num_accs; ++i)
+            current_accs[i] = new_accs[i];
+        /* Drain ds_reads before the next smem_store_vN. */
+        rocke_b_sync(b);
+        /* Commit the next tile's staged VGPRs to LDS. */
+        if(has_pending)
+        {
+            rocke_conv_emit_lds_write(
+                ctx, pending_k_off, &pending_a, &pending_b, ctx->A_smem, ctx->B_smem);
+            has_pending = 0;
+        }
+    }
+
+    rocke_conv_set_final_accs(ctx, current_accs, num_accs);
+}
+
+/* ===================================================================== *
  * rocke_conv_emit_kloop_simple   (Python lines 1311-1319)
  *
  * Single scf.for_iter load + sync + mfma + sync. The not-async, not-unroll
