@@ -50,8 +50,11 @@ history as the source of truth.
 Decision:
 
 - The canonical distribution and import namespace are `tensilelite`.
-- The canonical commands are `tensilelite create-library`, `tensilelite logic`,
-  and `tensilelite run`.
+- The canonical commands are `tensilelite benchmark-cluster`,
+  `tensilelite create-library`, `tensilelite generate-summations`,
+  `tensilelite logic`, `tensilelite logic-to-yaml`,
+  `tensilelite merge-library`, `tensilelite retune-library`,
+  `tensilelite run`, and `tensilelite update-library`.
 - `python -m tensilelite` dispatches the same command surface.
 - The default wheel never installs a top-level `Tensile` package.
 
