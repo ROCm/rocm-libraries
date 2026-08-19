@@ -5698,11 +5698,15 @@ def build_unified_attention_2d_tiled(
 # standalone (experiments/d256_4warp_gqa/build_e2e_T3_ragged_bf16o.py): parity+
 # with AITER at Sq4096/8192. Wired for the ``_d256_gfx942_fast`` cohort only.
 _4WGQA_LOG2E = 1.4426950408889634
-# Head size the lean natural-QK body has been GPU-validated for. It is a
-# validation gate, not an algorithmic limit: the schedule reads every head-dim
-# extent off ``spec.head_size``, so this only pins the cohort proven correct on
-# real hardware. Widen it (and re-bless golden IR) once another head size is
-# validated end-to-end.
+# Head size the lean natural-QK body is written and GPU-validated for. Most
+# head-dim extents derive from ``spec.head_size`` (``NK``, ``NDdim``, ``V_lds``),
+# but the V-staging loop's per-thread stride is hardwired to the 256-wide row
+# (``BN*HD/256 == 64`` elems/thread), so a different head size would compute wrong
+# offsets -- a real limit of the lean body, not merely a validation gate. Other
+# head sizes are served by the general 4-warp body (``build_gfx942_4warp_gqa``,
+# whose V-fill derives the stride from ``BN*HD``, e.g. D128) and the default tiled
+# builder. Widening the lean body needs the staging generalized AND end-to-end GPU
+# validation, then a golden re-bless.
 _4WGQA_LEAN_HEAD_SIZE = 256
 
 

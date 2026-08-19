@@ -286,10 +286,13 @@ page per `AGENTS.md`.)
 `max_seqlen_q > 1`), `block_size in {16, 32}`, none of the feature flags
 (fp8/softcap/sinks/alibi/qq-bias), and i32-addressable KV (caches $\le$ 2 GiB).
 Anything outside that cohort falls back to the default builder. The body itself
-guards `head_size == _4WGQA_LEAN_HEAD_SIZE` (a **validation gate**, not an
-algorithmic limit — it pins the only head size proven correct on real hardware)
-and has no sliding-window logic, so its correctness relies on the external gate
-enforcing `sliding_window == 0`. Correctness is otherwise the same online-softmax
+guards `head_size == _4WGQA_LEAN_HEAD_SIZE` **and** `sliding_window == 0`, raising
+`NotImplementedError` otherwise. The head-size guard is a **real limit** of the
+lean body, not merely a validation gate: most head-dim extents derive from
+`head_size`, but the V-staging stride is hardwired to the 256-wide row, so a
+different head size would compute wrong offsets — those sizes are served instead by
+the general 4-warp body (the D128 branch, whose V-fill derives the stride from
+`BN·HD`) and the default tiled builder. Correctness is otherwise the same online-softmax
 recurrence (§3), bottom-right causal mask (§4), and paged-KV layout (§5), gated by
 the fp32 reference (§10) on real gfx942.
 
