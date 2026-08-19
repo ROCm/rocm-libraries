@@ -1034,14 +1034,12 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
 /// D7's mirror, half one: benchmark wide, then run narrow. The narrower candidate set is
 /// fully covered by the wider record, so the run is served -- no re-benchmarking.
 ///
-/// The candidate set must have MORE than one member for this to test anything. An earlier
-/// version narrowed the knob filter to kernel_128 alone, which made the served answer
-/// identical to the no-cache answer (`filtered.front()` of a one-element list) -- it
-/// passed with the cache switched off entirely. Here the record is wider than the
-/// catalog in the dimension that matters: it carries an extra entry for a kernel this
-/// engine no longer admits, while still covering all three live candidates. Coverage must
-/// hold, and the served kernel must be the record's front (kernel_256), not the
-/// heuristic's (kernel_64, pinned by priority).
+/// The candidate set must have more than one member, or the served answer would equal
+/// `filtered.front()` of a one-element list and the assertion would hold with the cache
+/// switched off. The record here is wider than the catalog: it carries an extra entry
+/// for a kernel this engine does not admit, while still covering all three live
+/// candidates. Coverage must hold, and the served kernel must be the record's front
+/// (kernel_256), not the heuristic's (kernel_64, pinned by priority).
 TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);

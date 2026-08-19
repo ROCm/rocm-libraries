@@ -631,12 +631,11 @@ TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
     EXPECT_FALSE(invoked) << "caching index 0 when nothing was usable would cache a guess";
 }
 
-/// The explicit no-caching path: every existing SDK fixture and every flag-off caller
-/// constructs a BenchmarkPlan without a callback, and must behave exactly as before.
+/// The explicit no-caching path: every SDK fixture and every flag-off caller constructs
+/// a BenchmarkPlan without a callback, and selection must be unaffected.
 ///
-/// Asserts the winner, not merely the absence of a crash: an earlier version ended in a
-/// bare SUCCEED(), which would have passed even if the no-callback path had picked the
-/// wrong kernel -- the opposite of what its name promises.
+/// Asserts which candidate ran, not merely that nothing crashed -- a test that only
+/// survived the call would pass with the wrong kernel chosen.
 TEST(TestIngestorBenchmarkPlan, AnAbsentCallbackLeavesSelectionUnchanged)
 {
     auto candidates = threeCandidates();
