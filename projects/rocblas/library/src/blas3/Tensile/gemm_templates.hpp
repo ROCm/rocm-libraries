@@ -26,49 +26,49 @@
 #include "int64_helpers.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp"
 
-template <typename TI_, typename T>
+template <typename T>
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     rocblas_internal_gemm_grouped_batched_template(rocblas_handle           handle,
                                                    const rocblas_operation* transa_array,
                                                    const rocblas_operation* transb_array,
-                                                   const TI_*               m_array,
-                                                   const TI_*               n_array,
-                                                   const TI_*               k_array,
+                                                   const rocblas_int*       m_array,
+                                                   const rocblas_int*       n_array,
+                                                   const rocblas_int*       k_array,
                                                    const T*                 alpha_array,
                                                    const T* const*          Aarray,
-                                                   const TI_*               lda_array,
+                                                   const rocblas_int*       lda_array,
                                                    const T* const*          Barray,
-                                                   const TI_*               ldb_array,
+                                                   const rocblas_int*       ldb_array,
                                                    const T*                 beta_array,
                                                    T* const*                Carray,
-                                                   const TI_*               ldc_array,
-                                                   TI_                      group_count,
-                                                   const TI_*               group_size)
+                                                   const rocblas_int*       ldc_array,
+                                                   rocblas_int              group_count,
+                                                   const rocblas_int*       group_size)
 {
     int64_t idx = 0;
-    for(TI_ g = 0; g < group_count; ++g)
+    for(rocblas_int g = 0; g < group_count; ++g)
     {
-        rocblas_status status = ROCBLAS_API(rocblas_internal_gemm_batched_template)(handle,
-                                                                                    transa_array[g],
-                                                                                    transb_array[g],
-                                                                                    m_array[g],
-                                                                                    n_array[g],
-                                                                                    k_array[g],
-                                                                                    alpha_array + g,
-                                                                                    Aarray + idx,
-                                                                                    0,
-                                                                                    lda_array[g],
-                                                                                    0,
-                                                                                    Barray + idx,
-                                                                                    0,
-                                                                                    ldb_array[g],
-                                                                                    0,
-                                                                                    beta_array + g,
-                                                                                    Carray + idx,
-                                                                                    0,
-                                                                                    ldc_array[g],
-                                                                                    0,
-                                                                                    group_size[g]);
+        rocblas_status status = (rocblas_internal_gemm_batched_template)(handle,
+                                                                         transa_array[g],
+                                                                         transb_array[g],
+                                                                         m_array[g],
+                                                                         n_array[g],
+                                                                         k_array[g],
+                                                                         alpha_array + g,
+                                                                         Aarray + idx,
+                                                                         0,
+                                                                         lda_array[g],
+                                                                         0,
+                                                                         Barray + idx,
+                                                                         0,
+                                                                         ldb_array[g],
+                                                                         0,
+                                                                         beta_array + g,
+                                                                         Carray + idx,
+                                                                         0,
+                                                                         ldc_array[g],
+                                                                         0,
+                                                                         group_size[g]);
         if(status != rocblas_status_success)
             return status;
         idx += group_size[g];
