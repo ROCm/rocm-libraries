@@ -46,6 +46,22 @@ Tests:
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
 
+# Coverage widening: exercise all four datatypes (the extract compute-dispatch
+# selects T from compute_type, so proper precision anchors are required) along
+# with base_one / mismatched bases across csr and csc source formats.
+- name: extract
+  category: quick
+  function: extract
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [17]
+  N: [7]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc ]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+
 
 - name: extract
   category: pre_checkin

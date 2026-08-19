@@ -38,6 +38,7 @@
 
 /* rocSPARSE 5.1 */
 #cmakedefine ROCSPARSE_WITH_SPMAT_SCALE
+#cmakedefine ROCSPARSE_WITH_SDDMM_BATCHED
 
 /* rocSPARSE 5.0 */
 #cmakedefine ROCSPARSE_WITH_HANDLE_CREATE

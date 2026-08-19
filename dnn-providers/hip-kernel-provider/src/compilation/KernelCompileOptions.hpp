@@ -24,16 +24,28 @@ public:
     KernelCompileOptions(
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
         const hipDeviceProp_t& deviceProps)
+        : KernelCompileOptions(inputTensorAttrs, std::string(deviceProps.gcnArchName))
+    {
+    }
+
+    /// Overload for callers that hold an arch name rather than a hipDeviceProp_t.
+    /// `gcnArchName` is the only field this class reads, and the kernel ingestor's
+    /// device facts are a plain struct rather than HIP's (ingestor/DeviceProperties.hpp).
+    ///
+    /// @param archName Raw gcnArchName, suffix intact, as `--offload-arch` wants.
+    KernelCompileOptions(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
+        const std::string& archName)
     {
         // Kernels use C++17 features (if constexpr, scoped-enum brace-init).
         _baseCompileOptions.emplace_back("-std=c++17");
 
         // Add device arch to compile options
-        _baseCompileOptions.emplace_back(std::string("--offload-arch=") + deviceProps.gcnArchName);
+        _baseCompileOptions.emplace_back("--offload-arch=" + archName);
 
         // Add data type and layout options
         addDataTypeAndLayoutOptions(inputTensorAttrs);
-        addArchName(deviceProps.gcnArchName);
+        addArchName(archName);
     }
 
     ~KernelCompileOptions() = default;

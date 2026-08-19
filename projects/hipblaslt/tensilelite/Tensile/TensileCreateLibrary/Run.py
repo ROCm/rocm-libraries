@@ -60,7 +60,7 @@ from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParame
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
-from Tensile.CustomYamlLoader import load_logic_gfx_arch
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import (
@@ -1049,9 +1049,6 @@ def run():
         logicExtFormat = ".json"
     else:
         printExit(f"Unrecognized LogicFormat: {arguments['LogicFormat']}")
-
-    def archMatch(arch: str, archs: List[str]):
-        return (arch in archs) or any(a.startswith(arch) for a in archs)
 
     def validLogicFile(p: Path):
         return p.suffix == logicExtFormat and (
