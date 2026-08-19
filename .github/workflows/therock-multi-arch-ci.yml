@@ -113,6 +113,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
       therock_ref: ${{ steps.resolve.outputs.therock_ref }}
     steps:

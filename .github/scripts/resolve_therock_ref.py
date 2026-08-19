@@ -57,7 +57,9 @@ MODE_MERGE_BASE = "pull-request merge-base (build-validated)"
 MODE_MERGE_BASE_UNVALIDATED = (
     "pull-request merge-base (unvalidated - no successful build found)"
 )
-MODE_MERGE_BASE_FALLBACK = "pull-request merge-base (fell back to live tip of main)"
+MODE_MERGE_BASE_FALLBACK = (
+    "pull-request merge-base (fell back to live tip of target branch)"
+)
 MODE_LIVE_TIP = "live-tip (push/dispatch/schedule)"
 
 
@@ -225,7 +227,8 @@ class RestGitHubClient:
             f"/repos/{repo}/actions/workflows/{workflow_file}/runs",
             params={
                 "branch": branch,
-                "status": "success",
+                "status": "completed",
+                "conclusion": "success",
                 "created": f"<={iso_utc(until)}",
                 "per_page": limit,
             },
