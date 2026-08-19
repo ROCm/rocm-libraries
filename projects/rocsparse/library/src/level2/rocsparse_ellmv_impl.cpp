@@ -102,7 +102,9 @@ namespace rocsparse
 #define LAUNCH_ELLMVN(DIM)                                            \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (rocsparse::ellmvn_kernel<DIM>),                              \
-        dim3((m - 1) / (DIM) + 1),                                    \
+        dim3(rocsparse::min(                                          \
+            (m - 1) / (DIM) + 1,                                      \
+            static_cast<I>(handle->properties.maxGridSize[0]))),      \
         dim3(DIM),                                                    \
         0,                                                            \
         stream,                                                       \
@@ -163,7 +165,8 @@ namespace rocsparse
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::ellmvt_kernel<ELLMVT_DIM>),
-                dim3((m - 1) / ELLMVT_DIM + 1),
+                dim3(rocsparse::min((m - 1) / ELLMVT_DIM + 1,
+                                    static_cast<I>(handle->properties.maxGridSize[0]))),
                 dim3(ELLMVT_DIM),
                 0,
                 stream,
