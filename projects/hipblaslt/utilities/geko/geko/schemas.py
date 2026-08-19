@@ -48,9 +48,9 @@ class GemmType:
 
     Represents the invariant aspects of a GEMM problem: transposition
     options together with the hipBLASLt logical dtype keys and/or the
-    Tensile dtype triple.  Either set may be supplied directly, but for
+    TensileLite dtype triple.  Either set may be supplied directly, but for
     consistency between the two views prefer the from_hipblaslt /
-    from_tensile constructors, which fill in the other set automatically.
+    from_tensilelite constructors, which fill in the other set automatically.
 
     Attributes:
         transA (str | bool): Transpose mode for A ("N" / "T";
@@ -62,14 +62,14 @@ class GemmType:
         c_type (str | None): hipBLASLt dtype key for matrix C/D.
         compute_type (str | None): hipBLASLt accumulation compute type
             (stored without the leading c_).
-        data_type (str): Tensile DataType letter or pair (e.g. "H"
+        data_type (str): TensileLite DataType letter or pair (e.g. "H"
             or "H8"); the canonical name fragment used in YAML.
-        dest_data_type (str): Tensile DestDataType letter.
-        compute_data_type (str): Tensile ComputeDataType letter.
+        dest_data_type (str): TensileLite DestDataType letter.
+        compute_data_type (str): TensileLite ComputeDataType letter.
 
     Note:
         a_type/b_type/c_type/compute_type must be all provided together or
-        all left as None. The Tensile triple
+        all left as None. The TensileLite triple
         (data_type/dest_data_type/compute_data_type) must always be set to
         non-empty strings.
     """
@@ -94,7 +94,7 @@ class GemmType:
         transA: str,
         transB: str,
     ) -> str:
-        """Tensile-style basename fragment DataDestCompute_transAtransB."""
+        """TensileLite-style basename fragment DataDestCompute_transAtransB."""
         return f"{data_type}{dest_data_type}{compute_data_type}_{transA}{transB}"
 
     @property
@@ -115,7 +115,7 @@ class GemmType:
         c_type: str,
         compute_type: str,
     ) -> Tuple[str, str, str]:
-        """Map hipBLASLt dtype keys to Tensile (data_type, dest_data_type, compute_data_type)."""
+        """Map hipBLASLt dtype keys to TensileLite (data_type, dest_data_type, compute_data_type)."""
         Da, Db, Dc, Dcomp = (
             DTYPE[a_type],
             DTYPE[b_type],
@@ -128,7 +128,7 @@ class GemmType:
         dest_data_type = Dc
         compute_data_type = Dcomp
 
-        # Complex data types use real accumulation in hipBLASLt but Tensile
+        # Complex data types use real accumulation in hipBLASLt but TensileLite
         # tags compute_data_type as C/Z.
         if Da in ("C", "Z") and Dcomp in ("S", "D"):
             compute_data_type = Da
@@ -154,7 +154,7 @@ class GemmType:
         c_type: str,
         compute_type: str,
     ) -> "GemmType":
-        """Construct from hipBLASLt dtype keys (also fills the Tensile triple)."""
+        """Construct from hipBLASLt dtype keys (also fills the TensileLite triple)."""
         ct = compute_type.lstrip("c_")
         dt, dd, cd = cls._hipblaslt_to_tensile(a_type, b_type, c_type, ct)
         return cls(
@@ -170,7 +170,7 @@ class GemmType:
         )
 
     @classmethod
-    def from_tensile(
+    def from_tensilelite(
         cls,
         transA: str | bool,
         transB: str | bool,
@@ -178,7 +178,7 @@ class GemmType:
         dest_data_type: str,
         compute_data_type: str,
     ) -> "GemmType":
-        """Construct from Tensile triple strings (also derives hipBLASLt logical keys)."""
+        """Construct from TensileLite triple strings (also derives hipBLASLt logical keys)."""
         dt = str(data_type).strip()
         dd = str(dest_data_type).strip()
         cd = str(compute_data_type).strip()
@@ -201,7 +201,7 @@ class GemmType:
         dest_data_type: str,
         compute_data_type: str,
     ) -> Tuple[str, str, str, str]:
-        """Map a Tensile triple to hipBLASLt (a_type, b_type, c_type, compute_type).
+        """Map a TensileLite triple to hipBLASLt (a_type, b_type, c_type, compute_type).
 
         compute_type has no c_ prefix. Raises ValueError if the triple is unknown
         or inconsistent with the round-trip through _hipblaslt_to_tensile.
@@ -227,12 +227,12 @@ class GemmType:
             ]
             if not candidates:
                 raise ValueError(
-                    f"Cannot resolve Tensile DataType {dt!r}: not a known type "
+                    f"Cannot resolve TensileLite DataType {dt!r}: not a known type "
                     f"or a valid ordered pair of types."
                 )
             if len(candidates) > 1:
                 raise ValueError(
-                    f"Ambiguous Tensile DataType {dt!r}: multiple valid ordered-pair "
+                    f"Ambiguous TensileLite DataType {dt!r}: multiple valid ordered-pair "
                     f"splits found ({candidates}). Cannot resolve unambiguously."
                 )
             a_type, b_type = candidates[0]
@@ -240,7 +240,7 @@ class GemmType:
         try:
             c_type = m[dd]
         except KeyError as e:
-            raise ValueError(f"Unknown Tensile DestDataType letter {dd!r}") from e
+            raise ValueError(f"Unknown TensileLite DestDataType letter {dd!r}") from e
 
         _COMPLEX_COMPUTE_TO_REAL = {"C": "f32_r", "Z": "f64_r"}
         if cd in _COMPLEX_COMPUTE_TO_REAL:
@@ -249,14 +249,14 @@ class GemmType:
             try:
                 compute_type = m[cd]
             except KeyError as e:
-                raise ValueError(f"Unknown Tensile ComputeDataType letter {cd!r}") from e
+                raise ValueError(f"Unknown TensileLite ComputeDataType letter {cd!r}") from e
 
         check_dt, check_dd, check_cd = GemmType._hipblaslt_to_tensile(
             a_type, b_type, c_type, compute_type
         )
         if (check_dt, check_dd, check_cd) != (dt, dd, cd):
             raise ValueError(
-                f"Tensile triple {dt!r}/{dd!r}/{cd!r} is inconsistent with derived hipBLASLt types"
+                f"TensileLite triple {dt!r}/{dd!r}/{cd!r} is inconsistent with derived hipBLASLt types"
             )
 
         return a_type, b_type, c_type, compute_type
@@ -293,7 +293,7 @@ class GemmType:
                         f"Invalid {field_name} '{value}'. Must be one of: {list(DTYPE.keys())}"
                     )
 
-        # Tensile triple must always be present
+        # TensileLite triple must always be present
         if not (self.data_type and self.dest_data_type and self.compute_data_type):
             raise ValueError(
                 "data_type, dest_data_type, and compute_data_type must be non-empty strings"
