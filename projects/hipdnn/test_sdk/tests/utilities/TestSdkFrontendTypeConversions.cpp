@@ -7,6 +7,8 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
+using hipdnn_data_sdk::utilities::PackedFp6Tensor;
+using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_test_sdk::utilities::createTensor;
 using hipdnn_test_sdk::utilities::frontendToSdkDataType;
 using hipdnn_test_sdk::utilities::frontendToSdkPointwiseMode;
@@ -189,10 +191,18 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp6UnpackedByDefault)
     ASSERT_NE(e2m3, nullptr);
     ASSERT_NE(e3m2, nullptr);
     EXPECT_EQ(e2m3->dims(), dims);
+    EXPECT_EQ(e3m2->dims(), dims);
+    EXPECT_EQ(e2m3->strides(), strides);
     EXPECT_EQ(e3m2->strides(), strides);
     // Unpacked: one 6-bit code per byte, so per-element size is well-defined.
     EXPECT_EQ(e2m3->elementSize(), sizeof(hipdnn_data_sdk::types::fp6_e2m3));
     EXPECT_EQ(e3m2->elementSize(), sizeof(hipdnn_data_sdk::types::fp6_e3m2));
+    // The two encodings differ only in the element type, and every property
+    // above is identical for both, so assert the concrete type: swapping the
+    // two cases in createTensor would otherwise go unnoticed here while
+    // encoding the buffer in the wrong FP6 format.
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp6_e2m3>*>(e2m3.get()), nullptr);
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp6_e3m2>*>(e3m2.get()), nullptr);
 }
 
 TEST(TestSdkFrontendTypeConversions, CreateTensorFp6PackedWhenRequested)
@@ -206,6 +216,7 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp6PackedWhenRequested)
     ASSERT_NE(e2m3, nullptr);
     ASSERT_NE(e3m2, nullptr);
     EXPECT_EQ(e2m3->dims(), dims);
+    EXPECT_EQ(e3m2->dims(), dims);
     // The packed FP6 variants store four values per three bytes and have no
     // integer per-element size, which distinguishes them from the unpacked
     // tensors.
@@ -213,6 +224,12 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp6PackedWhenRequested)
     EXPECT_THROW(e3m2->elementSize(), std::logic_error);
     EXPECT_TRUE(e2m3->isPacked());
     EXPECT_TRUE(e3m2->isPacked());
+    // As above: the element type is the only thing separating the two, and it
+    // selects the encoding PackedFp6Tensor writes.
+    EXPECT_NE(dynamic_cast<PackedFp6Tensor<hipdnn_data_sdk::types::fp6_e2m3>*>(e2m3.get()),
+              nullptr);
+    EXPECT_NE(dynamic_cast<PackedFp6Tensor<hipdnn_data_sdk::types::fp6_e3m2>*>(e3m2.get()),
+              nullptr);
 }
 
 TEST(TestSdkFrontendTypeConversions, PackSubByteElementsIgnoredForNonSubByteTypes)
