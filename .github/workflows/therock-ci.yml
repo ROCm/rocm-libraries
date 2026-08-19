@@ -240,6 +240,7 @@ jobs:
     name: "dbsync rocjitsu (${{ matrix.arch }})"
     permissions:
       contents: read
+      actions: read # read this run's job list to track the MIOpen build leg (see Fetch artifact)
     needs: setup
     if: ${{ needs.setup.outputs.miopen_selected == 'true' }}
     strategy:
@@ -249,9 +250,10 @@ jobs:
           - { arch: gfx942, family: gfx94X-dcgpu, rj_config: amdgpu_cdna3_kmd.json }
           - { arch: gfx950, family: gfx950-dcgpu, rj_config: amdgpu_cdna4_kmd.json }
     runs-on: azure-linux-scale-rocm
-    # Generous ceiling: up to ~45 min retry-polling for the MIOpen build's own artifact (see the
-    # "Fetch artifact" step) plus the KMD build + dbsync run itself (observed 15-200s).
-    timeout-minutes: 60
+    # Hard ceiling. The "Fetch artifact" step waits (build-aware) for this run's MIOpen build leg to
+    # produce the artifact -- observed up to ~77 min end-to-end when the build runner queues (build
+    # started 35 min after this job, ran ~40 min) -- then the KMD build + dbsync run itself (15-200s).
+    timeout-minutes: 120
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host --user 0
@@ -305,30 +307,35 @@ jobs:
       # composite action, which has no --run-github-repo input) with --run-github-repo defaulting
       # to this repo, since ARTIFACT_RUN_ID is this same GHA run's own id.
       #
-      # This job starts as soon as `setup` finishes (see the job-level comment above), so the
-      # MIOpen build for this family may not have uploaded its artifact yet. Retries on a "Found
-      # no artifacts matching [...]" failure with a bounded budget instead of depending on
-      # therock-ci-linux's full completion (which would also wait on unrelated components' tests).
+      # This job only `needs: setup`, so it starts before this run's MIOpen build has uploaded its
+      # artifact. It can't `needs:` the build directly -- therock-ci-linux is one reusable-workflow
+      # job that fuses build+test across ALL families/bundles, and GHA can't depend on a sub-leg of
+      # it (depending on the whole thing would also block on unrelated components' GPU tests). So
+      # this is BUILD-AWARE instead of a fixed wait budget: each poll tries the fetch, and if the
+      # artifact isn't there yet it checks this run's MIOpen *build* leg for our family via
+      # therock_dbsync_build_leg_state.py and either keeps waiting (build still queued/running),
+      # fails fast (build concluded without success -> no artifact will ever appear), or errors if
+      # the build succeeded but the artifact still never materializes. Bounded by the job timeout.
       #
-      # The retry condition checks for build/bin/miopen_gtest explicitly, NOT just the script's own
-      # exit code -- confirmed live (run 32204574647) that install_rocm_from_artifacts.py exits 0
-      # as soon as ANY artifacts exist at this run's S3 prefix, which happens as soon as ANY OTHER
-      # project bundle sharing this family (e.g. hipkernelprovider, rpp, hiptensor) finishes
-      # uploading its "generic" (architecture-independent) pieces -- well before MIOpen's own bundle
-      # (still in_progress at that point) has uploaded miopen_gtest.
+      # The fetch success check looks for build/bin/miopen_gtest explicitly, NOT just the script's
+      # exit code -- confirmed live (run 32204574647) that install_rocm_from_artifacts.py exits 0 as
+      # soon as ANY artifacts exist at this run's S3 prefix, which happens once any OTHER bundle
+      # sharing this family (e.g. hipkernelprovider, rpp) uploads its shared "generic" pieces, well
+      # before MIOpen's own bundle has uploaded miopen_gtest.
       - name: Fetch artifact (source-CK build for ${{ matrix.family }})
-        timeout-minutes: 50
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          max_wait_seconds=2700
           poll_interval_seconds=60
+          post_success_grace_polls=5 # tolerate brief S3 upload lag after the build leg reports success
+          post_success_seen=0
           start="${SECONDS}"
           while true; do
             if python ./build_tools/install_rocm_from_artifacts.py \
                 --run-id="${ARTIFACT_RUN_ID}" \
-                --run-github-repo="${{ github.repository }}" \
+                --run-github-repo="${GH_REPO}" \
                 --artifact-group="${AMDGPU_FAMILIES}" \
                 --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
                 --blas --miopen --rand --tests \
@@ -336,12 +343,27 @@ jobs:
               echo "Fetched artifact (miopen_gtest present) after $((SECONDS - start))s"
               break
             fi
+
+            state="$(python3 rocm-libraries/.github/scripts/therock_dbsync_build_leg_state.py)"
             elapsed=$((SECONDS - start))
-            if [ "${elapsed}" -ge "${max_wait_seconds}" ]; then
-              echo "::error::Timed out after ${elapsed}s waiting for miopen_gtest in the ${AMDGPU_FAMILIES} artifact (run ${ARTIFACT_RUN_ID})"
-              exit 1
-            fi
-            echo "miopen_gtest not present yet (${elapsed}s elapsed) -- retrying in ${poll_interval_seconds}s"
+            case "${state}" in
+              success)
+                post_success_seen=$((post_success_seen + 1))
+                if [ "${post_success_seen}" -ge "${post_success_grace_polls}" ]; then
+                  echo "::error::MIOpen build leg for ${AMDGPU_FAMILIES} reported success but miopen_gtest never appeared in the fetched artifact (${elapsed}s, run ${ARTIFACT_RUN_ID})"
+                  exit 1
+                fi
+                echo "build leg succeeded; artifact not fetched yet (grace ${post_success_seen}/${post_success_grace_polls}, ${elapsed}s) -- retrying in ${poll_interval_seconds}s"
+                ;;
+              failure | cancelled | skipped)
+                echo "::error::MIOpen build leg for ${AMDGPU_FAMILIES} did not succeed (state=${state}); no artifact will be produced (${elapsed}s, run ${ARTIFACT_RUN_ID})"
+                exit 1
+                ;;
+              *)
+                # queued / in_progress / notfound (not created yet) / query-error -- keep waiting.
+                echo "MIOpen build leg for ${AMDGPU_FAMILIES} not ready (state=${state}, ${elapsed}s) -- retrying in ${poll_interval_seconds}s"
+                ;;
+            esac
             sleep "${poll_interval_seconds}"
           done
 
