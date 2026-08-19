@@ -542,7 +542,7 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
             "Invalid compute_input_typeA "
             + std::string(hip_datatype_to_string(real_compute_input_typeA)));
 
-    if(real_compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
+    if(real_compute_input_typeB != HIPBLASLT_DATATYPE_INVALID
        && !supported_compute_input_types.count(real_compute_input_typeB))
         throw std::invalid_argument(
             "Invalid compute_input_typeB "
