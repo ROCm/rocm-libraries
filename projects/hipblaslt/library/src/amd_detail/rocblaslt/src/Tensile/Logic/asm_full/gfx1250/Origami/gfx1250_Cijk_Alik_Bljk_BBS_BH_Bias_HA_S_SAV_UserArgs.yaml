@@ -273,7 +273,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -486,7 +486,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -700,7 +700,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -912,7 +912,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1123,7 +1123,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1336,7 +1336,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1549,7 +1549,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1761,7 +1761,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1973,7 +1973,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2188,7 +2188,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2402,7 +2402,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2616,7 +2616,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2829,7 +2829,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3042,7 +3042,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3256,7 +3256,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3468,7 +3468,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3679,7 +3679,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3891,7 +3891,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4104,7 +4104,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4316,7 +4316,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4529,7 +4529,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4741,7 +4741,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4955,7 +4955,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5167,7 +5167,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5380,7 +5380,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5593,7 +5593,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5807,7 +5807,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6019,7 +6019,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6230,7 +6230,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6441,7 +6441,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6654,7 +6654,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6865,7 +6865,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7077,7 +7077,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7290,7 +7290,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7504,7 +7504,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7716,7 +7716,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7929,7 +7929,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8142,7 +8142,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8356,7 +8356,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8569,7 +8569,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8783,7 +8783,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8994,7 +8994,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9205,7 +9205,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9416,7 +9416,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9627,7 +9627,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9840,7 +9840,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10054,7 +10054,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10265,7 +10265,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10477,7 +10477,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10691,7 +10691,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10903,7 +10903,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11116,7 +11116,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11331,7 +11331,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11546,7 +11546,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11761,7 +11761,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11975,7 +11975,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12186,7 +12186,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12397,7 +12397,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12609,7 +12609,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12822,7 +12822,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13034,7 +13034,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13247,7 +13247,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13461,7 +13461,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13675,7 +13675,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13888,7 +13888,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14101,7 +14101,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14315,7 +14315,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14527,7 +14527,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14740,7 +14740,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14953,7 +14953,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15167,7 +15167,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15378,7 +15378,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15589,7 +15589,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15801,7 +15801,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16014,7 +16014,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16225,7 +16225,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16436,7 +16436,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16649,7 +16649,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16862,7 +16862,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17074,7 +17074,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17287,7 +17287,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17499,7 +17499,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17711,7 +17711,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17924,7 +17924,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18138,7 +18138,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18349,7 +18349,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18560,7 +18560,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18771,7 +18771,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18982,7 +18982,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19193,7 +19193,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19404,7 +19404,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19616,7 +19616,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19829,7 +19829,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20041,7 +20041,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20254,7 +20254,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20465,7 +20465,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20678,7 +20678,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20891,7 +20891,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21103,7 +21103,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21316,7 +21316,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21528,7 +21528,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21740,7 +21740,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21951,7 +21951,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -22162,7 +22162,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -22373,7 +22373,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -22585,7 +22585,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -22798,7 +22798,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23009,7 +23009,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23220,7 +23220,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23432,7 +23432,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23645,7 +23645,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23858,7 +23858,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24071,7 +24071,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24282,7 +24282,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24493,7 +24493,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24704,7 +24704,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24915,7 +24915,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -25127,7 +25127,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -25341,7 +25341,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -25554,7 +25554,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -25766,7 +25766,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -25980,7 +25980,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26194,7 +26194,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26408,7 +26408,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26622,7 +26622,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26836,7 +26836,7 @@ Solutions:
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: 4
-  CompactLoopStore: true
+  CompactLoopStore: false
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
