@@ -11,10 +11,10 @@ with a BUG comment. When a bug is fixed:
 
 import os
 import sys
+import tempfile
 import unittest
-from io import StringIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 
@@ -217,8 +217,6 @@ class OutputSubtreesTest(unittest.TestCase):
         sut.output_subtrees([], dry_run=True)
 
     def test_non_dry_run_writes_to_github_output(self):
-        import tempfile
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
             tmp_path = f.name
         try:
@@ -235,8 +233,6 @@ class OutputSubtreesTest(unittest.TestCase):
             os.unlink(tmp_path)
 
     def test_non_dry_run_appends_to_existing_github_output(self):
-        import tempfile
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
             f.write("existing=value\n")
             tmp_path = f.name
@@ -257,8 +253,6 @@ class OutputSubtreesTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
     def test_empty_subtrees_writes_empty_body_to_github_output(self):
-        import tempfile
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
             tmp_path = f.name
         try:

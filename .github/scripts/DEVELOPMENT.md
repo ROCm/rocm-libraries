@@ -8,8 +8,8 @@ script-specific guidance for contributors.
 
 ## Setup
 
-The system Python on many AMD developer machines is managed by the OS and
-rejects `pip install` without `--break-system-packages`. Use a venv instead:
+Many Linux distributions manage the system Python through the OS package manager
+and reject `pip install` without `--break-system-packages`. Use a venv instead:
 
 ```bash
 # One-time setup
@@ -31,6 +31,9 @@ from the standard library plus the packages above.
 ---
 
 ## Directory Layout
+
+> Keep this tree and the [Workflow → Script Reference](#workflow--script-reference)
+> table up to date when adding, removing, or renaming scripts.
 
 ```
 .github/
@@ -82,6 +85,8 @@ from the standard library plus the packages above.
 
 ## Workflow → Script Reference
 
+> Keep this table up to date when workflows are added or scripts are moved.
+
 | Workflow file | Script(s) invoked |
 |---|---|
 | `pr-merge-sync-patches.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
@@ -119,7 +124,8 @@ pytest .github/scripts/tests/test_pr_merge_sync_patches.py -v
 
 ### Test conventions
 
-- File naming: `<script_stem>_test.py` (pre-existing) or `test_<script_stem>.py` (new).
+- File naming: use `test_<script_stem>.py` for new files. Pre-existing files use
+  `<script_stem>_test.py`; leave them as-is when making unrelated changes.
 - Keep tests free of real network calls. `GitHubCLIClient` is the only class
   that makes HTTP requests — replace it with a `MagicMock` or a hand-written
   stub in every test that reaches it.

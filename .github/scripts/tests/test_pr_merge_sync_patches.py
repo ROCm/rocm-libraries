@@ -11,13 +11,12 @@ When a bug is fixed:
 """
 
 import os
-import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 
@@ -166,12 +165,14 @@ class ExtractCommitMessageTest(unittest.TestCase):
                               extraction, truncating the rest of the body.
     """
 
-    def test_simple_patch_strips_patch_prefix_and_pr_ref(self):
+    def test_simple_patch_subject_and_body_are_present(self):
+        # Checks overall shape: subject is clean, body text is preserved.
+        # Individual properties (prefix stripping, PR-ref stripping, diff exclusion)
+        # are each covered by their own dedicated tests below.
         result = sut._extract_commit_message_from_patch(FIXTURES / "simple.patch")
-        self.assertEqual(
-            result,
-            "Fix the off-by-one error\n\nThis commit fixes the off-by-one error in the\nloop bounds.\n\nSigned-off-by: Jane Dev <jane@example.com>",
-        )
+        self.assertTrue(result.startswith("Fix the off-by-one error"))
+        self.assertIn("loop bounds", result)
+        self.assertIn("Signed-off-by", result)
 
     def test_simple_patch_does_not_include_diff_lines(self):
         result = sut._extract_commit_message_from_patch(FIXTURES / "simple.patch")
@@ -250,11 +251,9 @@ class ExtractCommitMessageTest(unittest.TestCase):
                 "From: Someone <s@example.com>\nDate: Mon, 18 Aug 2026 10:00:00 -0400\n\nBody\n---\n"
             )
             tmp = Path(f.name)
-        try:
-            result = sut._extract_commit_message_from_patch(tmp)
-            self.assertEqual(result, "")
-        finally:
-            tmp.unlink()
+        self.addCleanup(tmp.unlink)
+        result = sut._extract_commit_message_from_patch(tmp)
+        self.assertEqual(result, "")
 
     def test_returns_stripped_string(self):
         # Leading/trailing whitespace should be stripped from the final result.
@@ -614,16 +613,13 @@ class PushChangesTest(unittest.TestCase):
 
 class ApplyPatchToSubrepoTest(unittest.TestCase):
 
-    def _make_entry(self):
-        return make_entry("rocblas")
-
     def test_dry_run_skips_all_git_operations(self):
         """In dry-run mode the function must log and return without cloning."""
         with patch.object(sut, "_clone_subrepo") as mock_clone, patch.object(
             sut, "_apply_patch"
         ) as mock_apply, patch.object(sut, "_push_changes") as mock_push:
             sut.apply_patch_to_subrepo(
-                entry=self._make_entry(),
+                entry=make_entry("rocblas"),
                 monorepo_url="ROCm/rocm-libraries",
                 monorepo_pr=1,
                 patch_path=FIXTURES / "simple.patch",
@@ -632,12 +628,14 @@ class ApplyPatchToSubrepoTest(unittest.TestCase):
                 merge_sha="abc1234",
                 dry_run=True,
             )
-        mock_clone.assert_called_once()  # clone still happens for dry-run logging
+        # The production code clones before checking --dry-run, so _clone_subrepo
+        # is called even in dry-run mode. If that changes, update this assertion.
+        mock_clone.assert_called_once()
         mock_apply.assert_not_called()
         mock_push.assert_not_called()
 
-    def test_non_dry_run_calls_clone_apply_stage_commit_push(self):
-        """Every step of the pipeline should be invoked exactly once."""
+    def test_non_dry_run_commits_and_pushes(self):
+        """The full pipeline runs commit and push exactly once."""
         with patch.object(sut, "_clone_subrepo"), patch.object(
             sut, "_configure_git_user"
         ), patch.object(sut, "_apply_patch"), patch.object(
@@ -650,7 +648,7 @@ class ApplyPatchToSubrepoTest(unittest.TestCase):
             sut, "_push_changes"
         ) as mock_push:
             sut.apply_patch_to_subrepo(
-                entry=self._make_entry(),
+                entry=make_entry("rocblas"),
                 monorepo_url="ROCm/rocm-libraries",
                 monorepo_pr=99,
                 patch_path=FIXTURES / "simple.patch",
