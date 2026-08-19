@@ -18,6 +18,7 @@ Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilatio
 """
 
 import os
+import sys
 import subprocess
 import re
 import shutil
@@ -43,7 +44,6 @@ from geko.concurrency.runner import Runner, Worker
 from geko.utils import (
     build_tensilelite_client,
     parse_devices,
-    tensile_pythonpath,
 )
 from geko.concurrency.utils import wait_process_or_stop, DeviceActivityTracker
 from geko.optim.utils import *
@@ -130,7 +130,7 @@ def configure(
     search_space: str | None = None,
     config_overrides: Mapping[str, Any] | None = None,
 ) -> dict:
-    """Generate tuning YAML configs for one or more GEMM types.
+    """Generate TensileLite tuning YAML configs for one or more GEMM types.
 
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via
@@ -226,7 +226,7 @@ def run(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the TensileLite binary and to add tensilelite to PYTHONPATH.
+            for the staged TensileLite ROCm root and installed package command.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
@@ -336,22 +336,21 @@ def run(
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
             tuning_config = yaml.safe_load(content)
-            env = {
-                "PYTHONPATH": tensile_pythonpath(hipblaslt_path),
-                **runtime_env((tuning_config.get("LibraryLogic") or {}).get("ArchitectureName")),
-            }
+            env = os.environ.copy()
+            env.update(runtime_env((tuning_config.get("LibraryLogic") or {}).get("ArchitectureName")))
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
-                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
+                        sys.executable,
+                        "-m",
+                        "tensilelite",
+                        "run",
                         self.config,
                         self.build_dir,
-                        "--prebuilt-client",
-                        client_build_dir / "tensilelite/client/tensilelite-client",
                         "--client-lock",
                         (tuning_dir / f"gpulock_{self.device}").resolve(),
                     ],
-                    env=os.environ | env,
+                    env=env,
                     stdout=f,
                     stderr=subprocess.STDOUT,
                     start_new_session=(os.name != "nt"),
