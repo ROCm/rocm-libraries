@@ -18,7 +18,7 @@ numpy reference is computed. Select with --variant.
 This is the dispatcher equivalent of tile_engine's per-op benchmark scripts
 driven with TILE_ENGINE_SAMPLING_TIER=daily, with one deliberate difference:
 those scripts never verify numerics and always exit 0. This one validates every
-kernel against a numpy reference and exits 1 on any mismatch.
+kernel against a numpy reference and exits 1 on any mismatch or build failure.
 
 Exit codes: 0 = all pass, 1 = failure, 77 = skipped (no GPU) per the ctest
 SKIP_RETURN_CODE convention.
@@ -116,14 +116,6 @@ def _sample(strata: dict, budget: int, seed: int) -> list:
         selected.extend(rng.sample(leftover, min(budget - len(selected), len(leftover))))
     rng.shuffle(selected)
     return selected[:budget]
-
-
-def _emulate(x: np.ndarray, dtype: str) -> np.ndarray:
-    if dtype == "bf16":
-        u32 = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
-        rounded = (u32 + ((u32 >> 16) & 1) + np.uint32(0x7FFF)) >> 16
-        return (rounded.astype(np.uint32) << 16).view(np.float32)
-    return x.astype(np.float16).astype(np.float32)
 
 
 def _max_rel(out: np.ndarray, ref: np.ndarray) -> float:
@@ -246,7 +238,15 @@ def _verify(variant: str, cfg, runner, result, ops: _Operands) -> float:
         return _max_rel(result.output.astype(np.float32), ref)
 
     # standard / stream_k
-    ref = _emulate(_emulate(ops.A, dtype) @ _emulate(ops.B, dtype), dtype)
+    #
+    # Quantize operands to the *input* dtype and the result to the *output*
+    # dtype -- they differ (expand_sweep maps fp8/bf8 inputs to an fp16 C), and
+    # conflating them is what a naive "round everything to `dtype`" reference
+    # gets wrong: for fp8/bf8 it would round the operands to fp16, leaving the
+    # reference strictly more precise than the kernel and failing every fp8/bf8
+    # config by construction.
+    acc = _quantize(ops.A, dtype) @ _quantize(ops.B, dtype)
+    ref = _quantize(acc, cfg.dtype_c)
     return _max_rel(result.output, ref)
 
 
@@ -375,14 +375,17 @@ def run(args) -> int:
         Path(args.json).write_text(json.dumps(out, indent=2))
         print(f"Results written to {args.json}")
 
-    if n_fail > 0:
+    if n_fail > 0 or n_build_fail > 0:
         print("\nFailed kernels:")
         for r in results:
-            if r["status"] not in ("pass", "build_fail"):
+            if r["status"] != "pass":
                 print(f"  {r['name']}: {r['status']} "
                       f"{r.get('error', r.get('max_rel', ''))}")
 
-    return 0 if n_fail == 0 else 1
+    # A build failure is a failure. Excluding it would mean a total codegen or
+    # compile breakage -- every kernel failing to build, nothing verified --
+    # still reports a green lane.
+    return 0 if n_fail == 0 and n_build_fail == 0 else 1
 
 
 def main() -> int:

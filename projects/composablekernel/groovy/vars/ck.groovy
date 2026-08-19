@@ -1610,9 +1610,20 @@ def runDispatcherTests(String arch, String compiler) {
         python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
     }
-    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
-    // Glob, not a single name: each variant writes its own dispatcher_<v>_results.json.
-    archiveArtifacts artifacts: "dispatcher_*_results.json", allowEmptyArchive: true
+    try {
+        buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+    } finally {
+        // finally, not a trailing call: a red lane is exactly when the per-kernel
+        // JSON is worth having, and buildAndTest throws on failure.
+        //
+        // Path, not a bare glob: cmake_build runs execute_cmd from
+        // projects/composablekernel/build, while archiveArtifacts resolves
+        // against the workspace root. A bare "dispatcher_*_results.json" matches
+        // nothing there, and allowEmptyArchive hides that it matched nothing.
+        // Glob, not one name: each variant writes its own dispatcher_<v>_*.json.
+        archiveArtifacts artifacts: "projects/composablekernel/build/dispatcher_*_results.json",
+                         allowEmptyArchive: true
+    }
 }
 
 def runDispatcherTestsGfx950(String compiler) {
