@@ -136,6 +136,18 @@ private:
             content->id.reset();
             content->preferred_engine_id = ::flatbuffers::nullopt;
             content->is_override_shape_enabled = false;
+
+            // Derived, never independent content: the backend stamps this from
+            // computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
+            // isRuntimePassByValue, isRaggedTensorEnabled, hasNonDefaultTensorAlignment)
+            // (PluginVersionConstants.hpp:58-93). Leaving it would silently defeat the
+            // is_override_shape_enabled exclusion directly above, because that flag alone
+            // moves the stamped version and operator== compares it
+            // (graph_generated.h:1312). Clearing it loses nothing: the three
+            // content-bearing inputs -- pass-by-value, ragged offsets, alignment -- are
+            // each compared directly on the TensorAttributes that carry them, so a graph
+            // genuinely differing in any of them still compares unequal.
+            content->min_required_engine_api_version.reset();
         }
         return content;
     }

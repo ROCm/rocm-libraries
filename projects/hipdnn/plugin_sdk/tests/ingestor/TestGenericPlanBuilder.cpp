@@ -866,6 +866,37 @@ private:
 
 using BenchmarkPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, BenchmarkContext>;
 
+/// Supplies deterministic sample times through BenchmarkPlan's D11 seam, so the ranking
+/// and write-back are decided by the code under test rather than by whether a GPU is
+/// present. Mirrors TestBenchmarkPlan.cpp's subclass, on the stream-capable handle the
+/// builder tests use.
+class DeterministicStreamBenchmarkPlan : public BenchmarkPlan<StreamCapableHandle>
+{
+public:
+    DeterministicStreamBenchmarkPlan(std::vector<Candidate> candidates,
+                                     const StreamCapableHandle& handle,
+                                     std::vector<std::optional<double>> times,
+                                     RecordRankingFn recordRanking)
+        : BenchmarkPlan<StreamCapableHandle>(
+              std::move(candidates), handle, std::move(recordRanking))
+        , _times(std::move(times))
+    {
+    }
+
+protected:
+    std::optional<double> sampleCandidate(size_t index,
+                                          const StreamCapableHandle& /*handle*/,
+                                          const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                                          uint32_t /*numDeviceBuffers*/,
+                                          void* /*workspace*/) const override
+    {
+        return index < _times.size() ? _times[index] : std::nullopt;
+    }
+
+private:
+    std::vector<std::optional<double>> _times;
+};
+
 /// With benchmarking on, the plan the context receives reports the workspace max over
 /// all three knob-filtered candidates (256, kernel_256's), not the ranked front's own
 /// 64.
@@ -1466,6 +1497,86 @@ TEST(TestIngestorGenericPlanBuilderOverride, TheOverrideIsReReadOnEveryCallNotCa
     EXPECT_FALSE(secondCall.ingestorSettings.benchmarkingEnabled);
 }
 
-} // namespace
+// ---------------------------------------------------------------------------
+// The real write-back path, end to end (D1 as revised by D6)
+// ---------------------------------------------------------------------------
 
+/// Substitutes a deterministic sampling plan through the builder's own seam, so the
+/// callback and key under test are the ones `buildPlan` actually captured -- not a
+/// hand-built pair. Without this the write-back is unreachable at the SDK tier: the real
+/// sampler needs hipEvents, so on a device-less runner every candidate scores unusable
+/// and the callback is correctly never invoked.
+class DeterministicStreamPlanBuilder : public StreamPlanBuilder
+{
+public:
+    using StreamPlanBuilder::StreamPlanBuilder;
+
+protected:
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan<StreamCapableHandle>> makeBenchmarkPlan(
+        std::vector<BenchmarkPlan<StreamCapableHandle>::Candidate> candidates,
+        const StreamCapableHandle& handle,
+        BenchmarkPlan<StreamCapableHandle>::RecordRankingFn recordRanking) const override
+    {
+        // Time descending by index, so the LAST candidate wins -- the opposite of the
+        // heuristic front, making a served record observable.
+        std::vector<std::optional<double>> times;
+        times.reserve(candidates.size());
+        for(size_t index = 0; index < candidates.size(); ++index)
+        {
+            times.emplace_back(static_cast<double>(candidates.size() - index));
+        }
+        return std::make_unique<DeterministicStreamBenchmarkPlan>(
+            std::move(candidates), handle, std::move(times), std::move(recordRanking));
+    }
+};
+
+TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuildersOwnCallback)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const StreamWorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const StreamDeviceResolver resolver;
+    const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xD8));
+    const auto properties = testDeviceProperties();
+    const StreamCapableHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    StreamSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    StreamContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    ASSERT_EQ(manager->winnerCacheSize(), 0U) << "nothing is recorded until execute() samples";
+
+    // The sampling plan sizes for the largest candidate (kernel_256), and every
+    // sub-plan's launch is handed the same buffer.
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    // The key the builder computed internally must be the one the record landed under.
+    const auto stored = manager->winnerFor(winnerKeyFor(graph, properties));
+    ASSERT_TRUE(stored.has_value())
+        << "the callback buildPlan captured must have written the ranking back";
+    ASSERT_EQ(stored->size(), 3U) << "every usable candidate belongs in the record";
+    // Rank 0 must be the candidate the deterministic sampler timed fastest -- the LAST
+    // in catalog order, which is the opposite of the heuristic front. Compare against
+    // the ids directly rather than re-reading sortedDefinitions: that now returns the
+    // record's own order, so it can no longer serve as an independent baseline.
+    EXPECT_EQ(stored->front().kernelId, testId(0x72))
+        << "the fastest sampled candidate must rank first, not the heuristic front";
+    EXPECT_EQ(stored->back().kernelId, testId(0x70)) << "and the slowest must rank last";
+}
+
+} // namespace
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

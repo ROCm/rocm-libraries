@@ -207,13 +207,24 @@ public:
     Catalog sortedCatalog(const MatchContext& context) const
     {
         Catalog catalog = catalogFor(context);
-        if(catalog.isSorted)
+
+        // A catalog already ordered from a record is final: the measurement cannot be
+        // improved on, and re-checking would re-walk the record on every call.
+        if(catalog.isSorted && catalog.orderedFromRecord)
         {
             return catalog;
         }
 
+        // A heuristically sorted catalog, however, is only provisionally ordered. The
+        // benchmark sweep that produces a record runs *after* the buildPlan that sorted
+        // and memoized this catalog, so returning early here on `isSorted` alone would
+        // pin the guess forever and Check 1 would never fire in the flow it exists for.
         if(!orderFromWinnerRecord(catalog, context))
         {
+            if(catalog.isSorted)
+            {
+                return catalog;
+            }
             catalog.entries = _heuristic->rank(catalog, context);
         }
         catalog.isSorted = true;
@@ -654,7 +665,11 @@ private:
     /// ones would invent a ranking nobody took.
     bool orderFromWinnerRecord(Catalog& catalog, const MatchContext& context) const
     {
-        if(catalog.entries.empty())
+        // Cheap rejection first. Building a WinnerKey costs a full graph UnPack -- a deep
+        // copy of every node and tensor -- so on the default path, where nobody has ever
+        // benchmarked and the map is empty, that work would be done and thrown away on
+        // every call. One uncontended mutex acquisition avoids it.
+        if(catalog.entries.empty() || winnerCacheSize() == 0)
         {
             return false;
         }
@@ -676,6 +691,7 @@ private:
         }
 
         catalog.entries = std::move(ordered);
+        catalog.orderedFromRecord = true;
         HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << catalog.entries.size()
                                                     << " catalog entries from a benchmarked "
                                                        "record; heuristic ranking skipped");
