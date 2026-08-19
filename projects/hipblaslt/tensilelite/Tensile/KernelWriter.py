@@ -28,7 +28,7 @@ from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
-from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
+from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
   BufferLoadD16B16, BufferLoadD16U8, DSLoad2B32, DSLoad2B64, DSLoadB128, \
   DSLoadB32, DSLoadB64, DSLoadB192, DSStoreB192, DSLoadB64TrB16, DSLoadB128TrB16, \
   DSLoadB64TrB8, DSLoadB64TrB4, DSLoadB96TrB6, DSLoadInstruction, DSLoadU16, \
@@ -71,6 +71,7 @@ import math
 import abc
 import sys
 import os
+import re
 import time
 import collections
 from copy import deepcopy
@@ -11210,52 +11211,146 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # unroll loop we model the back-edge for.
       return isinstance(labelName, str) and "LoopBegin" in labelName and "TailLoopBegin" not in labelName
 
+    def _isLabelDef(leaf):
+      # A label definition answers getLabelName; a branch carries labelName.
+      return hasattr(leaf, "getLabelName") and not isinstance(leaf, Instruction)
+
+    # The whole tree flattened to its leaves in program order, each paired with
+    # the module that owns it and its index there.
+    #
+    # Insertion used to recurse module by module, which put a barrier in the
+    # module owning the conflicting access and so could not see a branch opened
+    # outside it. _dcpScheduleSingleBufferedFillLate emits the wave-parity
+    # s_cbranch beside the fill group rather than inside it, so the barrier for
+    # that group's tensor_load_to_lds landed after the branch and only the waves
+    # falling through ever reached it. One flattening keeps such a branch in
+    # scope for the whole walk, and (owner, index) is what still lets an
+    # insertion be written back into the right place in the tree.
+    flatLeaves = []
+    seenModules = set()
+
+    def _flattenLeaves(mod: Module):
+      if id(mod) in seenModules:
+        print2("[postMainLoopBarrierCheckAndReset] WARNING: module '%s' is reached twice, so an "
+               "insertion index in it names two places" % mod.name)
+      seenModules.add(id(mod))
+      for pos, item in enumerate(mod.items()):
+        if isinstance(item, Module):
+          _flattenLeaves(item)
+        else:
+          flatLeaves.append((item, mod, pos))
+
+    _flattenLeaves(rootModule)
+
+    labelDefIndex = {}
+    for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
+      if _isLabelDef(leaf):
+        labelDefIndex.setdefault(leaf.getLabelName(), idx)
+
+    # beginLabelName -> (beginIdx, backBranchIdx) using the widest back-edge span.
+    loopSpanByLabel = {}
+    for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
+      target = getattr(leaf, "labelName", None)
+      if target is None or not _isUnrollLoopBeginLabel(target):
+        continue
+      beginIdx = labelDefIndex.get(target, None)
+      if beginIdx is None or beginIdx >= idx:
+        continue  # forward branch, not a back-edge
+      prev = loopSpanByLabel.get(target)
+      if prev is None or idx > prev[1]:
+        loopSpanByLabel[target] = (beginIdx, idx)
+
+    # Every point a barrier must not be moved across, because crossing one
+    # changes how many times it executes.
+    loopBoundaryIndices = sorted(
+      {beginIdx for beginIdx, _branchIdx in loopSpanByLabel.values()} |
+      {branchIdx for _beginIdx, branchIdx in loopSpanByLabel.values()})
+
+    # Only WAVE-DIVERGENT conditional branches are tracked, not every conditional
+    # one. A trip-count or K-remainder branch is taken by the whole workgroup, so
+    # a barrier inside it is already correct - and the unroll loop is itself
+    # skipped by such a branch, so treating that as a guard would lift a barrier
+    # clean out of the loop.
+    #
+    # Everything that dispatches TDM work by wave leaves its answer in SCC:
+    # s_bitcmp1_b32 on bit 0 of the wave index for a parity split, s_cmp_eq_u32
+    # for a named wave, either reading sgpr("WaveIdx") directly or an sgpr filled
+    # by a v_readfirstlane_b32 of vgprSerial where that is no longer live. SCC is
+    # therefore followed as the register it is, from the write to the branch that
+    # reads it, with no distance limit. Adjacency would be enough for the tree as
+    # the writer builds it, but it is not a property this pass should depend on.
+    #
+    # The categories come from the instruction class name so that str() is only
+    # rendered for the comparisons, and the SCC-writing families are listed
+    # because a stale predicate is the failure that matters: it would report a
+    # guard that is not one.
+    sccCompareClassPrefixes = ("SBitcmp", "SCmp")
+    sccClobberClassPrefixes = (
+      "SAdd", "SSub", "SAnd", "SOr", "SXor", "SNand", "SNor", "SXnor", "SAndn2",
+      "SOrn2", "SNot", "SLShift", "SAShift", "SBfe", "SAbs", "SBcnt", "SFf",
+      "SFlbit", "SQuadmask", "SWqm", "SBitset", "SPack", "SMin", "SMax",
+      "SBitreplicate",
+    )
+
+    # The unconditional branches are listed rather than the conditional ones so
+    # that an unfamiliar branch class is treated as conditional, which costs a
+    # needless hoist, instead of ignored, which is this pass's defect. By name
+    # because only some of them are classes: rocisa exposes the long branches as
+    # factory functions that build a Module, so isinstance cannot name them.
+    unconditionalBranchClassNames = (
+      "SBranch", "SLongBranch", "SLongBranchPositive", "SLongBranchNegative",
+    )
+
+    def _isConditionalBranch(leaf):
+      return isinstance(leaf, BranchInstruction) and \
+             type(leaf).__name__ not in unconditionalBranchClassNames
+
+    sgprNumberPattern = re.compile(r"\bs\[?(\d+)")
+    waveIdSgprs = set()
+    guardEndByIndex = {}
+    sccIsWaveDivergent = False
+    for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
+      if not isinstance(leaf, Instruction):
+        continue
+      if _isConditionalBranch(leaf):
+        endIdx = labelDefIndex.get(getattr(leaf, "labelName", None))
+        # A backward branch is a loop back-edge, and a target this tree does not
+        # define is not a region that closes at a known point either.
+        if sccIsWaveDivergent and endIdx is not None and endIdx > idx:
+          guardEndByIndex[idx] = endIdx
+        continue
+      className = type(leaf).__name__
+      if className.startswith(sccCompareClassPrefixes):
+        text = str(leaf)
+        sccIsWaveDivergent = "WaveIdx" in text or \
+            any(int(n) in waveIdSgprs for n in sgprNumberPattern.findall(text))
+      elif className.startswith(sccClobberClassPrefixes):
+        sccIsWaveDivergent = False
+      elif isinstance(leaf, VReadfirstlaneB32):
+        # Where sgpr("WaveIdx") is no longer live the wave index is recomputed
+        # into a temporary, and the comparison then names that number rather than
+        # the symbol. Nothing else in a TDM kernel reads vgprSerial into an sgpr,
+        # so this read is what identifies the temporary.
+        text = str(leaf)
+        if "vgprSerial" in text:
+          waveIdSgprs.update(int(n) for n in sgprNumberPattern.findall(text))
+
     def _detectLoopHeadInfo():
-      # Detect the real loop span(s) from the back-edge, not from module names.
-      # A module named "loopBody" also contains the odd/even-iter exit code and
-      # the loop-end label that execute AFTER the back-branch, so its last token
-      # access is not the loop tail. Instead, flatten leaves in program order,
-      # find each backward branch to a "LoopBegin" label, and treat
-      # [begin .. back-branch] as the loop body.
+      # Read the loop span(s) off the back-edge, not off module names. A module
+      # named "loopBody" also contains the odd/even-iter exit code and the
+      # loop-end label that execute AFTER the back-branch, so its last token
+      # access is not the loop tail.
       #
       # Returns beginLabelName -> {token: [firstAccess, tailState]} where:
       #   firstAccess: access ("read"/"write") of the token's FIRST occurrence in
       #                the body (what the back-edge feeds into).
       #   tailState:   phase ("reading"/"writing") of the token's LAST occurrence
       #                in the body (the phase the back-edge carries out).
-      flatLeaves = []
-      def _flattenLeaves(mod: Module):
-        for item in mod.items():
-          if isinstance(item, Module):
-            _flattenLeaves(item)
-          else:
-            flatLeaves.append(item)
-      _flattenLeaves(rootModule)
-
-      labelDefIndex = {}
-      for idx, leaf in enumerate(flatLeaves):
-        if hasattr(leaf, "getLabelName") and not isinstance(leaf, Instruction):
-          name = leaf.getLabelName()
-          labelDefIndex.setdefault(name, idx)
-
-      # beginLabelName -> (beginIdx, backBranchIdx) using the widest back-edge span.
-      loopSpanByLabel = {}
-      for idx, leaf in enumerate(flatLeaves):
-        target = getattr(leaf, "labelName", None)
-        if target is None or not _isUnrollLoopBeginLabel(target):
-          continue
-        beginIdx = labelDefIndex.get(target, None)
-        if beginIdx is None or beginIdx >= idx:
-          continue  # forward branch, not a back-edge
-        prev = loopSpanByLabel.get(target)
-        if prev is None or idx > prev[1]:
-          loopSpanByLabel[target] = (beginIdx, idx)
-
       headInfo = {}
       for beginName, (beginIdx, branchIdx) in loopSpanByLabel.items():
         info = {}
         for k in range(beginIdx, branchIdx + 1):
-          leaf = flatLeaves[k]
+          leaf = flatLeaves[k][0]
           if not isinstance(leaf, Instruction):
             continue
           access = _classifyTokenAccess(leaf)
@@ -11275,101 +11370,157 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # PrefetchGlobalRead >= 2 the pipelined prologue pre-stages the next
     # iteration's LDS data, so the steady-state phase is already established and
     # a plain single linear pass is correct - leaving loopHeadInfo empty makes
-    # _rewriteModuleInOrder degrade to exactly that linear pass.
+    # the walk below degrade to exactly that linear pass.
     loopEntryOverride = {}
     loopPendingTokens = set()
     loopHeadInfo = _detectLoopHeadInfo() if kernel["PrefetchGlobalRead"] < 2 else {}
 
-    def _rewriteModuleInOrder(mod: Module):
-      nonlocal insertedCount
-      rewrittenItems = []
-      for item in mod.items():
-        if hasattr(item, "getLabelName") and not isinstance(item, Instruction):
-          labelName = item.getLabelName()
-          if _isOptNllEndLabelName(labelName) and labelName in branchTokenStateSnapshot:
-            # recover token state from the snapshot
-            tokenState.clear()
-            tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
-          if labelName in loopHeadInfo:
-            # Entering the unroll loop. The loop-head barrier is driven purely by
-            # the back-edge (loop-tail) state, so a steady-state iteration only
-            # gets a barrier when the carried phase truly conflicts with the
-            # first access. The first iteration's pre-loop conflict, if any and
-            # not already covered by a back-edge barrier, is satisfied ONCE by a
-            # barrier hoisted into the prologue (emitted right before the loop
-            # label) instead of one that re-fires every iteration.
-            prologueBarrierTokens = []
-            for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
-              preState = tokenState.get(token, "standby")
-              loopEntryOverride[token] = tailState
-              loopPendingTokens.add(token)
-              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
-                prologueBarrierTokens.append(token)
-            if prologueBarrierTokens:
-              uniqueTokens = sorted(set(prologueBarrierTokens))
-              syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
-              barrier = SBarrier(comment=f"auto token transition barrier (loop prologue), {syncComments}")
-              barrier.setMemToken(MemTokenData(uniqueTokens))
-              rewrittenItems.append(barrier)
-              insertedCount += 1
-          rewrittenItems.append(item)
-          continue
+    # (ownerModule, indexInOwner, tokens, commentPrefix), in program order.
+    plannedBarriers = []
+    # One entry per wave-divergent region still open, outermost first:
+    # [endIdx, branchIdx, ownerModule, indexInOwner, tokensTouchedSinceItOpened].
+    openGuards = []
+    divergentBarriers = 0
 
-        if isinstance(item, Module):
-          _rewriteModuleInOrder(item)
-          rewrittenItems.append(item)
-          continue
-        if not isinstance(item, Instruction):
-          rewrittenItems.append(item)
-          continue
+    def _crossesLoopBoundary(fromIdx, toIdx):
+      return any(fromIdx < b <= toIdx for b in loopBoundaryIndices)
 
-        branchLabelName = getattr(item, "labelName", None)
-        if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
-          # Save token state at the first branch to OptNLL_End.
-          branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
-        if branchLabelName in loopHeadInfo:
-          # Reached the loop back-branch: drop any stale loop-entry overrides.
-          loopEntryOverride.clear()
-          loopPendingTokens.clear()
+    for idx, (item, owner, pos) in enumerate(flatLeaves):
+      if openGuards:
+        openGuards = [guard for guard in openGuards if guard[0] > idx]
 
-        access = _classifyTokenAccess(item)
-        tokens = _getTokenList(item)
-        if access is None and tokens:
-          print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access — barrier may be missing")
-        if access is None or not tokens:
-          rewrittenItems.append(item)
-          continue
+      if _isLabelDef(item):
+        labelName = item.getLabelName()
+        if _isOptNllEndLabelName(labelName) and labelName in branchTokenStateSnapshot:
+          # recover token state from the snapshot
+          tokenState.clear()
+          tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+        if labelName in loopHeadInfo:
+          # Entering the unroll loop. The loop-head barrier is driven purely by
+          # the back-edge (loop-tail) state, so a steady-state iteration only
+          # gets a barrier when the carried phase truly conflicts with the
+          # first access. The first iteration's pre-loop conflict, if any and
+          # not already covered by a back-edge barrier, is satisfied ONCE by a
+          # barrier hoisted into the prologue (emitted right before the loop
+          # label) instead of one that re-fires every iteration.
+          prologueBarrierTokens = []
+          for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
+            preState = tokenState.get(token, "standby")
+            loopEntryOverride[token] = tailState
+            loopPendingTokens.add(token)
+            if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
+              prologueBarrierTokens.append(token)
+          if prologueBarrierTokens:
+            # Never relocated: this one has to fire exactly once on the way in,
+            # and the label it precedes is a branch target, so moving it ahead
+            # of an enclosing branch would change which paths reach it. A loop
+            # head is not inside a wave-divergent region; say so if that ever
+            # stops holding rather than emitting it quietly.
+            if openGuards:
+              divergentBarriers += 1
+              print2("[postMainLoopBarrierCheckAndReset] WARNING: the loop prologue barrier for "
+                     "%s is inside a wave-divergent region, so only some waves reach it"
+                     % labelName)
+            plannedBarriers.append((owner, pos, sorted(set(prologueBarrierTokens)),
+                                    "auto token transition barrier (loop prologue)"))
+        continue
 
-        barrierTokens = []
-        for token in tokens:
-          if token in loopPendingTokens:
-            # First access of this token inside the loop body: evaluate it
-            # against the back-edge (loop-tail) state.
-            state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
-            loopPendingTokens.discard(token)
+      if not isinstance(item, Instruction):
+        continue
+
+      branchLabelName = getattr(item, "labelName", None)
+      if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
+        # Save token state at the first branch to OptNLL_End.
+        branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
+      if branchLabelName in loopHeadInfo:
+        # Reached the loop back-branch: drop any stale loop-entry overrides.
+        loopEntryOverride.clear()
+        loopPendingTokens.clear()
+      if idx in guardEndByIndex:
+        openGuards.append([guardEndByIndex[idx], idx, owner, pos, set()])
+
+      access = _classifyTokenAccess(item)
+      tokens = _getTokenList(item)
+      if access is None and tokens:
+        print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access - barrier may be missing")
+      if access is None or not tokens:
+        continue
+
+      barrierTokens = []
+      for token in tokens:
+        if token in loopPendingTokens:
+          # First access of this token inside the loop body: evaluate it
+          # against the back-edge (loop-tail) state.
+          state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
+          loopPendingTokens.discard(token)
+        else:
+          state = tokenState.get(token, "standby")
+        if _conflicts(access, state):
+          barrierTokens.append(token)
+
+      if barrierTokens:
+        uniqueTokens = sorted(set(barrierTokens))
+        if not openGuards:
+          plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
+        else:
+          outer = openGuards[0]
+          blockers = sorted(outer[4].intersection(uniqueTokens))
+          if blockers:
+            # Moving it ahead of the branch would move it ahead of an access it
+            # has to separate, so there is no correct placement. Leave it on the
+            # transition and say so rather than emit one that only looks right.
+            reason = ("%s is also accessed inside that region" % blockers)
+          elif _crossesLoopBoundary(outer[1], idx):
+            # The region begins outside the loop this access is in, so the
+            # barrier would go from once per iteration to once per kernel.
+            reason = "the region begins outside this access's loop"
           else:
-            state = tokenState.get(token, "standby")
-          if _conflicts(access, state):
-            barrierTokens.append(token)
+            reason = None
+          if reason is None:
+            plannedBarriers.append((outer[2], outer[3], uniqueTokens,
+                                    "auto token transition barrier (ahead of a wave-divergent branch)"))
+          else:
+            divergentBarriers += 1
+            print2("[postMainLoopBarrierCheckAndReset] WARNING: the barrier for tokens %s cannot "
+                   "leave the wave-divergent region it falls in, because %s; only some waves will "
+                   "reach it" % (uniqueTokens, reason))
+            plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
 
-        if barrierTokens:
-          uniqueTokens = sorted(set(barrierTokens))
-          syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
-          barrier = SBarrier(comment=f"auto token transition barrier, {syncComments}")
-          barrier.setMemToken(MemTokenData(uniqueTokens))
-          rewrittenItems.append(barrier)
-          insertedCount += 1
+      nextState = _accessPhase(access)
+      for token in tokens:
+        tokenState[token] = nextState
+      for guard in openGuards:
+        guard[4].update(tokens)
 
-        nextState = _accessPhase(access)
-        for token in tokens:
-          tokenState[token] = nextState
+    # Two transitions relocated to the same point want one barrier, not two
+    # adjacent ones. plannedBarriers is in program order, so they are adjacent.
+    mergedBarriers = []
+    for owner, pos, tokens, prefix in plannedBarriers:
+      if mergedBarriers and mergedBarriers[-1][0] is owner and mergedBarriers[-1][1] == pos:
+        mergedBarriers[-1][2] = sorted(set(mergedBarriers[-1][2]) | set(tokens))
+        continue
+      mergedBarriers.append([owner, pos, tokens, prefix])
 
-        rewrittenItems.append(item)
+    # Applied per owning module, descending by index, so every index still names
+    # the item it was recorded against. Two at one index are applied in reverse
+    # order so that they end up in program order.
+    barriersByOwner = {}
+    for order, (owner, pos, tokens, prefix) in enumerate(mergedBarriers):
+      barriersByOwner.setdefault(id(owner), (owner, []))[1].append((pos, order, tokens, prefix))
+    for owner, entries in barriersByOwner.values():
+      items = list(owner.items())
+      for pos, _order, tokens, prefix in sorted(entries, key=lambda e: (e[0], e[1]), reverse=True):
+        syncComments = ", ".join([f"sync LDS{token}" for token in tokens])
+        barrier = SBarrier(comment=f"{prefix}, {syncComments}")
+        barrier.setMemToken(MemTokenData(tokens))
+        items.insert(pos, barrier)
+        insertedCount += 1
+      owner.setItems(items)
 
-      mod.setItems(rewrittenItems)
-
-    _rewriteModuleInOrder(rootModule)
     print2(f"[postMainLoopBarrierCheckAndReset] removed {removedCount} barriers, inserted {insertedCount} barriers")
+    if divergentBarriers:
+      print2(f"[postMainLoopBarrierCheckAndReset] WARNING: {divergentBarriers} inserted barrier(s) "
+             "are reachable only under a wave-divergent branch")
     return
 
   ##############################################################################
