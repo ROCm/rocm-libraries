@@ -64,12 +64,12 @@ To use the `tensile_config_generator.py` script, follow these steps:
    gfx942:
 
    ```
-   TensileMergeLibrary --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/
+   tensilelite merge-library --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942_{cu count}/{Equality|GridBased}/
    ```
    gfx90a:
 
    ```
-   TensileMergeLibrary --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/
+   tensilelite merge-library --no_eff library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/ <tune result directory>/3_LibraryLogic/ library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aldebaran/{cu count}/{Equality|GridBased}/
    ```
 
 6. Rebuild hipBLASLt with the merged results:
