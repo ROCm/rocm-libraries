@@ -210,6 +210,48 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
     }
 
     template <typename SrcBuffer, typename DstBuffer>
+    __device__ void Clear([[maybe_unused]] const SrcDesc&,
+                          [[maybe_unused]] const SrcBuffer& src_buf,
+                          [[maybe_unused]] const DstDesc& dst_desc,
+                          [[maybe_unused]] DstBuffer& dst_buf)
+    {
+#if defined(__gfx125__)
+        static_assert(SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Source data must come from a global memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Destination data must be stored in an LDS memory buffer.");
+
+        static_assert(
+            ck::is_same_v<remove_cvref_t<typename SrcBuffer::type>, remove_cvref_t<SrcData>>,
+            "SrcBuffer and SrcData data types must be consistent.");
+        static_assert(
+            ck::is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>,
+            "DstBuffer and DstData data types must be consistent.");
+        ignore = dst_desc;
+        constexpr auto scalar_per_access =
+            generate_sequence(detail::lambda_scalar_per_access<DstVectorDim, 1>{}, Number<nDim>{});
+
+        using SpaceFillingCurve   = SpaceFillingCurve<decltype(thread_slice_lengths),
+                                                      SrcDimAccessOrder,
+                                                      remove_cv_t<decltype(scalar_per_access)>>;
+        constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
+
+        // loop over space-filling curve
+        static_assert(num_access > 0);
+        static_for<0, num_access, 1>{}([&](auto idx_1d) {
+            constexpr auto lds_access_offset = [&]() {
+                constexpr auto coord_offset = SpaceFillingCurve::GetIndex(idx_1d) * thread_steps;
+                return make_tensor_coordinate(DstDesc{}, coord_offset).GetOffset();
+            }();
+
+            src_buf.template Clear<remove_cvref_t<decltype(dst_buf)>,
+                                   ScalarPerVector,
+                                   lds_access_offset>(dst_buf, dst_coord_.GetOffset());
+        });
+#endif
+    }
+
+    template <typename SrcBuffer, typename DstBuffer>
     __device__ void Run(const SrcDesc& src_desc,
                         const SrcBuffer& src_buf,
                         const DstDesc& dst_desc,

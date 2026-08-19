@@ -273,8 +273,24 @@ struct DynamicBuffer
                                      NumElemsPerThread,
                                      static_dst_offset,
                                      true,
-                                     coherence>(
+                                     coherence,
+                                     true>(
             p_uniform_ptr, src_offset, dst_buf.p_data_, dst_offset, is_valid_element);
+    }
+
+    template <typename DstBuffer, index_t NumElemsPerThread, index_t static_dst_offset>
+    __host__ __device__ void Clear(DstBuffer& dst_buf, IndexType dst_offset) const
+    {
+        // Copy data from global to LDS memory using direct loads.
+        static_assert(GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Source data must come from a global memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Destination data must be stored in an LDS memory buffer.");
+        static_assert(is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<T>>,
+                      "Source and destination buffer must have the same data type.");
+
+        clear<remove_cvref_t<typename DstBuffer::type>, NumElemsPerThread, static_dst_offset>(
+            dst_buf.p_data_, dst_offset);
     }
 
     template <typename X,

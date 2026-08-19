@@ -915,10 +915,12 @@ template <typename T,
           index_t NumBytesPerThread,
           index_t static_dst_offset        = 0,
           bool is_uniform_src_ptr          = true,
-          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          bool enable_oob_mask             = false>
 __device__ void amd_async_copy_to_lds_impl_raw(__attribute__((address_space(1))) const T* src_ptr,
                                                index_t src_offset,
-                                               __attribute__((address_space(3))) T* dst_ptr)
+                                               __attribute__((address_space(3))) T* dst_ptr,
+                                               [[maybe_unused]] bool is_src_valid)
 {
     static_assert(NumBytesPerThread == 1 || NumBytesPerThread == 4 || NumBytesPerThread == 8 ||
                       NumBytesPerThread == 16,
@@ -1012,12 +1014,36 @@ __device__ void amd_async_copy_to_lds_impl_raw(__attribute__((address_space(1)))
     {
         if constexpr(use_asm_path)
         {
-            asm volatile("global_load_async_to_lds_b128 %0, %1, %2, offset:%3\n\t" ::"v"(
-                             static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst_ptr))),
-                         "v"(static_cast<uint32_t>((src_offset - static_dst_offset) * sizeof(T))),
-                         "s"(reinterpret_cast<uint64_t>(src_ptr)),
-                         "n"(static_cast<uint32_t>(static_dst_offset * sizeof(T)))
-                         : "memory");
+            if constexpr(enable_oob_mask)
+            {
+#define CMPX_LE_EXEC "v_cmpx_le_u32 "
+#define RESTORE_EXEC "s_mov_b32 exec_lo "
+                // save/restore exec_lo inside the same asm block so the compiler never
+                // sees it as a plain read of exec_lo that it could fold away
+                uint32_t save_exec;
+                asm volatile(
+                    "s_mov_b32 %0, exec_lo\n\t" CMPX_LE_EXEC "  1, %5\n\t"
+                    "global_load_async_to_lds_b128 %1, %2, %3, offset:%4\n\t" RESTORE_EXEC " %0"
+                    : "=s"(save_exec)
+                    : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst_ptr))),
+                      "v"(static_cast<uint32_t>((src_offset - static_dst_offset) * sizeof(T))),
+                      "s"(reinterpret_cast<uint64_t>(src_ptr)),
+                      "n"(static_cast<uint32_t>(static_dst_offset * sizeof(T))),
+                      "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0))
+                    : "memory");
+#undef CMPX_LE_EXEC
+#undef RESTORE_EXEC
+            }
+            else
+            {
+                asm volatile(
+                    "global_load_async_to_lds_b128 %0, %1, %2, offset:%3\n\t" ::"v"(
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst_ptr))),
+                    "v"(static_cast<uint32_t>((src_offset - static_dst_offset) * sizeof(T))),
+                    "s"(reinterpret_cast<uint64_t>(src_ptr)),
+                    "n"(static_cast<uint32_t>(static_dst_offset * sizeof(T)))
+                    : "memory");
+            }
         }
         else
         {
@@ -1111,10 +1137,12 @@ template <typename T,
           index_t N,
           index_t static_dst_offset        = 0,
           bool is_uniform_src_ptr          = true,
-          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          bool enable_oob_mask             = false>
 __device__ void amd_async_copy_to_lds_impl(__attribute__((address_space(1))) const T* src_ptr,
                                            index_t src_offfset,
-                                           __attribute__((address_space(3))) T* dst_ptr)
+                                           __attribute__((address_space(3))) T* dst_ptr,
+                                           bool is_src_valid = true)
 {
 #if defined(__gfx125__)
     // currently only support to b8, b32, b64, b128 when one async copy
@@ -1136,11 +1164,13 @@ __device__ void amd_async_copy_to_lds_impl(__attribute__((address_space(1))) con
                                    sizeof(T) * N,
                                    static_dst_offset,
                                    is_uniform_src_ptr,
-                                   coherence>(src_ptr, src_offfset, dst_ptr);
+                                   coherence,
+                                   enable_oob_mask>(src_ptr, src_offfset, dst_ptr, is_src_valid);
 #else
     ignore = src_ptr;
     ignore = dst_ptr;
     ignore = src_offfset;
+    ignore = is_src_valid;
 #endif
     return;
 }
@@ -1178,14 +1208,15 @@ template <typename T,
           index_t NumElemsPerThread,
           index_t static_dst_offset,
           bool is_uniform_src_ptr          = true,
-          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          bool enable_oob_mask             = false>
 __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
                                              const index_t global_offset,
                                              T* lds_base_ptr,
                                              const index_t lds_offset,
                                              const bool is_src_valid)
 {
-    if(is_src_valid)
+    // if(is_src_valid)
     {
         __attribute__((address_space(1))) const T* global_ptr =
             reinterpret_cast<__attribute__((address_space(1))) T*>(
@@ -1197,14 +1228,27 @@ __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
                                    NumElemsPerThread,
                                    static_dst_offset,
                                    is_uniform_src_ptr,
-                                   coherence>(global_ptr, global_offset, lds_ptr);
+                                   coherence,
+                                   enable_oob_mask>(
+            global_ptr, global_offset, lds_ptr, is_src_valid);
     }
-    else
+    // else
+    // {
+    //     using DstVecType = typename vector_type_maker<T, NumElemsPerThread>::type;
+    //     DstVecType* lds_ptr =
+    //         reinterpret_cast<DstVecType*>(lds_base_ptr + lds_offset + static_dst_offset);
+    //     *lds_ptr = {};
+    // }
+}
+
+template <typename T, index_t NumElemsPerThread, index_t static_dst_offset>
+__device__ void clear(T* lds_base_ptr, const index_t lds_offset)
+{
     {
-        using DstVecType = typename vector_type_maker<T, NumElemsPerThread>::type;
-        DstVecType* lds_ptr =
-            reinterpret_cast<DstVecType*>(lds_base_ptr + lds_offset + static_dst_offset);
-        *lds_ptr = {};
+        T* lds_ptr_         = lds_base_ptr + lds_offset + static_dst_offset;
+        using DstVecType    = typename vector_type_maker<T, NumElemsPerThread>::type;
+        DstVecType* lds_ptr = reinterpret_cast<DstVecType*>(lds_ptr_);
+        *lds_ptr            = {};
     }
 }
 
