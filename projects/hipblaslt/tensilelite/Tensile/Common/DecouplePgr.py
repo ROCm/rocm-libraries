@@ -193,17 +193,23 @@ def tdmDealiasAB(ks):
     moving 3 once those twelve fill the holes the shared layout left free for
     the tail temporaries, less the 1 tdmABIncs the shared set no longer needs.
 
-    Never derived, only selected by TDMFuse=6, so that 0 stays inert. Equal
-    block counts keep the alias, because their byte-identity with a legacy
-    configuration is the evidence the feature rests on. MXSA/MXSB stay
-    parity-aliased; de-aliasing all four costs another 24 SGPRs. TDMSplit keeps
-    the alias, because its multi-wave increment recomputes one parity-selected
-    split stride for one shared descriptor.
+    The 2 make the total config-dependent rather than a constant 14: a
+    high-water mark answers to whatever else the allocation holds.
+
+    Never derived, only selected by TDMFuse=6, so that 0 stays inert. The block
+    counts do not enter. De-aliasing is a descriptor grouping, and an equal pair
+    -- or the legacy scalar PrefetchGlobalRead an equal pair resolves to --
+    groups exactly as a divergent one does; it spends the SGPRs on a cadence
+    split it never uses, which is a tuning cost and not a correctness one. The
+    one reader that keys on the block counts is
+    KernelWriter._dcpScheduleSingleBufferedFillLate, which returns early off
+    _dcpDivergent, so no equal pair reaches its singleIsA cadence.
+
+    MXSA/MXSB stay parity-aliased; de-aliasing all four costs another 24 SGPRs.
+    TDMSplit keeps the alias, because its multi-wave increment recomputes one
+    parity-selected split stride for one shared descriptor.
     """
     if ks.get("TDMFuse") != 6:
-        return False
-    decoupled, numLdsBlkA, numLdsBlkB = decouplePgrBlocks(ks)
-    if not (decoupled and numLdsBlkA != numLdsBlkB):
         return False
     if not tdmBothTensors(ks):
         return False

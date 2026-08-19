@@ -1801,14 +1801,7 @@ class Solution(collections.abc.Mapping):
     # equalPairDegeneratesToScalar. Deleting the keys here would take the only
     # evidence of the conflict with it, and the solution would build one LDS
     # block where two were asked for.
-    #
-    # dcpDegeneratedPair keeps what was supplied for the diagnostics further
-    # down, which otherwise report a state that no longer mentions the pair and
-    # so read identically to a solution that never had one. A local, not a state
-    # key: nothing derived should reach the serialized library.
-    dcpDegeneratedPair = None
     if equalPairDegeneratesToScalar(state):
-      dcpDegeneratedPair = (dcpPgrA, dcpPgrB)
       printWarning(
         "PrefetchGlobalReadA/B: PrefetchGlobalReadA and PrefetchGlobalReadB are both "
         "%u, which is legacy PrefetchGlobalRead=%u exactly -- the same block count on "
@@ -3100,35 +3093,6 @@ class Solution(collections.abc.Mapping):
                  "TDMFuse=6 is not available with TDMSplit, whose multi-wave increment recomputes "
                  "one parity-selected split stride for one shared descriptor")
           return
-        # Outside a divergent pair the de-aliased cadence is unverified: it keys
-        # on the block count through singleIsA, and only that envelope was
-        # measured.
-        #
-        # Three ways to miss, and they need three messages. An equal pair has
-        # usually been resolved away by the time this runs, so reporting the
-        # state here would describe a solution with no pair at all -- which is
-        # also what the third case is, and the two read identically.
-        decoupled, blkA, blkB = decouplePgrBlocks(state)
-        if not (decoupled and blkA != blkB):
-          if dcpDegeneratedPair is not None:
-            tdmFuseNoPair = (
-              "PrefetchGlobalReadA=%u and PrefetchGlobalReadB=%u were supplied, and an equal "
-              "pair is legacy PrefetchGlobalRead=%u exactly, so both keys were resolved away "
-              "before this check. There is no A and B to de-alias -- they share a cadence by "
-              "construction"
-              % (dcpDegeneratedPair[0], dcpDegeneratedPair[1], dcpDegeneratedPair[0]))
-          elif decoupled:
-            tdmFuseNoPair = (
-              "PrefetchGlobalReadA and PrefetchGlobalReadB both resolve to %d LDS block(s), so "
-              "the pair is not divergent" % blkA)
-          else:
-            tdmFuseNoPair = (
-              "this solution has no per-tensor pair; PrefetchGlobalRead=%d covers both tensors"
-              % state["PrefetchGlobalRead"])
-          reject(state, printRejectionReason,
-                 "TDMFuse=6 requires a divergent decoupled pair (PrefetchGlobalReadA/B resolving "
-                 "to different LDS block counts): %s" % tdmFuseNoPair)
-          return
         if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
           reject(state, printRejectionReason,
                  "TDMFuse=6 names the MX scale group {MXSA,MXSB}, so it requires MX scales on "
@@ -3137,6 +3101,13 @@ class Solution(collections.abc.Mapping):
         if state["enableTDMMetadata"]:
           reject(state, printRejectionReason,
                  "TDMFuse=6 does not describe the sparse metadata tensor")
+          return
+        # These guards must stay exactly tdmDealiasAB's preconditions; if they
+        # drift, decline rather than accept a name the writer will not honour.
+        if not tdmDealiasAB(state):
+          reject(state, printRejectionReason,
+                 "TDMFuse=6 passed its solution-level guards but tdmDealiasAB declined the "
+                 "solution, so the writer would emit a different grouping than the name claims")
           return
 
     # TDMWaveSpread -- see the declaration in Common/ValidParameters.py.
