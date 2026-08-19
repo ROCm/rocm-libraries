@@ -317,15 +317,20 @@ jobs:
       # fails fast (build concluded without success -> no artifact will ever appear), or errors if
       # the build succeeded but the artifact still never materializes. Bounded by the job timeout.
       #
-      # The fetch success check looks for build/bin/miopen_gtest explicitly, NOT just the script's
-      # exit code -- confirmed live (run 32204574647) that install_rocm_from_artifacts.py exits 0 as
-      # soon as ANY artifacts exist at this run's S3 prefix, which happens once any OTHER bundle
-      # sharing this family (e.g. hipkernelprovider, rpp) uploads its shared "generic" pieces, well
-      # before MIOpen's own bundle has uploaded miopen_gtest.
+      # Readiness is keyed on the arch-specific CK grouped-conv plugin (libMIOpenCKGroupedConv_<arch>.so),
+      # NOT on miopen_gtest -- confirmed live (run 32290762766) that miopen_gtest ships in the
+      # arch-INDEPENDENT miopen_test_generic artifact, which lands independently of the arch-specific
+      # miopen_lib_<arch> artifact that actually carries the CK plugin + this arch's SystemDBs (the
+      # things dbsync needs). Keying on miopen_gtest exited the loop too early: for gfx950 the
+      # miopen_lib_gfx950 artifact existed but hadn't been fetched yet; for gfx942 it masked a build
+      # failure entirely (generic gtest was present so the loop never consulted the build leg state).
+      # (install_rocm_from_artifacts.py also exits 0 as soon as ANY artifact exists at the run's S3
+      # prefix, so its exit code alone is not a readiness signal either.)
       - name: Fetch artifact (source-CK build for ${{ matrix.family }})
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          DEVICE_ARCH: ${{ matrix.arch }}
         run: |
           set -uo pipefail
           poll_interval_seconds=60
@@ -339,8 +344,8 @@ jobs:
                 --artifact-group="${AMDGPU_FAMILIES}" \
                 --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
                 --blas --miopen --rand --tests \
-                && [ -f "${OUTPUT_ARTIFACTS_DIR}/bin/miopen_gtest" ]; then
-              echo "Fetched artifact (miopen_gtest present) after $((SECONDS - start))s"
+                && find "${OUTPUT_ARTIFACTS_DIR}" -name "libMIOpenCKGroupedConv_${DEVICE_ARCH}.so" | grep -q .; then
+              echo "Fetched artifact (libMIOpenCKGroupedConv_${DEVICE_ARCH}.so present) after $((SECONDS - start))s"
               break
             fi
 
@@ -350,13 +355,13 @@ jobs:
               success)
                 post_success_seen=$((post_success_seen + 1))
                 if [ "${post_success_seen}" -ge "${post_success_grace_polls}" ]; then
-                  echo "::error::MIOpen build leg for ${AMDGPU_FAMILIES} reported success but miopen_gtest never appeared in the fetched artifact (${elapsed}s, run ${ARTIFACT_RUN_ID})"
+                  echo "::error::MIOpen build leg for ${AMDGPU_FAMILIES} reported success but the ${DEVICE_ARCH} CK plugin never appeared in the fetched artifact (${elapsed}s, run ${ARTIFACT_RUN_ID})"
                   exit 1
                 fi
-                echo "build leg succeeded; artifact not fetched yet (grace ${post_success_seen}/${post_success_grace_polls}, ${elapsed}s) -- retrying in ${poll_interval_seconds}s"
+                echo "build leg succeeded; ${DEVICE_ARCH} artifact not fetched yet (grace ${post_success_seen}/${post_success_grace_polls}, ${elapsed}s) -- retrying in ${poll_interval_seconds}s"
                 ;;
               failure | cancelled | skipped)
-                echo "::error::MIOpen build leg for ${AMDGPU_FAMILIES} did not succeed (state=${state}); no artifact will be produced (${elapsed}s, run ${ARTIFACT_RUN_ID})"
+                echo "::error::MIOpen build leg for ${AMDGPU_FAMILIES} did not succeed (state=${state}); no ${DEVICE_ARCH} artifact will be produced (${elapsed}s, run ${ARTIFACT_RUN_ID})"
                 exit 1
                 ;;
               *)
