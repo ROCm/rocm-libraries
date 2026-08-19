@@ -156,6 +156,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_util_checkmatrix.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_extra_geam.cpp
+  #10154: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
   unit_test_internal_level3_bsrmm.cpp
   unit_test_internal_level2_extras.cpp
