@@ -602,29 +602,15 @@ PythonEpilogueResult referenceEpilogueOwned(
 
 Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType accumulatorType,
                          std::vector<size_t> axes) {
-    std::vector<bool> reduced(input.shape().rank(), false);
-    for (const size_t axis : axes) {
-        if (axis >= input.shape().rank())
-            throw std::out_of_range("Python reference_sum axis exceeds input rank.");
-        if (reduced[axis]) throw std::invalid_argument("Python reference_sum axes must be unique.");
-        reduced[axis] = true;
-    }
-
-    std::vector<size_t> outputDimensions;
-    for (size_t dimension = 0; dimension < input.shape().rank(); ++dimension) {
-        if (!reduced[dimension]) outputDimensions.push_back(input.shape()[dimension]);
-    }
-
-    Tensor output(outputType, Shape(std::move(outputDimensions)));
-    referenceSum(ReductionProblem(input, output, accumulatorType, std::move(axes)));
-    return output;
+    ReductionResult result =
+        referenceSum(ReductionProblem(input, outputType, accumulatorType, std::move(axes)));
+    return std::move(result.output);
 }
 
 Tensor referenceMaximumAbsoluteOwned(const Tensor& input, ScalarType outputType,
                                      ScalarType accumulatorType) {
-    Tensor output(outputType, Shape{});
-    referenceMaximumAbsolute(input, output, accumulatorType);
-    return output;
+    ReductionResult result = referenceMaximumAbsolute(input, outputType, accumulatorType);
+    return std::move(result.output);
 }
 
 PythonStructuredSparsityResult applyStructuredSparsityOwned(const Tensor& input,

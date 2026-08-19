@@ -18,10 +18,16 @@ namespace roc::host_validation {
 namespace detail {
 struct ReductionPlan {
     std::vector<bool> reducedDimensions;
+    Shape outputShape;
     Shape reductionShape;
+    size_t outputElements = 0;
+    size_t reductionElements = 0;
 };
 
-inline ReductionPlan validateReduction(const ReductionProblem& problem) {
+inline ReductionPlan validateReductionProblem(const ReductionProblem& problem) {
+    if (!isConcreteScalarType(problem.outputType))
+        throw std::invalid_argument("Reference reduction output type is invalid.");
+
     const size_t inputRank = problem.input.shape().rank();
     std::vector<bool> reducedDimensions(inputRank, false);
     std::vector<size_t> reductionDimensions;
@@ -42,80 +48,88 @@ inline ReductionPlan validateReduction(const ReductionProblem& problem) {
         if (!reducedDimensions[dimension])
             expectedOutputDimensions.push_back(problem.input.shape()[dimension]);
     }
-    if (problem.output.shape() != Shape(expectedOutputDimensions))
-        throw std::invalid_argument("Reference reduction output shape mismatch.");
+    Shape outputShape(std::move(expectedOutputDimensions));
+    Shape reductionShape(std::move(reductionDimensions));
 
     const bool complexAccumulator = problem.accumulatorType == ScalarType::ComplexFloat32 ||
                                     problem.accumulatorType == ScalarType::ComplexFloat64;
     if (problem.operation == ReductionOperation::MaximumAbsolute &&
         (complexAccumulator || isComplexScalarType(problem.input.type()) ||
-         isComplexScalarType(problem.output.type())))
+         isComplexScalarType(problem.outputType)))
         throw std::invalid_argument("Maximum-absolute reduction currently requires real tensors.");
     if (!complexAccumulator && isComplexScalarType(problem.input.type()))
         throw std::invalid_argument(
             "Real reference reduction cannot consume a complex input tensor.");
-    if (complexAccumulator != isComplexScalarType(problem.output.type()))
+    if (complexAccumulator != isComplexScalarType(problem.outputType))
         throw std::invalid_argument("Reference reduction accumulator/output complexity mismatch.");
 
-    if (problem.operation == ReductionOperation::Sum) {
-        switch (problem.accumulatorType) {
-            case ScalarType::Float32:
-            case ScalarType::Float64:
-            case ScalarType::Int32:
-            case ScalarType::ComplexFloat32:
-            case ScalarType::ComplexFloat64:
-                break;
-            default:
-                throw std::invalid_argument(
-                    "Reference sum supports F32, F64, I32, C64, and C128 accumulators.");
-        }
-    } else {
-        switch (problem.accumulatorType) {
-            case ScalarType::Float16:
-            case ScalarType::BFloat16:
-            case ScalarType::Float32:
-            case ScalarType::Float64:
-                break;
-            default:
-                throw std::invalid_argument(
-                    "Maximum-absolute reduction supports F16, BF16, F32, and F64 "
-                    "accumulators.");
-        }
+    switch (problem.operation) {
+        case ReductionOperation::Sum:
+            switch (problem.accumulatorType) {
+                case ScalarType::Float32:
+                case ScalarType::Float64:
+                case ScalarType::Int32:
+                case ScalarType::ComplexFloat32:
+                case ScalarType::ComplexFloat64:
+                    break;
+                default:
+                    throw std::invalid_argument(
+                        "Reference sum supports F32, F64, I32, C64, and C128 accumulators.");
+            }
+            break;
+        case ReductionOperation::MaximumAbsolute:
+            switch (problem.accumulatorType) {
+                case ScalarType::Float16:
+                case ScalarType::BFloat16:
+                case ScalarType::Float32:
+                case ScalarType::Float64:
+                    break;
+                default:
+                    throw std::invalid_argument(
+                        "Maximum-absolute reduction supports F16, BF16, F32, and F64 "
+                        "accumulators.");
+            }
+            break;
+        default:
+            throw std::invalid_argument("Reference reduction operation is invalid.");
     }
 
-    return {
-        .reducedDimensions = std::move(reducedDimensions),
-        .reductionShape = Shape(std::move(reductionDimensions)),
-    };
-}
-
-inline void coordinatesFromLinear(size_t linear, const Shape& shape,
-                                  std::vector<size_t>& coordinates) {
-    coordinates.resize(shape.rank());
-    for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-        const size_t index = dimension - 1;
-        coordinates[index] = linear % shape[index];
-        linear /= shape[index];
-    }
-}
-
-template <typename Accumulator>
-ReductionRunInfo referenceReductionTyped(const ReductionProblem& problem,
-                                         const ReductionPlan& plan) {
-    const RuntimeTensorReader<Accumulator> input(problem.input);
-    const RuntimeTensorWriter<Accumulator> output(problem.output);
-
-    const size_t outputElements = problem.output.shape().elementCount();
-    const size_t reductionElements = plan.reductionShape.elementCount();
+    const size_t outputElements = outputShape.elementCount();
+    const size_t reductionElements = reductionShape.elementCount();
     if (reductionElements != 0 &&
         outputElements > std::numeric_limits<size_t>::max() / reductionElements)
         throw std::overflow_error("Reference reduction input-read count overflow.");
 
-    std::vector<size_t> outputCoordinates;
-    std::vector<size_t> reductionCoordinates;
-    std::vector<size_t> inputCoordinates(problem.input.shape().rank(), 0);
-    for (size_t outputLinear = 0; outputLinear < outputElements; ++outputLinear) {
-        coordinatesFromLinear(outputLinear, problem.output.shape(), outputCoordinates);
+    return {
+        .reducedDimensions = std::move(reducedDimensions),
+        .outputShape = std::move(outputShape),
+        .reductionShape = std::move(reductionShape),
+        .outputElements = outputElements,
+        .reductionElements = reductionElements,
+    };
+}
+
+inline ReductionPlan validateReductionRequest(const ReductionRequest& request) {
+    ReductionPlan plan = validateReductionProblem(request);
+    if (request.output.shape() != plan.outputShape)
+        throw std::invalid_argument("Reference reduction output shape mismatch.");
+    if (request.output.type() != request.outputType)
+        throw std::invalid_argument("Reference reduction output type differs from the problem.");
+    return plan;
+}
+
+template <typename Accumulator>
+ReductionRunInfo referenceReductionTyped(const ReductionRequest& request,
+                                         const ReductionPlan& plan) {
+    const RuntimeTensorReader<Accumulator> input(request.input);
+    const RuntimeTensorWriter<Accumulator> output(request.output);
+
+    std::vector<size_t> outputCoordinates(plan.outputShape.rank());
+    std::vector<size_t> reductionCoordinates(plan.reductionShape.rank());
+    std::vector<size_t> inputCoordinates(request.input.shape().rank(), 0);
+    for (size_t outputLinear = 0; outputLinear < plan.outputElements; ++outputLinear) {
+        plan.outputShape.coordinates(outputLinear, IndexOrder::LastDimensionFastest,
+                                     outputCoordinates);
         size_t outputDimension = 0;
         for (size_t inputDimension = 0; inputDimension < inputCoordinates.size();
              ++inputDimension) {
@@ -124,15 +138,17 @@ ReductionRunInfo referenceReductionTyped(const ReductionProblem& problem,
         }
 
         Accumulator result{};
-        for (size_t reductionLinear = 0; reductionLinear < reductionElements; ++reductionLinear) {
-            coordinatesFromLinear(reductionLinear, plan.reductionShape, reductionCoordinates);
-            for (size_t axisIndex = 0; axisIndex < problem.axes.size(); ++axisIndex)
-                inputCoordinates[problem.axes[axisIndex]] = reductionCoordinates[axisIndex];
+        for (size_t reductionLinear = 0; reductionLinear < plan.reductionElements;
+             ++reductionLinear) {
+            plan.reductionShape.coordinates(reductionLinear, IndexOrder::LastDimensionFastest,
+                                            reductionCoordinates);
+            for (size_t axisIndex = 0; axisIndex < request.axes.size(); ++axisIndex)
+                inputCoordinates[request.axes[axisIndex]] = reductionCoordinates[axisIndex];
             const Accumulator value = input(std::span<const size_t>(inputCoordinates));
             if constexpr (IsComplex<Accumulator>::value) {
                 result += value;
             } else {
-                if (problem.operation == ReductionOperation::Sum) {
+                if (request.operation == ReductionOperation::Sum) {
                     result += value;
                 } else {
                     const Accumulator magnitude = static_cast<Accumulator>(std::abs(value));
@@ -147,8 +163,8 @@ ReductionRunInfo referenceReductionTyped(const ReductionProblem& problem,
     }
 
     return {
-        .outputElementsWritten = outputElements,
-        .inputElementsRead = outputElements * reductionElements,
+        .outputElementsWritten = plan.outputElements,
+        .inputElementsRead = plan.outputElements * plan.reductionElements,
     };
 }
 }  // namespace detail
