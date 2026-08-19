@@ -89,6 +89,7 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
+
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
@@ -280,38 +281,25 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
-    set(hipblaslt_python_dev Development.Module)
-    hipblaslt_find_python("${hipblaslt_python_dev}")
-else()
-    hipblaslt_find_python("${hipblaslt_python_dev}")
-endif()
-if(HIPBLASLT_ENABLE_DEVICE)
-    if(WIN32)
-        set(_hipblaslt_python_path_separator "$<SEMICOLON>")
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON)
+    if(ROCISA_USE_STABLE_ABI)
+        hipblaslt_find_python(3.12 "Development.Module;Development.SABIModule")
     else()
-        set(_hipblaslt_python_path_separator ":")
+        hipblaslt_find_python(3.10 "Development.Module")
     endif()
-    set(_hipblaslt_python_paths
-        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
-    list(JOIN _hipblaslt_python_paths
-        "${_hipblaslt_python_path_separator}" _hipblaslt_python_path)
-    set(HIPBLASLT_PYTHON_COMMAND
-        "${CMAKE_COMMAND}" -E env
-        "PYTHONPATH=${_hipblaslt_python_path}"
-        "PATH=$ENV{PATH}"
-        ${san_opts}
-        -- "${Python3_EXECUTABLE}")
-    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
-else()
-    set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
-    set(HIPBLASLT_PYTHON_DEPS "")
+elseif(TENSILELITE_ENABLE_CLIENT OR HIPBLASLT_ENABLE_CLIENT
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+    hipblaslt_find_python(3.10 "")
+endif()
+set(HIPBLASLT_PYTHON_COMMAND "")
+set(HIPBLASLT_PYTHON_DEPS "")
+
+set(_tensilelite_needs_canonical_wheel FALSE)
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+    set(_tensilelite_needs_canonical_wheel TRUE)
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+if(_tensilelite_needs_canonical_wheel OR TENSILELITE_ENABLE_CLIENT)
     set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
         "rocm-libraries commit to record when building from a tree without git")
@@ -553,6 +541,7 @@ block(SCOPE_FOR VARIABLES)
     set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
     add_subdirectory(tensilelite)
 endblock()
+hipblaslt_configure_tensilelite_python("${san_opts}")
 
 set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
@@ -660,10 +649,6 @@ if(HIPBLASLT_ENABLE_HOST
     else()
         message(STATUS "llvm-ifs not found; hipblaslt.symbol-contract.tensilelite-host test disabled")
     endif()
-endif()
-
-if(HIPBLASLT_ENABLE_DEVICE)
-    add_subdirectory(device-library)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -921,6 +906,10 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
     endif()
 endif()
 
+if(HIPBLASLT_ENABLE_DEVICE)
+    add_subdirectory(device-library)
+endif()
+
 # Install ROCm-versioned wheels and installed tests for artifact-based testing.
 # Also stages, for FFM gfx1250 codegen:
 #   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
@@ -1030,6 +1019,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "*.pyc" EXCLUDE
     )
 
+    # pytest config (marker registration, xfail_strict)
     install(
         FILES "${_tensilelite_src}/pytest.ini"
         DESTINATION "${_tensilelite_install_dest}"
@@ -1037,6 +1027,8 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
+    # Test filter standardization config consumed by TheRock's pytest_runner.py
+    # to drive quick/standard/comprehensive/full categories from the installed tree.
     install(
         FILES "${_tensilelite_src}/test_categories.yaml"
         DESTINATION "${_tensilelite_install_dest}"
@@ -1058,6 +1050,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
             COMPONENT tests
         )
     endif()
+
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
