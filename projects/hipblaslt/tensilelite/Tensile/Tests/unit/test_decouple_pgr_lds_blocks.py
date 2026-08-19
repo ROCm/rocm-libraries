@@ -126,6 +126,10 @@ def _divergentSolution(**overrides):
     The loop shape is carried because one precondition is about the number of
     sub-iterations: DepthU 512 over MatrixInstK 128 is LoopIters 4, so the
     PrefetchLocalRead of 1 here sits well inside it.
+
+    _ScheduleIterAlg is derived from ScheduleIterAlg rather than written out,
+    because the guard reads the derived key and a test that set only the raw
+    one would be pinning a state the deriver never produces.
     """
     ks = {
         "PrefetchGlobalRead": 1,
@@ -143,6 +147,10 @@ def _divergentSolution(**overrides):
         "ForceUnrollSubIter": False,
     }
     ks.update(overrides)
+    # Derived the way Solution.assignProblemIndependentDerivedParameters
+    # derives it. An override that names the derived key directly still wins.
+    ks.setdefault("_ScheduleIterAlg",
+                  0 if ks["ScheduleIterAlg"] == 4 else ks["ScheduleIterAlg"])
     return ks
 
 
@@ -183,6 +191,34 @@ def test_divergent_pair_at_one_wave_is_rejected_not_asserted():
     """
     assert divergentPairUnsupportedReason(_divergentSolution(NumWaves=1)) is not None
     assert divergentPairUnsupportedReason(_divergentSolution(NumWaves=2)) is None
+
+
+# The guard is on the derived schedule, not on the level the user asked for.
+# ScheduleIterAlg=4 is StinkyTofu at OptLevel 3 over _ScheduleIterAlg=0, so the
+# unrolled loop is the SIA0 loop and the slot the relocated fill needs is there;
+# reading the raw key dropped these solutions for a scheduler they never run.
+# 1, 2 and 3 are genuinely different schedulers and the reject is load-bearing
+# for them: with the clause taken out, SIA3 emits the relocation guard with no
+# instructions inside it, against six at SIA0.
+@pytest.mark.parametrize(
+    "scheduleIterAlg, accepted",
+    [
+        (0, True),
+        (1, False),
+        (2, False),
+        (3, False),
+        (4, True),
+    ],
+)
+def test_divergent_pair_follows_the_derived_schedule_iter_alg(scheduleIterAlg, accepted):
+    reason = divergentPairUnsupportedReason(
+        _divergentSolution(ScheduleIterAlg=scheduleIterAlg)
+    )
+
+    if accepted:
+        assert reason is None
+    else:
+        assert reason is not None and "ScheduleIterAlg" in reason
 
 
 # 1LDSBuffer=1 gives every tensor one shared LDS block, which contradicts any

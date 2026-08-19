@@ -128,8 +128,16 @@ def divergentPairUnsupportedReason(ks):
     _, numLdsBlkA, numLdsBlkB = decouplePgrBlocks(ks)
     if max(numLdsBlkA, numLdsBlkB) > 2:
         return "more than two LDS blocks for a tensor is not supported"
-    if ks["ScheduleIterAlg"] != 0:
-        return "only ScheduleIterAlg=0 places the fill where it can be moved"
+    # The derived key, not the one the user wrote. ScheduleIterAlg=4 is remapped
+    # in assignProblemIndependentDerivedParameters to _ScheduleIterAlg=0 plus
+    # _StinkyTofuOptLevel=3, so its unrolled loop is scheduled exactly as SIA0
+    # and the sub-iteration the relocated fill needs is present. Reading the raw
+    # key refused those solutions for a scheduler they never run; HalfPLR
+    # already rejects on this same derived key for this same reason. 1, 2 and 3
+    # are different schedulers and the reject stays load-bearing for them.
+    if ks["_ScheduleIterAlg"] != 0:
+        return ("only ScheduleIterAlg=0 places the fill where it can be moved, "
+                "and ScheduleIterAlg=4 derives to it")
     if ks["PrefetchLocalRead"] < 1:
         return ("PrefetchLocalRead must be at least 1 so a sub-iteration exists "
                 "between the last local read and the pre-read sync")
@@ -143,7 +151,7 @@ def divergentPairUnsupportedReason(ks):
     # assigned after this call -- absent on the first DepthU tried, and stale on
     # every one after. This mirrors that derivation.
     #
-    # ScheduleIterAlg=0 above already excludes the _ScheduleIterAlg == 2 arm of
+    # _ScheduleIterAlg=0 above already excludes the _ScheduleIterAlg == 2 arm of
     # the rewrite's condition, so only the other two are re-tested here.
     #
     # The block-count clause at the top of this function currently hides this

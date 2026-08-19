@@ -3108,9 +3108,10 @@ class Solution(collections.abc.Mapping):
         # tokens; with A and B de-aliased into their own descriptor sets it
         # rebuilds too few, and validation on gfx1250 silicon fails from K=1024
         # at DepthU 256 while passing at 384 and 512 -- the write-after-read
-        # signature. SIA=0 passes at every K measured. A divergent pair cannot
-        # reach this clause: divergentPairUnsupportedReason already rejects it
-        # wherever ScheduleIterAlg is not 0.
+        # signature. SIA=0 passes at every K measured. A divergent pair is
+        # exempt on purpose: divergentPairUnsupportedReason admits
+        # ScheduleIterAlg=4, whose _ScheduleIterAlg is 0, so its unrolled loop
+        # and its relocated fill are scheduled exactly as they are at SIA=0.
         decoupled, blkA, blkB = decouplePgrBlocks(state)
         if not (decoupled and blkA != blkB) and state["ScheduleIterAlg"] == 4:
           reject(state, printRejectionReason,
