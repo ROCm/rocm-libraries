@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from . import __version__
+from . import GENERATOR_VERSION as __version__
 from . import LibraryIO
 from .Common.GlobalParameters import defaultBenchmarkCommonParameters
 from .Common.Constants import HR

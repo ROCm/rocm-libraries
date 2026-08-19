@@ -27,7 +27,7 @@
 #
 # Assuming one runs the following TensileLite command:
 #
-#   tensilelite/bin/Tensile <yaml> tensile-out
+#   python -m tensilelite run <yaml> tensile-out
 #
 # One can invoke make from the directory containing this Makefile as follows:
 #
