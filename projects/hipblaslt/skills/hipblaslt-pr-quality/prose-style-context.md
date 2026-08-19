@@ -30,15 +30,15 @@ When goals conflict, use this order:
 
 Do not shorten a sentence by replacing an explanation with jargon.
 
-## Length limits
+## Length guidance
 
-- Aim for about 200 words for a pull-request description.
-- Use 201–350 words when definitions materially improve understanding.
-- Never exceed 300 words without explicit approval.
-- Prefer sentences under 25 words. Treat 30 words as a warning.
-- Keep most paragraphs to two through four sentences.
+- Aim for about 200 words when that is enough to explain the change.
+- Use additional length when it preserves necessary context, test evidence, risk analysis, or an unusual review decision.
+- Remove repetition, discarded development history, and generic process language before removing technical evidence.
+- Prefer sentences under 30 words, but vary sentence length naturally.
+- Keep most paragraphs to two through four sentences unless a longer paragraph develops one connected technical argument.
 
-These are readability limits, not targets. A complete 160-word description is better than a padded 200-word description.
+These are readability signals, not acceptance criteria. Correctness, clarity, necessary context, and evidence take precedence over length. A focused 400-word description with reproducible test results is better than a 200-word description that omits how the change was verified.
 
 ## Sentence-level gate
 
