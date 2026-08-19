@@ -553,18 +553,19 @@ dimensions in order:
 
 ```cpp
 ReductionProblem problem(inputView,
-                         outputView,
+                         ScalarType::Float32,
                          ScalarType::Float32,
                          {0, 2});
-ReductionRunInfo run = referenceSum(problem);
+ReductionResult result = referenceSum(problem);
 ```
 
 The current implementation supports F32, F64, I32, complex-F32, and complex-F64
 accumulation, runtime input/output storage types, validated signed-strided layouts
-used by current consumers,
-rank-zero outputs, and multiple reduction axes. hipBLASLt's bias-gradient
-adapter represents its matrix as a strided tensor and reduces the K axis; no
-product type enters the component.
+used by current consumers, rank-zero outputs, and multiple reduction axes. The
+owning overload derives a contiguous output shape and accepts an optional
+`TensorStorageAllocator`. `ReductionRequest` writes a caller-owned destination.
+hipBLASLt's bias-gradient adapter represents its matrix as a strided tensor and
+reduces the K axis; no product type enters the component.
 
 `referenceMaximumAbsolute` reduces every logical input dimension into a
 rank-zero output. It supports F16, BF16, F32, and F64 accumulator policies,

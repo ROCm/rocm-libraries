@@ -475,9 +475,9 @@ void testReferenceReduction() {
         }
     }
 
-    Tensor output(ScalarType::Float32, Shape{3});
-    ReductionProblem problem(input, output, ScalarType::Float32, {0, 2});
-    const ReductionRunInfo run = referenceSum(problem);
+    Tensor output(ScalarType::Float32, Layout(Shape{3}, {2}));
+    ReductionRequest request(input, output, ScalarType::Float32, {0, 2});
+    const ReductionRunInfo run = referenceSum(request);
     require(run.outputElementsWritten == 3 && run.inputElementsRead == 24,
             "Reference reduction run information mismatch.");
     require(compare(output,
@@ -492,6 +492,44 @@ void testReferenceReduction() {
             "Reference maximum-absolute run information mismatch.");
     require(maximumAbsolute.loadAs<float>({}) == 123.0f,
             "Reference maximum-absolute result mismatch.");
+
+    const ReductionProblem ownedProblem(input, ScalarType::Float32, ScalarType::Float32, {0, 2});
+    const ReductionResult owned = referenceSum(ownedProblem);
+    require(owned.output.layout() == Layout::contiguous(Shape{3}) &&
+                owned.output.type() == ScalarType::Float32 &&
+                owned.runInfo.outputElementsWritten == 3 && owned.runInfo.inputElementsRead == 24 &&
+                compare(owned.output, Tensor::fromNativeValues<float>(
+                                          Shape{3}, std::array<float, 3>{412, 492, 572}))
+                    .passed(),
+            "Owning reference sum result contract mismatch.");
+
+    size_t allocatorCalls = 0;
+    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
+        ++allocatorCalls;
+        return TensorStorage::allocate(bytes);
+    };
+    const ReductionResult allocated = referenceSum(ownedProblem, allocator);
+    require(allocatorCalls == 1 && allocated.output.layout() == Layout::contiguous(Shape{3}),
+            "Owning reference sum did not use the supplied allocator exactly once.");
+
+    const ReductionProblem invalidProblem(input, ScalarType::Float32, ScalarType::Float32, {0, 0});
+    bool rejectedBeforeAllocation = false;
+    try {
+        (void)referenceSum(invalidProblem, allocator);
+    } catch (const std::invalid_argument&) {
+        rejectedBeforeAllocation = true;
+    }
+    require(rejectedBeforeAllocation && allocatorCalls == 1,
+            "Owning reference sum allocated before validating its axes.");
+
+    const ReductionResult ownedMaximum =
+        referenceMaximumAbsolute(input, ScalarType::Float32, ScalarType::Float32);
+    require(ownedMaximum.output.shape() == Shape{} &&
+                ownedMaximum.output.layout() == Layout::contiguous(Shape{}) &&
+                ownedMaximum.runInfo.outputElementsWritten == 1 &&
+                ownedMaximum.runInfo.inputElementsRead == 24 &&
+                ownedMaximum.output.loadAs<float>({}) == 123.0f,
+            "Owning reference maximum-absolute result contract mismatch.");
 }
 
 void testStructuredSparsity() {
