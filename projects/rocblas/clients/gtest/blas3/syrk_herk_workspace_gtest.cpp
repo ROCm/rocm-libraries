@@ -27,7 +27,6 @@
 #include "rocblas_data.hpp"
 #include "rocblas_datatype2string.hpp"
 #include "rocblas_test.hpp"
-
 #include <cstring>
 #include <string>
 #include <vector>
@@ -39,10 +38,10 @@ namespace
     // Supply an exact-sized workspace with a contiguous canary behind it.
     //
     // batch_count notes (pre-fix compounded W_C offset bug):
-    //   65536 — intentionally omitted: second grid-z pass has blockIdx.z=0 only,
+    //   65536 -- intentionally omitted: second grid-z pass has blockIdx.z=0 only,
     //           so the extra offset is zero and the canary cannot fail.
-    //   65539 — small-magnitude detector (second pass z=2,3 write past the end).
-    //   131070 — two saturated grid-z passes; strongest reproducer for n=2.
+    //   65539 -- small-magnitude detector (second pass z=2,3 write past the end).
+    //   131070 -- two saturated grid-z passes; strongest reproducer for n=2.
     //
     // ILP64 (_64) batched syrk/herk above c_i64_grid_YZ_chunk (65520 production)
     // is chunked into rocblas_internal_syr2k_her2k_template and never reaches
@@ -54,9 +53,8 @@ namespace
 
     bool fill_guard(void* workspace, size_t workspace_bytes)
     {
-        hipError_t err = hipMemset(static_cast<char*>(workspace) + workspace_bytes,
-                                   c_guard_byte,
-                                   c_guard_bytes);
+        hipError_t err = hipMemset(
+            static_cast<char*>(workspace) + workspace_bytes, c_guard_byte, c_guard_bytes);
         EXPECT_EQ(err, hipSuccess) << "could not fill the guard: " << hipGetErrorString(err);
         if(err != hipSuccess)
             return false;
@@ -89,10 +87,9 @@ namespace
                 ++differing;
             }
         }
-        EXPECT_EQ(differing, size_t(0))
-            << differing << " guard byte(s) differ, the first " << first
-            << " byte(s) past the end of the " << workspace_bytes
-            << " byte user allocated workspace";
+        EXPECT_EQ(differing, size_t(0)) << differing << " guard byte(s) differ, the first " << first
+                                        << " byte(s) past the end of the " << workspace_bytes
+                                        << " byte user allocated workspace";
     }
 
     // Owns an exact-sized workspace plus trailing guard; clears handle binding on teardown.
@@ -110,7 +107,8 @@ namespace
                 return;
             if(!fill_guard(m_storage, workspace_bytes))
                 return;
-            if(rocblas_set_workspace(m_handle, m_storage, workspace_bytes) != rocblas_status_success)
+            if(rocblas_set_workspace(m_handle, m_storage, workspace_bytes)
+               != rocblas_status_success)
                 return;
             m_valid = true;
         }
@@ -126,9 +124,18 @@ namespace
         canary_workspace(const canary_workspace&)            = delete;
         canary_workspace& operator=(const canary_workspace&) = delete;
 
-        bool   valid() const { return m_valid; }
-        void*  ptr() const { return m_storage; }
-        size_t bytes() const { return m_workspace_bytes; }
+        bool valid() const
+        {
+            return m_valid;
+        }
+        void* ptr() const
+        {
+            return m_storage;
+        }
+        size_t bytes() const
+        {
+            return m_workspace_bytes;
+        }
 
     private:
         rocblas_handle m_handle;
@@ -192,15 +199,15 @@ namespace
                          bool              herk,
                          size_t*           bytes)
     {
-        *bytes = 0;
+        *bytes  = 0;
         auto st = rocblas_start_device_memory_size_query(handle);
         EXPECT_EQ(st, rocblas_status_success);
         if(st != rocblas_status_success)
             return false;
 
-        const T         alpha_t(1);
-        const T         beta_t(1);
-        using U           = real_t<T>;
+        const T alpha_t(1);
+        const T beta_t(1);
+        using U = real_t<T>;
         const U         alpha_h(1);
         const U         beta_h(1);
         const T* const* null_A  = nullptr;
@@ -306,17 +313,8 @@ namespace
             = herk ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose;
 
         size_t workspace_bytes = 0;
-        ASSERT_TRUE(query_workspace<T>(handle,
-                                       transA,
-                                       uplo,
-                                       n,
-                                       k,
-                                       lda,
-                                       ldc,
-                                       batch_count,
-                                       strided,
-                                       herk,
-                                       &workspace_bytes));
+        ASSERT_TRUE(query_workspace<T>(
+            handle, transA, uplo, n, k, lda, ldc, batch_count, strided, herk, &workspace_bytes));
         // Path must be live: a zero query means rocblas_use_only_gemm did not select
         // the workspace path (yaml gpu_arch also restricts these cases to gfx90a/gfx942).
         if(workspace_bytes == 0)
@@ -339,7 +337,7 @@ namespace
 
         const T alpha_t(1);
         const T beta_t(1);
-        using U     = real_t<T>;
+        using U = real_t<T>;
         const U alpha_h(1);
         const U beta_h(1);
 
@@ -509,8 +507,7 @@ namespace
 
     TEST_P(syrk_herk_workspace_gtest, pre_checkin)
     {
-        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(
-            testing_syrk_herk_workspace_fun<>{}(GetParam()));
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_syrk_herk_workspace_fun<>{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(syrk_herk_workspace_gtest)
 } // namespace
