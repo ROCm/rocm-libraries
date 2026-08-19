@@ -42,7 +42,7 @@ All version tokens normalised to ``<VERSION>``.
 
 import pytest
 
-from tensilelite import GENERATOR_VERSION
+from tensilelite import GENERATOR_VERSION as __version__
 import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
@@ -51,7 +51,7 @@ pytestmark = pytest.mark.unit
 def _norm(obj):
     """Recursively replace the embedded TensileLite version with a stable token."""
     if isinstance(obj, str):
-        return obj.replace(GENERATOR_VERSION, "<VERSION>")
+        return obj.replace(__version__, "<VERSION>")
     if isinstance(obj, dict):
         return {k: _norm(v) for k, v in obj.items()}
     if isinstance(obj, list):
