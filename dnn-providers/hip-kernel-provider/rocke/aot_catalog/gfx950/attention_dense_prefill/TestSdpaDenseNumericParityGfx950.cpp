@@ -79,10 +79,19 @@ struct Geom
     int64_t kvHeads;  // H_kv
     int64_t headDim;  // D
     bool causal;
+    // Align the causal diagonal to the bottom-right corner: query i attends to keys
+    // j <= i + (seqKv - seqQ). Only meaningful when seqQ != seqKv, which is chunked
+    // prefill -- a chunk of queries scored against a longer KV cache.
+    bool bottomRight = false;
 
     int64_t gqa() const
     {
         return heads / kvHeads;
+    }
+    // Diagonal offset in key positions. 0 for top-left, and 0 whenever seqQ == seqKv.
+    int64_t diagOffset() const
+    {
+        return bottomRight ? (seqKv - seqQ) : 0;
     }
 };
 
@@ -193,8 +202,8 @@ void runDenseParity(const Geom& g)
     problem.emplace("batch_foldable", catalog::ShapeValue{true});
     problem.emplace("bshd_packed", catalog::ShapeValue{true});
     problem.emplace("causal", catalog::ShapeValue{g.causal});
-    for(const char* k : {"causal_bottom_right",
-                         "has_diagonal_band",
+    problem.emplace("causal_bottom_right", catalog::ShapeValue{g.bottomRight});
+    for(const char* k : {"has_diagonal_band",
                          "has_mma_core_mode",
                          "has_alibi",
                          "has_padding_mask",
@@ -292,9 +301,12 @@ void runDenseParity(const Geom& g)
         const int64_t hkv = h / GQA; // GQA head mapping
         for(int64_t i = 0; i < SEQ_Q; ++i)
         {
-            // Top-left causal: query i attends to keys j <= i (S_q == S_kv here, so
-            // top-left and bottom-right coincide). Non-causal attends to every key.
-            const int64_t jMax = g.causal ? i : (SEQ_KV - 1);
+            // Causal: query i attends to keys j <= i + diagOffset(). The offset is 0
+            // for top-left (and whenever S_q == S_kv, where the two coincide) and
+            // (S_kv - S_q) for bottom-right, which is what chunked prefill needs --
+            // the queries are the LAST S_q positions of the sequence.
+            // Non-causal attends to every key.
+            const int64_t jMax = g.causal ? (i + g.diagOffset()) : (SEQ_KV - 1);
             float maxScore = -std::numeric_limits<float>::infinity();
             for(int64_t j = 0; j <= jMax; ++j)
             {
@@ -398,11 +410,12 @@ void runDenseParity(const Geom& g)
     (void)hipStreamDestroy(stream);
 }
 
-// batch, S_q, S_kv, H, H_kv, D, causal
+// batch, S_q, S_kv, H, H_kv, D, causal, bottomRight
 constexpr Geom CAUSAL_D128{1, 256, 256, 4, 1, 128, true};
 constexpr Geom CAUSAL_D128_B2{2, 256, 256, 4, 1, 128, true};
 constexpr Geom NONCAUSAL_D64{1, 256, 256, 4, 1, 64, false};
 constexpr Geom NONCAUSAL_D64_RAGGED{1, 197, 197, 4, 1, 64, false};
+constexpr Geom CHUNKED_BR{1, 256, 512, 4, 1, 128, true, true};
 
 TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16CausalMatchesReference)
 {
@@ -433,4 +446,15 @@ TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16NonCausalD64Matc
 TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16NonCausalRaggedMatchesReference)
 {
     runDenseParity(NONCAUSAL_D64_RAGGED);
+}
+
+// Chunked prefill: 256 queries against a 512-key cache, the shape vLLM and SGLang issue
+// on every chunk. This is the test that matters most in the whole file. The kernel
+// ACCEPTS S_q != S_kv regardless, so without bottom-right alignment it would build and
+// run and silently compute top-left attention -- query 0 seeing only key 0 instead of
+// the 257 keys that actually precede it. Only a reference with the shifted diagonal
+// catches that; a shape-only check never would.
+TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16ChunkedBottomRightMatchesReference)
+{
+    runDenseParity(CHUNKED_BR);
 }

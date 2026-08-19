@@ -76,6 +76,35 @@ SHAPES += [(1, s, hq, hkv, 128, True, False) for (hq, hkv) in BENCH_GEOMS for s 
 # Batch variants, kept to the Llama-3-8B/Qwen3-8B geometry we A/B end-to-end.
 SHAPES += [(b, s, 32, 8, 128, True, False) for s in (2048, 4096) for b in (2, 4, 8)]
 SHAPES += TRACK_A_SHAPES
+
+# Chunked prefill: a chunk of queries scored against a longer KV cache, which is what
+# vLLM and SGLang issue on every chunk. Needs causal_bottom_right -- the queries are the
+# LAST S_q positions of the sequence, so top-left alignment would let query 0 see only
+# key 0 and compute the wrong attention silently. Nine-tuples carry S_q and S_kv
+# separately: (batch, S_q, S_kv, hq, hkv, d, causal, ragged, bottom_right)
+CHUNKED_SHAPES = [
+    (1, 256, 512, 4, 1, 128, True, False, True),      # parity shape: cheap CPU reference
+    (1, 512, 8192, 32, 8, 128, True, False, True),    # Llama-3-8B 512-chunk vs 8K
+    (1, 2048, 8192, 32, 8, 128, True, False, True),   # 2K chunk vs 8K
+    (1, 2048, 32768, 32, 8, 128, True, False, True),  # 2K chunk vs 32K long cache
+    (1, 256, 4096, 32, 8, 128, True, False, True),    # small chunk vs 4K
+    (1, 512, 8192, 40, 8, 128, True, False, True),    # Qwen3-14B, non-power-of-2 GQA
+    (1, 512, 8192, 28, 4, 128, True, False, True),    # Qwen2.5-7B, NQK=7
+    (1, 2048, 16384, 64, 8, 128, True, False, True),  # Llama-3-70B 2K chunk vs 16K
+    (1, 2048, 16384, 64, 4, 128, True, False, True),  # Qwen3-235B MoE attention
+    (1, 2048, 32768, 40, 8, 128, True, False, True),  # Qwen3-14B long-cache chunk
+]
+
+
+def _norm(t):
+    """Widen a (b, S, ...) self-attention tuple to the full 9-field form."""
+    if len(t) == 7:
+        b, s, hq, hkv, d, causal, ragged = t
+        return (b, s, s, hq, hkv, d, causal, ragged, False)
+    return t
+
+
+SHAPES = [_norm(t) for t in SHAPES] + CHUNKED_SHAPES
 SHAPES = list(dict.fromkeys(SHAPES))   # order-preserving dedupe
 DTYPES = ["bf16", "fp16"]     # spec spelling
 PERSISTENT = [False, True]
@@ -104,24 +133,29 @@ def resolved_persist_decode(hq, hkv, seqlen_q, batch, num_persistent):
     return "qb_major"
 
 
-def kernel_name(b, s, hq, hkv, d, dtype, persistent, causal=True, ragged=False):
+def kernel_name(b, sq, skv, hq, hkv, d, dtype, persistent, causal=True, ragged=False,
+                bottom_right=False):
     parts = ["rocke_attention_dense", f"d{d}", f"hq{hq}", f"kv{hkv}", f"bn{BLOCK_N}", dtype]
     # kpad is only in the name on the packed head_size<128 path.
     if 128 // d > 1:
         parts.append("kpad8")
-    parts += [f"sq{s}", f"sk{s}", "causal" if causal else "full"]
+    parts += [f"sq{sq}", f"sk{skv}", "causal" if causal else "full"]
+    if bottom_right:
+        parts.append("br")
     if ragged:
         parts.append("ragged")
     parts.append("lazyrs")
     if persistent:
         parts.append(f"persist{NUM_PERSISTENT}")
-        if resolved_persist_decode(hq, hkv, s, b, NUM_PERSISTENT) == "hkv_major":
+        if resolved_persist_decode(hq, hkv, sq, b, NUM_PERSISTENT) == "hkv_major":
             parts.append("hkvmaj")
     return "_".join(parts)
 
 
-def entry(b, s, hq, hkv, d, dtype, persistent, causal=True, ragged=False):
-    sym = kernel_name(b, s, hq, hkv, d, dtype, persistent, causal, ragged)
+def entry(b, sq, skv, hq, hkv, d, dtype, persistent, causal=True, ragged=False,
+          bottom_right=False):
+    sym = kernel_name(b, sq, skv, hq, hkv, d, dtype, persistent, causal, ragged,
+                      bottom_right)
     # kernel_name() omits batch, so batch variants of one shape share a symbol and are
     # told apart only by co_file. Catalog.cpp resolves each entry's symbol inside its
     # own .co, so this is legal; the producer writes the same name.
@@ -139,8 +173,8 @@ def entry(b, s, hq, hkv, d, dtype, persistent, causal=True, ragged=False):
             "dtype": {"equals": DTYPE_TOKEN[dtype]},
             # Every shape axis is baked into the .co, so all of these are exact.
             "B": {"equals": b},
-            "S_q": {"equals": s},
-            "S_kv": {"equals": s},
+            "S_q": {"equals": sq},
+            "S_kv": {"equals": skv},
             "H": {"equals": hq},
             "H_kv": {"equals": hkv},
             "D": {"equals": d},
@@ -160,7 +194,11 @@ def entry(b, s, hq, hkv, d, dtype, persistent, causal=True, ragged=False):
             # prefill and non-causal (vision/diffusion) variants, and a problem can
             # only ever match the one whose `causal` value it published.
             "causal": {"equals": causal},
-            "causal_bottom_right": {"equals": False},
+            # Top-left vs bottom-right is a numerical difference, not a performance
+            # one, so it is pinned like any other capability: a chunked-prefill
+            # graph (which publishes causal_bottom_right=true) can only match a
+            # kernel built with the offset, and vice versa.
+            "causal_bottom_right": {"equals": bottom_right},
             "has_diagonal_band": {"equals": False},
             "has_mma_core_mode": {"equals": False},
             "has_alibi": {"equals": False},
@@ -187,10 +225,13 @@ def entry(b, s, hq, hkv, d, dtype, persistent, causal=True, ragged=False):
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else "family.json"
     kernels = [
-        entry(b, s, hq, hkv, d, dt, p, causal, ragged)
-        for (b, s, hq, hkv, d, causal, ragged) in SHAPES
+        entry(b, sq, skv, hq, hkv, d, dt, p, causal, ragged, br)
+        for (b, sq, skv, hq, hkv, d, causal, ragged, br) in SHAPES
+        # causal_bottom_right is non-persistent only (the persistent path prunes
+        # from the same diagonal and needs its own offset), so skip that pairing.
         for dt in DTYPES
         for p in PERSISTENT
+        if not (br and p)
     ]
 
     doc = {

@@ -120,6 +120,34 @@ _SHAPES = [
 _SHAPES += [(1, s, hq, hkv, 128, True, False) for (hq, hkv) in _BENCH_GEOMS for s in _BENCH_SEQLENS]
 _SHAPES += [(b, s, 32, 8, 128, True, False) for s in (2048, 4096) for b in (2, 4, 8)]
 _SHAPES += _TRACK_A_SHAPES
+
+# Chunked prefill (vLLM / SGLang): a chunk of queries against a longer KV cache. Requires
+# causal_bottom_right, because the queries are the LAST S_q positions of the sequence --
+# top-left alignment would let query 0 see only key 0 and be silently wrong.
+# (batch, S_q, S_kv, hq, hkv, d, causal, ragged, bottom_right)
+_CHUNKED_SHAPES = [
+    (1, 256, 512, 4, 1, 128, True, False, True),      # parity shape: cheap CPU reference
+    (1, 512, 8192, 32, 8, 128, True, False, True),    # Llama-3-8B 512-chunk vs 8K
+    (1, 2048, 8192, 32, 8, 128, True, False, True),   # 2K chunk vs 8K
+    (1, 2048, 32768, 32, 8, 128, True, False, True),  # 2K chunk vs 32K long cache
+    (1, 256, 4096, 32, 8, 128, True, False, True),    # small chunk vs 4K
+    (1, 512, 8192, 40, 8, 128, True, False, True),    # Qwen3-14B, non-power-of-2 GQA
+    (1, 512, 8192, 28, 4, 128, True, False, True),    # Qwen2.5-7B, NQK=7
+    (1, 2048, 16384, 64, 8, 128, True, False, True),  # Llama-3-70B 2K chunk vs 16K
+    (1, 2048, 16384, 64, 4, 128, True, False, True),  # Qwen3-235B MoE attention
+    (1, 2048, 32768, 40, 8, 128, True, False, True),  # Qwen3-14B long-cache chunk
+]
+
+
+def _norm(t):
+    """Widen a (b, S, ...) self-attention tuple to the full 9-field form."""
+    if len(t) == 7:
+        b, s, hq, hkv, d, causal, ragged = t
+        return (b, s, s, hq, hkv, d, causal, ragged, False)
+    return t
+
+
+_SHAPES = [_norm(t) for t in _SHAPES] + _CHUNKED_SHAPES
 _SHAPES = list(dict.fromkeys(_SHAPES))
 
 # Spec spelling ("fp16"/"bf16") differs from the catalog dtype constraint token
@@ -136,13 +164,18 @@ _NUM_PERSISTENT = 256
 
 
 def _specs():
-    for (b, s, hq, hkv, d, causal, ragged) in _SHAPES:
+    for (b, sq, skv, hq, hkv, d, causal, ragged, bottom_right) in _SHAPES:
         for dtype in _DTYPES:
             for persistent in _PERSISTENT:
+                # causal_bottom_right is non-persistent only: the persistent path
+                # prunes the KV loop from the same diagonal and needs its own offset.
+                if bottom_right and persistent:
+                    continue
                 yield AttentionDenseSpec(
                     batch=b,
-                    seqlen_q=s,
-                    seqlen_kv=s,
+                    seqlen_q=sq,
+                    seqlen_kv=skv,
+                    causal_bottom_right=bottom_right,
                     num_query_heads=hq,
                     num_kv_heads=hkv,
                     head_size=d,
