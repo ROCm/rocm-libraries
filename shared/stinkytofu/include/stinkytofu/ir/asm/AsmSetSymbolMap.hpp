@@ -30,12 +30,26 @@
 namespace stinkytofu {
 class Function;
 
+/// Resolved value and how many SET directives defined the symbol (program order).
+struct AsmSetSymbolInfo {
+    int64_t value = 0;
+    unsigned definitionCount = 0;
+};
+
 /// Walk all basic blocks in program order and collect `.set` symbol definitions
 /// from `AsmDirective` (SET) IR. Resolves values that are decimal/hex literals
 /// or refer to earlier symbols (no expression arithmetic). Output values are
 /// signed int64; large unsigned 32-bit constants (e.g. 0xffffffff) are stored
 /// as their 64-bit magnitude.
+///
+/// When a symbol is defined more than once, `definitionCount` reflects that and
+/// `value` is the last definition (flat map semantics).
 void collectAsmSetSymbolValues(const Function& func, std::unordered_map<std::string, int64_t>& out);
+
+/// Like `collectAsmSetSymbolValues`, but also reports per-symbol definition
+/// multiplicity for consumers that must treat redefined symbols as unresolvable.
+void collectAsmSetSymbolInfo(const Function& func,
+                             std::unordered_map<std::string, AsmSetSymbolInfo>& out);
 
 /// If \p name matches a collected `.set` symbol, set \p outInt32 to the value
 /// narrowed like a 32-bit immediate (unsigned wrap for values outside int32

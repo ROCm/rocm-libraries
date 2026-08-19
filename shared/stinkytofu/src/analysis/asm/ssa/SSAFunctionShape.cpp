@@ -20,19 +20,17 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
+#include "stinkytofu/analysis/asm/ssa/SSAFunctionShape.hpp"
 
-#include <cassert>
-
+#include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
 namespace {
-
-const RegKey kUnassigned{RegType::UNKNOWN, 0, RegHalf::NONE};
 
 void mixWord(uint64_t& hash, uint64_t word) {
     hash ^= word + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
@@ -61,58 +59,15 @@ uint64_t computeFunctionShape(const Function& function) {
             if (instruction == nullptr) continue;
             mixWord(hash, instruction->getUnifiedOpcode());
             for (const StinkyRegister& reg : instruction->getSrcRegs()) mixOperand(hash, reg);
-            // Separator, so moving one operand from sources to destinations
-            // cannot produce the same hash.
+            // Separator, so moving one register operand from sources to
+            // destinations cannot produce the same hash. It shares its value
+            // with the non-register marker above, so the same does not hold for
+            // a non-register operand crossing that boundary.
             mixWord(hash, 0);
             for (const StinkyRegister& reg : instruction->getDestRegs()) mixOperand(hash, reg);
         }
     }
     return hash == kUnstampedShape ? 1 : hash;
-}
-
-AllocationResult::AllocationResult(const Function& function)
-    : byValue_(function.ssaArena().valueCount() + 1, kUnassigned),
-      shape_(function.ssaArena().shape()) {}
-
-void AllocationResult::assign(SSAValueID id, RegKey physical) {
-    assert(id != kInvalidSSAValueID && id < byValue_.size() && "invalid SSA value ID");
-    byValue_[id] = physical;
-}
-
-bool AllocationResult::isAssigned(SSAValueID id) const {
-    if (id == kInvalidSSAValueID || id >= byValue_.size()) return false;
-    return byValue_[id].type != RegType::UNKNOWN;
-}
-
-RegKey AllocationResult::assignmentOf(SSAValueID id) const {
-    assert(isAssigned(id) && "value has no physical register");
-    return byValue_[id];
-}
-
-size_t AllocationResult::valueCount() const {
-    return byValue_.empty() ? 0 : byValue_.size() - 1;
-}
-
-uint64_t AllocationResult::shape() const {
-    return shape_;
-}
-
-size_t AllocationResult::unassignedCount() const {
-    size_t unassigned = 0;
-    for (size_t id = 1; id < byValue_.size(); ++id) {
-        if (byValue_[id].type == RegType::UNKNOWN) ++unassigned;
-    }
-    return unassigned;
-}
-
-AllocationResult createLegacyColoring(const Function& function) {
-    AllocationResult result(function);
-    for (StinkySSAValue* value : function.ssaArena().values()) {
-        if (value == nullptr || !value->hasPhysicalBinding()) continue;
-        const StinkySSAValue::PhysicalBinding& binding = value->physical();
-        result.assign(value->valueId(), RegKey{binding.type, binding.idx, RegHalf::NONE});
-    }
-    return result;
 }
 
 }  // namespace stinkytofu

@@ -24,41 +24,27 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
-#include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 
 namespace stinkytofu {
 
 class Function;
 
-using SSAValueID = uint32_t;
-inline constexpr SSAValueID kInvalidSSAValueID = 0;
-
-/// Shape of SSA that was built by hand rather than lifted, and whose
-/// agreement with a function therefore cannot be checked.
-inline constexpr uint64_t kUnstampedShape = 0;
-
-/// Structural fingerprint of everything attached SSA depends on: block count,
-/// CFG edge counts, instruction count and order, opcodes, and every register
-/// operand.
-///
-/// Attached SSA is only valid for the program it was built from, and no
-/// revision counter exists because mutation happens on BasicBlock and on
-/// instruction operands, neither of which notifies the Function. Comparing
-/// fingerprints at the boundaries that matter catches stale SSA without
-/// instrumenting every mutation site. Never returns kUnstampedShape.
-STINKYTOFU_EXPORT uint64_t computeFunctionShape(const Function& function);
-
 /// Physical register chosen for each attached SSA value.
 ///
 /// This is the interface between allocation policy and SSA destruction: any
 /// allocator produces one of these, and the same lowering path consumes it.
-/// Keeping policy and lowering separate is what lets legacy replay and a real
-/// allocator be compared without the comparison being muddied by differences in
-/// how the result is applied.
-class STINKYTOFU_EXPORT AllocationResult {
+/// Keeping policy and lowering separate is what lets the identity colouring and
+/// a real allocator be compared without the comparison being muddied by
+/// differences in how the result is applied. It lives beside the SSA data model
+/// rather than with any one allocator because it is the SSA subsystem's exit
+/// interface: a mapping over SSAValueID, not a policy.
+class AllocationResult {
    public:
     AllocationResult() = default;
 
@@ -83,19 +69,28 @@ class STINKYTOFU_EXPORT AllocationResult {
     /// Fingerprint of the attached SSA this result was computed against.
     uint64_t shape() const;
 
+    /// Register classes the lift this result was computed against covered.
+    ///
+    /// Two lifts of one program under different scopes share a shape but number
+    /// their values differently, so the shape alone cannot tell them apart.
+    const RegClassSet& liftedClasses() const {
+        return liftedClasses_;
+    }
+
+    /// Deterministic dump: a counts line, then one line per value in ID order.
+    /// An unassigned value prints "-", so a partial colouring is readable rather
+    /// than silently short.
+    ///
+    /// Reads alongside SSALiveIntervals::toString(), which keys its lines the
+    /// same way, so a colouring and the ranges it was derived from can be diffed
+    /// value by value.
+    std::string toString() const;
+
    private:
     // Indexed by value ID; RegType::UNKNOWN marks an unassigned slot.
     std::vector<RegKey> byValue_;
     uint64_t shape_ = kUnstampedShape;
+    RegClassSet liftedClasses_ = RegClassSet::all();
 };
-
-/// Assign every value the physical register it was lifted from.
-///
-/// This reproduces the producer's original allocation exactly, which makes it
-/// the reference point for differential testing: lifting, colouring, and SSA
-/// destruction must together be an identity transform on the physical program.
-/// Any difference is a defect in that machinery rather than in allocation
-/// policy, which is why this gate runs before any real allocator is evaluated.
-STINKYTOFU_EXPORT AllocationResult createLegacyColoring(const Function& function);
 
 }  // namespace stinkytofu

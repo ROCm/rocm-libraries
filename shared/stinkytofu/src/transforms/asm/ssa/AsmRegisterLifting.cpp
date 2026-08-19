@@ -27,10 +27,11 @@
 #include <utility>
 #include <vector>
 
+#include "stinkytofu/analysis/asm/ssa/SSAFunctionShape.hpp"
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
-#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/ssa/AttachedSSAVerifier.hpp"
@@ -38,7 +39,7 @@
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
-#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -59,7 +60,7 @@ struct OperandClass {
     std::string reason;
 };
 
-OperandClass classifyOperand(const StinkyRegister& reg) {
+OperandClass classifyOperand(const StinkyRegister& reg, const RegClassSet& classes) {
     if (!reg.isRegister()) return {OperandKind::Ignored, 0, {}};
     if (reg.isVirtualReg())
         return {OperandKind::Unsupported, 0,
@@ -70,7 +71,11 @@ OperandClass classifyOperand(const StinkyRegister& reg) {
         return {OperandKind::Unsupported, 0,
                 "register class '" + regTypeToString(reg.reg.type) +
                     "' is not lifted yet; VGPRs and SGPRs are supported"};
-    return {OperandKind::AllocatableRange, liftedSSAUnits(reg), {}};
+    // Liftable, but this lift was not asked for it. Deliberately leaving a class
+    // physical is not an error: the operand carries an immediate payload and SSA
+    // destruction never rewrites it, so it survives exactly as written.
+    if (!classes.contains(reg.reg.type)) return {OperandKind::Ignored, 0, {}};
+    return {OperandKind::AllocatableRange, liftedSSAUnits(reg, classes), {}};
 }
 
 /// True when any operand selects a True16 half, which needs sub-DWORD units.
@@ -193,6 +198,15 @@ class Lifter {
     void placePhis();
     bool rename();
     void renameBlock(unsigned block, std::vector<RegKey>& pushedKeys);
+
+    /// Record what this arena describes: the program it was built from, and the
+    /// classes it was built for. Only on success, so a rejected lift leaves no
+    /// claim behind. Both are needed, because the shape hashes the physical
+    /// program, which is identical whichever classes were lifted.
+    void stamp() {
+        function_.ssaArena().setShape(computeFunctionShape(function_));
+        function_.ssaArena().setLiftedClasses(options_.classes);
+    }
 
     LiftAttachedSSAResult counts() const {
         LiftAttachedSSAResult result;
@@ -317,7 +331,8 @@ bool Lifter::validateInstruction(const StinkyInstruction& instruction, uint32_t 
         return failAt(index, "True16 half operands need sub-DWORD SSA units");
 
     for (size_t operand = 0; operand < instruction.getSrcRegs().size(); ++operand) {
-        const OperandClass operandClass = classifyOperand(instruction.getSrcRegs()[operand]);
+        const OperandClass operandClass =
+            classifyOperand(instruction.getSrcRegs()[operand], options_.classes);
         if (operandClass.kind == OperandKind::Unsupported)
             return failAtOperand(index, /*isDestination=*/false, operand, operandClass.reason);
     }
@@ -325,7 +340,7 @@ bool Lifter::validateInstruction(const StinkyInstruction& instruction, uint32_t 
     RegKeySet definedHere;
     for (size_t operand = 0; operand < instruction.getDestRegs().size(); ++operand) {
         const StinkyRegister& reg = instruction.getDestRegs()[operand];
-        const OperandClass operandClass = classifyOperand(reg);
+        const OperandClass operandClass = classifyOperand(reg, options_.classes);
         if (operandClass.kind == OperandKind::Unsupported)
             return failAtOperand(index, /*isDestination=*/true, operand, operandClass.reason);
 
@@ -355,7 +370,8 @@ bool Lifter::gatherBlockFacts() {
 
             const std::vector<StinkyRegister>& srcRegs = instruction->getSrcRegs();
             for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
-                const OperandClass operandClass = classifyOperand(srcRegs[operand]);
+                const OperandClass operandClass =
+                    classifyOperand(srcRegs[operand], options_.classes);
                 for (size_t unit = 0; unit < operandClass.units; ++unit) {
                     const RegKey key = toRegKey(srcRegs[operand], static_cast<unsigned>(unit));
                     if (definedSoFar.contains(key)) continue;
@@ -367,7 +383,8 @@ bool Lifter::gatherBlockFacts() {
 
             const std::vector<StinkyRegister>& destRegs = instruction->getDestRegs();
             for (size_t operand = 0; operand < destRegs.size(); ++operand) {
-                const OperandClass operandClass = classifyOperand(destRegs[operand]);
+                const OperandClass operandClass =
+                    classifyOperand(destRegs[operand], options_.classes);
                 for (size_t unit = 0; unit < operandClass.units; ++unit) {
                     const RegKey key = toRegKey(destRegs[operand], static_cast<unsigned>(unit));
                     definedSoFar.insert(key);
@@ -492,7 +509,7 @@ void Lifter::renameBlock(unsigned slot, std::vector<RegKey>& pushedKeys) {
         // Sources first, so a read-modify-write operand reads the old value.
         const std::vector<StinkyRegister>& srcRegs = instruction->getSrcRegs();
         for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
-            const OperandClass operandClass = classifyOperand(srcRegs[operand]);
+            const OperandClass operandClass = classifyOperand(srcRegs[operand], options_.classes);
             if (operandClass.kind != OperandKind::AllocatableRange) {
                 attached.operands.push_back(
                     makeSSAImmOperand(asImmediateOperand(srcRegs[operand])));
@@ -510,7 +527,7 @@ void Lifter::renameBlock(unsigned slot, std::vector<RegKey>& pushedKeys) {
 
         const std::vector<StinkyRegister>& destRegs = instruction->getDestRegs();
         for (size_t operand = 0; operand < destRegs.size(); ++operand) {
-            const OperandClass operandClass = classifyOperand(destRegs[operand]);
+            const OperandClass operandClass = classifyOperand(destRegs[operand], options_.classes);
             for (size_t unit = 0; unit < operandClass.units; ++unit) {
                 const RegKey key = toRegKey(destRegs[operand], static_cast<unsigned>(unit));
                 StinkySSAValue* defined = arena.createRegister(key.type, 1);
@@ -609,8 +626,13 @@ bool Lifter::rename() {
 Expected<LiftAttachedSSAResult> Lifter::run() {
     function_.clearAttachedSSA();
 
+    if (options_.classes.empty()) {
+        fail("no register classes to lift; narrowing the scope to nothing is not a lift");
+        return Result::Error(error_);
+    }
+
     if (function_.empty()) {
-        function_.ssaArena().setShape(computeFunctionShape(function_));
+        stamp();
         return counts();
     }
 
@@ -629,7 +651,7 @@ Expected<LiftAttachedSSAResult> Lifter::run() {
         return Result::Error(error_);
     }
 
-    function_.ssaArena().setShape(computeFunctionShape(function_));
+    stamp();
     if (options_.verify) {
         const AttachedSSAVerificationResult verification = verifyAttachedSSA(function_);
         if (!verification.ok()) {

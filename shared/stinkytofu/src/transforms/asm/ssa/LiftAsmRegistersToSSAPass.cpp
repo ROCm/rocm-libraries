@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 #include <memory>
 #include <string>

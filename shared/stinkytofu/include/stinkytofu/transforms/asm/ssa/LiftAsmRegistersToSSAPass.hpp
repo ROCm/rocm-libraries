@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
@@ -35,6 +36,18 @@ class Pass;
 struct DominanceInfo;
 
 struct LiftAsmRegistersToSSAOptions {
+    /// Register classes to lift. Anything outside this set stays physical: its
+    /// operands keep their immediate payload and SSA destruction never rewrites
+    /// them, so those registers come out exactly as the producer wrote them.
+    ///
+    /// Narrow it to allocate one class at a time. Lifting SGPRs alone, for
+    /// instance, leaves every VGPR untouched, which also keeps the VGPR
+    /// high-water mark and its kernel metadata unchanged.
+    ///
+    /// A class outside isLiftableRegClass() is still an error, not a silent skip:
+    /// this selects among the classes lifting can model, it does not extend them.
+    RegClassSet classes = RegClassSet::all();
+
     /// Verify attached SSA before handing the function back.
     bool verify = true;
 
@@ -77,11 +90,11 @@ struct LiftAttachedSSAResult {
 ///
 /// On success, the function's SSAArena, instruction AttachedSSA payloads, and
 /// BasicBlock arguments are rebuilt. On failure, attached SSA is left empty.
-STINKYTOFU_EXPORT Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
+Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
     Function& function, const LiftAsmRegistersToSSAOptions& options = {});
 
 /// As above, reusing dominance information the caller already computed.
-STINKYTOFU_EXPORT Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
+Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
     Function& function, const DominanceInfo& dominance,
     const LiftAsmRegistersToSSAOptions& options = {});
 
@@ -93,7 +106,7 @@ STINKYTOFU_EXPORT Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
 /// A pipeline enabling allocation therefore preflights the whole kernel with
 /// this and keeps the legacy path for all of it when the answer is true, rather
 /// than deciding function by function.
-STINKYTOFU_EXPORT bool kernelHasCallSites(const std::vector<const Function*>& functions);
+bool kernelHasCallSites(const std::vector<const Function*>& functions);
 
 /// Creates a pass that lifts a function's physical registers to attached SSA
 /// on the IR.

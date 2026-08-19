@@ -2,5 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu_objs PRIVATE
-    SSAAllocation.cpp
+    SSAFunctionShape.cpp
+    SSASlotIndexes.cpp
+    SSALiveIntervals.cpp
 )

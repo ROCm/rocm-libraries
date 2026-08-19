@@ -5,5 +5,4 @@ target_sources(stinkytofu_objs PRIVATE
     AsmRegisterLifting.cpp
     LiftAsmRegistersToSSAPass.cpp
     SSADestruction.cpp
-    ReplayLegacyColoringPass.cpp
 )

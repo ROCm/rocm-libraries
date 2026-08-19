@@ -22,31 +22,26 @@
  * ************************************************************************ */
 #pragma once
 
-// The identity colouring, and the round trip it exists to prove.
-//
-// Legacy replay assigns every SSA value the register it was lifted from, so
-// lowering it must reproduce the original program exactly. That is the gate in
-// front of enabling any real allocation: until it holds, a difference in
-// emitted code cannot be attributed to allocation policy.
-
-#include <memory>
-
-#include "stinkytofu/Export.hpp"
-#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
+#include "stinkytofu/ir/asm/ssa/AllocationResult.hpp"
 
 namespace stinkytofu {
+
 class Function;
-class Pass;
 
-/// Rewrite \p function using each value's PhysicalBinding, undoing the lift
-/// exactly.
-STINKYTOFU_EXPORT SSADestructionResult replayLegacyColoring(Function& function);
-
-/// Creates a pass that lowers attached SSA back to the registers it was lifted
-/// from.
+/// Assign every value the physical register it was lifted from.
 ///
-/// After a successful rewrite it clears attached SSA, which is what discards
-/// value identity that described the pre-rewrite operands.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createReplayLegacyColoringPass();
+/// This reproduces the producer's original allocation exactly, which makes it
+/// the reference point for differential testing: lifting, colouring, and SSA
+/// destruction must together be an identity transform on the physical program.
+/// Any difference is a defect in that machinery rather than in allocation
+/// policy, which is why this gate runs before any real allocator is evaluated.
+///
+/// This is the simplest allocation policy rather than part of the SSA data
+/// model, so it sits here and not with AllocationResult. It has its own header
+/// because both RegisterAllocationPass, which needs the baseline to report
+/// against, and LegacyIdentityAllocator, which is a thin wrapper over it, use
+/// it; the pass must be able to name the baseline without taking a compile-time
+/// dependency on any concrete allocator.
+AllocationResult createLegacyColoring(const Function& function);
 
 }  // namespace stinkytofu

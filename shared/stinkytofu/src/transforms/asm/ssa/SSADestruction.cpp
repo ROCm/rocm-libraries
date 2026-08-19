@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
+#include "stinkytofu/transforms/asm/ssa/SSADestruction.hpp"
 
 #include <sstream>
 #include <string>
@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include "stinkytofu/analysis/asm/ssa/SSAFunctionShape.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -108,6 +109,15 @@ class Destroyer {
                   "not mean the same thing here");
             return false;
         }
+        // Same program, different lift scope: the shapes match because the shape
+        // hashes physical operands, but the slot layout and value numbering do not.
+        const RegClassSet& lifted = function_.ssaArena().liftedClasses();
+        if (allocation_.shape() != kUnstampedShape && allocation_.liftedClasses() != lifted) {
+            error(prefix + "the allocation was computed against a lift of " +
+                  allocation_.liftedClasses().toString() + " but this SSA covers " +
+                  lifted.toString() + ", so its SSA value IDs do not mean the same thing here");
+            return false;
+        }
         return true;
     }
 
@@ -153,6 +163,9 @@ class Destroyer {
     }
 
     void planOperandRewrites() {
+        // The scope the slots were laid out with. An operand outside it was left
+        // physical, so it contributes no slot and is never rewritten.
+        const RegClassSet& classes = function_.ssaArena().liftedClasses();
         for (BasicBlock& bb : function_) {
             for (IRBase& ir : bb) {
                 auto* instruction = dyn_cast<StinkyInstruction>(&ir);
@@ -161,7 +174,7 @@ class Destroyer {
                 size_t resultCursor = 0;
                 const std::vector<StinkyRegister>& destRegs = instruction->getDestRegs();
                 for (size_t operand = 0; operand < destRegs.size(); ++operand) {
-                    const size_t units = liftedSSAUnits(destRegs[operand]);
+                    const size_t units = liftedSSAUnits(destRegs[operand], classes);
                     if (units == 0) continue;
                     if (resultCursor + units > instruction->getNumSSAResults()) {
                         error(locate(instruction, /*isDestination=*/true, operand) +
@@ -178,7 +191,7 @@ class Destroyer {
                 size_t operandCursor = 0;
                 const std::vector<StinkyRegister>& srcRegs = instruction->getSrcRegs();
                 for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
-                    const size_t units = liftedSSAUnits(srcRegs[operand]);
+                    const size_t units = liftedSSAUnits(srcRegs[operand], classes);
                     if (units == 0) {
                         if (operandCursor < instruction->getNumSSAOperands()) ++operandCursor;
                         continue;
@@ -245,6 +258,9 @@ class Destroyer {
         // Rewriting only the class and base index keeps width, modifiers, and
         // symbolic names exactly as the producer wrote them.
         StinkyRegister updated = operands[rewrite.operand];
+        result_.rewritten.push_back({rewrite.instruction, rewrite.isDestination, rewrite.operand,
+                                     updated.reg.type, updated.reg.idx, rewrite.type,
+                                     rewrite.baseIndex});
         updated.reg.type = rewrite.type;
         updated.reg.idx = rewrite.baseIndex;
 

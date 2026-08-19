@@ -28,18 +28,34 @@
 // them alone and an allocator only produces an AllocationResult, so without
 // this step an allocation would never reach the emitted program.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
-#include "stinkytofu/Export.hpp"
-#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
+#include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/ir/asm/ssa/AllocationResult.hpp"
 
 namespace stinkytofu {
 class Function;
+struct StinkyInstruction;
+
+/// One operand destruction rewrote, with both identities. `beforeType`/`beforeIdx`
+/// are what the producer wrote; `afterType`/`afterIdx` are the allocation result.
+struct RewrittenOperand {
+    StinkyInstruction* instruction = nullptr;
+    bool isDestination = false;
+    size_t operand = 0;
+    RegType beforeType = RegType::UNKNOWN;
+    uint32_t beforeIdx = 0;
+    RegType afterType = RegType::UNKNOWN;
+    uint32_t afterIdx = 0;
+};
 
 /// Everything that stopped SSA destruction, in deterministic order.
-struct STINKYTOFU_EXPORT SSADestructionResult {
+struct SSADestructionResult {
     std::vector<std::string> errors;
+    /// Populated only on success, in the order destruction applied them.
+    std::vector<RewrittenOperand> rewritten;
 
     bool ok() const {
         return errors.empty();
@@ -50,9 +66,9 @@ struct STINKYTOFU_EXPORT SSADestructionResult {
 
 /// Rewrite \p function's physical operands from \p allocation.
 ///
-/// This is the single lowering path shared by every allocation result, so
-/// legacy replay and a real allocator differ only in the colouring they are
-/// given, never in how it is applied.
+/// This is the single lowering path shared by every allocation result, so the
+/// producer's colouring and a real allocator differ only in the colouring they
+/// are given, never in how it is applied.
 ///
 /// A function whose attached SSA no longer matches its physical shape, or an
 /// allocation computed against a different lift, is reported instead of being
@@ -64,9 +80,8 @@ struct STINKYTOFU_EXPORT SSADestructionResult {
 /// A block argument whose inputs and result do not all land on the same
 /// register needs a copy on the incoming edge. Copy insertion, parallel-copy
 /// sequencing, and critical-edge splitting are not implemented, so that case is
-/// reported rather than mis-lowered. Legacy replay never hits it: every version
-/// of a register colours back to that same register.
-STINKYTOFU_EXPORT SSADestructionResult destroyAttachedSSA(Function& function,
-                                                          const AllocationResult& allocation);
+/// reported rather than mis-lowered. The producer's colouring never hits it:
+/// every version of a register colours back to that same register.
+SSADestructionResult destroyAttachedSSA(Function& function, const AllocationResult& allocation);
 
 }  // namespace stinkytofu
