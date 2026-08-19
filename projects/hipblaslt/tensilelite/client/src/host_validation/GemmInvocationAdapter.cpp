@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <roc/host_validation/adapters/tensilelite/GemmProblemAdapter.hpp>
+#include <roc/host_validation/adapters/tensilelite/GemmInvocationAdapter.hpp>
 #include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 
 #include <Tensile/TensorDescriptor_fwd.hpp>
@@ -23,18 +23,12 @@ namespace TensileLite::Client::reference_adapter
     namespace detail
     {
         using namespace roc::host_validation;
+        using TensileLite::Client::checkedHostValidationPtrdiff;
+        using TensileLite::Client::hostValidationLayout;
 
         inline TranslationFailure failure(TranslationFailureCode code, std::string reason)
         {
             return {code, std::move(reason)};
-        }
-
-        template <typename Integer>
-        inline ptrdiff_t checkedToPtrdiff(Integer value)
-        {
-            if(!std::in_range<ptrdiff_t>(value))
-                throw std::overflow_error("TensileLite adapter offset exceeds ptrdiff_t.");
-            return static_cast<ptrdiff_t>(value);
         }
 
         inline ptrdiff_t checkedMultiply(size_t left, size_t right)
@@ -113,18 +107,9 @@ namespace TensileLite::Client::reference_adapter
             return {view.loadAs<double>({0}), 0.0};
         }
 
-        inline Layout descriptorLayout(TensorDescriptor const& descriptor)
-        {
-            std::vector<ptrdiff_t> strides;
-            strides.reserve(descriptor.strides().size());
-            for(const size_t stride : descriptor.strides())
-                strides.push_back(checkedToPtrdiff(stride));
-            return Layout(Shape(descriptor.sizes()), std::move(strides));
-        }
-
         inline size_t descriptorStorageBytes(ScalarType type, TensorDescriptor const& descriptor)
         {
-            return storageBytesForLayout(type, descriptorLayout(descriptor));
+            return storageBytesForLayout(type, hostValidationLayout(descriptor));
         }
 
         inline std::span<const std::byte> descriptorStorage(ScalarType              type,
@@ -196,7 +181,7 @@ namespace TensileLite::Client::reference_adapter
         };
     } // namespace detail
 
-    struct GemmProblemAdapter::State
+    struct GemmInvocationAdapter::State
     {
         using Activation = roc::host_validation::Activation;
         using ScalarType = roc::host_validation::ScalarType;
@@ -453,10 +438,14 @@ namespace TensileLite::Client::reference_adapter
                 }
             }
 
-            const ptrdiff_t batchOffsetA = detail::checkedToPtrdiff(inputs.batchOffsetA);
-            const ptrdiff_t batchOffsetB = detail::checkedToPtrdiff(inputs.batchOffsetB);
-            const ptrdiff_t batchOffsetC = detail::checkedToPtrdiff(inputs.batchOffsetC);
-            const ptrdiff_t batchOffsetD = detail::checkedToPtrdiff(inputs.batchOffsetD);
+            const ptrdiff_t batchOffsetA
+                = detail::checkedHostValidationPtrdiff(inputs.batchOffsetA);
+            const ptrdiff_t batchOffsetB
+                = detail::checkedHostValidationPtrdiff(inputs.batchOffsetB);
+            const ptrdiff_t batchOffsetC
+                = detail::checkedHostValidationPtrdiff(inputs.batchOffsetC);
+            const ptrdiff_t batchOffsetD
+                = detail::checkedHostValidationPtrdiff(inputs.batchOffsetD);
 
             std::span<const std::byte> aStorage;
             std::span<const std::byte> bStorage;
@@ -469,23 +458,23 @@ namespace TensileLite::Client::reference_adapter
             if(inputs.batchA == nullptr)
             {
                 aStorage = detail::descriptorStorage(typeA, problem.a(), inputs.a, batchOffsetA);
-                aTensor.emplace(typeA, detail::descriptorLayout(problem.a()), aStorage);
+                aTensor.emplace(typeA, detail::hostValidationLayout(problem.a()), aStorage);
             }
             if(inputs.batchB == nullptr)
             {
                 bStorage = detail::descriptorStorage(typeB, problem.b(), inputs.b, batchOffsetB);
-                bTensor.emplace(typeB, detail::descriptorLayout(problem.b()), bStorage);
+                bTensor.emplace(typeB, detail::hostValidationLayout(problem.b()), bStorage);
             }
             if(inputs.batchC == nullptr)
             {
                 cStorage = detail::descriptorStorage(typeC, problem.c(), inputs.c, batchOffsetC);
-                cTensor.emplace(typeC, detail::descriptorLayout(problem.c()), cStorage);
+                cTensor.emplace(typeC, detail::hostValidationLayout(problem.c()), cStorage);
             }
             if(inputs.batchD == nullptr)
             {
                 dStorage
                     = detail::mutableDescriptorStorage(typeD, problem.d(), inputs.d, batchOffsetD);
-                dTensor.emplace(typeD, detail::descriptorLayout(problem.d()), dStorage);
+                dTensor.emplace(typeD, detail::hostValidationLayout(problem.d()), dStorage);
             }
 
             std::optional<ScalarType>  biasType;
@@ -507,13 +496,14 @@ namespace TensileLite::Client::reference_adapter
                 {
                     biasStorage = detail::descriptorStorage(*biasType, problem.bias(), inputs.bias);
                     biasTensor.emplace(
-                        *biasType, detail::descriptorLayout(problem.bias()), biasStorage);
+                        *biasType, detail::hostValidationLayout(problem.bias()), biasStorage);
                     if(problem.useGradient())
                     {
                         biasOutputStorage = detail::mutableDescriptorStorage(
                             *biasType, problem.bias(), const_cast<void*>(inputs.bias));
-                        biasOutputTensor.emplace(
-                            *biasType, detail::descriptorLayout(problem.bias()), biasOutputStorage);
+                        biasOutputTensor.emplace(*biasType,
+                                                 detail::hostValidationLayout(problem.bias()),
+                                                 biasOutputStorage);
                     }
                 }
             }
@@ -536,7 +526,7 @@ namespace TensileLite::Client::reference_adapter
                 auxiliaryStorage = detail::mutableDescriptorStorage(
                     *auxiliaryType, *auxiliaryDescriptor, inputs.e);
                 auxiliaryTensor.emplace(*auxiliaryType,
-                                        detail::descriptorLayout(*auxiliaryDescriptor),
+                                        detail::hostValidationLayout(*auxiliaryDescriptor),
                                         auxiliaryStorage);
             }
 
@@ -560,7 +550,7 @@ namespace TensileLite::Client::reference_adapter
                     gateStorage = detail::descriptorStorage(
                         *gateType, *gateDescriptor, inputs.gateResidual);
                     gateTensor.emplace(
-                        *gateType, detail::descriptorLayout(*gateDescriptor), gateStorage);
+                        *gateType, detail::hostValidationLayout(*gateDescriptor), gateStorage);
                 }
             }
 
@@ -627,8 +617,10 @@ namespace TensileLite::Client::reference_adapter
                     = inputs.batchD == nullptr
                           ? detail::checkedMultiply(batch, problem.d().strides()[batchD])
                           : 0;
-                ptrdiff_t strideKA = detail::checkedToPtrdiff(problem.a().strides()[indexKA]);
-                ptrdiff_t strideKB = detail::checkedToPtrdiff(problem.b().strides()[indexKB]);
+                ptrdiff_t strideKA
+                    = detail::checkedHostValidationPtrdiff(problem.a().strides()[indexKA]);
+                ptrdiff_t strideKB
+                    = detail::checkedHostValidationPtrdiff(problem.b().strides()[indexKB]);
                 if(problem.boundIndices()[0].aMirror && k != 0)
                 {
                     const ptrdiff_t mirroredOffset
@@ -646,39 +638,43 @@ namespace TensileLite::Client::reference_adapter
 
                 const Layout layoutA(
                     Shape{m, k},
-                    {detail::checkedToPtrdiff(problem.a().strides()[indexMA]), strideKA},
+                    {detail::checkedHostValidationPtrdiff(problem.a().strides()[indexMA]),
+                     strideKA},
                     offsetA);
                 const Layout layoutB(
                     Shape{k, n},
-                    {strideKB, detail::checkedToPtrdiff(problem.b().strides()[indexNB])},
+                    {strideKB,
+                     detail::checkedHostValidationPtrdiff(problem.b().strides()[indexNB])},
                     offsetB);
-                const Layout layoutC(Shape{m, n},
-                                     {detail::checkedToPtrdiff(problem.c().strides()[indexMD]),
-                                      detail::checkedToPtrdiff(problem.c().strides()[indexND])},
-                                     offsetC);
-                const Layout layoutD(Shape{m, n},
-                                     {detail::checkedToPtrdiff(problem.d().strides()[indexMD]),
-                                      detail::checkedToPtrdiff(problem.d().strides()[indexND])},
-                                     offsetD);
+                const Layout layoutC(
+                    Shape{m, n},
+                    {detail::checkedHostValidationPtrdiff(problem.c().strides()[indexMD]),
+                     detail::checkedHostValidationPtrdiff(problem.c().strides()[indexND])},
+                    offsetC);
+                const Layout layoutD(
+                    Shape{m, n},
+                    {detail::checkedHostValidationPtrdiff(problem.d().strides()[indexMD]),
+                     detail::checkedHostValidationPtrdiff(problem.d().strides()[indexND])},
+                    offsetD);
 
                 const auto currentAStorage
                     = inputs.batchA == nullptr
                           ? aStorage
                           : std::span<const std::byte>(
-                                static_cast<const std::byte*>(inputs.batchA[batch]) + batchOffsetA,
-                                storageBytesForLayout(typeA, layoutA));
+                              static_cast<const std::byte*>(inputs.batchA[batch]) + batchOffsetA,
+                              storageBytesForLayout(typeA, layoutA));
                 const auto currentBStorage
                     = inputs.batchB == nullptr
                           ? bStorage
                           : std::span<const std::byte>(
-                                static_cast<const std::byte*>(inputs.batchB[batch]) + batchOffsetB,
-                                storageBytesForLayout(typeB, layoutB));
+                              static_cast<const std::byte*>(inputs.batchB[batch]) + batchOffsetB,
+                              storageBytesForLayout(typeB, layoutB));
                 const auto currentCStorage
                     = inputs.batchC == nullptr
                           ? cStorage
                           : std::span<const std::byte>(
-                                static_cast<const std::byte*>(inputs.batchC[batch]) + batchOffsetC,
-                                storageBytesForLayout(typeC, layoutC));
+                              static_cast<const std::byte*>(inputs.batchC[batch]) + batchOffsetC,
+                              storageBytesForLayout(typeC, layoutC));
                 const auto currentDStorage
                     = inputs.batchD == nullptr
                           ? dStorage
@@ -750,11 +746,12 @@ namespace TensileLite::Client::reference_adapter
                 {
                     const ptrdiff_t offsetE
                         = detail::checkedMultiply(batch, auxiliaryDescriptor->strides()[batchD]);
-                    const Layout layoutE(
-                        Shape{m, n},
-                        {detail::checkedToPtrdiff(auxiliaryDescriptor->strides()[indexMD]),
-                         detail::checkedToPtrdiff(auxiliaryDescriptor->strides()[indexND])},
-                        offsetE);
+                    const Layout layoutE(Shape{m, n},
+                                         {detail::checkedHostValidationPtrdiff(
+                                              auxiliaryDescriptor->strides()[indexMD]),
+                                          detail::checkedHostValidationPtrdiff(
+                                              auxiliaryDescriptor->strides()[indexND])},
+                                         offsetE);
                     if(problem.useGradient())
                         auxiliaryInput = auxiliaryTensor->alias(layoutE);
                     else
@@ -770,8 +767,8 @@ namespace TensileLite::Client::reference_adapter
                               : 0;
                     const Layout gateLayout(
                         Shape{m, n},
-                        {detail::checkedToPtrdiff(gateDescriptor->strides()[indexMD]),
-                         detail::checkedToPtrdiff(gateDescriptor->strides()[indexND])},
+                        {detail::checkedHostValidationPtrdiff(gateDescriptor->strides()[indexMD]),
+                         detail::checkedHostValidationPtrdiff(gateDescriptor->strides()[indexND])},
                         offsetGate);
                     std::span<const std::byte> currentGateStorage = gateStorage;
                     if(inputs.batchGateResidual != nullptr)
@@ -870,16 +867,17 @@ namespace TensileLite::Client::reference_adapter
         std::vector<detail::BatchInputs>    translatedBatches;
     };
 
-    GemmProblemAdapter::GemmProblemAdapter(std::unique_ptr<const State> state)
+    GemmInvocationAdapter::GemmInvocationAdapter(std::unique_ptr<const State> state)
         : m_state(std::move(state))
     {
     }
 
-    GemmProblemAdapter::~GemmProblemAdapter() = default;
+    GemmInvocationAdapter::~GemmInvocationAdapter() = default;
 
-    GemmProblemAdapter::GemmProblemAdapter(GemmProblemAdapter&&) noexcept = default;
+    GemmInvocationAdapter::GemmInvocationAdapter(GemmInvocationAdapter&&) noexcept = default;
 
-    GemmProblemAdapter& GemmProblemAdapter::operator=(GemmProblemAdapter&&) noexcept = default;
+    GemmInvocationAdapter&
+        GemmInvocationAdapter::operator=(GemmInvocationAdapter&&) noexcept = default;
 
     void TranslatedGemmBatch::copyOutputs() const
     {
@@ -903,24 +901,23 @@ namespace TensileLite::Client::reference_adapter
         }
     }
 
-    size_t GemmProblemAdapter::batchCount() const
+    size_t GemmInvocationAdapter::batchCount() const
     {
         return m_state->batches;
     }
 
-    roc::host_validation::ScalarType GemmProblemAdapter::operationAccumulatorType() const
+    roc::host_validation::ScalarType GemmInvocationAdapter::operationAccumulatorType() const
     {
         return m_state->operationAccumulatorType;
     }
 
-    bool GemmProblemAdapter::usesStandaloneEpilogue() const
+    bool GemmInvocationAdapter::usesStandaloneEpilogue() const
     {
         return m_state->useStandaloneEpilogue;
     }
 
-    std::variant<TranslatedGemmBatch, TranslationFailure>
-        GemmProblemAdapter::translateBatch(size_t                           batch,
-                                           roc::host_validation::ScalarType accumulatorType) const
+    std::variant<TranslatedGemmBatch, TranslationFailure> GemmInvocationAdapter::translateBatch(
+        size_t batch, roc::host_validation::ScalarType accumulatorType) const
     {
         using namespace roc::host_validation;
         using detail::failure;
@@ -1100,7 +1097,7 @@ namespace TensileLite::Client::reference_adapter
                 {
                     translated.biasWorkspace.emplace(accumulatorType,
                                                      Shape{m_state->m, m_state->n});
-                    epilogue.rawOutput = *translated.biasWorkspace;
+                    epilogue.rawOutput     = *translated.biasWorkspace;
                     epilogue.rawOutputType = epilogue.rawOutput->type();
                 }
                 epilogue.auxiliaryInput  = source.auxiliaryInput;
@@ -1168,18 +1165,18 @@ namespace TensileLite::Client::reference_adapter
         }
     }
 
-    std::variant<GemmProblemAdapter, TranslationFailure>
-        translateGemmProblem(ContractionProblemGemm const& problem,
-                             ContractionInputs const&      inputs,
-                             size_t                        elementsToValidate)
+    std::variant<GemmInvocationAdapter, TranslationFailure>
+        translateGemmInvocation(ContractionProblemGemm const& problem,
+                                ContractionInputs const&      inputs,
+                                size_t                        elementsToValidate)
     {
         try
         {
-            auto state
-                = std::make_unique<GemmProblemAdapter::State>(problem, inputs, elementsToValidate);
+            auto state = std::make_unique<GemmInvocationAdapter::State>(
+                problem, inputs, elementsToValidate);
             if(auto preflightFailure = state->preflight())
                 return std::move(*preflightFailure);
-            return GemmProblemAdapter(std::move(state));
+            return GemmInvocationAdapter(std::move(state));
         }
         catch(std::invalid_argument const& error)
         {

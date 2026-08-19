@@ -3,7 +3,7 @@
 
 // Product-private TensileLite execution policy around the descriptor adapter.
 
-#include <roc/host_validation/adapters/tensilelite/GemmProblemAdapter.hpp>
+#include <roc/host_validation/adapters/tensilelite/GemmInvocationAdapter.hpp>
 #include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 #include <roc/host_validation/backends/blocked.hpp>
 #include <roc/host_validation/validation.hpp>
@@ -23,7 +23,7 @@ namespace TensileLite
     namespace
     {
         using namespace roc::host_validation;
-        using Client::reference_adapter::GemmProblemAdapter;
+        using Client::reference_adapter::GemmInvocationAdapter;
         using Client::reference_adapter::TranslatedGemmBatch;
         using Client::reference_adapter::TranslationFailure;
 
@@ -108,7 +108,7 @@ namespace TensileLite
         };
 
         bool executeGemmBatch(ContractionProblemGemm const& problem,
-                              GemmProblemAdapter const&     adapter,
+                              GemmInvocationAdapter const&  adapter,
                               TranslatedGemmBatch&          translated,
                               RuntimeGemmPolicy const&      policy,
                               RunInfoRecorder&              recorder)
@@ -164,10 +164,10 @@ namespace TensileLite
         {
             using namespace Client::reference_adapter;
 
-            auto translation = translateGemmProblem(problem, inputs, elementsToValidate);
+            auto translation = translateGemmInvocation(problem, inputs, elementsToValidate);
             if(std::holds_alternative<TranslationFailure>(translation))
                 return false;
-            GemmProblemAdapter adapter = std::move(std::get<GemmProblemAdapter>(translation));
+            GemmInvocationAdapter adapter = std::move(std::get<GemmInvocationAdapter>(translation));
 
             const RuntimeGemmPolicy policy(execution);
             const ScalarType        accumulatorType

@@ -9,6 +9,7 @@
 
 #include <Tensile/Activation.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/TensorDescriptor.hpp>
 
 #include <complex>
 #include <cstddef>
@@ -16,9 +17,29 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace TensileLite::Client
 {
+    template <typename Integer>
+    inline ptrdiff_t checkedHostValidationPtrdiff(Integer value)
+    {
+        if(!std::in_range<ptrdiff_t>(value))
+            throw std::overflow_error("TensileLite adapter offset exceeds ptrdiff_t.");
+        return static_cast<ptrdiff_t>(value);
+    }
+
+    inline roc::host_validation::Layout hostValidationLayout(TensorDescriptor const& descriptor)
+    {
+        std::vector<ptrdiff_t> strides;
+        strides.reserve(descriptor.strides().size());
+        for(const size_t stride : descriptor.strides())
+            strides.push_back(checkedHostValidationPtrdiff(stride));
+        return roc::host_validation::Layout(roc::host_validation::Shape(descriptor.sizes()),
+                                            std::move(strides));
+    }
+
     inline roc::host_validation::ScalarType toHostValidationScalarType(rocisa::DataType type)
     {
         using roc::host_validation::ScalarType;
