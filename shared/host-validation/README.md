@@ -174,6 +174,9 @@ Tensor::clone();
 Tensor::clone(TensorStorageAllocator);
 Tensor::copyFrom(Tensor);
 Tensor::copyFrom(Tensor, linearIndices);
+Tensor::reshape(Shape);
+Tensor::pad(Shape);
+Tensor::permute(destinationToSource);
 Tensor::to(ScalarType);
 Tensor::to(ScalarType, ScalarConversionOptions);
 ```
@@ -187,6 +190,14 @@ type/layout metadata and share the same storage; mutations are visible through
 every alias. `clone()` is the explicit deep-copy operation. `alias(Layout)`
 creates another layout over the same owned storage. Shallow constness is
 intentional: a const Tensor handle may still mutate its shared data.
+
+`reshape()` returns a shallow alias and requires contiguous
+last-dimension-fastest storage with the same logical element count. `pad()`
+returns an owning Tensor with unchanged rank, no smaller extent, and zero bits
+in newly allocated storage.
+`permute()` returns an owning contiguous Tensor; its argument maps each
+destination dimension to one source dimension. Padding and permutation copy
+encoded scalar bits directly, including packed and cross-byte formats.
 
 Every Tensor participates in owning its storage lifetime. The default storage
 uses ordinary host bytes; an allocator callback may return owned storage backed
