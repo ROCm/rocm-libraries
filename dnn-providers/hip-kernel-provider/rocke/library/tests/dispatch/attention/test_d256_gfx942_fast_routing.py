@@ -166,6 +166,17 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
             via_entry, via_lean, "D256 entry must delegate to the lean natural-QK body"
         )
 
+    def test_lean_body_rejects_sliding_window(self):
+        """The lean D256 body is causal-only -- it has no sliding-window mask and
+        never reads ``spec.sliding_window``. It must fail loud on a windowed spec
+        rather than silently ignore the window and emit full-attention output. Today
+        the external ``_d256_gfx942_fast`` gate enforces ``window == 0``; this guard
+        makes the builder self-protecting if a future D256+SWA routing is wired up."""
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem(sliding_window=256))
+            with self.assertRaises(NotImplementedError):
+                t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
+
 
 if __name__ == "__main__":
     unittest.main()

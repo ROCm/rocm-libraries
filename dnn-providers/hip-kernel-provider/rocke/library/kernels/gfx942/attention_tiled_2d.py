@@ -5724,6 +5724,10 @@ def _build_gfx942_4warp_gqa_lean(
             f"4-warp GQA lean body is validated for head_size="
             f"{_4WGQA_LEAN_HEAD_SIZE} only"
         )
+    if spec.sliding_window:
+        raise NotImplementedError(
+            "4-warp GQA lean body is causal-only (no sliding-window mask)"
+        )
     H = spec.num_query_heads
     HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
