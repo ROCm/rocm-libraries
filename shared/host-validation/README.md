@@ -260,19 +260,21 @@ layout-independent linear-index arithmetic.
 
 ## Tensor linear combination
 
-`axpby.hpp` evaluates an arbitrary-layout elementwise linear combination with
-explicit accumulator and output storage types:
+`axpby.hpp` evaluates an elementwise linear combination with explicit
+accumulator and output storage types:
 
 ```cpp
-AxpbyProblem problem(xTensor, yTensor, outputTensor, ScalarType::Float32);
+AxpbyProblem problem(
+    xTensor, yTensor, ScalarType::Float32, ScalarType::Float32);
 problem.alpha = 2.0;
 problem.beta = -0.5;
-AxpbyRunInfo run = referenceAxpby(problem);
+AxpbyResult result = referenceAxpby(problem);
 ```
 
 Either input may be absent, but at least one is required. The Tensors must share
-the output shape; strides, offsets, transposes, batching, and padding are
-represented entirely by their layouts.
+one shape. The owning overload creates a contiguous result and accepts an
+optional `TensorStorageAllocator`. `AxpbyRequest` binds the same problem to a
+caller-owned destination when a specific output layout is required.
 
 ## Softmax
 
@@ -280,13 +282,16 @@ represented entirely by their layouts.
 tensor axis:
 
 ```cpp
-SoftmaxProblem problem(inputView, outputView, axis, ScalarType::Float32);
-SoftmaxRunInfo run = referenceSoftmax(problem);
+SoftmaxProblem problem(
+    inputTensor, ScalarType::Float32, axis, ScalarType::Float32);
+SoftmaxResult result = referenceSoftmax(problem);
 ```
 
-Input/output storage types and layouts may differ. The accumulator is
-explicitly Float32 or Float64, and the implementation subtracts each slice's
-maximum before exponentiation.
+The owning overload returns a contiguous output and accepts an optional
+`TensorStorageAllocator`. `SoftmaxRequest` writes a caller-owned destination
+when a specific output layout is required. Input and output storage types may
+differ. The accumulator is explicitly Float32 or Float64, and the
+implementation subtracts each slice's maximum before exponentiation.
 
 ## LayerNorm
 
