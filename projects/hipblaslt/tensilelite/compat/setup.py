@@ -17,8 +17,8 @@ def _build_rocm_version() -> str:
     value = os.environ.get("TENSILELITE_ROCM_VERSION")
     if not value:
         raise RuntimeError(
-            "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
-            "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
+            "TENSILELITE_ROCM_VERSION is required to build a TensileLite wheel. "
+            "Use the CMake or Invoke build frontend, or supply the selected SDK identity explicitly."
         )
     return value
 
