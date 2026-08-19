@@ -371,7 +371,6 @@ namespace TensileLite
                     tensor.dataType(),
                     resultStorage.data(),
                     referenceStorage.data(),
-                    tensor.totalAllocatedElements(),
                     layout,
                     options);
             }
