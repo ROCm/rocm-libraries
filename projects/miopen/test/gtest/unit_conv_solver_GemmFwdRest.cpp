@@ -50,6 +50,12 @@ auto GetConvTestCases(miopenDataType_t datatype)
         // clang-format off
         cases.emplace_back(TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, type_x, type_w, type_y});
         cases.emplace_back(TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, type_x, type_w, type_y});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {4, 4, 14, 14}},
+                                    {datatype, miopenTensorNHWC, {64, 4, 14, 14}},
+                                    datatype, {{0, 0}, {14, 14}, {1, 1}}});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {4, 4, 4, 4, 4}},
+                                    {datatype, miopenTensorNDHWC, {64, 4, 4, 4, 4}},
+                                    datatype, {{0, 0, 0}, {4, 4, 4}, {1, 1, 1}}});
         // clang-format on
     }
 
