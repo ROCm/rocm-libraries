@@ -41,7 +41,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tensilelite import GENERATOR_VERSION
+from tensilelite import GENERATOR_VERSION as __version__
 import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
@@ -49,7 +49,7 @@ pytestmark = pytest.mark.unit
 
 def _norm(text):
     """Normalise the embedded TensileLite version to a stable token."""
-    return text.replace(GENERATOR_VERSION, "<VERSION>")
+    return text.replace(__version__, "<VERSION>")
 
 
 # ---------------------------------------------------------------------------
