@@ -1367,7 +1367,8 @@ namespace
         bool                            rowUniform = false;
         // Row-uniform and refused by the pre-existing tiles % grid == 0 test,
         // i.e. exactly the regime this change adds.
-        bool newlyAdmitted = false;
+        bool newlyAdmitted     = false;
+        bool perTileExtraIters = false;
     };
 
     // The TensileLite problem matching what the runtime builds for the public
@@ -1449,12 +1450,9 @@ namespace
             out.grid,
             amdgpu != nullptr ? amdgpu->skFullTiles : 1,
             solution.sizeMapping.streamKForceDPOnly != 0);
-        out.rowUniform = TensileLite::streamKStaticSplitRowUniform(
-            out.split,
-            out.tiles,
-            out.itersPerTile,
-            out.grid,
-            solution.internalArgsSupport.perTileExtraIters);
+        out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
+        out.rowUniform        = TensileLite::streamKStaticSplitRowUniform(
+            out.split, out.tiles, out.itersPerTile, out.grid, out.perTileExtraIters);
         out.newlyAdmitted
             = out.rowUniform && out.split.skTiles != 0 && out.tiles % out.grid != 0;
         return out;
@@ -1462,9 +1460,13 @@ namespace
 
     // A tall, narrow shape with a long K, which is what puts the tile count
     // below the CU count and lets the grid selector cut every tile into the
-    // same number of equal chunks: grid = F * tiles for an integer F that
-    // divides the iterations per tile. That is row-uniform, and it was refused
-    // before this change because the grid does not divide the tile count.
+    // same number of chunks: grid = F * tiles for an integer F >= 2. When F
+    // divides the iterations per tile, that is an even K-split (extraIters ==
+    // 0). When it does not, leftover K-iters (extraIters != 0) stay
+    // tile-symmetric if the kernel redistributes extras within each tile;
+    // splits inside one tile may still differ (I % F != 0). Both are
+    // row-uniform, and both were refused before this change because the grid
+    // does not divide the tile count.
     //
     // Written to discover rather than to pin. Solution indices, the
     // tile_fractions vector and select_reduction's thresholds are all library
@@ -1549,15 +1551,37 @@ namespace
                 // Pin the resolution, not just the outcome: asserting only
                 // success would let a future threshold change degrade this case
                 // into a duplicate of the pre-existing one with no signal.
+                //
+                // Clause 2 is grid = F * tiles with F >= 2 and skTiles == tiles.
+                // That admits two K-splits:
+                //   even: extraIters == 0 and I % skItersPerWG == 0 (F divides I)
+                //   leftover: extraIters != 0, admitted only when the kernel
+                //     redistributes extras within each tile. Intra-tile chunk
+                //     lengths may still differ when I % F != 0; that is the
+                //     leftover regime, not the even-split one.
                 EXPECT_EQ(resolved.grid % resolved.tiles, 0u)
                     << name << ": clause 2 requires the grid to be a multiple of the tile count";
                 EXPECT_NE(resolved.grid, resolved.tiles)
                     << name << ": a grid equal to the tile count is the pre-existing regime";
                 EXPECT_EQ(resolved.split.skTiles, resolved.tiles);
-                EXPECT_EQ(resolved.split.extraIters, 0u);
                 EXPECT_NE(resolved.split.skItersPerWG, resolved.itersPerTile);
                 ASSERT_NE(resolved.split.skItersPerWG, 0u);
-                EXPECT_EQ(resolved.itersPerTile % resolved.split.skItersPerWG, 0u);
+
+                const bool leftoverSplit = resolved.split.extraIters != 0u;
+                if(leftoverSplit)
+                {
+                    EXPECT_TRUE(resolved.perTileExtraIters)
+                        << name << ": leftover extraIters=" << resolved.split.extraIters
+                        << " (itersPerTile%skItersPerWG="
+                        << (resolved.itersPerTile % resolved.split.skItersPerWG)
+                        << ") is admitted only with per-tile extra-iters; do not "
+                           "classify it as the even K-split";
+                }
+                else
+                {
+                    EXPECT_EQ(resolved.split.extraIters, 0u);
+                    EXPECT_EQ(resolved.itersPerTile % resolved.split.skItersPerWG, 0u);
+                }
 
                 if(admitted == 0)
                 {
@@ -1570,6 +1594,9 @@ namespace
                     RecordProperty("sk_tiles", static_cast<int>(resolved.split.skTiles));
                     RecordProperty("sk_iters_per_wg",
                                    static_cast<int>(resolved.split.skItersPerWG));
+                    RecordProperty("extra_iters",
+                                   static_cast<int>(resolved.split.extraIters));
+                    RecordProperty("leftover_split", leftoverSplit ? 1 : 0);
                 }
                 ++admitted;
 
@@ -1578,7 +1605,9 @@ namespace
                     << " itersPerTile=" << resolved.itersPerTile << " grid=" << resolved.grid
                     << " skTiles=" << resolved.split.skTiles
                     << " skItersPerWG=" << resolved.split.skItersPerWG
-                    << ") and must be honored rather than refused";
+                    << " extraIters=" << resolved.split.extraIters
+                    << (leftoverSplit ? ", leftover per-tile extra-iters" : ", even K-split")
+                    << ") and must be admitted rather than refused";
 
                 const int64_t badRow = harness.firstNonUniformRowOfLastRun();
                 EXPECT_EQ(badRow, -1)
