@@ -428,17 +428,6 @@ protected:
             return fillResult;
         }
 
-        auto missing = _inputFillRecipes.unfilled(leafInputUids);
-        if(!missing.empty())
-        {
-            std::string msg = "unfilled inputs:";
-            for(const int64_t uid : missing)
-            {
-                msg += " uid=" + std::to_string(uid);
-            }
-            return FillResult::unsupported(msg);
-        }
-
         return FillResult::ok();
     }
 
