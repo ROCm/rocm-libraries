@@ -116,14 +116,17 @@ namespace hipblaslt_ext
          *  hipBLASLt guarantees that if every row of matrix A is the identical
          *  vector, every row of the output matrix D is bitwise identical. This is
          *  uniformity across the M dimension within a single run; it is **not**
-         *  run-to-run determinism. Defaults to ``false``. Enabling it restricts
-         *  kernel selection and the launch configuration, so it can reduce
-         *  performance, and ``run()`` returns ``HIPBLAS_STATUS_INVALID_VALUE``
-         *  when no uniform-safe configuration exists for the resolved launch
-         *  rather than silently producing a non-uniform result.
+         *  run-to-run determinism. Defaults to ``false`` (inherit). ``true``
+         *  enables this Gemm even when the handle is off. To enable the mode for
+         *  every GEMM on a handle, use ``hipblasLtSetUniformSummationOrder``.
+         *  Enabling it restricts kernel selection and the launch configuration,
+         *  so it can reduce performance, and ``run()`` returns
+         *  ``HIPBLAS_STATUS_INVALID_VALUE`` when no uniform-safe configuration
+         *  exists for the resolved launch rather than silently producing a
+         *  non-uniform result.
          *
          *  @param[in]
-         *  value  ``true`` to enable the mode, ``false`` (default) to disable it.
+         *  value  ``true`` to enable this Gemm, ``false`` (default) to inherit.
          */
         HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
 

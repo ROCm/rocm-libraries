@@ -3206,7 +3206,9 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 
 // Likewise for the uniform-summation-order request, applied before solution
 // ranking and before each isAlgoSupported query so the selection-time filter
-// and the launch gate see the same value.
+// and the launch gate see the same value. OR into any value already on the
+// problem so a default-false preference cannot clear a desc- or handle-level
+// enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 bool                   value)
@@ -3217,7 +3219,10 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
     {
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(data)
-            data->problem.setParams().setUniformSummationOrder(value);
+        {
+            const bool existing = data->problem.getParams().uniformSummationOrder();
+            data->problem.setParams().setUniformSummationOrder(existing || value);
+        }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -3225,7 +3230,10 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         if(data)
         {
             for(auto& g : data->problem.gemms)
-                g.setParams().setUniformSummationOrder(value);
+            {
+                const bool existing = g.getParams().uniformSummationOrder();
+                g.setParams().setUniformSummationOrder(existing || value);
+            }
         }
     }
 }

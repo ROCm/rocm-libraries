@@ -104,6 +104,13 @@ struct _rocblaslt_handle
     // non-zero, takes precedence over this handle-level value.
     int32_t sm_count_target = 0;
 
+    // Handle-level uniform-summation-order request. Set via
+    // hipblasLtSetUniformSummationOrder. 0 (default) means off; 1 enables
+    // uniform summation order for subsequent GEMMs on this handle. Values
+    // outside {0, 1} are rejected by the setter. There is no per-GEMM
+    // opt-out: a desc or preference of 0 inherits this handle value.
+    int32_t uniform_summation_order = 0;
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;
@@ -220,8 +227,9 @@ struct _rocblaslt_matmul_desc
     int32_t streamk_tile_scheduling_ext = 0;
 
     // Uniform summation order request (HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT).
-    // 0 = off (default), 1 = on; values outside {0, 1} are rejected by the
-    // setter. See hipblaslt.h for the guarantee this offers the caller.
+    // 0 = inherit the handle-level request (default), 1 = on; values outside
+    // {0, 1} are rejected by the setter. See hipblaslt.h for the guarantee
+    // this offers the caller.
     int32_t uniform_summation_order = 0;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
@@ -304,6 +312,23 @@ inline int32_t effective_sm_count_target(const _rocblaslt_handle*            han
         return desc->sm_count_target;
     if(handle)
         return handle->sm_count_target;
+    return 0;
+}
+
+// Resolve the effective uniform-summation-order request for a matmul launch
+// using first-on-wins precedence (C++ preference true, then desc==1, then
+// handle==1). 0 on desc/pref means inherit. There is no per-GEMM opt-out
+// when the handle is on.
+inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      handle,
+                                                 const _rocblaslt_matmul_desc* desc,
+                                                 bool                          pref_uso = false)
+{
+    if(pref_uso)
+        return 1;
+    if(desc && desc->uniform_summation_order)
+        return 1;
+    if(handle && handle->uniform_summation_order)
+        return 1;
     return 0;
 }
 
