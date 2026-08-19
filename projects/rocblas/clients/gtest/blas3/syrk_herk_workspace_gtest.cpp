@@ -96,15 +96,17 @@ namespace
     }
 
     // Owns an exact-sized workspace plus trailing guard; clears handle binding on teardown.
+    // Raw hipMalloc: device_vector<unsigned char> fails on Windows MSVC because
+    // rocblas_init_nan uses std::uniform_int_distribution<unsigned char>.
     class canary_workspace
     {
     public:
         canary_workspace(rocblas_handle handle, size_t workspace_bytes)
             : m_handle(handle)
             , m_workspace_bytes(workspace_bytes)
-            , m_storage(workspace_bytes + c_guard_bytes)
         {
-            if(m_storage.memcheck() != hipSuccess)
+            const size_t total_bytes = workspace_bytes + c_guard_bytes;
+            if(total_bytes > 0 && (hipMalloc)(&m_storage, total_bytes) != hipSuccess)
                 return;
             if(!fill_guard(m_storage, workspace_bytes))
                 return;
@@ -117,23 +119,22 @@ namespace
         {
             if(m_valid)
                 EXPECT_EQ(rocblas_set_workspace(m_handle, nullptr, 0), rocblas_status_success);
+            if(m_storage)
+                EXPECT_EQ((hipFree)(m_storage), hipSuccess);
         }
 
         canary_workspace(const canary_workspace&)            = delete;
         canary_workspace& operator=(const canary_workspace&) = delete;
 
         bool   valid() const { return m_valid; }
-        void*  ptr() const
-        {
-            return const_cast<unsigned char*>(static_cast<const unsigned char*>(m_storage));
-        }
+        void*  ptr() const { return m_storage; }
         size_t bytes() const { return m_workspace_bytes; }
 
     private:
-        rocblas_handle               m_handle;
-        size_t                       m_workspace_bytes = 0;
-        device_vector<unsigned char> m_storage;
-        bool                         m_valid           = false;
+        rocblas_handle m_handle;
+        size_t         m_workspace_bytes = 0;
+        void*          m_storage         = nullptr;
+        bool           m_valid           = false;
     };
 
     // device_vector<T> initializes elements and cannot hold pointer arrays.
@@ -144,13 +145,13 @@ namespace
             : m_count(count)
         {
             if(count > 0)
-                EXPECT_EQ(hipMalloc(&m_ptr, count * sizeof(void*)), hipSuccess);
+                EXPECT_EQ((hipMalloc)(&m_ptr, count * sizeof(void*)), hipSuccess);
         }
 
         ~device_pointer_array()
         {
             if(m_ptr)
-                EXPECT_EQ(hipFree(m_ptr), hipSuccess);
+                EXPECT_EQ((hipFree)(m_ptr), hipSuccess);
         }
 
         device_pointer_array(const device_pointer_array&)            = delete;
