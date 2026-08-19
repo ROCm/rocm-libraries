@@ -798,6 +798,11 @@ void CheckFDBEntry(size_t thread_index,
             miopen::solver::ConvSolution sol;
             auto db         = miopen::GetDb(ctx);
             const auto solv = id.GetSolver();
+            std::cerr << "CALL_DEBUG about to call IsApplicable for solver_id="
+                      << val.solver_id << " id.ToString()=" << id.ToString()
+                      << " id.Value()=" << id.Value() << std::endl;
+            bool applic_result = solv.IsApplicable(ctx, problem);
+            std::cerr << "CALL_DEBUG result=" << applic_result << std::endl;
 
             // Skip MLIR
             if(miopen::StartsWith(id.ToString(), "ConvMlir"))
@@ -807,7 +812,7 @@ void CheckFDBEntry(size_t thread_index,
                 continue;
             }
 
-            if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not solv.IsApplicable(ctx, problem))
+            if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not applic_result)
             {
                 MIOPEN_LOG_W("Inapplicable solver found fdb-key:"
                              << kinder.first << ", pdb-key:" << pdb_key << ", solver:"
@@ -822,7 +827,7 @@ void CheckFDBEntry(size_t thread_index,
             }
             else
             {
-                EXPECT_TRUE(solv.IsApplicable(ctx, problem)) //
+                EXPECT_TRUE(applic_result) //
                     << '[' << (++failures) << "] "           //
                     << "Solver is not applicable fdb-key:" << kinder.first
                     << " Solver: " << id.ToString();
