@@ -272,10 +272,28 @@ public:
     }
 
 private:
+    /// A plan built for a device that was never identified cannot be correct: an
+    /// arch-independent pack (empty `arch` list, itself legal) is admitted by
+    /// `archSupports` regardless of device identity, so the catalog can come back
+    /// non-empty even though no device was actually resolved. Rejecting here, at the
+    /// one `MatchContext` construction site every entry point shares, closes that gap
+    /// once instead of at each caller.
     MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
         const auto deviceId = _deviceResolver.deviceId(handle);
-        return MatchContext{opGraph, deviceId, _deviceResolver.deviceProperties(deviceId)};
+        const auto& deviceProperties = _deviceResolver.deviceProperties(deviceId);
+        if(deviceId == NO_DEVICE || deviceProperties.gcnArchName.empty())
+        {
+            const auto* reason = deviceId == NO_DEVICE
+                                     ? "the device could not be resolved from the handle"
+                                     : "the resolved device reports no gcnArchName";
+            HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '" << _engine.name
+                                                         << "' cannot build a plan: " << reason);
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                        "engine '" + _engine.name
+                                            + "' cannot build a plan: " + reason);
+        }
+        return MatchContext{opGraph, deviceId, deviceProperties};
     }
 
     KnobFilter readKnobFilter(const IEngineConfig& engineConfig) const
