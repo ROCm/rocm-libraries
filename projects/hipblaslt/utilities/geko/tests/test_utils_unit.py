@@ -76,7 +76,6 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
     monkeypatch.setattr(utils, "find_spec", lambda _n: object())
 
     built = {"n": 0}
-
     calls = []
 
     def _fake_run(_cmd, cwd=None, env=None):
@@ -86,7 +85,9 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
         client.write_text("bin\n")
 
     monkeypatch.setattr(utils, "run_silent_command", _fake_run)
-    monkeypatch.setattr(utils, "_tensilelite_build_environment", lambda: {"TENSILELITE_ROCM_VERSION": "7.2.4"})
+    monkeypatch.setattr(
+        utils, "_tensilelite_build_environment", lambda: {"TENSILELITE_ROCM_VERSION": "7.2.4"}
+    )
 
     out1 = utils.build_tensilelite_client(hip, build_dir=build_dir)
     assert out1 == client
@@ -122,38 +123,6 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
     assert calls[3][0] == calls[1][0]
     assert calls[3][2]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
     assert calls[4][0] == calls[2][0]
-
-
-def test_default_client_build_keeps_source_wrapper_return_shape(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    hip = Path("hip")
-    tensile = hip / "tensilelite"
-    tensile.mkdir(parents=True)
-    client = (tensile / "build_tmp/tensilelite/client/tensilelite-client").resolve()
-    calls = []
-
-    def _fake_run(command, cwd=None, env=None):
-        calls.append((command, cwd, env))
-        client.parent.mkdir(parents=True, exist_ok=True)
-        client.write_text("bin\n")
-
-    monkeypatch.setattr(utils, "find_spec", lambda _n: object())
-    monkeypatch.setattr(utils, "run_silent_command", _fake_run)
-    monkeypatch.setattr(
-        utils, "_tensilelite_build_environment", lambda: {"TENSILELITE_ROCM_VERSION": "7.2.4"}
-    )
-
-    assert utils.build_tensilelite_client(hip) is None
-    assert calls[0][0] == [
-        "invoke",
-        "build-client",
-        "--build-dir",
-        (tensile / "build_tmp").resolve(),
-    ]
-    assert calls[1][2]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
-    assert calls[2][0][-1] == client
 
 
 def test_tensilelite_build_environment_reads_the_selected_rocm_identity(

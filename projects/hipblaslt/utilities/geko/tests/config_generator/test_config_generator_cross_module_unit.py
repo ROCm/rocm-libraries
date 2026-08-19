@@ -37,7 +37,7 @@ def _cfg(
 ) -> dict:
     dd = dd or dt
     cd = cd or ("S" if dt not in ("D", "Z") else dt)
-    gt = GemmType.from_tensile(trans_a, trans_b, dt, dd, cd)
+    gt = GemmType.from_tensilelite(trans_a, trans_b, dt, dd, cd)
     return {
         "ARCH": arch,
         "CUs": 256 if arch.startswith("gfx950") else 304,
@@ -67,9 +67,9 @@ def test_param_meta_helpers_and_loader_cache(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setitem(sys.modules, "tensilelite.Common.GlobalParameters", gp_mod)
     monkeypatch.setitem(sys.modules, "tensilelite.Common.ValidParameters", vp_mod)
 
-    pm.load_tensile_metadata.cache_clear()
-    m1 = pm.load_tensile_metadata()
-    m2 = pm.load_tensile_metadata()
+    pm.load_tensilelite_metadata.cache_clear()
+    m1 = pm.load_tensilelite_metadata()
+    m2 = pm.load_tensilelite_metadata()
     assert m1 is m2
     assert set(m1.keys()) == {"A", "B"}
     assert m1["A"].default_value == 11
@@ -77,7 +77,7 @@ def test_param_meta_helpers_and_loader_cache(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_registry_and_fork_generator_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
 
     c0 = _cfg(arch="gfx950", search_space="heuristic")
     assert isinstance(get_optimization_params(c0), g950_opt.GFX950Params)
@@ -123,7 +123,7 @@ def test_registry_and_fork_generator_paths(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_post_processors_and_optimization_profiles(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
 
     def _calc(mi):
         if mi.M == 16:
@@ -194,7 +194,7 @@ def test_config_generator_orchestrators(monkeypatch: pytest.MonkeyPatch, tmp_pat
     real_run_per_gemm_type = cg._run_per_gemm_type
     monkeypatch.setattr(cg, "build_tensilelite_client", lambda *_a, **_k: tmp_path / "client")
 
-    gt = GemmType.from_tensile("N", "N", "H", "H", "S")
+    gt = GemmType.from_tensilelite("N", "N", "H", "H", "S")
     gp0 = type("GP", (), {"gemm_type": gt, "sizes": [[16, 16, 1, 16]]})()
     gp1 = type("GP", (), {"gemm_type": gt, "sizes": [[32, 32, 1, 32]]})()
 

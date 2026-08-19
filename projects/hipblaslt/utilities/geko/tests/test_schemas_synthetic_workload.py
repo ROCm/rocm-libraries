@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tensile and hipBLASLt workload rows; compatibility with bench.log.parse."""
+"""TensileLite and hipBLASLt workload rows; compatibility with bench.log.parse."""
 
 from pathlib import Path
 
@@ -36,14 +36,14 @@ def test_tensile_triple_mixed_bh():
 
 
 def test_workload_log_rows_keys_and_sample_values():
-    gt = GemmType.from_tensile("N", "T", "B", "B", "S")
+    gt = GemmType.from_tensilelite("N", "T", "B", "B", "S")
     row = GemmConfig(gt, [[1024, 1024, 1, 1024]]).workload_log_rows()[0]
     assert set(row) == set(GEMM_LOG_FIELDS)
     assert row["M"] == 1024 and row["transB"] == "T"
 
 
 def test_single_gemm_workload_parseable(tmp_path: Path):
-    gt = GemmType.from_tensile("N", "T", "B", "B", "S")
+    gt = GemmType.from_tensilelite("N", "T", "B", "B", "S")
     rows = GemmConfig(gt, [[128, 256, 2, 512]]).workload_log_rows()
     assert len(rows) == 1
     ypath = tmp_path / "w.yaml"
@@ -55,7 +55,7 @@ def test_single_gemm_workload_parseable(tmp_path: Path):
 
 
 def test_workload_log_rows_tensile_only():
-    gt = GemmType.from_tensile("N", "N", "B", "B", "S")
+    gt = GemmType.from_tensilelite("N", "N", "B", "B", "S")
     rows = GemmConfig(gt, [[64, 64, 1, 64]]).workload_log_rows()
     assert len(rows) == 1
     assert set(rows[0]) == set(GEMM_LOG_FIELDS)
@@ -68,15 +68,15 @@ def test_workload_log_rows_with_logical():
 
 
 def test_workload_log_rows_multi_sizes():
-    gt = GemmType.from_tensile("N", "N", "B", "B", "S")
+    gt = GemmType.from_tensilelite("N", "N", "B", "B", "S")
     rows = GemmConfig(gt, [[64, 64, 1, 64], [128, 128, 1, 128]]).workload_log_rows()
     assert len(rows) == 2
     assert rows[0]["M"] == 64 and rows[1]["M"] == 128
 
 
 def test_workload_log_rows_concat_multiple_configs():
-    g1 = GemmConfig(GemmType.from_tensile("N", "N", "B", "B", "S"), [[8, 8, 1, 8]])
-    g2 = GemmConfig(GemmType.from_tensile("N", "T", "H", "H", "S"), [[16, 16, 1, 16]])
+    g1 = GemmConfig(GemmType.from_tensilelite("N", "N", "B", "B", "S"), [[8, 8, 1, 8]])
+    g2 = GemmConfig(GemmType.from_tensilelite("N", "T", "H", "H", "S"), [[16, 16, 1, 16]])
     rows: list[dict] = []
     for gc in (g1, g2):
         rows.extend(gc.workload_log_rows())
@@ -114,16 +114,16 @@ def test_gemmtype_validation_errors() -> None:
 
 
 def test_tensile_mapper_error_paths() -> None:
-    with pytest.raises(ValueError, match="Unknown Tensile DataType letter"):
+    with pytest.raises(ValueError, match="Unknown TensileLite DataType letter"):
         GemmType._tensile_triple_to_hipblaslt("Q", "B", "S")
 
     with pytest.raises(ValueError, match="must be 1 or 2 letters"):
         GemmType._tensile_triple_to_hipblaslt("ABC", "B", "S")
 
-    with pytest.raises(ValueError, match="Unknown Tensile DestDataType letter"):
+    with pytest.raises(ValueError, match="Unknown TensileLite DestDataType letter"):
         GemmType._tensile_triple_to_hipblaslt("B", "Q", "S")
 
-    with pytest.raises(ValueError, match="Unknown Tensile ComputeDataType letter"):
+    with pytest.raises(ValueError, match="Unknown TensileLite ComputeDataType letter"):
         GemmType._tensile_triple_to_hipblaslt("B", "B", "Q")
 
 
@@ -133,7 +133,7 @@ def test_hipblaslt_to_tensile_tf32_invalid_combo_raises() -> None:
 
 
 def test_gemmconfig_validation_and_row_key_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    gt = GemmType.from_tensile("N", "N", "B", "B", "S")
+    gt = GemmType.from_tensilelite("N", "N", "B", "B", "S")
     with pytest.raises(ValueError, match="non-empty list"):
         GemmConfig(gt, [])
 
@@ -172,25 +172,25 @@ def test_runstate_dump_load_and_verify_failures(tmp_path: Path) -> None:
 
 
 def test_cgemm_conjugate_transpose_accepted() -> None:
-    gt = GemmType.from_tensile("N", "C", "C", "C", "C")
+    gt = GemmType.from_tensilelite("N", "C", "C", "C", "C")
     assert gt.transA == "N" and gt.transB == "C"
     assert gt.gemm_name == "CCC_NC"
 
 
 def test_zgemm_both_conjugate_transpose() -> None:
-    gt = GemmType.from_tensile("C", "C", "Z", "Z", "Z")
+    gt = GemmType.from_tensilelite("C", "C", "Z", "Z", "Z")
     assert gt.transA == "C" and gt.transB == "C"
     assert gt.gemm_name == "ZZZ_CC"
 
 
 def test_conjugate_transpose_rejected_for_real_types() -> None:
     with pytest.raises(ValueError, match="conjugate-transpose"):
-        GemmType.from_tensile("C", "N", "B", "B", "S")
+        GemmType.from_tensilelite("C", "N", "B", "B", "S")
 
 
 def test_conjugate_transpose_rejected_transB_real() -> None:
     with pytest.raises(ValueError, match="conjugate-transpose"):
-        GemmType.from_tensile("N", "C", "S", "S", "S")
+        GemmType.from_tensilelite("N", "C", "S", "S", "S")
 
 
 def test_cgemm_hipblaslt_roundtrip() -> None:

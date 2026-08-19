@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=9,
         metavar=("M", "N", "batch", "K", "DataType", "DestDataType", "ComputeDataType", "transA", "transB"),
         help=(
-            "Single GEMM: M N batch_count K, Tensile DataType / DestDataType / ComputeDataType "
+            "Single GEMM: M N batch_count K, TensileLite DataType / DestDataType / ComputeDataType "
             "(e.g. B B S), transA and transB each N, T, or C (conjugate-transpose, complex only) "
             "(e.g. --inline 1024 1024 1 1024 B B S N T)"
         ),
@@ -331,7 +331,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
     elif args.inline is not None:
         m, n, batch_count, k, data_t, dest_t, comp_t, trans_a, trans_b = args.inline
         try:
-            gtype = GemmType.from_tensile(trans_a, trans_b, data_t, dest_t, comp_t)
+            gtype = GemmType.from_tensilelite(trans_a, trans_b, data_t, dest_t, comp_t)
             rows = GemmConfig(gtype, [[m, n, batch_count, k]]).workload_log_rows()
         except ValueError as e:
             logger.error(str(e))

@@ -938,7 +938,7 @@ gemm_type = GemmType.from_hipblaslt(
     "T", "N", "f16_r", "f16_r", "f16_r", "f32_r"
 )
 # Or from tensilelite YAML codes only:
-# gemm_type = GemmType.from_tensile("N", "T", "H", "H", "S")
+# gemm_type = GemmType.from_tensilelite("N", "T", "H", "H", "S")
 
 gemm_config = GemmConfig(
     gemm_type=gemm_type,
