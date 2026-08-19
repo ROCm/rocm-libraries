@@ -174,6 +174,26 @@ def test_changed_ambr_files_empty_when_nothing_changed(repo: _Repo):
     assert csd.changed_ambr_files(base_sha, head_sha, repo.root, CHAR_DIR) == []
 
 
+def test_changed_ambr_files_excludes_pure_renames(repo: _Repo):
+    # git detects a byte-identical move as a rename (status R) by default; a pure
+    # rename changes no pinned content (e.g. a test function renamed, carrying its
+    # golden along untouched), so it must not count toward the threshold.
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    original = repo.root / f"{CHAR_DIR}/DataType/__snapshots__/test_datatype_char.ambr"
+    renamed = repo.root / f"{CHAR_DIR}/DataType/__snapshots__/test_datatype_v2_char.ambr"
+    renamed.write_bytes(original.read_bytes())
+    original.unlink()
+    head_sha = repo.commit("rename a golden, content untouched")
+
+    # Confirm git actually detected this as a rename (not add+delete) before
+    # asserting on the guard's behavior, so the test fails loudly if git's default
+    # rename-detection heuristics ever change out from under it.
+    statuses = repo._git("diff", "--name-status", "--diff-filter=R", base_sha, head_sha).strip()
+    assert statuses, "expected git to detect this as a rename"
+
+    assert csd.changed_ambr_files(base_sha, head_sha, repo.root, CHAR_DIR) == []
+
+
 # --------------------------------------------------------------------------- #
 # changed_adr_files                                                          #
 # --------------------------------------------------------------------------- #
