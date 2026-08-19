@@ -185,8 +185,11 @@ namespace rocsparse
         constexpr uint32_t BSRMMNN_DIM = 64;
         constexpr uint32_t SUB_WF_SIZE = 8;
 
+        // grid.y is capped at 65,535; the kernel grid-strides over column panels
+        // beyond that cap (see bsrmmnn_small_blockdim_device).
         const dim3 bsrmm_blocks((m - 1) / (BSRMMNN_DIM / SUB_WF_SIZE) + 1,
-                                (n - 1) / SUB_WF_SIZE + 1);
+                                std::min(static_cast<J>((n - 1) / SUB_WF_SIZE + 1),
+                                         static_cast<J>(65535)));
         const dim3 bsrmm_threads(BSRMMNN_DIM);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrmmnn_small_blockdim_kernel<BSRMMNN_DIM, SUB_WF_SIZE, 2>),

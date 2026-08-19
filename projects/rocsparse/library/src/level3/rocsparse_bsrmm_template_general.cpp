@@ -125,7 +125,11 @@ namespace rocsparse
         hipStream_t stream = handle->stream;
         rocsparse_host_assert(block_dim > 32, "This function is designed for block_dim > 32.");
 
-        const dim3 bsrmm_blocks((mb - 1) / 1 + 1, (n - 1) / 32 + 1);
+        // grid.y is capped at 65,535; the kernel grid-strides over column panels
+        // beyond that cap (see bsrmm_general_blockdim_device).
+        const dim3 bsrmm_blocks((mb - 1) / 1 + 1,
+                                std::min(static_cast<J>((n - 1) / 32 + 1),
+                                         static_cast<J>(65535)));
         const dim3 bsrmm_threads(32, 32, 1);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrmm_general_blockdim_kernel<32, 32>),
                                            bsrmm_blocks,
