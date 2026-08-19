@@ -37,12 +37,14 @@ def _resolve_version(
     )
 
 
-def test_therock_uses_warned_provisional_identity_before_validation(tmp_path):
-    result = _resolve_version(tmp_path)
+@pytest.mark.parametrize("package_version", [None, "", "git"])
+def test_therock_requires_forwarded_release_identity(tmp_path, package_version):
+    result = _resolve_version(tmp_path, package_version=package_version)
 
-    assert result.returncode == 0, result.stderr
-    assert "resolved=0.0.0" in result.stdout
-    assert "temporary 0.0.0 ROCm identity" in " ".join(result.stderr.split())
+    assert result.returncode != 0
+    assert "requires a release THEROCK_PACKAGE_VERSION" in " ".join(
+        result.stderr.split()
+    )
 
 
 def test_therock_prefers_forwarded_package_identity(tmp_path):

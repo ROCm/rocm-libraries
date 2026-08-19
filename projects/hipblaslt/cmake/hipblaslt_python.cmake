@@ -38,13 +38,9 @@ function(hipblaslt_resolve_build_rocm_version output)
     if(HIPBLASLT_ENABLE_THEROCK)
         if(THEROCK_PACKAGE_VERSION AND NOT THEROCK_PACKAGE_VERSION STREQUAL "git")
             set(_version "${THEROCK_PACKAGE_VERSION}")
-        elseif(THEROCK_ROCM_VERSION)
-            set(_version "${THEROCK_ROCM_VERSION}")
         else()
-            message(WARNING
-                "TheRock did not forward a ROCm package identity; using the "
-                "temporary 0.0.0 ROCm identity while validation is disabled")
-            set(_version "0.0.0")
+            message(FATAL_ERROR
+                "HIPBLASLT_ENABLE_THEROCK requires a release THEROCK_PACKAGE_VERSION")
         endif()
     else()
         hipblaslt_resolve_build_rocm_root(_root)
