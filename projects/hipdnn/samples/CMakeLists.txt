@@ -250,9 +250,13 @@ add_test(NAME ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
 set_property(GLOBAL APPEND PROPERTY HIPDNN_SAMPLE_TEST_TARGETS
                                     ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
 )
+# The sample returns 0 from RETURN_SUCCESS_IF_NO_DEVICE() before it reads --engine-name, so on a
+# GPU-less runner the warning never prints. SKIP_REGULAR_EXPRESSION outranks an unmatched
+# PASS_REGULAR_EXPRESSION, so that run reports Skipped rather than a missing-regex failure.
 set_tests_properties(
-    ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST} PROPERTIES PASS_REGULAR_EXPRESSION
-                                                  "no loaded engine carries"
+    ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
+    PROPERTIES PASS_REGULAR_EXPRESSION "no loaded engine carries" SKIP_REGULAR_EXPRESSION
+               "SKIPPED: No GPU devices available"
 )
 if(TEST_ENVIRONMENT)
     set_tests_properties(${HIPDNN_UNKNOWN_ENGINE_NAME_TEST} PROPERTIES ENVIRONMENT
@@ -275,7 +279,8 @@ file(APPEND "${INSTALLED_CTEST_FILE}"
      "add_test(${HIPDNN_UNKNOWN_ENGINE_NAME_TEST} \"../hipdnn_sample_conv_fprop\""
      " \"${HIPDNN_UNKNOWN_ENGINE_NAME_INSTALLED_ARGS}\")\n"
      "set_tests_properties(${HIPDNN_UNKNOWN_ENGINE_NAME_TEST} PROPERTIES"
-     " PASS_REGULAR_EXPRESSION \"no loaded engine carries\")\n"
+     " PASS_REGULAR_EXPRESSION \"no loaded engine carries\""
+     " SKIP_REGULAR_EXPRESSION \"SKIPPED: No GPU devices available\")\n"
 )
 
 if(NOT WIN32)
