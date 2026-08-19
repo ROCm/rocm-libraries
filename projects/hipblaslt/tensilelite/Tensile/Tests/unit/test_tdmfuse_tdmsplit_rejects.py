@@ -44,6 +44,12 @@ is here for that row is the cross-product cell and the one clause that file does
 not reach, the sparse metadata tensor. Rows 2, 4 and 6 are covered here outright:
 before this file row 2 had one message pinned, row 4 none, and row 6 one.
 
+One guard covered here is not a TDMFuse row at all. TDMWaveSpread's macro-tile
+divisibility check sits inside row 6's envelope, because it is only reachable
+once tdmDealiasAB has accepted the grouping, and it is the one guard in this
+file whose removal changes no solution's validity at all. The last section says
+why that makes it the most deletable-looking live guard in the block.
+
 The TDMSplit axis is the one worth stating outright, because it is not uniform:
 
     TDMFuse   0     2       4     5       6
@@ -596,3 +602,108 @@ def test_subtile_is_refused_before_the_grouping_is_considered(
     assert sol.get("Valid") is False
     assert "Unable to load MXSB scales using one load per wave" in out
     assert "not available with UseSubtileImpl" not in out
+
+
+# ---------------------------------------------------------------------------
+# TDMWaveSpread's macro-tile divisibility guard. It lives inside row 6's
+# envelope, and it is the only guard in this file whose removal changes no
+# solution's validity.
+# ---------------------------------------------------------------------------
+# MacroTile0 = MatrixInstM * MIWaveTile[0] * MIWaveGroup[0], and the component
+# count TDMWaveSpread=1 asks for is NumWaves = MIWaveGroup[0] * MIWaveGroup[1].
+# The MIWaveGroup[0] factor is on both sides and cancels, so divisibility turns
+# on nothing but
+#
+#     (MatrixInstM * MIWaveTile[0]) % MIWaveGroup[1] == 0
+#
+# At MatrixInstM=16 the numerator is a multiple of 16, so the only way to fail
+# is MIWaveGroup[1] > 16 * MIWaveTile[0]: MIWaveTile[0]=1 against
+# MIWaveGroup[1]=32, where the macro tile is SMALLER than the number of
+# components it is being cut into. Any shape with a macro tile of 32 or more on
+# the split axis divides evenly, which is why a probe over ordinary tile sizes
+# reports this guard as unreachable and is wrong.
+#
+# Why it needs asserting by message rather than by validity. The blanket "not
+# implemented" reject is last in the same block, so TDMWaveSpread=1 is refused
+# either way and deleting the divisibility check moves no solution from invalid
+# to valid. A test that asserted only `Valid is False` would pass with the guard
+# gone, and anyone measuring the guard by its effect rather than its text would
+# conclude it does nothing. It does: `mt // numComp` downstream is a tile
+# extent, and a truncating divide silently drops rows. When the two dispatch
+# sites that hardcode the two-way parity are generalized and the blanket reject
+# goes, this check is the only thing between that divide and a kernel that
+# transfers part of each tile.
+
+
+def _spread_shape(waveTile, waveGroup):
+    """A MatrixInstruction and the WorkGroup that agrees with it.
+
+    WorkGroup[1] has to be NumWaves or the derivation reports a wave count the
+    instruction does not describe, and NumWaves is exactly the component count
+    the guard divides by, so the two cannot be varied independently.
+    """
+    return {
+        "MatrixInstruction": [16, 16, 128, 1, 1, waveTile[0], waveTile[1],
+                              waveGroup[0], waveGroup[1]],
+        "WorkGroup": [32, waveGroup[0] * waveGroup[1], 1],
+    }
+
+
+@pytest.mark.parametrize(
+    "waveTile,waveGroup,tc,mtKey,extent,numComp",
+    [
+        ((1, 1), (1, 32), "A", "MacroTile0", 16, 32),
+        ((1, 1), (32, 1), "B", "MacroTile1", 16, 32),
+        ((1, 1), (2, 32), "A", "MacroTile0", 32, 64),
+    ],
+    ids=["A_16_over_32", "B_16_over_32", "A_32_over_64"],
+)
+def test_wave_spread_refuses_a_macro_tile_smaller_than_its_component_count(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys,
+        waveTile, waveGroup, tc, mtKey, extent, numComp):
+    """Both tensors, and a component count above the two that fail at 32.
+
+    The A and B cases are one reject site inside a loop over the two tensors,
+    but they read different macro tiles, so a loop written over one axis twice
+    is a defect this pair catches and a single-tensor test would not. The third
+    case moves the component count instead of the tile, which pins the guard to
+    the arithmetic rather than to the constant 32.
+
+    The numbers are asserted because they ARE the mechanism here -- a guard that
+    divided by the wrong quantity would still say "not divisible".
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=6,
+                       TDMWaveSpread=1, **_spread_shape(waveTile, waveGroup))
+    assert sol.get("Valid") is False
+    assert "splits %s into %d components" % (tc, numComp) in out
+    assert "%s=%d is not divisible by %d" % (mtKey, extent, numComp) in out
+    assert "per-wave tile extent would truncate" in out
+    # The blanket reject sits immediately below and refuses the same solution.
+    # Without this line the test passes with the guard above deleted, which is
+    # the whole reason the divisibility check is asserted by message.
+    assert "is not implemented" not in out
+
+
+@pytest.mark.parametrize(
+    "waveTile,waveGroup",
+    [((2, 1), (1, 32)), ((1, 2), (32, 1)), ((1, 1), (1, 16))],
+    ids=["wave_tile_doubles_the_tile", "same_on_B", "wave_group_halves_comps"],
+)
+def test_wave_spread_divisibility_is_satisfied_and_the_blanket_reject_shows(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, waveTile, waveGroup):
+    """The other side of the same arithmetic, which is what makes the pair mean
+    something.
+
+    Each of these is one step from a case above -- twice the wave tile, or half
+    the wave groups -- and each satisfies divisibility, so the reject that
+    appears is the blanket one below. Two facts at once: the guard is reading
+    the quantities it claims to, and these wave groups do survive the earlier
+    TDMWaveSpread guards, so nothing upstream refuses them and the cases above
+    really do reach the divisibility check.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=6,
+                       TDMWaveSpread=1, **_spread_shape(waveTile, waveGroup))
+    assert sol.get("Valid") is False
+    assert "TDMWaveSpread=1 is not implemented" in out
+    assert "two-way wave-parity gate" in out
+    assert "not divisible by" not in out

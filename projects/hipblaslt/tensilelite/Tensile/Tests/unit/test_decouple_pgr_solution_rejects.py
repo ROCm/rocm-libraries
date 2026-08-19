@@ -46,9 +46,14 @@ them are worth the trouble on their own:
 Three of the rejects in this block cannot be reached on gfx1250 and are
 deliberately not tested, because a test that cannot fail is worse than no test:
 
-  - DirectToLds. gfx1250 reports HasDirectToLds=0, so isDirectToLdsDoable
-    clears DirectToLdsA/B before this reject reads them. Measured: requesting
-    both leaves the solution valid with both keys False.
+  - DirectToLds, ON THIS TARGET ONLY -- the finding is arch-scoped and is not
+    a statement about the guard. gfx1250 reports HasDirectToLds=0, so
+    isDirectToLdsDoable clears DirectToLdsA/B before this reject reads them;
+    measured, requesting both leaves the solution valid with both keys False.
+    On a target where HasDirectToLds is 1 the keys survive and this reject is
+    live, so it must not be removed on the strength of this note. What cannot
+    be written is a gfx1250 test: it would pass with the guard deleted, which
+    is the vacuous kind this file is trying not to add.
   - UseSubtileImpl. On the MX shape the feature needs, the subtile pipeline is
     refused earlier by "Unable to load MXSB scales using one load per wave".
   - TDMInst != 3. Refused earlier still, by "TDMA and TDMB must be enabled
