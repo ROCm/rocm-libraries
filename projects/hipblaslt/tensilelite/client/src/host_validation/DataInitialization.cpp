@@ -44,7 +44,7 @@ namespace TensileLite::Client
         using roc::host_validation::ScalarType;
         using roc::host_validation::Shape;
         using roc::host_validation::StructuredSparsityPattern;
-        using roc::host_validation::StructuredSparsityProblem;
+        using roc::host_validation::StructuredSparsityRequest;
         using roc::host_validation::StructuredSparsitySelection;
         using roc::host_validation::StructuredSparsitySliceRange;
         using roc::host_validation::Tensor;
@@ -541,9 +541,12 @@ namespace TensileLite::Client
         Tensor prunedTensor(scalarType, denseLayout, prunedStorage);
         Tensor compressedTensor(scalarType, compressedLayout, compressedStorage);
         Tensor metadataTensor(ScalarType::UInt8, metadataTensorLayout, metadataStorage);
-        StructuredSparsityProblem problem(
-            prunedTensor, prunedTensor, compressedTensor, sparsePattern(mode, dim));
-        problem.twoOfFourMetadata = metadataTensor;
+        StructuredSparsityRequest request(prunedTensor,
+                                          prunedTensor,
+                                          compressedTensor,
+                                          std::nullopt,
+                                          metadataTensor,
+                                          sparsePattern(mode, dim));
 
         const size_t sliceCount = tensor.totalLogicalElements() / tensor.sizes()[dim];
         if(sliceCount == 0)
@@ -569,7 +572,7 @@ namespace TensileLite::Client
             const size_t firstSlice = sliceCount * static_cast<size_t>(chunk) / chunkCount;
             const size_t endSlice   = sliceCount * static_cast<size_t>(chunk + 1) / chunkCount;
             roc::host_validation::applyStructuredSparsity(
-                problem,
+                request,
                 StructuredSparsitySliceRange{.firstSlice = firstSlice,
                                              .sliceCount = endSlice - firstSlice});
         }

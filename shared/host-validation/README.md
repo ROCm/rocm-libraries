@@ -588,10 +588,10 @@ pattern.retainedElements = 2;
 pattern.fixedPositions = {0, 2};
 
 StructuredSparsityProblem problem(
-    inputView, prunedView, compressedView, pattern);
-problem.twoOfFourMetadata = metadataView; // optional fused output
-
-StructuredSparsityRunInfo run = applyStructuredSparsity(problem);
+    inputTensor,
+    pattern,
+    {.retainedIndices = true, .twoOfFourMetadata = true});
+StructuredSparsityResult result = applyStructuredSparsity(problem);
 ```
 
 The operation supports:
@@ -603,6 +603,11 @@ The operation supports:
 - optional retained-position indices;
 - optional fused 2:4 metadata encoding; and
 - independent slice ranges for caller-selected parallel scheduling.
+
+A problem's owning overload derives contiguous output shapes and accepts an
+optional `TensorStorageAllocator`. `StructuredSparsityRequest` binds existing
+destinations, permits exact input/pruned in-place operation, and exposes slice
+ranges. Every other input/output storage overlap is rejected.
 
 A slice is one logical combination of all coordinates except the sparsity
 axis. Product adapters may partition slices with OpenMP or another host
