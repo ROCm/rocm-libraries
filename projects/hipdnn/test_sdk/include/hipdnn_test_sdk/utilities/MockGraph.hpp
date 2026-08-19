@@ -26,6 +26,13 @@ public:
             .WillByDefault(::testing::ReturnRef(
                 *flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
                     _defaultGraphBuffer.GetBufferPointer())));
+        // Kept consistent with the getGraph() default above: the bytes a caller
+        // retains must be the same buffer getGraph() reads, or a content key built
+        // from this mock would not match the graph the mock reports.
+        ON_CALL(*this, bytes())
+            .WillByDefault(
+                ::testing::Return(hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView{
+                    _defaultGraphBuffer.GetBufferPointer(), _defaultGraphBuffer.GetSize()}));
     }
 
     MOCK_METHOD(const hipdnn_flatbuffers_sdk::data_objects::Graph&,
@@ -56,6 +63,10 @@ public:
     MOCK_METHOD(const std::vector<
                     std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper>>&,
                 nodeWrappers,
+                (),
+                (const, override));
+    MOCK_METHOD(hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView,
+                bytes,
                 (),
                 (const, override));
 

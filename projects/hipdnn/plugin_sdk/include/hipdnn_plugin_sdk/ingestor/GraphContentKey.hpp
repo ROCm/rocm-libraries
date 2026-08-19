@@ -9,9 +9,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/cachekey_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
@@ -33,19 +34,20 @@ namespace hipdnn_plugin_sdk::ingestor
 ///
 /// Conflating them is what makes a content key expensive:
 ///
-///  - `hash` narrows the lookup to a bucket. It may be lossy. It is folded from a few
-///    cheap facts read in place -- no allocation, no serialization.
-///  - `content` decides the match, via the schema-generated
-///    `operator==(const GraphT&, const GraphT&)`. That comparison walks every tensor,
-///    every node and the whole attribute union, and codegen keeps it current, so a new
-///    `graph.fbs` field cannot silently stop being compared.
+///  - `hash` narrows the lookup to a bucket. It may be lossy.
+///  - `logicallyEqual` decides the match.
+///
+/// Both come from `cachekey_generated.h`, generated from `graph.fbs`, so a new schema
+/// field is hashed and compared the day it is added -- the policy is opt-out. Both read
+/// the buffer in place: no `UnPack`, no allocation, no reflection.
 ///
 /// A hash match with differing content is therefore a miss, not a wrong kernel.
 ///
 /// # The excluded fields, and why each transfers
 ///
-/// Excluded by clearing them on the unpacked copy, so exclusion is code that runs rather
-/// than a list someone remembered to skip:
+/// Exclusion lives on the field in `graph.fbs`, as `(cache_ignore)`, next to the comment
+/// explaining what the field means. Nothing here re-states the list, and nothing has to
+/// remember to skip anything:
 ///
 ///  - `id` -- minted per finalize by `generateUuidV4()`, so it differs on every run of
 ///    the same program. Including it would make every lookup a miss and defeat the cache
@@ -60,6 +62,13 @@ namespace hipdnn_plugin_sdk::ingestor
 ///    actually run, and they are compared in full. So the flag alters what the caller is
 ///    *allowed* to do later, never the geometry a kernel was timed against -- a
 ///    measurement transfers across it unchanged.
+///  - `min_required_engine_api_version` -- derived, never independent content: stamped
+///    from `computeMinimumEnginePluginApiVersion(...)`. Comparing it would silently
+///    undo the `is_override_shape_enabled` exclusion above, since that flag alone moves
+///    the stamped version. Its content-bearing inputs -- pass-by-value, ragged offsets,
+///    alignment -- are each compared directly on the `TensorAttributes` that carry them.
+///  - the `name` on the graph, each node and each tensor -- labels for humans. Two
+///    identically-shaped graphs run the same kernels whatever they are called.
 ///
 /// Everything else is compared, including tensor dims and strides, every node's
 /// attributes, and all three graph-level data types -- each of those genuinely changes
@@ -67,22 +76,22 @@ namespace hipdnn_plugin_sdk::ingestor
 ///
 /// # Cost
 ///
-/// One `UnPack` per key: a deep copy, since `NodeT` owns a `std::string` and a
-/// `NodeAttributesUnion` that heap-allocates its payload. Paid once per `buildPlan`, on a
-/// path otherwise about to rank the catalog or run a device benchmark sweep, and it buys
-/// the ability to skip the former outright.
+/// One contiguous copy of the serialized graph per key, because a cached record outlives
+/// the caller's buffer. That is a single `memcpy` of a few KB and the retained bytes are
+/// the wire format itself -- no per-node allocation, and the comparison reads them
+/// directly.
 class GraphContentKey
 {
 public:
-    /// The unpacked, policy-stripped graph this key matched on. Shared because a record
-    /// outlives the plan that produced it, and copies of the key must not deep-copy the
-    /// graph.
-    using Content = std::shared_ptr<const hipdnn_flatbuffers_sdk::data_objects::GraphT>;
+    /// The serialized graph this key matched on, kept as the wire bytes. Shared because
+    /// a record outlives the plan that produced it, and copies of the key must not
+    /// re-copy the buffer.
+    using Content = std::shared_ptr<const std::vector<uint8_t>>;
 
     GraphContentKey() = default;
 
     explicit GraphContentKey(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
-        : _content(unpackWithoutIdentity(graph))
+        : _content(retain(graph))
         , _hash(fold(graph))
     {
     }
@@ -97,19 +106,21 @@ public:
         return _content;
     }
 
-    /// Hash first because it rejects almost every non-match without touching the graphs;
-    /// the structural comparison then decides the survivors.
+    /// Hash first because it rejects almost every non-match without reading either
+    /// graph; the structural comparison then decides the survivors.
     bool operator==(const GraphContentKey& other) const
     {
         if(_hash != other._hash)
         {
             return false;
         }
-        if(_content == nullptr || other._content == nullptr)
+        const auto* left = root();
+        const auto* right = other.root();
+        if(left == nullptr || right == nullptr)
         {
-            return _content == other._content;
+            return left == right;
         }
-        return *_content == *other._content;
+        return hipdnn_flatbuffers_sdk::data_objects::cachekey::logicallyEqual(left, right);
     }
 
     bool operator!=(const GraphContentKey& other) const
@@ -129,110 +140,42 @@ protected:
     }
 
 private:
-    /// Unpacks into an owned object so the excluded fields can simply be cleared. The
-    /// generated `operator==` compares `id` (graph_generated.h:1313) and both policy
-    /// fields (:1310-1311), so clearing them here is what makes equality mean "same
-    /// computation" rather than "same request".
-    static Content
-        unpackWithoutIdentity(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
+    /// Copies the verified buffer. `IGraph` is a view over storage this key does not
+    /// own and will outlive, and the bytes are already the comparison's input format,
+    /// so the copy is one memcpy rather than a graph reconstruction.
+    static Content retain(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
     {
-        auto content = std::shared_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>(
-            graph.getGraph().UnPack());
-        if(content != nullptr)
+        const auto bytes = graph.bytes();
+        if(bytes.data == nullptr || bytes.size == 0)
         {
-            // Each is cleared to the value a default-constructed GraphT carries, so two
-            // graphs differing only in these compare equal. The types differ -- `id` is a
-            // unique_ptr, `preferred_engine_id` a flatbuffers::Optional -- so this cannot
-            // be one uniform reset.
-            content->id.reset();
-            content->preferred_engine_id = ::flatbuffers::nullopt;
-            content->is_override_shape_enabled = false;
-
-            // Derived, never independent content: the backend stamps this from
-            // computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
-            // isRuntimePassByValue, isRaggedTensorEnabled, hasNonDefaultTensorAlignment)
-            // (PluginVersionConstants.hpp:58-93). Leaving it would silently defeat the
-            // is_override_shape_enabled exclusion directly above, because that flag alone
-            // moves the stamped version and operator== compares it
-            // (graph_generated.h:1312). Clearing it loses nothing: the three
-            // content-bearing inputs -- pass-by-value, ragged offsets, alignment -- are
-            // each compared directly on the TensorAttributes that carry them, so a graph
-            // genuinely differing in any of them still compares unequal.
-            content->min_required_engine_api_version.reset();
+            return nullptr;
         }
-        return content;
+        return std::make_shared<const std::vector<uint8_t>>(bytes.data, bytes.data + bytes.size);
     }
 
-    /// Cheap, allocation-free facts only: enough to scatter distinct graphs across
-    /// buckets, never enough to decide a match. Everything read here is a view into the
-    /// caller's buffer.
-    ///
-    /// The version tag and node count are emitted before any content, so a degenerate or
-    /// empty graph still folds a non-empty stream -- `fnv1aHash` collapses null and empty
-    /// input to sentinel `0`, and a key of `0` would alias every unkeyable graph onto one
-    /// bucket.
+    const hipdnn_flatbuffers_sdk::data_objects::Graph* root() const
+    {
+        if(_content == nullptr)
+        {
+            return nullptr;
+        }
+        // Verified by GraphWrapper before bytes() would hand them over.
+        return ::flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
+            _content->data());
+    }
+
+    /// The same generated walk the comparison uses, so the two can never disagree about
+    /// which fields matter: a hash collision is possible, a hash *disagreement* on
+    /// equal content is not.
     static uint64_t fold(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
     {
-        constexpr uint32_t KEY_FORMAT_VERSION = 1;
-
-        std::vector<uint8_t> stream;
-        appendTrivial(stream, KEY_FORMAT_VERSION);
-
-        const auto nodeCount = graph.nodeCount();
-        appendTrivial(stream, nodeCount);
-
-        const auto& raw = graph.getGraph();
-        appendTrivial(stream, raw.compute_data_type());
-        appendTrivial(stream, raw.io_data_type());
-        appendTrivial(stream, raw.intermediate_data_type());
-
-        for(uint32_t index = 0; index < nodeCount; ++index)
+        if(!graph.isValid())
         {
-            const auto& node = graph.getNode(index);
-            appendTrivial(stream, node.attributes_type());
-            appendTrivial(stream, node.compute_data_type());
+            return 0;
         }
-
-        // Tensors come out of an unordered_map, so fold an order-independent summary
-        // rather than iterating: a per-tensor fold combined with XOR, which commutes.
-        // Sorting the uids first would also work and costs an allocation this does not.
-        uint64_t tensorFold = 0;
-        for(const auto& [uid, attributes] : graph.getTensorMap())
-        {
-            if(attributes == nullptr)
-            {
-                continue;
-            }
-            std::vector<uint8_t> tensorStream;
-            appendTrivial(tensorStream, uid);
-            appendTrivial(tensorStream, attributes->data_type());
-            appendVector(tensorStream, attributes->dims());
-            appendVector(tensorStream, attributes->strides());
-            tensorFold
-                ^= hipdnn_data_sdk::utilities::fnv1aHash(tensorStream.data(), tensorStream.size());
-        }
-        appendTrivial(stream, tensorFold);
-
-        return hipdnn_data_sdk::utilities::fnv1aHash(stream.data(), stream.size());
-    }
-
-    template <typename T>
-    static void appendTrivial(std::vector<uint8_t>& stream, const T& value)
-    {
-        const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
-        stream.insert(stream.end(), bytes, bytes + sizeof(T));
-    }
-
-    /// Length first, so {1,2} and {1,2,0} cannot fold to the same bytes.
-    template <typename TVector>
-    static void appendVector(std::vector<uint8_t>& stream, const TVector* values)
-    {
-        const size_t size = values == nullptr ? 0 : values->size();
-        appendTrivial(stream, size);
-        for(size_t index = 0; index < size; ++index)
-        {
-            appendTrivial(stream, values->Get(static_cast<uint32_t>(index)));
-        }
+        hipdnn_flatbuffers_sdk::data_objects::cachekey::Hasher hasher;
+        hipdnn_flatbuffers_sdk::data_objects::cachekey::hashAppend(hasher, &graph.getGraph());
+        return hasher.value();
     }
 
     Content _content;

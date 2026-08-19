@@ -3,6 +3,9 @@
 
 include "data_types.fbs";
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_ignore";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 struct Float32Value {
@@ -53,7 +56,7 @@ union TensorValue {
 
 table TensorAttributes {
     uid: long;
-    name: string;
+    name: string (cache_ignore);
     data_type: DataType;
     strides: [long];
     dims: [long];

@@ -149,6 +149,32 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects"
         OUTPUT_NAMESPACE hipdnn_flatbuffers_sdk
     )
+
+    # The cache-key header is generated from the same schemas, but not by flatc:
+    # the `cache_ignore` annotation it keys on never reaches flatc's C++ output, so
+    # gen_cache_key.py reads it back out of the binary schema instead. Wired as a
+    # dependency of the same target for the same reason -- the header must exist
+    # before anything compiles against it or install() globs the include tree.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(_cache_key_header
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/cachekey_generated.h"
+    )
+    add_custom_command(
+        OUTPUT "${_cache_key_header}"
+        COMMAND ${CMAKE_COMMAND} -E env "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/schemas/graph.fbs"
+                "${CMAKE_CURRENT_SOURCE_DIR}/schemas/tensor_attributes.fbs"
+        COMMENT "Generating cachekey_generated.h from the FlatBuffers schemas"
+        VERBATIM
+    )
+    add_custom_target(
+        generate_hipdnn_cache_key
+        DEPENDS "${_cache_key_header}"
+        COMMENT "Cache-key header generation"
+    )
+    add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_cache_key)
 endif()
 
 # --- Export and install ---

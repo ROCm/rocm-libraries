@@ -22,20 +22,26 @@ using Spec = ContentCarryingTestGraph::Spec;
 /// question -- the "equal" ones are facts a benchmark result survives, the "not equal"
 /// ones are facts it does not.
 ///
-/// MAINTENANCE: this file is the field-set pin for the graph half of the key. `IGraph` is
-/// a virtual interface with no compiler-checkable arity, so nothing fails to build when
-/// `graph.fbs` grows -- a new field that changes what a kernel does needs a
-/// discriminates-on case here, and a new field that does not needs an ignores case.
+/// MAINTENANCE: this file is the field-set pin for the graph half of the key. The
+/// traversal itself is generated from `graph.fbs` (cachekey_generated.h), so a new field
+/// is hashed and compared without anyone wiring it up -- what codegen cannot decide is
+/// whether that participation is *correct*. A new field that changes what a kernel does
+/// needs a discriminates-on case here; one that does not needs `(cache_ignore)` in the
+/// schema and an ignores case here.
 ///
 /// What is pinned here: every `Graph` field the fixture can express (name, all three
 /// data types, tensors, nodes, id, preferred engine, override-shape, api version), plus
-/// the tensor fields the key traversal reads (uid, dtype, dims, strides) and the node
-/// fields it reads (name, compute dtype, attribute discriminant, and two payload fields).
+/// the tensor fields the traversal reads (uid, dtype, dims, strides) and the node fields
+/// it reads (name, compute dtype, attribute discriminant, and two payload fields). The
+/// excluded ones -- graph name, node name, id, preferred engine, override-shape, api
+/// version -- are pinned as *equal*, so deleting an annotation fails a test rather than
+/// silently narrowing the cache. Tensor name is excluded too but has no case: `TensorSpec`
+/// cannot express it, and widening the fixture for one field is not worth it while the
+/// two names above cover the same annotation.
 ///
 /// What is deliberately NOT pinned here: the interiors of `TensorAttributesT` and each
-/// `NodeAttributes` union member. Those are compared by codegen'd `operator==`, which is
-/// regenerated from the schema, so a new sub-field is covered automatically -- the risk
-/// this file guards is a field falling out of the *hash*, not out of the comparison.
+/// `NodeAttributes` union member. Those are walked by the generated traversal, which is
+/// regenerated from the schema, so a new sub-field is covered automatically.
 GraphContentKey keyFor(const ContentCarryingTestGraph& graph)
 {
     return GraphContentKey{graph};
@@ -223,13 +229,21 @@ TEST(TestIngestorGraphContentKey, AnEmptyGraphStillComparesEqualToAnotherEmptyGr
     EXPECT_EQ(GraphContentKey{first}, GraphContentKey{second});
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentGraphNameComparesUnequal)
+/// Names are labels a caller chose, not geometry a kernel was timed against: two
+/// identically-shaped graphs run the same kernels whatever they are called, so a
+/// measurement transfers and the names are excluded. Marked `(cache_ignore)` in
+/// graph.fbs, which is what this pins -- dropping the annotation fails here.
+///
+/// The cost of excluding them is that two graphs a caller distinguishes by name share
+/// one entry and one benchmark sweep. That is the intended trade: the sweep is what the
+/// cache exists to avoid, and the names do not change its result.
+TEST(TestIngestorGraphContentKey, ADifferentGraphNameComparesEqual)
 {
     const Spec named;
     Spec renamed;
     renamed.name = "a_different_graph";
 
-    EXPECT_NE(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
+    EXPECT_EQ(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
 }
 
 TEST(TestIngestorGraphContentKey, ADifferentGraphIoDataTypeComparesUnequal)
@@ -250,13 +264,16 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphIntermediateDataTypeComparesUne
     EXPECT_NE(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentNodeNameComparesUnequal)
+/// Same reasoning as the graph name above, one level down. The node's *attributes* are
+/// compared in full -- see the operand-uid case below -- so excluding the label does not
+/// weaken what the key discriminates.
+TEST(TestIngestorGraphContentKey, ADifferentNodeNameComparesEqual)
 {
     const Spec named;
     Spec renamed;
     renamed.nodes[0].name = "a_different_node";
 
-    EXPECT_NE(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
+    EXPECT_EQ(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
 }
 
 /// Inside the union payload again, on a field the discriminant and operation cannot
