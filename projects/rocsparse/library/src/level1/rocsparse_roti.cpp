@@ -94,7 +94,14 @@ rocsparse_status rocsparse::roti_template(rocsparse_handle     handle, //0
     hipStream_t stream = handle->stream;
 
 #define ROTI_DIM 512
-    dim3 roti_blocks((nnz - 1) / ROTI_DIM + 1);
+    // Clamp the grid size against the device limit; the kernel uses a grid-stride
+    // loop so a clamped grid still covers all nnz elements (supports large nnz).
+    int64_t num_blocks = (static_cast<int64_t>(nnz) - 1) / ROTI_DIM + 1;
+    if(num_blocks > handle->properties.maxGridSize[0])
+    {
+        num_blocks = handle->properties.maxGridSize[0];
+    }
+    dim3 roti_blocks(static_cast<uint32_t>(num_blocks));
     dim3 roti_threads(ROTI_DIM);
 
     const bool on_host = (handle->pointer_mode == rocsparse_pointer_mode_host);

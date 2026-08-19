@@ -32,19 +32,20 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         roti_device(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, rocsparse_index_base idx_base)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        // Cast to the (possibly 64-bit) index type I before the multiply so the
+        // element index does not overflow 32-bit arithmetic for large nnz.
+        const I stride = static_cast<I>(hipGridDim_x) * BLOCKSIZE;
 
-        if(idx >= nnz)
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < nnz;
+            idx += stride)
         {
-            return;
+            I i = x_ind[idx] - idx_base;
+
+            T xr = x_val[idx];
+            T yr = y[i];
+
+            x_val[idx] = rocsparse::fma<T>(c, xr, s * yr);
+            y[i]       = rocsparse::fma<T>(c, yr, -s * xr);
         }
-
-        I i = x_ind[idx] - idx_base;
-
-        T xr = x_val[idx];
-        T yr = y[i];
-
-        x_val[idx] = rocsparse::fma<T>(c, xr, s * yr);
-        y[i]       = rocsparse::fma<T>(c, yr, -s * xr);
     }
 }
