@@ -40,7 +40,7 @@ inline const char* getKernelParamTypeString(hipdnn_flatbuffers_sdk::data_objects
     case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
         return "half";
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
-        return "ushort";
+        return "__bf16";
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
         return "float";
     default:
