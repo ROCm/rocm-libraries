@@ -108,6 +108,13 @@ public:
 
     /// Hash first because it rejects almost every non-match without reading either
     /// graph; the structural comparison then decides the survivors.
+    ///
+    /// An unkeyable graph matches **nothing, including another unkeyable graph**. Two
+    /// graphs whose bytes could not be retained are not known to be the same
+    /// computation -- they are two graphs we know nothing about, and treating them as
+    /// equal would serve one's measured ranking for the other. That is the wrong-kernel
+    /// outcome the whole key exists to prevent, so absence of content is a permanent
+    /// miss rather than a wildcard.
     bool operator==(const GraphContentKey& other) const
     {
         if(_hash != other._hash)
@@ -118,9 +125,16 @@ public:
         const auto* right = other.root();
         if(left == nullptr || right == nullptr)
         {
-            return left == right;
+            return false;
         }
         return hipdnn_flatbuffers_sdk::data_objects::cachekey::logicallyEqual(left, right);
+    }
+
+    /// Whether this key can identify a graph at all. False when the graph was invalid or
+    /// its implementation does not supply `bytes()`; callers must not cache under it.
+    bool isUsable() const
+    {
+        return root() != nullptr;
     }
 
     bool operator!=(const GraphContentKey& other) const

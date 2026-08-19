@@ -295,10 +295,89 @@ TEST(TestIngestorGraphContentKey, AnEmptyGraphDoesNotMatchAContentCarryingOne)
     EXPECT_NE(GraphContentKey{empty}, keyFor(populated));
 }
 
-/// The hash narrows; the content decides. This forces the two hashes to agree so the
-/// structural comparison is actually reached -- an earlier version asserted only that
-/// two different graphs compare unequal, which `operator==` answers from the hash
-/// mismatch alone, so it passed even with the content comparison deleted.
+/// An IGraph whose bytes cannot be retained -- an invalid graph, or an implementation
+/// that supplies none. The key must be unusable and must match nothing, including
+/// another unkeyable graph: two graphs we know nothing about are not known to be the
+/// same computation, and treating them as equal would serve one's ranking for the other.
+class UnkeyableGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
+{
+public:
+    const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
+    {
+        throw std::logic_error("UnkeyableGraph carries no graph");
+    }
+    bool isValid() const override
+    {
+        return false;
+    }
+    uint32_t nodeCount() const override
+    {
+        return 0;
+    }
+    bool hasOnlySupportedAttributes(
+        std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes> /*supported*/) const override
+    {
+        return true;
+    }
+    const hipdnn_flatbuffers_sdk::data_objects::Node& getNode(uint32_t /*index*/) const override
+    {
+        throw std::logic_error("UnkeyableGraph carries no nodes");
+    }
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper&
+        getNodeWrapper(uint32_t /*index*/) const override
+    {
+        throw std::logic_error("UnkeyableGraph carries no nodes");
+    }
+    const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper>>&
+        nodeWrappers() const override
+    {
+        throw std::logic_error("UnkeyableGraph carries no nodes");
+    }
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        getTensorMap() const override
+    {
+        return _tensors;
+    }
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {};
+    }
+
+private:
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        _tensors;
+};
+
+TEST(TestIngestorGraphContentKey, AGraphWithNoBytesYieldsAnUnusableKey)
+{
+    const UnkeyableGraph graph;
+
+    EXPECT_FALSE(GraphContentKey{graph}.isUsable());
+}
+
+TEST(TestIngestorGraphContentKey, TwoUnkeyableGraphsDoNotMatchEachOther)
+{
+    const UnkeyableGraph first;
+    const UnkeyableGraph second;
+
+    EXPECT_NE(GraphContentKey{first}, GraphContentKey{second})
+        << "absence of content is a permanent miss, never a wildcard that matches "
+           "every other unkeyable graph";
+}
+
+TEST(TestIngestorGraphContentKey, AnUnkeyableGraphDoesNotMatchARealOne)
+{
+    const UnkeyableGraph unkeyable;
+    const ContentCarryingTestGraph real{Spec{}};
+
+    EXPECT_NE(GraphContentKey{unkeyable}, keyFor(real));
+}
+
+/// The hash narrows; the content decides. The hashes are forced to agree so the
+/// structural comparison is actually reached: `operator==` short-circuits on a hash
+/// mismatch, so asserting only that two different graphs compare unequal would hold
+/// even with the content comparison deleted.
 TEST(TestIngestorGraphContentKey, EqualHashesWithDifferentContentStillCompareUnequal)
 {
     struct CollidingKey : GraphContentKey

@@ -311,12 +311,12 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
         << "a covering record must decide the order, not the heuristic";
 }
 
-/// The production sequence, on ONE manager: sort (heuristic, memoized), then record, then
-/// sort again. The earlier test uses a fresh manager, which proves the mechanism but
-/// skips the ordering that actually occurs -- a benchmark sweep always writes its record
-/// *after* the buildPlan that already sorted and cached the catalog. Before
-/// `Catalog::orderedFromRecord`, the second call short-circuited on `isSorted` and the
-/// measured order was never adopted.
+/// The production sequence, on ONE manager: sort (heuristic, memoized), then record,
+/// then sort again. A benchmark sweep always writes its record *after* the buildPlan
+/// that already sorted and cached the catalog, so a memoized heuristic order must still
+/// yield to a measurement that arrives later -- which is what
+/// `Catalog::orderedFromRecord` distinguishes. A fresh manager would skip this ordering
+/// entirely and prove only the mechanism.
 TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlreadySorted)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -417,10 +417,9 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEn
     }
 }
 
-/// Readers and writers contend on ONE key, which is what makes this a lock test rather
-/// than a crash canary. An earlier version had every thread touch its own disjoint key,
-/// so no reader ever looked up an entry a writer was mutating and the test passed with
-/// the mutex deleted.
+/// Readers and writers contend on ONE key. Disjoint keys would make this a crash canary
+/// rather than a lock test: no reader would ever look up an entry a writer was mutating,
+/// and it would pass with the mutex deleted.
 ///
 /// The assertion is that a reader never observes a torn record: `winnerFor` returns a
 /// copy taken under the lock, so every read must be one of the whole records written,

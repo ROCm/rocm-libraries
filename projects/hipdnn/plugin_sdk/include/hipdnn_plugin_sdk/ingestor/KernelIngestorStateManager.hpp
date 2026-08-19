@@ -252,6 +252,16 @@ public:
             return;
         }
 
+        if(!key.graph.isUsable())
+        {
+            // Nothing to key on, so nothing may be stored: an unkeyable graph never
+            // matches on lookup (GraphContentKey::operator==), so the entry would be
+            // unreachable and repeated sweeps would grow the map without bound.
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked ranking could not be cached "
+                                   "because its graph yields no key");
+            return;
+        }
+
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
         _winnerCache[key] = std::move(record);
 
@@ -675,6 +685,14 @@ private:
         }
 
         const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
+        if(!key.graph.isUsable())
+        {
+            // No bytes to key on -- an invalid graph, or an IGraph implementation that
+            // does not supply them. Such graphs never match each other either, so there
+            // is nothing to look up.
+            return false;
+        }
+
         const auto record = winnerFor(key);
         if(!record.has_value() || !recordCovers(*record, catalog.entries))
         {
