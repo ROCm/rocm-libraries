@@ -152,13 +152,13 @@ struct hipLink_wrapper_t
         return *this;
     }
 
-    void link(void* bitcode_data, size_t bitcode_len_bytes, const char* filename)
+    void link(const void* bitcode_data, size_t bitcode_len_bytes, const char* filename)
     {
         // hip/cu link APIs accept non-const data, even though they
         // have no reason to own or modify the data
         auto err = hipLinkAddData(state,
                                   hipJitInputSpirv,
-                                  bitcode_data,
+                                  const_cast<void*>(bitcode_data),
                                   bitcode_len_bytes,
                                   filename,
                                   0,
