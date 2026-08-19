@@ -423,7 +423,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
             roc::host_validation::ComparisonOptions comparisonOptions{
                 .absoluteTolerance = std::nextafter(tol, 0.0), .maxReportedMismatches = 0};
             comparisonOptions.selection.indexOrder
-                = roc::host_validation::ComparisonIndexOrder::FirstDimensionFastest;
+                = roc::host_validation::IndexOrder::FirstDimensionFastest;
             const auto comparison
                 = roc::host_validation::compare(hipblaslt::host_validation::tensorFromStorage(
                                                     result_gpu, size_D_sub, comparisonLayout),
