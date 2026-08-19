@@ -153,6 +153,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collective_extras_elementwise.cpp
   unit_test_internal_collective_extras_nontemporal.cpp
   unit_test_internal_collective_extras_lower_bound.cpp
+  #10155: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_precond_itilu0.cpp
   unit_test_internal_collective_extras_insert.cpp
   unit_test_internal_primitives_host_extras.cpp
   # Host-path C-API coverage for previously-untested in-scope routines. These
