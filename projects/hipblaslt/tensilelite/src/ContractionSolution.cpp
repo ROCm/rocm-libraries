@@ -4321,12 +4321,13 @@ namespace TensileLite
                 static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
         }
 
-        // Under coherence + static two-tile packing, keep origami's parallel
+        // Under USO + static two-tile packing, admit origami's parallel
         // reduction when the launch is eligible (non-atomic and no static
         // obstacles). Final grid / F checks run at the launch gate once
-        // getSKGridImpl has sized the grid. Otherwise force tree so query
-        // (requiredWorkspaceSize) and launch (solve) stay on the steered
-        // tree path. Mirror the gate's staticTwoTilePacking predicate.
+        // getSKGridImpl has sized the grid. Otherwise refuse parallel and
+        // force tree so query (requiredWorkspaceSize) and launch (solve)
+        // stay on the steered tree path. Mirror the gate's
+        // staticTwoTilePacking predicate.
         if(problem.getParams().uniformSummationOrder())
         {
             const bool effectiveDynamic

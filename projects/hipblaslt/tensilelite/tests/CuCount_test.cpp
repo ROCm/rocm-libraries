@@ -1001,7 +1001,9 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
 }
 
 // ===========================================================================
-// Coherence-mode Stream-K grid steering (parallel admission + mixed-split snap)
+// Uniform-summation-order Stream-K grid steering (admit parallel / refuse to tree
+// + mixed-split snap). Mixed GridDividesTiles (g0 < T, g0 | T) is not the
+// parallel-admitted window; that window is Flags==0, grid=tiles*F, F>=2.
 // ===========================================================================
 
 namespace
@@ -1010,6 +1012,13 @@ namespace
     {
         solution.sizeMapping.streamK               = 3;
         solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
+        // getSKReduction keep-parallel consults streamKUniformSummationOrderObstacle,
+        // which treats WorkGroup[2] > 1 with LocalSplitU <= 1 as WaveSplitK.
+        // vector3 defaults leave x/y/z uninitialized, so a synthesised SK3
+        // solution must set a real WG or the admit window collapses to tree.
+        solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
+        solution.sizeMapping.LocalSplitU           = 1;
+        solution.sizeMapping.packBatchDims         = 0;
         solution.sizeMapping.depthU                = 64;
         solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
         solution.sizeMapping.CUOccupancy           = 1;
@@ -1022,8 +1031,9 @@ namespace
 TEST(StreamKCoherenceGridSteeringTest, KeepParallelUnderUniformSummationOrderWhenEligible)
 {
     // Same window as SmCountTargetChangesReductionAndGrid: 512x512 => 16 tiles,
-    // K=8192 => I=128, C=256 => tiles <= C/4 and I >= 64 => parallel without
-    // coherence; under coherence the eligible parallel path is kept.
+    // K=8192 => I=128, C=256 => tiles <= C/4 and I >= 64 => origami parallel.
+    // Under USO that launch is admitted (SK3 static, non-atomic, obstacles
+    // clear) rather than forced to tree.
     StreamK5AnalyticalEnv env;
     initSk3CoherenceSolution(env.solution);
     env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
@@ -1038,7 +1048,7 @@ TEST(StreamKCoherenceGridSteeringTest, KeepParallelUnderUniformSummationOrderWhe
 
     problem.setParams().setUniformSummationOrder(true);
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
-        << "coherence must keep parallel when SK3 static, non-atomic, and obstacles clear";
+        << "must admit origami's parallel when SK3 static, non-atomic, and obstacles clear";
 
     const size_t grid
         = env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::parallel);
@@ -1054,7 +1064,7 @@ TEST(StreamKCoherenceGridSteeringTest, KeepParallelUnderUniformSummationOrderWhe
 TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderWhenIneligible)
 {
     // Atomic Stream-K is a static obstacle: origami may still pick parallel,
-    // but coherence must force tree rather than keep an unaudited path.
+    // but USO must refuse it and force tree rather than keep an unaudited path.
     StreamK5AnalyticalEnv env;
     initSk3CoherenceSolution(env.solution);
     env.solution.sizeMapping.streamKAtomic = 1;
@@ -1069,12 +1079,12 @@ TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderWhenIn
 
     problem.setParams().setUniformSummationOrder(true);
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::tree)
-        << "coherence must force tree when parallel is ineligible (StreamKAtomic=1)";
+        << "must refuse parallel / force tree when StreamKAtomic=1";
 }
 
 TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderCustomKernel)
 {
-    // Custom kernels always resolve to tree; coherence must not invent parallel.
+    // Custom kernels always resolve to tree; USO must not invent parallel.
     StreamK5AnalyticalEnv env;
     initSk3CoherenceSolution(env.solution);
     env.solution.sizeMapping.customKernelName = "DummyCustomKernel";
@@ -1207,6 +1217,6 @@ TEST(StreamKCoherenceGridSteeringTest, ModeOffLeavesNaturalGridAndReduction)
     EXPECT_EQ(env.solution.getSKGrid(problem, env.device, tiles, redOff), gridOff);
 
     // Confirm the off path above was actually parallel so the comparison is
-    // meaningful. Coherence on keeps parallel for this eligible shape.
+    // meaningful. USO-on admits parallel for this eligible shape.
     EXPECT_EQ(redOff, origami::reduction_t::parallel);
 }
