@@ -901,9 +901,9 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsApplicable(
     // solver off such shapes; a large-tensor-capable solver is selected instead.
     {
         constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
-        if(problem.GetIn().GetElementSize() > max_int32 ||
-           problem.GetOut().GetElementSize() > max_int32 ||
-           problem.GetWeights().GetElementSize() > max_int32)
+        if(problem.GetIn().GetNumBytes() > max_int32 ||
+           problem.GetOut().GetNumBytes() > max_int32 ||
+           problem.GetWeights().GetNumBytes() > max_int32)
             return false;
     }
 
