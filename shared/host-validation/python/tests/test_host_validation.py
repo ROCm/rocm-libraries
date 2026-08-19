@@ -2963,6 +2963,9 @@ class TensorAndGemmTests(unittest.TestCase):
         expected[:, 1::4] = logical[:, 1::4]
         expected[:, 3::4] = logical[:, 3::4]
         np.testing.assert_array_equal(hv.to_numpy(observed.pruned), expected)
+        self.assertEqual(observed.pruned.strides, [8, 1])
+        self.assertEqual(observed.compressed.strides, [4, 1])
+        self.assertEqual(observed.retained_indices.strides, [4, 1])
 
         fp4_values = np.asarray(
             [[-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.5]],
