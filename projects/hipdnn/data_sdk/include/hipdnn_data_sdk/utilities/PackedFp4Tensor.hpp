@@ -27,9 +27,9 @@ namespace hipdnn_data_sdk::utilities
 ///
 /// Use this for the GPU-side bundle of an FP4 input; keep `Tensor<fp4_e2m1>` for
 /// the CPU-reference bundle. Filled with the same (seed, min, max) the two agree
-/// value-for-value, because randomization here mirrors
-/// `Tensor<fp4_e2m1>::fillWithRandomValues` exactly: the same RNG sequence is
-/// generated in linear index order and packed into nibbles.
+/// value-for-value: the same RNG sequence is generated in linear index order and
+/// packed into nibbles, and the bounds are rounded through `fp4_e2m1` first, as
+/// `TensorBase` does.
 ///
 /// Only dense (packed-stride) layouts are supported. Element-wise host access
 /// (`operator()`, iteration dereference) is not provided; this type is a buffer
@@ -118,15 +118,17 @@ public:
         _memory.markHostModified();
     }
 
-    // Mirrors Tensor<fp4_e2m1>::fillWithRandomValues: identical RNG, distribution,
-    // and linear traversal order, so a paired unpacked tensor (same seed) holds
-    // the same logical values.
+    // Must match Tensor<fp4_e2m1>::fillWithRandomValues draw-for-draw, or the packed
+    // and unpacked bundles disagree silently: identical RNG, distribution, and linear
+    // traversal order. That includes rounding the bounds through fp4_e2m1 before
+    // building the distribution, as TensorBase does.
     void fillTensorWithRandomValues(float min,
                                     float max,
                                     unsigned int seed = std::random_device{}()) override
     {
         std::mt19937 generator(seed);
-        std::uniform_real_distribution<float> distribution(min, max);
+        std::uniform_real_distribution<float> distribution(
+            static_cast<float>(types::fp4_e2m1(min)), static_cast<float>(types::fp4_e2m1(max)));
 
         auto* host = static_cast<uint8_t*>(_memory.hostData());
         for(size_t byte = 0; byte < packedByteCount(); ++byte)
