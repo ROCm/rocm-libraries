@@ -228,7 +228,7 @@ GenerationRecipe recipe = GenerationRecipe::cartesian(
     GenerationRecipe::sine(),
     GenerationRecipe::cosine(),
     {.seed = 17,
-     .indexOrder = LogicalIndexOrder::FirstDimensionFastest});
+     .indexOrder = IndexOrder::FirstDimensionFastest});
 
 Tensor output = generate(ScalarType::ComplexFloat32, layout, recipe);
 GenerationRunInfo patch = generateAt(output, logicalIndex, recipe);
@@ -324,7 +324,7 @@ product has copied an observed tensor into host memory:
 ComparisonOptions options
     = defaultComparisonOptions(ScalarType::Float32);
 options.selection.indexOrder
-    = ComparisonIndexOrder::FirstDimensionFastest;
+    = IndexOrder::FirstDimensionFastest;
 options.computeUlp = true;
 options.ulpType = ScalarType::Float32;
 
@@ -690,8 +690,7 @@ The `roc_host_validation` package currently provides:
 - `ComparisonOptions`/`ComparisonResult`, logical selection, complex and
   non-finite policy, Frobenius/ULP evidence, allclose search, and sentinel
   diagnostics;
-- `GenerationOptions`, `GenerationPatternSpec`, `generate_tensor`, and
-  `generate_at`;
+- typed `GenerationRecipe` factories, `generate_tensor`, and `generate_at`;
 - `reference_axpby` with optional X/Y tensors, explicit alpha/beta,
   accumulator type, and output type;
 - `reference_softmax` with an explicit axis and runtime

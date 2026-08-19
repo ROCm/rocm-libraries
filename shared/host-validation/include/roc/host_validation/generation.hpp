@@ -26,7 +26,7 @@ struct GenerationRecipeSettings {
     uint64_t seed = 0;
 
     // Indexed recipes and generateAt use this coordinate-to-index mapping.
-    LogicalIndexOrder indexOrder = LogicalIndexOrder::FirstDimensionFastest;
+    IndexOrder indexOrder = IndexOrder::FirstDimensionFastest;
 };
 
 struct ConstantGenerationParameters {
@@ -306,7 +306,7 @@ class GenerationRecipe {
                                                     GenerationRecipeSettings settings = {});
 
     [[nodiscard]] uint64_t seed() const noexcept;
-    [[nodiscard]] LogicalIndexOrder indexOrder() const noexcept;
+    [[nodiscard]] IndexOrder indexOrder() const noexcept;
 
    private:
     struct BoundComponent {

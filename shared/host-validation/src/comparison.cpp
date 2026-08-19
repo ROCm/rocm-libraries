@@ -627,7 +627,7 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
         ComparisonResult result;
         result.pointwiseEvaluated = true;
         if (options.selection.first == 0 && options.selection.stride == 1 &&
-            options.selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest &&
+            options.selection.indexOrder == IndexOrder::FirstDimensionFastest &&
             observed.shape().rank() != 0) {
             const Shape& shape = observed.shape();
             const size_t innerSize = shape[0];

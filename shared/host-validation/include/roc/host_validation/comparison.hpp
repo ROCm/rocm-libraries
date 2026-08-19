@@ -38,7 +38,7 @@ struct ComparisonSelection {
     size_t first = 0;
     size_t stride = 1;
     size_t maxElements = std::numeric_limits<size_t>::max();
-    ComparisonIndexOrder indexOrder = ComparisonIndexOrder::LastDimensionFastest;
+    IndexOrder indexOrder = IndexOrder::LastDimensionFastest;
 };
 
 /// Configures three independent comparison criteria plus optional evidence and reporting.

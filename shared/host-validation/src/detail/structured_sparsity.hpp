@@ -72,8 +72,8 @@ inline StructuredSparsityPlan validateStructuredSparsityProblem(
     if (problem.pattern.selection != StructuredSparsitySelection::Fixed &&
         problem.pattern.selection != StructuredSparsitySelection::Random)
         throw std::invalid_argument("Structured sparsity selection is invalid.");
-    if (problem.pattern.indexOrder != LogicalIndexOrder::FirstDimensionFastest &&
-        problem.pattern.indexOrder != LogicalIndexOrder::LastDimensionFastest)
+    if (problem.pattern.indexOrder != IndexOrder::FirstDimensionFastest &&
+        problem.pattern.indexOrder != IndexOrder::LastDimensionFastest)
         throw std::invalid_argument("Structured sparsity index order is invalid.");
 
     std::vector<size_t> compressedDimensions(inputShape.dimensions().begin(),
@@ -209,9 +209,9 @@ inline StructuredSparsityPlan validateStructuredSparsityRequest(
 }
 
 inline void coordinatesForLine(size_t line, const Shape& shape, size_t excludedAxis,
-                               LogicalIndexOrder order, std::vector<size_t>& coordinates) {
+                               IndexOrder order, std::vector<size_t>& coordinates) {
     coordinates.assign(shape.rank(), 0);
-    if (order == LogicalIndexOrder::FirstDimensionFastest) {
+    if (order == IndexOrder::FirstDimensionFastest) {
         for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
             if (dimension == excludedAxis) continue;
             coordinates[dimension] = line % shape[dimension];
@@ -635,7 +635,7 @@ inline Shape validateTwoOfFourMetadataProblem(const TwoOfFourMetadataProblem& pr
     const ptrdiff_t retainedAxisStride = problem.retainedIndices.layout().strides()[problem.axis];
     for (size_t line = 0; line < lineCount; ++line) {
         coordinatesForLine(line, problem.retainedIndices.shape(), problem.axis,
-                           LogicalIndexOrder::FirstDimensionFastest, retainedCoordinates);
+                           IndexOrder::FirstDimensionFastest, retainedCoordinates);
         const ptrdiff_t retainedBase =
             problem.retainedIndices.layout().elementOffset(retainedCoordinates);
         for (size_t group = 0; group < sparsityGroups; ++group) {
@@ -843,7 +843,7 @@ TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataRequest&
     const ptrdiff_t metadataAxisStride = problem.metadata.layout().strides()[problem.axis];
     for (size_t line = 0; line < lineCount; ++line) {
         detail::coordinatesForLine(line, problem.retainedIndices.shape(), problem.axis,
-                                   LogicalIndexOrder::FirstDimensionFastest, retainedCoordinates);
+                                   IndexOrder::FirstDimensionFastest, retainedCoordinates);
         const ptrdiff_t retainedBase =
             problem.retainedIndices.layout().elementOffset(retainedCoordinates);
         const ptrdiff_t metadataBase = problem.metadata.layout().elementOffset(retainedCoordinates);

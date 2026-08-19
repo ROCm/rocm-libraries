@@ -12,9 +12,4 @@ enum class IndexOrder {
     LastDimensionFastest,
 };
 
-// Compatibility names retained while generation and comparison consumers
-// converge on the component-wide IndexOrder vocabulary.
-using LogicalIndexOrder = IndexOrder;
-using ComparisonIndexOrder = IndexOrder;
-
 }  // namespace roc::host_validation

@@ -256,7 +256,7 @@ namespace hipblaslt::host_validation
             allCloseOptions.computePointwiseStatistics = false;
             allCloseOptions.computeFrobenius           = false;
             allCloseOptions.maxReportedMismatches      = 0;
-            allCloseOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+            allCloseOptions.selection.indexOrder = IndexOrder::FirstDimensionFastest;
 
             constexpr std::array<double, 6> candidates{
                 1e-6,

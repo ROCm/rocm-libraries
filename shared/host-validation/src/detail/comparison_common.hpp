@@ -251,13 +251,12 @@ inline bool pointwiseStatisticsOnlyComparison(const ComparisonOptions& options) 
            !options.relativeFrobeniusTolerance && !options.maximumUlpTolerance;
 }
 
-inline void coordinatesForLinearIndex(size_t logicalIndex, const Shape& shape,
-                                      ComparisonIndexOrder order, std::span<size_t> coordinates) {
+inline void coordinatesForLinearIndex(size_t logicalIndex, const Shape& shape, IndexOrder order,
+                                      std::span<size_t> coordinates) {
     shape.coordinates(logicalIndex, order, coordinates);
 }
 
-inline bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
-                               ComparisonIndexOrder order,
+inline bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape, IndexOrder order,
                                std::span<const ptrdiff_t> observedStrides,
                                std::span<const ptrdiff_t> expectedStrides,
                                ptrdiff_t& observedOffset, ptrdiff_t& expectedOffset) {
@@ -272,7 +271,7 @@ inline bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape
         return false;
     };
 
-    if (order == ComparisonIndexOrder::FirstDimensionFastest) {
+    if (order == IndexOrder::FirstDimensionFastest) {
         for (size_t dimension = 0; dimension < shape.rank(); ++dimension)
             if (advanceDimension(dimension)) return true;
     } else {
@@ -301,7 +300,7 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
 
     if (selection.first == 0 && selection.stride == 1) {
         const bool firstDimensionFastest =
-            selection.indexOrder == ComparisonIndexOrder::FirstDimensionFastest;
+            selection.indexOrder == IndexOrder::FirstDimensionFastest;
         const size_t innerDimension = firstDimensionFastest ? 0 : shape.rank() - 1;
         const size_t innerSize = shape[innerDimension];
         const size_t selectedTotal = std::min(total, selection.maxElements);
