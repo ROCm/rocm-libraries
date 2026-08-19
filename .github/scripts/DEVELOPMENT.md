@@ -105,18 +105,23 @@ from the standard library plus the packages above.
 ## Running the Tests
 
 Tests live in `.github/scripts/tests/` and use `unittest`, runnable via
-`pytest` with no extra configuration.
+`pytest` with no extra configuration. Run from the `scripts/` directory:
 
 ```bash
-# Run everything
-pytest .github/scripts/tests/ -v
+# Run the full suite
+cd .github/scripts
+pytest . -v
 
 # Without an activated venv (substitute your venv path)
-/tmp/rocm-scripts-venv/bin/pytest .github/scripts/tests/ -v
+/tmp/rocm-scripts-venv/bin/pytest . -v
 
 # Run one file
-pytest .github/scripts/tests/test_pr_merge_sync_patches.py -v
+pytest tests/test_pr_merge_sync_patches.py -v
 ```
+
+`tests/conftest.py` automatically stubs out modules that are only available
+in CI (such as `amdgpu_family_matrix` from a TheRock checkout), so `pytest .`
+works locally without any extra setup.
 
 > **Note:** there is currently no CI job that runs these tests automatically.
 > Until one is added, run the suite locally before merging any change to a
