@@ -57,6 +57,16 @@ Apply every question below to every sentence. If any answer is no, rewrite the s
 11. Is every factual claim supported by the diff, a test result, or an authoritative source?
 12. Could the target reader paraphrase it correctly after one reading?
 
+## Sentence cadence
+
+Apply these checks to each paragraph after checking its individual sentences:
+
+- Vary sentence length naturally. Short sentences should emphasize an important result, not become the default rhythm.
+- Combine closely related facts when the relationship between them is clearer in one sentence.
+- Use transitions to show cause, contrast, qualification, and consequence.
+- Let a paragraph develop one connected idea rather than reading like a list with the bullets removed.
+- Read the paragraph aloud. If every sentence has the same length or structure, revise the cadence without removing technical detail.
+
 ## Explain concepts before identifiers
 
 Introduce the idea first, then give the code name.
