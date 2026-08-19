@@ -230,7 +230,7 @@ def test_heuristic_rejected_for_complex_dtype(dt: str) -> None:
 def test_heuristic_rejected_for_complex_gemm_problems() -> None:
     from geko.schemas import GemmConfig, GemmType
 
-    gt = GemmType.from_tensile("N", "N", "C", "C", "C")
+    gt = GemmType.from_tensilelite("N", "N", "C", "C", "C")
     cfg = {
         "ARCH": "gfx942",
         "search_space": "heuristic",
