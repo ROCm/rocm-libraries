@@ -3242,6 +3242,15 @@ class Solution(collections.abc.Mapping):
               return
             state["_TDMIterateModeB"] = True
 
+        # The walk steps along the tile dimension, which is what dim1 carries only when
+        # the tensor is unroll-major in global memory. TransposeLDS 2 sets
+        # UnrollMajorLDS without that being true, so check TLU as well.
+        for tc in ["A", "B"]:
+          if state.get("_TDMIterateMode%s" % tc, False) and state["ProblemType"]["TLU%s" % tc]:
+            reject(state, printRejectionReason,
+                   "TDMIterateMode %s requires TLU%s to be False" % (tc, tc))
+            return
+
         # Stage 2: for non-iterate tensors, halve auto-derived VW until LBSPP
         # fits the pad_interval 1024 B limit.
         multiple = 256
@@ -5107,6 +5116,34 @@ class Solution(collections.abc.Mapping):
     state["LdsBlockSizePerPadA"] = int(state["LdsBlockSizePerPadA"])
     state["LdsBlockSizePerPadB"] = int(state["LdsBlockSizePerPadB"])
     state["LdsBlockSizePerPadMetadata"] = int(state["LdsBlockSizePerPadMetadata"])
+
+    # The iterate walk steps a whole tile_dim1 rows at a time, so a wave left with a
+    # row count that is not a whole number of steps reads past the end of the tensor
+    # on its last step. A wave's row count differs from the free size only by whole
+    # multiples of MacroTile and of the rows one issueLoad covers, and the codegen
+    # guard keeps the latter a whole number of steps -- so requiring the free size to
+    # be a multiple of the step is enough to keep every wave on whole steps.
+    #
+    # Subtile builds its descriptors elsewhere, so it is not described by this.
+    for tc, freeIdx in (("A", 0), ("B", 1)):
+      if state["UseSubtileImpl"] or not state.get("_TDMIterateMode%s" % tc, False):
+        continue
+      # tile_dim1 as the descriptor carries it: rows of DepthU input elements.
+      bytesPerRow = int(round(state["DepthU"] * state["ProblemType"]["DataType%s" % tc].numBytes()))
+      lbspp = state["LdsBlockSizePerPad%s" % tc]
+      if bytesPerRow <= 0 or lbspp % bytesPerRow != 0:
+        continue  # the codegen guard reports the real reason
+      tileDim1 = lbspp // bytesPerRow
+      if tileDim1 <= 1:
+        continue
+      mt = state["MacroTile%u" % freeIdx]
+      if mt % tileDim1 != 0:
+        reject(state, printRejectionReason,
+               "TDM iterate %s: MacroTile%u(%u) is not a multiple of tile_dim1(%u)"
+               % (tc, freeIdx, mt, tileDim1))
+        return
+      key = "AssertFree%uElementMultiple" % freeIdx
+      state[key] = int(math.lcm(state[key], tileDim1))
 
     if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
