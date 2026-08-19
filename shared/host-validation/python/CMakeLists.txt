@@ -25,6 +25,7 @@ nanobind_add_module(
     src/generation_bindings.cpp
     src/gemm_bindings.cpp
     src/mx_bindings.cpp
+    src/operation_bindings.cpp
 )
 target_link_libraries(
     host-validation-python
