@@ -79,8 +79,8 @@ enum class IntegerOverflow : uint8_t {
 };
 
 struct ScalarConversionOptions {
-    // Explicit-options conversions reject overflow by default. Legacy overloads keep their
-    // destination-specific behavior for source compatibility.
+    // Option-bearing conversions reject overflow by default. No-options
+    // Scalar/Tensor APIs use the documented deterministic implicit policy.
     IntegerRounding integerRounding = IntegerRounding::TowardZero;
     IntegerOverflow integerOverflow = IntegerOverflow::Reject;
 };

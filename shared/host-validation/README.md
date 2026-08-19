@@ -205,9 +205,10 @@ raw storage without decoding; cross-type conversion decodes and re-encodes
 logical values through the core scalar codecs. Option-bearing overloads make
 integer rounding (`TowardZero` or deterministic `NearestEven`) and overflow
 handling (`Reject`, `Saturate`, or `ModuloWrap`) explicit. NaN-to-integer and
-lossy complex-to-real conversions are rejected. The legacy overloads retain
-their established destination-specific behavior while consumers migrate to
-explicit policies.
+lossy complex-to-real conversions are rejected. No-options native conversions
+truncate and modulo-wrap integers deterministically. No-options storage
+conversions use the same policy for byte-addressable integers and saturate the
+synthetic packed Int4 and Int12 encodings.
 
 `visitScalarType` dispatches a runtime scalar type once to a unique semantic
 tag. Operations should dispatch at their boundary and run typed inner loops;

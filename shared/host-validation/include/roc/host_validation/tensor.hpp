@@ -621,7 +621,7 @@ class Tensor {
 };
 
 inline Tensor Tensor::to(ScalarType destinationType) const {
-    return to(destinationType, detail::legacyScalarConversionOptions(destinationType));
+    return to(destinationType, detail::implicitStorageConversionOptions(destinationType));
 }
 
 inline Tensor Tensor::to(ScalarType destinationType, const ScalarConversionOptions& options) const {
