@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -102,6 +103,7 @@ def _ukd_extra(ukd):
             "priority",
             "build",
             "arch",
+            "provenance",
         )
     }
 
@@ -128,7 +130,7 @@ def _compile_ukd_variant(ukd, where, flat, arch, hipcc, inter_arch_dir, variant_
     return vk, source, entry, build
 
 
-def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
+def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
     """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
 
     Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
@@ -222,6 +224,7 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir):
         # shard: no intermediate JSON, no record, and its exclusive generics
         # prune away with it.
         if not new_kds:
+            log(f"KDP {kdp.path.name}: all UKDs filtered out for {arch}, dropping")
             continue
         new_doc["kernelDescriptors"] = new_kds
         (inter_arch_dir / kdp.path.name).write_text(
@@ -442,22 +445,13 @@ def run_pipeline(
         if not surviving:
             log(f"no kernels for {arch}, skipping")
             if out_arch_dir.exists():
-                _rmtree(out_arch_dir)
+                shutil.rmtree(out_arch_dir)
             results[arch] = ArchResult(
                 arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
             )
             continue
-        inter = compile_intermediate(flat, arch, hipcc, inter_root / arch)
+        inter = compile_intermediate(flat, arch, hipcc, inter_root / arch, log=log)
         results[arch] = pack_arch(
             flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=expected_sha256
         )
     return results
-
-
-def _rmtree(path):
-    for child in sorted(path.glob("**/*"), reverse=True):
-        if child.is_file():
-            child.unlink()
-        elif child.is_dir():
-            child.rmdir()
-    path.rmdir()

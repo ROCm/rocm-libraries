@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -6,10 +7,16 @@ from .errors import HkpPackError
 
 KDP_TYPE = "kdp"
 UKD_TYPE = "ukd"
+UED_TYPE = "ued"
 _GENERIC_TYPES = {"kmd", "ued", "umd", "udd", "uhd"}
 _ALL_TYPES = {KDP_TYPE, UKD_TYPE} | _GENERIC_TYPES
 
 _SCALAR_TYPES = (str, int, float, bool)
+
+# A UED engine name is a scoped 'namespace:local' identifier (loader is
+# authoritative, RFC 0020 §4.2): exactly one colon, neither first nor last, with
+# the name-char class on both halves.
+_UED_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 
 
 def type_from_filename(path):
@@ -88,6 +95,23 @@ def _require(doc, keys, where):
             raise HkpPackError(f"{where} missing required field '{key}'")
 
 
+def _validate_version(value, where):
+    """A file-backed descriptor's version is '<major>.<minor>' with numeric halves.
+
+    Mirrors the loader's parseDescriptorVersion (loader is authoritative); the
+    tool fails fast on a malformed value rather than shipping an ungatable file.
+    """
+    if (
+        not isinstance(value, str)
+        or value.count(".") != 1
+        or not all(part.isdigit() for part in value.split("."))
+    ):
+        raise HkpPackError(
+            f"{where} has invalid version '{value}' "
+            "(expected '<major>.<minor>' with numeric halves)"
+        )
+
+
 def arch_matches(kdp_doc, arch):
     """A KDP matches an arch iff its arch list is empty (wildcard) or lists it."""
     archs = kdp_doc.get("arch")
@@ -150,9 +174,30 @@ def validate_hip_build(build, where):
     if flags is not None:
         if not isinstance(flags, list) or not all(isinstance(f, str) for f in flags):
             raise HkpPackError(f"{where} has invalid build (flags not a string list)")
+        for f in flags:
+            if f.startswith("-fuse-cuid"):
+                raise HkpPackError(
+                    f"{where} has invalid build (-fuse-cuid is reserved; the tool "
+                    "pins -fuse-cuid=none for reproducible code objects)"
+                )
 
 
-def _validate_ukd_fields(ukd, where):
+def _warn_nonbare_arch(archs, where, log):
+    """Warn (non-fatal) on any arch entry that is not a plausible bare gfx name.
+
+    Every real gfx name is 6-7 chars and fully alphanumeric (gfx90a, gfx942,
+    gfx1100, gfx1201). A feature-suffixed arch (gfx942:xnack-) or alphanumeric
+    garbage (gfx12345) trips this and is warned, not rejected: the loader matches
+    on the bare name, so a suffixed arch simply won't match a requested arch. The
+    7-char bound is a heuristic, not a hard fact -- a hypothetical future >7-char
+    arch would false-warn, which is harmless since the warning is advisory.
+    """
+    for arch in archs or []:
+        if not arch.isalnum() or len(arch) > 7:
+            log(f"{where}: arch '{arch}' is not a bare gfx name")
+
+
+def _validate_ukd_fields(ukd, where, log=print):
     """Validate the shape shared by inline and standalone UKDs.
 
     Both authoring forms carry the same fields; only the surrounding context
@@ -170,6 +215,7 @@ def _validate_ukd_fields(ukd, where):
             raise HkpPackError(
                 f"{where} 'arch' must be a list of strings (empty = wildcard)"
             )
+        _warn_nonbare_arch(arch, where, log)
     ks = ukd["kernel_source"]
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
@@ -190,14 +236,17 @@ def _validate_ukd_fields(ukd, where):
         )
 
 
-def _validate_inline_ukd(ukd, kdp_path):
+def _validate_inline_ukd(ukd, kdp_path, log=print):
     if not isinstance(ukd, dict):
         raise HkpPackError(f"inline UKD in {kdp_path.name} is not a JSON object")
     where = f"UKD '{ukd.get('id', '?')}' in {kdp_path.name}"
-    _validate_ukd_fields(ukd, where)
+    # An inline UKD carries its own version, independent of the enclosing KDP's.
+    _require(ukd, ["version"], where)
+    _validate_version(ukd.get("version"), where)
+    _validate_ukd_fields(ukd, where, log)
 
 
-def _validate_standalone_ukd(desc):
+def _validate_standalone_ukd(desc, log=print):
     """A standalone `<name>.ukd.json` is authored in the same hip form as inline.
 
     Its optional `arch` narrows the shards it ships in (empty/omitted = wildcard,
@@ -206,7 +255,7 @@ def _validate_standalone_ukd(desc):
     """
     doc = desc.doc
     where = f"standalone UKD {desc.path.name}"
-    _validate_ukd_fields(doc, where)
+    _validate_ukd_fields(doc, where, log)
     if doc["kernel_source"]["kind"] != "hip":
         raise HkpPackError(
             f"{where} must be authored in hip form "
@@ -214,7 +263,7 @@ def _validate_standalone_ukd(desc):
         )
 
 
-def _validate_kdp(desc):
+def _validate_kdp(desc, log=print):
     doc = desc.doc
     path = desc.path
     where = f"KDP {path.name}"
@@ -228,6 +277,7 @@ def _validate_kdp(desc):
         raise HkpPackError(
             f"{where} 'arch' must be a list of strings (empty = wildcard)"
         )
+    _warn_nonbare_arch(arch, where, log)
     kds = doc["kernelDescriptors"]
     if not isinstance(kds, list) or not kds:
         raise HkpPackError(f"{where} 'kernelDescriptors' must be a non-empty list")
@@ -236,10 +286,19 @@ def _validate_kdp(desc):
     for ukd in kds:
         if isinstance(ukd, str):
             continue
-        _validate_inline_ukd(ukd, path)
+        _validate_inline_ukd(ukd, path, log)
 
 
-def _validate_shape(desc):
+def _validate_ued(desc):
+    name = desc.doc.get("name")
+    if not isinstance(name, str) or not _UED_NAME_RE.match(name):
+        raise HkpPackError(
+            f"UED {desc.path.name} name '{name}' must be scoped 'namespace:local' "
+            "matching ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
+        )
+
+
+def _validate_shape(desc, log=print):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -251,10 +310,16 @@ def _validate_shape(desc):
             f"descriptor {path.name} has unknown type token '{dtype}' "
             "(expected <name>.<type>.json)"
         )
+    # Every file-backed descriptor the tool reads carries a gatable version; only
+    # the inline UKD form is exempt (rejected in _validate_inline_ukd).
+    _require(doc, ["version"], f"descriptor {path.name}")
+    _validate_version(doc.get("version"), f"descriptor {path.name}")
     if dtype == UKD_TYPE:
-        _validate_standalone_ukd(desc)
+        _validate_standalone_ukd(desc, log)
     if dtype == KDP_TYPE:
-        _validate_kdp(desc)
+        _validate_kdp(desc, log)
+    if dtype == UED_TYPE:
+        _validate_ued(desc)
 
 
 def load_flat_input(root, log=print):
@@ -280,20 +345,25 @@ def load_flat_input(root, log=print):
             log(f"skipping non-descriptor file {jp.name}")
             continue
         desc = Descriptor(path=jp, doc=_read_json(jp))
-        _validate_shape(desc)
+        _validate_shape(desc, log)
         descriptors.append(desc)
 
     flat = FlatInput(root=root, descriptors=descriptors)
+    _reject_inline_standalone_collision(flat)
+    _reject_duplicate_ids(flat)
     _validate_references(flat)
+    _warn_orphan_standalone_ukds(flat, log)
     return flat
 
 
-def _validate_references(flat):
-    ids = {d.id for d in flat.descriptors}
-    ukd_by_id = flat.ukd_by_id()
-    ukd_ids = set(ukd_by_id)
-    # An inline UKD and a standalone UKD sharing an id would make a by-id KDP
-    # reference ambiguous; reject the collision rather than silently pick one.
+def _reject_inline_standalone_collision(flat):
+    """An inline UKD id colliding with a standalone UKD is ambiguous by-id.
+
+    A subset of the global id-uniqueness rule, kept ahead of it for its more
+    specific message: a by-id KDP reference cannot pick between an inline and a
+    standalone UKD of the same id.
+    """
+    ukd_ids = set(flat.ukd_by_id())
     for kdp in flat.kdps():
         for entry in kdp.doc.get("kernelDescriptors", []):
             if isinstance(entry, dict) and entry.get("id") in ukd_ids:
@@ -301,6 +371,60 @@ def _validate_references(flat):
                     f"inline UKD Id '{entry.get('id')}' in {kdp.path.name} "
                     "collides with a standalone UKD of the same Id"
                 )
+
+
+def _reject_duplicate_ids(flat):
+    """Every descriptor id is unique across ALL types and forms at pack time.
+
+    Build-time invariant, deliberately stronger than the loader, which keys on
+    (type, id) and permits the same id on descriptors of different types. Packing
+    hard-fails on any repeat so a copy-pasted id can never ship. Iterates in
+    sorted-file then authored order so the "already defined by" pointer is
+    deterministic.
+    """
+    seen = {}
+
+    def _claim(desc_id, source):
+        if desc_id is None:
+            return
+        if desc_id in seen:
+            raise HkpPackError(
+                f"duplicate descriptor id '{desc_id}': defined by {seen[desc_id]} "
+                f"and {source}"
+            )
+        seen[desc_id] = source
+
+    for desc in sorted(flat.descriptors, key=lambda d: d.path.name):
+        _claim(desc.id, desc.path.name)
+        if desc.type == KDP_TYPE:
+            for entry in desc.doc.get("kernelDescriptors", []):
+                if isinstance(entry, dict):
+                    _claim(entry.get("id"), f"inline UKD in {desc.path.name}")
+
+
+def _warn_orphan_standalone_ukds(flat, log):
+    """Warn (non-fatal) for each standalone UKD no KDP references by id.
+
+    An orphan still packs; the warning flags a likely authoring slip (a UKD file
+    that no pack pulls in).
+    """
+    referenced = set()
+    for kdp in flat.kdps():
+        for entry in kdp.doc.get("kernelDescriptors", []):
+            if isinstance(entry, str):
+                referenced.add(entry)
+    for ukd in flat.ukds():
+        if ukd.id not in referenced:
+            log(
+                f"standalone UKD {ukd.path.name} (id '{ukd.id}') is not referenced "
+                "by any KDP"
+            )
+
+
+def _validate_references(flat):
+    ids = {d.id for d in flat.descriptors}
+    ukd_by_id = flat.ukd_by_id()
+    ukd_ids = set(ukd_by_id)
     for kdp in flat.kdps():
         doc = kdp.doc
         kdp_arch = doc.get("arch") or []
