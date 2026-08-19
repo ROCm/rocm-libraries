@@ -102,6 +102,12 @@ set(TENSILELITE_TESTS_INSTALL_SUBDIR "hipblaslt-tensilelite")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        # Per shared/ctest/README.md, enable_testing() must run before
+        # apply_test_category_labels() or its add_test() calls have no
+        # effect. The unconditional enable_testing() later in this file
+        # (for the cpu-gemm-driver tests) is too late for this block, so
+        # call it here too; enable_testing() is idempotent.
+        enable_testing()
         message(STATUS "tensilelite-tests: YAML-based test categorization")
         file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 
