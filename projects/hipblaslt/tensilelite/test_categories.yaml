@@ -96,11 +96,10 @@ test_categories:
     parallel_workers: 16
     # Extra pytest CLI options appended verbatim for this category only.
     # `{ROCM_PATH}` is substituted with the install prefix at runtime (same as the
-    # execution_settings.environment block). The `--prebuilt-client`,
-    # `--global-parameters` and `--tensile-options` flags are custom options
+    # execution_settings.environment block). The `--global-parameters` and
+    # `--tensile-options` flags are custom options
     # registered in tensilelite's conftest.py (tensilelite/Tests/conftest.py).
     pytest_args:
-      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
       - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
     labels:

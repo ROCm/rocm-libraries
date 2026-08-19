@@ -129,7 +129,7 @@ class TestMinimumRequiredVersionSkipped:
         # is a string, this would otherwise be a string-vs-string no-op,
         # but a compatible version string should also pass without
         # surprises.)
-        from tensilelite import __version__
+        from tensilelite import GENERATOR_VERSION as __version__
         assignGlobalParameters({"MinimumRequiredVersion": __version__}, EMPTY_ISA_INFO)
 
 
