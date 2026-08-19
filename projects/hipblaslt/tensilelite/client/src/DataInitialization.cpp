@@ -26,11 +26,11 @@
 
 #include "DataInitialization.hpp"
 
+#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
 #include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
 #endif
-#include "TensorDataManipulation.hpp"
 #include "Utility.hpp"
 // #include "DataInitializationTyped.hpp"
 
@@ -39,7 +39,9 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <iostream>
 #include <list>
 #include <map>
@@ -115,37 +117,87 @@ namespace TensileLite
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
         using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
-        using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
+        using SwizzleCacheVal = roc::host_validation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
 
-        BitWidth toBitWidth(rocisa::DataType datatype)
+        constexpr std::array<size_t, 5> dataSwizzlePermutation{0, 2, 3, 1, 4};
+        constexpr std::array<size_t, 4> unrollMajorMXSwizzlePermutation{0, 2, 1, 3};
+        constexpr std::array<size_t, 4> tiledMajorMXSwizzlePermutation{0, 1, 3, 2};
+
+        enum class SwizzleTensorKind
         {
-            switch(datatype)
+            Data,
+            MXScale
+        };
+
+        roc::host_validation::ScalarType swizzleScalarType(rocisa::DataType  dataType,
+                                                           SwizzleTensorKind kind)
+        {
+            using roc::host_validation::ScalarType;
+
+            switch(dataType)
             {
-            case rocisa::DataType::Double:
-                return 64;
-            case rocisa::DataType::XFloat32:
-            case rocisa::DataType::Float:
-                return 32;
-            case rocisa::DataType::Half:
-            case rocisa::DataType::BFloat16:
-                return 16;
-            case rocisa::DataType::Int8:
-            case rocisa::DataType::Float8_fnuz:
-            case rocisa::DataType::BFloat8_fnuz:
+            case rocisa::DataType::E8:
+                // TensileLite E8 assigns numeric zero to raw 0x00, unlike OCP E8M0.
+                return ScalarType::UInt8;
             case rocisa::DataType::Float8BFloat8_fnuz:
             case rocisa::DataType::BFloat8Float8_fnuz:
-            case rocisa::DataType::Float8:
-            case rocisa::DataType::BFloat8:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
-            case rocisa::DataType::E8:
-            case rocisa::DataType::E5M3:
-                return 8;
+                // A mixed product tag selects an operand interpretation, not one scalar encoding.
+                return ScalarType::UInt8;
             default:
-                throw std::runtime_error("unsupported datatype");
+                return kind == SwizzleTensorKind::MXScale ? toHostValidationMxScaleType(dataType)
+                                                          : toHostValidationScalarType(dataType);
             }
+        }
+
+        BitWidth toBitWidth(rocisa::DataType dataType)
+        {
+            return static_cast<BitWidth>(roc::host_validation::scalarTypeInfo(
+                                             swizzleScalarType(dataType, SwizzleTensorKind::Data))
+                                             .storageBits);
+        }
+
+        roc::host_validation::Tensor makeSwizzleTensor(rocisa::DataType            dataType,
+                                                       SwizzleTensorKind           kind,
+                                                       roc::host_validation::Shape shape,
+                                                       const void*                 source)
+        {
+            using namespace roc::host_validation;
+
+            const ScalarType type   = swizzleScalarType(dataType, kind);
+            Layout           layout = Layout::contiguous(shape);
+            const size_t     bytes  = storageBytesForLayout(type, layout);
+            if(source == nullptr && bytes != 0)
+                throw std::invalid_argument("Cannot swizzle a null tensor buffer.");
+
+            return Tensor(type,
+                          std::move(layout),
+                          std::span<const std::byte>(static_cast<const std::byte*>(source), bytes));
+        }
+
+        void* copySwizzleTensor(const TensorDescriptor&             descriptor,
+                                void*                               destination,
+                                const roc::host_validation::Tensor& source,
+                                hipMemcpyKind                       kind)
+        {
+            const size_t bytes
+                = roc::host_validation::storageBytesForLayout(source.type(), source.layout());
+            const auto storage = source.storage();
+            if(storage.size() != bytes)
+                throw std::runtime_error("Swizzled tensor has an unexpected storage byte count.");
+            if(destination == nullptr && bytes != 0)
+            {
+                std::stringstream message;
+                message << "Cannot copy swizzled tensor " << descriptor.getName()
+                        << " to a null destination.";
+                throw std::runtime_error(message.str());
+            }
+            if(bytes != 0)
+                HIP_CHECK_EXC(hipMemcpy(destination, storage.data(), bytes, kind));
+            return destination;
         }
 
         std::string ToString(InitMode mode)
@@ -389,6 +441,10 @@ namespace TensileLite
             case rocisa::DataType::E5M3:
                 MiK  = 32;
                 MiKv = 8;
+                break;
+            case rocisa::DataType::Float4:
+                MiK  = 32;
+                MiKv = 16;
                 break;
             default:
                 throw std::runtime_error("unsupported datatype for swizzling");
@@ -2471,13 +2527,15 @@ namespace TensileLite
 
                 if(needSwizzle)
                 {
-                    using Tensor = Tensor::Manipulation::Tensor;
+                    using roc::host_validation::Shape;
+                    using roc::host_validation::Tensor;
+
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto                          unrolledSize = desc.sizes()[0];
-                    auto                          tiledSize    = desc.sizes()[1];
-                    ::Tensor::Manipulation::Shape paddedShape{
+                    auto  unrolledSize = desc.sizes()[0];
+                    auto  tiledSize    = desc.sizes()[1];
+                    Shape paddedShape{
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
                             * PackK};
@@ -2489,11 +2547,8 @@ namespace TensileLite
                         if(swizzleKey != g_swizzleCache.back())
                         {
                             Tensor& permuted = g_swizzleCache.at(swizzleKey);
-                            ptr              = copyInputBuffers(desc,
-                                                   p.gpuInput.valid.get(),
-                                                   permuted.as<void>(),
-                                                   permuted.getDesc().flattenSize(),
-                                                   hipMemcpyHostToDevice);
+                            ptr              = copySwizzleTensor(
+                                desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                         }
                         else
                         {
@@ -2502,25 +2557,19 @@ namespace TensileLite
                     }
                     else
                     {
-                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
-
-                        memcpy(
-                            tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
-                        //Temporary hack
-                        uint64_t padVal{};
-                        auto     paddedTensor = ::Tensor::Manipulation::pad(
-                            tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                        paddedTensor.reshape({paddedShape[0] / MiM_N,
-                                              MiM_N,
-                                              paddedShape[1] / (MiK * PackK),
-                                              MiK / MiKv,
-                                              MiKv * PackK});
-                        Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
-                        ptr             = copyInputBuffers(desc,
-                                               p.gpuInput.valid.get(),
-                                               permuted.as<void>(),
-                                               permuted.getDesc().flattenSize(),
-                                               hipMemcpyHostToDevice);
+                        Tensor tmpTensor    = makeSwizzleTensor(desc.dataType(),
+                                                                SwizzleTensorKind::Data,
+                                                                Shape{tiledSize, unrolledSize},
+                                                                p.cpuInput.valid.get());
+                        Tensor paddedTensor = tmpTensor.pad(paddedShape);
+                        Tensor reshaped = paddedTensor.reshape(Shape{paddedShape[0] / MiM_N,
+                                                                     MiM_N,
+                                                                     paddedShape[1] / (MiK * PackK),
+                                                                     MiK / MiKv,
+                                                                     MiKv * PackK});
+                        Tensor permuted = reshaped.permute(dataSwizzlePermutation);
+                        ptr             = copySwizzleTensor(
+                            desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
                     }
                 }
@@ -2563,7 +2612,9 @@ namespace TensileLite
                         // branches above. Batch dim (if present) goes at the
                         // front; pad/reshape/permute operate natively on N-D
                         // so all batches are processed at once.
-                        using Tensor = Tensor::Manipulation::Tensor;
+                        using roc::host_validation::Shape;
+                        using roc::host_validation::Tensor;
+
                         size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 
                         if(unrollMajor)
@@ -2571,52 +2622,40 @@ namespace TensileLite
                             auto   unrolledSize = desc.sizes()[0];
                             auto   tiledSize    = desc.sizes()[1];
                             size_t dimk         = 128 / MX;
-                            auto   tmpTensor
-                                = Tensor({batch, tiledSize, unrolledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{
+                            Tensor tmpTensor
+                                = makeSwizzleTensor(desc.dataType(),
+                                                    SwizzleTensorKind::MXScale,
+                                                    Shape{batch, tiledSize, unrolledSize},
+                                                    p.cpuInput.valid.get());
+                            Shape paddedShape{
                                 batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
 
-                            memcpy(tmpTensor.as<void>(),
-                                   p.cpuInput.valid.get(),
-                                   tmpTensor.getNumBytes());
-                            //Temporary hack
-                            uint64_t padVal{};
-                            auto     paddedTensor = ::Tensor::Manipulation::pad(
-                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape(
-                                {batch, paddedShape[1], paddedShape[2] / dimk, dimk});
-                            Tensor permuted = permute(paddedTensor, {0, 2, 1, 3});
-                            ptr             = copyInputBuffers(desc,
-                                                               p.gpuInput.valid.get(),
-                                                               permuted.as<void>(),
-                                                               permuted.getDesc().flattenSize(),
-                                                               hipMemcpyHostToDevice);
+                            Tensor paddedTensor = tmpTensor.pad(paddedShape);
+                            Tensor reshaped     = paddedTensor.reshape(
+                                Shape{batch, paddedShape[1], paddedShape[2] / dimk, dimk});
+                            Tensor permuted = reshaped.permute(unrollMajorMXSwizzlePermutation);
+                            ptr             = copySwizzleTensor(
+                                desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                         }
                         else
                         {
                             auto   unrolledSize = desc.sizes()[1];
                             auto   tiledSize    = desc.sizes()[0];
                             size_t dimk         = 128 / MX;
-                            auto   tmpTensor
-                                = Tensor({batch, unrolledSize, tiledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{
+                            Tensor tmpTensor
+                                = makeSwizzleTensor(desc.dataType(),
+                                                    SwizzleTensorKind::MXScale,
+                                                    Shape{batch, unrolledSize, tiledSize},
+                                                    p.cpuInput.valid.get());
+                            Shape paddedShape{
                                 batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
 
-                            memcpy(tmpTensor.as<void>(),
-                                   p.cpuInput.valid.get(),
-                                   tmpTensor.getNumBytes());
-                            //Temporary hack
-                            uint64_t padVal{};
-                            auto     paddedTensor = ::Tensor::Manipulation::pad(
-                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape(
-                                {batch, paddedShape[1] / dimk, dimk, paddedShape[2]});
-                            Tensor permuted = permute(paddedTensor, {0, 1, 3, 2});
-                            ptr             = copyInputBuffers(desc,
-                                                               p.gpuInput.valid.get(),
-                                                               permuted.as<void>(),
-                                                               permuted.getDesc().flattenSize(),
-                                                               hipMemcpyHostToDevice);
+                            Tensor paddedTensor = tmpTensor.pad(paddedShape);
+                            Tensor reshaped     = paddedTensor.reshape(
+                                Shape{batch, paddedShape[1] / dimk, dimk, paddedShape[2]});
+                            Tensor permuted = reshaped.permute(tiledMajorMXSwizzlePermutation);
+                            ptr             = copySwizzleTensor(
+                                desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                         }
                     }
                 }

@@ -25,11 +25,14 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
+#include <roc/host_validation/tensor.hpp>
+#include <span>
+#include <type_traits>
 
-#include "TensorDataManipulation.hpp"
 #include "datatype_interface.hpp"
 #include "helper.h"
 
@@ -61,23 +64,39 @@ void calculateKforSwizzling(hipDataType datatype, size_t& MiK, size_t& MiKv, siz
 template <typename T>
 void swizzleTensor(T* dst, const T* src, size_t n, size_t k, bool colMaj)
 {
-    using Tensor = Tensor::Manipulation::Tensor;
-    size_t MiN   = 16;
+    using Storage = std::conditional_t<
+        sizeof(T) == 1,
+        std::uint8_t,
+        std::conditional_t<sizeof(T) == 2,
+                           std::uint16_t,
+                           std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
+    static_assert(sizeof(T) == sizeof(Storage));
+
+    using roc::host_validation::Layout;
+    using roc::host_validation::Shape;
+    using roc::host_validation::Tensor;
+
+    size_t MiN = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(hipblaslt_type2datatype<T>(), MiK, MiKv, PackK);
-    auto tmpTensor = Tensor::create<T>({n, k});
-    std::copy(src, src + (n * k), tmpTensor.template as<T>());
 
+    std::vector<Storage> nativeStorage(n * k);
+    const auto           sourceBytes = std::as_bytes(std::span(src, n * k));
+    auto                 nativeBytes = std::as_writable_bytes(std::span(nativeStorage));
+    std::copy(sourceBytes.begin(), sourceBytes.end(), nativeBytes.begin());
+
+    const Shape sourceShape = colMaj ? Shape{k, n} : Shape{n, k};
+    Tensor      tmpTensor   = Tensor::fromNative(Layout::contiguous(sourceShape),
+                                                 std::span<const Storage>(nativeStorage));
     if(colMaj)
-    {
-        auto orgTensor = Tensor::create<T>({k, n});
-        std::copy(src, src + (n * k), orgTensor.template as<T>());
-        tmpTensor = permute(orgTensor, {1, 0});
-    }
+        tmpTensor = tmpTensor.permute({1, 0});
 
-    tmpTensor.reshape({n / MiN, MiN, k / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor permuted = permute(tmpTensor, {0, 2, 3, 1, 4});
-    std::copy(permuted.template as<T>(), permuted.template as<T>() + (n * k), dst);
+    const Tensor permuted
+        = tmpTensor.reshape(Shape{n / MiN, MiN, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .permute({0, 2, 3, 1, 4});
+    const std::span<const std::byte> swizzledBytes = permuted.storage();
+    auto destinationBytes                          = std::as_writable_bytes(std::span(dst, n * k));
+    std::copy(swizzledBytes.begin(), swizzledBytes.end(), destinationBytes.begin());
 }
 
 void simpleGemm(hipblasLtHandle_t  handle,
