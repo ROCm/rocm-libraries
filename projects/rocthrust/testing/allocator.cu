@@ -17,6 +17,7 @@
 
 #include <thrust/detail/config.h>
 
+#include <thrust/detail/nv_target.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/system/cpp/vector.h>
 
