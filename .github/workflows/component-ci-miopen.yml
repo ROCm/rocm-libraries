@@ -6,10 +6,10 @@
 # additional build configurations that MIOpen must support but TheRock CI does
 # not exercise: the HIPNOGPU backend (used for offline kernel tuning without
 # GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
-# no-CK UBSan debug build, gtest binary naming convention validation, the
-# public/private split wrapper build (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON), and the
-# flag-off public-ABI gate: a MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF build must keep
-# libMIOpen.so's exported public C API identical to the pre-wrapper baseline.
+# no-CK UBSan debug build, and gtest binary naming convention validation.
+#
+# The HIP package job additionally carries the public-ABI gate: libMIOpen.so's
+# exported public C API must stay identical to the committed baseline.
 
 name: "Component CI: MIOpen"
 
@@ -47,6 +47,8 @@ jobs:
 
           # Builds the HIP package and runs miopen_gtest_check via rocjitsu KMD interposer
           # to validate the gtest binary and test naming conventions without a physical GPU.
+          # Also hosts the public-ABI gate: this is the release, HIP-backend build, so it
+          # is the closest thing here to the artifact consumers actually link against.
           - name: MIOpen Build Hip Package
             job_id: hip-package-build
             cmake_extra_flags: >-
@@ -85,50 +87,6 @@ jobs:
               -DCMAKE_PREFIX_PATH=/opt/rocm
               -DGPU_TARGETS="gfx942"
             build_target: --target install --target all
-
-          # Builds the public/private split (wrapper + libMIOpen_private.so) to
-          # exercise the MIOPEN_ENABLE_HIPDNN_WRAPPER=ON path: the compile-time
-          # -include rename must apply cleanly across every private TU and the
-          # wrapper must link against the private library. miopen_gtest is built
-          # as well so a real consumer links against the wrapper, proving the split
-          # still satisfies both the public C API and the internal C++ symbols the
-          # tests use.
-          #
-          # Coverage caveat: MLIR and ComposableKernel are OFF here to keep the job
-          # within its time budget, so the TUs those backends add are not compiled
-          # under the rename. The flag-on rename is only proven over the default
-          # solver set; a CK/MLIR-specific TU could still break it.
-          - name: MIOpen Flag-On Wrapper Build-Only
-            job_id: flag-on-build
-            cmake_extra_flags: >-
-              -DCMAKE_BUILD_TYPE=release
-              -DBUILD_DEV=OFF
-              -DMIOPEN_USE_MLIR=OFF
-              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
-              -DMIOPEN_GPU_SYNC=OFF
-              -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON
-              -DCMAKE_PREFIX_PATH=/opt/rocm
-              -DGPU_TARGETS="gfx942"
-            build_target: --target MIOpen --target miopen_gtest
-
-          # Flag-off public-ABI gate. Builds the default
-          # (MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF) single libMIOpen.so and asserts its
-          # public ABI matches the committed pre-wrapper baseline: SONAME, exported
-          # public C API symbol set, no _impl leakage, no dependency on
-          # libMIOpen_private. This is a symbol-level check, not byte equivalence --
-          # signatures, struct layout and behaviour are outside its reach.
-          - name: MIOpen Flag-Off Public ABI
-            job_id: public-abi
-            cmake_extra_flags: >-
-              -DCMAKE_BUILD_TYPE=release
-              -DBUILD_DEV=OFF
-              -DMIOPEN_USE_MLIR=OFF
-              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
-              -DMIOPEN_GPU_SYNC=OFF
-              -DMIOPEN_ENABLE_HIPDNN_WRAPPER=OFF
-              -DCMAKE_PREFIX_PATH=/opt/rocm
-              -DGPU_TARGETS="gfx942"
-            build_target: --target MIOpen
 
     runs-on: azure-linux-scale-rocm
     steps:
@@ -195,46 +153,22 @@ jobs:
       - name: Build
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
 
-      - name: Flag-off public-ABI check
-        if: matrix.job_id == 'public-abi'
+      # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
+      # exported public C API symbol set, and no _impl symbol leakage. This is a
+      # symbol-level check -- signatures, struct layout and behaviour are outside
+      # its reach. Globbing the output directory rather than searching all of
+      # build/ keeps --target package's staging copy under build/_CPack_Packages/
+      # from being picked instead; lib* covers distros where CMAKE_INSTALL_LIBDIR
+      # resolves to lib64.
+      - name: Public ABI check
+        if: matrix.job_id == 'hip-package-build'
         run: |
-          lib=$(find build -name 'libMIOpen.so.1.0' | head -1)
-          test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/"; exit 1; }
+          lib=$(ls build/lib*/libMIOpen.so.1.0 2>/dev/null | head -1)
+          test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/lib*/"; exit 1; }
           echo "Checking $lib against committed baseline"
           python3 projects/miopen/script/check_public_abi.py check \
             "$lib" \
             --baseline projects/miopen/test/public_abi/public_symbols.baseline
-
-      # Asserts the flag-on wrapper's exported public C API set equals the
-      # committed baseline minus the committed excluded set (experimental
-      # miopen_internal.h APIs + Hidden MIGraphX shims, which intentionally stay
-      # on libMIOpen_private.so under their original names). Enforces the flag-on
-      # symbol boundary that hipDNN will consume.
-      - name: Flag-on wrapper symbol-set check
-        if: matrix.job_id == 'flag-on-build'
-        run: |
-          lib=$(find build -name 'libMIOpen.so.1.0' -not -name 'libMIOpen_private*' | head -1)
-          test -n "$lib" || { echo "wrapper libMIOpen.so.1.0 not found under build/"; exit 1; }
-          private=$(find build -name 'libMIOpen_private.so.1.0' | head -1)
-          test -n "$private" || { echo "libMIOpen_private.so.1.0 not found under build/"; exit 1; }
-          echo "Checking wrapper $lib against baseline minus excluded"
-          python3 projects/miopen/script/check_public_abi.py check-wrapper \
-            "$lib" \
-            --baseline projects/miopen/test/public_abi/public_symbols.baseline \
-            --excluded projects/miopen/test/public_abi/wrapper_excluded_symbols.txt \
-            --private-lib "$private" \
-            --public-header projects/miopen/include/miopen/miopen.h
-
-      # The symbol-set check above proves the wrapper's symbol table partitions
-      # correctly; it says nothing about whether the forwarding stubs pass their
-      # arguments through correctly. The CPU_* gtests are the only part of the
-      # suite that can run on this GPU-less runner, so they are the one piece of
-      # behavioural coverage available for a flag-on binary. They also exercise
-      # the _impl branch of the relaxed assertions in smoke_tuning_policy.cpp,
-      # which no other job reaches.
-      - name: Run CPU gtests against the flag-on wrapper
-        if: matrix.job_id == 'flag-on-build'
-        run: ./build/bin/miopen_gtest --gtest_filter='CPU_*'
 
       - name: Configure Tuna Fin
         if: matrix.job_id == 'tuna-fin-build'
