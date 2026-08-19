@@ -20,6 +20,8 @@ Serializes ForkParameter objects directly to YAML in a single pass with no post-
 import logging
 import os
 from pathlib import Path
+import shlex
+import sys
 from typing import Any, Dict, List, Optional
 
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
@@ -273,19 +275,6 @@ echo " ---- $NAME Done!"
 """
 
 
-def _tensile_pp(hip_s: str) -> str:
-    """PYTHONPATH for the emitted run script: tensilelite plus rocisa.
-
-    Same reason as geko.utils.tensile_pythonpath -- Tensile imports rocisa at import
-    time and the built package sits one level below the CMake directory of the same
-    name. inherit=False here because the emitted script must be reproducible on its
-    own rather than depending on whoever runs it.
-    """
-    from geko.utils import tensile_pythonpath
-
-    return tensile_pythonpath(hip_s, inherit=False)
-
-
 def write_run_script(
     filepath: str | Path,
     entity_name: str,
@@ -298,21 +287,25 @@ def write_run_script(
     Args:
         filepath: Path for the ``.sh`` file (created with mode ``0o755``).
         entity_name: Base name matching ``{entity_name}.yaml`` in the working directory.
-        hipblaslt_path: Root of the hipBLASLt checkout (for ``tensilelite`` paths).
-        client_path: Optional path passed as ``--prebuilt-client`` when set.
+        hipblaslt_path: Retained for compatibility with the existing caller API.
+        client_path: Optional client executable returned by the TensileLite build.
         extra_env: Environment variables the run needs on its architecture
             (geko.constants.runtime_env), set on the command line.
     """
-    hip_s = str(Path(hipblaslt_path).resolve())
-    client_path_str = ''
+    command = "tensilelite run"
+    environment = ""
     if client_path:
-        client_path_str = f'--prebuilt-client {Path(client_path).resolve()}'
-    env_prefix = ''.join(f'{name}={value} ' for name, value in (extra_env or {}).items())
+        client = Path(client_path).resolve()
+        python = shlex.quote(sys.executable)
+        environment = (
+            f"{python} -m tensilelite_configure_client --ensure-client "
+            f"{shlex.quote(str(client))} && "
+        )
+        command = f"{python} -m tensilelite run"
 
+    env_prefix = ''.join(f'{name}={value} ' for name, value in (extra_env or {}).items())
     run_command = (
-        f'{env_prefix}PYTHONPATH={_tensile_pp(hip_s)} '
-        f'{hip_s}/tensilelite/tensilelite/bin/Tensile '
-        f'$YAML $WORK_DIR {client_path_str} 2>&1 | tee $OUT'
+        f'{environment}{env_prefix}{command} $YAML $WORK_DIR 2>&1 | tee $OUT'
     )
 
     content = _RUN_SCRIPT_TEMPLATE.format(
@@ -406,7 +399,7 @@ class EntityOutputWriter:
             output_dir: Directory for YAML and ``.sh`` files (and ``run_<gemm_type>_all.sh``).
             gemm_type: GEMM string used in run-all and config log basenames.
             hipblaslt_path: hipBLASLt root for per-entity run scripts.
-            client_path: Optional prebuilt TensileLite client for run scripts.
+            client_path: Optional staged ROCm root for run scripts.
             write_shell_scripts: If false, skip ``.sh`` and ``run_*_all.sh`` (YAML and log only).
         """
         self._output_dir = Path(output_dir)
