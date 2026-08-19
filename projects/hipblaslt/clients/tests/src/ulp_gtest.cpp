@@ -58,7 +58,8 @@ namespace
         using namespace roc::host_validation;
         using namespace hipblaslt::host_validation;
 
-        const Layout layout          = comparisonLayout(M, N, lda, stride, batchCount);
+        const Layout layout
+            = hipblaslt::host_validation::detail::comparisonLayout(M, N, lda, stride, batchCount);
         const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
         ComparisonOptions options;
         options.pointwise                  = false;
