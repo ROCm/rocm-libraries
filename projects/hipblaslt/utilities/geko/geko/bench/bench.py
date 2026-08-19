@@ -431,7 +431,7 @@ def compare(
     if ref_custom_lib_dir is not None and not is_built_custom_library(ref_custom_lib_dir):
         raise ValueError(f"Reference custom library not built in '{ref_custom_lib_dir}'")
 
-    # Build custom library with TensileCreateLibrary if not found
+    # Build custom library with tensilelite_create_library if not found
     if not cache or not is_built_custom_library(custom_lib_dir):
         logger.debug(f"Creating custom library cache={cache} custom_lib_dir={custom_lib_dir}")
         library.operations.create(hipblaslt_path, lib_dir, custom_lib_dir)

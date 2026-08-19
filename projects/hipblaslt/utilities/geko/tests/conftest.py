@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -126,23 +125,14 @@ def repo_root() -> Path:
 def tensilelite_sys_path(hipblaslt_path):
     if not hipblaslt_path:
         pytest.skip("Requires --hipblaslt-path")
-    tl = Path(hipblaslt_path) / "tensilelite"
-    if not tl.is_dir():
+    if not (Path(hipblaslt_path) / "tensilelite").is_dir():
         pytest.skip(f"tensilelite not found under {hipblaslt_path}")
-    s = str(tl)
-    sys.path.insert(0, s)
-    # The directory existing does not guarantee rocisa was built/installed in this
-    # checkout. TensileLite imports rocisa (a compiled nanobind extension) lazily, so
-    # without this guard a missing rocisa surfaces as an error deep inside a test
-    # rather than a clean skip. See tox -e integration to provision the env.
+    pytest.importorskip(
+        "tensilelite",
+        reason="TensileLite must be installed in the active GEKO interpreter.",
+    )
     pytest.importorskip(
         "rocisa",
-        reason=f"rocisa not importable from {tl}; build it (e.g. tox -e integration).",
+        reason="rocisa must be importable in the active GEKO interpreter.",
     )
-    try:
-        yield
-    finally:
-        try:
-            sys.path.remove(s)
-        except ValueError:
-            pass
+    yield

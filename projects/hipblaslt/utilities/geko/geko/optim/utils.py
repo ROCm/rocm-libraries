@@ -47,7 +47,6 @@ __all__ = [
 ]
 
 
-
 def get_checkpoint_file(build_dir: str | Path) -> Path | None:
     """Return checkpoint file found in a build directory.
 
