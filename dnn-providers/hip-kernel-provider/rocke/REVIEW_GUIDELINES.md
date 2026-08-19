@@ -91,6 +91,14 @@ and the gap is invisible until someone profiles production.
 - **Gate scope must equal verified scope.** If a gate *opens* a path for a broad set of shapes,
   the configs you did not measure are unverified — test them or scope the gate down to what you
   proved. "Routes to the fast path" is not "produces correct numbers."
+- **`is_valid_spec` / `supports_*` is functional-only.** It answers one question — *can this
+  kernel be emitted and run correctly?* Reject only for emit-impossible/undefined configs
+  (impossible tile/atom geometry, LDS/register budget, missing MMA-op / dtype / arch mismatch,
+  mutually-incompatible flags, a boundary mode with no safe IR path). Keep *opinions* out —
+  performance heuristics ("prefer d128"), benchmark-coverage gaps, policy ("prod only enables
+  GQA-8"), and re-checking routing the dispatcher already does all belong in dispatch/selectors,
+  not the validator. State the hardware/algorithm invariant in `reason`, not the workload.
+  (Detail + the reject / don't-reject lists: [`authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md) §2.)
 
 *(Authoring side: the Core DoD in [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md) requires an
 on-GPU **numeric** test — "not spec-only geometry, that passes green and lets a regression
@@ -169,17 +177,25 @@ knob, per the spec-field rule above.)*
   correctness bug — the day someone updates one site and forgets another, the code is subtly
   wrong only on the missed path. One named helper makes a partial update impossible. (This is
   the same failure as the duplicated-cohort case above.)
-- **Keep shape/dimension values out of identifiers, and hoist any hard-coded shape to a
-  named, classified constant.** A symbol like `_build_..._d256_lean`, or a bare
-  `head_size == 256` sprinkled through a body, reads as permanent and load-bearing even when
-  it is really *the only shape validated so far* — so the name lies the moment the code is
-  reused or generalized. Name the concept for what it *does* (`_build_..._lean`), lift the
-  shape into a named constant whose comment classifies it — **validation gate** (widen once
-  another shape is proven) vs **algorithmic limit** (the schedule genuinely bakes it, e.g. a
-  per-thread stride derived from that dimension) per §1 — and derive extents from `spec`
-  wherever the schedule actually allows it. Reviewer cue: a dimension baked into a symbol name
-  or a scattered literal is a prompt to ask "is this load-bearing, or just the first shape
-  that shipped?" — and to check the two answers (name vs guard) tell the same story.
+- **One builder per family; no bespoke shape kernels.** Ship one `build_<family>(spec)`; a new
+  module/function/branch keyed to a single shape class — `build_attention_sq8192.py`, or
+  `if spec.seqlen_q == 8192: return build_other(...)` inside a body — is the smell. Shape-specific
+  behavior belongs in spec flags or dispatch/heuristics; a harness may hardcode shapes but must
+  call the same public `build_*` / `run_*_torch` the dispatcher uses, never a forked IR path.
+  (Detail: [`authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md) §1.)
+- **Name by operation + algorithm, not workload — and hoist a hard-coded shape to a classified
+  constant.** A builder/module/spec-class name states the *operation + tiling*
+  (`build_unified_attention_2d_tiled`), never runtime geometry (`build_attention_d128_sq4096`,
+  `prefill_qwen3_80b`, `_build_..._d256_lean`). `kernel_name()` **may** carry codegen knobs that
+  change emitted IR (`dtype`, `head_size`, `block_n`, tile/warp, `ragged`, `persistent`) but
+  **not** workload identity (`batch`, `seqlen`, `M/N/K`, model codenames) — those are `b.param`
+  runtime args. When a body still pins one shape (e.g. `head_size == 256`), lift it to a named
+  constant whose comment classifies it — **validation gate** (widen once another shape is proven)
+  vs **algorithmic limit** (the schedule bakes it, e.g. a per-thread stride derived from that
+  dim) per §1 — and derive extents from `spec` where the schedule allows. Reviewer cue: a
+  workload dimension in a *name* (vs a codegen knob in `kernel_name()`) is the tell; check the
+  name and the guard tell the same story. (Detail:
+  [`authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md).)
 - **Arch-independent logic belongs in `common/`,** not forked across `gfx942/` and `gfx950/`.
   Forked copies drift; fix one, miss the other. Conversely, when logic *is* arch-specific, cover
   every arch you enabled — don't fix on the arch you happen to be sitting on and assume the
