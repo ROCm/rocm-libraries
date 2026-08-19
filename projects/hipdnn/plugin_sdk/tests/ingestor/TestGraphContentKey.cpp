@@ -221,10 +221,24 @@ TEST(TestIngestorGraphContentKey, AnEmptyGraphDoesNotMatchAContentCarryingOne)
     EXPECT_NE(GraphContentKey{empty}, keyFor(populated));
 }
 
-// The hash narrows; the content decides. Colliding hashes must not produce a false hit,
-// or a cache lookup would serve a kernel measured for a different graph.
+/// The hash narrows; the content decides. This forces the two hashes to agree so the
+/// structural comparison is actually reached -- an earlier version asserted only that
+/// two different graphs compare unequal, which `operator==` answers from the hash
+/// mismatch alone, so it passed even with the content comparison deleted.
 TEST(TestIngestorGraphContentKey, EqualHashesWithDifferentContentStillCompareUnequal)
 {
+    struct CollidingKey : GraphContentKey
+    {
+        using GraphContentKey::GraphContentKey;
+
+        static CollidingKey with(const ContentCarryingTestGraph& graph, uint64_t forcedHash)
+        {
+            CollidingKey key{graph};
+            key.forceHash(forcedHash);
+            return key;
+        }
+    };
+
     Spec narrow;
     narrow.tensors[0].dims = {4, 8};
     Spec wide;
@@ -233,13 +247,40 @@ TEST(TestIngestorGraphContentKey, EqualHashesWithDifferentContentStillCompareUne
     const ContentCarryingTestGraph first{narrow};
     const ContentCarryingTestGraph second{wide};
 
-    const auto firstKey = keyFor(first);
-    const auto secondKey = keyFor(second);
-    ASSERT_NE(firstKey, secondKey) << "the two graphs must differ for this test to mean anything";
+    const auto firstKey = CollidingKey::with(first, 0xC0FFEE);
+    const auto secondKey = CollidingKey::with(second, 0xC0FFEE);
 
-    // Structural comparison is what rejects the match, so forcing the hashes together
-    // must not change the verdict.
-    EXPECT_FALSE(*firstKey.content() == *secondKey.content());
+    ASSERT_EQ(firstKey.hash(), secondKey.hash()) << "the collision must actually be forced";
+    EXPECT_NE(static_cast<const GraphContentKey&>(firstKey),
+              static_cast<const GraphContentKey&>(secondKey))
+        << "a hash collision with differing content must resolve to a miss, never a hit";
+}
+
+/// The same forcing, in the direction that must still match: equal content plus equal
+/// hashes is a genuine hit. Without this, the test above could be satisfied by an
+/// operator== that simply always returned false.
+TEST(TestIngestorGraphContentKey, EqualHashesWithEqualContentStillCompareEqual)
+{
+    struct CollidingKey : GraphContentKey
+    {
+        using GraphContentKey::GraphContentKey;
+
+        static CollidingKey with(const ContentCarryingTestGraph& graph, uint64_t forcedHash)
+        {
+            CollidingKey key{graph};
+            key.forceHash(forcedHash);
+            return key;
+        }
+    };
+
+    const ContentCarryingTestGraph first{Spec{}};
+    const ContentCarryingTestGraph second{Spec{}};
+
+    const auto firstKey = CollidingKey::with(first, 0xC0FFEE);
+    const auto secondKey = CollidingKey::with(second, 0xC0FFEE);
+
+    EXPECT_EQ(static_cast<const GraphContentKey&>(firstKey),
+              static_cast<const GraphContentKey&>(secondKey));
 }
 
 TEST(TestIngestorGraphContentKey, StdHashAgreesWithTheKeysOwnHash)
