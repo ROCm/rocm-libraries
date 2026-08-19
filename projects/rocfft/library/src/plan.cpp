@@ -561,7 +561,6 @@ rocfft_status rocfft_plan_description_set_load_callback(rocfft_plan_description 
                                                         const char*             symbol_name,
                                                         const void*             bitcode_data,
                                                         size_t                  bitcode_len_bytes,
-                                                        void**                  cb_data,
                                                         size_t                  shared_mem_bytes)
 try
 {
@@ -574,8 +573,6 @@ try
               bitcode_data,
               "bitcode_len_bytes",
               bitcode_len_bytes,
-              "cb_data",
-              cb_data,
               "shared_mem_bytes",
               shared_mem_bytes);
     if(!description)
@@ -593,7 +590,7 @@ try
         // validate that the symbol name is a legal C identifier
         if(!valid_symbol_name(symbol_name))
             return rocfft_status_invalid_arg_value;
-        description->loadOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes, cb_data);
+        description->loadOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
     }
     return rocfft_status_success;
 }
@@ -606,7 +603,6 @@ rocfft_status rocfft_plan_description_set_store_callback(rocfft_plan_description
                                                          const char*             symbol_name,
                                                          const void*             bitcode_data,
                                                          size_t                  bitcode_len_bytes,
-                                                         void**                  cb_data,
                                                          size_t                  shared_mem_bytes)
 try
 {
@@ -619,8 +615,6 @@ try
               bitcode_data,
               "bitcode_len_bytes",
               bitcode_len_bytes,
-              "cb_data",
-              cb_data,
               "shared_mem_bytes",
               shared_mem_bytes);
     if(!description)
@@ -638,7 +632,7 @@ try
         // validate that the symbol name is a legal C identifier
         if(!valid_symbol_name(symbol_name))
             return rocfft_status_invalid_arg_value;
-        description->storeOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes, cb_data);
+        description->storeOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
     }
     return rocfft_status_success;
 }

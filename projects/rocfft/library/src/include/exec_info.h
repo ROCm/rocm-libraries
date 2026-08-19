@@ -50,6 +50,13 @@ struct rocfft_execution_info_t
     void** store_cb_fns       = nullptr;
     void** store_cb_data      = nullptr;
     size_t store_cb_lds_bytes = 0;
+
+    // Copies of user-supplied JIT callback data.  This is necessary
+    // because JIT callback data is specified using separate APIs
+    // from rocfft_execute, so the pointers above need something to
+    // point to that lives long enough.
+    std::vector<void*> load_cb_data_jit;
+    std::vector<void*> store_cb_data_jit;
 };
 
 class InternalTempBuffer;

@@ -141,6 +141,28 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_execution_info info,
+                                                           void**                cb_data,
+                                                           size_t                count)
+try
+{
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // nullptr cannot be combined with a nonzero count
+    if(!cb_data && count)
+        return rocfft_status_invalid_arg_value;
+
+    info->load_cb_data_jit.resize(count);
+    std::copy(cb_data, cb_data + count, info->load_cb_data_jit.begin());
+    info->load_cb_data = info->load_cb_data_jit.data();
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
 rocfft_status rocfft_execution_info_set_store_callback(rocfft_execution_info info,
                                                        void**                cb_functions,
                                                        void**                cb_data,
@@ -158,6 +180,28 @@ try
     info->store_cb_fns       = cb_functions;
     info->store_cb_data      = cb_data;
     info->store_cb_lds_bytes = shared_mem_bytes;
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
+rocfft_status rocfft_execution_info_set_store_callback_data(rocfft_execution_info info,
+                                                            void**                cb_data,
+                                                            size_t                count)
+try
+{
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // nullptr cannot be combined with a nonzero count
+    if(!cb_data && count)
+        return rocfft_status_invalid_arg_value;
+
+    info->store_cb_data_jit.resize(count);
+    std::copy(cb_data, cb_data + count, info->store_cb_data_jit.begin());
+    info->store_cb_data = info->store_cb_data_jit.data();
     return rocfft_status_success;
 }
 catch(...)
