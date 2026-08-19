@@ -270,7 +270,7 @@ std::shared_future<std::unique_ptr<RTCKernel>>
                       module.alloc(code.data());
                       module_promise.set_value(std::move(module));
                   }
-                  catch(std::exception& e)
+                  catch(const std::exception& e)
                   {
                       if(LOG_RTC_ENABLED())
                           (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;

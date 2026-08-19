@@ -1,4 +1,4 @@
-// Copyright (C) 2022, 2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,15 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCFFT_RTC_COMPILE_H
-#define ROCFFT_RTC_COMPILE_H
+#ifndef ROCFFT_HIPRTC_EXCEPT_H
+#define ROCFFT_HIPRTC_EXCEPT_H
 
-#include <string>
-#include <vector>
+#include <hip/hiprtc.h>
 
-inline constexpr const char* ARCH_SPIRV = "amdgcnspirv";
-
-// compile source to a code object, in the current process.
-std::vector<char> compile_inprocess(const std::string& kernel_src, const std::string& gpu_arch);
+// errors specifically from hiprtc APIs
+struct hiprtc_runtime_error : public std::runtime_error
+{
+    const hiprtcResult hiprtc_error;
+    hiprtc_runtime_error(const std::string& info, hiprtcResult hiprtc_status)
+        : std::runtime_error::runtime_error(info)
+        , hiprtc_error(hiprtc_status)
+    {
+    }
+};
 
 #endif

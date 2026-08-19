@@ -128,8 +128,9 @@ struct hipLink_wrapper_t
 {
     hipLink_wrapper_t()
     {
-        if(hipLinkCreate(0, nullptr, nullptr, &state) != hipSuccess)
-            throw std::runtime_error("failed to link create");
+        auto err = hipLinkCreate(0, nullptr, nullptr, &state);
+        if(err != hipSuccess)
+            throw hip_runtime_error("failed to link create", err);
     }
 
     ~hipLink_wrapper_t()
@@ -137,21 +138,34 @@ struct hipLink_wrapper_t
         (void)hipLinkDestroy(state);
         state = nullptr;
     }
+    // Disallow copies
+    hipLink_wrapper_t(const hipLink_wrapper_t&) = delete;
+    hipLink_wrapper_t& operator=(const hipLink_wrapper_t&) = delete;
+    // Allow moves
+    hipLink_wrapper_t(hipLink_wrapper_t&& other)
+    {
+        std::swap(this->state, other.state);
+    }
+    hipLink_wrapper_t& operator=(hipLink_wrapper_t&& other)
+    {
+        std::swap(this->state, other.state);
+        return *this;
+    }
 
     void link(void* bitcode_data, size_t bitcode_len_bytes, const char* filename)
     {
         // hip/cu link APIs accept non-const data, even though they
         // have no reason to own or modify the data
-        if(hipLinkAddData(state,
-                          hipJitInputSpirv,
-                          const_cast<void*>(bitcode_data),
-                          bitcode_len_bytes,
-                          filename,
-                          0,
-                          nullptr,
-                          nullptr)
-           != hipSuccess)
-            throw std::runtime_error("failed to add cb");
+        auto err = hipLinkAddData(state,
+                                  hipJitInputSpirv,
+                                  bitcode_data,
+                                  bitcode_len_bytes,
+                                  filename,
+                                  0,
+                                  nullptr,
+                                  nullptr);
+        if(err != hipSuccess)
+            throw hip_runtime_error("failed to add cb", err);
     }
 
     std::vector<char> complete()
@@ -159,13 +173,15 @@ struct hipLink_wrapper_t
         std::vector<char> ret;
         void*             bin     = nullptr;
         size_t            binSize = 0;
-        if(hipLinkComplete(state, &bin, &binSize) != hipSuccess)
-            throw std::runtime_error("failed to link complete");
+        auto              err     = hipLinkComplete(state, &bin, &binSize);
+        if(err != hipSuccess)
+            throw hip_runtime_error("failed to link complete", err);
         auto bin_char = reinterpret_cast<char*>(bin);
         std::copy(bin_char, bin_char + binSize, std::back_inserter(ret));
         return ret;
     }
 
+private:
     hipLinkState_t state = nullptr;
 };
 
@@ -207,7 +223,7 @@ struct StoreOps
                 ret += std::string("extern \"C\" __device__ void ") + spirv_cb.symbol_name + "("
                        + scalar_type + "*, size_t, " + scalar_type + ", void*, void*);\n";
             }
-            // declare a constant name for the load callback as well
+            // declare a constant name for the store callback as well
             ret += "__device__ auto store_cb_jit_fn = ";
             ret += spirv_cb.symbol_name;
             ret += ";\n";

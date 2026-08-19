@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,8 @@
 // THE SOFTWARE.
 
 #include "rtc_compile.h"
+
+#include "../../shared/hiprtc_except.h"
 
 #include <hip/hiprtc.h>
 #include <stdexcept>
@@ -76,21 +78,25 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
     // SPIR-V is returned as bitcode, not a finished code object
     if(gpu_arch == ARCH_SPIRV)
     {
-        if(hiprtcGetBitcodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
-            throw std::runtime_error("failed to get bitcode size");
+        auto err = hiprtcGetBitcodeSize(state.prog, &codeSize);
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get bitcode size", err);
 
         code.resize(codeSize);
-        if(hiprtcGetBitcode(state.prog, code.data()) != HIPRTC_SUCCESS)
-            throw std::runtime_error("failed to get bitcode");
+        err = hiprtcGetBitcode(state.prog, code.data());
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get bitcode", err);
     }
     else
     {
-        if(hiprtcGetCodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
-            throw std::runtime_error("failed to get code size");
+        auto err = hiprtcGetCodeSize(state.prog, &codeSize);
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get code size", err);
 
         code.resize(codeSize);
-        if(hiprtcGetCode(state.prog, code.data()) != HIPRTC_SUCCESS)
-            throw std::runtime_error("failed to get code");
+        err = hiprtcGetCode(state.prog, code.data());
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get code", err);
     }
     return code;
 }
