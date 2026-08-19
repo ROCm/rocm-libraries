@@ -11305,6 +11305,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return isinstance(leaf, BranchInstruction) and \
              type(leaf).__name__ not in unconditionalBranchClassNames
 
+    def _writtenSgprNumbers(leaf):
+      # rocisa gives every instruction at most one destination, so a single dst
+      # is the whole write set, and it is None on the compares that only write
+      # SCC. A numbered container carries its index and its width; a named one
+      # carries neither, and is matched by symbol instead.
+      dst = getattr(leaf, "dst", None)
+      if not isinstance(dst, RegisterContainer) or dst.regType != "s" or \
+         dst.regName is not None or dst.regIdx < 0:
+        return ()
+      return range(dst.regIdx, dst.regIdx + max(dst.regNum, 1))
+
+    def _readsAnySgprNumber(leaf, numbers):
+      for src in (getattr(leaf, "srcs", None) or []):
+        if isinstance(src, RegisterContainer) and src.regType == "s" and \
+           src.regName is None and src.regIdx >= 0 and \
+           any(n in numbers
+               for n in range(src.regIdx, src.regIdx + max(src.regNum, 1))):
+          return True
+      return False
+
     sgprNumberPattern = re.compile(r"\bs\[?(\d+)")
     waveIdSgprs = set()
     guardEndByIndex = {}
@@ -11326,14 +11346,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
             any(int(n) in waveIdSgprs for n in sgprNumberPattern.findall(text))
       elif className.startswith(sccClobberClassPrefixes):
         sccIsWaveDivergent = False
-      elif isinstance(leaf, VReadfirstlaneB32):
-        # Where sgpr("WaveIdx") is no longer live the wave index is recomputed
-        # into a temporary, and the comparison then names that number rather than
-        # the symbol. Nothing else in a TDM kernel reads vgprSerial into an sgpr,
-        # so this read is what identifies the temporary.
-        text = str(leaf)
-        if "vgprSerial" in text:
-          waveIdSgprs.update(int(n) for n in sgprNumberPattern.findall(text))
+
+      # Where sgpr("WaveIdx") is no longer live the wave index is recomputed into
+      # a temporary, and the comparison then names that number rather than the
+      # symbol. Nothing else in a TDM kernel reads vgprSerial into an sgpr, so
+      # that read is what identifies the temporary.
+      #
+      # A number in waveIdSgprs names a register that holds a wave index now, not
+      # one that ever did. The allocator hands the same number out again once the
+      # temporary is released, so a set that only ever grew would read whatever
+      # replaced it as a wave index and report a guard that is not one. Every
+      # write therefore ends a number's tenure and only that read begins one.
+      #
+      # The read lands the thread id, not the wave id, so the tenure has to
+      # survive the s_lshr_b32 that divides it by the wave length in place. A
+      # write that reads the register it writes is refining the wave index it
+      # already holds; a write sourced from elsewhere is replacing it. Only the
+      # latter ends the tenure. Refinement never extends it to a register that
+      # was not already holding a wave index, so this cannot report a new guard,
+      # only keep reporting one that is still there.
+      #
+      # A write through a symbol cannot end the tenure of the number it occupies,
+      # because a named sgpr carries no index at this stage; the symbolic wave
+      # index is matched by name above, so only recomputed temporaries depend on
+      # this, and those are numbered where they are written and read.
+      written = _writtenSgprNumbers(leaf)
+      if written:
+        if isinstance(leaf, VReadfirstlaneB32) and "vgprSerial" in str(leaf):
+          waveIdSgprs.update(written)
+        elif not _readsAnySgprNumber(leaf, waveIdSgprs):
+          waveIdSgprs.difference_update(written)
 
     def _detectLoopHeadInfo():
       # Read the loop span(s) off the back-edge, not off module names. A module

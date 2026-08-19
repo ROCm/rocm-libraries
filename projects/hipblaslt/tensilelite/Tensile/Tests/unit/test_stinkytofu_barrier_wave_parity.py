@@ -47,11 +47,15 @@ from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.instruction import (
     DSLoadB64,
     Instruction,
+    SAndB32,
     SBarrier,
     SBitcmp1B32,
     SCBranchSCC1,
+    SCmpEQU32,
     SCmpLeU32,
+    SLShiftRightB32,
     TensorLoadToLds,
+    VReadfirstlaneB32,
 )
 
 from Tensile.KernelWriter import KernelWriter
@@ -134,6 +138,46 @@ def _waveParityCompare():
 
 def _tripCountCompare():
     return SCmpLeU32(src0=sgpr("LoopCounterL"), src1=1, comment="LoopCounterL < EndCounter")
+
+
+# The number the allocator happens to hand out for the recomputed index. Which
+# number it is does not matter; that it is a number and not a symbol does.
+_WAVE_TEMP = 5
+
+
+def _recomputedWaveParityCompare():
+    """The same guard, emitted where sgprWaveIdx is no longer live.
+
+    KernelWriterAssembly releases sgprWaveIdx after the stagger, so the guard
+    reads the index back out of vgprSerial into a temporary and compares that
+    number. There is no symbol here for the pass to match on, and the thread id
+    the read lands has to be divided by the wave length in place first.
+    """
+    module = Module("recomputed wave index")
+    module.add(VReadfirstlaneB32(dst=sgpr(_WAVE_TEMP), src=vgpr("Serial"),
+                                 comment="get tId"))
+    module.add(SLShiftRightB32(dst=sgpr(_WAVE_TEMP), shiftHex=5,
+                               src=sgpr(_WAVE_TEMP), comment="waveId"))
+    module.add(SBitcmp1B32(src0=sgpr(_WAVE_TEMP), src1=0, comment="check wave parity"))
+    return module
+
+
+def _reusedTemporaryCompare():
+    """The temporary goes back to the allocator and something unrelated takes the
+    number, which is guaranteed to happen now that sgprWaveIdx is released early.
+
+    The comparison names a register that once held a wave index and no longer
+    does, and the branch it feeds is taken by the whole workgroup.
+    """
+    module = Module("reused temporary")
+    module.add(VReadfirstlaneB32(dst=sgpr(_WAVE_TEMP), src=vgpr("Serial"),
+                                 comment="get tId"))
+    module.add(SLShiftRightB32(dst=sgpr(_WAVE_TEMP), shiftHex=5,
+                               src=sgpr(_WAVE_TEMP), comment="waveId"))
+    module.add(SAndB32(dst=sgpr(_WAVE_TEMP), src0=sgpr("GSU"), src1=0x3fff,
+                       comment="the number is reused for something else"))
+    module.add(SCmpEQU32(src0=sgpr(_WAVE_TEMP), src1=1, comment="GSU == 1"))
+    return module
 
 
 def _flatten(module):
@@ -242,3 +286,35 @@ def test_the_pass_does_not_run_below_optlevel_3():
     assert [x for x in fillGroup.items() if x is authored], \
         "the pass ran at OptLevel 0 and removed a barrier the writer placed"
     assert len(_barriers(root)) == 1
+
+
+def test_a_wave_index_recomputed_into_a_temporary_still_guards():
+    """The by-number half of the detector, which is the half a liveness rule can
+    silently switch off: every recomputed index is refined in place right after it
+    is read, so a rule that ended the tenure on any write would see no guards at
+    all here while the by-symbol tests above kept passing."""
+    root, _guarded, fillGroup = _guardedFillTree(_recomputedWaveParityCompare)
+    _runPass(_kernel(), root)
+
+    assert len(_barriers(root)) == 1, \
+        "expected exactly one barrier for the one write-after-read, got %d" % len(_barriers(root))
+    assert not [x for x in fillGroup.items() if isinstance(x, SBarrier)], \
+        "the barrier is still inside a fill guarded by a wave index held in a temporary"
+    leaves = _flatten(root)
+    barrierAt = next(i for i, x in enumerate(leaves) if isinstance(x, SBarrier))
+    branchAt = next(i for i, x in enumerate(leaves) if isinstance(x, SCBranchSCC1))
+    assert barrierAt < branchAt, \
+        "the barrier must precede the branch that only some waves fall through"
+
+
+def test_a_temporary_reused_after_the_wave_index_is_not_a_wave_index():
+    """A register that once held a wave index is not one forever. Reading
+    membership of a set that only ever grew reported this uniform branch as a
+    wave-parity guard and hoisted a barrier out of it."""
+    root, _guarded, fillGroup = _guardedFillTree(_reusedTemporaryCompare)
+    _runPass(_kernel(), root)
+
+    assert len(_barriers(root)) == 1
+    assert [x for x in fillGroup.items() if isinstance(x, SBarrier)], \
+        "a barrier was hoisted out of a branch the whole workgroup takes, because " \
+        "the register it compares had held a wave index earlier"
