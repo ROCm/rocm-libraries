@@ -531,25 +531,53 @@ void check(hipStream_t                   stream,
         };
 
 #ifdef GOOGLE_TEST
-        std::optional<HostComparisonReport> dPointwiseComparison;
-        if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY && (arg.unit_check || arg.norm_check))
-        {
-            dPointwiseComparison = compareBuffer(M[gemmIdx],
-                                                 N[gemmIdx],
-                                                 ldd[gemmIdx],
-                                                 stride_d[gemmIdx],
-                                                 hD_gold[gemmIdx].buf(),
-                                                 hD_1[gemmIdx].buf(),
-                                                 num_batches[gemmIdx],
-                                                 To,
-                                                 true,
-                                                 arg.unit_check,
-                                                 false,
-                                                 false,
-                                                 false);
-        }
-
+        const bool requireDSpecialValueConsistency = arg.unit_check || arg.norm_check;
+        const bool compareDPointwise               = arg.unit_check;
+#else
+        constexpr bool requireDSpecialValueConsistency = false;
+        constexpr bool compareDPointwise               = false;
 #endif
+        const bool compareD = requireDSpecialValueConsistency || compareDPointwise
+                              || arg.norm_check || arg.allclose_check || arg.ulp_check;
+
+        std::optional<HostComparisonReport> dComparison;
+        std::vector<HostComparisonReport>   dBatchComparisons;
+        if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY && compareD)
+        {
+            dComparison = compareBuffer(M[gemmIdx],
+                                        N[gemmIdx],
+                                        ldd[gemmIdx],
+                                        stride_d[gemmIdx],
+                                        hD_gold[gemmIdx].buf(),
+                                        hD_1[gemmIdx].buf(),
+                                        num_batches[gemmIdx],
+                                        To,
+                                        requireDSpecialValueConsistency,
+                                        compareDPointwise,
+                                        arg.norm_check,
+                                        arg.allclose_check,
+                                        arg.ulp_check);
+        }
+        else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY && compareD)
+        {
+            dBatchComparisons.reserve(num_batches[gemmIdx]);
+            for(int batch = 0; batch < num_batches[gemmIdx]; ++batch)
+            {
+                dBatchComparisons.push_back(compareBuffer(M[gemmIdx],
+                                                          N[gemmIdx],
+                                                          ldd[gemmIdx],
+                                                          0,
+                                                          hD_gold[batch].buf(),
+                                                          hD_1[batch].buf(),
+                                                          1,
+                                                          To,
+                                                          requireDSpecialValueConsistency,
+                                                          compareDPointwise,
+                                                          arg.norm_check,
+                                                          arg.allclose_check,
+                                                          arg.ulp_check));
+            }
+        }
 
 #ifdef GOOGLE_TEST
         const auto assertSpecialValueConsistency = [](const auto& report) {
@@ -566,7 +594,7 @@ void check(hipStream_t                   stream,
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
 #ifdef GOOGLE_TEST
-                assertSpecialValueConsistency(dPointwiseComparison->comparison);
+                assertSpecialValueConsistency(dComparison->comparison);
 #endif
             }
             else
@@ -574,21 +602,7 @@ void check(hipStream_t                   stream,
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
 #ifdef GOOGLE_TEST
-                    const HostComparisonReport specialValueComparison
-                        = compareBuffer(M[gemmIdx],
-                                        N[gemmIdx],
-                                        ldd[gemmIdx],
-                                        0,
-                                        hD_gold[batch].buf(),
-                                        hD_1[batch].buf(),
-                                        1,
-                                        To,
-                                        true,
-                                        false,
-                                        false,
-                                        false,
-                                        false);
-                    assertSpecialValueConsistency(specialValueComparison.comparison);
+                    assertSpecialValueConsistency(dBatchComparisons[batch].comparison);
 #endif
                 }
             }
@@ -622,7 +636,7 @@ void check(hipStream_t                   stream,
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
 #ifdef GOOGLE_TEST
-                assertPointwiseComparison(dPointwiseComparison->comparison);
+                assertPointwiseComparison(dComparison->comparison);
 #endif
             }
             else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -630,21 +644,7 @@ void check(hipStream_t                   stream,
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
 #ifdef GOOGLE_TEST
-                    const HostComparisonReport pointwiseComparison
-                        = compareBuffer(M[gemmIdx],
-                                        N[gemmIdx],
-                                        ldd[gemmIdx],
-                                        0,
-                                        hD_gold[batch].buf(),
-                                        hD_1[batch].buf(),
-                                        1,
-                                        To,
-                                        false,
-                                        true,
-                                        false,
-                                        false,
-                                        false);
-                    assertPointwiseComparison(pointwiseComparison.comparison);
+                    assertPointwiseComparison(dBatchComparisons[batch].comparison);
 #endif
                 }
             }
@@ -715,48 +715,17 @@ void check(hipStream_t                   stream,
 
         if(arg.norm_check)
         {
-            std::optional<HostComparisonReport> dFrobeniusComparison;
-            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-            {
-                dFrobeniusComparison = compareBuffer(M[gemmIdx],
-                                                     N[gemmIdx],
-                                                     ldd[gemmIdx],
-                                                     stride_d[gemmIdx],
-                                                     hD_gold[gemmIdx].buf(),
-                                                     hD_1[gemmIdx].buf(),
-                                                     num_batches[gemmIdx],
-                                                     To,
-                                                     false,
-                                                     false,
-                                                     true,
-                                                     false,
-                                                     false);
-            }
-
             double norm_error = 0.0;
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                norm_error = std::abs(dFrobeniusComparison->relativeFrobeniusError);
+                norm_error = std::abs(dComparison->relativeFrobeniusError);
             }
             else
             {
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    const HostComparisonReport frobeniusComparison
-                        = compareBuffer(M[gemmIdx],
-                                        N[gemmIdx],
-                                        ldd[gemmIdx],
-                                        0,
-                                        hD_gold[batch].buf(),
-                                        hD_1[batch].buf(),
-                                        1,
-                                        To,
-                                        false,
-                                        false,
-                                        true,
-                                        false,
-                                        false);
-                    norm_error = std::abs(frobeniusComparison.relativeFrobeniusError);
+                    norm_error
+                        = std::abs(dBatchComparisons[batch].relativeFrobeniusError);
                     hipblaslt_error += norm_error;
                 }
             }
@@ -845,25 +814,11 @@ void check(hipStream_t                   stream,
         {
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                const HostComparisonReport dAllCloseComparison
-                    = compareBuffer(M[gemmIdx],
-                                    N[gemmIdx],
-                                    ldd[gemmIdx],
-                                    stride_d[gemmIdx],
-                                    hD_gold[gemmIdx].buf(),
-                                    hD_1[gemmIdx].buf(),
-                                    num_batches[gemmIdx],
-                                    To,
-                                    false,
-                                    false,
-                                    false,
-                                    true,
-                                    false);
                 if(M[gemmIdx] != 0 && N[gemmIdx] != 0 && num_batches[gemmIdx] != 0
-                   && dAllCloseComparison.allCloseTolerance)
+                   && dComparison->allCloseTolerance)
                 {
-                    hipblaslt_atol = dAllCloseComparison.allCloseTolerance->absolute;
-                    hipblaslt_rtol = dAllCloseComparison.allCloseTolerance->relative;
+                    hipblaslt_atol = dComparison->allCloseTolerance->absolute;
+                    hipblaslt_rtol = dComparison->allCloseTolerance->relative;
                 }
                 else if(M[gemmIdx] != 0 && N[gemmIdx] != 0 && num_batches[gemmIdx] != 0)
                 {
@@ -875,24 +830,13 @@ void check(hipStream_t                   stream,
             {
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    const HostComparisonReport allCloseComparison
-                        = compareBuffer(M[gemmIdx],
-                                        N[gemmIdx],
-                                        ldd[gemmIdx],
-                                        0,
-                                        hD_gold[batch].buf(),
-                                        hD_1[batch].buf(),
-                                        1,
-                                        To,
-                                        false,
-                                        false,
-                                        false,
-                                        true,
-                                        false);
-                    if(M[gemmIdx] != 0 && N[gemmIdx] != 0 && allCloseComparison.allCloseTolerance)
+                    if(M[gemmIdx] != 0 && N[gemmIdx] != 0
+                       && dBatchComparisons[batch].allCloseTolerance)
                     {
-                        hipblaslt_atol = allCloseComparison.allCloseTolerance->absolute;
-                        hipblaslt_rtol = allCloseComparison.allCloseTolerance->relative;
+                        hipblaslt_atol
+                            = dBatchComparisons[batch].allCloseTolerance->absolute;
+                        hipblaslt_rtol
+                            = dBatchComparisons[batch].allCloseTolerance->relative;
                     }
                     else if(M[gemmIdx] != 0 && N[gemmIdx] != 0)
                     {
@@ -908,51 +852,23 @@ void check(hipStream_t                   stream,
         {
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                const HostComparisonReport dUnitsInLastPlaceComparison
-                    = compareBuffer(M[gemmIdx],
-                                    N[gemmIdx],
-                                    ldd[gemmIdx],
-                                    stride_d[gemmIdx],
-                                    hD_gold[gemmIdx].buf(),
-                                    hD_1[gemmIdx].buf(),
-                                    num_batches[gemmIdx],
-                                    To,
-                                    false,
-                                    false,
-                                    false,
-                                    false,
-                                    true);
                 hipblaslt_max_ulp
                     = std::max(hipblaslt_max_ulp,
-                               dUnitsInLastPlaceComparison.unitsInLastPlaceComparison.maximumUlp);
-                ulp_sum_total += dUnitsInLastPlaceComparison.unitsInLastPlaceComparison.sumUlp;
-                ulp_count_total
-                    += dUnitsInLastPlaceComparison.unitsInLastPlaceComparison.ulpCompared;
+                               dComparison->unitsInLastPlaceComparison.maximumUlp);
+                ulp_sum_total += dComparison->unitsInLastPlaceComparison.sumUlp;
+                ulp_count_total += dComparison->unitsInLastPlaceComparison.ulpCompared;
             }
             else
             {
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    const HostComparisonReport unitsInLastPlaceComparison
-                        = compareBuffer(M[gemmIdx],
-                                        N[gemmIdx],
-                                        ldd[gemmIdx],
-                                        0,
-                                        hD_gold[batch].buf(),
-                                        hD_1[batch].buf(),
-                                        1,
-                                        To,
-                                        false,
-                                        false,
-                                        false,
-                                        false,
-                                        true);
                     hipblaslt_max_ulp = std::max(
                         hipblaslt_max_ulp,
-                        unitsInLastPlaceComparison.unitsInLastPlaceComparison.maximumUlp);
-                    ulp_sum_total += unitsInLastPlaceComparison.unitsInLastPlaceComparison.sumUlp;
+                        dBatchComparisons[batch].unitsInLastPlaceComparison.maximumUlp);
+                    ulp_sum_total
+                        += dBatchComparisons[batch].unitsInLastPlaceComparison.sumUlp;
                     ulp_count_total
-                        += unitsInLastPlaceComparison.unitsInLastPlaceComparison.ulpCompared;
+                        += dBatchComparisons[batch].unitsInLastPlaceComparison.ulpCompared;
                 }
             }
         }
