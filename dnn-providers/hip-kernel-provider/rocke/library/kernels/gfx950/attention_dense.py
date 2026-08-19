@@ -121,6 +121,23 @@ class AttentionDenseSpec:
     num_kv_heads: int
     head_size: int
     causal: bool = True
+    # causal_bottom_right: align the causal diagonal to the BOTTOM-RIGHT corner of the
+    #   S_q x S_kv score matrix instead of the top-left, so query i attends to keys
+    #   j <= i + (seqlen_kv - seqlen_q) rather than j <= i.
+    #
+    #   Identical to top-left whenever seqlen_q == seqlen_kv (the offset is 0), and
+    #   0-cost when False: the offset is a build-time int, so nothing is emitted and
+    #   the IR is byte-identical.
+    #
+    #   Needed for CHUNKED PREFILL, where a chunk of queries is scored against a longer
+    #   KV cache (vLLM / SGLang issue this on every chunk). The queries are the LAST
+    #   seqlen_q positions of the sequence, so top-left alignment would let query 0 see
+    #   only key 0 -- it builds and runs and is silently wrong.
+    #
+    #   Requires causal=True and seqlen_q <= seqlen_kv. Not supported with persistent
+    #   (that path derives the diagonal separately and needs its own offset) or with
+    #   sliding_window (the window band would have to shift with it).
+    causal_bottom_right: bool = False
     dtype: str = "bf16"
     # sliding_window: left-context window W. 0 = disabled (full causal, the
     #   byte-identical always-on path). When W>0 each query token q attends to
@@ -306,6 +323,31 @@ class AttentionDenseSpec:
                 raise ValueError("varlen is not supported with persistent=True")
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
+        if self.causal_bottom_right:
+            if not self.causal:
+                raise ValueError("causal_bottom_right requires causal=True")
+            if self.persistent:
+                raise ValueError(
+                    "causal_bottom_right is not supported with persistent=True"
+                )
+            if self.sliding_window > 0:
+                raise ValueError(
+                    "causal_bottom_right is not supported with sliding_window>0"
+                )
+            if self.seqlen_q > self.seqlen_kv:
+                raise ValueError(
+                    "causal_bottom_right requires seqlen_q <= seqlen_kv, got "
+                    f"{self.seqlen_q} > {self.seqlen_kv}"
+                )
+            # The offset shifts the KV-tile prune by exactly (seqlen_kv - seqlen_q) //
+            # block_n tiles, so it must land on a tile boundary or the pruned bound
+            # would cut into a partially-valid tile.
+            if (self.seqlen_kv - self.seqlen_q) % self.block_n != 0:
+                raise ValueError(
+                    "causal_bottom_right requires (seqlen_kv - seqlen_q) to be a "
+                    f"multiple of block_n={self.block_n}, got "
+                    f"{self.seqlen_kv - self.seqlen_q}"
+                )
         if self.waves_per_eu < 1 or self.waves_per_eu > 8:
             raise ValueError(
                 f"waves_per_eu must be in [1, 8], got {self.waves_per_eu} "
@@ -430,6 +472,8 @@ class AttentionDenseSpec:
             f"sk{self.seqlen_kv}",
             "causal" if self.causal else "full",
         ]
+        if self.causal_bottom_right:
+            parts.append("br")
         if self.ragged:
             parts.append("ragged")
         if self.sliding_window > 0:
@@ -493,6 +537,10 @@ def build_attention_dense(
     PAD = _LDS_PAD
     W = spec.sliding_window
     Wt = W // BN  # window length in KV tiles (0 when disabled)
+    # Causal diagonal offset, in keys and in whole KV tiles. 0 for top-left (and always
+    # 0 when seqlen_q == seqlen_kv), so the default path emits byte-identical IR.
+    DIAG_OFF = (Skv - Sq) if spec.causal_bottom_right else 0
+    DIAG_TILES = DIAG_OFF // BN
     varlen = spec.varlen
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
@@ -828,6 +876,12 @@ def build_attention_dense(
             return
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
         query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        # Bottom-right: this query block is the LAST seqlen_q positions of the
+        # sequence, so its absolute key position is offset by (seqlen_kv - seqlen_q).
+        # DIAG_OFF is a Python int folded at build time -- 0 on the top-left default,
+        # where nothing is emitted and the IR is byte-identical.
+        if DIAG_OFF:
+            query_tok = b.add(query_tok, b.const_i32(DIAG_OFF))
         # lower bound key: q - W + 1  (keep iff ktok > q - W)
         win_lo = b.sub(query_tok, b.const_i32(W)) if lower else None
         for nsub in range(N_SUB):
@@ -971,7 +1025,10 @@ def build_attention_dense(
         b.div(seqlen_kv_b, b.const_i32(BN)) if varlen else b.const_i32(n_ktiles)
     )
     if causal:
-        n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
+        # Last KV tile this query block can reach. Bottom-right shifts the diagonal
+        # right by DIAG_OFF keys, i.e. DIAG_TILES whole tiles (validated to divide
+        # evenly), so the block reaches that many tiles further.
+        n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per + DIAG_TILES))
         n_upper = b.select(b.cmp_lt(n_upper, n_ktiles_val), n_upper, n_ktiles_val)
     else:
         n_upper = n_ktiles_val
@@ -1122,7 +1179,12 @@ def build_attention_dense(
             emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
     elif causal:
         # Diagonal-only masking: below-diagonal tiles need no mask (~94% at Sq=8192).
-        diag_start = b.mul(qb, b.const_i32(n_per))
+        # Bottom-right moves the diagonal right by DIAG_TILES, so that many more tiles
+        # are entirely below it and can join the mask-free body. Purely an
+        # optimisation: leaving this unshifted would mask tiles that do not need it,
+        # which is slower but still correct, because the diagonal only ever moves
+        # right (seqlen_q <= seqlen_kv is validated).
+        diag_start = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(DIAG_TILES))
         body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
         body = b.scf_for_iter(
             b.const_i32(1), body_upper, b.const_i32(1), iter_args, iv_name="nb"
