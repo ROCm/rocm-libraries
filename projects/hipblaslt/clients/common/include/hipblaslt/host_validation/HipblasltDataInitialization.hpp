@@ -7,14 +7,14 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <hipblaslt/host_validation/GenerationRecipes.hpp>
 #include <hipblaslt/host_validation/Types.hpp>
 #include <hipblaslt_datatype2string.hpp>
 #include <limits>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <utility>
-#include <vector>
 
 namespace hipblaslt::host_validation
 {
@@ -27,40 +27,71 @@ namespace hipblaslt::host_validation
         C,
     };
 
-    struct MatrixStorageInitialization
+    enum class OneSpecialValue : uint8_t
     {
-        MatrixRole               role             = MatrixRole::A;
-        hipblaslt_initialization initialization   = hipblaslt_initialization::zero;
-        bool                     forceNaN         = false;
-        hipDataType              type             = HIP_R_32F;
-        size_t                   rows             = 0;
-        size_t                   columns          = 0;
-        size_t                   leadingDimension = 0;
-        size_t                   batchStride      = 0;
-        size_t                   batchCount       = 1;
-        int                      specialValueType = -1;
-        bool                     positiveOnly     = false;
+        PositiveInfinity,
+        NegativeInfinity,
+        NaN,
     };
 
-    std::vector<std::byte> generateMatrixStorage(const MatrixStorageInitialization& initialization);
+    struct MatrixInitialization
+    {
+        MatrixRole                     role             = MatrixRole::A;
+        hipblaslt_initialization       initialization   = hipblaslt_initialization::zero;
+        bool                           forceNaN         = false;
+        hipDataType                    type             = HIP_R_32F;
+        size_t                         rows             = 0;
+        size_t                         columns          = 0;
+        size_t                         leadingDimension = 0;
+        size_t                         batchStride      = 0;
+        size_t                         batchCount       = 1;
+        std::optional<OneSpecialValue> oneSpecialValue;
+        bool                           positiveOnly = false;
+    };
+
+    ::roc::host_validation::Tensor generateMatrix(const MatrixInitialization& initialization);
+
+    namespace detail
+    {
+        inline void generateIntoCallerStorage(void*                   data,
+                                              ScalarType              type,
+                                              Layout                  layout,
+                                              const GenerationRecipe& recipe)
+        {
+            const size_t storageBytes = storageBytesForLayout(type, layout);
+            if(storageBytes != 0 && data == nullptr)
+                throw std::invalid_argument(
+                    "hipBLASLt initialization destination storage is null.");
+
+            ::roc::host_validation::Tensor generated
+                = generate(type, std::move(layout), recipe);
+            std::span<std::byte> destinationStorage(
+                static_cast<std::byte*>(data), storageBytes);
+            const uint16_t bits = scalarTypeInfo(type).storageBits;
+            ::roc::host_validation::detail::forEachIndex(
+                generated.shape(), [&](std::span<const size_t> indices, size_t) {
+                    const ptrdiff_t offset = generated.layout().elementOffset(indices);
+                    ::roc::host_validation::detail::copyBitRange(
+                        generated.storage(),
+                        ::roc::host_validation::detail::bitOffset(type, offset),
+                        destinationStorage,
+                        ::roc::host_validation::detail::bitOffset(type, offset),
+                        bits);
+                });
+        }
+    } // namespace detail
 
     template <typename T>
     void initializeTensor(T* data, Layout layout, const GenerationRecipe& recipe)
     {
-        const size_t elements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
-        auto         tensor   = tensorFromMutableStorage(data, elements, std::move(layout));
-        generate(tensor, recipe);
-        if(!tensor.storage().empty())
-            std::memcpy(data, tensor.storage().data(), tensor.storage().size());
+        detail::generateIntoCallerStorage(
+            static_cast<void*>(data), scalarType<T>(), std::move(layout), recipe);
     }
 
     inline void
         initializeTensor(void* data, ScalarType type, Layout layout, const GenerationRecipe& recipe)
     {
-        auto tensor = tensorFromMutableStorage(data, type, std::move(layout));
-        generate(tensor, recipe);
-        if(!tensor.storage().empty())
-            std::memcpy(data, tensor.storage().data(), tensor.storage().size());
+        detail::generateIntoCallerStorage(data, type, std::move(layout), recipe);
     }
 
     inline void initializeTensor(void*                   data,
@@ -162,9 +193,10 @@ namespace hipblaslt::host_validation
                 GenerationRecipe::constant({.value = std::numeric_limits<double>::quiet_NaN()}));
         case hipblaslt_initialization::fp16_accumulator_probe:
         case hipblaslt_initialization::norm_dist_one_special:
-            return GenerationRecipe::realOnly(GenerationRecipe::zero());
+            throw std::invalid_argument(
+                "Requested hipBLASLt initialization requires matrix role and layout information.");
         }
-        return GenerationRecipe::realOnly(GenerationRecipe::zero());
+        throw std::invalid_argument("Unsupported hipBLASLt vector initialization mode.");
     }
 
     template <typename T>

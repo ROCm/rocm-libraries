@@ -12,7 +12,6 @@
 #include <limits>
 #include <stdexcept>
 #include <utility>
-#include <vector>
 
 namespace hipblaslt::host_validation
 {
@@ -20,7 +19,34 @@ namespace hipblaslt::host_validation
 
     namespace
     {
-        bool usesPackedBatchStride(const MatrixStorageInitialization& initialization)
+        size_t checkedMultiply(size_t left, size_t right)
+        {
+            if(left != 0 && right > std::numeric_limits<size_t>::max() / left)
+                throw std::overflow_error("hipBLASLt matrix initialization size overflow.");
+            return left * right;
+        }
+
+        size_t checkedAdd(size_t left, size_t right)
+        {
+            if(right > std::numeric_limits<size_t>::max() - left)
+                throw std::overflow_error("hipBLASLt matrix initialization size overflow.");
+            return left + right;
+        }
+
+        size_t matrixElements(const MatrixInitialization& initialization)
+        {
+            return checkedMultiply(initialization.leadingDimension, initialization.columns);
+        }
+
+        ptrdiff_t layoutStride(size_t stride)
+        {
+            if(stride > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
+                throw std::overflow_error(
+                    "hipBLASLt matrix initialization stride exceeds ptrdiff_t.");
+            return static_cast<ptrdiff_t>(stride);
+        }
+
+        bool usesPackedBatchStride(const MatrixInitialization& initialization)
         {
             return initialization.initialization == hipblaslt_initialization::norm_dist_one_special
                    || (initialization.role == MatrixRole::B
@@ -29,25 +55,49 @@ namespace hipblaslt::host_validation
                                   == hipblaslt_initialization::fp16_accumulator_probe));
         }
 
-        size_t effectiveBatchStride(const MatrixStorageInitialization& initialization)
+        size_t effectiveBatchStride(const MatrixInitialization& initialization)
         {
-            const size_t matrixElements = initialization.leadingDimension * initialization.columns;
+            const size_t oneMatrixElements = matrixElements(initialization);
             if(usesPackedBatchStride(initialization))
                 return initialization.batchStride
-                           ? std::max(initialization.batchStride, matrixElements)
-                           : matrixElements;
+                           ? std::max(initialization.batchStride, oneMatrixElements)
+                           : oneMatrixElements;
             return initialization.batchStride;
         }
 
-        size_t storageElements(const MatrixStorageInitialization& initialization,
-                               size_t                             batchStride)
+        size_t storageElements(const MatrixInitialization& initialization, size_t batchStride)
         {
             if(initialization.batchCount == 0)
                 return 0;
-            const size_t matrixElements = initialization.leadingDimension * initialization.columns;
+            const size_t oneMatrixElements = matrixElements(initialization);
             if(batchStride >= initialization.leadingDimension)
-                return matrixElements + (initialization.batchCount - 1) * batchStride;
-            return matrixElements;
+                return checkedAdd(oneMatrixElements,
+                                  checkedMultiply(initialization.batchCount - 1, batchStride));
+            return oneMatrixElements;
+        }
+
+        void validateInitialization(const MatrixInitialization& initialization)
+        {
+            switch(initialization.role)
+            {
+            case MatrixRole::A:
+            case MatrixRole::B:
+            case MatrixRole::C:
+                break;
+            default:
+                throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
+            }
+
+            if(initialization.oneSpecialValue
+               && initialization.initialization != hipblaslt_initialization::norm_dist_one_special)
+                throw std::invalid_argument(
+                    "A one-special value requires norm_dist_one_special initialization.");
+
+            if(initialization.positiveOnly
+               && initialization.initialization != hipblaslt_initialization::hpl
+               && initialization.initialization != hipblaslt_initialization::trig_float)
+                throw std::invalid_argument(
+                    "Positive-only initialization is only supported for hpl and trig_float.");
         }
 
         GenerationRecipe sentinelRecipe(GenerationRecipe::Component component, bool complexOutput)
@@ -62,16 +112,14 @@ namespace hipblaslt::host_validation
                    || type == ScalarType::Float32 || type == ScalarType::Float64;
         }
 
-        GenerationRecipe matrixGenerationRecipe(const MatrixStorageInitialization& initialization,
-                                                const Tensor&                      destination)
+        GenerationRecipe matrixGenerationRecipe(const MatrixInitialization& initialization,
+                                                const Tensor&               destination)
         {
             const ScalarType type    = destination.type();
             const bool complexOutput = scalarTypeInfo(type).category == ScalarCategory::Complex;
             if(initialization.forceNaN)
             {
-                const ScalarTypeInfo& info = scalarTypeInfo(type);
-                if(info.category == ScalarCategory::Scale
-                   || (info.category == ScalarCategory::FloatingPoint && !info.supportsNaN))
+                if(!scalarTypeInfo(type).supportsNaN)
                     throw std::invalid_argument(
                         "hipBLASLt input type has no supported NaN initialization.");
                 return nanRecipe(type, ComplexGenerationPolicy::Replicated);
@@ -141,7 +189,8 @@ namespace hipblaslt::host_validation
             case hipblaslt_initialization::fp16_accumulator_probe:
             {
                 if(type != ScalarType::Float16)
-                    return GenerationRecipe::realOnly(GenerationRecipe::zero());
+                    throw std::invalid_argument(
+                        "hipBLASLt FP16 accumulator probe requires Float16 storage.");
                 if(initialization.role == MatrixRole::A)
                     return GenerationRecipe::realOnly(GenerationRecipe::constant(
                         {.value = maximumFiniteFloat16Value - fp16AccumulatorProbeStep}));
@@ -175,38 +224,49 @@ namespace hipblaslt::host_validation
             throw std::invalid_argument("Unsupported hipBLASLt host matrix initialization mode.");
         }
 
-        enum class OneSpecialValue
+        OneSpecialValue oneSpecialValueFromIndex(int index)
         {
-            PositiveInfinity = 0,
-            NegativeInfinity = 1,
-            NaN              = 2,
-        };
+            switch(index)
+            {
+            case 0:
+                return OneSpecialValue::PositiveInfinity;
+            case 1:
+                return OneSpecialValue::NegativeInfinity;
+            case 2:
+                return OneSpecialValue::NaN;
+            default:
+                throw std::invalid_argument("Unsupported hipBLASLt one-special value.");
+            }
+        }
 
-        void injectOneSpecial(Tensor view, int requestedSpecialType)
+        void injectOneSpecial(Tensor view, std::optional<OneSpecialValue> requestedValue)
         {
             const size_t logicalElements = view.shape().elementCount();
             if(logicalElements == 0)
                 return;
 
-            uint32_t     state              = static_cast<uint32_t>(oneSpecialInitializationSeed)
-                                                  * initialization::oneSpecialLcgMultiplier
-                                              + initialization::oneSpecialLcgIncrement;
-            const size_t specialLinearIndex = size_t(state) % logicalElements;
-            state                           = state * initialization::oneSpecialLcgMultiplier
-                                              + initialization::oneSpecialLcgIncrement;
-            const int specialType
-                = requestedSpecialType >= 0
-                          && requestedSpecialType < initialization::oneSpecialValueCount
-                      ? requestedSpecialType
-                      : int(state >> initialization::oneSpecialLcgValueShift)
-                            % initialization::oneSpecialValueCount;
+            uint32_t     state                 = static_cast<uint32_t>(oneSpecialInitializationSeed)
+                                                     * initialization::oneSpecialLcgMultiplier
+                                                 + initialization::oneSpecialLcgIncrement;
+            const size_t specialLinearIndex    = size_t(state) % logicalElements;
+            state                              = state * initialization::oneSpecialLcgMultiplier
+                                                 + initialization::oneSpecialLcgIncrement;
+            const OneSpecialValue specialValue = requestedValue.value_or(
+                oneSpecialValueFromIndex(int(state >> initialization::oneSpecialLcgValueShift)
+                                         % initialization::oneSpecialValueCount));
 
-            const GenerationRecipe::Component component
-                = specialType == static_cast<int>(OneSpecialValue::PositiveInfinity)
-                      ? GenerationRecipe::typeInfinity()
-                  : specialType == static_cast<int>(OneSpecialValue::NegativeInfinity)
-                      ? GenerationRecipe::typeNegativeInfinity()
-                      : GenerationRecipe::typeNaN();
+            const GenerationRecipe::Component component = [&] {
+                switch(specialValue)
+                {
+                case OneSpecialValue::PositiveInfinity:
+                    return GenerationRecipe::typeInfinity();
+                case OneSpecialValue::NegativeInfinity:
+                    return GenerationRecipe::typeNegativeInfinity();
+                case OneSpecialValue::NaN:
+                    return GenerationRecipe::typeNaN();
+                }
+                throw std::invalid_argument("Unsupported hipBLASLt one-special value.");
+            }();
             generateAt(
                 view,
                 specialLinearIndex,
@@ -215,32 +275,33 @@ namespace hipblaslt::host_validation
         }
     } // namespace
 
-    std::vector<std::byte> generateMatrixStorage(const MatrixStorageInitialization& initialization)
+    Tensor generateMatrix(const MatrixInitialization& initialization)
     {
+        validateInitialization(initialization);
         if(initialization.leadingDimension < initialization.rows)
             throw std::invalid_argument(
                 "hipBLASLt initialization leading dimension is smaller than rows.");
 
-        const ScalarType       type        = scalarType(initialization.type);
-        const size_t           batchStride = effectiveBatchStride(initialization);
-        const size_t           elements    = storageElements(initialization, batchStride);
-        std::vector<std::byte> storage(
-            storageBytesForLayout(type, Layout::contiguous(Shape{elements})));
+        const ScalarType type        = scalarType(initialization.type);
+        const size_t     batchStride = effectiveBatchStride(initialization);
+        const size_t     elements    = storageElements(initialization, batchStride);
+        const size_t     generatedBatchCount
+            = initialization.batchCount == 0
+                  ? 0
+                  : (batchStride >= initialization.leadingDimension ? initialization.batchCount
+                                                                    : 1);
+        Layout layout(
+            Shape{initialization.rows, initialization.columns, generatedBatchCount},
+            {1, layoutStride(initialization.leadingDimension), layoutStride(batchStride)});
+        Tensor matrix = Tensor(type, Layout::contiguous(Shape{elements})).alias(std::move(layout));
         if(initialization.rows == 0 || initialization.columns == 0
            || initialization.batchCount == 0)
-            return storage;
+            return matrix;
 
-        const size_t generatedBatchCount
-            = batchStride >= initialization.leadingDimension ? initialization.batchCount : 1;
-        Layout layout(Shape{initialization.rows, initialization.columns, generatedBatchCount},
-                      {1,
-                       static_cast<ptrdiff_t>(initialization.leadingDimension),
-                       static_cast<ptrdiff_t>(batchStride)});
-        Tensor view(type, layout, storage);
-        generate(view, matrixGenerationRecipe(initialization, view));
+        generate(matrix, matrixGenerationRecipe(initialization, matrix));
 
         if(initialization.initialization == hipblaslt_initialization::norm_dist_one_special)
-            injectOneSpecial(view, initialization.specialValueType);
-        return std::vector<std::byte>(view.storage().begin(), view.storage().end());
+            injectOneSpecial(matrix, initialization.oneSpecialValue);
+        return matrix;
     }
 } // namespace hipblaslt::host_validation

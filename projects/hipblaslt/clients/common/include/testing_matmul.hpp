@@ -1656,10 +1656,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hScaleD.emplace_back(Talpha, 1);
         }
 
-        // For ULP validation, force hpl / trig_float A/B/C inputs to be
-        // positive-only so the reference dot products do not cancel toward zero
-        // (near-zero outputs inflate the per-element ULP error spuriously).
-        set_ulp_positive_init_state(arg.ulp_check);
+        const bool positiveOnlyInitialization
+            = arg.ulp_check
+              && (arg.initialization == hipblaslt_initialization::hpl
+                  || arg.initialization == hipblaslt_initialization::trig_float);
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
         hipDeviceProp_t mxProp{};
@@ -1760,7 +1760,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       TiA,
                                       (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
                                                                          : stride_a[i],
-                                      num_batches[i]);
+                                      num_batches[i],
+                                      positiveOnlyInitialization);
             }
             else
             {
@@ -1776,7 +1777,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           TiA,
                                           (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
                                                                              : stride_a[i],
-                                          1);
+                                          1,
+                                          positiveOnlyInitialization);
                 }
             }
         }
@@ -1867,7 +1869,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       TiB,
                                       (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                          : stride_b[i],
-                                      num_batches[i]);
+                                      num_batches[i],
+                                      positiveOnlyInitialization);
             }
             else
             {
@@ -1883,7 +1886,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           TiB,
                                           (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                              : stride_b[i],
-                                          1);
+                                          1,
+                                          positiveOnlyInitialization);
                 }
             }
         }
@@ -1899,7 +1903,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   ldc[i],
                                   To,
                                   stride_c[i],
-                                  num_batches[i]);
+                                  num_batches[i],
+                                  positiveOnlyInitialization);
 
         // generateMXInput already produced the reference floats and the
         // kernel-ready scale layout for both A and B; nothing to do here.
@@ -2353,7 +2358,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       ldc[i],
                                       To,
                                       stride_c[i],
-                                      1);
+                                      1,
+                                      positiveOnlyInitialization);
                 // broadcast first block
                 CHECK_HIP_ERROR(broadcast(dA[batchCount], block_count));
                 CHECK_HIP_ERROR(broadcast(dB[batchCount], block_count));
