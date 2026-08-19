@@ -2004,6 +2004,180 @@ libraries are resolved by the selected executable's own loader configuration,
 not by executable `PATH`; mixing a wheel compiler with a prefix bundler is a
 different toolchain model and has no compatibility guarantee.
 
+### Q111 — What is the final ROCm-identity source for each installation model?
+
+**Decision: Accepted — keep three explicit identity contracts.**
+
+- A TheRock source or CI build uses the exact forwarded
+  `THEROCK_PACKAGE_VERSION` publication identity.
+- An active Python SDK uses the exact `rocm_sdk_core.__version__` publication
+  identity.
+- A conventional system ROCm prefix uses the base compatibility identity from
+  `<root>/.info/version`.
+
+TheRock's base `version.json` value is not a substitute for
+`THEROCK_PACKAGE_VERSION`: it cannot distinguish nightly, RC, or CI
+publications on the same base line. The TheRock branch must therefore forward
+`THEROCK_PACKAGE_VERSION` into the isolated hipBLASLt CMake configure before
+exact validation is enabled.
+
+### Q112 — How does the TheRock build model enter TensileLite?
+
+**Decision: Accepted — add a distinct `TheRockCIRocm` adapter.**
+
+`TheRockCIRocm` is the build-graph adapter beside `PythonRocm` and
+`SystemRocm`. It is selected only for the command-scoped TheRock source-build
+environment and must not pretend that TheRock's staged compiler tree is a
+conventional ROCm prefix.
+
+The adapter uses the selected `THEROCK_PACKAGE_VERSION` as its exact identity.
+It does not read `.info/version`, `ROCM_PATH`, `/opt/rocm`, or
+`hipconfig --rocmpath`.
+
+### Q113 — How does `TheRockCIRocm` find tools without `ROCM_PATH`?
+
+**Decision: Accepted — preserve develop's graph-prepared `PATH` and explicit
+compiler arguments.**
+
+TheRock's hipBLASLt pre-hook already prepends graph-owned tool directories to
+`PATH`, and develop captures that configured `PATH` for build-time Python
+commands. Device generation also receives the explicit CMake-selected compiler.
+The installed-wheel build path must retain that contract.
+
+The command-scoped `THEROCK_PACKAGE_VERSION` both activates
+`TheRockCIRocm` and supplies its identity. Do not add a second toolchain-root
+environment variable and do not export `ROCM_PATH` into wheel construction,
+logic validation, or create-library commands.
+
+### Q114 — Which local installation wins when both Python and system ROCm are
+present?
+
+**Decision: Accepted — the active Python SDK wins.**
+
+If the selected interpreter contains `rocm_sdk_core`, the build frontend and
+runtime both use `rocm_sdk_core.__version__` and the interpreter-local tool
+trampolines. They do not borrow `ROCM_PATH` or individual tools from a system
+prefix. Only when no active Python SDK exists does the conventional-prefix
+adapter select explicit `ROCM_PATH`, `/opt/rocm`, or `hipconfig --rocmpath`.
+
+Wheel construction must use the same precedence as runtime initialization so a
+locally built wheel does not encode one identity and immediately validate
+against another.
+
+When the same Python environment remains active, its Python SDK continues to
+win at both build and execution. Keep the current validation strengths in this
+work: `PythonRocm` compares its exact publication identity, while `SystemRocm`
+compares the base `A.B.C` compatibility line. Do not add adapter-provenance
+metadata or a new cross-adapter normalization matrix now; strengthen that policy
+later only if a concrete workflow requires it.
+
+### Q115 — How does the stack transition before TheRock forwards its package
+version?
+
+**Decision: Accepted — keep the PR 17 compatibility fallback only while
+validation is disabled, then require the forwarded identity.**
+
+`users/alvasile/AIHPBLAS-3989-runtime-validator-coverage` may retain the
+temporary `0.0.0` identity, with a visible warning, when it is built by an
+unchanged TheRock main that does not yet forward `THEROCK_PACKAGE_VERSION`.
+This keeps the validation-disabled PR buildable and is not a supported release
+identity.
+
+The TheRock forwarding change is a prerequisite for enabling exact version
+validation later in the stack. The validation-enabling change must reject a
+missing or `git` `THEROCK_PACKAGE_VERSION`; it must not silently retain
+`0.0.0`, downgrade to the base `version.json` value, or inspect the parent
+CMake cache as a backchannel.
+
+### Q116 — Does the dormant TheRock fix belong entirely in PR 17?
+
+**Decision: Rejected — preserve the existing stack's ownership boundaries.**
+
+PR 17 is a convenient integration point on which to develop and validate the
+complete correction, but it is not the final owner of every changed line. Each
+piece must be committed independently so it can be cherry-picked back to the
+earliest PR that owns that contract. The affected PRs are then manually rebased
+and restacked in order.
+
+In particular, the version-input contract, canonical-wheel build environment,
+ROCm installation adapters, selected-installation tool lookup, TheRock identity
+requirement, and validation gate must remain separately reviewable. The
+validation-enabling PR must stay small and activate behavior already established
+and tested below it; it must not introduce the adapter or build-environment
+correction itself.
+
+### Q117 — Which PR owns each part of the correction?
+
+**Decision: Accepted — assign changes to the earliest coherent contract owner,
+then restack manually.**
+
+The changes may first be developed as independent commits on top of PR 17 for
+integrated validation. They must then be cherry-picked to these final owners:
+
+| Change | Owning PR |
+| --- | --- |
+| Remove `ROCM_PATH` from canonical and compatibility wheel construction once `TENSILELITE_ROCM_VERSION` is authoritative | PR 9 — explicit ROCm build identity |
+| Restore develop's captured graph-prepared `PATH`, omit `ROCM_PATH` from TheRock device generation, and pass command-scoped `THEROCK_PACKAGE_VERSION` | PR 10 — canonical-wheel client-free device generation |
+| Add the dormant `TheRockCIRocm` adapter and its adapter-selection tests | PR 11 — dormant ROCm installation/lazy-client model |
+| Make any required selected-installation validator integration changes | PR 12 — selected-installation toolchain/enumerator plumbing |
+| Retain only genuine coverage fallout; add no new production mechanism | PR 17 — runtime and validator coverage repair |
+| Require a real non-`git` `THEROCK_PACKAGE_VERSION` and remove the temporary fallback | PR 18 — TheRock ROCm identity |
+| Remove only the version-validation gate | PR 19 — ROCm version validation |
+| Select the active Python SDK identity for local wheel builds and remove only the Python-SDK runtime gate | PR 20 — Python SDK runtime |
+| Reconcile the decision records and implementation plans with this final contract | PR 21 — documentation |
+
+The TheRock-side change is only the parent-to-child forwarding of
+`THEROCK_PACKAGE_VERSION`. Forwarding a second base-only
+`THEROCK_ROCM_VERSION` is not required by this contract. Tests travel with the
+behavior they protect rather than being accumulated in PR 17.
+
+### Q118 — Should this work strengthen cross-adapter compatibility validation?
+
+**Decision: Rejected — retain the existing simplified validation rules.**
+
+`TheRockCIRocm` validates the exact `THEROCK_PACKAGE_VERSION`, `PythonRocm`
+validates the exact `rocm_sdk_core.__version__`, and `SystemRocm` validates the
+base `A.B.C` value exposed by `.info/version`. This change does not add build
+adapter provenance to wheel metadata or attempt to normalize every possible
+Python-SDK/system-prefix transition.
+
+### Q119 — How does a local build select ROCm when its Python is a ROCm venv?
+
+**Decision: Accepted — the active build interpreter's Python SDK wins.**
+
+Every local build frontend queries the selected Python interpreter first. If
+that interpreter contains `rocm-sdk-core`, its installed distribution identity
+(equivalent to `rocm_sdk_core.__version__`) supplies the wheel's exact ROCm
+identity, and its interpreter-local tool trampolines supply the Python SDK tool
+model. The build does not consult `ROCM_PATH` or borrow individual tools from a
+system prefix in that case.
+
+Only when the selected interpreter has no Python ROCm SDK does the build use the
+conventional-prefix selection order and `.info/version`. An active but
+incomplete Python ROCm build environment fails clearly rather than silently
+falling back to system ROCm.
+
+### Q120 — What validation closes the TheRock and local-build correction?
+
+**Decision: Accepted — prove all four supported build/runtime environments.**
+
+1. PR 17 with unchanged TheRock main: validation remains disabled, the
+   temporary identity is accepted, no build-time `ROCM_PATH` is introduced, and
+   Linux device generation succeeds.
+2. The final stack with TheRock package-version forwarding: the exact
+   `THEROCK_PACKAGE_VERSION` reaches `TheRockCIRocm`, validation is enabled, and
+   Linux and Windows device-generation paths pass.
+3. A local system ROCm build: the build and runtime use the selected
+   conventional prefix and its base `.info/version` identity.
+4. A local ROCm venv build: the build and runtime use the active interpreter's
+   `rocm-sdk-core` identity and tool trampolines even when a conflicting
+   `ROCM_PATH` exists.
+
+Each implementation commit carries the focused tests for its own PR boundary
+before the cross-repository builds are run. The independent Windows `<version>`
+header collision remains a separate defect and must not be confused with the
+version/installation-adapter validation described here.
+
 ## Confirmed TheRock build/test facts
 
 ### Build
