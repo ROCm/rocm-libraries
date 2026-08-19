@@ -6,40 +6,101 @@
 #include <cstddef>
 #include <cstdint>
 #include <roc/host_validation/tensor.hpp>
+#include <variant>
 
 namespace roc::host_validation {
-// Selects the source-value recipe for packed MX data. Scale selection uses the
-// separate MxScaleGenerationMode policy.
-enum class MxGenerationMode {
-    Bounded,
-    BoundedAlternatingSign,
-    Unbounded,
-    Identity,
-    Ones,
-    Zeros,
-    Sequential,
-    RowIndex,
-    ColumnIndex,
-    Checkerboard,
-    ScaledDiagonal,
-    Twos,
-    NegativeOnes,
-    Maximum,
-    DenormalMinimum,
-    DenormalMaximum,
-    NaN,
-    Infinity,
-    Trigonometric,
-    Normal,
-    UniformInteger,
+namespace detail {
+struct MxDataRecipeAccess;
+}
+
+struct MxBoundedDataParameters {
+    double lower = -1.0;
+    double upper = 1.0;
+
+    friend bool operator==(const MxBoundedDataParameters&,
+                           const MxBoundedDataParameters&) = default;
 };
 
-struct MxGenerationRecipe {
-    // parameter0 and parameter1 are mode-specific operands. Examples include
-    // bounded/integer endpoints and normal-distribution mean/deviation.
-    MxGenerationMode mode = MxGenerationMode::Bounded;
-    double parameter0 = -1.0;
-    double parameter1 = 1.0;
+struct MxAlternatingSignDataParameters {
+    double maximumMagnitude = 1.0;
+
+    friend bool operator==(const MxAlternatingSignDataParameters&,
+                           const MxAlternatingSignDataParameters&) = default;
+};
+
+struct MxNormalDataParameters {
+    double mean = 0.0;
+    double standardDeviation = 1.0;
+
+    friend bool operator==(const MxNormalDataParameters&, const MxNormalDataParameters&) = default;
+};
+
+struct MxUniformIntegerDataParameters {
+    int lower = 0;
+    int upper = 1;
+
+    friend bool operator==(const MxUniformIntegerDataParameters&,
+                           const MxUniformIntegerDataParameters&) = default;
+};
+
+// Immutable source-value recipe for packed MX data. Scale generation is an
+// independent MxScaleGenerationMode policy on MxGenerationProblem.
+class MxDataRecipe {
+   public:
+    [[nodiscard]] static MxDataRecipe bounded(MxBoundedDataParameters parameters = {});
+    [[nodiscard]] static MxDataRecipe boundedAlternatingSign(
+        MxAlternatingSignDataParameters parameters = {});
+    [[nodiscard]] static MxDataRecipe unbounded();
+    [[nodiscard]] static MxDataRecipe identity();
+    [[nodiscard]] static MxDataRecipe constant(double value);
+    [[nodiscard]] static MxDataRecipe sequential();
+    [[nodiscard]] static MxDataRecipe rowIndex();
+    [[nodiscard]] static MxDataRecipe columnIndex();
+    [[nodiscard]] static MxDataRecipe checkerboard();
+    [[nodiscard]] static MxDataRecipe scaledDiagonal();
+    [[nodiscard]] static MxDataRecipe typeMaximum();
+    [[nodiscard]] static MxDataRecipe typeDenormalMinimum();
+    [[nodiscard]] static MxDataRecipe typeDenormalMaximum();
+    [[nodiscard]] static MxDataRecipe typeNaN();
+    [[nodiscard]] static MxDataRecipe typeInfinity();
+    [[nodiscard]] static MxDataRecipe trigonometric();
+    [[nodiscard]] static MxDataRecipe normal(MxNormalDataParameters parameters = {});
+    [[nodiscard]] static MxDataRecipe uniformInteger(MxUniformIntegerDataParameters parameters);
+
+    friend bool operator==(const MxDataRecipe&, const MxDataRecipe&) = default;
+
+   private:
+    enum class Kind {
+        Bounded,
+        BoundedAlternatingSign,
+        Unbounded,
+        Identity,
+        Constant,
+        Sequential,
+        RowIndex,
+        ColumnIndex,
+        Checkerboard,
+        ScaledDiagonal,
+        TypeMaximum,
+        TypeDenormalMinimum,
+        TypeDenormalMaximum,
+        TypeNaN,
+        TypeInfinity,
+        Trigonometric,
+        Normal,
+        UniformInteger,
+    };
+
+    using Parameters = std::variant<std::monostate, double, MxBoundedDataParameters,
+                                    MxAlternatingSignDataParameters, MxNormalDataParameters,
+                                    MxUniformIntegerDataParameters>;
+
+    explicit MxDataRecipe(Kind kind, Parameters parameters = {});
+
+    Kind kind_;
+    Parameters parameters_;
+
+    friend struct detail::MxDataRecipeAccess;
 };
 
 // Selects how block scales are produced, independently of the data recipe.
@@ -61,8 +122,7 @@ enum class MxScaleGenerationMode {
 // Data generation and scale selection are independent: data controls source
 // values, while scale controls only how each block scale is selected.
 struct MxGenerationProblem {
-    // Retained for compatibility with the pre-component MX generator.
-    static constexpr uint32_t defaultSeed = 1713573849U;
+    MxGenerationProblem() : data(MxDataRecipe::bounded()) {}
 
     // Packed data encoding and per-block scale encoding.
     ScalarType dataType = ScalarType::Float4E2M1;
@@ -79,14 +139,14 @@ struct MxGenerationProblem {
     size_t blockSize = 32;
 
     // Source values to quantize into dataType.
-    MxGenerationRecipe data;
+    MxDataRecipe data;
 
     // Scale-selection policy. Derived computes scales from data; constant modes
     // use the same encoded scale for every block.
     MxScaleGenerationMode scale = MxScaleGenerationMode::Derived;
 
     // Seed used by stochastic data and scale choices.
-    uint32_t seed = defaultSeed;
+    uint64_t seed = 0;
 };
 
 struct MxGenerationResult {
@@ -104,4 +164,6 @@ struct MxGenerationResult {
 };
 
 MxGenerationResult generateMx(const MxGenerationProblem& problem);
+MxGenerationResult generateMx(const MxGenerationProblem& problem,
+                              const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

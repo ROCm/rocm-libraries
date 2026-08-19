@@ -10,34 +10,45 @@ using namespace nb::literals;
 
 namespace roc::host_validation::python_bindings {
 void registerMxBindings(nb::module_& module) {
-    nb::enum_<MxGenerationMode>(module, "MxGenerationMode")
-        .value("Bounded", MxGenerationMode::Bounded)
-        .value("BoundedAlternatingSign", MxGenerationMode::BoundedAlternatingSign)
-        .value("Unbounded", MxGenerationMode::Unbounded)
-        .value("Identity", MxGenerationMode::Identity)
-        .value("Ones", MxGenerationMode::Ones)
-        .value("Zeros", MxGenerationMode::Zeros)
-        .value("Sequential", MxGenerationMode::Sequential)
-        .value("RowIndex", MxGenerationMode::RowIndex)
-        .value("ColumnIndex", MxGenerationMode::ColumnIndex)
-        .value("Checkerboard", MxGenerationMode::Checkerboard)
-        .value("ScaledDiagonal", MxGenerationMode::ScaledDiagonal)
-        .value("Twos", MxGenerationMode::Twos)
-        .value("NegativeOnes", MxGenerationMode::NegativeOnes)
-        .value("Maximum", MxGenerationMode::Maximum)
-        .value("DenormalMinimum", MxGenerationMode::DenormalMinimum)
-        .value("DenormalMaximum", MxGenerationMode::DenormalMaximum)
-        .value("NaN", MxGenerationMode::NaN)
-        .value("Infinity", MxGenerationMode::Infinity)
-        .value("Trigonometric", MxGenerationMode::Trigonometric)
-        .value("Normal", MxGenerationMode::Normal)
-        .value("UniformInteger", MxGenerationMode::UniformInteger);
+    nb::class_<MxBoundedDataParameters>(module, "MxBoundedDataParameters")
+        .def(nb::init<double, double>(), "lower"_a = -1.0, "upper"_a = 1.0)
+        .def_rw("lower", &MxBoundedDataParameters::lower)
+        .def_rw("upper", &MxBoundedDataParameters::upper);
 
-    nb::class_<MxGenerationRecipe>(module, "MxGenerationRecipe")
-        .def(nb::init<>())
-        .def_rw("mode", &MxGenerationRecipe::mode)
-        .def_rw("parameter0", &MxGenerationRecipe::parameter0)
-        .def_rw("parameter1", &MxGenerationRecipe::parameter1);
+    nb::class_<MxAlternatingSignDataParameters>(module, "MxAlternatingSignDataParameters")
+        .def(nb::init<double>(), "maximum_magnitude"_a = 1.0)
+        .def_rw("maximum_magnitude", &MxAlternatingSignDataParameters::maximumMagnitude);
+
+    nb::class_<MxNormalDataParameters>(module, "MxNormalDataParameters")
+        .def(nb::init<double, double>(), "mean"_a = 0.0, "standard_deviation"_a = 1.0)
+        .def_rw("mean", &MxNormalDataParameters::mean)
+        .def_rw("standard_deviation", &MxNormalDataParameters::standardDeviation);
+
+    nb::class_<MxUniformIntegerDataParameters>(module, "MxUniformIntegerDataParameters")
+        .def(nb::init<int, int>(), "lower"_a, "upper"_a)
+        .def_rw("lower", &MxUniformIntegerDataParameters::lower)
+        .def_rw("upper", &MxUniformIntegerDataParameters::upper);
+
+    nb::class_<MxDataRecipe>(module, "MxDataRecipe")
+        .def_static("bounded", &MxDataRecipe::bounded, "parameters"_a = MxBoundedDataParameters{})
+        .def_static("bounded_alternating_sign", &MxDataRecipe::boundedAlternatingSign,
+                    "parameters"_a = MxAlternatingSignDataParameters{})
+        .def_static("unbounded", &MxDataRecipe::unbounded)
+        .def_static("identity", &MxDataRecipe::identity)
+        .def_static("constant", &MxDataRecipe::constant, "value"_a)
+        .def_static("sequential", &MxDataRecipe::sequential)
+        .def_static("row_index", &MxDataRecipe::rowIndex)
+        .def_static("column_index", &MxDataRecipe::columnIndex)
+        .def_static("checkerboard", &MxDataRecipe::checkerboard)
+        .def_static("scaled_diagonal", &MxDataRecipe::scaledDiagonal)
+        .def_static("type_maximum", &MxDataRecipe::typeMaximum)
+        .def_static("type_denormal_minimum", &MxDataRecipe::typeDenormalMinimum)
+        .def_static("type_denormal_maximum", &MxDataRecipe::typeDenormalMaximum)
+        .def_static("type_nan", &MxDataRecipe::typeNaN)
+        .def_static("type_infinity", &MxDataRecipe::typeInfinity)
+        .def_static("trigonometric", &MxDataRecipe::trigonometric)
+        .def_static("normal", &MxDataRecipe::normal, "parameters"_a = MxNormalDataParameters{})
+        .def_static("uniform_integer", &MxDataRecipe::uniformInteger, "parameters"_a);
 
     nb::enum_<MxScaleGenerationMode>(module, "MxScaleGenerationMode")
         .value("Derived", MxScaleGenerationMode::Derived)
@@ -65,6 +76,8 @@ void registerMxBindings(nb::module_& module) {
         .def_ro("scale_indices", &MxGenerationResult::scaleIndices)
         .def_ro("reference", &MxGenerationResult::reference);
 
-    module.def("generate_mx", &generateMx, "problem"_a);
+    module.def("generate_mx",
+               static_cast<MxGenerationResult (*)(const MxGenerationProblem&)>(&generateMx),
+               "problem"_a);
 }
 }  // namespace roc::host_validation::python_bindings

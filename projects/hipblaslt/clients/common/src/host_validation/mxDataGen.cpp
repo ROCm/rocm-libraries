@@ -21,9 +21,8 @@
 
 namespace
 {
-    using roc::host_validation::MxGenerationMode;
+    using roc::host_validation::MxDataRecipe;
     using roc::host_validation::MxGenerationProblem;
-    using roc::host_validation::MxGenerationRecipe;
     using roc::host_validation::MxScaleGenerationMode;
     using roc::host_validation::ScalarType;
 
@@ -54,117 +53,79 @@ namespace
         return hipblaslt::host_validation::scalarType(scaleType);
     }
 
-    bool recipesEqual(const MxGenerationRecipe& first, const MxGenerationRecipe& second)
+    std::optional<MxScaleGenerationMode> scaleGenerationMode(std::string_view initMethod)
     {
-        return first.mode == second.mode && first.parameter0 == second.parameter0
-               && first.parameter1 == second.parameter1;
-    }
-
-    bool isRandomLike(MxGenerationMode mode)
-    {
-        return mode == MxGenerationMode::Bounded || mode == MxGenerationMode::BoundedAlternatingSign
-               || mode == MxGenerationMode::Unbounded || mode == MxGenerationMode::Normal;
-    }
-
-    std::optional<MxScaleGenerationMode> scaleGenerationMode(MxGenerationMode mode)
-    {
-        switch(mode)
-        {
-        case MxGenerationMode::Zeros:
+        if(initMethod == "Zeros" || initMethod == "zero")
             return MxScaleGenerationMode::Minimum;
-        case MxGenerationMode::Ones:
-        case MxGenerationMode::NegativeOnes:
-        case MxGenerationMode::DenormalMinimum:
-        case MxGenerationMode::DenormalMaximum:
-        case MxGenerationMode::Infinity:
+        if(initMethod == "Identity" || initMethod == "Ones" || initMethod == "NegOnes"
+           || initMethod == "DenormMins" || initMethod == "DenormMaxs" || initMethod == "Infs"
+           || initMethod == "Sequential" || initMethod == "RowIndex" || initMethod == "ColIndex"
+           || initMethod == "Checkerboard" || initMethod == "ScaledDiagonal"
+           || initMethod == "rand_int")
             return MxScaleGenerationMode::One;
-        case MxGenerationMode::Twos:
+        if(initMethod == "Twos")
             return MxScaleGenerationMode::Two;
-        case MxGenerationMode::Maximum:
+        if(initMethod == "MaxVals")
             return MxScaleGenerationMode::Maximum;
-        case MxGenerationMode::NaN:
+        if(initMethod == "NaNs")
             return MxScaleGenerationMode::NaN;
-        default:
-            return std::nullopt;
-        }
+        return std::nullopt;
     }
 
-    MxGenerationRecipe generationRecipe(std::string_view initMethod,
-                                        ScalarType       dataType,
-                                        float            minimum,
-                                        float            maximum)
+    MxDataRecipe generationRecipe(std::string_view initMethod,
+                                  ScalarType       dataType,
+                                  float            minimum,
+                                  float            maximum)
     {
-        MxGenerationRecipe recipe;
-        recipe.parameter0 = minimum;
-        recipe.parameter1 = maximum;
         if(initMethod == "Sequential")
-            recipe.mode = MxGenerationMode::Sequential;
-        else if(initMethod == "RowIndex")
-            recipe.mode = MxGenerationMode::RowIndex;
-        else if(initMethod == "ColIndex")
-            recipe.mode = MxGenerationMode::ColumnIndex;
-        else if(initMethod == "Checkerboard")
-            recipe.mode = MxGenerationMode::Checkerboard;
-        else if(initMethod == "ScaledDiagonal")
-            recipe.mode = MxGenerationMode::ScaledDiagonal;
-        else if(initMethod == "Identity")
-            recipe.mode = MxGenerationMode::Identity;
-        else if(initMethod == "Ones")
-            recipe.mode = MxGenerationMode::Ones;
-        else if(initMethod == "Zeros" || initMethod == "zero")
-            recipe.mode = MxGenerationMode::Zeros;
-        else if(initMethod == "Twos")
-            recipe.mode = MxGenerationMode::Twos;
-        else if(initMethod == "NegOnes")
-            recipe.mode = MxGenerationMode::NegativeOnes;
-        else if(initMethod == "MaxVals")
-            recipe.mode = MxGenerationMode::Maximum;
-        else if(initMethod == "DenormMins")
-            recipe.mode = MxGenerationMode::DenormalMinimum;
-        else if(initMethod == "DenormMaxs")
-            recipe.mode = MxGenerationMode::DenormalMaximum;
-        else if(initMethod == "NaNs")
-            recipe.mode = MxGenerationMode::NaN;
-        else if(initMethod == "Infs")
-            recipe.mode = MxGenerationMode::Infinity;
-        else if(initMethod == "Bounded")
-            recipe.mode = MxGenerationMode::Bounded;
-        else if(initMethod == "uniform_01")
-        {
-            recipe.mode       = MxGenerationMode::Bounded;
-            recipe.parameter0 = 0;
-            recipe.parameter1 = 1;
-        }
-        else if(initMethod == "hpl")
-        {
-            recipe.mode       = MxGenerationMode::Bounded;
-            recipe.parameter0 = -0.5;
-            recipe.parameter1 = 0.5;
-        }
-        else if(initMethod == "uniform_low_precision")
-        {
-            recipe.mode       = MxGenerationMode::Bounded;
-            recipe.parameter0 = -6;
-            recipe.parameter1 = 6;
-        }
-        else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
-            recipe.mode = MxGenerationMode::Trigonometric;
-        else if(initMethod == "norm_dist")
-        {
-            recipe.mode       = MxGenerationMode::Normal;
-            recipe.parameter0 = 0;
-            recipe.parameter1 = normDistStdDevFor(dataType);
-        }
-        else if(initMethod == "rand_int")
+            return MxDataRecipe::sequential();
+        if(initMethod == "RowIndex")
+            return MxDataRecipe::rowIndex();
+        if(initMethod == "ColIndex")
+            return MxDataRecipe::columnIndex();
+        if(initMethod == "Checkerboard")
+            return MxDataRecipe::checkerboard();
+        if(initMethod == "ScaledDiagonal")
+            return MxDataRecipe::scaledDiagonal();
+        if(initMethod == "Identity")
+            return MxDataRecipe::identity();
+        if(initMethod == "Ones")
+            return MxDataRecipe::constant(1.0);
+        if(initMethod == "Zeros" || initMethod == "zero")
+            return MxDataRecipe::constant(0.0);
+        if(initMethod == "Twos")
+            return MxDataRecipe::constant(2.0);
+        if(initMethod == "NegOnes")
+            return MxDataRecipe::constant(-1.0);
+        if(initMethod == "MaxVals")
+            return MxDataRecipe::typeMaximum();
+        if(initMethod == "DenormMins")
+            return MxDataRecipe::typeDenormalMinimum();
+        if(initMethod == "DenormMaxs")
+            return MxDataRecipe::typeDenormalMaximum();
+        if(initMethod == "NaNs")
+            return MxDataRecipe::typeNaN();
+        if(initMethod == "Infs")
+            return MxDataRecipe::typeInfinity();
+        if(initMethod == "Bounded")
+            return MxDataRecipe::bounded({.lower = minimum, .upper = maximum});
+        if(initMethod == "uniform_01")
+            return MxDataRecipe::bounded({.lower = 0.0, .upper = 1.0});
+        if(initMethod == "hpl")
+            return MxDataRecipe::bounded({.lower = -0.5, .upper = 0.5});
+        if(initMethod == "uniform_low_precision")
+            return MxDataRecipe::bounded({.lower = -6.0, .upper = 6.0});
+        if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
+            return MxDataRecipe::trigonometric();
+        if(initMethod == "norm_dist")
+            return MxDataRecipe::normal(
+                {.mean = 0.0, .standardDeviation = normDistStdDevFor(dataType)});
+        if(initMethod == "rand_int")
         {
             const auto [lower, upper] = randIntRangeFor(dataType);
-            recipe.mode               = MxGenerationMode::UniformInteger;
-            recipe.parameter0         = lower;
-            recipe.parameter1         = upper;
+            return MxDataRecipe::uniformInteger({.lower = lower, .upper = upper});
         }
-        else
-            throw std::invalid_argument("Unsupported hipBLASLt MX initialization mode.");
-        return recipe;
+        throw std::invalid_argument("Unsupported hipBLASLt MX initialization mode.");
     }
 
     std::vector<uint8_t> swizzleScaleBytes(std::vector<uint8_t> scaleBytes,
@@ -233,16 +194,12 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     problem.blockSize        = blockRows * blockColumns;
     problem.blockAxis        = blockColumns > 1 ? 1 : 0;
     problem.data             = generationRecipe(initMethod, hostDataType, min_val, max_val);
+    const std::string_view scaleMethod
+        = scaleInitMethod.empty() ? initMethod : scaleInitMethod;
     if(!scaleInitMethod.empty())
-    {
-        MxGenerationRecipe const scaleRecipe
-            = generationRecipe(scaleInitMethod, hostDataType, -1.0f, 1.0f);
-        if(!recipesEqual(problem.data, scaleRecipe) && isRandomLike(problem.data.mode))
-        {
-            if(const auto scaleMode = scaleGenerationMode(scaleRecipe.mode))
-                problem.scale = *scaleMode;
-        }
-    }
+        (void)generationRecipe(scaleInitMethod, hostDataType, -1.0f, 1.0f);
+    if(const auto scaleMode = scaleGenerationMode(scaleMethod))
+        problem.scale = *scaleMode;
     problem.seed = seed;
 
     roc::host_validation::MxGenerationResult result = roc::host_validation::generateMx(problem);

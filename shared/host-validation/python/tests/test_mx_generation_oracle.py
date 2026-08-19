@@ -7,6 +7,7 @@ import math
 import unittest
 from bisect import bisect_left
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Optional
 
 import numpy as np
@@ -91,11 +92,78 @@ SCALE_FORMATS = {
 }
 
 
+class RecipeKind(Enum):
+    BOUNDED = auto()
+    BOUNDED_ALTERNATING_SIGN = auto()
+    UNBOUNDED = auto()
+    IDENTITY = auto()
+    CONSTANT = auto()
+    SEQUENTIAL = auto()
+    ROW_INDEX = auto()
+    COLUMN_INDEX = auto()
+    CHECKERBOARD = auto()
+    SCALED_DIAGONAL = auto()
+    TYPE_MAXIMUM = auto()
+    TYPE_DENORMAL_MINIMUM = auto()
+    TYPE_DENORMAL_MAXIMUM = auto()
+    TYPE_NAN = auto()
+    TYPE_INFINITY = auto()
+    TRIGONOMETRIC = auto()
+    NORMAL = auto()
+    UNIFORM_INTEGER = auto()
+
+
 @dataclass(frozen=True)
 class Recipe:
-    mode: object
-    parameter0: float = -1.0
-    parameter1: float = 1.0
+    kind: RecipeKind
+    lower: float = -1.0
+    upper: float = 1.0
+    maximum_magnitude: float = 1.0
+    value: float = 0.0
+    mean: float = 0.0
+    standard_deviation: float = 1.0
+    integer_lower: int = 0
+    integer_upper: int = 1
+
+    def native(self):
+        factories = {
+            RecipeKind.UNBOUNDED: hv.MxDataRecipe.unbounded,
+            RecipeKind.IDENTITY: hv.MxDataRecipe.identity,
+            RecipeKind.SEQUENTIAL: hv.MxDataRecipe.sequential,
+            RecipeKind.ROW_INDEX: hv.MxDataRecipe.row_index,
+            RecipeKind.COLUMN_INDEX: hv.MxDataRecipe.column_index,
+            RecipeKind.CHECKERBOARD: hv.MxDataRecipe.checkerboard,
+            RecipeKind.SCALED_DIAGONAL: hv.MxDataRecipe.scaled_diagonal,
+            RecipeKind.TYPE_MAXIMUM: hv.MxDataRecipe.type_maximum,
+            RecipeKind.TYPE_DENORMAL_MINIMUM: hv.MxDataRecipe.type_denormal_minimum,
+            RecipeKind.TYPE_DENORMAL_MAXIMUM: hv.MxDataRecipe.type_denormal_maximum,
+            RecipeKind.TYPE_NAN: hv.MxDataRecipe.type_nan,
+            RecipeKind.TYPE_INFINITY: hv.MxDataRecipe.type_infinity,
+            RecipeKind.TRIGONOMETRIC: hv.MxDataRecipe.trigonometric,
+        }
+        if self.kind in factories:
+            return factories[self.kind]()
+        if self.kind is RecipeKind.BOUNDED:
+            return hv.MxDataRecipe.bounded(
+                hv.MxBoundedDataParameters(self.lower, self.upper)
+            )
+        if self.kind is RecipeKind.BOUNDED_ALTERNATING_SIGN:
+            return hv.MxDataRecipe.bounded_alternating_sign(
+                hv.MxAlternatingSignDataParameters(self.maximum_magnitude)
+            )
+        if self.kind is RecipeKind.CONSTANT:
+            return hv.MxDataRecipe.constant(self.value)
+        if self.kind is RecipeKind.NORMAL:
+            return hv.MxDataRecipe.normal(
+                hv.MxNormalDataParameters(self.mean, self.standard_deviation)
+            )
+        if self.kind is RecipeKind.UNIFORM_INTEGER:
+            return hv.MxDataRecipe.uniform_integer(
+                hv.MxUniformIntegerDataParameters(
+                    self.integer_lower, self.integer_upper
+                )
+            )
+        raise AssertionError(f"no native MX recipe for {self.kind}")
 
 
 @dataclass(frozen=True)
@@ -330,89 +398,62 @@ def explicit_scale_raw(scale_type, mode):
     raise AssertionError(f"oracle has no MX scale formula for {mode}")
 
 
-def selected_constant_scale(case):
-    selected = explicit_scale_raw(case.scale_type, case.scale)
-    if selected is not None:
-        return selected
-
-    if case.data.mode == hv.MxGenerationMode.Zeros:
-        return encode_scale(case.scale_type, 0.0)
-    if case.data.mode == hv.MxGenerationMode.NaN:
-        return encode_scale(case.scale_type, math.nan)
-    if case.data.mode in (
-        hv.MxGenerationMode.Bounded,
-        hv.MxGenerationMode.BoundedAlternatingSign,
-        hv.MxGenerationMode.Unbounded,
-        hv.MxGenerationMode.Trigonometric,
-        hv.MxGenerationMode.Normal,
-    ):
-        return None
-    return encode_scale(case.scale_type, 1.0)
-
-
 def generated_value(case, row, column, logical_index):
     recipe = case.data
-    mode = recipe.mode
-    if mode == hv.MxGenerationMode.Bounded:
+    kind = recipe.kind
+    if kind is RecipeKind.BOUNDED:
         unit = indexed_uniform_unit(case.seed, MX_DATA_RANDOM_DOMAIN, logical_index)
-        return recipe.parameter0 + unit * (recipe.parameter1 - recipe.parameter0)
-    if mode == hv.MxGenerationMode.BoundedAlternatingSign:
-        maximum = max(abs(recipe.parameter0), abs(recipe.parameter1))
-        magnitude = maximum * indexed_uniform_unit(
+        return recipe.lower + unit * (recipe.upper - recipe.lower)
+    if kind is RecipeKind.BOUNDED_ALTERNATING_SIGN:
+        magnitude = recipe.maximum_magnitude * indexed_uniform_unit(
             case.seed, MX_DATA_RANDOM_DOMAIN, logical_index
         )
         return magnitude if logical_index % 2 == 0 else -magnitude
-    if mode == hv.MxGenerationMode.Identity:
+    if kind is RecipeKind.IDENTITY:
         return 1.0 if row == column else 0.0
-    if mode == hv.MxGenerationMode.Ones:
-        return 1.0
-    if mode == hv.MxGenerationMode.Zeros:
-        return 0.0
-    if mode == hv.MxGenerationMode.Sequential:
+    if kind is RecipeKind.CONSTANT:
+        return recipe.value
+    if kind is RecipeKind.SEQUENTIAL:
         return ((row % 256) * (case.shape[1] % 256) + column % 256) % 256
-    if mode == hv.MxGenerationMode.RowIndex:
+    if kind is RecipeKind.ROW_INDEX:
         return row % 256
-    if mode == hv.MxGenerationMode.ColumnIndex:
+    if kind is RecipeKind.COLUMN_INDEX:
         return column % 256
-    if mode == hv.MxGenerationMode.Checkerboard:
+    if kind is RecipeKind.CHECKERBOARD:
         return 1.0 if (row + column) % 2 == 0 else 0.0
-    if mode == hv.MxGenerationMode.ScaledDiagonal:
+    if kind is RecipeKind.SCALED_DIAGONAL:
         return row + 1.0 if row == column else 0.0
-    if mode == hv.MxGenerationMode.Twos:
-        return 2.0
-    if mode == hv.MxGenerationMode.NegativeOnes:
-        return -1.0
     format_spec = DATA_FORMATS[case.data_type]
-    if mode == hv.MxGenerationMode.Maximum:
+    if kind is RecipeKind.TYPE_MAXIMUM:
         return finite_binary_value(format_spec, format_spec.maximum_finite_raw)
-    if mode == hv.MxGenerationMode.DenormalMinimum:
+    if kind is RecipeKind.TYPE_DENORMAL_MINIMUM:
         return finite_binary_value(format_spec, 1)
-    if mode == hv.MxGenerationMode.DenormalMaximum:
+    if kind is RecipeKind.TYPE_DENORMAL_MAXIMUM:
         return finite_binary_value(format_spec, (1 << format_spec.mantissa_bits) - 1)
-    if mode == hv.MxGenerationMode.NaN:
+    if kind is RecipeKind.TYPE_NAN:
         return math.nan
-    if mode == hv.MxGenerationMode.Infinity:
+    if kind is RecipeKind.TYPE_INFINITY:
         return math.inf
-    if mode == hv.MxGenerationMode.Trigonometric:
+    if kind is RecipeKind.TRIGONOMETRIC:
         unit = indexed_uniform_unit(case.seed, MX_DATA_RANDOM_DOMAIN, logical_index)
         return math.cos(TWO_PI * unit)
-    if mode == hv.MxGenerationMode.Normal:
+    if kind is RecipeKind.NORMAL:
         first_index = logical_index * 2
         first = indexed_uniform_unit(case.seed, MX_NORMAL_RANDOM_DOMAIN, first_index)
         second = indexed_uniform_unit(
             case.seed, MX_NORMAL_RANDOM_DOMAIN, first_index + 1
         )
         standard_normal = math.sqrt(-2.0 * math.log(first)) * math.cos(TWO_PI * second)
-        return recipe.parameter0 + recipe.parameter1 * standard_normal
-    if mode == hv.MxGenerationMode.UniformInteger:
+        return recipe.mean + recipe.standard_deviation * standard_normal
+    if kind is RecipeKind.UNIFORM_INTEGER:
         return indexed_uniform_integer(
             case.seed,
             MX_DATA_RANDOM_DOMAIN,
             logical_index,
-            int(recipe.parameter0),
-            int(recipe.parameter1),
+            recipe.integer_lower,
+            recipe.integer_upper,
         )
-    raise AssertionError(f"oracle has no source formula for {mode}")
+    raise AssertionError(f"oracle has no source formula for {kind}")
 
 
 def scale_at_least(requested, candidates, allow_larger, seed, scale_index):
@@ -471,7 +512,7 @@ def expected_mx(case):
     free_extent = case.shape[1 - case.block_axis]
     block_count = (blocked_extent + case.block_size - 1) // case.block_size
     scale_count = block_count * free_extent
-    fixed_scale_raw = selected_constant_scale(case)
+    fixed_scale_raw = explicit_scale_raw(case.scale_type, case.scale)
     scale_candidates = (
         []
         if fixed_scale_raw is not None
@@ -499,7 +540,7 @@ def expected_mx(case):
             free_coordinate = scale_index % free_extent
         coordinates = block_coordinates(case, block, free_coordinate)
 
-        if case.data.mode == hv.MxGenerationMode.Unbounded:
+        if case.data.kind is RecipeKind.UNBOUNDED:
             if fixed_scale_raw is None:
                 candidate_index = counter_random(
                     case.seed, MX_UNBOUNDED_SCALE_RANDOM_DOMAIN, scale_index
@@ -544,11 +585,8 @@ def expected_mx(case):
                 selected_scale_raw = scale_at_least(
                     maximum_magnitude / maximum_data_value,
                     scale_candidates,
-                    case.data.mode
-                    in (
-                        hv.MxGenerationMode.Bounded,
-                        hv.MxGenerationMode.BoundedAlternatingSign,
-                    ),
+                    case.data.kind
+                    in (RecipeKind.BOUNDED, RecipeKind.BOUNDED_ALTERNATING_SIGN),
                     case.seed,
                     scale_index,
                 )
@@ -562,17 +600,17 @@ def expected_mx(case):
                 source_value if source_value == 0.0 else source_value / scale_value
             )
             data_raw = encode_binary(format_spec, scaled_value)
-            if case.data.mode == hv.MxGenerationMode.Bounded:
+            if case.data.kind is RecipeKind.BOUNDED:
                 data_raw = constrain_raw_to_interval(
                     format_spec,
                     data_raw,
                     scale_value,
-                    case.data.parameter0,
-                    case.data.parameter1,
+                    case.data.lower,
+                    case.data.upper,
                     decoded_data,
                 )
-            elif case.data.mode == hv.MxGenerationMode.BoundedAlternatingSign:
-                maximum = max(abs(case.data.parameter0), abs(case.data.parameter1))
+            elif case.data.kind is RecipeKind.BOUNDED_ALTERNATING_SIGN:
+                maximum = case.data.maximum_magnitude
                 data_raw = constrain_raw_to_interval(
                     format_spec,
                     data_raw,
@@ -607,11 +645,7 @@ def make_problem(case):
     problem.block_size = case.block_size
     problem.seed = case.seed
 
-    data = hv.MxGenerationRecipe()
-    data.mode = case.data.mode
-    data.parameter0 = case.data.parameter0
-    data.parameter1 = case.data.parameter1
-    problem.data = data
+    problem.data = case.data.native()
     problem.scale = case.scale
     return problem
 
@@ -649,38 +683,34 @@ class MxGenerationOracleTests(unittest.TestCase):
         )
         return observed, expected
 
-    def test_every_bound_mx_generation_mode_matches_exact_oracle(self):
+    def test_every_mx_data_recipe_matches_exact_oracle(self):
         recipes = (
-            Recipe(hv.MxGenerationMode.Bounded, -1.25, 0.875),
-            Recipe(hv.MxGenerationMode.BoundedAlternatingSign, -0.75, 1.25),
-            Recipe(hv.MxGenerationMode.Unbounded),
-            Recipe(hv.MxGenerationMode.Identity),
-            Recipe(hv.MxGenerationMode.Ones),
-            Recipe(hv.MxGenerationMode.Zeros),
-            Recipe(hv.MxGenerationMode.Sequential),
-            Recipe(hv.MxGenerationMode.RowIndex),
-            Recipe(hv.MxGenerationMode.ColumnIndex),
-            Recipe(hv.MxGenerationMode.Checkerboard),
-            Recipe(hv.MxGenerationMode.ScaledDiagonal),
-            Recipe(hv.MxGenerationMode.Twos),
-            Recipe(hv.MxGenerationMode.NegativeOnes),
-            Recipe(hv.MxGenerationMode.Maximum),
-            Recipe(hv.MxGenerationMode.DenormalMinimum),
-            Recipe(hv.MxGenerationMode.DenormalMaximum),
-            Recipe(hv.MxGenerationMode.NaN),
-            Recipe(hv.MxGenerationMode.Infinity),
-            Recipe(hv.MxGenerationMode.Trigonometric),
-            Recipe(hv.MxGenerationMode.Normal, 0.25, 0.75),
-            Recipe(hv.MxGenerationMode.UniformInteger, -3.0, 4.0),
-        )
-        self.assertEqual(
-            set(hv.MxGenerationMode.__members__.values()),
-            {recipe.mode for recipe in recipes},
+            Recipe(RecipeKind.BOUNDED, lower=-1.25, upper=0.875),
+            Recipe(RecipeKind.BOUNDED_ALTERNATING_SIGN, maximum_magnitude=1.25),
+            Recipe(RecipeKind.UNBOUNDED),
+            Recipe(RecipeKind.IDENTITY),
+            Recipe(RecipeKind.CONSTANT, value=1.0),
+            Recipe(RecipeKind.CONSTANT, value=0.0),
+            Recipe(RecipeKind.SEQUENTIAL),
+            Recipe(RecipeKind.ROW_INDEX),
+            Recipe(RecipeKind.COLUMN_INDEX),
+            Recipe(RecipeKind.CHECKERBOARD),
+            Recipe(RecipeKind.SCALED_DIAGONAL),
+            Recipe(RecipeKind.CONSTANT, value=2.0),
+            Recipe(RecipeKind.CONSTANT, value=-1.0),
+            Recipe(RecipeKind.TYPE_MAXIMUM),
+            Recipe(RecipeKind.TYPE_DENORMAL_MINIMUM),
+            Recipe(RecipeKind.TYPE_DENORMAL_MAXIMUM),
+            Recipe(RecipeKind.TYPE_NAN),
+            Recipe(RecipeKind.TYPE_INFINITY),
+            Recipe(RecipeKind.TRIGONOMETRIC),
+            Recipe(RecipeKind.NORMAL, mean=0.25, standard_deviation=0.75),
+            Recipe(RecipeKind.UNIFORM_INTEGER, integer_lower=-3, integer_upper=4),
         )
 
         for recipe in recipes:
             case = MxCase(
-                label=recipe.mode.name,
+                label=recipe.kind.name,
                 data_type=hv.ScalarType.Float8E5M2,
                 scale_type=hv.ScalarType.E8M0,
                 shape=(3, 4),
@@ -702,7 +732,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 7,
                 0,
                 4,
-                Recipe(hv.MxGenerationMode.Bounded, -0.9, 1.1),
+                Recipe(RecipeKind.BOUNDED, lower=-0.9, upper=1.1),
                 seed=12345,
             ),
             MxCase(
@@ -713,7 +743,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 5,
                 1,
                 4,
-                Recipe(hv.MxGenerationMode.Bounded, -0.9, 1.1),
+                Recipe(RecipeKind.BOUNDED, lower=-0.9, upper=1.1),
                 seed=12345,
             ),
             MxCase(
@@ -724,7 +754,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 6,
                 0,
                 3,
-                Recipe(hv.MxGenerationMode.Bounded, -0.9, 1.1),
+                Recipe(RecipeKind.BOUNDED, lower=-0.9, upper=1.1),
                 seed=12345,
             ),
             MxCase(
@@ -735,7 +765,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 4,
                 1,
                 2,
-                Recipe(hv.MxGenerationMode.Bounded, -0.9, 1.1),
+                Recipe(RecipeKind.BOUNDED, lower=-0.9, upper=1.1),
                 seed=12345,
             ),
             MxCase(
@@ -746,7 +776,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 8,
                 0,
                 4,
-                Recipe(hv.MxGenerationMode.Bounded, -0.9, 1.1),
+                Recipe(RecipeKind.BOUNDED, lower=-0.9, upper=1.1),
                 seed=12345,
             ),
             MxCase(
@@ -757,7 +787,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 5,
                 1,
                 4,
-                Recipe(hv.MxGenerationMode.Bounded, -0.9, 1.1),
+                Recipe(RecipeKind.BOUNDED, lower=-0.9, upper=1.1),
                 seed=12345,
             ),
             MxCase(
@@ -768,7 +798,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 6,
                 0,
                 4,
-                Recipe(hv.MxGenerationMode.Bounded, -0.9, 1.1),
+                Recipe(RecipeKind.BOUNDED, lower=-0.9, upper=1.1),
                 seed=12345,
             ),
         )
@@ -789,7 +819,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                     leading_dimension=leading_dimension,
                     block_axis=0,
                     block_size=4,
-                    data=Recipe(hv.MxGenerationMode.Unbounded),
+                    data=Recipe(RecipeKind.UNBOUNDED),
                     seed=0xA5A5,
                 )
                 with self.subTest(
@@ -816,7 +846,7 @@ class MxGenerationOracleTests(unittest.TestCase):
                 leading_dimension=4,
                 block_axis=0,
                 block_size=2,
-                data=Recipe(hv.MxGenerationMode.Sequential),
+                data=Recipe(RecipeKind.SEQUENTIAL),
                 scale=hv.MxScaleGenerationMode.Two,
             )
             with self.subTest(scale_type=scale_type.name):
@@ -825,22 +855,44 @@ class MxGenerationOracleTests(unittest.TestCase):
 
     def test_invalid_bounds_are_rejected(self):
         invalid_data_recipes = (
-            ("bounded_equal", Recipe(hv.MxGenerationMode.Bounded, 1.0, 1.0)),
-            ("bounded_reversed", Recipe(hv.MxGenerationMode.Bounded, 2.0, -1.0)),
-            ("bounded_nonfinite", Recipe(hv.MxGenerationMode.Bounded, -1.0, math.inf)),
+            (
+                "bounded_equal",
+                Recipe(RecipeKind.BOUNDED, lower=1.0, upper=1.0),
+            ),
+            (
+                "bounded_reversed",
+                Recipe(RecipeKind.BOUNDED, lower=2.0, upper=-1.0),
+            ),
+            (
+                "bounded_nonfinite",
+                Recipe(RecipeKind.BOUNDED, lower=-1.0, upper=math.inf),
+            ),
             (
                 "alternating_nonfinite",
-                Recipe(hv.MxGenerationMode.BoundedAlternatingSign, -math.inf, 1.0),
+                Recipe(
+                    RecipeKind.BOUNDED_ALTERNATING_SIGN,
+                    maximum_magnitude=math.inf,
+                ),
             ),
-            ("normal_negative_sigma", Recipe(hv.MxGenerationMode.Normal, 0.0, -0.1)),
-            ("normal_nan_mean", Recipe(hv.MxGenerationMode.Normal, math.nan, 1.0)),
+            (
+                "normal_negative_sigma",
+                Recipe(RecipeKind.NORMAL, mean=0.0, standard_deviation=-0.1),
+            ),
+            (
+                "normal_nan_mean",
+                Recipe(
+                    RecipeKind.NORMAL,
+                    mean=math.nan,
+                    standard_deviation=1.0,
+                ),
+            ),
             (
                 "integer_reversed",
-                Recipe(hv.MxGenerationMode.UniformInteger, 4.0, -3.0),
-            ),
-            (
-                "integer_out_of_range",
-                Recipe(hv.MxGenerationMode.UniformInteger, 0.0, float(1 << 40)),
+                Recipe(
+                    RecipeKind.UNIFORM_INTEGER,
+                    integer_lower=4,
+                    integer_upper=-3,
+                ),
             ),
         )
         for label, recipe in invalid_data_recipes:
@@ -858,6 +910,9 @@ class MxGenerationOracleTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     hv.generate_mx(make_problem(case))
 
+        with self.assertRaises(TypeError):
+            hv.MxUniformIntegerDataParameters(0, 1 << 40)
+
         no_infinity = MxCase(
             "fp4_infinity",
             hv.ScalarType.Float4E2M1,
@@ -866,7 +921,7 @@ class MxGenerationOracleTests(unittest.TestCase):
             3,
             0,
             2,
-            Recipe(hv.MxGenerationMode.Infinity),
+            Recipe(RecipeKind.TYPE_INFINITY),
         )
         with self.assertRaises(ValueError):
             hv.generate_mx(make_problem(no_infinity))
@@ -879,7 +934,7 @@ class MxGenerationOracleTests(unittest.TestCase):
             3,
             0,
             2,
-            Recipe(hv.MxGenerationMode.Bounded, 0.1, 0.2),
+            Recipe(RecipeKind.BOUNDED, lower=0.1, upper=0.2),
             scale=hv.MxScaleGenerationMode.One,
         )
         with self.assertRaises(ValueError):
@@ -894,7 +949,7 @@ class MxGenerationOracleTests(unittest.TestCase):
             leading_dimension=3,
             block_axis=0,
             block_size=2,
-            data=Recipe(hv.MxGenerationMode.Ones),
+            data=Recipe(RecipeKind.CONSTANT, value=1.0),
         )
         invalid_cases = (
             ("rank", MxCase(**(base | {"shape": (3,)})), ValueError),
