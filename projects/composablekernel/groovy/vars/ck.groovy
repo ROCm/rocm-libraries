@@ -1501,7 +1501,7 @@ def runTileEngineGemmTests(String arch, String compiler) {
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
-def runDispatcherGemmUniversalTests(String compiler) {
+def runDispatcherGemmTests(String compiler) {
     def execute_cmd = """
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D BUILD_CK_TILE_ENGINE="ON" \

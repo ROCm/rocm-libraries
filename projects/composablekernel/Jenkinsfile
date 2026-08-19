@@ -136,9 +136,9 @@ pipeline {
             defaultValue: false,
             description: "Run the tile_engine_gemm tests (default: OFF)")
         booleanParam(
-            name: "RUN_DISPATCHER_GEMM_UNIVERSAL_TESTS",
+            name: "RUN_DISPATCHER_GEMM_TESTS",
             defaultValue: false,
-            description: "Run dispatcher gemm_universal tests on gfx942 only (default: OFF)")
+            description: "Run dispatcher gemm tests on gfx942 only (default: OFF)")
         booleanParam(
             name: "RUN_DISPATCHER_TESTS",
             defaultValue: false,
@@ -616,7 +616,7 @@ pipeline {
                 }
             }
         }
-        stage("Run DISPATCHER_GEMM_UNIVERSAL Tests")
+        stage("Run DISPATCHER_GEMM Tests")
         {
             when {
                 beforeAgent true
@@ -624,11 +624,11 @@ pipeline {
             }
             parallel
             {
-                stage("Run DISPATCHER_GEMM_UNIVERSAL Tests on gfx942")
+                stage("Run DISPATCHER_GEMM Tests on gfx942")
                 {
                     when {
                         beforeAgent true
-                        expression { params.RUN_DISPATCHER_GEMM_UNIVERSAL_TESTS.toBoolean() }
+                        expression { params.RUN_DISPATCHER_GEMM_TESTS.toBoolean() }
                     }
                     agent none
                     steps{
@@ -636,7 +636,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx942")) {
                                 deleteDir()
-                                ck.runDispatcherGemmUniversalTests(params.BUILD_COMPILER)
+                                ck.runDispatcherGemmTests(params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }
