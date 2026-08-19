@@ -23,9 +23,8 @@
 // it expands to a no-op. An arch-query failure is fail-closed: declining reports
 // the graph unsupported, guessing "not affected" on a real gfx115x crashes.
 //
-// To remove after the fix: delete this file and `tests/TestWorkarounds.hpp`,
-// drop their includes, and remove the call sites. `git grep WORKAROUND_ISSUE_9962`
-// finds them all.
+// To remove after the fix: `git grep WORKAROUND_ISSUE_9962` finds the macro, its
+// test-side counterpart, and both call sites.
 // ----------------------------------------------------------------------------
 // ROCm/rocm-libraries#10811 — on gfx950 a block-scaled MX GEMM with FP8 OCP
 // (E4M3 or E5M2) on graph operand A and FP6 (E2M3 or E3M2) on graph operand B
@@ -33,6 +32,11 @@
 //
 // REJECT_IF_WORKAROUND_ISSUE_10811 must only be invoked from a function with
 // return type `bool` (it contains a `return`).
+//
+// To remove after the fix: `git grep WORKAROUND_ISSUE_10811` finds the macro and its
+// single call site. Also delete the test
+// `TestGpuHipblasltMxMatmulPlanBuilder.IsApplicableRejectsFp8AWithFp6B` and add the
+// four `MxMixedConfig<FP8_*, FP6_*>` pairings to `MxMixedConfigs` in that same file.
 // ----------------------------------------------------------------------------
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
