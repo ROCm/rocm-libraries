@@ -122,6 +122,23 @@ run_fp8fp32_tests() {
     done ; done ; done
 }
 
+# perhead is only generated for gfx125x, and the example exits non-zero when an instance is
+# missing, so this cannot be folded into run_fp8bf16_tests without breaking the other targets.
+run_gfx125_qscale_tests() {
+    for prec in fp8 fp8bf16 fp8fp32 ; do
+    for scale in n pt ph bs ; do
+    for mode in 0 1 ; do
+
+    # init=3 fills up to the fp8 maximum, which only stands for a real tensor when a descale
+    # maps it back to qkv_max. With no descale the logits reach ~3e5 in the exp2 domain and
+    # the softmax collapses to an argmax, where half an fp32 ulp of the row max is worth 1%.
+    if [ "$scale" = "n" ] ; then init=0 ; else init=3 ; fi
+
+    run_exe -prec=$prec -init=$init -mode=$mode -b=2 -h=2 -h_k=1 -d=128 -s=99 -s_k=256 -iperm=1 -operm=1 -vlayout=r -qscale=$scale -kname=$KNAME $COMMON_ARGS
+
+    done ; done ; done
+}
+
 run_fp16_appendkv_tests() {
     for s in $(seq 63 1 65) ; do
     for s_k in 65 129 ; do
@@ -310,6 +327,9 @@ run_padding_smoke_tests
 run_padding_basic_boundary_tests
 run_fp8bf16_tests
 run_fp8fp32_tests
+case "$GPU_arch" in
+    gfx125*) run_gfx125_qscale_tests ;;
+esac
 if [ $TEST_STREAM_SINK -eq 1 ] ; then
     run_sink_mask_tests
 fi
