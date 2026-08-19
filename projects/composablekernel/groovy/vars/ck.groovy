@@ -1057,7 +1057,7 @@ def buildAndTest(Map conf=[:]){
                                 cmake --build build -- -j &&
                                 cd build &&
                                 make install &&
-                                cd ../install &&
+                                cd ../install/bin &&
                                 ctest
                             """
                         }
