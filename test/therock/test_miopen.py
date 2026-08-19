@@ -182,7 +182,6 @@ TEST_TO_IGNORE = {
     "gfx1151": {
         "windows": ["Full/GPU_UnitTestConvSolverGemmBwdRestBwd_FP16.GemmBwdRest/0"]
     },
-    "gfx950-dcgpu": {"linux": ["*DBSync*"]},
 }
 
 if AMDGPU_FAMILIES in TEST_TO_IGNORE and os_type in TEST_TO_IGNORE[AMDGPU_FAMILIES]:
@@ -267,10 +266,8 @@ quick_filter = [
     "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*",
 ]
 
-# TODO(rocm-libraries#2266): re-enable test for gfx950-dcgpu
-if AMDGPU_FAMILIES != "gfx950-dcgpu":
-    quick_filter.append("*DBSync*")
-    positive_filter.append("*DBSync*")
+quick_filter.append("*DBSync*")
+positive_filter.append("*DBSync*")
 
 ####################################################
 
