@@ -411,12 +411,12 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
     };
 
     const size_t logicalElements = problem.d.shape().elementCount();
-    size_t computedElements = 0;
+    size_t outputElementsWritten = 0;
     if (problem.outputSelection.selectsAll()) {
         for (size_t row = 0; row < m; ++row) {
             for (size_t column = 0; column < n; ++column) {
                 computeOutput(row, column);
-                ++computedElements;
+                ++outputElementsWritten;
             }
         }
     } else {
@@ -426,19 +426,17 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
             const size_t column = logicalIndex % n;
             computeOutput(row, column);
         }
-        computedElements = selected.size();
+        outputElementsWritten = selected.size();
     }
 
     return {
-        .backendUsed = GemmBackend::Canonical,
+        .backendUsed = GemmBackend::Pointwise,
         .fallbackReason = std::nullopt,
-        .outputElementsComputed = computedElements,
+        .outputElementsWritten = outputElementsWritten,
+        .outputElementsCovered = outputElementsWritten,
     };
 }
 
-// Internal exact selected-output strategy. GemmBackend::Canonical remains the
-// public compatibility request and run-info value until consumer migration is
-// complete.
 inline GemmRunInfo runPointwiseGemm(const GemmRequest& problem) {
     switch (problem.accumulatorType) {
         case ScalarType::Float16:

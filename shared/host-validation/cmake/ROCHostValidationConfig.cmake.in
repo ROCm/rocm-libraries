@@ -5,18 +5,18 @@
 # Component      Imported target                         Component requirements
 # Core           roc::host-validation-core               none
 # Operations     roc::host-validation                    Core
-# Tiled          roc::host-validation-tiled              Operations
+# Blocked          roc::host-validation-blocked              Operations
 # BLAS           roc::host-validation-blas               Operations, LP64 CBLAS
 # MX             roc::host-validation-mx                 Core
 # AMDGPULayout   roc::host-validation-amd-gpu-layout     none
 #
-# Component requirements are transitive. For example, requesting Tiled loads
+# Component requirements are transitive. For example, requesting Blocked loads
 # Operations and Core, while requesting BLAS loads Operations and Core. The
 # *_TARGET and *_COMPONENT_DEPENDENCIES variables below expose this mapping to
 # consumers that need to inspect it. BLAS also requires a conforming LP64 CBLAS
 # implementation.
 # Operations, MX, and AMDGPULayout require OpenMP CXX only when their installed
-# targets were built with OpenMP support; Tiled and BLAS inherit the Operations
+# targets were built with OpenMP support; Blocked and BLAS inherit the Operations
 # requirement. A lookup without COMPONENTS preserves the historical behavior
 # by loading every component present in the installation.
 
@@ -33,7 +33,7 @@ set(
     ROCHostValidation_SUPPORTED_COMPONENTS
     Core
     Operations
-    Tiled
+    Blocked
     BLAS
     MX
     AMDGPULayout
@@ -47,9 +47,9 @@ set(ROCHostValidation_Operations_TARGET roc::host-validation)
 set(ROCHostValidation_Operations_COMPONENT_DEPENDENCIES Core)
 set(ROCHostValidation_Operations_AVAILABLE ON)
 
-set(ROCHostValidation_Tiled_TARGET roc::host-validation-tiled)
-set(ROCHostValidation_Tiled_COMPONENT_DEPENDENCIES Operations)
-set(ROCHostValidation_Tiled_AVAILABLE ON)
+set(ROCHostValidation_Blocked_TARGET roc::host-validation-blocked)
+set(ROCHostValidation_Blocked_COMPONENT_DEPENDENCIES Operations)
+set(ROCHostValidation_Blocked_AVAILABLE ON)
 
 set(ROCHostValidation_BLAS_TARGET roc::host-validation-blas)
 set(ROCHostValidation_BLAS_COMPONENT_DEPENDENCIES Operations)
@@ -75,8 +75,8 @@ set(
     ROCHostValidationOperationsTargets.cmake
 )
 set(
-    _ROCHostValidation_Tiled_targets_file
-    ROCHostValidationTiledTargets.cmake
+    _ROCHostValidation_Blocked_targets_file
+    ROCHostValidationBlockedTargets.cmake
 )
 set(
     _ROCHostValidation_BLAS_targets_file
@@ -96,7 +96,7 @@ set(
     _ROCHostValidation_Operations_uses_openmp
     @HOST_VALIDATION_PACKAGE_OPERATIONS_HAS_OPENMP@
 )
-set(_ROCHostValidation_Tiled_uses_openmp OFF)
+set(_ROCHostValidation_Blocked_uses_openmp OFF)
 set(_ROCHostValidation_BLAS_uses_openmp OFF)
 set(
     _ROCHostValidation_MX_uses_openmp
@@ -125,7 +125,7 @@ if(NOT _ROCHostValidation_requested_components)
         _ROCHostValidation_requested_components
         Core
         Operations
-        Tiled
+        Blocked
         AMDGPULayout
     )
     if(ROCHostValidation_BLAS_AVAILABLE)
@@ -152,7 +152,7 @@ foreach(_ROCHostValidation_component
                 _ROCHostValidation_unsupported_message
                 "ROCHostValidation does not support component "
                 "\"${_ROCHostValidation_component}\". Supported components: "
-                "Core, Operations, Tiled, BLAS, MX, AMDGPULayout."
+                "Core, Operations, Blocked, BLAS, MX, AMDGPULayout."
             )
             list(
                 APPEND
@@ -269,7 +269,7 @@ endif()
 foreach(_ROCHostValidation_component
         Core
         Operations
-        Tiled
+        Blocked
         BLAS
         MX
         AMDGPULayout)

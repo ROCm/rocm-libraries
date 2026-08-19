@@ -56,7 +56,7 @@ namespace
     }
 } // namespace
 
-TEST(ReferenceTiledBackend, PreservesDoublePrecisionForF64)
+TEST(ReferenceBlockedBackend, PreservesDoublePrecisionForF64)
 {
     const size_t M = 1;
     const size_t N = 1;
@@ -76,14 +76,14 @@ TEST(ReferenceTiledBackend, PreservesDoublePrecisionForF64)
     std::vector<double> d = {0.0};
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0, 0.0);
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
 
     const double expected = a0 * b0 + a1 * b1;
     ASSERT_NE(static_cast<double>(static_cast<float>(expected)), expected);
     EXPECT_EQ(d[0], expected);
 }
 
-TEST(ReferenceTiledBackend, AppliesXFloat32OperandMathOpToBothOperands)
+TEST(ReferenceBlockedBackend, AppliesXFloat32OperandMathOpToBothOperands)
 {
     const size_t M = 1;
     const size_t N = 1;
@@ -99,7 +99,7 @@ TEST(ReferenceTiledBackend, AppliesXFloat32OperandMathOpToBothOperands)
     std::vector<float> d = {0.0f};
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
 
     auto        xf32     = [](float v) { return static_cast<float>(XFloat32(v)); };
     const float expected = xf32(a[0]) * xf32(b[0]) + xf32(a[1]) * xf32(b[1]);
@@ -109,7 +109,7 @@ TEST(ReferenceTiledBackend, AppliesXFloat32OperandMathOpToBothOperands)
     EXPECT_EQ(d[0], expected);
 }
 
-TEST(ReferenceTiledBackend, DelegatesDenseRuntimeGemm)
+TEST(ReferenceBlockedBackend, DelegatesDenseRuntimeGemm)
 {
     const size_t M = 2;
     const size_t N = 2;
@@ -123,11 +123,11 @@ TEST(ReferenceTiledBackend, DelegatesDenseRuntimeGemm)
     std::vector<float> d(M * N, -99);
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 2.0f, 3.0f);
 
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{49, 71, 65, 95}));
 }
 
-TEST(ReferenceTiledBackend, SupportsAffineLayoutsAndMixedRealStorage)
+TEST(ReferenceBlockedBackend, SupportsAffineLayoutsAndMixedRealStorage)
 {
     const size_t M = 2;
     const size_t N = 2;
@@ -180,14 +180,14 @@ TEST(ReferenceTiledBackend, SupportsAffineLayoutsAndMixedRealStorage)
     std::vector<double> d(problem.d().totalAllocatedElements(), -99);
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 2.0f, 3.0f);
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 49);
     EXPECT_EQ(d[3], 71);
     EXPECT_EQ(d[10], 65);
     EXPECT_EQ(d[13], 95);
 }
 
-TEST(ReferenceTiledBackend, PromotesHalfDestinationAccumulationToFloat)
+TEST(ReferenceBlockedBackend, PromotesHalfDestinationAccumulationToFloat)
 {
     const size_t K       = 64;
     auto         problem = makePackedProblem(
@@ -198,14 +198,14 @@ TEST(ReferenceTiledBackend, PromotesHalfDestinationAccumulationToFloat)
     std::vector<Half> d(1, Half(-99));
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), Half(1), Half(0));
 
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     float expected = 0;
     for(size_t reduction = 0; reduction < K; ++reduction)
         expected += static_cast<float>(a[reduction]) * static_cast<float>(b[reduction]);
     EXPECT_EQ(d[0], Half(expected));
 }
 
-TEST(ReferenceGemmSelection, KeepsSparseHalfRequestsCanonical)
+TEST(ReferenceGemmSelection, KeepsSparseHalfRequestsPointwise)
 {
     const size_t M       = 1;
     const size_t N       = 10;
@@ -218,17 +218,17 @@ TEST(ReferenceGemmSelection, KeepsSparseHalfRequestsCanonical)
     std::vector<Half> d(M * N, Half(-99));
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), Half(1), Half(0));
 
-    Half  canonicalExpected = Half(0);
-    float tiledExpected     = 0;
+    Half  pointwiseExpected = Half(0);
+    float blockedExpected   = 0;
     for(size_t reduction = 0; reduction < K; ++reduction)
     {
-        canonicalExpected = Half(canonicalExpected + Half(a[reduction] * b[reduction]));
-        tiledExpected += static_cast<float>(a[reduction]) * static_cast<float>(b[reduction]);
+        pointwiseExpected = Half(pointwiseExpected + Half(a[reduction] * b[reduction]));
+        blockedExpected += static_cast<float>(a[reduction]) * static_cast<float>(b[reduction]);
     }
-    ASSERT_NE(canonicalExpected, Half(tiledExpected));
+    ASSERT_NE(pointwiseExpected, Half(blockedExpected));
 
     SolveGemmCPU(problem, inputs, /*elementsToValidate=*/1);
-    EXPECT_EQ(d[0], canonicalExpected);
+    EXPECT_EQ(d[0], pointwiseExpected);
     for(size_t index = 1; index < d.size(); ++index)
         EXPECT_EQ(d[index], Half(-99)) << "index=" << index;
 }
@@ -246,21 +246,21 @@ TEST(ReferenceGemmSelection, ZeroRequestedElementsUsesSelectAllPolicy)
     std::vector<Half> d(M * N, Half(-99));
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), Half(1), Half(0));
 
-    Half  canonicalExpected = Half(0);
-    float tiledExpected     = 0;
+    Half  pointwiseExpected = Half(0);
+    float blockedExpected   = 0;
     for(size_t reduction = 0; reduction < K; ++reduction)
     {
-        canonicalExpected = Half(canonicalExpected + Half(a[reduction] * b[reduction]));
-        tiledExpected += static_cast<float>(a[reduction]) * static_cast<float>(b[reduction]);
+        pointwiseExpected = Half(pointwiseExpected + Half(a[reduction] * b[reduction]));
+        blockedExpected += static_cast<float>(a[reduction]) * static_cast<float>(b[reduction]);
     }
-    ASSERT_NE(canonicalExpected, Half(tiledExpected));
+    ASSERT_NE(pointwiseExpected, Half(blockedExpected));
 
     const auto runInfo = SolveGemmCPU(problem, inputs, /*elementsToValidate=*/0);
-    EXPECT_EQ(runInfo.backendUsed, roc::host_validation::GemmBackend::Tiled);
-    EXPECT_EQ(d, std::vector<Half>(M * N, Half(tiledExpected)));
+    EXPECT_EQ(runInfo.backendUsed, roc::host_validation::GemmBackend::Blocked);
+    EXPECT_EQ(d, std::vector<Half>(M * N, Half(blockedExpected)));
 }
 
-TEST(ReferenceGemmSelection, UsesTiledTilesForSparseFloatValidation)
+TEST(ReferenceGemmSelection, UsesBlockedTilesForSparseFloatValidation)
 {
     const size_t M                  = 384;
     const size_t N                  = 384;
@@ -275,10 +275,11 @@ TEST(ReferenceGemmSelection, UsesTiledTilesForSparseFloatValidation)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     const auto runInfo = SolveGemmCPU(problem, inputs, elementsToValidate);
-    EXPECT_EQ(runInfo.backendUsed, roc::host_validation::GemmBackend::Tiled);
-    EXPECT_EQ(runInfo.outputElementsComputed, 12 * 32 * 32);
-    EXPECT_GT(runInfo.outputElementsComputed, elementsToValidate);
-    EXPECT_LT(runInfo.outputElementsComputed, M * N);
+    EXPECT_EQ(runInfo.backendUsed, roc::host_validation::GemmBackend::Blocked);
+    EXPECT_EQ(runInfo.outputElementsWritten, elementsToValidate);
+    EXPECT_EQ(runInfo.outputElementsCovered, 12 * 32 * 32);
+    EXPECT_GT(runInfo.outputElementsCovered, elementsToValidate);
+    EXPECT_LT(runInfo.outputElementsCovered, M * N);
 
     const auto selection
         = roc::host_validation::OutputSelection::primeStride(problem.d().totalLogicalElements(),
@@ -343,7 +344,7 @@ TEST(ReferenceOutputSelection, ComputesPrimeStrideSubset)
     std::vector<float> d(M * N, -99.0f);
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/3));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/3));
 
     for(size_t index = 0; index < d.size(); ++index)
     {
@@ -392,7 +393,7 @@ TEST(ReferenceStandaloneEpilogue, HandlesEAndAmaxScaleAndGate)
     inputs.gateResidual = gate.data();
     inputs.amaxD        = &amaxD;
 
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(e, (std::vector<float>{5, -3, 6, -1}));
     EXPECT_EQ(d, (std::vector<float>{8, 2, -19, 0.25f}));
     EXPECT_EQ(amaxD, 6);
@@ -418,7 +419,7 @@ TEST(ReferenceStandaloneEpilogue, CompletesDForPartialAmax)
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.amaxD = &amaxD;
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/2));
     EXPECT_EQ(d, (std::vector<float>{1, 2, 10, 20}));
     EXPECT_EQ(amaxD, 20);
 }
@@ -460,7 +461,7 @@ TEST(ReferenceStandaloneEpilogue, AccumulatesAmaxAcrossStridedBatches)
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.amaxD = &amaxD;
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/1));
     EXPECT_EQ(d, (std::vector<float>{10, 20, 2, 3}));
     EXPECT_EQ(amaxD, 20);
 }
@@ -487,7 +488,7 @@ TEST(ReferenceStandaloneEpilogue, HandlesGradientAuxiliaryInput)
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.e = e.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{0, 20}));
     EXPECT_EQ(e, (std::vector<float>{-1, 2}));
 }
@@ -505,7 +506,7 @@ TEST(ReferenceStandaloneEpilogue, UsesZeroAuxiliaryWhenGradientEIsDisabled)
     std::vector<float> d(2, -99);
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{0, 0}));
 }
 
@@ -535,7 +536,7 @@ TEST(ReferenceStandaloneEpilogue, HandlesGradientBiasReduction)
     inputs.e    = e.data();
     inputs.bias = bias.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/2));
     EXPECT_EQ(d, (std::vector<float>{3, 6, 4, 8}));
     EXPECT_EQ(bias, (std::vector<float>{7, 14}));
 }
@@ -547,24 +548,24 @@ TEST(ReferenceStandaloneEpilogue, WritesPointerArrayGradientBiasOutputs)
     const size_t K       = 1;
     const size_t batches = 2;
     auto         problem = ContractionProblemGemm::GEMM_Strides(false,
-                                                        false,
-                                                        rocisa::DataType::Float,
-                                                        rocisa::DataType::Float,
-                                                        rocisa::DataType::Float,
-                                                        rocisa::DataType::Float,
-                                                        M,
-                                                        N,
-                                                        K,
-                                                        batches,
-                                                        M,
-                                                        M * K,
-                                                        K,
-                                                        K * N,
-                                                        M,
-                                                        M * N,
-                                                        M,
-                                                        M * N,
-                                                        0.0);
+                                                                false,
+                                                                rocisa::DataType::Float,
+                                                                rocisa::DataType::Float,
+                                                                rocisa::DataType::Float,
+                                                                rocisa::DataType::Float,
+                                                                M,
+                                                                N,
+                                                                K,
+                                                                batches,
+                                                                M,
+                                                                M * K,
+                                                                K,
+                                                                K * N,
+                                                                M,
+                                                                M * N,
+                                                                M,
+                                                                M * N,
+                                                                0.0);
     problem.setComputeInputTypeA(rocisa::DataType::Float);
     problem.setComputeInputTypeB(rocisa::DataType::Float);
     problem.setAlphaType(rocisa::DataType::Float);
@@ -597,7 +598,7 @@ TEST(ReferenceStandaloneEpilogue, WritesPointerArrayGradientBiasOutputs)
     inputs.batchD    = batchD;
     inputs.batchBias = batchBias;
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d0, a0);
     EXPECT_EQ(d1, a1);
     EXPECT_EQ(bias0, a0);
@@ -626,7 +627,7 @@ TEST(ReferenceStandaloneEpilogue, SamplesGradientBiasSourceA)
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.bias = bias.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/2));
     EXPECT_EQ(d, (std::vector<float>{4, -99, -99, 6, -99, -99}));
     EXPECT_EQ(bias, (std::vector<float>{4, 6}));
 }
@@ -653,7 +654,7 @@ TEST(ReferenceStandaloneEpilogue, SamplesGradientBiasSourceB)
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.bias = bias.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/2));
     EXPECT_EQ(d, (std::vector<float>{3, -99, -99, 7, -99, -99}));
     EXPECT_EQ(bias, (std::vector<float>{3, 7, 11}));
 }
@@ -682,7 +683,7 @@ TEST(ReferenceStandaloneEpilogue, PreservesLegacySharedFactorAxisWhenMEqualsN)
     inputs.bias          = bias.data();
     inputs.scaleAlphaVec = scaleAlpha.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{31, 61, 402, 802}));
 }
 
@@ -705,12 +706,12 @@ TEST(ReferenceStandaloneEpilogue, PreservesPartialOutputSelection)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.e = e.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/2));
     EXPECT_EQ(d, (std::vector<float>{3, -99, 4, -99}));
     EXPECT_EQ(e, (std::vector<float>{3, -99, 4, -99}));
 }
 
-TEST(ReferenceGemmSelection, FallsBackToCanonicalForInt32Accumulation)
+TEST(ReferenceGemmSelection, FallsBackToPointwiseForInt32Accumulation)
 {
     const size_t M = 2;
     const size_t N = 1;
@@ -729,7 +730,7 @@ TEST(ReferenceGemmSelection, FallsBackToCanonicalForInt32Accumulation)
     EXPECT_EQ(d, (std::vector<int32_t>{23, 34}));
 }
 
-TEST(ReferenceRuntimeCanonical, SaturatesInt8Destination)
+TEST(ReferenceRuntimePointwise, SaturatesInt8Destination)
 {
     auto problem = makePackedProblem(
         rocisa::DataType::Int8, rocisa::DataType::Int8, rocisa::DataType::Int8, 1, 4, 1);
@@ -742,7 +743,7 @@ TEST(ReferenceRuntimeCanonical, SaturatesInt8Destination)
     std::vector<int8_t> d(4, 0);
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(0));
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<int8_t>{127, -128, 100, -100}));
 }
 
@@ -763,11 +764,11 @@ TEST(ReferenceStandaloneEpilogue, SaturatesInt8Destination)
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(0));
     inputs.e = e.data();
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 127);
 }
 
-TEST(ReferenceTiledBackend, SupportsMirroredBoundIndex)
+TEST(ReferenceBlockedBackend, SupportsMirroredBoundIndex)
 {
     const size_t M     = 2;
     const size_t N     = 1;
@@ -809,12 +810,12 @@ TEST(ReferenceTiledBackend, SupportsMirroredBoundIndex)
     std::vector<float> d(M * N, -99);
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{21, 32}));
 }
 
 #ifdef TENSILE_USE_FP8_BF8
-TEST(ReferenceRuntimeCanonical, MirrorsBlockScalesWithTheBoundIndex)
+TEST(ReferenceRuntimePointwise, MirrorsBlockScalesWithTheBoundIndex)
 {
     const size_t                        K = 32;
     ContractionProblemGemm::FreeIndices freeIndices{
@@ -867,12 +868,12 @@ TEST(ReferenceRuntimeCanonical, MirrorsBlockScalesWithTheBoundIndex)
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.mxsa = scaleA.data();
     inputs.mxsb = scaleB.data();
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 392);
 }
 #endif
 
-TEST(ReferenceRuntimeCanonical, HandlesPointerArrayBatches)
+TEST(ReferenceRuntimePointwise, HandlesPointerArrayBatches)
 {
     const size_t M       = 2;
     const size_t N       = 1;
@@ -938,33 +939,33 @@ TEST(ReferenceRuntimeCanonical, HandlesPointerArrayBatches)
     inputs.batchOffsetC      = sizeof(float);
     inputs.batchOffsetD      = sizeof(float);
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d0, (std::vector<float>{-99, 5, 9}));
     EXPECT_EQ(d1, (std::vector<float>{-99, 24, 30}));
 }
 
-TEST(ReferenceRuntimeCanonical, PreservesEarlierStridedBatchOutputs)
+TEST(ReferenceRuntimePointwise, PreservesEarlierStridedBatchOutputs)
 {
     const size_t batches = 2;
     auto         problem = ContractionProblemGemm::GEMM_Strides(false,
-                                                        false,
-                                                        rocisa::DataType::Float,
-                                                        rocisa::DataType::Float,
-                                                        rocisa::DataType::Float,
-                                                        rocisa::DataType::Float,
-                                                        1,
-                                                        1,
-                                                        1,
-                                                        batches,
-                                                        1,
-                                                        1,
-                                                        1,
-                                                        1,
-                                                        1,
-                                                        1,
-                                                        1,
-                                                        1,
-                                                        0.0);
+                                                                false,
+                                                                rocisa::DataType::Float,
+                                                                rocisa::DataType::Float,
+                                                                rocisa::DataType::Float,
+                                                                rocisa::DataType::Float,
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                batches,
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                0.0);
     problem.setComputeInputTypeA(rocisa::DataType::Float);
     problem.setComputeInputTypeB(rocisa::DataType::Float);
     problem.setAlphaType(rocisa::DataType::Float);
@@ -980,12 +981,12 @@ TEST(ReferenceRuntimeCanonical, PreservesEarlierStridedBatchOutputs)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.e = e.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{8, 15}));
     EXPECT_EQ(e, d);
 }
 
-TEST(ReferenceTiledBackend, RejectsInvalidPointerBatchBeforeWriting)
+TEST(ReferenceBlockedBackend, RejectsInvalidPointerBatchBeforeWriting)
 {
     const size_t M       = 1;
     const size_t N       = 1;
@@ -1040,7 +1041,7 @@ TEST(ReferenceTiledBackend, RejectsInvalidPointerBatchBeforeWriting)
     EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
               reference_adapter::TranslationFailureCode::InvalidBatchPointer);
 
-    EXPECT_FALSE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_FALSE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d0[0], -99);
 }
 
@@ -1079,7 +1080,7 @@ TEST(ReferenceProblemAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
     ASSERT_TRUE(translated->epilogue);
     roc::host_validation::referenceGemm(translated->gemm(),
                                         {
-                                            .backend = roc::host_validation::GemmBackend::Canonical,
+                                            .backend = roc::host_validation::GemmBackend::Pointwise,
                                             .requireRequestedBackend = true,
                                         });
     roc::host_validation::referenceEpilogue(*translated->epilogue);
@@ -1215,7 +1216,7 @@ TEST(ReferenceProblemAdapter, RejectsMirroredOffsetMultiplicationOverflow)
               reference_adapter::TranslationFailureCode::InvalidDescriptor);
 }
 
-TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)
+TEST(ReferenceRuntimePointwise, HandlesFloat16Accumulation)
 {
     const size_t M = 1;
     const size_t N = 1;
@@ -1230,14 +1231,14 @@ TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)
     std::vector<Half> d(1, Half(-99));
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), Half(1), Half(0));
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     Half expected = Half(0);
     for(size_t reduction = 0; reduction < K; ++reduction)
         expected = Half(expected + Half(a[reduction] * b[reduction]));
     EXPECT_EQ(d[0], expected);
 }
 
-TEST(ReferenceRuntimeCanonical, AppliesScalarScaleBeforeComputeQuantization)
+TEST(ReferenceRuntimePointwise, AppliesScalarScaleBeforeComputeQuantization)
 {
     auto problem = makePackedProblem(
         rocisa::DataType::Half, rocisa::DataType::Float, rocisa::DataType::Float, 1, 1, 1);
@@ -1256,14 +1257,14 @@ TEST(ReferenceRuntimeCanonical, AppliesScalarScaleBeforeComputeQuantization)
     inputs.scaleA = &scaleA;
     inputs.scaleB = &scaleB;
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 3.25f);
     d[0] = -99;
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 3.25f);
 }
 
-TEST(ReferenceRuntimeCanonical, AppliesVectorScaleBeforeComputeQuantization)
+TEST(ReferenceRuntimePointwise, AppliesVectorScaleBeforeComputeQuantization)
 {
     auto problem = makePackedProblem(
         rocisa::DataType::Half, rocisa::DataType::Float, rocisa::DataType::Float, 2, 1, 1);
@@ -1282,14 +1283,14 @@ TEST(ReferenceRuntimeCanonical, AppliesVectorScaleBeforeComputeQuantization)
     inputs.scaleA = scaleA.data();
     inputs.scaleB = scaleB.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{3.25f, 4.5f}));
     d.assign(2, -99);
-    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeBlockedGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<float>{3.25f, 4.5f}));
 }
 
-TEST(ReferenceRuntimeCanonical, SupportsEveryConfiguredActivation)
+TEST(ReferenceRuntimePointwise, SupportsEveryConfiguredActivation)
 {
     const std::array<ActivationType, 13> activations{
         ActivationType::Abs,
@@ -1320,13 +1321,13 @@ TEST(ReferenceRuntimeCanonical, SupportsEveryConfiguredActivation)
         ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
         inputs.activationArgs = {0.5f, 1.5f};
 
-        EXPECT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1))
+        EXPECT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1))
             << "activation=" << ToString(activation);
         EXPECT_TRUE(std::isfinite(d[0])) << "activation=" << ToString(activation);
     }
 }
 
-TEST(ReferenceRuntimeCanonical, NormalizesExplicitGradientActivations)
+TEST(ReferenceRuntimePointwise, NormalizesExplicitGradientActivations)
 {
     for(const ActivationType activation : {ActivationType::DGelu, ActivationType::DRelu})
     {
@@ -1345,7 +1346,7 @@ TEST(ReferenceRuntimeCanonical, NormalizesExplicitGradientActivations)
         ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
         inputs.e = e.data();
 
-        EXPECT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1))
+        EXPECT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1))
             << "activation=" << ToString(activation);
         EXPECT_TRUE(std::isfinite(d[0])) << "activation=" << ToString(activation);
     }
@@ -1369,7 +1370,7 @@ TEST(ReferencePackedStorage, Float6MatchesComponentCodec)
         EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;
 }
 
-TEST(ReferenceRuntimeCanonical, HandlesPackedFloat6Storage)
+TEST(ReferenceRuntimePointwise, HandlesPackedFloat6Storage)
 {
     auto problem = makePackedProblem(
         rocisa::DataType::Float6, rocisa::DataType::Float6, rocisa::DataType::Float, 1, 1, 32);
@@ -1379,7 +1380,7 @@ TEST(ReferenceRuntimeCanonical, HandlesPackedFloat6Storage)
     std::vector<float>     d{-99};
     ContractionInputs      inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 64);
 }
 #endif
@@ -1402,7 +1403,7 @@ TEST(ReferencePackedStorage, BFloat6MatchesComponentCodec)
         EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;
 }
 
-TEST(ReferenceRuntimeCanonical, HandlesPackedBFloat6Storage)
+TEST(ReferenceRuntimePointwise, HandlesPackedBFloat6Storage)
 {
     auto problem = makePackedProblem(
         rocisa::DataType::BFloat6, rocisa::DataType::BFloat6, rocisa::DataType::Float, 1, 1, 32);
@@ -1412,7 +1413,7 @@ TEST(ReferenceRuntimeCanonical, HandlesPackedBFloat6Storage)
     std::vector<float>      d{-99};
     ContractionInputs       inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimePointwiseGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d[0], 64);
 }
 #endif

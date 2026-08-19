@@ -29,7 +29,7 @@ void testTransformingBlockScale(roc::host_validation::ScalarType accumulatorType
     const Layout layoutB(Shape{4, 2}, {1, 4});
     const Layout layoutD(Shape{2, 2}, {1, 2});
     const Layout scaleLayout = Layout::contiguous(Shape{2, 2});
-    Tensor canonicalD(nativeScalarType<T>, layoutD);
+    Tensor pointwiseD(nativeScalarType<T>, layoutD);
     Tensor transformingD(nativeScalarType<T>, layoutD);
 
     auto makeOperandA = [&]() {
@@ -49,10 +49,10 @@ void testTransformingBlockScale(roc::host_validation::ScalarType accumulatorType
         return operand;
     };
 
-    GemmRequest canonicalProblem(makeOperandA(), makeOperandB(),
-                                 Tensor::fromNative<T>(layoutD, std::span<const T>(c)), canonicalD,
+    GemmRequest pointwiseProblem(makeOperandA(), makeOperandB(),
+                                 Tensor::fromNative<T>(layoutD, std::span<const T>(c)), pointwiseD,
                                  accumulatorType);
-    referenceGemm(canonicalProblem);
+    referenceGemm(pointwiseProblem);
 
     GemmRequest transformingProblem(makeOperandA(), makeOperandB(),
                                     Tensor::fromNative<T>(layoutD, std::span<const T>(c)),
@@ -75,10 +75,10 @@ void testTransformingBlockScale(roc::host_validation::ScalarType accumulatorType
 
     const std::array<T, 4> expected{20, 80, 80, 320};
     const Tensor expectedTensor = Tensor::fromNative<T>(layoutD, std::span<const T>(expected));
-    require(compare(canonicalD, expectedTensor).passed(),
-            "Canonical block-scale reference mismatch.");
-    require(compare(transformingD, canonicalD).passed(),
-            "Transforming BLAS block-scale result differs from canonical reference.");
+    require(compare(pointwiseD, expectedTensor).passed(),
+            "Pointwise block-scale reference mismatch.");
+    require(compare(transformingD, pointwiseD).passed(),
+            "Transforming BLAS block-scale result differs from pointwise reference.");
 }
 
 void testPartialOutputSelection() {
@@ -130,13 +130,14 @@ void testPartialOutputSelection() {
                                                   .requireRequestedBackend = false,
                                               },
                                               &backend);
-    require(fallback.runInfo.backendUsed == GemmBackend::Canonical &&
+    require(fallback.runInfo.backendUsed == GemmBackend::Pointwise &&
                 fallback.runInfo.fallbackReason == support.reason &&
-                fallback.runInfo.outputElementsComputed == 2,
-            "Partial-output BLAS request did not report canonical fallback.");
+                fallback.runInfo.outputElementsWritten == 2 &&
+                fallback.runInfo.outputElementsCovered == 2,
+            "Partial-output BLAS request did not report pointwise fallback.");
     require(d.loadAs<float>({0, 0}) == 58 && d.loadAs<float>({1, 0}) == -99 &&
                 d.loadAs<float>({0, 1}) == -99 && d.loadAs<float>({1, 1}) == 154,
-            "Canonical BLAS fallback did not preserve unselected outputs.");
+            "Pointwise BLAS fallback did not preserve unselected outputs.");
 }
 
 void testModeratelyLargeExactGemm() {
@@ -215,7 +216,7 @@ int main() {
     d.copyFrom(ones);
     problem.epilogue.activation = Activation::Relu;
     const GemmRunInfo fallback = referenceGemm(problem, {}, &backend).runInfo;
-    require(fallback.backendUsed == GemmBackend::Canonical && fallback.fallbackReason.has_value() &&
+    require(fallback.backendUsed == GemmBackend::Pointwise && fallback.fallbackReason.has_value() &&
                 d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
                 d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
             "Automatic runtime backend fallback mismatch.");

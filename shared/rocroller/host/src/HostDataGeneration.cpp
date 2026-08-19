@@ -21,9 +21,8 @@ namespace rocRoller::HostNumerics
 {
     namespace
     {
-        using roc::host_validation::GenerationOptions;
-        using roc::host_validation::GenerationPattern;
-        using roc::host_validation::GenerationTransform;
+        using roc::host_validation::GenerationRecipe;
+        using roc::host_validation::GenerationRecipeSettings;
         using roc::host_validation::Layout;
         using roc::host_validation::LogicalIndexOrder;
         using roc::host_validation::MxGenerationMode;
@@ -149,67 +148,68 @@ namespace rocRoller::HostNumerics
                        : LogicalIndexOrder::LastDimensionFastest;
         }
 
-        GenerationOptions generationOptions(TensorDescriptor const&   descriptor,
-                                            DataInitialization const& initialization,
-                                            ScalarType                type,
-                                            float                     minimum,
-                                            float                     maximum,
-                                            uint32_t                  seed)
+        GenerationRecipe generationRecipe(TensorDescriptor const&   descriptor,
+                                          DataInitialization const& initialization,
+                                          ScalarType                type,
+                                          float                     minimum,
+                                          float                     maximum,
+                                          uint32_t                  seed)
         {
-            GenerationOptions options;
-            options.seed       = seed;
-            options.indexOrder = indexOrder(descriptor);
+            GenerationRecipeSettings const settings{
+                .seed       = seed,
+                .indexOrder = indexOrder(descriptor),
+            };
+            auto realOnly = [&settings](GenerationRecipe::Component component) {
+                return GenerationRecipe::realOnly(std::move(component), settings);
+            };
 
             switch(initialization.mode)
             {
             case DataInitializationMode::Bounded:
-                options.real.pattern    = GenerationPattern::UniformReal;
-                options.real.parameter0 = minimum;
-                options.real.parameter1 = maximum;
-                break;
+                return realOnly(
+                    GenerationRecipe::uniformReal({.lower = minimum, .upper = maximum}));
             case DataInitializationMode::BoundedAlternatingSign:
-                options.real.pattern    = GenerationPattern::UniformReal;
-                options.real.parameter0 = 0;
-                options.real.parameter1 = std::max(std::abs(minimum), std::abs(maximum));
+            {
+                std::vector<size_t> alternatingDimensions;
                 for(size_t dimension = 0; dimension < descriptor.dimensions(); ++dimension)
                 {
                     if((descriptor.stride(dimension) & 1U) != 0)
-                        options.real.alternatingDimensions.push_back(dimension);
+                        alternatingDimensions.push_back(dimension);
                 }
-                options.real.negativeParity = 1U ^ (descriptor.offset() & 1U);
-                break;
+                auto component = GenerationRecipe::uniformReal(
+                    {.lower = 0.0, .upper = std::max(std::abs(minimum), std::abs(maximum))});
+                if(!alternatingDimensions.empty())
+                {
+                    component = component.withAlternatingSign(
+                        {.dimensions      = std::move(alternatingDimensions),
+                         .negativeWhenOdd = (1U ^ (descriptor.offset() & 1U)) != 0});
+                }
+                return realOnly(std::move(component));
+            }
             case DataInitializationMode::Unbounded:
             {
                 auto const [lowerExponent, upperExponent] = unboundedExponentRange(type);
-                options.real.pattern    = GenerationPattern::RandomEncodedExponent;
-                options.real.parameter0 = lowerExponent;
-                options.real.parameter1 = upperExponent;
-                options.real.sourceType = type;
-                break;
+                return realOnly(
+                    GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = lowerExponent,
+                                                             .upperUnbiasedExponent = upperExponent,
+                                                             .sourceType            = type}));
             }
             case DataInitializationMode::Identity:
-                options.real.pattern = GenerationPattern::Identity;
-                break;
+                return realOnly(GenerationRecipe::identity());
             case DataInitializationMode::Ones:
-                options.real.pattern    = GenerationPattern::Constant;
-                options.real.parameter0 = 1;
-                break;
+                return realOnly(GenerationRecipe::constant({.value = 1.0}));
             case DataInitializationMode::Zeros:
-                options.real.pattern = GenerationPattern::Zero;
-                break;
+                return realOnly(GenerationRecipe::zero());
             case DataInitializationMode::TrigonometricFromFloat:
-                options.real.pattern    = GenerationPattern::UniformReal;
-                options.real.parameter0 = 0;
-                options.real.parameter1 = 6.28318530717958647692528676655900576;
-                options.real.transform  = GenerationTransform::Cosine;
-                break;
+                return realOnly(GenerationRecipe::uniformReal(
+                                    {.lower = 0.0, .upper = 6.28318530717958647692528676655900576})
+                                    .withCosineTransform());
             case DataInitializationMode::NormalFromFloat:
-                options.real.pattern    = GenerationPattern::Normal;
-                options.real.parameter0 = initialization.normalMean;
-                options.real.parameter1 = initialization.normalStandardDeviation;
-                break;
+                return realOnly(GenerationRecipe::normal(
+                    {.mean              = initialization.normalMean,
+                     .standardDeviation = initialization.normalStandardDeviation}));
             }
-            return options;
+            throw std::invalid_argument("Unknown rocRoller data initialization mode.");
         }
 
         MxGenerationRecipe mxGenerationRecipe(DataInitialization const& initialization,
@@ -263,8 +263,7 @@ namespace rocRoller::HostNumerics
             auto const layout = hostTensorLayout(descriptor);
             Tensor     source(ScalarType::Float32, layout);
             roc::host_validation::generate(
-                source,
-                generationOptions(descriptor, initialization, type, minimum, maximum, seed));
+                source, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
 
             auto const sourceStorage = source.storage();
             if(sourceStorage.size() % sizeof(float) != 0)
@@ -307,7 +306,7 @@ namespace rocRoller::HostNumerics
 
             Tensor data(type, hostTensorLayout(descriptor));
             roc::host_validation::generate(
-                data, generationOptions(descriptor, initialization, type, minimum, maximum, seed));
+                data, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
             std::optional<Tensor> reference;
             if(includeReference)
                 reference = data.to(ScalarType::Float32);
@@ -360,13 +359,13 @@ namespace rocRoller::HostNumerics
 
             auto   result      = roc::host_validation::generateMx(problem);
             auto   dataStorage = std::vector<std::byte>(result.data.storage().begin(),
-                                                      result.data.storage().end());
+                                                        result.data.storage().end());
             Tensor data        = Tensor::fromStorage(
                 result.data.type(), hostTensorLayout(descriptor), std::move(dataStorage));
 
             auto const scaleLayout  = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
             auto       scaleStorage = std::vector<std::byte>(result.scales.storage().begin(),
-                                                       result.scales.storage().end());
+                                                             result.scales.storage().end());
             Tensor     scales
                 = Tensor::fromStorage(result.scales.type(), scaleLayout, std::move(scaleStorage));
             std::optional<Tensor> reference;
@@ -375,8 +374,8 @@ namespace rocRoller::HostNumerics
                 auto referenceStorage = std::vector<std::byte>(result.reference.storage().begin(),
                                                                result.reference.storage().end());
                 reference             = Tensor::fromStorage(result.reference.type(),
-                                                hostTensorLayout(descriptor),
-                                                std::move(referenceStorage));
+                                                            hostTensorLayout(descriptor),
+                                                            std::move(referenceStorage));
             }
             return {std::move(data), std::move(scales), std::move(reference)};
         }
@@ -507,7 +506,7 @@ namespace rocRoller::HostNumerics
             initializationA,
             scaleTypeA == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeA, 1, scaleBlockSize}},
+                                               scaleTypeA, 1, scaleBlockSize}},
             minimum,
             maximum,
             seed + 1);
@@ -516,7 +515,7 @@ namespace rocRoller::HostNumerics
             initializationB,
             scaleTypeB == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeB, 0, scaleBlockSize}},
+                                               scaleTypeB, 0, scaleBlockSize}},
             minimum,
             maximum,
             seed + 2);

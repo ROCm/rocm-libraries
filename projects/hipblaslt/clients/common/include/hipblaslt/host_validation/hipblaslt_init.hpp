@@ -140,14 +140,14 @@ namespace hipblaslt::host_validation::detail
         hipblaslt_cerr << "Error type in " << functionName << std::endl;
     }
 
-    template <typename OptionsFactory>
+    template <typename RecipeFactory>
     inline void initializeRuntimeTensor(void*                 data,
                                         hipDataType           runtimeType,
                                         Layout                layout,
                                         RuntimeInitialization required,
                                         std::string_view      functionName,
                                         bool                  identifyPackedType,
-                                        OptionsFactory&&      optionsFactory)
+                                        RecipeFactory&&       recipeFactory)
     {
         const std::optional<ScalarType> type = tryScalarType(runtimeType);
         if(!type || !supportsRuntimeInitialization(*type, required))
@@ -156,8 +156,8 @@ namespace hipblaslt::host_validation::detail
             return;
         }
 
-        GenerationOptions options = std::forward<OptionsFactory>(optionsFactory)(*type);
-        initializeTensor(data, *type, std::move(layout), options);
+        GenerationRecipe recipe = std::forward<RecipeFactory>(recipeFactory)(*type);
+        initializeTensor(data, *type, std::move(layout), recipe);
     }
 
     inline Layout matrixBatchLayout(
@@ -177,16 +177,16 @@ namespace hipblaslt::host_validation::detail
 /* ============================================================================================ */
 /*! \brief  matrix/vector initialization: */
 // for vector x (M=1, N=lengthX, lda=incx);
-// for complex number, the real/imag part would be initialized with the same value
+// Legacy signatures are retained; product recipes define complex components explicitly.
 
 // Initialize matrices with random values
 template <typename T>
 inline void
     hipblaslt_init(T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::legacyRandomOptions(
+    const auto recipe = hipblaslt::host_validation::legacyRandomRecipe(
         hipblaslt::host_validation::scalarType<T>());
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 // Initialize matrices with random values
@@ -194,9 +194,11 @@ template <typename T>
 inline void hipblaslt_init_small(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::randomIntegerOptions(
-        hipblaslt::host_validation::scalarType<T>(), true, false, false);
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe = hipblaslt::host_validation::randomIntegerRecipe(
+        hipblaslt::host_validation::scalarType<T>(),
+        {.small         = true,
+         .complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 // Initialize matrices with random values
@@ -216,7 +218,7 @@ inline void hipblaslt_init(void*       A,
         "hipblaslt_init",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::legacyRandomOptions(scalar);
+            return hipblaslt::host_validation::legacyRandomRecipe(scalar);
         });
 }
 
@@ -236,7 +238,10 @@ inline void hipblaslt_init_small(void*       A,
         "hipblaslt_init_small",
         false,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::randomIntegerOptions(scalar, true, false, false);
+            return hipblaslt::host_validation::randomIntegerRecipe(
+                scalar,
+                {.small         = true,
+                 .complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
         });
 }
 
@@ -244,9 +249,10 @@ template <typename T>
 inline void hipblaslt_init_sin(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options
-        = hipblaslt::host_validation::sineOptions(hipblaslt::host_validation::scalarType<T>());
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe = hipblaslt::host_validation::trigonometricRecipe(
+        hipblaslt::host_validation::scalarType<T>(),
+        hipblaslt::host_validation::TrigonometricComponent::Sine);
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 inline void hipblaslt_init_sin(void*       A,
@@ -265,7 +271,8 @@ inline void hipblaslt_init_sin(void*       A,
         "hipblaslt_init_sin",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::sineOptions(scalar);
+            return hipblaslt::host_validation::trigonometricRecipe(
+                scalar, hipblaslt::host_validation::TrigonometricComponent::Sine);
         });
 }
 
@@ -277,9 +284,11 @@ template <typename T>
 inline void hipblaslt_init_alternating_sign(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::randomIntegerOptions(
-        hipblaslt::host_validation::scalarType<T>(), false, true, false);
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe = hipblaslt::host_validation::randomIntegerRecipe(
+        hipblaslt::host_validation::scalarType<T>(),
+        {.alternating   = true,
+         .complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 inline void hipblaslt_init_alternating_sign(void*       A,
@@ -298,7 +307,10 @@ inline void hipblaslt_init_alternating_sign(void*       A,
         "hipblaslt_init_alternating_sign",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::randomIntegerOptions(scalar, false, true, false);
+            return hipblaslt::host_validation::randomIntegerRecipe(
+                scalar,
+                {.alternating   = true,
+                 .complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
         });
 }
 
@@ -307,9 +319,11 @@ template <typename T>
 inline void hipblaslt_init_hpl_alternating_sign(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::hplOptions(
-        hipblaslt::host_validation::scalarType<T>(), false, true, false);
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe = hipblaslt::host_validation::hplRecipe(
+        hipblaslt::host_validation::scalarType<T>(),
+        {.alternating   = true,
+         .complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 inline void hipblaslt_init_hpl_alternating_sign(void*       A,
@@ -328,7 +342,10 @@ inline void hipblaslt_init_hpl_alternating_sign(void*       A,
         "hipblaslt_init_hpl_alternating_sign",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::hplOptions(scalar, false, true, false);
+            return hipblaslt::host_validation::hplRecipe(
+                scalar,
+                {.alternating   = true,
+                 .complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
         });
 }
 
@@ -336,9 +353,9 @@ template <typename T>
 inline void hipblaslt_init_cos(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    roc::host_validation::GenerationOptions options;
-    options.real.pattern = roc::host_validation::GenerationPattern::Cosine;
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
+        roc::host_validation::GenerationRecipe::cosine());
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 inline void hipblaslt_init_cos(void*       A,
@@ -357,9 +374,8 @@ inline void hipblaslt_init_cos(void*       A,
         "hipblaslt_init_cos",
         true,
         [](roc::host_validation::ScalarType) {
-            roc::host_validation::GenerationOptions options;
-            options.real.pattern = roc::host_validation::GenerationPattern::Cosine;
-            return options;
+            return roc::host_validation::GenerationRecipe::realOnly(
+                roc::host_validation::GenerationRecipe::cosine());
         });
 }
 
@@ -368,19 +384,21 @@ template <typename T>
 inline void hipblaslt_init_hpl(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::hplOptions(
-        hipblaslt::host_validation::scalarType<T>(), false, false, false);
+    const auto recipe = hipblaslt::host_validation::hplRecipe(
+        hipblaslt::host_validation::scalarType<T>(),
+        {.complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
     hipblaslt::host_validation::initializeMatrixBatches(
-        A.data(), M, N, lda, stride, batch_count, options);
+        A.data(), M, N, lda, stride, batch_count, recipe);
 }
 
 template <typename T>
 inline void hipblaslt_init_hpl(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::hplOptions(
-        hipblaslt::host_validation::scalarType<T>(), false, false, false);
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe = hipblaslt::host_validation::hplRecipe(
+        hipblaslt::host_validation::scalarType<T>(),
+        {.complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 inline void hipblaslt_init_hpl(void*       A,
@@ -399,7 +417,9 @@ inline void hipblaslt_init_hpl(void*       A,
         "hipblaslt_init_hpl",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::hplOptions(scalar, false, false, false);
+            return hipblaslt::host_validation::hplRecipe(
+                scalar,
+                {.complexPolicy = hipblaslt::host_validation::ComplexGenerationPolicy::RealOnly});
         });
 }
 
@@ -408,19 +428,19 @@ template <typename T>
 inline void hipblaslt_init_low_precision(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::lowPrecisionOptions(
+    const auto recipe = hipblaslt::host_validation::lowPrecisionRecipe(
         hipblaslt::host_validation::scalarType<T>());
     hipblaslt::host_validation::initializeMatrixBatches(
-        A.data(), M, N, lda, stride, batch_count, options);
+        A.data(), M, N, lda, stride, batch_count, recipe);
 }
 
 template <typename T>
 inline void hipblaslt_init_low_precision(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options = hipblaslt::host_validation::lowPrecisionOptions(
+    const auto recipe = hipblaslt::host_validation::lowPrecisionRecipe(
         hipblaslt::host_validation::scalarType<T>());
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 inline void hipblaslt_init_low_precision(void*       A,
@@ -439,7 +459,7 @@ inline void hipblaslt_init_low_precision(void*       A,
         "hipblaslt_init_low_precision",
         false,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::lowPrecisionOptions(scalar);
+            return hipblaslt::host_validation::lowPrecisionRecipe(scalar);
         });
 }
 
@@ -449,10 +469,10 @@ inline void hipblaslt_init_low_precision(void*       A,
 template <typename T>
 inline void hipblaslt_init_nan(T* A, size_t N)
 {
-    const auto options
-        = hipblaslt::host_validation::nanOptions(hipblaslt::host_validation::scalarType<T>());
+    const auto recipe
+        = hipblaslt::host_validation::nanRecipe(hipblaslt::host_validation::scalarType<T>());
     hipblaslt::host_validation::initializeTensor(
-        A, roc::host_validation::Layout::contiguous(roc::host_validation::Shape{N}), options);
+        A, roc::host_validation::Layout::contiguous(roc::host_validation::Shape{N}), recipe);
 }
 
 template <typename T>
@@ -471,7 +491,7 @@ inline void hipblaslt_init_nan(void* A, size_t N, hipDataType type)
         "hipblaslt_init_nan",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::nanOptions(scalar);
+            return hipblaslt::host_validation::nanRecipe(scalar);
         });
 }
 
@@ -485,7 +505,7 @@ inline void hipblaslt_init_nan(void* A, size_t start_offset, size_t end_offset, 
         "hipblaslt_init_nan",
         true,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::nanOptions(scalar);
+            return hipblaslt::host_validation::nanRecipe(scalar);
         });
 }
 
@@ -493,9 +513,9 @@ template <typename T>
 inline void hipblaslt_init_nan(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    const auto options
-        = hipblaslt::host_validation::nanOptions(hipblaslt::host_validation::scalarType<T>());
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe
+        = hipblaslt::host_validation::nanRecipe(hipblaslt::host_validation::scalarType<T>());
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 inline void hipblaslt_init_nan(void*       A,
@@ -514,7 +534,7 @@ inline void hipblaslt_init_nan(void*       A,
         "hipblaslt_init_nan",
         false,
         [](roc::host_validation::ScalarType scalar) {
-            return hipblaslt::host_validation::nanOptions(scalar);
+            return hipblaslt::host_validation::nanRecipe(scalar);
         });
 }
 
@@ -525,28 +545,30 @@ template <typename T>
 inline void hipblaslt_init_zero(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    roc::host_validation::GenerationOptions options;
+    const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
+        roc::host_validation::GenerationRecipe::zero());
     hipblaslt::host_validation::initializeMatrixBatches(
-        A.data(), M, N, lda, stride, batch_count, options);
+        A.data(), M, N, lda, stride, batch_count, recipe);
 }
 
 template <typename T>
 inline void hipblaslt_init_zero(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    roc::host_validation::GenerationOptions options;
-    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, options);
+    const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
+        roc::host_validation::GenerationRecipe::zero());
+    hipblaslt::host_validation::initializeMatrixBatches(A, M, N, lda, stride, batch_count, recipe);
 }
 
 template <typename T>
 inline void hipblaslt_init_zero(T* A, size_t start_offset, size_t end_offset)
 {
-    roc::host_validation::GenerationOptions options;
     hipblaslt::host_validation::initializeTensor(
         A + start_offset,
         roc::host_validation::Layout::contiguous(
             roc::host_validation::Shape{end_offset - start_offset}),
-        options);
+        roc::host_validation::GenerationRecipe::realOnly(
+            roc::host_validation::GenerationRecipe::zero()));
 }
 
 inline void hipblaslt_init_zero(void*       A,
@@ -564,7 +586,10 @@ inline void hipblaslt_init_zero(void*       A,
         hipblaslt::host_validation::detail::RuntimeInitialization::General,
         "hipblaslt_init_zero",
         false,
-        [](roc::host_validation::ScalarType) { return roc::host_validation::GenerationOptions{}; });
+        [](roc::host_validation::ScalarType) {
+            return roc::host_validation::GenerationRecipe::realOnly(
+                roc::host_validation::GenerationRecipe::zero());
+        });
 }
 
 inline void hipblaslt_init_zero(void* A, size_t start_offset, size_t end_offset, hipDataType type)
@@ -576,5 +601,8 @@ inline void hipblaslt_init_zero(void* A, size_t start_offset, size_t end_offset,
         hipblaslt::host_validation::detail::RuntimeInitialization::General,
         "hipblaslt_init_zero",
         false,
-        [](roc::host_validation::ScalarType) { return roc::host_validation::GenerationOptions{}; });
+        [](roc::host_validation::ScalarType) {
+            return roc::host_validation::GenerationRecipe::realOnly(
+                roc::host_validation::GenerationRecipe::zero());
+        });
 }

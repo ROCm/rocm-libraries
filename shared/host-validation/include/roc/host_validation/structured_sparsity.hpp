@@ -16,8 +16,8 @@ namespace roc::host_validation {
 // Selects whether every N:M group retains fixed positions or a deterministic
 // counter-random position set.
 enum class StructuredSparsitySelection {
-    Fixed,
-    Random,
+    Fixed,   // Uses fixedPositions for every group.
+    Random,  // Counter-randomly selects one increasing retained-position set per group.
 };
 
 // Describes logical N:M pruning along one tensor axis. Each groupSize-element
@@ -37,9 +37,8 @@ struct StructuredSparsityPattern {
     // Positions retained in every group when selection is Fixed.
     std::vector<size_t> fixedPositions{0, 1};
 
-    // Counter-random inputs used when selection is Random.
+    // Counter-random seed used when selection is Random.
     uint64_t seed = 0;
-    uint64_t stream = 0;
 
     // Defines how groups on the non-sparsity axes receive linear random indices.
     LogicalIndexOrder indexOrder = LogicalIndexOrder::FirstDimensionFastest;
@@ -64,22 +63,22 @@ struct StructuredSparsityProblem {
         retainedIndices = std::move(retainedIndexTensor);
     }
 
-    Tensor input;
-    Tensor pruned;
-    Tensor compressed;
-    std::optional<Tensor> retainedIndices;
-    std::optional<Tensor> twoOfFourMetadata;
-    StructuredSparsityPattern pattern;
+    Tensor input;                           // Source values; may alias pruned with the same layout.
+    Tensor pruned;                          // Input-shaped output with dropped positions zeroed.
+    Tensor compressed;                      // Retained values packed along pattern.axis.
+    std::optional<Tensor> retainedIndices;  // UInt8 retained positions per group.
+    std::optional<Tensor> twoOfFourMetadata;  // Packed nibbles for a 2:4 pattern.
+    StructuredSparsityPattern pattern;        // Grouping and retained-position policy.
 };
 
 // Counts logical work and writes completed by applyStructuredSparsity.
 struct StructuredSparsityRunInfo {
-    size_t groupsProcessed = 0;
-    size_t inputElementsVisited = 0;
-    size_t prunedElementsWritten = 0;
-    size_t compressedElementsWritten = 0;
-    size_t retainedIndicesWritten = 0;
-    size_t metadataBytesWritten = 0;
+    size_t groupsProcessed = 0;            // N:M groups in the requested slice range.
+    size_t inputElementsVisited = 0;       // groupsProcessed * groupSize.
+    size_t prunedElementsWritten = 0;      // One write per visited input position.
+    size_t compressedElementsWritten = 0;  // Retained values written.
+    size_t retainedIndicesWritten = 0;     // Zero when retainedIndices is absent.
+    size_t metadataBytesWritten = 0;       // Zero when twoOfFourMetadata is absent.
 };
 
 // A slice fixes every coordinate except the sparsity axis. Callers can use
@@ -99,15 +98,15 @@ struct TwoOfFourMetadataProblem {
           metadata(std::move(metadataTensor)),
           axis(sparsityAxis) {}
 
-    Tensor retainedIndices;
-    Tensor metadata;
-    size_t axis = 0;
+    Tensor retainedIndices;  // UInt8 pairs of increasing retained positions.
+    Tensor metadata;         // UInt8 output containing two four-bit groups per byte.
+    size_t axis = 0;         // Dimension containing retained-position pairs.
 };
 
 // Counts groups encoded and metadata bytes written.
 struct TwoOfFourMetadataRunInfo {
-    size_t sparsityGroupsEncoded = 0;
-    size_t metadataBytesWritten = 0;
+    size_t sparsityGroupsEncoded = 0;  // Two retained indices per group.
+    size_t metadataBytesWritten = 0;   // ceil(groups per line / 2) per line.
 };
 
 StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityProblem& problem,

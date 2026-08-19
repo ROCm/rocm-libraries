@@ -5,7 +5,7 @@
 
 #include <roc/host_validation/adapters/tensilelite/GemmProblemAdapter.hpp>
 #include <roc/host_validation/adapters/tensilelite/Reference.hpp>
-#include <roc/host_validation/backends/tiled.hpp>
+#include <roc/host_validation/backends/blocked.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include <Tensile/Utils.hpp>
@@ -30,8 +30,8 @@ namespace TensileLite
         enum class RuntimeGemmExecution
         {
             Pointwise,
-            TiledPreferred,
-            TiledRequired,
+            BlockedPreferred,
+            BlockedRequired,
         };
 
         class RuntimeGemmPolicy
@@ -51,23 +51,23 @@ namespace TensileLite
                 return operationType;
             }
 
-            bool requestsTiledBackend() const
+            bool requestsBlockedBackend() const
             {
                 return m_execution != RuntimeGemmExecution::Pointwise;
             }
 
-            bool requiresTiledBackend() const
+            bool requiresBlockedBackend() const
             {
-                return m_execution == RuntimeGemmExecution::TiledRequired;
+                return m_execution == RuntimeGemmExecution::BlockedRequired;
             }
 
         private:
             RuntimeGemmExecution m_execution;
         };
 
-        TiledGemmBackend const& tiledGemmBackend()
+        BlockedGemmBackend const& blockedGemmBackend()
         {
-            static const TiledGemmBackend backend;
+            static const BlockedGemmBackend backend;
             return backend;
         }
 
@@ -96,7 +96,8 @@ namespace TensileLite
                     throw std::runtime_error(
                         "Reference GEMM batches selected different host backends.");
                 }
-                m_combined->outputElementsComputed += runInfo.outputElementsComputed;
+                m_combined->outputElementsWritten += runInfo.outputElementsWritten;
+                m_combined->outputElementsCovered += runInfo.outputElementsCovered;
                 if(!m_combined->fallbackReason && runInfo.fallbackReason)
                     m_combined->fallbackReason = runInfo.fallbackReason;
             }
@@ -113,34 +114,35 @@ namespace TensileLite
                               RunInfoRecorder&              recorder)
         {
             GemmRequest& request = translated.gemm();
-            if(policy.requestsTiledBackend())
+            if(policy.requestsBlockedBackend())
             {
                 const GemmExecution execution = {
-                    .backend                 = GemmBackend::Tiled,
+                    .backend                 = GemmBackend::Blocked,
                     .requireRequestedBackend = true,
                 };
                 const GemmSupportInfo support
-                    = queryGemmSupport(request, execution, &tiledGemmBackend());
+                    = queryGemmSupport(request, execution, &blockedGemmBackend());
                 if(support)
                 {
-                    recorder.record(referenceGemm(request, execution, &tiledGemmBackend()).runInfo);
+                    recorder.record(
+                        referenceGemm(request, execution, &blockedGemmBackend()).runInfo);
                     return true;
                 }
-                if(policy.requiresTiledBackend())
+                if(policy.requiresBlockedBackend())
                     return false;
                 if(adapter.usesStandaloneEpilogue()
                    && adapter.operationAccumulatorType() != request.accumulatorType)
                     return false;
 
-                request.accumulatorType       = adapter.operationAccumulatorType();
-                request.mathMode              = request.accumulatorType == ScalarType::Float32
-                                           && problem.f32XdlMathOp() == rocisa::DataType::XFloat32
-                                                    ? MathMode::XFloat32
-                                                    : MathMode::Default;
-                GemmResult result             = referenceGemm(request,
-                                                              {
-                                                                  .backend = GemmBackend::Canonical,
-                                                                  .requireRequestedBackend = true,
+                request.accumulatorType = adapter.operationAccumulatorType();
+                request.mathMode  = request.accumulatorType == ScalarType::Float32
+                                            && problem.f32XdlMathOp() == rocisa::DataType::XFloat32
+                                        ? MathMode::XFloat32
+                                        : MathMode::Default;
+                GemmResult result = referenceGemm(request,
+                                                  {
+                                                      .backend = GemmBackend::Pointwise,
+                                                      .requireRequestedBackend = true,
                                                   });
                 result.runInfo.fallbackReason = support.reason;
                 recorder.record(result.runInfo);
@@ -149,7 +151,7 @@ namespace TensileLite
 
             recorder.record(referenceGemm(request,
                                           {
-                                              .backend                 = GemmBackend::Canonical,
+                                              .backend                 = GemmBackend::Pointwise,
                                               .requireRequestedBackend = true,
                                           })
                                 .runInfo);
@@ -196,7 +198,7 @@ namespace TensileLite
 
     namespace Client
     {
-        bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
+        bool tryRuntimePointwiseGemm(ContractionProblemGemm const& problem,
                                      ContractionInputs const&      inputs,
                                      size_t                        elementsToValidate)
         {
@@ -204,12 +206,12 @@ namespace TensileLite
                 problem, inputs, elementsToValidate, RuntimeGemmExecution::Pointwise);
         }
 
-        bool tryRuntimeTiledGemm(ContractionProblemGemm const& problem,
-                                 ContractionInputs const&      inputs,
-                                 size_t                        elementsToValidate)
+        bool tryRuntimeBlockedGemm(ContractionProblemGemm const& problem,
+                                   ContractionInputs const&      inputs,
+                                   size_t                        elementsToValidate)
         {
             return tryRuntimeGemm(
-                problem, inputs, elementsToValidate, RuntimeGemmExecution::TiledRequired);
+                problem, inputs, elementsToValidate, RuntimeGemmExecution::BlockedRequired);
         }
 
         roc::host_validation::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
@@ -233,7 +235,7 @@ namespace TensileLite
                 if(tryRuntimeGemm(problem,
                                   inputs,
                                   elementsToValidate,
-                                  RuntimeGemmExecution::TiledPreferred,
+                                  RuntimeGemmExecution::BlockedPreferred,
                                   &runInfo))
                     return runInfo;
             }

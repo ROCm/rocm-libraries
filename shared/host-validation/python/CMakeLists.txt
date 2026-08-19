@@ -21,25 +21,16 @@ nanobind_add_module(
     host-validation-python
     NB_STATIC
     src/bindings.cpp
+    src/generation_bindings.cpp
+    src/mx_bindings.cpp
 )
 target_link_libraries(
     host-validation-python
     PRIVATE
         roc::host-validation
-        roc::host-validation-tiled
+        roc::host-validation-blocked
+        roc::host-validation-mx
 )
-if(TARGET host-validation-mx)
-    target_link_libraries(
-        host-validation-python
-        PRIVATE
-            roc::host-validation-mx
-    )
-    target_compile_definitions(
-        host-validation-python
-        PRIVATE
-            HOST_VALIDATION_PYTHON_HAS_MX=1
-    )
-endif()
 set_target_properties(
     host-validation-python
     PROPERTIES

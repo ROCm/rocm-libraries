@@ -40,6 +40,24 @@ TEST(HostValidationTensorStorage, PooledPinnedAllocatorBacksTensorAliases)
     EXPECT_EQ(clone.loadAs<float>({1}), 11.0f);
 }
 
+TEST(HostValidationTensorStorage, HipHostBufferTensorRetainsAndMutatesThePinnedAllocation)
+{
+    using namespace roc::host_validation;
+
+    Tensor tensor = [] {
+        HipHostBuffer buffer(HIP_R_32F, 2);
+        Tensor        wrapped = buffer.tensor(ScalarType::Float32, Layout::contiguous(Shape{2}));
+        wrapped.storeFrom({1}, 7.0f);
+        EXPECT_EQ(buffer.as<float>()[1], 7.0f);
+        return wrapped;
+    }();
+
+    EXPECT_EQ(tensor.loadAs<float>({1}), 7.0f);
+    Tensor alias = tensor;
+    alias.storeFrom({0}, 3.0f);
+    EXPECT_EQ(tensor.loadAs<float>({0}), 3.0f);
+}
+
 TEST(HostValidationTypeBridge, UsesScalarTypeAsTheExternalTypeConversionHub)
 {
     using hipblaslt::host_validation::hipDataTypeForScalarType;
@@ -47,17 +65,13 @@ TEST(HostValidationTypeBridge, UsesScalarTypeAsTheExternalTypeConversionHub)
     using roc::host_validation::ScalarType;
 
     constexpr std::array mappings{
-        std::pair{ScalarType::Float4E2M1,
-                  static_cast<hipDataType>(HIP_R_4F_E2M1_EXT)},
-        std::pair{ScalarType::Float6E2M3,
-                  static_cast<hipDataType>(HIP_R_6F_E2M3_EXT)},
-        std::pair{ScalarType::Float6E3M2,
-                  static_cast<hipDataType>(HIP_R_6F_E3M2_EXT)},
+        std::pair{ScalarType::Float4E2M1, static_cast<hipDataType>(HIP_R_4F_E2M1_EXT)},
+        std::pair{ScalarType::Float6E2M3, static_cast<hipDataType>(HIP_R_6F_E2M3_EXT)},
+        std::pair{ScalarType::Float6E3M2, static_cast<hipDataType>(HIP_R_6F_E3M2_EXT)},
         std::pair{ScalarType::Float8E4M3, HIP_R_8F_E4M3},
         std::pair{ScalarType::Float8E5M2, HIP_R_8F_E5M2},
         std::pair{ScalarType::E8M0, HIP_R_8F_UE8M0},
-        std::pair{ScalarType::E5M3,
-                  static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)},
+        std::pair{ScalarType::E5M3, static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)},
     };
     for(const auto& [scalar, hip] : mappings)
     {
@@ -72,9 +86,10 @@ TEST(HostValidationTypeBridge, UsesScalarTypeAsTheExternalTypeConversionHub)
 TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues)
 {
     std::array<std::complex<float>, 4> values{};
-    hipblaslt::host_validation::initialize(std::span<std::complex<float>>(values),
-                                           hipblaslt_initialization::trig_float,
-                                           roc::host_validation::GenerationPattern::Sine);
+    hipblaslt::host_validation::initialize(
+        std::span<std::complex<float>>(values),
+        hipblaslt_initialization::trig_float,
+        hipblaslt::host_validation::TrigonometricComponent::Sine);
 
     for(size_t index = 0; index < values.size(); ++index)
     {
@@ -83,7 +98,36 @@ TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues
     }
 }
 
-TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreamsAndDefaultSeed)
+TEST(HostValidationDataInitializationBridge, ComplexRandomUsesTypedCartesianDomains)
+{
+    using namespace roc::host_validation;
+
+    std::array<std::complex<float>, 8> first{};
+    std::array<std::complex<float>, 8> second{};
+    hipblaslt::host_validation::initialize(std::span<std::complex<float>>(first),
+                                           hipblaslt_initialization::rand_int);
+    hipblaslt::host_validation::initialize(std::span<std::complex<float>>(second),
+                                           hipblaslt_initialization::rand_int);
+    EXPECT_EQ(first, second);
+
+    for(size_t index = 0; index < first.size(); ++index)
+    {
+        EXPECT_EQ(first[index].real(),
+                  indexedUniformInteger(hipblaslt::host_validation::defaultInitializationSeed,
+                                        generation_random_domain_version_1::realComponent,
+                                        index,
+                                        1,
+                                        10));
+        EXPECT_EQ(first[index].imag(),
+                  indexedUniformInteger(hipblaslt::host_validation::defaultInitializationSeed,
+                                        generation_random_domain_version_1::imaginaryComponent,
+                                        index,
+                                        1,
+                                        10));
+    }
+}
+
+TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleDomainsAndDefaultSeed)
 {
     std::vector<float> a(5);
     std::vector<float> b(7);
@@ -112,6 +156,19 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreamsAnd
         EXPECT_EQ(c[index], roc::host_validation::indexedUniformInteger(seed, 2, index, 1, 10));
     for(size_t index = 0; index < bias.size(); ++index)
         EXPECT_EQ(bias[index], roc::host_validation::indexedUniformInteger(seed, 3, index, 1, 10));
+}
+
+TEST(HostValidationDataInitializationBridge, CompatibilitySeedPreservesSingleLegacyDomain)
+{
+    using hipblaslt::host_validation::compatibility::seedForRandomDomain;
+    using roc::host_validation::generation_random_domain_version_1::realComponent;
+
+    constexpr uint64_t seed         = 0x123456789abcdef0ULL;
+    constexpr uint64_t domain       = 0x1020304050607080ULL;
+    const uint64_t     remappedSeed = seedForRandomDomain(seed, domain);
+    for(uint64_t index = 0; index < 32; ++index)
+        EXPECT_EQ(roc::host_validation::counterRandom(remappedSeed, realComponent, index),
+                  roc::host_validation::counterRandom(seed, domain, index));
 }
 
 TEST(HostValidationDataInitializationBridge, GroupedGemmPropagatesCallerSeed)
@@ -180,9 +237,9 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmDefinesHplAndLegacySpeci
 
     initialize(hipblaslt_initialization::special);
     for(const float value : a)
-        EXPECT_EQ(value, 65280.0f);
+        EXPECT_EQ(value, hipblaslt::host_validation::specialInitializationAValue);
     for(const float value : b)
-        EXPECT_EQ(value, 0.0000607967376708984375f);
+        EXPECT_EQ(value, hipblaslt::host_validation::specialInitializationBValue);
     expectHplRange(c);
     expectHplRange(bias);
 }
@@ -235,7 +292,7 @@ TEST(HostValidationMatrixTransformBridge, MapsLayoutsAndTransposes)
     arguments.beta                   = -1.0;
 
     const auto result = hipblaslt::host_validation::referenceMatrixTransform(arguments);
-    EXPECT_EQ(result.runInfo.elementsComputed, rows * columns * batches);
+    EXPECT_EQ(result.runInfo.outputElementsWritten, rows * columns * batches);
     EXPECT_TRUE(result.comparison.passed());
 }
 
@@ -547,7 +604,16 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 0; row < 2; ++row)
             {
-                const float value = exactView.loadAs<float>({row, column, batch});
+                const float  value        = exactView.loadAs<float>({row, column, batch});
+                const size_t logicalIndex = row + 2 * (column + 3 * batch);
+                const int    magnitude
+                    = indexedUniformInteger(defaultInitializationSeed,
+                                            compatibility::integerExactMatrixBRandomDomain,
+                                            logicalIndex,
+                                            0,
+                                            2);
+                const int expected = ((row ^ column) & 1U) == 0 ? -magnitude : magnitude;
+                EXPECT_EQ(value, expected);
                 EXPECT_EQ(value, std::trunc(value));
                 EXPECT_LE(std::abs(value), 2);
                 if(value != 0)

@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -13,6 +15,11 @@
 
 namespace roc::host_validation {
 namespace {
+void validateIntegerInterval(const UniformIntegerGenerationParameters& parameters) {
+    if (parameters.lower > parameters.upper)
+        throw std::invalid_argument("Generation lower bound exceeds upper bound.");
+}
+
 uint64_t strideMagnitude(ptrdiff_t stride) {
     if (stride >= 0) return static_cast<uint64_t>(stride);
     return static_cast<uint64_t>(-(stride + 1)) + 1;
@@ -54,15 +61,14 @@ void incrementLastDimensionFast(std::vector<size_t>& indices, const Shape& shape
 }
 #endif
 
-void generateSerial(Tensor destination, const GenerationOptions& options) {
+void generateSerial(Tensor destination, const GenerationRecipe& recipe) {
     detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
-        const size_t logicalIndex =
-            detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
-        detail::generateElement(destination, options, indices, logicalIndex);
+        const size_t logicalIndex = destination.shape().linearIndex(indices, recipe.indexOrder());
+        detail::generateElement(destination, recipe, indices, logicalIndex);
     });
 }
 
-void generateParallel(Tensor destination, const GenerationOptions& options, int threadCount) {
+void generateParallel(Tensor destination, const GenerationRecipe& recipe, int threadCount) {
 #ifdef _OPENMP
     std::exception_ptr error;
     const size_t elementCount = destination.shape().elementCount();
@@ -77,12 +83,12 @@ void generateParallel(Tensor destination, const GenerationOptions& options, int 
             const size_t count = baseCount + static_cast<size_t>(threadIndex < remainder);
             const size_t end = first + count;
             if (first != end) {
-                std::vector<size_t> indices = detail::logicalCoordinates(
-                    first, destination.shape(), LogicalIndexOrder::LastDimensionFastest);
+                std::vector<size_t> indices =
+                    destination.shape().coordinates(first, IndexOrder::LastDimensionFastest);
                 for (size_t traversalIndex = first; traversalIndex < end; ++traversalIndex) {
-                    const size_t logicalIndex = detail::logicalLinearIndex(
-                        indices, destination.shape(), options.indexOrder);
-                    detail::generateElement(destination, options, indices, logicalIndex);
+                    const size_t logicalIndex =
+                        destination.shape().linearIndex(indices, recipe.indexOrder());
+                    detail::generateElement(destination, recipe, indices, logicalIndex);
                     incrementLastDimensionFast(indices, destination.shape());
                 }
             }
@@ -96,50 +102,319 @@ void generateParallel(Tensor destination, const GenerationOptions& options, int 
     if (error) std::rethrow_exception(error);
 #else
     (void)threadCount;
-    generateSerial(destination, options);
+    generateSerial(destination, recipe);
 #endif
 }
 }  // namespace
 
-GenerationRunInfo generate(Tensor destination, const GenerationOptions& options) {
+GenerationRecipe::Component::Component(Pattern pattern) : pattern_(std::move(pattern)) {}
+
+bool GenerationRecipe::Component::isRaw() const {
+    return std::visit(
+        [](const auto& pattern) {
+            using Pattern = std::remove_cvref_t<decltype(pattern)>;
+            return std::is_same_v<Pattern, RawConstantPattern> ||
+                   std::is_same_v<Pattern, UniformRawIntegerPattern> ||
+                   std::is_same_v<Pattern, RandomRawBitsPattern> ||
+                   std::is_same_v<Pattern, RawSerialDimensionPattern>;
+        },
+        pattern_);
+}
+
+GenerationRecipe::Component GenerationRecipe::Component::withAbsoluteTransform() const {
+    if (isRaw())
+        throw std::invalid_argument(
+            "Numerical generation modifiers do not apply to raw storage recipes.");
+    Component result = *this;
+    result.unaryTransform_ = UnaryTransform::Absolute;
+    return result;
+}
+
+GenerationRecipe::Component GenerationRecipe::Component::withSineTransform() const {
+    if (isRaw())
+        throw std::invalid_argument(
+            "Numerical generation modifiers do not apply to raw storage recipes.");
+    Component result = *this;
+    result.unaryTransform_ = UnaryTransform::Sine;
+    return result;
+}
+
+GenerationRecipe::Component GenerationRecipe::Component::withCosineTransform() const {
+    if (isRaw())
+        throw std::invalid_argument(
+            "Numerical generation modifiers do not apply to raw storage recipes.");
+    Component result = *this;
+    result.unaryTransform_ = UnaryTransform::Cosine;
+    return result;
+}
+
+GenerationRecipe::Component GenerationRecipe::Component::withAffineValueMapping(
+    GenerationAffineValueParameters parameters) const {
+    if (isRaw())
+        throw std::invalid_argument(
+            "Numerical generation modifiers do not apply to raw storage recipes.");
+    Component result = *this;
+    result.affineValue_ = parameters;
+    return result;
+}
+
+GenerationRecipe::Component GenerationRecipe::Component::withAlternatingSign(
+    AlternatingSignGenerationParameters parameters) const {
+    if (isRaw())
+        throw std::invalid_argument(
+            "Numerical generation modifiers do not apply to raw storage recipes.");
+    if (parameters.dimensions.empty())
+        throw std::invalid_argument("Alternating-sign generation requires at least one dimension.");
+    Component result = *this;
+    result.alternatingSign_ = std::move(parameters);
+    return result;
+}
+
+GenerationRecipe::Component GenerationRecipe::zero() {
+    return Component(Component::ZeroPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::constant(ConstantGenerationParameters parameters) {
+    return Component(Component::ConstantPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::candidateSet(
+    CandidateSetGenerationParameters parameters) {
+    if (parameters.values.empty())
+        throw std::invalid_argument("Candidate-set generation requires at least one value.");
+    return Component(Component::CandidateSetPattern{std::move(parameters)});
+}
+
+GenerationRecipe::Component GenerationRecipe::uniformInteger(
+    UniformIntegerGenerationParameters parameters) {
+    validateIntegerInterval(parameters);
+    return Component(Component::UniformIntegerPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::absoluteUniformInteger(
+    UniformIntegerGenerationParameters parameters) {
+    validateIntegerInterval(parameters);
+    return Component(Component::AbsoluteUniformIntegerPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::uniformReal(
+    UniformRealGenerationParameters parameters) {
+    if (!(parameters.lower <= parameters.upper))
+        throw std::invalid_argument("Uniform-real bounds must be ordered and must not be NaN.");
+    return Component(Component::UniformRealPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::normal(NormalGenerationParameters parameters) {
+    if (!(parameters.standardDeviation >= 0.0))
+        throw std::invalid_argument(
+            "Normal generation standard deviation must be nonnegative and not NaN.");
+    return Component(Component::NormalPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::sine() {
+    return Component(Component::SinePattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::cosine() {
+    return Component(Component::CosinePattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::absoluteSine() {
+    return Component(Component::AbsoluteSinePattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::absoluteCosine() {
+    return Component(Component::AbsoluteCosinePattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::serialIndex() {
+    return Component(Component::SerialIndexPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::serialDimension(
+    DimensionGenerationParameters parameters) {
+    return Component(Component::SerialDimensionPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::affineIndexRemainder(
+    AffineIndexRemainderGenerationParameters parameters) {
+    if (parameters.positiveDivisor <= 0)
+        throw std::invalid_argument("Affine-index remainder divisor must be positive.");
+    return Component(Component::AffineIndexRemainderPattern{std::move(parameters)});
+}
+
+GenerationRecipe::Component GenerationRecipe::identity() {
+    return Component(Component::IdentityPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::checkerboardUniformInteger(
+    UniformIntegerGenerationParameters parameters) {
+    validateIntegerInterval(parameters);
+    return Component(Component::CheckerboardUniformIntegerPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeMaximum() {
+    return Component(Component::TypeMaximumPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeLowest() {
+    return Component(Component::TypeLowestPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeDenormalMinimum() {
+    return Component(Component::TypeDenormalMinimumPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeDenormalMaximum() {
+    return Component(Component::TypeDenormalMaximumPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeNaN() {
+    return Component(Component::TypeNaNPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeInfinity() {
+    return Component(Component::TypeInfinityPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeNegativeInfinity() {
+    return Component(Component::TypeNegativeInfinityPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::typeNegativeZero() {
+    return Component(Component::TypeNegativeZeroPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::uniformTypeRange() {
+    return Component(Component::UniformTypeRangePattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::randomEncodedExponent(
+    RandomEncodedExponentGenerationParameters parameters) {
+    if (parameters.lowerUnbiasedExponent > parameters.upperUnbiasedExponent)
+        throw std::invalid_argument("Random encoded-exponent lower bound exceeds upper bound.");
+    if (parameters.sourceType.has_value()) {
+        if (!isConcreteScalarType(*parameters.sourceType) ||
+            scalarTypeInfo(*parameters.sourceType).exponentBits == 0)
+            throw std::invalid_argument(
+                "Random encoded-exponent source type must have an exponent field.");
+    }
+    return Component(Component::RandomEncodedExponentPattern{std::move(parameters)});
+}
+
+GenerationRecipe::Component GenerationRecipe::rawConstant(
+    RawConstantGenerationParameters parameters) {
+    return Component(Component::RawConstantPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::uniformRawInteger(
+    UniformIntegerGenerationParameters parameters) {
+    validateIntegerInterval(parameters);
+    return Component(Component::UniformRawIntegerPattern{parameters});
+}
+
+GenerationRecipe::Component GenerationRecipe::randomRawBits() {
+    return Component(Component::RandomRawBitsPattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::rawSerialDimension(
+    DimensionGenerationParameters parameters) {
+    return Component(Component::RawSerialDimensionPattern{parameters});
+}
+
+GenerationRecipe::GenerationRecipe(GenerationRecipeSettings settings, ComplexPolicy complexPolicy)
+    : settings_(settings), complexPolicy_(std::move(complexPolicy)) {}
+
+GenerationRecipe GenerationRecipe::realOnly(Component component,
+                                            GenerationRecipeSettings settings) {
+    return GenerationRecipe(
+        settings,
+        RealOnlyPolicy{.real = {
+                           .component = std::move(component),
+                           .randomDomain = generation_random_domain_version_1::realComponent,
+                       }});
+}
+
+GenerationRecipe GenerationRecipe::replicated(Component component,
+                                              GenerationRecipeSettings settings) {
+    if (component.isRaw())
+        throw std::invalid_argument(
+            "Replicated complex generation requires a numerical component.");
+    return GenerationRecipe(
+        settings,
+        ReplicatedPolicy{.value = {
+                             .component = std::move(component),
+                             .randomDomain = generation_random_domain_version_1::realComponent,
+                         }});
+}
+
+GenerationRecipe GenerationRecipe::cartesian(Component real, Component imaginary,
+                                             GenerationRecipeSettings settings) {
+    if (real.isRaw() || imaginary.isRaw())
+        throw std::invalid_argument("Cartesian complex generation requires numerical components.");
+    return GenerationRecipe(
+        settings,
+        CartesianPolicy{
+            .real =
+                {
+                    .component = std::move(real),
+                    .randomDomain = generation_random_domain_version_1::realComponent,
+                },
+            .imaginary =
+                {
+                    .component = std::move(imaginary),
+                    .randomDomain = generation_random_domain_version_1::imaginaryComponent,
+                },
+        });
+}
+
+uint64_t GenerationRecipe::seed() const noexcept {
+    return settings_.seed;
+}
+
+LogicalIndexOrder GenerationRecipe::indexOrder() const noexcept {
+    return settings_.indexOrder;
+}
+
+GenerationRunInfo generate(Tensor destination, const GenerationRecipe& recipe) {
     const size_t elementCount = destination.shape().elementCount();
     const int threadCount = hasProvablyIndependentElements(destination)
                                 ? detail::operationThreadCount(elementCount)
                                 : 1;
     if (threadCount == 1)
-        generateSerial(destination, options);
+        generateSerial(destination, recipe);
     else
-        generateParallel(destination, options, threadCount);
+        generateParallel(destination, recipe, threadCount);
     return {.elementsGenerated = elementCount};
 }
 
-Tensor generate(ScalarType type, Layout layout, const GenerationOptions& options) {
+Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe) {
     Tensor result(type, std::move(layout));
-    generate(result, options);
+    generate(result, recipe);
     return result;
 }
 
-Tensor generate(ScalarType type, Layout layout, const GenerationOptions& options,
+Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe,
                 const TensorStorageAllocator& allocator) {
     Tensor result(type, std::move(layout), allocator);
-    generate(result, options);
+    generate(result, recipe);
     return result;
 }
 
-Tensor generate(ScalarType type, Shape shape, const GenerationOptions& options) {
-    return generate(type, Layout::contiguous(shape), options);
+Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe) {
+    return generate(type, Layout::contiguous(shape), recipe);
 }
 
-Tensor generate(ScalarType type, Shape shape, const GenerationOptions& options,
+Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe,
                 const TensorStorageAllocator& allocator) {
-    return generate(type, Layout::contiguous(shape), options, allocator);
+    return generate(type, Layout::contiguous(shape), recipe, allocator);
 }
 
 GenerationRunInfo generateAt(Tensor destination, size_t logicalIndex,
-                             const GenerationOptions& options) {
+                             const GenerationRecipe& recipe) {
     const std::vector<size_t> indices =
-        detail::logicalCoordinates(logicalIndex, destination.shape(), options.indexOrder);
-    detail::generateElement(destination, options, indices, logicalIndex);
+        destination.shape().coordinates(logicalIndex, recipe.indexOrder());
+    detail::generateElement(destination, recipe, indices, logicalIndex);
     return {.elementsGenerated = 1};
 }
 }  // namespace roc::host_validation

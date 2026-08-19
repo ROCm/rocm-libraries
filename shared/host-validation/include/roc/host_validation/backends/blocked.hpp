@@ -6,7 +6,10 @@
 #include <roc/host_validation/gemm.hpp>
 
 namespace roc::host_validation {
-class TiledGemmBackend final : public GemmBackendImplementation {
+// Reuses fixed-size A, B, and output blocks. For a partial output selection it
+// accumulates every output position in each touched block and writes only the
+// selected D coordinates.
+class BlockedGemmBackend final : public GemmBackendImplementation {
    public:
     GemmBackend backend() const override;
     GemmSupportInfo querySupport(const GemmRequest& request) const override;

@@ -295,7 +295,7 @@ if(_hipblaslt_host_validation_enabled
             list(APPEND _hipblaslt_host_validation_components BLAS)
         endif()
         if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING)
-            list(APPEND _hipblaslt_host_validation_components Tiled)
+            list(APPEND _hipblaslt_host_validation_components Blocked)
         endif()
         if(_hipblaslt_mxdatagen_enabled)
             list(
@@ -380,7 +380,7 @@ endif()
 if(_hipblaslt_host_validation_enabled)
     foreach(_host_validation_target
             host-validation
-            host-validation-tiled
+            host-validation-blocked
             host-validation-blas
             host-validation-mx)
         if(NOT TARGET ${_host_validation_target})
