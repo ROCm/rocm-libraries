@@ -6,8 +6,8 @@ SPDX-License-Identifier: MIT
 Sample libraries can be rebuilt using TensileCreateLibrary.
 
 SolutionLibraries:
-../tensilelite/bin/TensileCreateLibrary  --library-format=yaml --no-lazy-library-loading ${HIPBLASLT_DIR}/tensilelite/tests/configs/mixed_configs/ . HIP
-../tensilelite/bin/TensileCreateLibrary  --library-format=msgpack --no-lazy-library-loading ${HIPBLASLT_DIR}/tensilelite/tests/configs/mixed_configs/ . HIP
+tensilelite create-library --library-format=yaml --no-lazy-library-loading ${HIPBLASLT_DIR}/tensilelite/tests/configs/mixed_configs/ . HIP
+tensilelite create-library --library-format=msgpack --no-lazy-library-loading ${HIPBLASLT_DIR}/tensilelite/tests/configs/mixed_configs/ . HIP
 
 KernelsLite.dat is a small (9-solution) master library used by
 IndexedLibraryLoad_test, which converts it to the indexed (format_version 2)

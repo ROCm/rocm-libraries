@@ -52,8 +52,8 @@ jobs:
       # per-suite reports (char.json / unit.json) that feed the split-summary
       # card below - no duplicate runs. This step measures only; the floors are
       # enforced by the coverage-gate step that follows.
-      # No GPU or client build is needed - coverage-unit skips the client build;
-      # the compiler env below is only so rocisa builds during the tox run.
+      # coverage-unit builds and configures the client before its tests; the
+      # compiler environment below is also required for rocisa during the tox run.
       #
       # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
       # but not PATH, and several characterization tests resolve the assembler

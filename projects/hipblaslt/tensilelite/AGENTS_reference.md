@@ -8,25 +8,33 @@ Supplementary reference for `AGENTS.md` — load this when you need test command
 # Full test suite (builds client + runs all common tests)
 tox -e py3 -- tensilelite/Tests -m common
 
-# Python unit tests only (skips the long client build; requires a prior build)
+
+# Python unit tests only (builds and configures the client in the tox environment)
+tox -e unit -- tensilelite/Tests/unit
+
+# Python unit tests only (builds and configures the client in the tox environment)
 tox -e unit -- tensilelite/Tests/unit
 
 # Run a specific test category
 tox -e py3 -- tensilelite/Tests -m gemm
 
 # Run a single test directly (after a prior `invoke build-client`)
-tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-out
+python -m tensilelite run tensilelite/Tests/common/exception/<test>.yaml tensile-out
 ```
 
 ## Custom CMake Build
 
 ```bash
+
+# Client-only builds use the selected SDK and do not create a private venv.
 cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
 # Run test with custom client path
-./my-custom-build/Tensile.sh tensilelite/Tests/common/<test>.yaml tensile-out \
-    --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
+python -m tensilelite_configure_client \
+    --client "$PWD/my-custom-build/tensilelite/client/tensilelite-client"
+ROCM_PATH=/opt/rocm python -m tensilelite run \
+    tensilelite/Tests/common/<test>.yaml tensile-out
 
 # Build with custom args (e.g., Debug + specific GPU)
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
@@ -46,7 +54,7 @@ make -j8
 
 ```bash
 tox -e lint          # flake8 (pyflakes errors only, E/W ignored)
-tox -e format        # black (line-length=100) on Common/, TensileCreateLibrary/, Utilities/Decorators/
+tox -e format        # black (line-length=100) on Common/, tensilelite_create_library/, Utilities/Decorators/
 tox -e isort         # isort (black profile) on same directories
 ```
 
@@ -66,8 +74,8 @@ make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32  # gfx11 explicit
 |--------|---------|---------|
 | `TENSILELITE_ENABLE_HOST` | ON | Build C++ runtime library |
 | `TENSILELITE_ENABLE_CLIENT` | ON | Build benchmark client |
-| `TENSILELITE_ENABLE_AUTOBUILD` | OFF | Auto-rebuild rocisa wrapper scripts |
 | `TENSILELITE_BUILD_TESTING` | OFF | Build C++ host library tests |
+| `ROCISA_BUILD_PYTHON` | OFF | Build only the in-tree rocisa extension without device libraries |
 | `GPU_TARGETS` | (detected) | Semicolon-separated list of gfx targets |
 
 ## Supported Targets
