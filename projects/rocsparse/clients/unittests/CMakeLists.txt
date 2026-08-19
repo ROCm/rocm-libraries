@@ -133,10 +133,14 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_shfl.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
+  #10156: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_precond_direct.cpp
   unit_test_internal_hostblocks_bitops.cpp
   unit_test_internal_hostblocks_csrmm_alg.cpp
   unit_test_internal_hostblocks_indextype.cpp
   unit_test_internal_hostblocks_itilu0.cpp
+  #10153: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_bsrgemm.cpp
   # Residual in-scope internal-routine coverage: device __global__ wrappers for
   # collective/atomic/hash device helpers, plus host-path primitive helpers.
   # unit_test_internal_primitives_host_extras.cpp additionally needs the
@@ -156,6 +160,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_util_checkmatrix.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_extra_geam.cpp
+  #10154: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
   unit_test_internal_level3_bsrmm.cpp
   unit_test_internal_level2_extras.cpp
