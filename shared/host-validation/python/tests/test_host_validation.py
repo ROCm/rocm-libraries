@@ -1958,16 +1958,18 @@ class TensorAndGemmTests(unittest.TestCase):
         a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         b_values = np.asarray([[5.0, 6.0, 7.0], [8.0, 9.0, 10.0]], dtype=np.float32)
         output_layout = hv.Layout(hv.Shape([2, 3]), [9, 2], 1)
-        request = hv.GemmRequest(
+        problem = hv.GemmProblem(
             hv.GemmOperand(hv.from_numpy(a_values)),
             hv.GemmOperand(hv.from_numpy(b_values)),
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3])),
-            hv.Tensor(hv.ScalarType.Float32, output_layout),
+            output_type=hv.ScalarType.Float32,
             accumulator_type=hv.ScalarType.Float32,
         )
+        output = hv.GemmOutputOptions()
+        output.layout = output_layout
         execution = hv.GemmExecution(hv.GemmBackend.Blocked, True)
 
-        result = hv.reference_gemm_result(request, execution)
+        result = hv.reference_gemm_result(problem, output, execution)
         expected = a_values @ b_values
         np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
         self.assertEqual(result.output.strides, [9, 2])
@@ -1977,7 +1979,7 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(result.run_info.output_elements_covered, expected.size)
 
         automatic = hv.reference_gemm_result(
-            request, hv.GemmExecution(hv.GemmBackend.Automatic)
+            problem, output, hv.GemmExecution(hv.GemmBackend.Automatic)
         )
         np.testing.assert_array_equal(hv.to_numpy(automatic.output), expected)
         self.assertEqual(automatic.run_info.backend_used, hv.GemmBackend.Blocked)

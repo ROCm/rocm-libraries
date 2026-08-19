@@ -33,6 +33,15 @@ int main() {
     referenceGemm(problem);
     if (d.loadAs<float>({0, 0}) != 6) return 1;
 
+    const GemmResult ownedGemm = referenceGemm(GemmProblem(
+        GemmOperand(
+            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(a))),
+        GemmOperand(
+            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(b))),
+        Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)),
+        ScalarType::Float32, ScalarType::Float32));
+    if (ownedGemm.output.loadAs<float>({0, 0}) != 6) return 1;
+
     EpilogueProblem epilogue(
         Tensor::fromNativeValues<float>(Shape{1, 1}, std::array<float, 1>{-2.0f}),
         ScalarType::Float32, ScalarType::Float32);
