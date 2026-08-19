@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     options.computePointwiseStatistics = false;
     options.computeFrobenius = false;
     options.maxReportedMismatches = 0;
-    options.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    options.selection.indexOrder = IndexOrder::FirstDimensionFastest;
 
     ComparisonResult report;
     const double componentSeconds =
@@ -63,14 +63,14 @@ int main(int argc, char** argv) {
 
     ComparisonOptions statisticsOptions = defaultComparisonOptions(ScalarType::Float32);
     statisticsOptions.computeFrobenius = false;
-    statisticsOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    statisticsOptions.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     ComparisonResult statisticsReport;
     const double statisticsComponentSeconds = bestSeconds(
         [&] { statisticsReport = compare(observedView, expectedView, statisticsOptions); });
     if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
 
     ComparisonOptions detailedOptions = defaultComparisonOptions(ScalarType::Float32);
-    detailedOptions.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+    detailedOptions.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     ComparisonResult detailedReport;
     const double detailedComponentSeconds =
         bestSeconds([&] { detailedReport = compare(observedView, expectedView, detailedOptions); });

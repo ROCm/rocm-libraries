@@ -199,9 +199,10 @@ class GenerationRecipeApiTests(unittest.TestCase):
         self.assertEqual(len(tensor.storage), 1)
         self.assertEqual(hv.to_numpy(tensor).dtype, np.dtype(np.float32))
 
-    def test_compatibility_index_order_names_alias_the_shared_enum(self):
-        self.assertIs(hv.LogicalIndexOrder, hv.IndexOrder)
-        self.assertIs(hv.ComparisonIndexOrder, hv.IndexOrder)
+    def test_only_canonical_index_order_name_is_exposed(self):
+        self.assertTrue(hasattr(hv, "IndexOrder"))
+        self.assertFalse(hasattr(hv, "LogicalIndexOrder"))
+        self.assertFalse(hasattr(hv, "ComparisonIndexOrder"))
 
 
 if __name__ == "__main__":

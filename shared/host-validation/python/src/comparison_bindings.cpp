@@ -118,9 +118,6 @@ void registerComparisonBindings(nb::module_& module) {
         .def_ro("reported_mismatches", &SentinelResult::reportedMismatches)
         .def_prop_ro("passed", &SentinelResult::passed);
 
-    module.attr("ComparisonPlan") = module.attr("ComparisonOptions");
-    module.attr("ComparisonReport") = module.attr("ComparisonResult");
-
     module.def(
         "compare",
         [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options) {

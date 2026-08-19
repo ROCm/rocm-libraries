@@ -78,7 +78,7 @@ struct GenerationPatternSpec {
 
 struct GenerationOptions {
     uint64_t seed = 0;
-    LogicalIndexOrder indexOrder = LogicalIndexOrder::FirstDimensionFastest;
+    IndexOrder indexOrder = IndexOrder::FirstDimensionFastest;
     GenerationPatternSpec real;
     GenerationPatternSpec imaginary;
 };

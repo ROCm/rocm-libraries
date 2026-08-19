@@ -58,7 +58,7 @@ namespace hipblaslt::host_validation
         static_assert(scalarTypeInfo(scalar).storageBits == sizeof(T) * 8,
                       "Typed hipBLASLt comparison requires native scalar storage.");
         const size_t storageBytes    = storageBytesForLayout(scalar, layout);
-        options.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+        options.selection.indexOrder = IndexOrder::FirstDimensionFastest;
         return compare(
             ::roc::host_validation::Tensor(
                 scalar,
@@ -110,7 +110,7 @@ namespace hipblaslt::host_validation
         case HIP_R_8I:
             return compareTypedBuffers<hipblasLtInt8>(expected, observed, layout, options);
         default:
-            options.selection.indexOrder = ComparisonIndexOrder::FirstDimensionFastest;
+            options.selection.indexOrder = IndexOrder::FirstDimensionFastest;
             return compare(comparisonTensor(observed, type, layout),
                            comparisonTensor(expected, type, layout),
                            options);
