@@ -589,26 +589,18 @@ my_optimization/
 HIPBLASLT_PATH="/path/to/rocm-libraries/projects/hipblaslt"
 LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/Equality/"
 
-python - <<PY
-from tensilelite.merge_library import avoidRegressions
-
-avoidRegressions(
-    "${LIBRARY_DIR}",
-    "my_optimization/final_libs",
-    "${LIBRARY_DIR}",
-    forceMerge=True,
-    noEff=True,
-)
-PY
+tensilelite merge-library \
+  --no_eff --force_merge True \
+  "${LIBRARY_DIR}" my_optimization/final_libs "${LIBRARY_DIR}"
 
 cd "${HIPBLASLT_PATH}"
 invoke build --install-deps --clients --architecture gfx950 --skip-rocroller
 ```
 
-`avoidRegressions` skips efficiency calculations with `noEff=True` and forces
-merge on conflicts with `forceMerge=True`; its three path arguments are the
-original directory, new-libraries directory, and output directory (the original
-directory above, to update in place).
+`tensilelite merge-library` skips efficiency calculations with `--no_eff` and
+forces merge on conflicts with `--force_merge True`; its three path arguments
+are the original directory, new-libraries directory, and output directory (the
+original directory above, to update in place).
 
 **Verify:**
 ```bash
@@ -683,8 +675,8 @@ my_search/
 
 #### Integrate
 
-Same steps as Ductile Optimization — call `tensilelite.merge_library.avoidRegressions`
-then rebuild hipBLASLt with the contents of `my_search/final_libs`.
+Same steps as Ductile Optimization — run `tensilelite merge-library` then rebuild
+hipBLASLt with the contents of `my_search/final_libs`.
 
 ---
 
