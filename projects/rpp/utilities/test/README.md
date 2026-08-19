@@ -23,6 +23,9 @@ cmake --build . --parallel
 ctest                              # run via CTest (each case registered individually)
 ```
 
+> [!NOTE]
+> Running tests via `ctest` ensures each unit is isolated to its own process. While this increases the runtime of the test suite significantly (due to per-unit setup overhead), it is preferred for isolating segfaults/GPU crashes to a single test case, rather than taking down other unit tests with it.
+
 ## Test names & filtering
 
 Every case has a structured, greppable name:
