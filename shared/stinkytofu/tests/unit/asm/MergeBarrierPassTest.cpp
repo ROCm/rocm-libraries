@@ -242,6 +242,54 @@ TEST_F(MergeBarrierPassTest, TokenConsumerBetweenPreventsMerge) {
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
 }
 
+// signal / filler / wait is NOT a legal group (must be adjacent signal+wait),
+// so it neither self-merges nor participates in a merge with another token.
+TEST_F(MergeBarrierPassTest, SplitSameTokenSignalWaitNotMerged) {
+    createSignal(0);
+    createVAddInBlock(bb, arch, /*dest=*/40, /*s0=*/0, /*s1=*/1);
+    createVAddInBlock(bb, arch, /*dest=*/41, /*s0=*/2, /*s1=*/3);
+    createWait(0);
+
+    runPasses(/*mergeThreshold=*/100000);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0}));
+}
+
+// Split (illegal) LDS0 pair must not merge with a later legal LDS1 pair.
+TEST_F(MergeBarrierPassTest, SplitPairDoesNotMergeWithOtherToken) {
+    createSignal(0);
+    createVAddInBlock(bb, arch, /*dest=*/40, /*s0=*/0, /*s1=*/1);
+    createWait(0);
+    createSignal(1);
+    createWait(1);
+
+    runPasses(/*mergeThreshold=*/100000);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
+}
+
+// Canonical merge pattern: adjacent signal+wait (T0), filler, adjacent
+// signal+wait (T1) with T0 ≠ T1.
+TEST_F(MergeBarrierPassTest, LegalDifferentTokenGroupsMerge) {
+    createSignal(0);
+    createWait(0);
+    createVAddInBlock(bb, arch, /*dest=*/40, /*s0=*/0, /*s1=*/1);
+    createSignal(1);
+    createWait(1);
+
+    runPasses(/*mergeThreshold=*/100000);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0, 1}));
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0, 1}));
+}
+
 // An instruction between the groups that touches an *unrelated* token (not in
 // either group's set) does not constrain the merged barrier, so the merge still
 // happens when the distance is below threshold.

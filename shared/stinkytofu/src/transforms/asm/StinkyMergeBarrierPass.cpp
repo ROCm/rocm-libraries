@@ -44,11 +44,14 @@
 // apart and fuses them into a single group carrying the union of their memory
 // tokens, dropping the redundant second signal/wait pair.
 //
-// A "barrier group" is a maximal run of consecutive barrier instructions
-// (typically an s_barrier_signal / s_barrier_wait pair) that all share the same
-// LDS memory-token set. Two consecutive groups G1 (tokens T1) and G2 (tokens T2)
-// are merged when the modeled cycle-distance (sum of issueCycles of the
-// instructions strictly between them) is below the configured threshold.
+// A legal "barrier group" is exactly one adjacent s_barrier_signal /
+// s_barrier_wait pair that shares the same non-empty LDS token set, e.g.:
+//   s_barrier_signal -1   // token 0
+//   s_barrier_wait   -1   // token 0
+// Anything else (lone signal/wait, signal/.../wait with filler between, mismatched
+// tokens) is ignored. Two consecutive legal groups G1 (tokens T1) and G2 (tokens
+// T2) may merge only when T1 ≠ T2 and the modeled cycle-distance between them is
+// below the configured threshold.
 //
 // The merge never moves instructions: it only unions G2's tokens into G1's
 // barriers and drops G2's redundant signal/wait pair. That is correct precisely
@@ -65,12 +68,12 @@ using namespace stinkytofu;
 // non-sentinel config wins. Mirrors the kCdna5* tunables in dag/CDNA5.hpp.
 constexpr int kCdna5MergeBarrierThreshold = 11;
 
-// A maximal run of consecutive barrier instructions that share one token set.
+// An adjacent s_barrier_signal / s_barrier_wait pair with one shared token set.
 struct BarrierGroup {
-    std::vector<StinkyInstruction*> barriers;
+    std::vector<StinkyInstruction*> barriers;  // [signal, wait]
     std::unordered_set<uint32_t> tokens;
-    IRList::iterator firstIt;  // iterator of the first barrier in the run
-    IRList::iterator lastIt;   // iterator of the last barrier in the run
+    IRList::iterator firstIt;  // signal
+    IRList::iterator lastIt;   // wait
 };
 
 // LDS memory-token ids attached to a barrier (from the pseudo LDS registers
@@ -83,23 +86,37 @@ std::unordered_set<uint32_t> barrierTokenSet(const StinkyInstruction& inst) {
     return tokens;
 }
 
-// Collect the barrier groups of a block in program order.
+// True if \p inst is ordered against a barrier guarding any token in \p tokens,
+// i.e. it produces or consumes one of those LDS tokens (an LDS pseudo operand on
+// src or dest whose index is in the set). Such an instruction has a fixed
+// side relative to the barrier and must not be jumped over by a merge.
+bool touchesTokens(const StinkyInstruction& inst, const std::unordered_set<uint32_t>& tokens) {
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (isPseudoReg(r) && r.reg.type == RegType::LDS && tokens.count(r.reg.idx)) return true;
+    for (const StinkyRegister& r : inst.getDestRegs())
+        if (isPseudoReg(r) && r.reg.type == RegType::LDS && tokens.count(r.reg.idx)) return true;
+    return false;
+}
+
+// Collect legal barrier groups in program order: only adjacent
+// s_barrier_signal + s_barrier_wait with identical non-empty token sets.
 std::vector<BarrierGroup> collectBarrierGroups(BasicBlock& bb) {
     std::vector<BarrierGroup> groups;
     for (auto it = bb.begin(); it != bb.end(); ++it) {
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr || !isBarrier(*inst)) continue;
+        auto* signal = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (signal == nullptr || !isBarrierSignal(*signal)) continue;
 
-        std::unordered_set<uint32_t> tokens = barrierTokenSet(*inst);
-        if (tokens.empty()) continue;  // only token-carrying barriers participate
+        std::unordered_set<uint32_t> tokens = barrierTokenSet(*signal);
+        if (tokens.empty()) continue;
 
-        if (!groups.empty() && groups.back().tokens == tokens &&
-            std::next(groups.back().lastIt) == it) {
-            groups.back().barriers.push_back(inst);
-            groups.back().lastIt = it;
-        } else {
-            groups.push_back({{inst}, std::move(tokens), it, it});
-        }
+        auto waitIt = std::next(it);
+        if (waitIt == bb.end()) continue;
+        auto* wait = dyn_cast<StinkyInstruction>(waitIt.getNodePtr());
+        if (wait == nullptr || !isBarrierWait(*wait)) continue;
+        if (barrierTokenSet(*wait) != tokens) continue;
+
+        groups.push_back({{signal, wait}, std::move(tokens), it, waitIt});
+        it = waitIt;  // for-loop ++it advances past the wait
     }
     return groups;
 }
@@ -117,18 +134,6 @@ int cycleDistance(IRList::iterator afterIt, IRList::iterator beforeIt) {
             cycles += inst->issueCycles;
     }
     return cycles;
-}
-
-// True if \p inst is ordered against a barrier guarding any token in \p tokens,
-// i.e. it produces or consumes one of those LDS tokens (an LDS pseudo operand on
-// src or dest whose index is in the set). Such an instruction has a fixed
-// side relative to the barrier and must not be jumped over by a merge.
-bool touchesTokens(const StinkyInstruction& inst, const std::unordered_set<uint32_t>& tokens) {
-    for (const StinkyRegister& r : inst.getSrcRegs())
-        if (isPseudoReg(r) && r.reg.type == RegType::LDS && tokens.count(r.reg.idx)) return true;
-    for (const StinkyRegister& r : inst.getDestRegs())
-        if (isPseudoReg(r) && r.reg.type == RegType::LDS && tokens.count(r.reg.idx)) return true;
-    return false;
 }
 
 // Add \p tokenId as an LDS pseudo register to \p regs if not already present.
@@ -184,6 +189,10 @@ void setMergedBarrierComment(StinkyInstruction* barrier,
 // Attempt to merge the two consecutive groups g1 (earlier) and g2 (later) inside
 // \p bb. Returns true on success (IR mutated). \p threshold is in cycles.
 bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2, int threshold) {
+    // Only distinct token sets are merge candidates. Same-token consecutive
+    // legal groups are successive syncs of one token and must both remain.
+    if (g1.tokens == g2.tokens) return false;
+
     const int dist = cycleDistance(g1.lastIt, g2.firstIt);
     if (dist >= threshold) return false;
 
@@ -248,6 +257,10 @@ class StinkyMergeBarrierPass : public StinkyInstPass {
 
         const int cfg = passCtx.getPassFeatureConfig().dagFeatures.mergeBarrierThreshold;
         const int threshold = cfg > 0 ? cfg : kCdna5MergeBarrierThreshold;
+
+        if (threshold == -1) {
+            return preserveCFGAnalyses();
+        }
 
         // Only touch loop-body basic blocks — the request targets the loop
         // interior, where the scheduler emits the repeated barrier groups.

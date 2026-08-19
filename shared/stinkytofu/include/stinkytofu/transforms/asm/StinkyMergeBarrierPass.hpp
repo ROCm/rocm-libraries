@@ -32,14 +32,13 @@ class Pass;
 
 /// Creates a pass that merges nearby barrier groups within loop bodies.
 ///
-/// Intended to run immediately after StinkyDAGSchedulerPass. After scheduling,
-/// two (or more) barrier groups (an s_barrier_signal / s_barrier_wait pair that
-/// share a memory-token set) can end up separated by only a handful of cycles.
-/// When the modeled cycle-distance between two consecutive groups is smaller
-/// than the merge threshold (PassFeatureConfig::DagFeatures::mergeBarrierThreshold,
-/// or the CDNA5 default when unset), the two groups are fused into a single
-/// group whose barriers carry the union of both token sets, removing the
-/// redundant second signal/wait pair.
+/// Intended to run immediately after StinkyDAGSchedulerPass. A legal group is
+/// exactly an adjacent s_barrier_signal / s_barrier_wait pair with the same
+/// non-empty memory-token set. Two consecutive legal groups with *different*
+/// token sets may be fused when their modeled cycle-distance is below the merge
+/// threshold (PassFeatureConfig::DagFeatures::mergeBarrierThreshold, or the
+/// CDNA5 default when unset): the earlier pair absorbs the later tokens and the
+/// redundant second signal/wait pair is removed.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyMergeBarrierPass();
 
 }  // namespace stinkytofu
