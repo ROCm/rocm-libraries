@@ -1501,6 +1501,21 @@ def runTileEngineGemmTests(String arch, String compiler) {
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
+def runDispatcherGemmUniversalTests(String compiler) {
+    def execute_cmd = """
+        cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+            -D BUILD_CK_TILE_ENGINE="ON" \
+            -D CMAKE_CXX_COMPILER="${compiler}" \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D GPU_TARGETS="gfx942" \
+            -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16;bf8;bf16" \
+            -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
+            -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
+        ninja -j${nthreads()} benchmark_gemm_universal_all && \
+        python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json"""
+    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+}
+
 def runDispatcherTests(String arch, String compiler) {
     def execute_cmd = """
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
