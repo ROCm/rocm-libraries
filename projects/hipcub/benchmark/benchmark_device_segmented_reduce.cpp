@@ -147,38 +147,24 @@ template<typename T, typename Op>
 struct Benchmark;
 
 template<typename T>
-struct Benchmark<T, benchmark_utils::plus>
+struct Benchmark<T, hipcub::Sum>
 {
     static void
         run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
     {
-        hipError_t (*ptr_to_sum)(void*,
-                                 size_t&,
-                                 T*,
-                                 T*,
-                                 _HIPCUB_STD::int64_t,
-                                 OffsetType*,
-                                 OffsetType*,
-                                 hipStream_t)
+        hipError_t (*ptr_to_sum)(void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
             = &hipcub::DeviceSegmentedReduce::Sum;
         run_benchmark<T, T>(state, desired_segments, stream, size, ptr_to_sum);
     }
 };
 
 template<typename T>
-struct Benchmark<T, benchmark_utils::minimum>
+struct Benchmark<T, hipcub::Min>
 {
     static void
         run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
     {
-        hipError_t (*ptr_to_min)(void*,
-                                 size_t&,
-                                 T*,
-                                 T*,
-                                 _HIPCUB_STD::int64_t,
-                                 OffsetType*,
-                                 OffsetType*,
-                                 hipStream_t)
+        hipError_t (*ptr_to_min)(void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
             = &hipcub::DeviceSegmentedReduce::Min;
         run_benchmark<T, T>(state, desired_segments, stream, size, ptr_to_min);
     }
@@ -198,7 +184,7 @@ struct Benchmark<T, hipcub::ArgMin>
                                     size_t&,
                                     T*,
                                     KeyValue*,
-                                    _HIPCUB_STD::int64_t,
+                                    int,
                                     OffsetType*,
                                     OffsetType*,
                                     hipStream_t)
@@ -233,11 +219,11 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
     std::vector<benchmark::internal::Benchmark*> bs = {
-        CREATE_BENCHMARKS(benchmark_utils::plus),
-        BENCHMARK_TYPE(custom_double2, benchmark_utils::plus),
-        CREATE_BENCHMARKS(benchmark_utils::minimum),
+        CREATE_BENCHMARKS(hipcub::Sum),
+        BENCHMARK_TYPE(custom_double2, hipcub::Sum),
+        CREATE_BENCHMARKS(hipcub::Min),
 #ifdef HIPCUB_ROCPRIM_API
-        BENCHMARK_TYPE(custom_double2, benchmark_utils::minimum),
+        BENCHMARK_TYPE(custom_double2, hipcub::Min),
 #endif
         CREATE_BENCHMARKS(hipcub::ArgMin),
 #ifdef HIPCUB_ROCPRIM_API

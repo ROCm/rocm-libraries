@@ -7,7 +7,7 @@ Run with a Python interpreter that has torch, triton, and AITER available:
 
     export AITER_PATH=<aiter-checkout>
     PYTHONPATH="python:${AITER_PATH}" python \\
-        rocke/library/builders/gfx950/attention/parity_unified_attention.py [--scenario name]
+        rocke/library/builders/gfx950/attention/prefill/parity_unified_attention.py [--scenario name]
 
 The harness:
   1. Builds the standard AITER unified-attention test inputs (paged KV, GQA).
@@ -1368,7 +1368,7 @@ def _run_rocke(
         use_alibi=data["alibi_slopes"] is not None,
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
-        num_sms=120,
+        num_cus=120,
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
     )
 

@@ -5,6 +5,15 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.40
 
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
+### Known issues
+
+* Function pointer callbacks specified via `rocfft_execution_info_set_load_callback` or 
+  `rocfft_execution_info_set_store_callback` are not functional on gfx1250 and `rocfft_execute` will fail in this case.
+
 ## rocFFT 1.0.39 for ROCm 10.0
 
 ### Optimized

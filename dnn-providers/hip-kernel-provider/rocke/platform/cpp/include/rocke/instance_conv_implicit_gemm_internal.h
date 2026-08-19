@@ -199,6 +199,12 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* block_m_off_v; /* grid.block_m_off OR swizzled row*tile_m */
     rocke_value_t* block_n_off_v; /* grid.block_n_off OR swizzled col*tile_n */
 
+    /* ---- grouped conv state (groups > 1; both NULL for groups == 1) ---- *
+     * group_idx      = b.block_id_z()           (the CTA's group in [0, groups))
+     * k_out_group_base = b.mul(group_idx, kpg)  (absolute output-filter base for B/D) */
+    rocke_value_t* group_idx;
+    rocke_value_t* k_out_group_base;
+
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
     bool double_buffer; /* compv4 || async_dma || unroll_k     */
@@ -225,12 +231,43 @@ typedef struct rocke_conv_build_ctx
     int load_vec; /* _choose_load_vec(spec)    */
 
     /* ---- coordinate-transform descriptors ---- */
-    rocke_tensor_descriptor_t* A_desc; /* make_a_descriptor(p, decompose_m)     */
-    rocke_tensor_descriptor_t* B_desc; /* make_b_descriptor(p)                  */
+    rocke_tensor_descriptor_t* A_desc; /* make_a_descriptor(p, decompose_m); NULL if pointwise */
+    rocke_tensor_descriptor_t* B_desc; /* make_b_descriptor(p);              NULL if pointwise */
     /* D_desc is built lazily inside the epilogue phase (Python builds it per
      * epilogue fn); held here so an epilogue_override and the two stock
      * epilogues share one instance. NULL until the epilogue phase populates. */
     rocke_tensor_descriptor_t* D_desc;
+
+    /* ---- pointwise fast-path (Python p.is_pointwise) ---- *
+     * When true, A_desc / B_desc / D_desc are NULL and flat multiply+add
+     * arithmetic is used instead of the coordinate-transform DAG.
+     * Mirrors: if p.is_pointwise: A_desc = None; B_desc = None ...
+     *
+     * Forward conv: c_M_pw=p.M, c_C_pw=p.cpg, c_K_pw=p.kpg.
+     * Wgrad:        c_M_pw=wg_M, c_C_pw=p.cpg, c_K_pw=p.kpg,
+     *               c_wgK_pw=wg_K, c_wgN_pw=wg_N. */
+    bool is_pointwise;
+    int c_M_pw; /* forward: p.M;   wgrad: wg_M */
+    int c_C_pw; /* forward: p.cpg; wgrad: p.cpg (input channels per group) */
+    int c_K_pw; /* forward: p.kpg; wgrad: p.kpg (output channels per group) */
+    int c_wgK_pw; /* wgrad only: wg_K (= N*Ho*Wo, reduction dim); 0 for forward */
+    int c_wgN_pw; /* wgrad only: wg_N (= Y*X*C, N dim); 0 for forward */
+
+    /* ---- pointwise IR constants (emitted before buffer resources, matching Python) ---- *
+     * Python emits _c_C_ir, _c_K_ir, _c_M_ir, _always_valid (in that order)
+     * before make_buffer_resource calls. We pre-emit and cache them so the
+     * descriptor callbacks reuse rather than re-emit them. */
+    rocke_value_t* ir_c_C_pw; /* const_i32(cpg)    — first  (fwd) / _c_K_ir=kpg (wgrad) */
+    rocke_value_t* ir_c_K_pw; /* const_i32(kpg)    — second (fwd) / _c_C_ir=cpg (wgrad) */
+    rocke_value_t* ir_c_M_pw; /* const_i32(M/wg_M) — third  (fwd) / _c_wgM_ir  (wgrad) */
+    rocke_value_t* ir_always_valid; /* const_i32(1)  — fourth (fwd) / _c_wgN_ir  (wgrad) */
+    rocke_value_t* ir_c_wgN_pw; /* wgrad only: const_i32(wg_N) — fifth */
+
+    /* ---- optional B-descriptor override (wgrad only) ---- *
+     * When non-NULL, rocke_conv_emit_load_phase calls this instead of
+     * rocke_conv_b_descriptor. Used by wgrad to provide a different pointwise
+     * formula for the X (input) B-tile descriptor. */
+    rocke_loads_descriptor_fn b_descriptor_fn;
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- */
     rocke_conv_buffer_resource_t a_buf_rsrc; /* make_buffer_resource(b, A, A_bytes) */
@@ -436,11 +473,11 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* const* accs,
                                      int num_accs,
                                      const rocke_warp_grid_t* grid,
-                                     rocke_value_t* d_rsrc);
+                                     rocke_value_t* d_rsrc,
+                                     rocke_value_t* ir_c_K_pw);
 
 /* _emit_direct_epilogue_wmma(b, spec, op, accs[n], warp_m_idx, warp_n_idx, lane,
- * block_m_off, block_n_off, d_rsrc, c0): WMMA per-lane fp16 store via the op's
- * c_layout map + the D descriptor. */
+ * block_m_off, block_n_off, d_rsrc, c0, ir_c_K_pw): WMMA per-lane fp16 store. */
 void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           const rocke_implicit_gemm_conv_spec_t* spec,
                                           const rocke_mmaop_t* op,
@@ -452,16 +489,18 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* block_m_off,
                                           rocke_value_t* block_n_off,
                                           rocke_value_t* d_rsrc,
-                                          rocke_value_t* c0);
+                                          rocke_value_t* c0,
+                                          rocke_value_t* ir_c_K_pw);
 
-/* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc): LDS-staged cshuffle
- * store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
+/* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc, ir_c_K_pw): LDS-staged
+ * cshuffle store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
 void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_implicit_gemm_conv_spec_t* spec,
                                        rocke_value_t* const* accs,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
-                                       rocke_value_t* d_rsrc);
+                                       rocke_value_t* d_rsrc,
+                                       rocke_value_t* ir_c_K_pw);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

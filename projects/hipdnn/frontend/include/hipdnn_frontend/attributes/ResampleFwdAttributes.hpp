@@ -195,4 +195,8 @@ public:
 
 typedef ResampleFwdAttributes Resample_fwd_attributes; // NOLINT(readability-identifier-naming)
 
+// cuDNN frontend spells the (forward-only, in hipDNN) resample node
+// `Resample_attributes`; provide that spelling for API compatibility.
+typedef ResampleFwdAttributes Resample_attributes; // NOLINT(readability-identifier-naming)
+
 } // namespace hipdnn_frontend::graph
