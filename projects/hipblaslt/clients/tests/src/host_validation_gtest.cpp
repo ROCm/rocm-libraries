@@ -815,7 +815,6 @@ TEST(HostValidationCblasBridge, DistinctHalfCAndFloatD)
                                     HIP_R_16F,
                                     HIP_R_32F,
                                     HIP_R_32F,
-                                    HIP_R_32F,
                                     HIP_R_32F);
 
     for(size_t index = 0; index < c.size(); ++index)
@@ -855,7 +854,6 @@ TEST(HostValidationCblasBridge, MixedHalfInputs)
                                     false,
                                     HIP_R_16F,
                                     HIP_R_16F,
-                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_16F,
@@ -900,7 +898,6 @@ TEST(HostValidationCblasBridge, QuantizesCombinedOperandScaleAndAlphaVector)
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
-                                    HIP_R_32F,
                                     HIP_R_8F_E4M3,
                                     HIP_R_32F);
 
@@ -936,7 +933,6 @@ TEST(HostValidationCblasBridge, AppliesSameWidthCrossFormatComputeQuantization)
                                     false,
                                     false,
                                     HIP_R_8F_E4M3,
-                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -978,7 +974,6 @@ TEST(HostValidationCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
                                     HIP_R_16F,
                                     HIP_R_16F,
                                     HIP_R_32F,
-                                    HIP_R_32F,
                                     HIP_R_32F);
 
     const hipblasLtHalf expected((a[0] * b[0]) * 0.1f);
@@ -1017,7 +1012,6 @@ TEST(HostValidationCblasBridge, ConvertsFnuzOutputWithComponentCodec)
                                     HIP_R_8F_E4M3_FNUZ,
                                     HIP_R_8F_E4M3_FNUZ,
                                     HIP_R_32F,
-                                    HIP_R_32F,
                                     HIP_R_32F);
 
     EXPECT_EQ(d[0], hipblaslt_f8_fnuz(a[0]));
@@ -1054,7 +1048,6 @@ TEST(HostValidationCblasBridge, SaturatesRoundedInt8Output)
                                     HIP_R_32F,
                                     HIP_R_8I,
                                     HIP_R_8I,
-                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F);
 
@@ -1094,7 +1087,6 @@ TEST(HostValidationCblasBridge, ZeroScalarsSuppressNonFiniteInputs)
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
-                                    HIP_R_32F,
                                     HIP_R_32F);
     EXPECT_EQ(output[0], 6.0f);
 
@@ -1121,7 +1113,6 @@ TEST(HostValidationCblasBridge, ZeroScalarsSuppressNonFiniteInputs)
                                     1.0f,
                                     false,
                                     false,
-                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -1163,7 +1154,6 @@ TEST(HostValidationCblasBridge, IntegerComputeUsesWideReferenceAndSaturatingOutp
                                       HIP_R_8I,
                                       HIP_R_8I,
                                       HIP_R_32I,
-                                      HIP_R_32I,
                                       HIP_R_32I);
 
     EXPECT_EQ(d[0], 127);
@@ -1198,7 +1188,6 @@ TEST(HostValidationCblasBridge, TransposedPaddedScaleUsesLogicalRows)
                                     1.0f,
                                     true,
                                     false,
-                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
@@ -1242,7 +1231,6 @@ TEST(HostValidationCblasBridge, PackedFloat4InputUsesLogicalElementLayout)
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
-                                    HIP_R_32F,
                                     static_cast<hipDataType>(HIP_R_4F_E2M1),
                                     HIP_R_32F);
 
@@ -1279,7 +1267,6 @@ TEST(HostValidationCblasBridge, ComplexConjugateTranspose)
                                       Complex(1, 0),
                                       false,
                                       false,
-                                      HIP_C_32F,
                                       HIP_C_32F,
                                       HIP_C_32F,
                                       HIP_C_32F,
@@ -1327,7 +1314,6 @@ TEST(HostValidationCblasBridge, LargeProblemUsesAcceleratedBackend)
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
-                                    HIP_R_32F,
                                     HIP_R_32F);
 
     for(int64_t row = 0; row < m; ++row)
@@ -1359,7 +1345,6 @@ TEST(HostValidationCblasBridge, ZeroReductionDoesNotRequireBlasOperands)
                                     1.0f,
                                     false,
                                     false,
-                                    HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
                                     HIP_R_32F,
