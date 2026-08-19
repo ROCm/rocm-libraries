@@ -133,9 +133,9 @@ rewrite, not just a critique.
   `prose-style-context.md` sentence-level gate and final acceptance test, then present the revised
   description as the recommendation.
 - **Review:** read the PR's current description, check it against the same gate, and when it fails
-  any check (undefined term, vague-improvement or hand-waving word, missing evidence/scope, over the
-  word limit, or a heading that cannot be answered from the body) output a specific rewrite the
-  author can paste in. Cite which gate items failed.
+  any check (undefined term, vague-improvement or hand-waving word, missing evidence/scope,
+  repetition or length that obscures the change, or a heading that cannot be answered from the
+  body) output a specific rewrite the author can paste in. Cite which gate items failed.
 - The rewrite is **advisory**. Per base operating principle 1, never post it to GitHub or edit the
   PR without explicit human approval; present it in the chat/`BLOCKING`-items output only. Preserve
   every repository-required heading and the JIRA/issue line.
