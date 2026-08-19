@@ -1510,9 +1510,20 @@ def runDispatcherGemmTests(String compiler) {
             -D GPU_TARGETS="gfx942" \
             -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16;bf8;bf16" \
             -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-            -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-        ninja -j${nthreads()} benchmark_gemm_universal_all && \
-        python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json"""
+            -D BATCHED_GEMM_DATATYPE="fp16" \
+            -D BATCHED_GEMM_LAYOUT="rcr" \
+            -D BATCHED_CONTRACTION_DATATYPE="fp16" \
+            -D BATCHED_CONTRACTION_LAYOUT="rcr" \
+            -D TILE_ENGINE_SAMPLING_TIER=daily \
+            -D CK_TILE_DISPATCHER=ON \
+            -D BUILD_DISPATCHER_BINDINGS=ON \
+            -D DISPATCHER_RULE_SET=tests .. && \
+        ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all ck_tile_dispatcher dispatcher_gemm_lib && \
+        python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
+        python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json && \
+        python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
+        python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx gfx942 && \
+        python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx gfx942"""
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
