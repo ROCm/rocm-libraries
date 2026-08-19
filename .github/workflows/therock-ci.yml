@@ -225,17 +225,19 @@ jobs:
   # build, no external input needed) -- see therock-dbsync-rocjitsu-prototype.yml for the
   # standalone workflow_dispatch version used for manual/diagnostic runs against a pinned commit.
   #
-  # needs: therock-ci-linux (not just setup) -- confirmed live (run 32194708858) that without
-  # this, the fetch races ahead of the actual build/upload and fails with "Found no artifacts
-  # matching [...] at s3://...". therock-ci-linux is matrixed per family/project bundle, so
-  # depending on it waits for ALL of its legs (not just gfx942/gfx950's), which is coarser than
-  # ideal but is the only granularity `needs:` supports for a matrixed reusable-workflow job --
-  # mirrors how therock_ci_summary already depends on the whole therock-ci-linux job.
+  # Only depends on `setup`, NOT `therock-ci-linux` -- deliberately. `therock-ci-linux` is one
+  # reusable-workflow job matrixed over EVERY family/project bundle in this PR (build AND test for
+  # ALL of them, not just MIOpen), so `needs: therock-ci-linux` would block this job on unrelated
+  # components' test runs finishing too -- confirmed live (run 32195745347) this can stall for a
+  # very long time on scarce GPU test-runner availability having nothing to do with MIOpen/dbsync.
+  # Instead the fetch step below retries with a bounded budget until this run's own MIOpen build
+  # artifact appears (confirmed separately, run 32194708858, that fetching too early fails with
+  # "Found no artifacts matching [...] at s3://..." -- a fixed wait, not a permanent error).
   dbsync-rocjitsu:
     name: "dbsync rocjitsu (${{ matrix.arch }})"
     permissions:
       contents: read
-    needs: [setup, therock-ci-linux]
+    needs: setup
     if: ${{ needs.setup.outputs.miopen_selected == 'true' }}
     strategy:
       fail-fast: false
@@ -244,9 +246,9 @@ jobs:
           - { arch: gfx942, family: gfx94X-dcgpu, rj_config: amdgpu_cdna3_kmd.json }
           - { arch: gfx950, family: gfx950-dcgpu, rj_config: amdgpu_cdna4_kmd.json }
     runs-on: azure-linux-scale-rocm
-    # Safety net: without this, a stall occupies the runner indefinitely instead of failing
-    # fast. 20 min is generous next to observed runs (15-200s).
-    timeout-minutes: 20
+    # Generous ceiling: up to ~45 min retry-polling for the MIOpen build's own artifact (see the
+    # "Fetch artifact" step) plus the KMD build + dbsync run itself (observed 15-200s).
+    timeout-minutes: 60
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host --user 0
@@ -299,17 +301,38 @@ jobs:
       # install_rocm_from_artifacts.py called directly (not via the setup_test_environment
       # composite action, which has no --run-github-repo input) with --run-github-repo defaulting
       # to this repo, since ARTIFACT_RUN_ID is this same GHA run's own id.
+      #
+      # This job starts as soon as `setup` finishes (see the job-level comment above), so the
+      # MIOpen build for this family may not have uploaded its artifact yet. Retries on a "Found
+      # no artifacts matching [...]" failure with a bounded budget instead of depending on
+      # therock-ci-linux's full completion (which would also wait on unrelated components' tests).
       - name: Fetch artifact (source-CK build for ${{ matrix.family }})
-        timeout-minutes: 15
+        timeout-minutes: 50
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python ./build_tools/install_rocm_from_artifacts.py \
-            --run-id="${ARTIFACT_RUN_ID}" \
-            --run-github-repo="${{ github.repository }}" \
-            --artifact-group="${AMDGPU_FAMILIES}" \
-            --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
-            --blas --miopen --rand --tests
+          set -uo pipefail
+          max_wait_seconds=2700
+          poll_interval_seconds=60
+          start="${SECONDS}"
+          while true; do
+            if python ./build_tools/install_rocm_from_artifacts.py \
+                --run-id="${ARTIFACT_RUN_ID}" \
+                --run-github-repo="${{ github.repository }}" \
+                --artifact-group="${AMDGPU_FAMILIES}" \
+                --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+                --blas --miopen --rand --tests; then
+              echo "Fetched artifact after $((SECONDS - start))s"
+              break
+            fi
+            elapsed=$((SECONDS - start))
+            if [ "${elapsed}" -ge "${max_wait_seconds}" ]; then
+              echo "::error::Timed out after ${elapsed}s waiting for the ${AMDGPU_FAMILIES} artifact (run ${ARTIFACT_RUN_ID})"
+              exit 1
+            fi
+            echo "Artifact not ready yet (${elapsed}s elapsed) -- retrying in ${poll_interval_seconds}s"
+            sleep "${poll_interval_seconds}"
+          done
 
       - name: Inspect artifact (key check — CK plugin + DBs must be present)
         run: |
