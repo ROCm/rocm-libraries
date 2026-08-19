@@ -14,11 +14,18 @@ int main() {
                                         roc::host_validation::Shape{2, 3});
     roc::host_validation::Tensor mxTensor(roc::host_validation::ScalarType::Float4E2M1,
                                           roc::host_validation::Shape{8});
+    const roc::host_validation::Tensor reshaped = tensor.reshape(roc::host_validation::Shape{3, 2});
+    const roc::host_validation::Tensor padded = tensor.pad(roc::host_validation::Shape{3, 4});
+    const std::array<size_t, 2> permutation{1, 0};
+    const roc::host_validation::Tensor permuted = tensor.permute(permutation);
     const roc::host_validation::Shape shape{2, 3};
     const std::array<size_t, 2> coordinates{1, 2};
     return scalar.type() == roc::host_validation::ScalarType::ComplexFloat32 &&
                    scalar.as<std::complex<float>>() == std::complex<float>{1.5f, -2.0f} &&
                    tensor.shape().elementCount() == 6 &&
+                   reshaped.shape() == roc::host_validation::Shape{3, 2} &&
+                   padded.shape() == roc::host_validation::Shape{3, 4} &&
+                   permuted.shape() == roc::host_validation::Shape{3, 2} &&
                    shape.linearIndex(coordinates,
                                      roc::host_validation::IndexOrder::LastDimensionFastest) == 5 &&
                    shape.coordinates(5, roc::host_validation::IndexOrder::LastDimensionFastest) ==
