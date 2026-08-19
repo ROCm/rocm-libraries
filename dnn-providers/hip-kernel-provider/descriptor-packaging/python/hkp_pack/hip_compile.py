@@ -6,17 +6,18 @@ from .variant import variant_key
 
 
 def _hipcc_command(hipcc, source_path, arch, build, out_co):
-    # -fuse-cuid=none: hipcc defaults to a random compilation unit id, which
-    # perturbs the __hip_cuid_ symbol so identical inputs produce different .co
-    # bytes. Pinning it keeps the sha256/provenance stamped on each UKD a stable
-    # traceability record across builds. In the fixed prefix so build flags
-    # cannot displace it.
-    cmd = [hipcc, "--genco", f"--offload-arch={arch}", "-fuse-cuid=none"]
+    cmd = [hipcc, "--genco", f"--offload-arch={arch}"]
     for name, val in (build.get("defines") or {}).items():
         if isinstance(val, bool):
             val = "1" if val else "0"
         cmd.append(f"-D{name}={val}")
     cmd += list(build.get("flags") or [])
+    # Pin the compilation-unit id: hipcc otherwise defaults it to random, which
+    # perturbs the __hip_cuid_ symbol so identical inputs emit different .co bytes
+    # and an unstable sha256/provenance stamp. Appended after the authored build
+    # flags so clang's last-flag-wins keeps this value; authored -fuse-cuid flags
+    # are rejected in validation as well.
+    cmd.append("-fuse-cuid=none")
     cmd += [str(source_path), "-o", str(out_co)]
     return cmd
 
