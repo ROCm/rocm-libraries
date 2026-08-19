@@ -5,58 +5,68 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from importlib import import_module
-import os
 from pathlib import Path
-import sys
 
-from ._rocm import TensileLiteRuntimeError, validate_distribution
+from _tensilelite_client_binding import (
+    ClientBindingError,
+    default_client_candidate,
+    selected_client,
+    validate_client,
+)
 
-
-@dataclass(frozen=True)
-class RuntimeInfo:
-    """Resolved, version-checked ROCm artifacts used by TensileLite."""
-
-    rocm_root: Path
-    rocm_version: str
-    client: Path
+from ._rocm import TensileLiteRuntimeError, ValidatedRocm, validate_distribution
 
 
-def _client_path(rocm_root: Path) -> Path:
-    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
-    return rocm_root / "libexec" / "hipblaslt" / "tensilelite" / executable
+_client: Path | None = None
+_installation: ValidatedRocm | None = None
 
 
-def _require_rocisa() -> None:
-    """Require rocisa without interpreting its version or native layout."""
+def initialize() -> None:
+    """Validate generator prerequisites without requiring the optional client."""
+    from tensilelite import __version__
+
+    global _installation
+
+    _installation = validate_distribution("tensilelite", __version__)
+
+
+def client_executable() -> Path:
+    """Return the validated client selected by this installation on first use."""
+    global _client
+
+    if _client is not None:
+        return _client
+    if _installation is None:
+        raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
+
+    from tensilelite import __version__
+
+    candidate = None
     try:
-        import_module("rocisa")
-    except (ImportError, OSError) as exc:
+        candidate = selected_client(
+            lambda: default_client_candidate(
+                _installation.executable_search_paths,
+                _installation.source,
+            )
+        )
+        validate_client(candidate.path, __version__)
+    except ClientBindingError as exc:
+        selected = (
+            f"  selected client: {candidate.path}\n"
+            f"  selected by: {candidate.source}"
+            if candidate is not None
+            else "  selected by: TensileLite client binding lookup"
+        )
         raise TensileLiteRuntimeError(
-            "TensileLite requires an independently packaged, importable rocisa dependency. "
-            f"The rocisa import failed: {exc}"
+            f"{exc}\n"
+            f"{selected}"
         ) from exc
+    _client = candidate.path
+    return _client
 
 
-def validate_runtime(distribution_version: str) -> RuntimeInfo:
-    """Validate the ROCm release, external rocisa dependency, and native client."""
-
-    _require_rocisa()
-    validated = validate_distribution("tensilelite", distribution_version)
-    client = _client_path(validated.root)
-    if not client.is_file():
-        raise TensileLiteRuntimeError(
-            "tensilelite-client is missing from the matching ROCm installation.\n"
-            f"  tensilelite version: {distribution_version}\n"
-            f"  ROCm root: {validated.root}\n"
-            f"  expected client: {client}\n"
-            "Install the matching hipBLASLt/TensileLite ROCm runtime package."
-        )
-    if os.name != "nt" and not os.access(client, os.X_OK):
-        raise TensileLiteRuntimeError(
-            "tensilelite-client is not executable.\n"
-            f"  client: {client}\n"
-            "Reinstall the matching hipBLASLt/TensileLite ROCm runtime package."
-        )
-    return RuntimeInfo(validated.root, validated.version, client)
+def executable_search_paths() -> list[Path]:
+    """Return the executable locations for the frozen ROCm installation model."""
+    if _installation is None:
+        raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
+    return list(_installation.executable_search_paths)
