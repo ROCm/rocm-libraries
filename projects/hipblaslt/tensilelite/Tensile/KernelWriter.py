@@ -7280,8 +7280,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
        clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
     # StaggerU=0 must not keep the wrap machinery alive on the strength of the
-    # runtime SupportCustomStaggerU flag.
-    if kernel["StaggerU"] == 0:
+    # runtime SupportCustomStaggerU flag. StreamK is exempt: dropping the wrap
+    # code switches its GlobalReadIncs to the const form, and the shorter sgpr
+    # layout that follows leaves SKMappingTemp no aligned gap to check out.
+    if kernel["StaggerU"] == 0 and not kernel["StreamK"]:
       self.states.staggerUCode = False
     
     self.states.tailloopInNllmaxUnit = 1
