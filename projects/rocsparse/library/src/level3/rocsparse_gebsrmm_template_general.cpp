@@ -99,7 +99,7 @@ namespace rocsparse
 
         hipStream_t stream = handle->stream;
 
-        dim3 gebsrmm_blocks((mb - 1) / 1 + 1, (n - 1) / 32 + 1);
+        dim3 gebsrmm_blocks((mb - 1) / 1 + 1, rocsparse::min((n - 1) / 32 + 1, 65535));
         dim3 gebsrmm_threads(32, 32, 1);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gebsrmm_general_blockdim_kernel<32, 32>),
                                            gebsrmm_blocks,

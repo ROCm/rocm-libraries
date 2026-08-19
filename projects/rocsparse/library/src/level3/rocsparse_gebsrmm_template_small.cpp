@@ -168,7 +168,8 @@ namespace rocsparse
                               "This function is designed for col_block_dim <= 4.");
 
 #define LAUNCH_SMALL_KERNEL(M_, K_, BLOCK_DIM_, N_)                         \
-    dim3 gebsrmm_blocks((mb - 1) / 1 + 1, (n - 1) / N_ + 1);                \
+    dim3 gebsrmm_blocks((mb - 1) / 1 + 1,                                  \
+                        rocsparse::min((n - 1) / N_ + 1, 65535));          \
     dim3 gebsrmm_threads(BLOCK_DIM_, N_);                                   \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
         (rocsparse::gebsrmm_small_blockdim_kernel<M_, K_, BLOCK_DIM_, N_>), \
