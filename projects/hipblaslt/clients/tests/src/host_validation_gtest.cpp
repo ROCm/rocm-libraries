@@ -14,6 +14,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -144,8 +145,8 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleSequencesA
                                                       static_cast<int64_t>(bias.size()),
                                                       hipblaslt_initialization::rand_int);
 
-    constexpr uint64_t seed = hipblaslt::host_validation::defaultInitializationSeed;
-    const auto expected = [seed](uint64_t sequence, size_t index) {
+    constexpr uint64_t seed     = hipblaslt::host_validation::defaultInitializationSeed;
+    const auto         expected = [seed](uint64_t sequence, size_t index) {
         return roc::host_validation::indexedUniformInteger(
             hipblaslt::host_validation::initialization::seedForSequence(seed, sequence),
             roc::host_validation::generation_random_domain_version_1::realComponent,
@@ -622,31 +623,32 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
     using namespace roc::host_validation;
     using namespace hipblaslt::host_validation;
 
-    MatrixStorageInitialization exact;
-    exact.role                          = MatrixRole::B;
-    exact.initialization                = hipblaslt_initialization::integer_exact;
-    exact.type                          = HIP_R_32F;
-    exact.rows                          = 2;
-    exact.columns                       = 3;
-    exact.leadingDimension              = 4;
-    exact.batchStride                   = 12;
-    exact.batchCount                    = 2;
-    std::vector<std::byte> exactStorage = generateMatrixStorage(exact);
-    Tensor exactView(ScalarType::Float32, Layout(Shape{2, 3, 2}, {1, 4, 12}), exactStorage);
+    MatrixInitialization exact;
+    exact.role             = MatrixRole::B;
+    exact.initialization   = hipblaslt_initialization::integer_exact;
+    exact.type             = HIP_R_32F;
+    exact.rows             = 2;
+    exact.columns          = 3;
+    exact.leadingDimension = 4;
+    exact.batchStride      = 12;
+    exact.batchCount       = 2;
+    Tensor exactMatrix     = generateMatrix(exact);
+    EXPECT_EQ(exactMatrix.layout(), (Layout(Shape{2, 3, 2}, {1, 4, 12})));
+    EXPECT_EQ(exactMatrix.storage().size(), 24 * sizeof(float));
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 0; row < 2; ++row)
             {
-                const float  value        = exactView.loadAs<float>({row, column, batch});
-                const size_t logicalIndex = row + 2 * (column + 3 * batch);
+                const float    value        = exactMatrix.loadAs<float>({row, column, batch});
+                const size_t   logicalIndex = row + 2 * (column + 3 * batch);
                 const uint64_t sequenceSeed = initialization::seedForSequence(
                     defaultInitializationSeed, initialization::integerExactMatrixBSequence);
-                const int magnitude = indexedUniformInteger(
-                    sequenceSeed,
-                    generation_random_domain_version_1::realComponent,
-                    logicalIndex,
-                    0,
-                    2);
+                const int magnitude
+                    = indexedUniformInteger(sequenceSeed,
+                                            generation_random_domain_version_1::realComponent,
+                                            logicalIndex,
+                                            0,
+                                            2);
                 const int expected = ((row ^ column) & 1U) == 0 ? -magnitude : magnitude;
                 EXPECT_EQ(value, expected);
                 EXPECT_EQ(value, std::trunc(value));
@@ -654,73 +656,113 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
                 if(value != 0)
                     EXPECT_EQ(value > 0, ((row ^ column) & 1U) != 0);
             }
-    Tensor exactAllocation(ScalarType::Float32, Layout(Shape{4, 3, 2}, {1, 4, 12}), exactStorage);
+    Tensor exactAllocation = exactMatrix.alias(Layout(Shape{4, 3, 2}, {1, 4, 12}));
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 2; row < 4; ++row)
                 EXPECT_EQ(exactAllocation.loadAs<float>({row, column, batch}), 0);
 
-    MatrixStorageInitialization probe;
-    probe.role                          = MatrixRole::B;
-    probe.initialization                = hipblaslt_initialization::fp16_accumulator_probe;
-    probe.type                          = HIP_R_16F;
-    probe.rows                          = 4;
-    probe.columns                       = 2;
-    probe.leadingDimension              = 4;
-    std::vector<std::byte> probeStorage = generateMatrixStorage(probe);
-    Tensor probeView(ScalarType::Float16, Layout(Shape{4, 2, 1}, {1, 4, 0}), probeStorage);
+    MatrixInitialization probe;
+    probe.role             = MatrixRole::B;
+    probe.initialization   = hipblaslt_initialization::fp16_accumulator_probe;
+    probe.type             = HIP_R_16F;
+    probe.rows             = 4;
+    probe.columns          = 2;
+    probe.leadingDimension = 4;
+    Tensor probeMatrix     = generateMatrix(probe);
     for(size_t column = 0; column < 2; ++column)
         for(size_t row = 0; row < 4; ++row)
-            EXPECT_EQ(probeView.loadAs<float>({row, column, 0}), row % 2 == 0 ? 2 : -2);
+            EXPECT_EQ(probeMatrix.loadAs<float>({row, column, 0}), row % 2 == 0 ? 2 : -2);
 
-    MatrixStorageInitialization oneSpecial;
-    oneSpecial.role                       = MatrixRole::A;
-    oneSpecial.initialization             = hipblaslt_initialization::norm_dist_one_special;
-    oneSpecial.specialValueType           = 0;
-    oneSpecial.type                       = HIP_R_32F;
-    oneSpecial.rows                       = 4;
-    oneSpecial.columns                    = 3;
-    oneSpecial.leadingDimension           = 4;
-    oneSpecial.batchStride                = 12;
-    oneSpecial.batchCount                 = 2;
-    std::vector<std::byte> specialStorage = generateMatrixStorage(oneSpecial);
-    Tensor specialView(ScalarType::Float32, Layout(Shape{4, 3, 2}, {1, 4, 12}), specialStorage);
-    size_t infinityCount = 0;
+    MatrixInitialization oneSpecial;
+    oneSpecial.role             = MatrixRole::A;
+    oneSpecial.initialization   = hipblaslt_initialization::norm_dist_one_special;
+    oneSpecial.oneSpecialValue  = OneSpecialValue::PositiveInfinity;
+    oneSpecial.type             = HIP_R_32F;
+    oneSpecial.rows             = 4;
+    oneSpecial.columns          = 3;
+    oneSpecial.leadingDimension = 4;
+    oneSpecial.batchStride      = 12;
+    oneSpecial.batchCount       = 2;
+    Tensor specialMatrix        = generateMatrix(oneSpecial);
+    size_t infinityCount        = 0;
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 0; row < 4; ++row)
-                infinityCount += std::isinf(specialView.loadAs<float>({row, column, batch}));
+                infinityCount += std::isinf(specialMatrix.loadAs<float>({row, column, batch}));
     EXPECT_EQ(infinityCount, 1);
 }
 
-TEST(HostValidationDataInitializationBridge, HostSideDeviceFillCopiesComponentStorage)
+TEST(HostValidationDataInitializationBridge, PositiveOnlyMatrixPolicyIsExplicit)
 {
     using namespace hipblaslt::host_validation;
 
-    MatrixStorageInitialization initialization;
-    initialization.role                   = MatrixRole::B;
-    initialization.initialization         = hipblaslt_initialization::integer_exact;
-    initialization.type                   = HIP_R_32F;
-    initialization.rows                   = 2;
-    initialization.columns                = 3;
-    initialization.leadingDimension       = 4;
-    initialization.batchStride            = 12;
-    initialization.batchCount             = 2;
-    const std::vector<std::byte> expected = generateMatrixStorage(initialization);
+    MatrixInitialization initialization;
+    initialization.role             = MatrixRole::A;
+    initialization.initialization   = hipblaslt_initialization::hpl;
+    initialization.type             = HIP_R_32F;
+    initialization.rows             = 8;
+    initialization.columns          = 8;
+    initialization.leadingDimension = 8;
+    const Tensor signedMatrix       = generateMatrix(initialization);
+
+    initialization.positiveOnly = true;
+    const Tensor positiveMatrix = generateMatrix(initialization);
+    for(size_t column = 0; column < initialization.columns; ++column)
+        for(size_t row = 0; row < initialization.rows; ++row)
+        {
+            const float signedValue   = signedMatrix.loadAs<float>({row, column, 0});
+            const float positiveValue = positiveMatrix.loadAs<float>({row, column, 0});
+            EXPECT_FLOAT_EQ(positiveValue, std::abs(signedValue));
+        }
+}
+
+TEST(HostValidationDataInitializationBridge, UnsupportedModesThrowInsteadOfProducingFallbackData)
+{
+    using namespace hipblaslt::host_validation;
+
+    MatrixInitialization initialization;
+    initialization.role             = MatrixRole::A;
+    initialization.initialization   = hipblaslt_initialization::fp16_accumulator_probe;
+    initialization.type             = HIP_R_32F;
+    initialization.rows             = 1;
+    initialization.columns          = 1;
+    initialization.leadingDimension = 1;
+    EXPECT_THROW(generateMatrix(initialization), std::invalid_argument);
+
+    initialization.initialization
+        = static_cast<hipblaslt_initialization>(std::numeric_limits<int>::max());
+    EXPECT_THROW(generateMatrix(initialization), std::invalid_argument);
+
+    std::array<float, 1> values{};
+    EXPECT_THROW(
+        initialize(std::span<float>(values), hipblaslt_initialization::fp16_accumulator_probe),
+        std::invalid_argument);
+
+    uint8_t unsupportedRuntimeStorage = 0x5a;
+    EXPECT_THROW(hipblaslt_init_small(
+                     static_cast<void*>(&unsupportedRuntimeStorage), 1, 1, 1, HIP_R_8F_E4M3),
+                 std::invalid_argument);
+    EXPECT_EQ(unsupportedRuntimeStorage, 0x5a);
+}
+
+TEST(HostValidationDataInitializationBridge, DeviceInitializationUploadsGeneratedTensor)
+{
+    using namespace hipblaslt::host_validation;
+
+    MatrixInitialization initialization;
+    initialization.role             = MatrixRole::B;
+    initialization.initialization   = hipblaslt_initialization::integer_exact;
+    initialization.type             = HIP_R_32F;
+    initialization.rows             = 2;
+    initialization.columns          = 3;
+    initialization.leadingDimension = 4;
+    initialization.batchStride      = 12;
+    initialization.batchCount       = 2;
+    const Tensor expected           = generateMatrix(initialization);
 
     void* device = nullptr;
-    ASSERT_EQ(hipMalloc(&device, expected.size()), hipSuccess);
-    struct HostFillStateGuard
-    {
-        HostFillStateGuard()
-        {
-            set_host_side_fill_kernel_state(true);
-        }
-        ~HostFillStateGuard()
-        {
-            set_host_side_fill_kernel_state(false);
-        }
-    } guard;
+    ASSERT_EQ(hipMalloc(&device, expected.storage().size()), hipSuccess);
 
     hipblaslt_init_device(ABC_dims::B,
                           initialization.initialization,
@@ -732,10 +774,10 @@ TEST(HostValidationDataInitializationBridge, HostSideDeviceFillCopiesComponentSt
                           initialization.type,
                           initialization.batchStride,
                           initialization.batchCount);
-    std::vector<std::byte> observed(expected.size());
+    std::vector<std::byte> observed(expected.storage().size());
     EXPECT_EQ(hipMemcpy(observed.data(), device, observed.size(), hipMemcpyDeviceToHost),
               hipSuccess);
-    EXPECT_EQ(observed, expected);
+    EXPECT_TRUE(std::equal(observed.begin(), observed.end(), expected.storage().begin()));
     EXPECT_EQ(hipFree(device), hipSuccess);
 }
 
