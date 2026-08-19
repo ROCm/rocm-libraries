@@ -51,7 +51,7 @@ namespace rocsparse
     {
         const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
         const int         asic_rev      = handle->asic_rev;
-        *sleep  = (gcn_arch_name == rocpsarse_arch_names::gfx908 && asic_rev < 2);
+        *sleep  = (gcn_arch_name == rocsparse_arch_names::gfx908 && asic_rev < 2);
         *wfsize = (*sleep) ? 64 : handle->wavefront_size;
     }
 
