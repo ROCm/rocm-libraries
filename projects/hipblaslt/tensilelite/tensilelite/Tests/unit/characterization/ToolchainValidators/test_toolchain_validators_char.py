@@ -4,8 +4,8 @@
 # ADD-ONLY: pins current behavior of the toolchain component validators.
 # Posix-focused (the container is Linux); Windows-only branches are documented
 # as resistance rather than exercised (os.name cannot be flipped meaningfully
-# because the Windows paths call os.environ["PATHEXT"], _windowsLatestRocmBin,
-# etc. on a non-Windows fs). See target.md.
+# because the Windows extension handling reads os.environ["PATHEXT"] on a
+# non-Windows filesystem). See target.md.
 ################################################################################
 import importlib
 import os
@@ -73,34 +73,6 @@ def test_exe_exists_true_false(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _posixSearchPaths (env-driven, pure)
-# ---------------------------------------------------------------------------
-def test_posix_search_paths_defaults(monkeypatch):
-    monkeypatch.delenv("ROCM_PATH", raising=False)
-    monkeypatch.delenv("PATH", raising=False)
-    paths = V._posixSearchPaths()
-    assert V.DEFAULT_ROCM_BIN_PATH_POSIX in paths
-    assert V.DEFAULT_ROCM_LLVM_BIN_PATH_POSIX in paths
-
-
-def test_posix_search_paths_with_rocm_and_path(monkeypatch):
-    monkeypatch.setenv("ROCM_PATH", "/custom/rocm")
-    monkeypatch.setenv("PATH", "/binA" + os.pathsep + "/binB")
-    paths = V._posixSearchPaths()
-    from pathlib import Path
-
-    assert Path("/custom/rocm/bin") in paths
-    assert Path("/custom/rocm/lib/llvm/bin") in paths
-    assert Path("/binA") in paths
-    assert Path("/binB") in paths
-    # ROCM_PATH entries precede the defaults precede PATH entries
-    assert paths.index(Path("/custom/rocm/bin")) < paths.index(
-        V.DEFAULT_ROCM_BIN_PATH_POSIX
-    )
-    assert paths.index(V.DEFAULT_ROCM_BIN_PATH_POSIX) < paths.index(Path("/binA"))
-
-
-# ---------------------------------------------------------------------------
 # _validateExecutable
 # ---------------------------------------------------------------------------
 def _make_exe(d, name):
@@ -148,7 +120,7 @@ def test_validate_toolchain_no_args():
 
 def test_validate_toolchain_single_returns_scalar(tmp_path, monkeypatch):
     _make_exe(tmp_path, "amdclang++")
-    monkeypatch.setattr(V, "_posixSearchPaths", lambda: [tmp_path])
+    monkeypatch.setattr(V, "executable_search_paths", lambda: [tmp_path])
     result = V.validateToolchain("amdclang++")
     assert result == str(tmp_path / "amdclang++")
     assert isinstance(result, str)
@@ -157,18 +129,16 @@ def test_validate_toolchain_single_returns_scalar(tmp_path, monkeypatch):
 def test_validate_toolchain_multiple_returns_tuple(tmp_path, monkeypatch):
     _make_exe(tmp_path, "amdclang++")
     _make_exe(tmp_path, "amdclang")
-    monkeypatch.setattr(V, "_posixSearchPaths", lambda: [tmp_path])
+    monkeypatch.setattr(V, "executable_search_paths", lambda: [tmp_path])
     result = V.validateToolchain("amdclang++", "amdclang")
     assert isinstance(result, tuple)
     assert result == (str(tmp_path / "amdclang++"), str(tmp_path / "amdclang"))
 
 
 def test_validate_toolchain_propagates_not_found(tmp_path, monkeypatch):
-    monkeypatch.setattr(V, "_posixSearchPaths", lambda: [tmp_path])
+    monkeypatch.setattr(V, "executable_search_paths", lambda: [tmp_path])
     with pytest.raises(FileNotFoundError):
-        validate = V.validateToolchain("amdclang++")
-        # generator is lazy for the single-arg path; force evaluation
-        _ = validate
+        V.validateToolchain("amdclang++")
 
 
 # ---------------------------------------------------------------------------
@@ -181,53 +151,11 @@ def test_toolchain_defaults_posix():
     assert d.OFFLOAD_BUNDLER == "clang-offload-bundler"
     assert d.ASSEMBLER == "amdclang++"
     assert d.HIP_CONFIG == "hipconfig"
-    assert d.DEVICE_ENUMERATOR in ("rocm_agent_enumerator", "amdgpu-arch")
+    assert d.DEVICE_ENUMERATOR == "offload-arch"
 
 
 def test_oss_select_posix():
     assert V.osSelect(linux="L", windows="W") == "L"
-
-
-# ---------------------------------------------------------------------------
-# Windows-only helpers — exercised directly where they do not gate on os.name.
-# These pin the Windows path-selection logic even though the host is Linux.
-# ---------------------------------------------------------------------------
-def test_windows_latest_rocm_bin_picks_highest(tmp_path):
-    (tmp_path / "5.7").mkdir()
-    (tmp_path / "6.0").mkdir()
-    (tmp_path / "6.10").mkdir()
-    (tmp_path / "not-a-version").mkdir()
-    (tmp_path / "5.9.txt").write_text("x")  # not a dir
-    latest = V._windowsLatestRocmBin(tmp_path)
-    assert latest == tmp_path / "6.10" / "bin"
-
-
-def test_windows_latest_rocm_bin_none_when_empty(tmp_path):
-    assert V._windowsLatestRocmBin(tmp_path) is None
-
-
-def test_windows_search_paths_direct(monkeypatch):
-    from pathlib import Path
-
-    monkeypatch.setenv("HIP_PATH", "/hip/root")
-    monkeypatch.setenv("PATH", "/winA" + os.pathsep + "/winB")
-    paths = V._windowsSearchPaths()
-    assert Path("/hip/root/bin") in paths
-    assert Path("/winA") in paths
-    assert Path("/winB") in paths
-    # HIP_PATH precedes PATH entries
-    assert paths.index(Path("/hip/root/bin")) < paths.index(Path("/winA"))
-
-
-def test_windows_search_paths_appends_latest_rocm_bin(tmp_path, monkeypatch):
-    from pathlib import Path
-
-    (tmp_path / "6.2").mkdir()
-    monkeypatch.setattr(V, "DEFAULT_ROCM_BIN_PATH_WINDOWS", tmp_path)
-    monkeypatch.delenv("HIP_PATH", raising=False)
-    monkeypatch.delenv("PATH", raising=False)
-    paths = V._windowsSearchPaths()
-    assert tmp_path / "6.2" / "bin" in paths
 
 
 def test_windows_with_extensions_raises_on_posix():
