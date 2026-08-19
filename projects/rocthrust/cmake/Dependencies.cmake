@@ -444,9 +444,10 @@ if(BUILD_BENCHMARK)
       set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
     endif()
 
-    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON leaks into
+    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON and BUILD_TEST=ON leaks into
     # rocrand and causes its benchmarks to build. Suppress that here.
     set(BUILD_BENCHMARK OFF)
+    set(BUILD_TEST OFF)
     
     FetchContent_Declare(
       rocrand
@@ -459,6 +460,7 @@ if(BUILD_BENCHMARK)
     )
     FetchContent_MakeAvailable(rocrand)
     set(BUILD_BENCHMARK ON)
+    set(BUILD_TEST ON)
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
