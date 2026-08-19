@@ -569,7 +569,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 # idle -- gives back 420 VGPRs / occ 2 / zero spill for +1.3%
                 # instructions. hdim 32/64 already reach occupancy 2, so they
                 # keep the register accumulators and pay no LDS traffic.
-                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
+                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
                 FmhaBwdDQDKDVTileSize( 32,  64, 256,  32, 256,  32, 32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
             ]  # fmt: skip
         return []

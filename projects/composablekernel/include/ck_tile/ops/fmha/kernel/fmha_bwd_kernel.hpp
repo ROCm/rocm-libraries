@@ -1560,12 +1560,26 @@ struct FmhaBwdDQDKDVKernel
                 sequence<false, (kPadHeadDimV > 0)>{});
         }();
 
-        // lse and d should be fine to read unpaded data as they are not on the reduction dimension
-        const auto lse_dram = make_naive_tensor_view_packed<address_space_enum::global>(
-            lse_ptr, make_tuple(kargs.seqlen_q), number<FmhaPipeline::kM0>{});
+        // lse and d are 1-D over seqlen_q and must be padded to kM0. When
+        // kM0 > warp size, MakeLSEDDramTileDistribution gives each lane
+        // M2 = kM0/warp_size seqlen-contiguous elements, so the tail access is a
+        // multi-dword transaction. Without a pad transform the coordinate is
+        // statically valid, an unconditional wide load is emitted, and at an odd
+        // seqlen_q it straddles num_records and is nullified as a whole --
+        // zeroing lse/d for the last real row and corrupting dQ/dK/dV.
+        // pad_tensor_view keeps element_space_size (no extra allocation needed)
+        // and supplies the per-element validity predicate.
+        const auto lse_dram = pad_tensor_view(
+            make_naive_tensor_view<address_space_enum::global>(
+                lse_ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{}),
+            make_tuple(number<FmhaPipeline::kM0>{}),
+            sequence<true>{});
 
-        const auto d_dram = make_naive_tensor_view_packed<address_space_enum::global>(
-            d_ptr, make_tuple(kargs.seqlen_q), number<FmhaPipeline::kM0>{});
+        const auto d_dram = pad_tensor_view(
+            make_naive_tensor_view<address_space_enum::global>(
+                d_ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{}),
+            make_tuple(number<FmhaPipeline::kM0>{}),
+            sequence<true>{});
 
         const auto do_dram_naive = make_naive_tensor_view<address_space_enum::global>(
             do_ptr,
