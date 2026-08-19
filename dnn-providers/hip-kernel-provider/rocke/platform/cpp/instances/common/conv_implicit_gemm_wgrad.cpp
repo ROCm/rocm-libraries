@@ -1472,9 +1472,11 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      * is NOT the stride-1 tensor axis.  The stride-1 axis is the free axis
      * (k_out = M for dY, inner C of N_wg for X), so vectorise the global load
      * along that axis and transpose-on-store into the (M/N, K) LDS tile
-     * (vector_axis="row").  Enabled for the sync CDNA-MFMA path only
-     * (!is_wmma): the async path writes lane-contiguous LDS and the WMMA path is
-     * a separate follow-on.  vec_a | K and vec_b | C keep the free-axis vector
+     * (vector_axis="row").  The transpose-on-store fills the SAME row-major LDS
+     * the scalar path produced, so the MMA consumer (MFMA or WMMA) reads it
+     * unchanged.  Enabled for every sync path (MFMA and WMMA); only the async
+     * path is excluded (it writes lane-contiguous LDS and cannot host a
+     * transpose-on-store).  vec_a | K and vec_b | C keep the free-axis vector
      * within one stride-1 run; choose_vec_axis enforces even tile distribution;
      * width 1 falls back to the scalar vector_axis="col" path (byte-identical). */
     ctx->threads = spec->warp_m * spec->warp_n * spec->wave_size;
@@ -1502,7 +1504,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         int vb = 1;
         bool axis_a = false;
         bool axis_b = false;
-        if(!ctx->is_wmma)
+        /* Every sync path (MFMA and WMMA); the async branch is handled above. */
         {
             /* free-axis width: widest of {8,4,2,1} ({4,2,1} for fp32) dividing
              * the channel count -- Python _free_axis_vec(kpg/cpg, dtype). */

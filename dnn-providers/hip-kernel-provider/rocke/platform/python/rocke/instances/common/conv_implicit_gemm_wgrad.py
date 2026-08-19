@@ -824,12 +824,14 @@ def build_implicit_gemm_conv_wgrad(
     # The stride-1 axis is instead the GEMM *free* axis: k_out (= M) for dY and
     # the inner C of N_wg for X.  So vectorise the global load along that free
     # (row) axis and transpose it into the row-major (M/N, K) LDS tile on store
-    # (CoalescedTileLoader vector_axis="row").  The MFMA consumer reads the same
-    # K-contiguous LDS tile unchanged.
+    # (CoalescedTileLoader vector_axis="row").  The transpose-on-store fills the
+    # SAME row-major (M/N, K) LDS tile the scalar path produced (identical LDS
+    # contents; only the load/store instructions differ), so the MMA consumer --
+    # MFMA or WMMA -- reads it unchanged.
     #
-    # Enabled for the sync CDNA-MFMA path only (op.family == "mma"): the async
-    # (raw_ptr_buffer_load_lds) path writes lane-contiguous LDS and cannot host a
-    # transpose-on-store; the WMMA path is a separate follow-on.  Correctness
+    # Enabled for every sync path (MFMA and WMMA); only the async
+    # (raw_ptr_buffer_load_lds) path is excluded, because it writes
+    # lane-contiguous LDS and cannot host a transpose-on-store.  Correctness
     # requires the free-axis vector to stay within one stride-1 run -- vec_a | K
     # (dY's k_out is contiguous over the whole K dim) and vec_b | C (an X vector
     # must not cross a (y,x) filter boundary) -- and choose_vec additionally
@@ -839,7 +841,7 @@ def build_implicit_gemm_conv_wgrad(
     axis_a = axis_b = "col"
     load_vec_a = 1
     load_vec_b = 1
-    if not spec.async_dma and op.family == "mma":
+    if not spec.async_dma:
 
         def _free_axis_vec(chan: int, dtype: str) -> int:
             widths = (8, 4, 2, 1) if dtype != "fp32" else (4, 2, 1)

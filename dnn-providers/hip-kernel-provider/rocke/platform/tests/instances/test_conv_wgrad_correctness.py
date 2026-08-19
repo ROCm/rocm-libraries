@@ -22,9 +22,11 @@ Coverage:
     asymmetric HW, small channel
   - Dtypes: fp16, bf16
 
-The GPU sweep is MFMA-only (gfx942/gfx950); the wgrad vector-load path is gated to
-``op.family == "mma"`` (the WMMA/gfx1250 path is a separate follow-on). Requires a
-ROCm GPU and torch. Run:
+The vector-load path is enabled for every sync MMA family (MFMA and WMMA); only
+the async-DMA path is excluded. The GPU numeric sweep here is MFMA-only
+(gfx942/gfx950) because that is the hardware available for verification; the WMMA
+path is covered by ``TestConvWgradVectorLoad`` (CPU IR-emission guard) and awaits
+gfx1250 hardware for a numeric sign-off. Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python <torch-python> -m pytest \\
         rocke/platform/tests/instances/test_conv_wgrad_correctness.py
 """
@@ -179,16 +181,27 @@ def _make_spec(
     from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
     target = ArchTarget.from_gfx(arch)
+    # MMA family + tile shape follow the wave size: wave64 -> MFMA (32x32 atom),
+    # wave32 -> WMMA (16x16 atom). The MFMA branch keeps the historical values so
+    # its emitted IR / goldens are unchanged; WMMA uses a 16x16-shaped tile.
+    family = "wmma" if target.wave_size == 32 else "mma"
+    if family == "wmma":
+        tile_m, tile_n, tile_k = 32, 32, 32
+        warp_m, warp_n, warp_tile_mn = 1, 1, 16
+    else:
+        tile_m, tile_n, tile_k = _TILE_M, _TILE_N, _TILE_K
+        warp_m, warp_n, warp_tile_mn = _WARP_M, _WARP_N, _WARP_TILE_MN
     atom = target.mma.select_largest_k(
+        family=family,
         a_dtype=dtype,
         b_dtype=dtype,
         c_dtype="fp32",
-        m=_WARP_TILE_MN,
-        n=_WARP_TILE_MN,
-        k_max=_TILE_K,
+        m=warp_tile_mn,
+        n=warp_tile_mn,
+        k_max=tile_k,
     )
     if atom is None:
-        return None, None, f"no atom for dtype={dtype} k={_TILE_K}"
+        return None, None, f"no {family} atom for dtype={dtype} k={tile_k}"
 
     problem = ConvProblem(
         N=shape.N,
@@ -216,23 +229,24 @@ def _make_spec(
             wg_M=problem.kpg,
             wg_N=problem.Y * problem.X * problem.cpg,
             wg_K=problem.N * problem.Ho * problem.Wo,
-            tile_m=_TILE_M,
-            tile_n=_TILE_N,
-            tile_k=_TILE_K,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
             arch=arch,
         ).split_k
     spec = WgradConvSpec(
         problem=problem,
         name=f"test_wgrad_{shape.id}_{dtype}_{pipeline}_{epilogue}_spk{split_k}",
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-        tile_m=_TILE_M,
-        tile_n=_TILE_N,
-        tile_k=_TILE_K,
-        warp_m=_WARP_M,
-        warp_n=_WARP_N,
-        warp_tile_m=_WARP_TILE_MN,
-        warp_tile_n=_WARP_TILE_MN,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
         warp_tile_k=atom.k,
+        wave_size=target.wave_size,
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=split_k,
@@ -454,6 +468,18 @@ class TestConvWgradVectorLoad(unittest.TestCase):
             0,
             "expected vectorised (buffer_load_vN) dY/X loads for a dense 3x3 wgrad "
             "on gfx950, but the lowered IR only has scalar buffer loads",
+        )
+
+    def test_wmma_dense_emits_vector_loads(self):
+        # The free-axis vectorised load is portable: WMMA (wave32) fills the same
+        # row-major LDS tile as MFMA, so a dense C/K wgrad must vectorise on the
+        # RDNA/WMMA path too. gfx1201 lowers on the CPU (no comgr/GPU needed).
+        ll = self._lower(_SHAPES[0], arch="gfx1201", dtype="fp16")
+        self.assertGreater(
+            _count_vector_buffer_loads(ll),
+            0,
+            "expected vectorised (buffer_load_vN) dY/X loads for a dense 3x3 wgrad "
+            "on gfx1201/WMMA, but the lowered IR only has scalar buffer loads",
         )
 
     def test_odd_channels_stay_scalar(self):

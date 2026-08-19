@@ -356,18 +356,18 @@
         },
         "conv_wgrad/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
-          "bytes": 78547,
+          "bytes": 50026,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "9924afa1ba16028637e182f6387e118ac3d1333c71d3ff37f08522387072f041",
+          "sha256": "ddea585b03f23dca19fa2db10ddb820c264cafcb9364c8317268489707d5b841",
           "status": "ok"
         },
         "conv_wgrad/gfx1201/n1h8c16k32r3": {
           "arch": "gfx1201",
-          "bytes": 72142,
+          "bytes": 43628,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "f8cfca7a827a4cf261521f0dddb2dfd933248eb50df61253b3af211419c2fabd",
+          "sha256": "abcc3065391d7df85ad05c1abb6d0a7f3a9bf72ed9d221a7184d2b396f4bc04f",
           "status": "ok"
         },
         "conv_wgrad/gfx90a/n1h8c16k32r3": {
@@ -1040,18 +1040,18 @@
         },
         "conv_wgrad/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
-          "bytes": 78697,
+          "bytes": 50165,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "b70b244976f8adb9d662b32f8b99546b4c8cd1614eaa637cbca12d3d65ab8bb5",
+          "sha256": "21e62e04f74f42b8f74f04935244c025150b6c8c38255d950f8ed9fac94fe51f",
           "status": "ok"
         },
         "conv_wgrad/gfx1201/n1h8c16k32r3": {
           "arch": "gfx1201",
-          "bytes": 72290,
+          "bytes": 43767,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "f1c0f792bf09522c8f58a6710272e975925a8c16c20c6f1a4a8a87b630a5c4a9",
+          "sha256": "a92a5e0b9b6874fb3e24e369f249240df99b78a1c839f2abcdec3001e8b879bb",
           "status": "ok"
         },
         "conv_wgrad/gfx90a/n1h8c16k32r3": {
@@ -1724,18 +1724,18 @@
         },
         "conv_wgrad/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
-          "bytes": 78701,
+          "bytes": 50169,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "01b7f7b79c3487f887dd830d167f0da1470f37b3796e2c9ead7b12f7d6077c66",
+          "sha256": "7eec218b49093645ba3854b8d921313fa198d9552a3eecb4b477996ad8432a79",
           "status": "ok"
         },
         "conv_wgrad/gfx1201/n1h8c16k32r3": {
           "arch": "gfx1201",
-          "bytes": 72294,
+          "bytes": 43771,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "88bfdb7ed49fcbb052652cd10809215ed9fa17dc3aaf4f5436d992bffb535d35",
+          "sha256": "908885dcfd621493a5dc50f86832577692b1a73fced09dcef82144e1574d6ec8",
           "status": "ok"
         },
         "conv_wgrad/gfx90a/n1h8c16k32r3": {
