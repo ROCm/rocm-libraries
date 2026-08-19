@@ -513,6 +513,23 @@ typedef struct {
     Rpp32u n, c, h, w;
     RpptStrides strides;
     RpptLayout layout;
+
+    RpptDesc() = default;
+
+    RpptDesc(Rpp32u n, Rpp32u c, Rpp32u h, Rpp32u w, RpptDataType dataType, RpptLayout layout)
+        : numDims(4), offsetInBytes(0), dataType(dataType), n(n), c(c), h(h), w(w), layout(layout) {
+        if (layout == NCHW) {
+            strides.nStride = c * h * w;
+            strides.cStride = h * w;
+            strides.hStride = w;
+            strides.wStride = 1;
+        } else if (layout == NHWC) {
+            strides.nStride = h * w * c;
+            strides.hStride = w * c;
+            strides.wStride = c;
+            strides.cStride = 1;
+        }
+    }
 } RpptDesc, *RpptDescPtr;
 
 /*! \brief RPPT Tensor Generic descriptor type struct
