@@ -71,16 +71,15 @@ int main() {
                  1.0f) > 1e-6f)
         return 1;
 
-    Tensor layerNormOutput(ScalarType::Float32, Shape{1, 2});
-    Tensor layerNormMean(ScalarType::Float32, Shape{1});
-    Tensor layerNormInverseVariance(ScalarType::Float32, Shape{1});
-    LayerNormProblem layerNorm(softmaxInput, layerNormOutput, 1, ScalarType::Float32);
-    layerNorm.mean = layerNormMean;
-    layerNorm.inverseVariance = layerNormInverseVariance;
-    const LayerNormRunInfo layerNormRun = referenceLayerNorm(layerNorm);
-    if (layerNormRun.slicesProcessed != 1 || layerNormRun.outputElementsWritten != 2 ||
-        layerNormRun.meanElementsWritten != 1 || layerNormRun.inverseVarianceElementsWritten != 1 ||
-        layerNormMean.loadAs<float>({0}) != 1.5f)
+    LayerNormProblem layerNorm(softmaxInput, ScalarType::Float32, 1, ScalarType::Float32);
+    layerNorm.meanType = ScalarType::Float32;
+    layerNorm.inverseVarianceType = ScalarType::Float32;
+    const LayerNormResult layerNormResult = referenceLayerNorm(layerNorm);
+    if (layerNormResult.runInfo.slicesProcessed != 1 ||
+        layerNormResult.runInfo.outputElementsWritten != 2 ||
+        layerNormResult.runInfo.meanElementsWritten != 1 ||
+        layerNormResult.runInfo.inverseVarianceElementsWritten != 1 || !layerNormResult.mean ||
+        layerNormResult.mean->loadAs<float>({0}) != 1.5f)
         return 1;
     return 0;
 }

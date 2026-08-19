@@ -299,18 +299,21 @@ implementation subtracts each slice's maximum before exponentiation.
 explicit tensor axis:
 
 ```cpp
-LayerNormProblem problem(inputView, outputView, axis, ScalarType::Float32);
-problem.mean = meanView;
-problem.inverseVariance = inverseVarianceView;
+LayerNormProblem problem(
+    inputTensor, ScalarType::Float32, axis, ScalarType::Float32);
+problem.meanType = ScalarType::Float32;
+problem.inverseVarianceType = ScalarType::Float32;
 problem.gamma = gammaView;
 problem.beta = betaView;
 problem.epsilon = 1e-5;
-LayerNormRunInfo run = referenceLayerNorm(problem);
+LayerNormResult result = referenceLayerNorm(problem);
 ```
 
-Mean/inverse-variance outputs and affine gamma/beta tensors are optional.
-Input/output layouts may differ; gamma and beta are vectors over the normalized
-axis.
+`meanType` and `inverseVarianceType` independently request statistics whose
+shape removes the normalized axis. The owning overload returns contiguous
+tensors and accepts an optional `TensorStorageAllocator`. `LayerNormRequest`
+writes caller-owned destinations. Gamma and beta are optional vectors over the
+normalized axis.
 
 ## Structured tensor comparison
 
