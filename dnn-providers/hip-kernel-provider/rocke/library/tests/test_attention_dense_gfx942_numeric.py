@@ -28,7 +28,10 @@ import math
 
 import pytest
 
-from kernels.gfx942.attention_dense import run_attention_dense_torch
+from kernels.gfx942.attention_dense import (
+    Gfx942DenseTuning,
+    run_attention_dense_torch,
+)
 
 
 def _gpu_ready():
@@ -62,6 +65,7 @@ _COHORT = [
     ("fp16", 128, 16, 4, False, True),  # flagship default (causal)
     ("fp16", 128, 16, 4, True, True),  # flagship persistent
     ("bf16", 128, 16, 4, True, True),  # bf16 D128 persistent (the VGPR-starved config)
+    ("bf16", 128, 16, 4, False, True),  # bf16 D128 default (exp2_fast arm enabled here)
     ("fp16", 64, 16, 16, False, True),  # D64 MHA default
     ("bf16", 64, 16, 4, True, True),  # D64 bf16 persistent (the wpe=4 config)
     ("fp16", 128, 16, 16, False, True),  # fp16 D128 MHA default -- swizzle path, MHA
@@ -200,6 +204,57 @@ def test_dense_fp16_d128_numeric_correct_at_non_shipped_tile_width(block_n):
     ).transpose(1, 2)
     max_abs = (ref - out.float()).abs().max().item()
     assert max_abs < tol, f"fp16 D128 block_n={block_n}: max_abs={max_abs:.3e} >= {tol}"
+
+
+# bf16 D128 is the config this PR flips to exp2_fast, on BOTH grids. The oracle
+# test above (tol=4e-2 vs fp32 SDPA) is far too loose to tell the two exp2 arms
+# apart, so it cannot back the "results unchanged" claim. This does: a forced-off
+# vs forced-on A/B on one identical spec must agree for every reachable softmax
+# argument (both softmax args are always <= 0, exactly exp2_fast's precondition).
+_EXP2_AB_COHORT = [
+    ("bf16", 128, 16, 4, False),  # default grid (newly enabled here)
+    ("bf16", 128, 16, 4, True),  # persistent grid
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype,d,hq,hkv,persistent", _EXP2_AB_COHORT)
+def test_exp2_fast_matches_plain_exp2(dtype, d, hq, hkv, persistent):
+    import torch
+
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B, S = 1, 512
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+
+    q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    spec = _spec(dtype, d, hq, hkv, persistent, batch=B, sq=S)
+
+    # Forced-off vs forced-on compile to distinct binaries (gfx942_kernel_name
+    # tags the non-policy arm `e2f0`), so this really exercises both code paths.
+    outs = {}
+    for use_fast in (False, True):
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            scale=scale,
+            tuning=Gfx942DenseTuning(use_exp2_fast=use_fast),
+        )
+        outs[use_fast] = out
+    torch.cuda.synchronize()
+
+    max_abs = (outs[False].float() - outs[True].float()).abs().max().item()
+    assert torch.equal(outs[False], outs[True]), (
+        f"{dtype} D{d} {'persist' if persistent else 'default'}: exp2_fast "
+        f"diverged from plain exp2 (max_abs={max_abs:.3e})"
+    )
 
 
 if __name__ == "__main__":
