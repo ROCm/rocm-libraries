@@ -36,9 +36,21 @@ done locally or via dry-run before any change reaches production.**
 
 ## Setup
 
+The system Python on many AMD developer machines is managed by the OS and
+rejects `pip install` without `--break-system-packages`. Use a venv instead:
+
 ```bash
-# From the repo root
+# One-time setup (from anywhere)
+python3 -m venv ~/.venv/mirror-sync
+source ~/.venv/mirror-sync/bin/activate
 pip install pydantic requests pytest
+```
+
+Or, without activating:
+
+```bash
+python3 -m venv /tmp/mirror-sync-venv
+/tmp/mirror-sync-venv/bin/pip install pydantic requests pytest
 ```
 
 No build step is required. All scripts are plain Python 3.12 and import only
@@ -52,11 +64,14 @@ Tests live in `.github/scripts/tests/` and use `unittest` (runnable via
 `pytest` with no configuration needed).
 
 ```bash
-# Run all script unit tests
+# If your venv is activated:
 pytest .github/scripts/tests/ -v
 
+# Without activating (substituting your venv path):
+/tmp/mirror-sync-venv/bin/pytest .github/scripts/tests/ -v
+
 # Run a single test file
-pytest .github/scripts/tests/resolve_therock_ref_test.py -v
+pytest .github/scripts/tests/test_pr_merge_sync_patches.py -v
 ```
 
 **When adding a fix for any mirror-sync bug, include a corresponding test in

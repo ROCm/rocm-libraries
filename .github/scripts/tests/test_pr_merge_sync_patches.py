@@ -149,6 +149,21 @@ class ExtractCommitMessageTest(unittest.TestCase):
 
     Each test documents current behavior. Tests marked AICK-2007 capture
     the known bugs in commit-message extraction.
+
+    Fixtures (tests/fixtures/):
+      simple.patch          - clean [PATCH] prefix + (#42) PR ref, multi-line body,
+                              full diff section. The baseline happy-path input.
+      no_pr_ref.patch       - [PATCH] prefix with no (#NN) suffix. Confirms the
+                              PR-ref regex doesn't corrupt clean subjects.
+      multi_part.patch      - [PATCH 2/5] prefix. Exposes AICK-2007: only the bare
+                              "[PATCH]" token is stripped; "[PATCH N/M]" leaks through.
+      mime_encoded.patch    - Subject encoded as =?UTF-8?q?...?=. Exposes AICK-2007:
+                              no MIME decoding is performed.
+      folded_subject.patch  - Long subject folded across two lines (RFC 2822).
+                              Exposes AICK-2007: only the first line is captured.
+      body_with_dashes.patch - Commit body contains a "---...---" visual separator.
+                              Exposes AICK-2007: any line starting with "---" stops
+                              extraction, truncating the rest of the body.
     """
 
     def test_simple_patch_strips_patch_prefix_and_pr_ref(self):
@@ -499,13 +514,20 @@ class ApplyPatchTest(unittest.TestCase):
     """
 
     def setUp(self):
+        # Strategy: we need a real .patch file and a real target repo to apply it
+        # to. We build both from scratch in a temp directory so these tests have
+        # no dependency on the state of the working tree.
+        #
+        # Layout:
+        #   <tmpdir>/repo/       - the "sub-repo" we will apply the patch to
+        #   <tmpdir>/patch_repo/ - a scratch repo used only to generate the patch
+        #   <tmpdir>/change.patch
         self._tmpdir = tempfile.TemporaryDirectory()
         self.repo = Path(self._tmpdir.name) / "repo"
         self.repo.mkdir()
         make_git_repo(self.repo)
         make_initial_commit(self.repo, "file.txt", "line1\nline2\nline3\n")
 
-        # Generate a real patch against the initial commit.
         patch_repo = Path(self._tmpdir.name) / "patch_repo"
         patch_repo.mkdir()
         make_git_repo(patch_repo)
@@ -574,12 +596,15 @@ class PushChangesTest(unittest.TestCase):
     def test_no_post_push_verification_performed(self):
         # AICK-2010: after a successful push there is no verification step
         # (e.g., fetching the remote to confirm the commit landed). The current
-        # code calls _run_git exactly once and then returns.
+        # code calls _run_git exactly once (the push itself) and then returns.
+        #
+        # This test is intentionally written against call_count so that when a
+        # retry or verification step is added, the test breaks and forces the
+        # author to explicitly update it with the new expected call sequence.
         with patch.object(sut, "_run_git") as mock_git:
             mock_git.return_value = ""
             sut._push_changes(Path("/tmp/repo"), "develop")
         self.assertEqual(mock_git.call_count, 1)
-        # After the fix, call_count may be > 1 due to a verification fetch.
 
 
 # ---------------------------------------------------------------------------
