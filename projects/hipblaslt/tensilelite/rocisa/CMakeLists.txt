@@ -63,8 +63,7 @@ target_include_directories(rocisa-cpp
 # Device generation always owns the in-tree extension. ROCISA_BUILD_PYTHON
 # retains a root-project rocisa-only configuration; the standalone project
 # remains independently buildable by Python packaging.
-if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS OR ROCISA_STANDALONE)
+if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON OR ROCISA_STANDALONE)
     # nanobind requires Python to be found first.
     if(ROCISA_USE_STABLE_ABI)
         find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
