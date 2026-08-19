@@ -129,8 +129,13 @@ def _changed_files(
 def changed_ambr_files(
     merge_base_ref: str, head: str, repo_root: Path, characterization_dir: str
 ) -> list[str]:
-    """`.ambr` goldens added/copied/modified/renamed between merge-base and head."""
-    names = _changed_files((merge_base_ref, head), "ACMR", characterization_dir, repo_root)
+    """`.ambr` goldens added/copied/modified between merge-base and head.
+
+    Deliberately excludes renames: a pure rename (e.g. a test function renamed,
+    carrying its golden along byte-for-byte) changes no pinned content, so it
+    must not count toward the blanket-regeneration threshold.
+    """
+    names = _changed_files((merge_base_ref, head), "ACM", characterization_dir, repo_root)
     return sorted(p for p in names if p.endswith(".ambr"))
 
 
