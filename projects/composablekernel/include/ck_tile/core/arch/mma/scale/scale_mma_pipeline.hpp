@@ -327,12 +327,10 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        // DenseFallbackMmaOp::exec is not templated on Params
-                        // (no op_sel/reuse dependency for a plain dense op).
-                        c_buf.at(bm * FragsN + bn) =
-                            DenseFallbackMmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                     b_buf.at(bn * FragsK + bk),
-                                                     c_buf.at(bm * FragsN + bn));
+                        c_buf.at(bm * FragsN + bn) = DenseFallbackMmaOp::template exec<Params...>(
+                            a_buf.at(bm * FragsK + bk),
+                            b_buf.at(bn * FragsK + bk),
+                            c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
@@ -345,10 +343,10 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_buf.at(bm * FragsN + bn) =
-                            DenseFallbackMmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                     b_buf.at(bn * FragsK + bk),
-                                                     c_buf.at(bm * FragsN + bn));
+                        c_buf.at(bm * FragsN + bn) = DenseFallbackMmaOp::template exec<Params...>(
+                            a_buf.at(bm * FragsK + bk),
+                            b_buf.at(bn * FragsK + bk),
+                            c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
