@@ -205,7 +205,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     // dbias only). The applicability gate selects that path only when this many fields
     // fit in dx, so this count must not be too small. This matches the logic captured
     // in MIOpen backward_spatial.cpp.
-    const unsigned int STASH_VALUES_BWD = !_usesSavedStats ? 4u : 2u;
+    const unsigned int stashValuesBwd = !_usesSavedStats ? 4u : 2u;
     KernelConfig config;
     if(useMultiple(dims.n,
                    dims.h,
@@ -222,7 +222,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                      dims.isLayoutNHWC,
                                      dims.useFp32,
                                      minWorkgroups,
-                                     STASH_VALUES_BWD,
+                                     stashValuesBwd,
                                      config);
         if(config.variant == -1)
         {
@@ -329,7 +329,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
         stashMethod = getStashMethod(dims.isLayoutNHWC,
                                      dims.useFp32,
-                                     STASH_VALUES_BWD,
+                                     stashValuesBwd,
                                      dims.c,
                                      dims.n,
                                      dims.inCstride,
