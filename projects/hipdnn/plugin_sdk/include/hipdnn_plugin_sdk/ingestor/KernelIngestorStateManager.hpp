@@ -443,7 +443,7 @@ private:
                                                       : _graphMatchFn(context);
                 if(graphMatch->has_value())
                 {
-                    catalog.bound = **graphMatch;
+                    catalog.bound = std::move(**graphMatch);
                 }
             }
 
