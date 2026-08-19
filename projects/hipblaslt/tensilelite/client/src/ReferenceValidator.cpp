@@ -29,7 +29,7 @@
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 
-#include "Reference.hpp"
+#include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/hip/HipUtils.hpp>
