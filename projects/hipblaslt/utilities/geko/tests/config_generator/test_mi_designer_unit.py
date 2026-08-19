@@ -10,7 +10,7 @@ from geko.schemas import GemmType
 
 
 def _config(streamk: bool = False) -> dict:
-    gt = GemmType.from_tensile("N", "N", "H", "H", "S")
+    gt = GemmType.from_tensilelite("N", "N", "H", "H", "S")
     return {
         "ARCH": "gfx950",
         "CUs": 256,

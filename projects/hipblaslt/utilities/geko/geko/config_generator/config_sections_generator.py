@@ -392,7 +392,8 @@ class ConfigSectionGenerator:
             'BenchmarkProblems': [[self._problem_type, benchmark_common]],
             'LibraryLogic': self._library_logic,
             '#LibraryClient': '',
-            'Backend': {"Name": "Ductile"} if is_ductile else {"Name": "Tensile"}
+            # ``tensile`` is the current TensileLite backend's wire identifier.
+            'Backend': {"Name": "Ductile"} if is_ductile else {"Name": "tensile"}
         }
 
         if is_ductile:

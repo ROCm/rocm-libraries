@@ -57,7 +57,7 @@ def main() -> None:
             "ductile",
             "tensile",
         ],
-        help="Tuning backend: Ductile or Tensile",
+        help="Tuning backend: Ductile or TensileLite",
     )
     parser.add_argument(
         "--search-space",
