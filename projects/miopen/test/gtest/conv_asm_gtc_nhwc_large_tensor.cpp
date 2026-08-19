@@ -27,24 +27,26 @@
 #include "unit_conv_solver.hpp"
 
 // The ASM-GTC NHWC solvers ConvAsmImplicitGemmGTCDynamic{Fwd,Bwd,Wrw}XdlopsNHWC index
-// global tensor memory with 32-bit element indices and do not implement large-tensor
-// support. Each solver's IsApplicable() therefore gates off any problem whose flattened
-// element count exceeds INT_MAX, so it cannot be selected for a shape it would silently
-// compute incorrectly.
+// global tensor memory with 32-bit BYTE offsets and do not implement large-tensor
+// support. Each solver's IsApplicable() therefore gates off any problem whose tensor
+// size in bytes exceeds INT_MAX, so it cannot be selected for a shape it would silently
+// compute incorrectly. Note the bound is on bytes, not elements: for fp16 the effective
+// element ceiling is half of INT_MAX.
 //
-// The two cases below share geometry and differ only in batch size N, so the element
+// The two cases below share geometry and differ only in batch size N, so the byte
 // count crosses the INT_MAX boundary and isolates the gate. The gate checks the
 // (direction-independent) in/out/weights descriptors; for this shape both the input and
-// output tensors have C*H*W per sample = 1024*162*92 = 15,261,696 elements:
-//     N=140 -> 2,136,637,440 <= INT_MAX (2,147,483,647): int32-safe, applicable
-//     N=141 -> 2,151,899,136 >  INT_MAX               : gated off, not applicable
+// output tensors have C*H*W per sample = 1024*162*92 = 15,261,696 elements, and fp16
+// doubles that to bytes:
+//     N=70 -> 2,136,637,440 bytes <= INT_MAX (2,147,483,647): int32-safe, applicable
+//     N=71 -> 2,167,160,832 bytes >  INT_MAX                : gated off, not applicable
 
 namespace {
 
 auto GetInRangeConvCase()
 {
     using miopen::unit_tests::ConvTestCase;
-    return ConvTestCase{{miopenHalf, miopenTensorNHWC, {140, 1024, 162, 92}},
+    return ConvTestCase{{miopenHalf, miopenTensorNHWC, {70, 1024, 162, 92}},
                         {miopenHalf, miopenTensorNHWC, {1024, 1024, 3, 3}},
                         miopenHalf,
                         {{1, 1}, {1, 1}, {1, 1}}};
@@ -53,7 +55,7 @@ auto GetInRangeConvCase()
 auto GetOverInt32ConvCase()
 {
     using miopen::unit_tests::ConvTestCase;
-    return ConvTestCase{{miopenHalf, miopenTensorNHWC, {141, 1024, 162, 92}},
+    return ConvTestCase{{miopenHalf, miopenTensorNHWC, {71, 1024, 162, 92}},
                         {miopenHalf, miopenTensorNHWC, {1024, 1024, 3, 3}},
                         miopenHalf,
                         {{1, 1}, {1, 1}, {1, 1}}};
@@ -68,7 +70,7 @@ auto GetInRangeParams()
     return p;
 }
 
-// element count > INT_MAX: the solver must be applicable on no device (gated off).
+// byte count > INT_MAX: the solver must be applicable on no device (gated off).
 auto GetGatedParams()
 {
     auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::None);
