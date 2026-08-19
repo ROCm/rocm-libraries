@@ -1,0 +1,177 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# ALMIOPEN-1779 experiment: does the CK-loader change (GetOfflineOrCurrentDeviceName,
+# honoring MIOPEN_DEVICE_ARCH) let ONE rocjitsu config validate MULTIPLE arches' dbsync
+# against SOURCE CK -- removing #10994's per-arch arch-matched-config requirement?
+#
+# Same source-CK artifact-reuse mechanism as therock-dbsync-rocjitsu.yml, but the matrix
+# deliberately runs gfx950 under the *cdna3* (gfx942) config. #10994 documents that this
+# mismatch aborts with "invalid device function": with the stock loader, MIOPEN_DEVICE_ARCH
+# selects gfx950's DBs while GetCurrentDeviceName() (the emulated gfx942 device) selects the
+# gfx942 CK lib -> DB/lib arch mismatch. This branch's change makes the loader follow
+# MIOPEN_DEVICE_ARCH, so the gfx950 lib + gfx950 DBs stay consistent on a cdna3 emulation.
+#
+# Legs:
+#   - gfx942 / cdna3  : control (config matches arch; == #10994) -> baseline.
+#   - gfx950 / cdna3  : THE TEST (cross-config) -> must load libMIOpenCKGroupedConv_gfx950.so
+#                       and validate gfx950 DBs GPU-free, with NO "invalid device function".
+#   - gfx950 / cdna4  : control (matched config; == #10994's validated path) -> baseline for
+#                       the expected gfx950 findings, to compare against the cdna3 leg.
+#
+# SUCCESS = the gfx950/cdna3 leg loads the gfx950 CK lib, runs StaticFDBSync end-to-end with
+# no "invalid device function" abort, and surfaces the SAME findings as the gfx950/cdna4
+# control. That proves one config + MIOPEN_DEVICE_ARCH covers any arch (incl. gfx90a/navi,
+# which have no rocjitsu config) as long as its source-CK artifact is built.
+#
+# artifact_run_id should be a ROCm/TheRock multi_arch_ci.yml dispatch (multiarch-ci-sweep)
+# pinned to this branch's commit, so the built miopen_gtest INCLUDES the loader change.
+name: "TheRock dbsync (CK-loader multiarch experiment)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: "Run id that produced the MIOpen artifacts (source-CK build of THIS branch)"
+        type: string
+        required: true
+      artifact_repo:
+        description: "Repo hosting artifact_run_id (ROCm/TheRock for a multi_arch_ci dispatch)"
+        type: string
+        default: "ROCm/TheRock"
+      fetch_artifact_args:
+        description: "MIOpen component fetch_artifact_args"
+        type: string
+        default: "--blas --miopen --rand --tests"
+      therock_ref:
+        description: "ROCm/TheRock ref providing build_tools"
+        type: string
+        default: "main"
+
+permissions:
+  contents: read
+
+jobs:
+  dbsync-ckloader:
+    name: "dbsync ck-loader (${{ matrix.arch }} / ${{ matrix.rj_config }})"
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: gfx942, family: gfx94X-dcgpu, rj_config: amdgpu_cdna3_kmd.json, role: "control-matched" }
+          - { arch: gfx950, family: gfx950-dcgpu, rj_config: amdgpu_cdna3_kmd.json, role: "TEST-cross-config" }
+          - { arch: gfx950, family: gfx950-dcgpu, rj_config: amdgpu_cdna4_kmd.json, role: "control-matched" }
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host --user 0
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      AMDGPU_FAMILIES: ${{ matrix.family }}
+      VENV_DIR: ${{ github.workspace }}/.venv
+    steps:
+      - name: Checkout ROCm/TheRock (build_tools)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ inputs.therock_ref }}
+
+      - name: Checkout rocm-libraries (scripts)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: rocm-libraries
+
+      - name: Checkout rocjitsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: 481982dfe23e181a302006747c561e7cf43e35ba # 2026-06-04
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install UV
+        run: pip install uv
+
+      - name: Create Python venv
+        run: python build_tools/setup_venv.py "${VENV_DIR}" --activate-in-future-github-actions-steps --use-uv
+
+      - name: Install test requirements
+        run: |
+          uv pip install -r requirements-test.txt
+          uv pip freeze
+
+      - name: Fetch artifact (source-CK build for ${{ matrix.family }}) from ${{ inputs.artifact_repo }}
+        timeout-minutes: 15
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python ./build_tools/install_rocm_from_artifacts.py \
+            --run-id="${ARTIFACT_RUN_ID}" \
+            --run-github-repo="${{ inputs.artifact_repo }}" \
+            --artifact-group="${AMDGPU_FAMILIES}" \
+            --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+            ${{ inputs.fetch_artifact_args }}
+
+      - name: Inspect artifact (CK plugin + DBs must be present)
+        run: |
+          set -euxo pipefail
+          test -f ./build/bin/miopen_gtest
+          echo "== CK grouped-conv plugins in the dist =="
+          find ./build -name 'libMIOpenCKGroupedConv_*.so' -print
+          echo "== ${{ matrix.arch }} system DBs in the dist =="
+          ls -la ./build/share/miopen/db/${{ matrix.arch }}*.HIP.fdb.txt \
+                 ./build/share/miopen/db/${{ matrix.arch }}*.db.txt
+
+      - name: Build rocjitsu KMD
+        run: |
+          set -euxo pipefail
+          apt-get update && apt-get install -y --no-install-recommends cmake build-essential libdrm-dev
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j"$(nproc)"
+
+      - name: Run StaticFDBSync (${{ matrix.role }}: ${{ matrix.arch }} on ${{ matrix.rj_config }})
+        run: |
+          set -uxo pipefail
+          export ROCM_PATH="$(realpath ./build)"
+          export LD_LIBRARY_PATH="$(realpath ./build/lib):${LD_LIBRARY_PATH:-}"
+          export RJ_CONFIG="$(realpath rocm-systems/emulation/rocjitsu/configs/${{ matrix.rj_config }})"
+          export MIOPEN_DEVICE_ARCH="${{ matrix.arch }}"
+          export MIOPEN_ENABLE_LOGGING=1
+          export MIOPEN_LOG_LEVEL=6
+          echo "role=${{ matrix.role }} arch=${{ matrix.arch }} rj_config=${{ matrix.rj_config }} MIOPEN_DEVICE_ARCH=$MIOPEN_DEVICE_ARCH"
+          set +e
+          LD_PRELOAD="$(realpath rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so)" \
+            ./build/bin/miopen_gtest --gtest_filter='*StaticFDBSync*' --gtest_color=no > dbsync.log 2>&1
+          rc=$?
+          set -e
+          echo "miopen_gtest exit code: $rc"
+
+          echo "### ${{ matrix.role }}: ${{ matrix.arch }} on ${{ matrix.rj_config }} (exit=$rc)" >> "$GITHUB_STEP_SUMMARY"
+          echo "CK libs loaded:" >> "$GITHUB_STEP_SUMMARY"
+          grep -aoE 'libMIOpenCKGroupedConv_[a-z0-9]+\.so' dbsync.log | sort -u | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || echo "- (none)" >> "$GITHUB_STEP_SUMMARY"
+          echo "invalid device function occurrences: $(grep -ac 'invalid device function' dbsync.log)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -aE 'invalid device function|No device|escaping launching kernel|Invalid perf config found|GetParam\(\) = |\[  PASSED  \]|\[  FAILED  \]|\[  SKIPPED \] [0-9]+ test' dbsync.log | tail -40 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "===== tail dbsync.log =====" ; tail -80 dbsync.log
+          exit 0
+
+      - name: Upload dbsync log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dbsync-log-${{ matrix.arch }}-${{ matrix.rj_config }}
+          path: dbsync.log
+          if-no-files-found: ignore
