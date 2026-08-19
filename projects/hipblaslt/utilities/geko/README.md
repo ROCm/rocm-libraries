@@ -38,7 +38,7 @@ Optimization Workflow:
 ```
 hipBLASLt Logs → Configure → Optimize   →    Benchmark → Filter → Merge
       ↓             ↓           ↓               ↓          ↓        ↓
-  YAML logs      TensileLite Tuning         Performance  Final   hipBLASLt
+  YAML logs      TensileLite     Tuning         Performance  Final   hipBLASLt
                  Configs  (Ductile or full)   Analysis   Library Integration
 ```
 
@@ -298,6 +298,7 @@ From the GEKO repo root you can also run the driver without installing (same cod
 For the full flag list with descriptions and defaults, see [CLI Reference](#cli-reference).
 
 Required packages (see `requirements.txt` for pinned versions):
+- `tensilelite` - Kernel generation and library manipulation APIs
 - `pyyaml` - YAML parsing
 - `pandas` - Data manipulation and tabular data operations
 - `numpy` - Numerical array operations
@@ -317,6 +318,20 @@ tox                           # in an isolated tox environment
 
 `tox` and `invoke test` forward extra arguments straight to pytest, e.g.
 `tox -- --skip-slow --skip-geko-bin` or `invoke test --skip-slow`.
+
+The plain `python3 -m pytest` / `invoke test` / `tox` paths assume you have already
+provisioned the environment by hand (steps 2–4, i.e. `tensilelite/requirements-dev.txt`
+which builds `rocisa`). To provision that environment automatically and run the suite
+inside it, use the `integration` tox env, which installs the tensilelite dependencies
+(`rocisa`) from the hipBLASLt checkout pointed at by `HIPBLASLT_PATH` before running pytest:
+
+```bash
+HIPBLASLT_PATH=~/rocm-libraries/projects/hipblaslt tox -e integration
+HIPBLASLT_PATH=~/rocm-libraries/projects/hipblaslt tox -e integration -- --skip-slow
+```
+
+Tests that require TensileLite/`rocisa` are skipped (not errored) when `rocisa` is not
+importable, so the hermetic subset still runs in a bare environment.
 
 Integration tests need a hipBLASLt repo and (in some cases) a tuning config and/or a workload log. Pass these via custom pytest options:
 
@@ -482,8 +497,9 @@ Tunes new kernel parameters using a Genetic Algorithm (via Ductile) or exhaustiv
 #### Option A: Single CLI command
 
 ```bash
-./bin/geko --tune --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
-  --workload-log hipblaslt-log-mask64.yaml --arch gfx950 --devices=0,1,2,3
+./bin/geko --search --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+  --workload-log hipblaslt-log-mask64.yaml \
+  --devices=0,1,2,3,4,5,6,7 --workdir my_search --keep_thr 0.1 --up_thr 1.03
 ```
 
 #### Option B: Two-step script control (recommended — lets you review configs before tuning)
@@ -573,15 +589,26 @@ my_optimization/
 HIPBLASLT_PATH="/path/to/rocm-libraries/projects/hipblaslt"
 LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/Equality/"
 
-${HIPBLASLT_PATH}/tensilelite/tensilelite/bin/TensileMergeLibrary \
-  --no_eff --force_merge True \
-  "${LIBRARY_DIR}" my_optimization/final_libs "${LIBRARY_DIR}"
+python - <<PY
+from tensilelite.merge_library import avoidRegressions
+
+avoidRegressions(
+    "${LIBRARY_DIR}",
+    "my_optimization/final_libs",
+    "${LIBRARY_DIR}",
+    forceMerge=True,
+    noEff=True,
+)
+PY
 
 cd "${HIPBLASLT_PATH}"
 invoke build --install-deps --clients --architecture gfx950 --skip-rocroller
 ```
 
-`TensileMergeLibrary` arguments: `--no_eff` skips efficiency calculations; `--force_merge True` forces merge on conflicts; the three positional args are original dir, new libs dir, output dir (same as original to update in place).
+`avoidRegressions` skips efficiency calculations with `noEff=True` and forces
+merge on conflicts with `forceMerge=True`; its three path arguments are the
+original directory, new-libraries directory, and output directory (the original
+directory above, to update in place).
 
 **Verify:**
 ```bash
@@ -656,7 +683,8 @@ my_search/
 
 #### Integrate
 
-Same steps as Ductile Optimization — run `TensileMergeLibrary` then rebuild hipBLASLt with the contents of `my_search/final_libs`.
+Same steps as Ductile Optimization — call `tensilelite.merge_library.avoidRegressions`
+then rebuild hipBLASLt with the contents of `my_search/final_libs`.
 
 ---
 
@@ -710,11 +738,12 @@ summary_df, unique_df = bench.log.summarize(
 )
 
 # Compare libraries
-results = bench.compare(
+comparison = bench.compare(
     hipblaslt_path="/path/to/rocm-libraries/projects/hipblaslt",
     lib_dir="optimized_libs",
     custom_lib_dir="build",
     benchmark_dir="benchmarks",
+    duration=1.0,
     device=0
 )
 ```
@@ -875,7 +904,7 @@ Manages TensileLite library loading, merging, and manipulation.
 - `library.operations.load_collection()` - Load directory of libraries
 - `library.operations.merge_solutions()` - Merge optimized solutions
 - `library.operations.extract_solutions()` - Extract solutions by solution index from a DataFrame
-- `library.operations.create()` - Call TensileCreateLibrary
+- `library.operations.create()` - Call tensilelite_create_library
 - `library.operations.from_dataframe()` - Create libraries from filtered results
 - `library.operations.prune_library()` - Trim a library to its minimum required solutions, without losing performance
 
@@ -894,7 +923,7 @@ collection = library.operations.load_collection("optimized_libs/")
 collection.trim()
 
 # Add epilogue support
-collection.add_epilogues()
+lib.add_epilogues()
 
 # Create benchmark inputs
 collection.create_bench_input(
@@ -937,7 +966,12 @@ from geko.schemas import GemmType, GemmConfig
 gemm_type = GemmType.from_hipblaslt(
     "T", "N", "f16_r", "f16_r", "f16_r", "f32_r"
 )
-# Or from tensilelite YAML codes only:
+# Or from TensileLite YAML codes only:
+# Prefer factory constructors (they keep TensileLite + hipBLASLt fields consistent).
+gemm_type = GemmType.from_hipblaslt(
+    "T", "N", "f16_r", "f16_r", "f16_r", "f32_r"
+)
+# Or from TensileLite YAML codes only:
 # gemm_type = GemmType.from_tensilelite("N", "T", "H", "H", "S")
 
 gemm_config = GemmConfig(
