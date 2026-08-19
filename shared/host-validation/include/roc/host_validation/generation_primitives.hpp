@@ -21,9 +21,8 @@ inline constexpr unsigned secondMixShift = 27;
 inline constexpr unsigned finalMixShift = 31;
 }  // namespace counter_random_version_1
 
-// GenerationRecipe assigns these domains. Equal seeds and logical indices use
-// the same random values for real-only and replicated components. Cartesian
-// imaginary components use a distinct domain.
+// Real values use one random sequence. Cartesian complex generation uses a
+// different sequence for imaginary values so the two parts are not identical.
 namespace generation_random_domain_version_1 {
 inline constexpr uint64_t realComponent = 0;
 inline constexpr uint64_t imaginaryComponent = 0x243f6a8885a308d3ULL;
