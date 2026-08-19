@@ -5,7 +5,13 @@ cmake_minimum_required(VERSION 3.25.2)
 project(ROCHostValidationPackageTest LANGUAGES CXX)
 
 enable_testing()
-find_package(ROCHostValidation CONFIG REQUIRED)
+find_package(
+    ROCHostValidation
+    CONFIG
+    REQUIRED
+    COMPONENTS Core Operations Blocked MX AMDGPULayout
+    OPTIONAL_COMPONENTS BLAS
+)
 
 add_executable(host-validation-package-test main.cpp)
 target_link_libraries(host-validation-package-test PRIVATE roc::host-validation-core)
