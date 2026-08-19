@@ -6,7 +6,7 @@ from __future__ import annotations
 """GEMM Kernel Optimization module.
 
 Implements the main optimization workflow.
-Generates TensileLite configurations for specific GEMM types and executes multi-GPU
+Generates TensileLiteLite configurations for specific GEMM types and executes multi-GPU
 optimization with automatic load balancing and progress monitoring.
 
 Key functions:
@@ -14,13 +14,14 @@ Key functions:
     run: Execute optimization across multiple GPUs.
     analyze: Benchmark and filter optimized kernels.
 
-Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilation.
+Integrates with hipBLASLt for benchmarking and TensileLiteLite for kernel compilation.
 """
 
 import os
 import subprocess
 import re
 import shutil
+import sys
 import time
 import yaml
 import pandas as pd
@@ -128,7 +129,7 @@ def configure(
     backend: str = "ductile",
     search_space: str | None = None,
 ) -> dict:
-    """Generate tuning YAML configs for one or more GEMM types.
+    """Generate TensileLite tuning YAML configs for one or more GEMM types.
 
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via
@@ -210,7 +211,7 @@ def run(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the TensileLite binary and to add tensilelite to PYTHONPATH.
+            for the staged TensileLiteLite ROCm root and installed package command.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
@@ -303,15 +304,17 @@ def run(
             self.build_dir.mkdir(parents=True, exist_ok=True)
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
-            env = {"PYTHONPATH": str(hipblaslt_path / "tensilelite")}
+            python = sys.executable
+            env = os.environ.copy()
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
-                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
+                        python,
+                        "-m",
+                        "tensilelite",
+                        "run",
                         self.config,
                         self.build_dir,
-                        "--prebuilt-client",
-                        client_build_dir / "tensilelite/client/tensilelite-client",
                         "--client-lock",
                         (tuning_dir / f"gpulock_{self.device}").resolve(),
                     ],

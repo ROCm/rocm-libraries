@@ -411,7 +411,7 @@ def compare(
     custom_lib_dir = Path(custom_lib_dir)
     benchmark_dir = Path(benchmark_dir)
 
-    # Build custom library with TensileCreateLibrary if not found
+    # Build custom library with tensilelite_create_library if not found
     if not cache or len(list(custom_lib_dir.glob("library/**/TensileLibrary_lazy_gfx*.dat"))) == 0:
         logger.debug(f"Creating custom library cache={cache} custom_lib_dir={custom_lib_dir}")
         library.operations.create(hipblaslt_path, lib_dir, custom_lib_dir)
