@@ -1,25 +1,26 @@
-name: THROWAWAY - HSA_OVERRIDE cross-arch dbsync POC
+name: THROWAWAY - offline CK-loader cross-arch dbsync validation
 
-# Temporary, disposable workflow. Tests whether HSA_OVERRIDE_GFX_VERSION
-# (layered on the cdna3 rocjitsu KMD interposer, on a GPU-less runner) can
-# make hipGetDeviceProperties().gcnArchName report a DIFFERENT arch, and
-# thereby make StaticFDBSync validate that arch's SystemDB + load its
-# arch-specific libMIOpenCKGroupedConv_<arch>.so.
+# Temporary, disposable workflow. Validates the MIOpen change that makes
+# MIOPEN_DEVICE_ARCH redirect the CK grouped-conv loader
+# (GetOfflineOrCurrentDeviceName). Goal: run StaticFDBSync GPU-free for a
+# DIFFERENT arch than the interposer emulates, using ONE cdna3 rocjitsu config
+# + MIOPEN_DEVICE_ARCH -- no HSA_OVERRIDE, no arch-matched emulation config.
 #
-# Why: MIOPEN_DEVICE_ARCH only reinterprets MIOpen's own arch string; it does
-# NOT redirect the CK grouped-conv loader, which keys off the real
-# gcnArchName (src/include/miopen/solver/ck_impl_lib_loader.hpp:60 ->
-# hipGetDeviceProperties().gcnArchName). HSA_OVERRIDE_GFX_VERSION sits at the
-# ROCr layer that FEEDS gcnArchName, so it can (in principle) redirect both
-# the MIOpen-side name and the CK loader. This POC checks whether it actually
-# propagates to gcnArchName under the rocjitsu cdna3 config -- if so, gfx90a
-# GPU-free dbsync needs no new rocjitsu config and no MIOpen code change.
+# Prior POC on this branch showed HSA_OVERRIDE_GFX_VERSION breaks the rocjitsu
+# device (hipGetDevice fails); that path is abandoned. This run tests the
+# code-change path instead.
 #
-# Matrix:
-#   - gfx942 / no override  -> control; reproduces the known-good #10994 path.
-#   - gfx90a / 9.0.10       -> test; can a cdna3 emulation report as gfx90a?
+# Matrix (both under the cdna3 rocjitsu config, which reports gfx942):
+#   - gfx942 : MIOPEN_DEVICE_ARCH=gfx942 -> control; arch matches emulation, so
+#              behavior is identical to no-change (loads gfx942 CK lib).
+#   - gfx90a : MIOPEN_DEVICE_ARCH=gfx90a -> TEST; must load
+#              libMIOpenCKGroupedConv_gfx90a.so and run gfx90a params against
+#              gfx90a DBs, on a gfx942-emulated device.
 #
-# Delete this file / branch once the question is answered.
+# Success = gfx90a leg loads libMIOpenCKGroupedConv_gfx90a.so and runs the
+# gfx90a StaticFDBSync params (no "No device" crash, params not skipped).
+# Individual stale-entry failures are legitimate dbsync findings, not a failure
+# of the mechanism. Delete this file / branch once validated.
 
 on:
   push:
@@ -27,19 +28,15 @@ on:
       - users/jlichtne/throwaway-hsa-override-dbsync-poc
 
 jobs:
-  hsa-override-dbsync-poc:
-    name: "HSA_OVERRIDE dbsync POC (${{ matrix.target }})"
+  offline-ckloader-dbsync:
+    name: "offline CK-loader dbsync (${{ matrix.target }})"
     timeout-minutes: 60
     container:
       image: rocm/miopen-dev:latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: gfx942
-            hsa: ""        # control: no override, cdna3 config reports gfx942
-          - target: gfx90a
-            hsa: "9.0.10"  # test: override cdna3 emulation to report gfx90a
+        target: [gfx942, gfx90a]
     runs-on: azure-linux-scale-rocm
     steps:
       - name: Checkout repository
@@ -55,16 +52,11 @@ jobs:
 
       - name: Pull DVC files for rocm-libraries
         run: |
-          if command -v dvc &> /dev/null; then
-            echo "dvc detected"
-          else
-            echo "Warning, dvc not detected!"
-          fi
+          if command -v dvc &> /dev/null; then echo "dvc detected"; else echo "Warning, dvc not detected!"; fi
           LOGNAME=github-runner dvc pull -v
 
       - name: Confirm no GPU present (interposer required)
         run: |
-          echo "=== ls /dev (expect no kfd) ==="
           ls -la /dev | grep -i kfd || echo "no /dev/kfd (GPU-less, as intended)"
 
       - name: Checkout rocjitsu
@@ -79,11 +71,10 @@ jobs:
       - name: Build rocjitsu KMD
         run: |
           apt-get update && apt-get install -y libdrm-dev
-          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
-            -DCMAKE_BUILD_TYPE=Release
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j$(nproc)
 
-      - name: Probe gcnArchName (decisive cheap signal)
+      - name: Probe emulated gcnArchName (should be gfx942 for BOTH legs)
         run: |
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
           cat > /tmp/arch_probe.cpp <<'EOF'
@@ -93,32 +84,18 @@ jobs:
             int d = 0;
             if (hipGetDevice(&d) != hipSuccess) { printf("PROBE: hipGetDevice FAILED\n"); return 2; }
             hipDeviceProp_t p{};
-            if (hipGetDeviceProperties(&p, d) != hipSuccess) { printf("PROBE: hipGetDeviceProperties FAILED\n"); return 3; }
+            if (hipGetDeviceProperties(&p, d) != hipSuccess) { printf("PROBE: props FAILED\n"); return 3; }
             printf("PROBE: gcnArchName=%s multiProcessorCount=%d warpSize=%d\n",
                    p.gcnArchName, p.multiProcessorCount, p.warpSize);
             return 0;
           }
           EOF
           /opt/rocm/bin/hipcc /tmp/arch_probe.cpp -o /tmp/arch_probe
-
           export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
           PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so
-
-          echo "### gcnArchName probe (${{ matrix.target }})" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "=== control: rocjitsu cdna3 config, NO HSA override ==="
-          set +e
-          out_ctrl=$(LD_PRELOAD=$PRELOAD /tmp/arch_probe 2>&1); echo "$out_ctrl"
-          set -e
-          echo "- control (no override): \`$out_ctrl\`" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -n "${{ matrix.hsa }}" ]; then
-            echo "=== test: rocjitsu cdna3 config + HSA_OVERRIDE_GFX_VERSION=${{ matrix.hsa }} ==="
-            set +e
-            out_test=$(HSA_OVERRIDE_GFX_VERSION=${{ matrix.hsa }} LD_PRELOAD=$PRELOAD /tmp/arch_probe 2>&1); echo "$out_test"
-            set -e
-            echo "- test (HSA_OVERRIDE=${{ matrix.hsa }}): \`$out_test\`" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          set +e; out=$(LD_PRELOAD=$PRELOAD /tmp/arch_probe 2>&1); set -e
+          echo "$out"
+          echo "### ${{ matrix.target }} leg: emulated device probe -> \`$out\` (MIOPEN_DEVICE_ARCH will select gfx target)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure and build (${{ matrix.target }})
         run: |
@@ -141,19 +118,15 @@ jobs:
           echo "=== libMIOpenCKGroupedConv_*.so in build tree ==="
           find build -name 'libMIOpenCKGroupedConv_*.so' -printf '%p\n' || echo "(none found)"
 
-      - name: Run StaticFDBSync (rocjitsu + HSA override, ${{ matrix.target }})
+      - name: Run StaticFDBSync (cdna3 rocjitsu + MIOPEN_DEVICE_ARCH=${{ matrix.target }})
         run: |
           export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
           PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so
-
           export MIOPEN_DEVICE_ARCH=${{ matrix.target }}
           export SKIP_KDB_TESTING=1
           export MIOPEN_ENABLE_LOGGING=1
           export MIOPEN_LOG_LEVEL=6
-          if [ -n "${{ matrix.hsa }}" ]; then
-            export HSA_OVERRIDE_GFX_VERSION=${{ matrix.hsa }}
-          fi
-          echo "target=${{ matrix.target }} MIOPEN_DEVICE_ARCH=$MIOPEN_DEVICE_ARCH HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-<unset>}"
+          echo "target=${{ matrix.target }} MIOPEN_DEVICE_ARCH=$MIOPEN_DEVICE_ARCH (NO HSA override)"
 
           set +e
           LD_PRELOAD=$PRELOAD ./build/bin/miopen_gtest \
@@ -163,13 +136,14 @@ jobs:
           echo "miopen_gtest exit code: $rc"
 
           echo "### StaticFDBSync (${{ matrix.target }}) exit=$rc" >> "$GITHUB_STEP_SUMMARY"
+          echo "CK libs actually loaded:" >> "$GITHUB_STEP_SUMMARY"
+          grep -aoE 'libMIOpenCKGroupedConv_[a-z0-9]+\.so' dbsync.log | sort -u | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || echo "- (none)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -E 'gcnArchName|libMIOpenCKGroupedConv|CK grouped conv|escaping launching kernel|Raw device name|No device|\[  PASSED  \]|\[  FAILED  \]|StaticFDBSync|RUN|OK' dbsync.log | tail -60 >> "$GITHUB_STEP_SUMMARY" || true
+          grep -aE 'No device|escaping launching kernel|GetParam\(\) = |\[  PASSED  \]|\[  FAILED  \]|StaticFDBSync' dbsync.log | tail -40 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-          echo "===== tail of full dbsync.log ====="
-          tail -120 dbsync.log
-          # Do not fail the job -- we want the failure signature captured, not truncated.
+          echo "===== tail of dbsync.log ====="
+          tail -80 dbsync.log
           exit 0
 
       - name: Upload dbsync log
