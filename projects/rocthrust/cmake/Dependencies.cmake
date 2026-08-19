@@ -445,7 +445,7 @@ if(BUILD_BENCHMARK)
     endif()
 
     # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON and BUILD_TEST=ON leaks into
-    # rocrand and causes its benchmarks to build. Suppress that here.
+    # rocrand and causes its benchmarks and unit tests to build. Suppress that here.
     set(BUILD_BENCHMARK OFF)
     set(BUILD_TEST OFF)
     
