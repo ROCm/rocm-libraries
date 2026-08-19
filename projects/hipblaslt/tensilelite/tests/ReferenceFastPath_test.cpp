@@ -6,7 +6,7 @@
 #include <Reference.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
-#include <roc/host_validation/adapters/tensilelite/GemmProblemAdapter.hpp>
+#include <roc/host_validation/adapters/tensilelite/GemmInvocationAdapter.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include <array>
@@ -1036,7 +1036,7 @@ TEST(ReferenceBlockedBackend, RejectsInvalidPointerBatchBeforeWriting)
     inputs.batchD = batchD;
 
     const auto translation
-        = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/-1);
+        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
     ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
     EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
               reference_adapter::TranslationFailureCode::InvalidBatchPointer);
@@ -1045,7 +1045,7 @@ TEST(ReferenceBlockedBackend, RejectsInvalidPointerBatchBeforeWriting)
     EXPECT_EQ(d0[0], -99);
 }
 
-TEST(ReferenceProblemAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
+TEST(ReferenceInvocationAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
 {
     auto problem = makePackedProblem(
         rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 2, 2, 1);
@@ -1062,12 +1062,12 @@ TEST(ReferenceProblemAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
 
     std::optional<reference_adapter::TranslatedGemmBatch> translated;
     {
-        auto problemTranslation
-            = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/-1);
+        auto invocationTranslation
+            = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
         ASSERT_TRUE(
-            std::holds_alternative<reference_adapter::GemmProblemAdapter>(problemTranslation));
+            std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
         auto adapter
-            = std::move(std::get<reference_adapter::GemmProblemAdapter>(problemTranslation));
+            = std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
 
         auto batchTranslation = adapter.translateBatch(0, adapter.operationAccumulatorType());
         ASSERT_TRUE(
@@ -1090,7 +1090,7 @@ TEST(ReferenceProblemAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
     EXPECT_EQ(e, d);
 }
 
-TEST(ReferenceProblemAdapter, CopyOutputsPreservesUnselectedValuesAndPadding)
+TEST(ReferenceInvocationAdapter, CopyOutputsPreservesUnselectedValuesAndPadding)
 {
     auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                         false,
@@ -1122,10 +1122,12 @@ TEST(ReferenceProblemAdapter, CopyOutputsPreservesUnselectedValuesAndPadding)
     std::vector<float> d(4, -99);
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    auto problemTranslation
-        = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::GemmProblemAdapter>(problemTranslation));
-    auto adapter = std::move(std::get<reference_adapter::GemmProblemAdapter>(problemTranslation));
+    auto invocationTranslation
+        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/1);
+    ASSERT_TRUE(
+        std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
+    auto adapter
+        = std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
 
     auto batchTranslation = adapter.translateBatch(0, adapter.operationAccumulatorType());
     ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batchTranslation));
@@ -1140,7 +1142,7 @@ TEST(ReferenceProblemAdapter, CopyOutputsPreservesUnselectedValuesAndPadding)
     EXPECT_EQ(d, (std::vector<float>{6, 111, 222, 333}));
 }
 
-TEST(ReferenceProblemAdapter, RejectsDescriptorStrideThatCannotFitPtrdiff)
+TEST(ReferenceInvocationAdapter, RejectsDescriptorStrideThatCannotFitPtrdiff)
 {
     if constexpr(std::numeric_limits<size_t>::digits <= std::numeric_limits<ptrdiff_t>::digits)
         GTEST_SKIP() << "size_t has no values outside ptrdiff_t range";
@@ -1158,13 +1160,13 @@ TEST(ReferenceProblemAdapter, RejectsDescriptorStrideThatCannotFitPtrdiff)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     const auto translation
-        = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/0);
+        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
     ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
     EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
               reference_adapter::TranslationFailureCode::InvalidDescriptor);
 }
 
-TEST(ReferenceProblemAdapter, RejectsMirroredOffsetMultiplicationOverflow)
+TEST(ReferenceInvocationAdapter, RejectsMirroredOffsetMultiplicationOverflow)
 {
     const size_t M = 1;
     const size_t N = 1;
@@ -1210,7 +1212,7 @@ TEST(ReferenceProblemAdapter, RejectsMirroredOffsetMultiplicationOverflow)
     inputs.batchA = batchA;
 
     const auto translation
-        = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/0);
+        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
     ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
     EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
               reference_adapter::TranslationFailureCode::InvalidDescriptor);

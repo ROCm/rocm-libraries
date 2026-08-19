@@ -134,7 +134,7 @@ endif()
 
 add_library(tensilelite-host-validation-adapter STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/DataInitialization.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/GemmProblemAdapter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/GemmInvocationAdapter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/Reference.cpp"
 )
 add_library(tensilelite::host-validation-adapter ALIAS tensilelite-host-validation-adapter)
