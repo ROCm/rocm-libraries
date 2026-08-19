@@ -1045,7 +1045,7 @@ def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
     [
         (64, "bf16", 4),  # 2 WG/CU (215->117 VGPR, 0 spill) -- +~50% at long seq
         (64, "fp16", 2),  # wpe=3 reaches 2 WG/CU but loses more ILP than it buys
-        (128, "fp16", 2),  # LDS-bound at ~35 KB: no wpe reaches a 2nd WG/CU
+        (128, "fp16", 2),  # LDS-bound at ~33-34 KB: no wpe reaches a 2nd WG/CU
         (128, "bf16", 2),  # LDS-bound: same
     ],
 )
