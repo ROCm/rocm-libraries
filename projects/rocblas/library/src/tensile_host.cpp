@@ -1247,7 +1247,9 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
     if constexpr(sizeof(Ti) >= 4 && !std::is_same_v<Ti, float>)
     {
         // TODO remove after tuning
-        if((rocblas_internal_get_arch(prob.handle) == 950 || rocblas_internal_get_arch(prob.handle) == 942) && !prob.handle->isHipBLASLtForcedOn())
+        if((rocblas_internal_get_arch(prob.handle) == 950
+            || rocblas_internal_get_arch(prob.handle) == 942)
+           && !prob.handle->isHipBLASLtForcedOn())
         {
             return false;
         }
