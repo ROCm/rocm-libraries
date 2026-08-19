@@ -78,11 +78,9 @@ def _call_writeRunScript(tmp_path, monkeypatch, os_name_value):
       - os.name                                   (global fallback)
       - tensilelite.ClientWriter.getClientExecutablePath  (returns fake path string)
 
-    ``getClientExecutablePath`` must be patched because it calls
-    ``os.path.isfile(globalParameters.get("PrebuiltClient"))`` which returns
-    None in the test environment and raises TypeError.  The patched version
-    simply returns a fake path string; writeRunScript only writes that string
-    into the script file, it does not execute it.
+    ``getClientExecutablePath`` is patched so the test remains independent of
+    the package installation's immutable client binding.  ``writeRunScript``
+    only writes that fake path string; it does not execute it.
 
     Returns the path returned by writeRunScript.
     """

@@ -160,7 +160,6 @@ function(create_device_library)
     endif()
     set(_known_bugs_resource "${_codegen_dir}/tensilelite/tensilelite_logic/known_bugs.yaml")
     foreach(_required_path
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
             "${_codegen_dir}/tensilelite/tensilelite_create_library/__main__.py"
             "${_known_bugs_resource}")
         if(NOT EXISTS "${_required_path}")
