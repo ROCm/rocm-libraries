@@ -248,3 +248,26 @@ std::string hipsolver_math_mode2string(hipsolverMathMode_t value)
         throw std::invalid_argument("Invalid enum");
     }
 }
+
+hipsolverEmulationStrategy_t string2hipsolver_emulation_strategy(const std::string& value)
+{
+    return value == "default"      ? HIPSOLVER_EMULATION_STRATEGY_DEFAULT
+           : value == "performant" ? HIPSOLVER_EMULATION_STRATEGY_PERFORMANT
+           : value == "eager"      ? HIPSOLVER_EMULATION_STRATEGY_EAGER
+                                   : static_cast<hipsolverEmulationStrategy_t>(-1);
+}
+
+std::string hipsolver_emulation_strategy2string(hipsolverEmulationStrategy_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_EMULATION_STRATEGY_DEFAULT:
+        return "default";
+    case HIPSOLVER_EMULATION_STRATEGY_PERFORMANT:
+        return "performant";
+    case HIPSOLVER_EMULATION_STRATEGY_EAGER:
+        return "eager";
+    default:
+        throw std::invalid_argument("Invalid enum");
+    }
+}

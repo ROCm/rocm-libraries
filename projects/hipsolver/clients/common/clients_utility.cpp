@@ -137,3 +137,15 @@ hipsolverMathMode_t get_math_mode()
 {
     return g_math_mode;
 }
+
+static hipsolverEmulationStrategy_t g_emulation_strategy = HIPSOLVER_EMULATION_STRATEGY_DEFAULT;
+
+void set_emulation_strategy(hipsolverEmulationStrategy_t strategy)
+{
+    g_emulation_strategy = strategy;
+}
+
+hipsolverEmulationStrategy_t get_emulation_strategy()
+{
+    return g_emulation_strategy;
+}

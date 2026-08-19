@@ -74,6 +74,10 @@ void set_device(int device_id);
 void                set_math_mode(hipsolverMathMode_t mode);
 hipsolverMathMode_t get_math_mode();
 
+/*  process-global floating-point emulation strategy applied to each handle on creation */
+void                         set_emulation_strategy(hipsolverEmulationStrategy_t strategy);
+hipsolverEmulationStrategy_t get_emulation_strategy();
+
 // /* ============================================================================================
 //  */
 // template <typename T>

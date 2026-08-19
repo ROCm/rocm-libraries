@@ -140,6 +140,18 @@ public:
                         "WARNING: could not set requested hipsolver math mode; "
                         "continuing with default math\n");
         }
+
+        // Apply the process-global emulation strategy, if a non-default one was requested.
+        // Same tolerant handling as the math mode above: a failed set is non-fatal.
+        hipsolverEmulationStrategy_t strategy = get_emulation_strategy();
+        if(strategy != HIPSOLVER_EMULATION_STRATEGY_DEFAULT)
+        {
+            hipsolverStatus_t status = hipsolverSetEmulationStrategy(m_handle, strategy);
+            if(status != HIPSOLVER_STATUS_SUCCESS)
+                fprintf(stderr,
+                        "WARNING: could not set requested hipsolver emulation strategy; "
+                        "continuing with default strategy\n");
+        }
     }
     ~hipsolver_local_handle()
     {

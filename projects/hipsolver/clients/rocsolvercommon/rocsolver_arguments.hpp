@@ -107,6 +107,7 @@ public:
         to_consume.erase("singular");
         to_consume.erase("device");
         to_consume.erase("math_mode");
+        to_consume.erase("emulation_strategy");
     }
 
     void clear()

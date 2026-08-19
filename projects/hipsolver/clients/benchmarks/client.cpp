@@ -67,6 +67,7 @@ try
     char        precision;
     rocblas_int device_id;
     std::string math_mode;
+    std::string emulation_strategy;
 
     // take arguments and set default values
     // clang-format off
@@ -121,6 +122,14 @@ try
             "Floating-point emulation math mode applied to the handle.\n"
             "                           Options are: default_math, fp32_bf16x9, fp64_fixedpoint, fp32_fp64.\n"
             "                           Emulation modes require CUDA 13 + cuSOLVER; ignored (NOT_SUPPORTED) on rocSOLVER.\n"
+            "                           ")
+
+        ("emulation_strategy",
+         value<std::string>(&emulation_strategy)->default_value("default"),
+            "Floating-point emulation strategy applied to the handle.\n"
+            "                           Options are: default, performant, eager.\n"
+            "                           performant emulates only when it predicts a speedup; eager emulates whenever possible.\n"
+            "                           Requires CUDA 13 + cuSOLVER; ignored (NOT_SUPPORTED) on rocSOLVER.\n"
             "                           ")
 
         // ("singular",
@@ -512,6 +521,12 @@ try
     if(mode == static_cast<hipsolverMathMode_t>(-1))
         throw std::invalid_argument("Invalid value for --math_mode");
     set_math_mode(mode);
+
+    // set floating-point emulation strategy
+    hipsolverEmulationStrategy_t strategy = string2hipsolver_emulation_strategy(emulation_strategy);
+    if(strategy == static_cast<hipsolverEmulationStrategy_t>(-1))
+        throw std::invalid_argument("Invalid value for --emulation_strategy");
+    set_emulation_strategy(strategy);
 
     // catch invalid arguments
     argus.validate_precision("precision");
