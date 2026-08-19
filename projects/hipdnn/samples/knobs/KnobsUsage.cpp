@@ -215,7 +215,7 @@ int main(int argc, char* argv[])
 
         const int64_t engineId = rankedEngineIds[0];
 
-        const std::string engineName = getEngineName(*graph, engineId);
+        const std::string engineName = getEngineName(handle, engineId);
 
         demonstrateKnobQuery(engineId, engineName, *graph);
         demonstrateSettingKnobs(engineId, *graph);

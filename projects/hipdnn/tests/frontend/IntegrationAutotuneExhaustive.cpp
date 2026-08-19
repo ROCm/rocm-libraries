@@ -48,7 +48,7 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
     ConvGraphBundle bundle;
     createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
 
-    auto result = bundle.graph->add_all_engines();
+    auto result = bundle.graph->add_all_engines(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     int64_t maxWs = 0;
@@ -167,7 +167,7 @@ TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
     ConvGraphBundle bundle;
     createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
 
-    auto result = bundle.graph->add_all_engines();
+    auto result = bundle.graph->add_all_engines(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     int64_t maxWs = 0;
@@ -308,7 +308,7 @@ TEST_F(IntegrationAutotuneExhaustive, AbortPolicyHardFailsOnPrimingFailure)
     ConvGraphBundle bundle;
     createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
 
-    auto result = bundle.graph->add_all_engines();
+    auto result = bundle.graph->add_all_engines(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     int64_t maxWs = 0;

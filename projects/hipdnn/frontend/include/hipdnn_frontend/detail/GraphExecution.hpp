@@ -7,7 +7,6 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
-#include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/VariantPackHelpers.hpp>
 
@@ -46,30 +45,11 @@ inline Error tensorLookupToVariantPack(
 
 /// Resolve a backend engine ID to its name from the static registry alone,
 /// falling back to the hexadecimal ID for an engine the registry does not carry.
-/// Prefer the descriptor-aware overload below whenever an engine descriptor is
-/// available, since it also reaches plugin-supplied names.
+/// Plugin-supplied names are not visible here; those come from the backend, via
+/// hipdnnGetEngineNameById_ext.
 inline std::string resolveEngineName(int64_t engineId)
 {
     return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
-}
-
-/// Resolve a finalized engine descriptor to its name, read from
-/// HIPDNN_ATTR_ENGINE_NAME_EXT. Falls back to the ID-only overload when the
-/// backend reports no name.
-inline std::string resolveEngineName(hipdnnBackendDescriptor_t engineDesc, int64_t engineId)
-{
-    if(engineDesc != nullptr)
-    {
-        std::string engineName;
-        auto err = getDescriptorAttrString(
-            engineDesc, HIPDNN_ATTR_ENGINE_NAME_EXT, engineName, "engine name.");
-        if(err.is_good() && !engineName.empty())
-        {
-            return engineName;
-        }
-    }
-
-    return resolveEngineName(engineId);
 }
 
 // Execute a graph using a specific execution plan descriptor and a

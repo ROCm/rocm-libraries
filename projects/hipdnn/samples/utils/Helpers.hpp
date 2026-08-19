@@ -503,10 +503,10 @@ bool run(F&& f)
 // ENGINE SELECTION
 
 // Applies the engine preference from `config` (--engine-id or --engine-name) to `graph`.
-// The name is handed to the graph as a string rather than resolved here, so it is matched
-// against the names the candidate engines actually display under. The preference is soft:
-// one that matches no engine config is discarded when the graph is built and the
-// heuristic's pick runs instead.
+// The name is handed to the graph as a string rather than resolved here, so the graph
+// applies the same name-or-ID resolution every other name-addressed surface uses. The
+// preference is soft: an ID that matches no engine config is discarded when the graph is
+// built and the heuristic's pick runs instead.
 inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Config& config)
 {
     if(config.engineId != -1)
@@ -528,22 +528,23 @@ inline void setPreferredEngine(const std::shared_ptr<hipdnn_frontend::graph::Gra
     setPreferredEngine(*graph, config);
 }
 
-// Resolves `engineId` to the name the backend reports for it against `graph`, which must
-// already be built (build_operation_graph()). Falls back to the frontend's registry/hex
-// rendering when the engine is not among the graph's engine configs, so callers always get
-// a printable name.
-inline std::string getEngineName(hipdnn_frontend::graph::Graph& graph, int64_t engineId)
+// Resolves `engineId` to the name its engine carries, asking the backend through
+// `handle`. That answers for any loaded engine, candidate for a particular graph or
+// not, and reaches plugin-supplied names the built-in registry does not carry. An ID
+// no loaded engine provides falls through to the registry and then to the hexadecimal
+// rendering, so callers always get a printable name.
+inline std::string getEngineName(hipdnnHandle_t handle, int64_t engineId)
 {
-    std::vector<hipdnn_frontend::EngineConfigInfo> engineConfigs;
-
-    if(graph.get_engine_configs(engineConfigs).is_good())
+    size_t engineNameLen = 0;
+    if(hipdnnGetEngineNameById_ext(handle, engineId, nullptr, &engineNameLen)
+           == HIPDNN_STATUS_SUCCESS
+       && engineNameLen > 0)
     {
-        for(const auto& engineConfig : engineConfigs)
+        std::vector<char> engineName(engineNameLen);
+        if(hipdnnGetEngineNameById_ext(handle, engineId, engineName.data(), &engineNameLen)
+           == HIPDNN_STATUS_SUCCESS)
         {
-            if(engineConfig.engineId == engineId && !engineConfig.engineName.empty())
-            {
-                return engineConfig.engineName;
-            }
+            return {engineName.data()};
         }
     }
 

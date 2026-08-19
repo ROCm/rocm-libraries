@@ -381,7 +381,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, PlanSpecAutotuneWithEngineIdFilter)
     createBuiltConvGraph("compiled_plan_path_test_conv", bundle);
 
     // Use plan-spec path (add_all_engines) instead of compiled-plan path
-    auto result = bundle.graph->add_all_engines();
+    auto result = bundle.graph->add_all_engines(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     int64_t maxWs = 0;

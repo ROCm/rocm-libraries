@@ -348,7 +348,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     auto graph = buildGraph("DeselectByPluginSuppliedEngineName", dims);
 
     std::vector<EngineConfigInfo> configs;
-    auto result = graph->get_engine_configs(configs);
+    auto result = graph->get_engine_configs(_handle, configs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const int64_t failingEngineId = hipdnn_tests::plugin_constants::engineId<ExecuteFailsPlugin>();
@@ -378,7 +378,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     for(int64_t index = 0; index < planCount; ++index)
     {
         std::string planName;
-        result = graph->get_plan_name_at_index(index, planName);
+        result = graph->get_plan_name_at_index(_handle, index, planName);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         if(planName == pluginEngineName())
         {
@@ -447,7 +447,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter
     for(int64_t index = 0; index < planCount; ++index)
     {
         std::string planName;
-        result = graph->get_plan_name_at_index(index, planName);
+        result = graph->get_plan_name_at_index(_handle, index, planName);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         if(planName == pluginEngineName())
         {
@@ -492,7 +492,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, PreferByPluginSuppliedEngineName)
     EXPECT_EQ(selectedEngineId, failingEngineId);
 
     std::string activePlanName;
-    result = graph->get_plan_name(activePlanName);
+    result = graph->get_plan_name(_handle, activePlanName);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     EXPECT_EQ(activePlanName, pluginEngineName());
 }
@@ -541,7 +541,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectBarsPluginEnginePlan)
     for(int64_t index = 0; index < planCount; ++index)
     {
         std::string planName;
-        result = graph->get_plan_name_at_index(index, planName);
+        result = graph->get_plan_name_at_index(_handle, index, planName);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         if(planName == pluginEngineName())
         {
@@ -577,7 +577,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngine
     // Confirm the engine carrying this name really is the hashed-name plugin's,
     // so the plan located below cannot belong to one of the other two plugins.
     std::vector<EngineConfigInfo> configs;
-    auto result = graph->get_engine_configs(configs);
+    auto result = graph->get_engine_configs(_handle, configs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const int64_t hashedEngineId = hipdnn_tests::plugin_constants::engineId<HashedNamePlugin>();
@@ -599,7 +599,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngine
     for(int64_t index = 0; index < planCount; ++index)
     {
         std::string planName;
-        result = graph->get_plan_name_at_index(index, planName);
+        result = graph->get_plan_name_at_index(_handle, index, planName);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         if(planName == hashedPluginEngineName())
         {

@@ -188,8 +188,7 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
         entry[config_json::CRITERIA] = criteriaToJson(criteria);
     }
     const auto routingKey = engineRoutingKey(result.engineName, result.engineId);
-    const bool nameNotPersisted = !result.engineName.empty() && routingKey != result.engineName;
-    if(nameNotPersisted)
+    if(!result.engineName.empty() && routingKey != result.engineName)
     {
         HIPDNN_FE_LOG_WARN("autotune: engine name \""
                            << result.engineName
@@ -226,10 +225,6 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
     metadata["strategy"] = strategyToLowerString(result.strategyUsed);
     metadata["rank"] = result.rank;
     metadata["workspace_size"] = result.workspaceSize;
-    if(nameNotPersisted)
-    {
-        metadata["resolved_engine_name"] = result.engineName;
-    }
 
     // Timestamp in ISO 8601 format, captured at write time
     {
@@ -300,8 +295,7 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
 //         "iterations_run": 37,
 //         "converged": true,
 //         "timestamp": "2026-04-21T10:30:00Z",
-//         "knobs": [ { "knob_id": "SPLIT_K", "type": "int", "value": 2 } ],
-//         "resolved_engine_name": "PLUGIN_REPORTED_NAME"
+//         "knobs": [ { "knob_id": "SPLIT_K", "type": "int", "value": 2 } ]
 //       }
 //     }
 //   ]
@@ -313,9 +307,8 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
 // tensor_id is required for the v2 named-id format and stride is present when
 // strides are supplied. engine_name is the routing key produced by
 // engineRoutingKey(). In autotune_metadata, converged is present only for the
-// run_until_stable strategy, knobs is omitted entirely for default-knob
-// entries, and resolved_engine_name records the engine's own name when
-// engine_name could not hold it.
+// run_until_stable strategy, and knobs is omitted entirely for default-knob
+// entries.
 //
 // Writes a single entry: the rank-0 winner (the first succeeded result in the
 // rank-ordered input). If no result succeeded, nothing is written and OK is

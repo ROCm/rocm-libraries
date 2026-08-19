@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
@@ -617,4 +618,52 @@ TEST(TestAutotune, MakeFilteredResultAssignsEveryField)
     EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
     EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
     EXPECT_EQ(result.errorMessage, "Plan excluded by engineIdFilter.");
+}
+
+TEST(TestAutotune, MakeBenchmarkResultResolvesAnOmittedEngineName)
+{
+    // Omitting the name is the arity a caller with no handle has. The registry
+    // answers for an engine it carries, and the hexadecimal rendering for one it
+    // does not, rather than the result carrying an empty name.
+    const auto registered
+        = autotune::detail::makeBenchmarkResult(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                                                factoryKnobSettings(),
+                                                ESTIMATED_WORKSPACE,
+                                                COMPILED_WORKSPACE,
+                                                factoryConfig());
+    EXPECT_EQ(registered.engineName, "MIOPEN_ENGINE");
+
+    const auto unregistered = autotune::detail::makeBenchmarkResult(FACTORY_ENGINE_ID,
+                                                                    factoryKnobSettings(),
+                                                                    ESTIMATED_WORKSPACE,
+                                                                    COMPILED_WORKSPACE,
+                                                                    factoryConfig());
+    EXPECT_EQ(unregistered.engineName, "0x0000000000001092");
+}
+
+TEST(TestAutotune, NonBenchmarkedFactoriesResolveAnOmittedEngineName)
+{
+    // The shared factory resolves the name, so every wrapper over it inherits the
+    // behavior; makeFilteredResult stands in for the five.
+    const auto shared
+        = autotune::detail::makeNonBenchmarkedResult(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                                                     factoryKnobSettings(),
+                                                     ESTIMATED_WORKSPACE,
+                                                     COMPILED_WORKSPACE,
+                                                     factoryConfig(),
+                                                     ERROR_MESSAGE_VALUE,
+                                                     /*supportsExhaustive=*/true,
+                                                     /*ranExhaustive=*/false,
+                                                     REASON_VALUE);
+    EXPECT_EQ(shared.engineName, "MIOPEN_ENGINE");
+
+    const auto wrapped = autotune::detail::makeFilteredResult(FACTORY_ENGINE_ID,
+                                                              factoryKnobSettings(),
+                                                              ESTIMATED_WORKSPACE,
+                                                              COMPILED_WORKSPACE,
+                                                              factoryConfig(),
+                                                              /*supportsExhaustive=*/true,
+                                                              /*ranExhaustive=*/false,
+                                                              REASON_VALUE);
+    EXPECT_EQ(wrapped.engineName, "0x0000000000001092");
 }

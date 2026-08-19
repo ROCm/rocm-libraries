@@ -496,8 +496,6 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryKeepsRegisteredEngineName)
     auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
 
     EXPECT_EQ(entry[config_json::ENGINE_NAME], "MIOPEN_ENGINE");
-    ASSERT_TRUE(entry.contains("autotune_metadata"));
-    EXPECT_FALSE(entry["autotune_metadata"].contains("resolved_engine_name"));
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryKeepsUnregisteredNameThatHashesToItsId)
@@ -513,8 +511,6 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryKeepsUnregisteredNameThatHashesTo
     auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
 
     EXPECT_EQ(entry[config_json::ENGINE_NAME], engineName);
-    ASSERT_TRUE(entry.contains("autotune_metadata"));
-    EXPECT_FALSE(entry["autotune_metadata"].contains("resolved_engine_name"));
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryFallsBackToHexWhenNameDoesNotHashToId)
@@ -530,9 +526,6 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryFallsBackToHexWhenNameDoesNotHash
     auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
 
     EXPECT_EQ(entry[config_json::ENGINE_NAME], formatEngineIdHex(ENGINE_ID));
-    ASSERT_TRUE(entry.contains("autotune_metadata"));
-    ASSERT_TRUE(entry["autotune_metadata"].contains("resolved_engine_name"));
-    EXPECT_EQ(entry["autotune_metadata"]["resolved_engine_name"], "LYING_ENGINE_NAME");
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryFallsBackToHexForEmptyEngineName)
@@ -547,8 +540,6 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryFallsBackToHexForEmptyEngineName)
     auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
 
     EXPECT_EQ(entry[config_json::ENGINE_NAME], formatEngineIdHex(ENGINE_ID));
-    ASSERT_TRUE(entry.contains("autotune_metadata"));
-    EXPECT_FALSE(entry["autotune_metadata"].contains("resolved_engine_name"));
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryEngineNameRoundTripsToEngineId)
