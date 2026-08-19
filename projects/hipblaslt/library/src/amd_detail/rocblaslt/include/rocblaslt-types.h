@@ -604,9 +604,10 @@ struct RocblasltContractionProblem
     // Effective sm_count_target after the (pref > desc > handle)
     // precedence resolution. 0 = "use all CUs the device exposes".
     int32_t sm_count_target = 0;
-    // Mirrors HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT. Forwarded into
-    // ContractionProblemParameters::setUniformSummationOrder by tensile_host.cpp.
-    // 0 = off (default), 1 = on.
+    // Effective uniform-summation-order request after first-on-wins
+    // (preference true, desc==1, handle==1) resolution. 0 = off (default),
+    // 1 = on. Forwarded into ContractionProblemParameters::setUniformSummationOrder
+    // by tensile_host.cpp.
     int32_t uniform_summation_order = 0;
 
     // gemm_ex

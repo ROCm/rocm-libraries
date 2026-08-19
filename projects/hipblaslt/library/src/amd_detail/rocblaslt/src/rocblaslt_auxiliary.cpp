@@ -520,7 +520,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
-                                        matmul_descr->uniform_summation_order};
+                                        effective_uniform_summation_order(handle, matmul_descr)};
 
     if(scaleAlphaVec)
     {
@@ -636,6 +636,48 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
     }
     *sm_count_target = handle->sm_count_target;
     log_api(__func__, "handle", handle, "sm_count_target", *sm_count_target);
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Set the handle-level uniform-summation-order request.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_set_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t          uniform_summation_order)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(uniform_summation_order < 0 || uniform_summation_order > 1)
+    {
+        log_error(__func__, "invalid uniform_summation_order", uniform_summation_order);
+        return rocblaslt_status_invalid_value;
+    }
+    log_api(__func__, "handle", handle, "uniform_summation_order", uniform_summation_order);
+    handle->uniform_summation_order = uniform_summation_order;
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Get the handle-level uniform-summation-order request.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_get_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t*         uniform_summation_order)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(uniform_summation_order == nullptr)
+    {
+        log_error(__func__, "uniform_summation_order", uniform_summation_order);
+        return rocblaslt_status_invalid_value;
+    }
+    *uniform_summation_order = handle->uniform_summation_order;
+    log_api(__func__, "handle", handle, "uniform_summation_order", *uniform_summation_order);
     return rocblaslt_status_success;
 }
 
@@ -2470,7 +2512,10 @@ rocblaslt_status
     // tensile_host.cpp (its body needs the TensileDataGemm /
     // TensileDataGroupedGemm types).
     applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
-    applyUniformSummationOrder(gemmData, gemmType, uniformSummationOrder);
+    applyUniformSummationOrder(gemmData,
+                               gemmType,
+                               uniformSummationOrder
+                                   || (handle && handle->uniform_summation_order));
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
