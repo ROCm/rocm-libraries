@@ -22,10 +22,20 @@ using Spec = ContentCarryingTestGraph::Spec;
 /// question -- the "equal" ones are facts a benchmark result survives, the "not equal"
 /// ones are facts it does not.
 ///
-/// MAINTENANCE: this file is the field-set pin for the graph half of the key. `IGraph`
-/// is a virtual interface with no compiler-checkable arity, so nothing fails to build
-/// when `graph.fbs` grows -- a new field that changes what a kernel does needs a
-/// discriminates-on case added here, and a new field that does not needs an ignores case.
+/// MAINTENANCE: this file is the field-set pin for the graph half of the key. `IGraph` is
+/// a virtual interface with no compiler-checkable arity, so nothing fails to build when
+/// `graph.fbs` grows -- a new field that changes what a kernel does needs a
+/// discriminates-on case here, and a new field that does not needs an ignores case.
+///
+/// What is pinned here: every `Graph` field the fixture can express (name, all three
+/// data types, tensors, nodes, id, preferred engine, override-shape, api version), plus
+/// the tensor fields the key traversal reads (uid, dtype, dims, strides) and the node
+/// fields it reads (name, compute dtype, attribute discriminant, and two payload fields).
+///
+/// What is deliberately NOT pinned here: the interiors of `TensorAttributesT` and each
+/// `NodeAttributes` union member. Those are compared by codegen'd `operator==`, which is
+/// regenerated from the schema, so a new sub-field is covered automatically -- the risk
+/// this file guards is a field falling out of the *hash*, not out of the comparison.
 GraphContentKey keyFor(const ContentCarryingTestGraph& graph)
 {
     return GraphContentKey{graph};
@@ -211,6 +221,53 @@ TEST(TestIngestorGraphContentKey, AnEmptyGraphStillComparesEqualToAnotherEmptyGr
     const TestGraph second(makeGraphId(0xC5));
 
     EXPECT_EQ(GraphContentKey{first}, GraphContentKey{second});
+}
+
+TEST(TestIngestorGraphContentKey, ADifferentGraphNameComparesUnequal)
+{
+    const Spec named;
+    Spec renamed;
+    renamed.name = "a_different_graph";
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
+}
+
+TEST(TestIngestorGraphContentKey, ADifferentGraphIoDataTypeComparesUnequal)
+{
+    const Spec asFloat;
+    Spec asHalf;
+    asHalf.ioDataType = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
+}
+
+TEST(TestIngestorGraphContentKey, ADifferentGraphIntermediateDataTypeComparesUnequal)
+{
+    const Spec asFloat;
+    Spec asHalf;
+    asHalf.intermediateDataType = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
+}
+
+TEST(TestIngestorGraphContentKey, ADifferentNodeNameComparesUnequal)
+{
+    const Spec named;
+    Spec renamed;
+    renamed.nodes[0].name = "a_different_node";
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
+}
+
+/// Inside the union payload again, on a field the discriminant and operation cannot
+/// distinguish: two adds wired to different tensors are different computations.
+TEST(TestIngestorGraphContentKey, ADifferentPointwiseOperandUidComparesUnequal)
+{
+    const Spec wired;
+    Spec rewired;
+    rewired.nodes[0].in0TensorUid = 99;
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{wired}), keyFor(ContentCarryingTestGraph{rewired}));
 }
 
 TEST(TestIngestorGraphContentKey, AnEmptyGraphDoesNotMatchAContentCarryingOne)

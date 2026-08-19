@@ -633,19 +633,32 @@ TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
 
 /// The explicit no-caching path: every existing SDK fixture and every flag-off caller
 /// constructs a BenchmarkPlan without a callback, and must behave exactly as before.
+///
+/// Asserts the winner, not merely the absence of a crash: an earlier version ended in a
+/// bare SUCCEED(), which would have passed even if the no-callback path had picked the
+/// wrong kernel -- the opposite of what its name promises.
 TEST(TestIngestorBenchmarkPlan, AnAbsentCallbackLeavesSelectionUnchanged)
 {
+    auto candidates = threeCandidates();
+    // Candidate 1 is the deterministic winner; hold its sub-plan so its launches can be
+    // counted through the IPlan the BenchmarkPlan delegates to.
+    auto* const expectedWinner = static_cast<FakePlan*>(candidates[1].plan.get());
+
     const BenchmarkTestHandle handle;
-    const DeterministicBenchmarkPlan plan(threeCandidates(), handle, {5.0, 1.0, 3.0});
+    const DeterministicBenchmarkPlan plan(std::move(candidates), handle, {5.0, 1.0, 3.0});
 
     plan.execute(handle, nullptr, 0U, nullptr);
+    const int afterFirst = expectedWinner->launchCount();
+
     plan.execute(handle, nullptr, 0U, nullptr);
-    SUCCEED() << "no callback, no crash, and sampling still resolves a winner";
+
+    EXPECT_GT(afterFirst, 0) << "the fastest candidate must be the one that ran";
+    EXPECT_GT(expectedWinner->launchCount(), afterFirst)
+        << "the second execute must delegate to the same already-chosen winner";
 }
 
-/// Ties resolve to the lowest candidate index, exactly as the running-minimum comparison
-/// did before the ranking replaced it. std::sort would reorder equal times arbitrarily
-/// and silently change which kernel wins.
+/// Ties resolve to the lowest candidate index. std::sort would reorder equal times
+/// arbitrarily and silently change which kernel wins.
 TEST(TestIngestorBenchmarkPlan, EqualTimesKeepTheLowestCandidateIndexFirst)
 {
     std::vector<RankedEntry> recorded;
