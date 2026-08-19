@@ -10,23 +10,36 @@
 #include <utility>
 
 namespace roc::host_validation {
-// Describes output = alpha * x + beta * y over one tensor shape. At least one
-// input is present. referenceAxpby reads the present inputs and writes every
-// logical element of output.
+// Reusable output = alpha * x + beta * y descriptor. It contains the inputs,
+// arithmetic policy, and result scalar type, but no destination storage.
 struct AxpbyProblem {
-    AxpbyProblem(std::optional<Tensor> xValues, std::optional<Tensor> yValues, Tensor outputValues,
-                 ScalarType accumulator)
+    AxpbyProblem(std::optional<Tensor> xValues, std::optional<Tensor> yValues,
+                 ScalarType resultType, ScalarType accumulator)
         : x(std::move(xValues)),
           y(std::move(yValues)),
-          output(std::move(outputValues)),
+          outputType(resultType),
           accumulatorType(accumulator) {}
 
-    std::optional<Tensor> x;               // Optional X input; shape must equal output.
-    std::optional<Tensor> y;               // Optional Y input; shape must equal output.
-    Tensor output;                         // Caller-owned destination written in full.
-    ScalarType accumulatorType;            // Arithmetic type used before output conversion.
+    std::optional<Tensor> x;               // Optional X input; X and Y shapes must match.
+    std::optional<Tensor> y;               // Optional Y input; at least one input is required.
+    ScalarType outputType;                 // Scalar type of the result tensor.
+    ScalarType accumulatorType;            // Arithmetic type before output conversion.
     std::complex<double> alpha{1.0, 0.0};  // X coefficient; ignored when X is absent.
     std::complex<double> beta{1.0, 0.0};   // Y coefficient; ignored when Y is absent.
+};
+
+// Binds an AXPBY problem to caller-owned destination storage. Every logical
+// output element is overwritten; arbitrary output layouts remain supported.
+struct AxpbyRequest : AxpbyProblem {
+    AxpbyRequest(std::optional<Tensor> xValues, std::optional<Tensor> yValues, Tensor outputValues,
+                 ScalarType accumulator)
+        : AxpbyProblem(std::move(xValues), std::move(yValues), outputValues.type(), accumulator),
+          output(std::move(outputValues)) {}
+
+    AxpbyRequest(AxpbyProblem problem, Tensor outputValues)
+        : AxpbyProblem(std::move(problem)), output(std::move(outputValues)) {}
+
+    Tensor output;
 };
 
 // Reports the number of logical output elements written.
@@ -34,5 +47,14 @@ struct AxpbyRunInfo {
     size_t outputElementsWritten = 0;  // output.shape().elementCount().
 };
 
-AxpbyRunInfo referenceAxpby(const AxpbyProblem& problem);
+// Owning AXPBY result. output uses a contiguous layout; callers requiring a
+// specific destination layout use AxpbyRequest.
+struct AxpbyResult {
+    Tensor output;
+    AxpbyRunInfo runInfo;
+};
+
+AxpbyRunInfo referenceAxpby(const AxpbyRequest& request);
+AxpbyResult referenceAxpby(const AxpbyProblem& problem);
+AxpbyResult referenceAxpby(const AxpbyProblem& problem, const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

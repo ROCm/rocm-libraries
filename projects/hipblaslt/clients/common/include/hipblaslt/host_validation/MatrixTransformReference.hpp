@@ -150,10 +150,10 @@ namespace hipblaslt::host_validation
             b = matrixTransformTensor(arguments.b, arguments.bStorageBytes, type, bLayout);
 
         Tensor       expected(ScalarType::Float32, outputLayout);
-        AxpbyProblem problem(std::move(a), std::move(b), expected, ScalarType::Float32);
-        problem.alpha              = arguments.alpha;
-        problem.beta               = arguments.beta;
-        const AxpbyRunInfo runInfo = referenceAxpby(problem);
+        AxpbyRequest request(std::move(a), std::move(b), expected, ScalarType::Float32);
+        request.alpha              = arguments.alpha;
+        request.beta               = arguments.beta;
+        const AxpbyRunInfo runInfo = referenceAxpby(request);
 
         Tensor observed
             = matrixTransformTensor(

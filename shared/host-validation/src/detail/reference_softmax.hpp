@@ -15,9 +15,9 @@
 
 namespace roc::host_validation {
 namespace detail {
-inline void validateSoftmax(const SoftmaxProblem& problem) {
-    if (problem.input.shape() != problem.output.shape())
-        throw std::invalid_argument("Reference softmax input/output shapes differ.");
+inline const Shape& validateSoftmaxProblem(const SoftmaxProblem& problem) {
+    if (!isConcreteScalarType(problem.outputType))
+        throw std::invalid_argument("Reference softmax output type is invalid.");
     if (problem.axis >= problem.input.shape().rank())
         throw std::out_of_range("Reference softmax axis exceeds input rank.");
     if (problem.input.shape()[problem.axis] == 0)
@@ -25,6 +25,15 @@ inline void validateSoftmax(const SoftmaxProblem& problem) {
     if (problem.accumulatorType != ScalarType::Float32 &&
         problem.accumulatorType != ScalarType::Float64)
         throw std::invalid_argument("Reference softmax requires a Float32 or Float64 accumulator.");
+    return problem.input.shape();
+}
+
+inline void validateSoftmaxRequest(const SoftmaxRequest& request) {
+    const Shape& outputShape = validateSoftmaxProblem(request);
+    if (request.output.shape() != outputShape)
+        throw std::invalid_argument("Reference softmax input/output shapes differ.");
+    if (request.output.type() != request.outputType)
+        throw std::invalid_argument("Reference softmax output type differs from the problem.");
 }
 
 inline std::vector<size_t> softmaxSliceCoordinates(size_t sliceIndex, const Shape& shape,
@@ -40,39 +49,39 @@ inline std::vector<size_t> softmaxSliceCoordinates(size_t sliceIndex, const Shap
 }
 
 template <typename Accumulator>
-SoftmaxRunInfo referenceSoftmaxTyped(const SoftmaxProblem& problem) {
-    const RuntimeTensorReader<Accumulator> input(problem.input);
-    const RuntimeTensorWriter<Accumulator> output(problem.output);
-    const size_t axisElements = problem.input.shape()[problem.axis];
-    const size_t slices = problem.input.shape().elementCountExcluding(problem.axis);
+SoftmaxRunInfo referenceSoftmaxTyped(const SoftmaxRequest& request) {
+    const RuntimeTensorReader<Accumulator> input(request.input);
+    const RuntimeTensorWriter<Accumulator> output(request.output);
+    const size_t axisElements = request.input.shape()[request.axis];
+    const size_t slices = request.input.shape().elementCountExcluding(request.axis);
     std::vector<Accumulator> exponentials(axisElements);
 
     for (size_t slice = 0; slice < slices; ++slice) {
         std::vector<size_t> coordinates =
-            softmaxSliceCoordinates(slice, problem.input.shape(), problem.axis);
-        coordinates[problem.axis] = 0;
+            softmaxSliceCoordinates(slice, request.input.shape(), request.axis);
+        coordinates[request.axis] = 0;
         Accumulator maximum = input(coordinates);
         for (size_t index = 1; index < axisElements; ++index) {
-            coordinates[problem.axis] = index;
+            coordinates[request.axis] = index;
             maximum = std::max(maximum, input(coordinates));
         }
 
         Accumulator sum = Accumulator(0);
         for (size_t index = 0; index < axisElements; ++index) {
-            coordinates[problem.axis] = index;
+            coordinates[request.axis] = index;
             const Accumulator value = std::exp(input(coordinates) - maximum);
             exponentials[index] = value;
             sum += value;
         }
         for (size_t index = 0; index < axisElements; ++index) {
-            coordinates[problem.axis] = index;
+            coordinates[request.axis] = index;
             output.store(coordinates, exponentials[index] / sum);
         }
     }
 
     return {
         .slicesProcessed = slices,
-        .outputElementsWritten = problem.output.shape().elementCount(),
+        .outputElementsWritten = request.output.shape().elementCount(),
     };
 }
 }  // namespace detail

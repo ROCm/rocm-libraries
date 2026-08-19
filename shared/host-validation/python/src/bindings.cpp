@@ -96,16 +96,6 @@ struct PythonGemmRequest {
     OutputSelection outputSelection = OutputSelection::all();
 };
 
-struct PythonAxpbyResult {
-    Tensor output;
-    AxpbyRunInfo runInfo;
-};
-
-struct PythonSoftmaxResult {
-    Tensor output;
-    SoftmaxRunInfo runInfo;
-};
-
 struct PythonLayerNormResult {
     Tensor output;
     Tensor mean;
@@ -525,26 +515,18 @@ PythonGemmResult referenceGemmOwned(
     return {.output = std::move(d), .runInfo = std::move(runInfo)};
 }
 
-PythonAxpbyResult referenceAxpbyOwned(std::optional<Tensor> x, std::optional<Tensor> y,
-                                      ScalarType outputType, ScalarType accumulatorType,
-                                      std::complex<double> alpha, std::complex<double> beta) {
-    if (!x && !y) throw std::invalid_argument("Python reference_axpby requires X or Y.");
-    const Shape& shape = x ? x->shape() : y->shape();
-    Tensor output(outputType, shape);
-    AxpbyProblem problem(x ? std::optional<Tensor>(x) : std::nullopt,
-                         y ? std::optional<Tensor>(y) : std::nullopt, output, accumulatorType);
+AxpbyResult referenceAxpbyOwned(std::optional<Tensor> x, std::optional<Tensor> y,
+                                ScalarType outputType, ScalarType accumulatorType,
+                                std::complex<double> alpha, std::complex<double> beta) {
+    AxpbyProblem problem(std::move(x), std::move(y), outputType, accumulatorType);
     problem.alpha = alpha;
     problem.beta = beta;
-    const AxpbyRunInfo runInfo = referenceAxpby(problem);
-    return {.output = std::move(output), .runInfo = runInfo};
+    return referenceAxpby(problem);
 }
 
-PythonSoftmaxResult referenceSoftmaxOwned(const Tensor& input, ScalarType outputType,
-                                          ScalarType accumulatorType, size_t axis) {
-    Tensor output(outputType, input.layout());
-    const SoftmaxRunInfo runInfo =
-        referenceSoftmax(SoftmaxProblem(input, output, axis, accumulatorType));
-    return {.output = std::move(output), .runInfo = runInfo};
+SoftmaxResult referenceSoftmaxOwned(const Tensor& input, ScalarType outputType,
+                                    ScalarType accumulatorType, size_t axis) {
+    return referenceSoftmax(SoftmaxProblem(input, outputType, axis, accumulatorType));
 }
 
 PythonLayerNormResult referenceLayerNormOwned(const Tensor& input, ScalarType outputType,
@@ -1128,30 +1110,26 @@ NB_MODULE(_roc_host_validation, module) {
     nb::class_<AxpbyRunInfo>(module, "AxpbyRunInfo")
         .def_ro("output_elements_written", &AxpbyRunInfo::outputElementsWritten);
 
-    nb::class_<PythonAxpbyResult>(module, "AxpbyResult")
+    nb::class_<AxpbyResult>(module, "AxpbyResult")
         .def_prop_ro(
-            "output",
-            [](const PythonAxpbyResult& result) -> const Tensor& { return result.output; },
+            "output", [](const AxpbyResult& result) -> const Tensor& { return result.output; },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "run_info",
-            [](const PythonAxpbyResult& result) -> const AxpbyRunInfo& { return result.runInfo; },
+            [](const AxpbyResult& result) -> const AxpbyRunInfo& { return result.runInfo; },
             nb::rv_policy::reference_internal);
 
     nb::class_<SoftmaxRunInfo>(module, "SoftmaxRunInfo")
         .def_ro("slices_processed", &SoftmaxRunInfo::slicesProcessed)
         .def_ro("output_elements_written", &SoftmaxRunInfo::outputElementsWritten);
 
-    nb::class_<PythonSoftmaxResult>(module, "SoftmaxResult")
+    nb::class_<SoftmaxResult>(module, "SoftmaxResult")
         .def_prop_ro(
-            "output",
-            [](const PythonSoftmaxResult& result) -> const Tensor& { return result.output; },
+            "output", [](const SoftmaxResult& result) -> const Tensor& { return result.output; },
             nb::rv_policy::reference_internal)
         .def_prop_ro(
             "run_info",
-            [](const PythonSoftmaxResult& result) -> const SoftmaxRunInfo& {
-                return result.runInfo;
-            },
+            [](const SoftmaxResult& result) -> const SoftmaxRunInfo& { return result.runInfo; },
             nb::rv_policy::reference_internal);
 
     nb::class_<LayerNormRunInfo>(module, "LayerNormRunInfo")
