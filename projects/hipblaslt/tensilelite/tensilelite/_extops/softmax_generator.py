@@ -45,7 +45,7 @@ from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
 from tensilelite.Common.RegisterPool import allocTmpGpr
 from tensilelite.Common.Types import IsaVersion
-from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from tensilelite.Toolchain.Validators import ToolchainDefaults, deviceEnumeratorCandidates, validateToolchain
 
 def record_num_calls(f):
     @wraps(f)
@@ -734,7 +734,7 @@ if __name__ == '__main__':
 
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
-        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
+        enumerator = deviceEnumeratorCandidates()
         # `arch` is the compile target for this kernel, so it has to be the name
         # the device reported: gfx1250 and gfx1250-strict share an ISA, and
         # deriving the name back from it would build for gfx1250 on either --

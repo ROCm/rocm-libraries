@@ -42,7 +42,7 @@ from .Common.Architectures import gfxToSwCodename, detectGlobalCurrentArch, gfxT
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from .Common.GlobalParameters import assignGlobalParameters
 from .SolutionStructs import ProblemSizes
-from .Toolchain.Validators import ToolchainDefaults, validateToolchain
+from .Toolchain.Validators import ToolchainDefaults, deviceEnumeratorCandidates, validateToolchain
 
 
 def createLibraryForBenchmark(logicPath, libraryPath, gfxName):
@@ -71,9 +71,9 @@ def GenerateSummations(userArgs):
 
     inputLogicPath = userArgs[0]
     outputPath = userArgs[1]
-    cxxCompiler, cCompiler, enumerator = validateToolchain(ToolchainDefaults.CXX_COMPILER,
-                                                           ToolchainDefaults.C_COMPILER,
-                                                           ToolchainDefaults.DEVICE_ENUMERATOR)
+    cxxCompiler, cCompiler = validateToolchain(ToolchainDefaults.CXX_COMPILER,
+                                               ToolchainDefaults.C_COMPILER)
+    enumerator = deviceEnumeratorCandidates()
 
     # The codename selects which logic files get a summation model, and the two
     # gfx1250 steppings have separate ones. Going through the ISA to name them
