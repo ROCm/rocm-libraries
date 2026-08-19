@@ -1686,8 +1686,71 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     CK_TILE_DEVICE static constexpr void PTFromGemm0CToGemm1A(PTOutTensor& pt_out,
                                                               const PInTensor& p_in)
     {
+        // The gfx125 fast path below is only valid when the gemm0-C and gemm1-A
+        // iteration spaces coincide, i.e. MIterPerWarp == KIterPerWarp == 1
+        // (kN0 == MWarp*16 and kKn == WarpGemm::kK). Outside that it silently
+        // produces wrong results -- there is no assert. The general path already
+        // handles both cases: with a single iteration its static_ford degenerates
+        // to exactly the same whole-buffer copy.
 #if defined(__gfx125__)
-        pt_out.get_thread_buffer() = p_in.get_thread_buffer();
+        // gfx1250: gemm0's C and gemm1's A hold the same per-lane element count
+        // but are cut into different fragments -- C into MWarp x NWarp tiles of
+        // WarpGemm::kM x kN (8 bf16 per lane), A into 16 x 32 tiles (16 per lane,
+        // i.e. two C fragments stacked along P's row direction).  A whole-buffer
+        // copy therefore only transposes when there is one fragment each way;
+        // beyond that it pairs the wrong C fragments together.  Measured with
+        // dstest/cta_probe.hip: correct at MIterPerWarp == 1, exactly 50% wrong
+        // at MIterPerWarp == 2.
+        //
+        //     A(am, ak) half h   <-   C(m = ak*2 + h, n = am)
+        //
+        // which degenerates to the identity when AM == 1, so no special case.
+        {
+            using BG_C = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+            using BG_A = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
+            constexpr auto cfg_c = BG_C::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+            constexpr auto cfg_a = BG_A::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+            using WG_C = remove_cvref_t<decltype(cfg_c.template at<0>())>;
+            using WG_A = remove_cvref_t<decltype(cfg_a.template at<0>())>;
+
+            constexpr index_t MWarpC = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<0>{});
+            constexpr index_t NWarpC = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{});
+            constexpr index_t MWarpA = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<0>{});
+
+            constexpr index_t CM = Problem::BlockFmhaShape::kM0 / (MWarpC * WG_C::kM);
+            constexpr index_t CN = Problem::BlockFmhaShape::kN0 / (NWarpC * WG_C::kN);
+            constexpr index_t AM = Problem::BlockFmhaShape::kN0 / (MWarpA * WG_A::kM);
+            constexpr index_t AK = Problem::BlockFmhaShape::kK1 / WG_A::kK;
+
+            static_assert(CN == AM && CM == AK * 2,
+                          "gfx125 C->A fragment counts do not line up");
+
+            constexpr index_t kChunk = WG_C::kM * WG_C::kN / get_warp_size();
+
+            // AM == 1 makes the permutation the identity.  Keep the whole-buffer
+            // copy for that case: the element-wise form is semantically the same
+            // but the compiler does not fold it away, and it cost 26% on the
+            // shipping bn0=64 tile when it was used unconditionally.
+            if constexpr(AM == 1)
+            {
+                pt_out.get_thread_buffer() = p_in.get_thread_buffer();
+            }
+            else
+            {
+                static_for<0, AM, 1>{}([&](auto am) {
+                    static_for<0, AK, 1>{}([&](auto ak) {
+                        static_for<0, 2, 1>{}([&](auto h) {
+                            constexpr index_t a_off = ((am * AK + ak) * 2 + h) * kChunk;
+                            constexpr index_t c_off = ((ak * 2 + h) * CN + am) * kChunk;
+                            static_for<0, kChunk, 1>{}([&](auto e) {
+                                pt_out.get_thread_buffer()[number<a_off + e>{}] =
+                                    p_in.get_thread_buffer()[number<c_off + e>{}];
+                            });
+                        });
+                    });
+                });
+            }
+        }
 #else
         if constexpr(Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}) == 16)
         {
@@ -1747,8 +1810,71 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     CK_TILE_DEVICE static constexpr void SGradTFromGemm2CToGemm3A(SGradTOutTensor& dst_out,
                                                                   const SGradInTensor& ds_in)
     {
+        // The gfx125 fast path below is only valid when the gemm0-C and gemm1-A
+        // iteration spaces coincide, i.e. MIterPerWarp == KIterPerWarp == 1
+        // (kN0 == MWarp*16 and kKn == WarpGemm::kK). Outside that it silently
+        // produces wrong results -- there is no assert. The general path already
+        // handles both cases: with a single iteration its static_ford degenerates
+        // to exactly the same whole-buffer copy.
 #if defined(__gfx125__)
-        dst_out.get_thread_buffer() = ds_in.get_thread_buffer();
+        // gfx1250: gemm0's C and gemm1's A hold the same per-lane element count
+        // but are cut into different fragments -- C into MWarp x NWarp tiles of
+        // WarpGemm::kM x kN (8 bf16 per lane), A into 16 x 32 tiles (16 per lane,
+        // i.e. two C fragments stacked along P's row direction).  A whole-buffer
+        // copy therefore only transposes when there is one fragment each way;
+        // beyond that it pairs the wrong C fragments together.  Measured with
+        // dstest/cta_probe.hip: correct at MIterPerWarp == 1, exactly 50% wrong
+        // at MIterPerWarp == 2.
+        //
+        //     A(am, ak) half h   <-   C(m = ak*2 + h, n = am)
+        //
+        // which degenerates to the identity when AM == 1, so no special case.
+        {
+            using BG_C = remove_cvref_t<decltype(GetOGradVBlockGemm<Problem>())>;
+            using BG_A = remove_cvref_t<decltype(GetSGradTQTBlockGemm<Problem>())>;
+            constexpr auto cfg_c = BG_C::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+            constexpr auto cfg_a = BG_A::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+            using WG_C = remove_cvref_t<decltype(cfg_c.template at<0>())>;
+            using WG_A = remove_cvref_t<decltype(cfg_a.template at<0>())>;
+
+            constexpr index_t MWarpC = Problem::BlockFmhaShape::Gemm2BlockWarps::at(number<0>{});
+            constexpr index_t NWarpC = Problem::BlockFmhaShape::Gemm2BlockWarps::at(number<1>{});
+            constexpr index_t MWarpA = Problem::BlockFmhaShape::Gemm3BlockWarps::at(number<0>{});
+
+            constexpr index_t CM = Problem::BlockFmhaShape::kM0 / (MWarpC * WG_C::kM);
+            constexpr index_t CN = Problem::BlockFmhaShape::kN0 / (NWarpC * WG_C::kN);
+            constexpr index_t AM = Problem::BlockFmhaShape::kN0 / (MWarpA * WG_A::kM);
+            constexpr index_t AK = Problem::BlockFmhaShape::kK3 / WG_A::kK;
+
+            static_assert(CN == AM && CM == AK * 2,
+                          "gfx125 C->A fragment counts do not line up");
+
+            constexpr index_t kChunk = WG_C::kM * WG_C::kN / get_warp_size();
+
+            // AM == 1 makes the permutation the identity.  Keep the whole-buffer
+            // copy for that case: the element-wise form is semantically the same
+            // but the compiler does not fold it away, and it cost 26% on the
+            // shipping bn0=64 tile when it was used unconditionally.
+            if constexpr(AM == 1)
+            {
+                dst_out.get_thread_buffer() = ds_in.get_thread_buffer();
+            }
+            else
+            {
+                static_for<0, AM, 1>{}([&](auto am) {
+                    static_for<0, AK, 1>{}([&](auto ak) {
+                        static_for<0, 2, 1>{}([&](auto h) {
+                            constexpr index_t a_off = ((am * AK + ak) * 2 + h) * kChunk;
+                            constexpr index_t c_off = ((ak * 2 + h) * CN + am) * kChunk;
+                            static_for<0, kChunk, 1>{}([&](auto e) {
+                                dst_out.get_thread_buffer()[number<a_off + e>{}] =
+                                    ds_in.get_thread_buffer()[number<c_off + e>{}];
+                            });
+                        });
+                    });
+                });
+            }
+        }
 #else
         if constexpr(Problem::BlockFmhaShape::Gemm3WarpTile::at(number<0>{}) == 16)
         {
