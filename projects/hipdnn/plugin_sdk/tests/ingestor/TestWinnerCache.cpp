@@ -3,6 +3,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
@@ -156,6 +160,270 @@ TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 
     EXPECT_EQ(firstKey, secondKey);
     EXPECT_EQ(WinnerKeyHash{}(firstKey), WinnerKeyHash{}(secondKey));
+}
+
+// ---------------------------------------------------------------------------
+// The cache inside KernelIngestorStateManager: no eviction, the soft threshold,
+// Check 1, and thread safety (D8, D13, D16)
+// ---------------------------------------------------------------------------
+
+/// Builds a distinct key per index without needing a distinct graph: the device half is
+/// enough to separate them, and it keeps the loop cheap.
+WinnerKey keyForIndex(const ContentCarryingTestGraph& graph, int index)
+{
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942";
+    properties.warpSize = 64;
+    properties.multiProcessorCount = index;
+    return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
+}
+
+/// THE NO-EVICTION REGRESSION GUARD. The winner cache sits beside an LruCache in the same
+/// class, so "tidying" it into that neighbour is a live temptation. It must not be:
+/// evicting a catalog costs a rematch, but evicting a winner costs a GPU sweep or a
+/// silent fall back to the heuristic front.
+TEST(TestIngestorWinnerCacheStateManager, TheEarliestEntrySurvivesFarPastAnyPlausibleLruCapacity)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto first = keyForIndex(graph, 0);
+    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+
+    manager->recordWinner(first, record);
+
+    // Well past DEFAULT_CATALOG_CACHE_CAPACITY (256), which is what an LruCache here
+    // would have been sized at.
+    for(int index = 1; index <= 1000; ++index)
+    {
+        manager->recordWinner(keyForIndex(graph, index), record);
+    }
+
+    EXPECT_EQ(manager->winnerCacheSize(), 1001U);
+    EXPECT_TRUE(manager->winnerFor(first).has_value())
+        << "the first entry must still be served after 1000 later insertions";
+}
+
+TEST(TestIngestorWinnerCacheStateManager, RecordingTheSameKeyTwiceReplacesRatherThanAccumulates)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyForIndex(graph, 7);
+
+    manager->recordWinner(key, WinnerRecord{entryFor(definitionFor(0x01), 5.0)});
+    manager->recordWinner(
+        key, WinnerRecord{entryFor(definitionFor(0x02), 1.0), entryFor(definitionFor(0x03), 2.0)});
+
+    EXPECT_EQ(manager->winnerCacheSize(), 1U);
+    const auto stored = manager->winnerFor(key);
+    ASSERT_TRUE(stored.has_value());
+    ASSERT_EQ(stored->size(), 2U) << "the later, wider sweep must win";
+    EXPECT_EQ(stored->front().kernelId, testId(0x02));
+}
+
+TEST(TestIngestorWinnerCacheStateManager, AnEmptyRecordIsNotStored)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+
+    manager->recordWinner(keyForIndex(graph, 1), WinnerRecord{});
+
+    EXPECT_EQ(manager->winnerCacheSize(), 0U)
+        << "an all-unusable sweep has no ranking; storing one would read as a covered hit";
+}
+
+TEST(TestIngestorWinnerCacheStateManager, AMissReturnsNulloptRatherThanAnEmptyRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+
+    EXPECT_FALSE(manager->winnerFor(keyForIndex(graph, 99)).has_value());
+}
+
+/// D8's soft threshold has no observable effect other than its log line -- the cache
+/// deliberately does not evict, cap, or change behaviour past it -- so the log assertion
+/// is the only possible test of it.
+TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTheThreshold)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+
+    // Fill to exactly the threshold: indices 0..threshold-1 is `threshold` entries, and
+    // the warning fires only once size exceeds it.
+    const auto threshold = StateManager::WINNER_CACHE_WARNING_THRESHOLD;
+    for(size_t index = 0; index < threshold; ++index)
+    {
+        manager->recordWinner(keyForIndex(graph, static_cast<int>(index)), record);
+    }
+    ASSERT_EQ(manager->winnerCacheSize(), threshold);
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "past the soft threshold"))
+        << "the warning must not fire at exactly the threshold:\n"
+        << recorder.getRecordedLogsAsString();
+
+    manager->recordWinner(keyForIndex(graph, static_cast<int>(threshold)), record);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "past the soft threshold"))
+        << recorder.getRecordedLogsAsString();
+
+    // And it stays quiet afterwards rather than re-logging on every later insert.
+    const auto afterFirstWarning = recorder.getRecordedLogsAsString();
+    manager->recordWinner(keyForIndex(graph, static_cast<int>(threshold) + 2), record);
+    EXPECT_EQ(recorder.getRecordedLogsAsString(), afterFirstWarning)
+        << "the growth warning is reported once, not per insertion";
+}
+
+/// Check 1: a record covering the WHOLE catalog orders it, and rank() is never consulted.
+/// The heuristic is rigged to invert the order, so serving measured order is observable
+/// rather than merely asserted.
+TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithoutTheHeuristic)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xE1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto catalog = manager->sortedDefinitions(context);
+    ASSERT_GE(catalog.size(), 2U) << "this test needs at least two candidates to reorder";
+
+    // Record the heuristic's order reversed, then assert selection follows the record.
+    WinnerRecord record;
+    double time = 1.0;
+    for(auto entry = catalog.rbegin(); entry != catalog.rend(); ++entry)
+    {
+        record.push_back(entryFor(*entry, time));
+        time += 1.0;
+    }
+
+    const auto freshManager = makeStateManager();
+    freshManager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}}, record);
+    const auto ordered = freshManager->sortedDefinitions(context);
+
+    ASSERT_EQ(ordered.size(), catalog.size());
+    EXPECT_EQ(ordered.front().kernelId, catalog.back().kernelId)
+        << "a covering record must decide the order, not the heuristic";
+}
+
+/// Check 1 fails on a partial record: the heuristic still ranks, because interleaving
+/// measured entries with unmeasured ones would invent an order nobody took.
+TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderIntact)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto reference = makeStateManager();
+    const TestGraph graph(makeGraphId(0xE2));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto heuristicOrder = reference->sortedDefinitions(context);
+    ASSERT_GE(heuristicOrder.size(), 2U);
+
+    // Record only the LAST candidate, so coverage fails.
+    const auto manager = makeStateManager();
+    manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
+                          WinnerRecord{entryFor(heuristicOrder.back(), 0.1)});
+
+    const auto ordered = manager->sortedDefinitions(context);
+
+    ASSERT_EQ(ordered.size(), heuristicOrder.size());
+    EXPECT_EQ(ordered.front().kernelId, heuristicOrder.front().kernelId)
+        << "an uncovering record must not reorder anything";
+}
+
+/// D8 puts the cache under its own mutex. Concurrent readers and writers must neither
+/// race nor lose entries; this is the guard for someone removing the lock as "unneeded".
+TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEntry)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+
+    constexpr int THREADS = 8;
+    constexpr int PER_THREAD = 250;
+    std::vector<std::thread> threads;
+    threads.reserve(THREADS);
+
+    for(int thread = 0; thread < THREADS; ++thread)
+    {
+        threads.emplace_back([&manager, &graph, &record, thread]() {
+            for(int index = 0; index < PER_THREAD; ++index)
+            {
+                const int unique = thread * PER_THREAD + index;
+                manager->recordWinner(keyForIndex(graph, unique), record);
+                // Interleave reads so writers and readers genuinely overlap.
+                (void)manager->winnerFor(keyForIndex(graph, unique));
+                (void)manager->winnerCacheSize();
+            }
+        });
+    }
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(manager->winnerCacheSize(), static_cast<size_t>(THREADS * PER_THREAD))
+        << "every distinct key must survive concurrent insertion";
+    for(int unique = 0; unique < THREADS * PER_THREAD; ++unique)
+    {
+        ASSERT_TRUE(manager->winnerFor(keyForIndex(graph, unique)).has_value())
+            << "entry " << unique << " was lost under concurrency";
+    }
+}
+
+/// Check 1 runs inside sortedCatalog, which is itself reached concurrently. Reading
+/// through it while writers populate the cache must stay consistent and never crash.
+TEST(TestIngestorWinnerCacheStateManager, ConcurrentSortedCatalogAndWriteBackStayConsistent)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xE3));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto expected = manager->sortedDefinitions(context);
+    ASSERT_FALSE(expected.empty());
+
+    std::vector<std::thread> threads;
+    std::atomic<bool> mismatched{false};
+    threads.reserve(8);
+
+    for(int thread = 0; thread < 4; ++thread)
+    {
+        threads.emplace_back([&]() {
+            for(int index = 0; index < 200; ++index)
+            {
+                const auto ordered = manager->sortedDefinitions(context);
+                if(ordered.size() != expected.size())
+                {
+                    mismatched = true;
+                }
+            }
+        });
+    }
+    for(int thread = 0; thread < 4; ++thread)
+    {
+        threads.emplace_back([&, thread]() {
+            const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+            for(int index = 0; index < 200; ++index)
+            {
+                manager->recordWinner(keyForIndex(ContentCarryingTestGraph{}, thread * 200 + index),
+                                      record);
+            }
+        });
+    }
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_FALSE(mismatched) << "sortedCatalog must stay consistent while the cache is written";
 }
 
 } // namespace

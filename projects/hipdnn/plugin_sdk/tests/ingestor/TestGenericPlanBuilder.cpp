@@ -1162,6 +1162,119 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
         << "a record measured on another device must not decide this one's kernel";
 }
 
+/// D7's narrow-then-wide half, and the case the human called out: a record written under
+/// a narrow knob filter does NOT cover a later unfiltered run, so that run must ignore it
+/// and re-benchmark rather than serve the best of a subset it never fully measured.
+///
+/// Observable without timing: benchmarking builds a BenchmarkPlan sized for the max over
+/// all candidates (256), while a served cache hit builds a plain GenericPlan sized for
+/// the one kernel it chose. Workspace size therefore says which path ran.
+TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTriggersReBenchmarking)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const StreamWorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const StreamDeviceResolver resolver;
+    const StreamPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xD6));
+    const auto properties = testDeviceProperties();
+    const StreamCapableHandle handle;
+
+    // A prior narrow run measured ONLY kernel_128.
+    const auto catalog = manager->sortedDefinitions(MatchContext{graph, 0, properties});
+    WinnerRecord narrow;
+    for(const auto& kernel : catalog)
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        {
+            narrow.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    ASSERT_EQ(narrow.size(), 1U);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+
+    // Now a WIDE run, unfiltered, with benchmarking on.
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    StreamSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    StreamContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), 256U)
+        << "an uncovering record with benchmarking on must be ignored and the whole "
+           "filtered set re-benchmarked, not served from the narrow subset";
+}
+
+/// The mirror, and the one existing tests never covered: two buildPlan calls for the same
+/// graph and device, where the first populates the cache by benchmarking and the second
+/// is served from it with no BenchmarkPlan built. This is the shape an EXHAUSTIVE
+/// autotune() run takes -- prime, then plan again -- minus autotune itself, so it is
+/// deterministic and needs no device.
+TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRanking)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const StreamWorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const StreamDeviceResolver resolver;
+    const StreamPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xD7));
+    const auto properties = testDeviceProperties();
+    const StreamCapableHandle handle;
+
+    // Stand in for the priming sweep's write-back: a full ranking naming kernel_256,
+    // which the heuristic would never choose (it ties every score, so priority puts
+    // kernel_64 first).
+    const auto catalog = manager->sortedDefinitions(MatchContext{graph, 0, properties});
+    ASSERT_EQ(catalog.size(), 3U);
+    // Rank kernel_128 first. Deliberately the MIDDLE workspace: a served hit yields a
+    // plain GenericPlan sized 128, whereas a re-benchmark yields a BenchmarkPlan sized
+    // for the max across all three (256). The two paths are therefore distinguishable by
+    // workspace alone -- picking kernel_256 would have made them identical.
+    WinnerRecord ranking;
+    for(const auto& kernel : catalog)
+    {
+        ranking.push_back(
+            rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0));
+    }
+    std::stable_sort(ranking.begin(), ranking.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    manager->recordWinner(winnerKeyFor(graph, properties), ranking);
+
+    // The post-priming plan: benchmarking still ON, exactly as autotune leaves it.
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    StreamSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    StreamContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    // Workspace is the whole discriminator here: StreamContext exposes only IPlan, which
+    // has no kernel accessor, and 128-vs-256 already separates the two paths cleanly.
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), 128U)
+        << "a served hit sizes for the one chosen kernel; 256 would mean a BenchmarkPlan "
+           "was built and the priming sweep's ranking was thrown away";
+}
+
 // ---------------------------------------------------------------------------
 // HIPDNN_FORCE_BENCHMARKING composes as value_or, never an OR
 // ---------------------------------------------------------------------------
