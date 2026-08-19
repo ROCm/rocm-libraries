@@ -234,6 +234,12 @@ class _SetupNewTilePapTdmWriter:
     def tdmSeparateABDescriptors(self, kernel):
         return kwa_module.KernelWriterAssembly.tdmSeparateABDescriptors(self, kernel)
 
+    def _dcpDivergent(self, kernel):
+        return kwa_module.KernelWriterAssembly._dcpDivergent(self, kernel)
+
+    def tdmWaveIdxReadAfterPrologue(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmWaveIdxReadAfterPrologue(self, kernel)
+
     def isTdmWaveIdxLive(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
 

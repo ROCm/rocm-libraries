@@ -449,6 +449,24 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(self.tdmEmitWaveCompId(dstIdx, compShift, waveIdxSgpr, comment))
     return mod
 
+  def tdmWaveIdxReadAfterPrologue(self, kernel) -> bool:
+    """True when a loop-body reader still needs WaveIdx once the prologue is done.
+
+    Stagger is deliberately not a reason here: its parity read is the prologue's
+    last one, so a site placed after it must not consult this.
+    """
+    if kernel["ClusterBarrier"]:
+      return True
+    # De-aliased A/B guard each fill on wave parity every iteration, so one SGPR
+    # held here saves recomputing it from vgpr("Serial") twice per iteration.
+    # The three-way dispatch compares the whole wave index, not just bit 0.
+    if self.tdmSeparateABDescriptors(kernel):
+      return True
+    # Divergent block counts route the LDS swap through
+    # _tdmSwapLdsOffsetDecoupled, whose parity read is the one in-loop reader
+    # with no vgpr("Serial") fallback.
+    return self._dcpDivergent(kernel)
+
   def isTdmWaveIdxLive(self, kernel) -> bool:
     if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
       return False
@@ -458,14 +476,9 @@ class KernelWriterAssembly(KernelWriter):
       return True
     if self.states.waveIdxReleasedAfterStagger:
       return False
-    # De-aliased A/B guard each fill on wave parity every iteration, so one SGPR
-    # held here saves recomputing it from vgpr("Serial") twice per iteration.
-    # The three-way dispatch compares the whole wave index, not just bit 0.
-    if self.tdmSeparateABDescriptors(kernel):
+    if self.tdmWaveIdxReadAfterPrologue(kernel):
       return True
-    # Every wave-separated grouping reads WaveIdx, not just stagger code: gating
-    # this on staggerUCode emits references to an undefined sgprWaveIdx.
-    return self.isTdmWaveSeparated(kernel)
+    return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
 
   ########################################
   def strideRef(self, tc, dim):
@@ -6763,9 +6776,9 @@ class KernelWriterAssembly(KernelWriter):
     # Subtile releases WaveIdx before graWorkGroup; never double-release it here.
     if kernel.get("UseSubtileImpl"):
       return module
-    # De-aliased A/B keep reading wave parity in the loop body (see
-    # isTdmWaveIdxLive), so WaveIdx outlives the stagger removal.
-    if self.tdmDealiasAB(kernel):
+    # Loop-body parity readers outlive the stagger removal (see
+    # tdmWaveIdxReadAfterPrologue).
+    if self.tdmWaveIdxReadAfterPrologue(kernel):
       return module
     if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
       return module
