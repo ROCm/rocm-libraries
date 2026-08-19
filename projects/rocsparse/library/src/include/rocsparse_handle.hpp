@@ -25,7 +25,7 @@
 #pragma once
 
 #include "rocsparse-auxiliary.h"
-#include "rocsparse-version.h"
+#include "rocsparse-config.h"
 
 #include "rocsparse_adaptive_info.hpp"
 #include "rocsparse_blas.hpp"
@@ -58,14 +58,15 @@
 struct _rocsparse_handle
 {
     // constructor
+    // Default construction (used by rocsparse_create_handle): synchronous
+    // initialization on an internally-managed stream.
+    _rocsparse_handle();
 #ifdef ROCSPARSE_WITH_HANDLE_CREATE
     // A user-defined stream must be provided so that all stream-ordered setup
     // work during construction runs on that stream instead of the default
     // (NULL) stream, which would otherwise implicitly synchronize with all
     // other streams on the device.
     explicit _rocsparse_handle(hipStream_t stream);
-#else
-    _rocsparse_handle();
 #endif
     // destructor
     ~_rocsparse_handle();
@@ -129,7 +130,7 @@ namespace rocsparse
     //
     std::string handle_get_arch_name(rocsparse_handle handle);
 
-    struct rocpsarse_arch_names
+    struct rocsparse_arch_names
     {
         static constexpr const char* gfx908 = "gfx908";
     };

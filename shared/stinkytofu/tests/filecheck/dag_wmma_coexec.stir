@@ -1,0 +1,150 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# DAG scheduler co-execution awareness for a dependent consumer of a WMMA's D. The
+# scheduler interleaves independent VALU into the gap; when none is left it emits the
+# shortfall as filler v_nops itself. Requirement: WMMA->WMMA = popcount(coIssueWindow)+1,
+# WMMA->VALU = popcount(coIssueWindow) (WMMA F16/BF16 = 4 slots). Only VALU fills a slot;
+# ds/global/SALU run on independent pipes and do not count.
+
+#===----------------------------------------------------------------------===#
+# WMMA->WMMA (D->A), enough independent VALU: 5 muls fill the gap, 0 v_nop.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @ww_enough_fill
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: v_nop
+st.func @ww_enough_fill() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[28:35], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v100 = "st.v_mul_f32"(v200, v201) { issueCycles = 1, latencyCycles = 5 }
+  v102 = "st.v_mul_f32"(v202, v203) { issueCycles = 1, latencyCycles = 5 }
+  v104 = "st.v_mul_f32"(v204, v205) { issueCycles = 1, latencyCycles = 5 }
+  v106 = "st.v_mul_f32"(v206, v207) { issueCycles = 1, latencyCycles = 5 }
+  v108 = "st.v_mul_f32"(v208, v209) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# WMMA->WMMA no dependency (next reads v[50:57], not the prior D): not held, no v_nop.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @ww_no_dep_not_held
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: v_nop
+st.func @ww_no_dep_not_held() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[28:35], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[50:57], v[8:15], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v100 = "st.v_mul_f32"(v200, v201) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# WMMA->WMMA (D->A), scarce: 2 muls placed, scheduler emits the remaining 3 v_nop (5).
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @ww_scarce_scheduler_emits
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+st.func @ww_scarce_scheduler_emits() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[28:35], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v100 = "st.v_mul_f32"(v200, v201) { issueCycles = 1, latencyCycles = 5 }
+  v102 = "st.v_mul_f32"(v202, v203) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# ds_load runs on the LDS pipe and does not fill a coexec slot: with only a ds_load
+# available, the scheduler emits the full slots+1 = 5 v_nops.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @ds_load_is_not_a_coexec_fill
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+st.func @ds_load_is_not_a_coexec_fill() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[28:35], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v200 = "st.ds_load_b32"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# WMMA->VALU (dependent v_add reads D), scarce: scheduler emits slots = 4 v_nop (no +1).
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @wmma_to_valu_scarce_scheduler_emits
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_add_f32
+st.func @wmma_to_valu_scarce_scheduler_emits() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[28:35], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v100 = "st.v_add_f32"(v0, v101) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# WMMA -> two dependent VALU in same window:
+# Fillers should be inserted once before the first dependent VALU only.
+# No extra filler should appear before the second dependent VALU.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @wmma_two_dependent_valu_no_double_topup
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_nop
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: v_nop
+st.func @wmma_two_dependent_valu_no_double_topup() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[28:35], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v100 = "st.v_add_f32"(v0, v101) { issueCycles = 1, latencyCycles = 5 }
+  v102 = "st.v_add_f32"(v0, v103) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# WMMA->VALU with enough independent VALU: muls fill the window, no v_nop.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @wmma_to_valu_enough_fill
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: v_nop
+st.func @wmma_to_valu_enough_fill() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[28:35], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v100 = "st.v_add_f32"(v0, v101) { issueCycles = 1, latencyCycles = 5 }
+  v102 = "st.v_mul_f32"(v200, v201) { issueCycles = 1, latencyCycles = 5 }
+  v104 = "st.v_mul_f32"(v202, v203) { issueCycles = 1, latencyCycles = 5 }
+  v106 = "st.v_mul_f32"(v204, v205) { issueCycles = 1, latencyCycles = 5 }
+  v108 = "st.v_mul_f32"(v206, v207) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

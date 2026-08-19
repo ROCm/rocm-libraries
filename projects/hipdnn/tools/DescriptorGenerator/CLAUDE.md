@@ -424,6 +424,7 @@ operation:
 | `frontend_inverse_converter` | string | `""` | Conversion function from backend C-API value back to frontend enum (used in unpacker). Only needed for `mode` fields. Example: `toFrontendConvMode` |
 | `fbs_optional` | bool | `false` | Set `true` for FBS optional scalar fields (i.e., the FBS schema marks the field as optional/nullable rather than providing a default). When `true`, the generated frontend getter returns `std::optional<T>` and the packer/unpacker emit `has_value()` / `value()` plumbing. Replaces the legacy `frontend_getter_returns_optional` field — derive optional-return shape solely from `fbs_optional`. |
 | `mode_sentinel` | string | unset | (Mode fields only.) Controls whether `finalize()` emits the sentinel-not-set check for this mode field. One of `"required"` (always emit; sentinel must exist in `enum_def`), `"optional"` (emit only when a sentinel exists; silently skip otherwise — the soft mode for in-flight migrations), or `"none"` (never emit; the enum has no sentinel by design). When unset, the loader auto-detects: emits the check when the linked `enum_def` contains a `NOT_SET` / `UNSET` entry (or any entry with `sentinel: true`), otherwise warns and falls back to `"none"`. Use `"none"` for SDPA-style enums (`DiagonalAlignment`, `AttentionImplementation`) where every value is meaningful. |
+| `mode_converter_optional` | bool | unset | (Mode fields only.) Overrides whether the frontend→backend converter returns `std::optional<T>`. Unset derives it from `mode_sentinel` (sentinel present → optional). Set `true` for a sentinel-less enum that must still reject a value it does not map, instead of falling back to the first enumerator; the packer then emits the `has_value()` check and returns `INVALID_VALUE`. |
 
 #### `shared` and `enum_def` Coexistence
 
@@ -541,7 +542,18 @@ The `mode` type is REQUIRED for all enum fields — both when using `enum_def` a
 
 ## Post-Generation Refactoring: TEST_P
 
-The code generator produces `TEST_F`-based tests as a baseline. After generation, refactor tests into parameterized `TEST_P` suites where doing so reduces duplication. The templates do not generate TEST_P directly; this is a manual post-generation step.
+The templates emit `TEST_P` directly for the two missing-required-input error families:
+
+| Family | Template | Generated suite |
+|---|---|---|
+| Missing required attribute at `finalize()` | `test_descriptor.cpp.j2` | `RequiredAttributes/Test<Op>OperationDescriptorFinalizeFailsWithout.FinalizeFailsWithout/<n>` |
+| Missing required tensor in the `fromNode()` tensor map | `test_from_node.cpp.j2` | `RequiredTensors/Test<Op>OperationFromNodeMissingTensor.FailsWithMissingTensor/<n>` |
+
+Each instantiates over the bare parameter — an attribute enumerator or a tensor UID. On the descriptor side this is what the fixture's `setTensors()` / `setRequiredAttributes()` `excluded` parameter exists for: each call sets every required attribute except the one under test, so each case proves the omitted attribute alone is what `finalize()` rejects.
+
+The descriptor suite is `RequiredAttributes` rather than `RequiredTensors` because its parameter list is not tensor-only — when `has_compute_data_type` is set, the compute type joins the required tensors as a case.
+
+Every other generated test is a `TEST_F`. Refactoring those into parameterized `TEST_P` suites where doing so reduces duplication is a manual post-generation step. If a refactoring proves broadly applicable, prefer folding it back into the template over repeating it per operation: a hand-refactored generated file is silently reverted by the next regeneration.
 
 ### When to Refactor to TEST_P
 

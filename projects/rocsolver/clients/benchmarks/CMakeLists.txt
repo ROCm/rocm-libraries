@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -61,5 +61,13 @@ target_compile_definitions(rocsolver-bench PRIVATE
   ROCM_USE_FLOAT16
   ROCSOLVER_CLIENTS_BENCH
 )
+
+# Mirror feature flags to test behaviour
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
 
 rocm_install(TARGETS rocsolver-bench COMPONENT benchmarks)

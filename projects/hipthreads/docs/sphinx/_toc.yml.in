@@ -11,17 +11,17 @@ subtrees:
   - file: install/source-build
     title: Build from source
 
-- caption: How to
-  entries:
-  - file: how-to/use-hipthreads-in-a-project
-    title: Add hipThreads to a CMake project
-  - file: how-to/tune-scheduler-concurrency
-    title: Tune scheduler concurrency
-
 - caption: Conceptual
   entries:
-  - file: conceptual/execution-model
+  - file: conceptual/hipThreads-execution-model
     title: Execution model
+
+- caption: How to
+  entries:
+  - file: how-to/hipThreads-in-a-project
+    title: Add hipThreads to a CMake project
+  - file: how-to/hipThreads-tune-scheduler-concurrency
+    title: Tune scheduler concurrency
 
 - caption: Reference
   entries:
@@ -29,7 +29,10 @@ subtrees:
     title: std to hip mapping
   - file: reference/limitations
     title: Limitations
-  - file: cpp_api
+  - file: reference/environment-variables
+    title: Environment variables
+  - file: reference/cpp_api
+    title: API reference
 
 - caption: About
   entries:

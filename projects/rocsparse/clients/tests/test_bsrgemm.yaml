@@ -527,6 +527,48 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3]
 
+# Coverage: dense block-rows to exercise the higher nnz-per-row group
+# kernels (groups 3-7) in rocsparse_bsrgemm_calc. Small block_dim with a
+# wide, dense block matrix produces hundreds of blocks per output block-row.
+- name: bsrgemm_mult_dense
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: [64]
+  N: [512, 800, 1400]
+  K: [512, 900]
+  block_dim: [2, 3]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_mult_scale_dense
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: [64]
+  N: [640]
+  K: [640]
+  block_dim: [2, 4]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
 # Coverage gap tests: high-fill output rows (develop vs reduced_ci)
 # Uses semi-dense matrices to produce 129-512+ nnz per row in result
 - name: bsrgemm_high_fill
@@ -537,7 +579,6 @@ Tests:
   N: [64]
   K: [512]
   block_dim: [4]
-  percentage: [0.5]
   alpha_alphai: *alpha_range_checkin
   beta_betai: *beta_range_checkin
   transA: [rocsparse_operation_none]

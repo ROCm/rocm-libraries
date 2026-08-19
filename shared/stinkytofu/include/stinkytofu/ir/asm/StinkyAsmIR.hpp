@@ -54,6 +54,9 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     const HwInstDesc* hwInstDesc;
     int issueCycles;
     int latencyCycles;
+    // VALU co-issue window (bit i = VALU may co-issue at cycle i after issue).
+    // Resolved from hwInstDesc, then possibly overridden by matrix data format.
+    uint16_t coIssueWindow;
 
    private:
     // Def-use chain:
@@ -80,7 +83,8 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         : IRBase(IRType::StinkyTofu),
           hwInstDesc(mcid),
           issueCycles(mcid->issue),
-          latencyCycles(mcid->latency) {}
+          latencyCycles(mcid->latency),
+          coIssueWindow(mcid->coIssueWindow) {}
 
     ~StinkyInstruction() override = default;
 
@@ -150,8 +154,16 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
             hwInstDesc = newDesc;
             issueCycles = newDesc->issue;
             latencyCycles = newDesc->latency;
+            coIssueWindow = newDesc->coIssueWindow;
+            resolveMatrixFmtOverrides();
         }
     }
+
+    // Apply matrix-data-format-keyed hardware overrides (issue/latency cycles
+    // and co-issue window) once the MatrixFmtModifiers is known. These are
+    // hardware properties of the instruction, so they are baked onto the
+    // instruction's own fields and every pass reads the corrected values.
+    void resolveMatrixFmtOverrides();
 
     bool is(InstFlag flag) const {
         return hwInstDesc->has(flag);
@@ -236,9 +248,10 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         cloned->destRegs = destRegs;
         cloned->srcRegs = srcRegs;
 
-        // Copy issue/latency cycles
+        // Copy issue/latency cycles and co-issue window
         cloned->issueCycles = issueCycles;
         cloned->latencyCycles = latencyCycles;
+        cloned->coIssueWindow = coIssueWindow;
 
         // Deep copy modifiers via virtual clone() (TypedModifier implements it per type).
         for (const auto& mod : modifiers) {
@@ -393,8 +406,16 @@ inline bool isGLOBALStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStore);
 }
 
+inline bool isGlobalStoreAsyncFromLds(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALStoreAsyncFromLds);
+}
+
 inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
+}
+
+inline bool isGlobalPrefetch(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALPrefetch);
 }
 
 inline bool isGLOBAL(const StinkyInstruction& inst) {
@@ -455,7 +476,8 @@ inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
-    return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst);
+    return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
 }
 
 /// A destination register is implicit (not printed) when it was added solely
@@ -507,6 +529,13 @@ inline bool isReturningAtomic(const StinkyInstruction& inst) {
 
 inline bool isTensorLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_TENSORLoadToLds);
+}
+
+// Async memory ops tracked by ASYNCcnt (s_wait_asynccnt). Shared FIFO counter
+// across the whole async family; extend this predicate as async loads /
+// cluster-async / ds_atomic_async_barrier_arrive are added.
+inline bool isAsyncMemOp(const StinkyInstruction& inst) {
+    return isGlobalStoreAsyncFromLds(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {
@@ -712,10 +741,11 @@ inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
 /// scheduler has no dependency edges to prove reordering is safe.
 inline bool hasSideEffect(const StinkyInstruction& inst) {
     if (!inst.getHwInstDesc()) return false;
-    if (isGlobalMemStore(inst) || isBranch(inst) || isCall(inst) || isWaitCnt(inst) ||
-        isHasSideEffect(inst))
+    if ((isGlobalMemStore(inst) && !isGlobalStoreAsyncFromLds(inst)) || isBranch(inst) ||
+        isCall(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
         return true;
-    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
+    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
+         isGlobalStoreAsyncFromLds(inst)) &&
         !hasLdsPseudoRegs(inst))
         return true;
     if (isExecMaskGroup(inst)) {
@@ -749,6 +779,11 @@ inline bool isScalarALU(const StinkyInstruction& inst) {
 /// Excludes FP32-input WMMA (v_wmma_f32_16x16x4_f32).
 inline bool isXDLWMMA(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_WMMA_XDL);
+}
+
+/// Check if instruction is a Tensor-LUT op (v_perm_pk16*).
+inline bool isTensorLUT(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_TensorLUT);
 }
 
 /// Check if instruction is a 64-bit transcendental.

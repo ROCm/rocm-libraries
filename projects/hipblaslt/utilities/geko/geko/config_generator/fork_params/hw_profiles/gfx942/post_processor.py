@@ -4,7 +4,7 @@
 from typing import Any, Dict, List, Tuple
 
 from geko.config_generator.constants import LIST_OF_MT_MAX_SIZE
-from geko.config_generator.mi_designer import MIDesign
+from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.fork_params.post_processor import BasePostProcessor, mark_post_process
 from geko.config_generator.shared_utils import (
     ForkParameter,
@@ -32,9 +32,8 @@ class GFX942PostProcessor(BasePostProcessor):
         dt = self._gt.data_type
         threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
         for entry in mi_groups:
-            mi = entry["MatrixInstruction"].values
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            if MT0 * MT1 >= threshold:
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+            if mfma_params.MT0 * mfma_params.MT1 >= threshold:
                 entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
@@ -56,8 +55,7 @@ class GFX942GAPostProcessor(BasePostProcessor):
         dt = self._gt.data_type
         threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
         for entry in mi_groups:
-            mi = entry["MatrixInstruction"].values
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            if MT0 * MT1 >= threshold:
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+            if mfma_params.MT0 * mfma_params.MT1 >= threshold:
                 entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups

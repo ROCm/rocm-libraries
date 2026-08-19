@@ -196,10 +196,14 @@ inline Error
 
     // Set enum parameters using dedicated backend enum types
     auto diagonalAlignment = toBackendDiagonalAlignment(attributes.diagonal_alignment);
+    if(!diagonalAlignment.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported diagonal alignment"};
+    }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
                                                HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
-                                               diagonalAlignment,
+                                               *diagonalAlignment,
                                                "SDPA bprop diagonal_alignment"));
 
     // Set compute data type

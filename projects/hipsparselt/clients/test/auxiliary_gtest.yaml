@@ -112,7 +112,7 @@ Tests:
 - name: aux_matmul_alg_assign
   category: smoke
   function:
-    - aux_matmul_alg_assign: *hpa_int8_precision
+    - aux_matmul_alg_assign: *real_precisions
 
 - name: aux_matmul_alg_set_attr_bad_arg
   category: smoke

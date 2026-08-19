@@ -71,6 +71,10 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         // CK_Tensor: tensor_load_to_lds; every consumer drains.
         {[](const StinkyInstruction& i) { return isTensorLoad(i); },
          [](const StinkyInstruction& i) { return true; }},
+        // CK_Async: global_store_async_from_lds_*; drains via the LDS WAR
+        // anti-dep scan (scanAsyncAntiDeps), not via SSA consumers.
+        {[](const StinkyInstruction& i) { return isAsyncMemOp(i); },
+         [](const StinkyInstruction&) { return true; }},
     };
     return kPolicies[c];
 }
@@ -87,6 +91,11 @@ CounterKind classifyMemOp(const StinkyInstruction& inst) {
 namespace {
 
 constexpr size_t kMaxInFlight = 64;
+constexpr int kMaxWaitCount = static_cast<int>(kMaxInFlight) - 1;
+
+int clampWaitCount(int w) {
+    return std::min(w, kMaxWaitCount);
+}
 
 bool isPhi(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::PHI;
@@ -94,6 +103,15 @@ bool isPhi(const StinkyInstruction& inst) {
 
 bool isTensorAnchor(const StinkyInstruction& inst) {
     return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+}
+
+bool hasUntaggedTensorAnchor(BasicBlock& bb) {
+    for (IRBase& ir : bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr) return true;
+    }
+    return false;
 }
 
 bool isLdsWriterAnchor(const StinkyInstruction& inst) {
@@ -111,6 +129,31 @@ bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
     return false;
 }
 
+// Sorted-unique union of the memory tokens of the tensor_load ops a tensorcnt wait
+// of value `tensorCount` drains: a wait of W keeps the W newest ops of each per-pred
+// queue in flight and drains the older prefix q.ops[0 .. size-W-1]. Since the emitted
+// W is a min across predecessor queues, at a CFG merge this union is a conservative
+// superset of what any single path drains. Drained ops without MemTokenData
+// contribute nothing (no token to add).
+std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount) {
+    std::vector<int> out;
+    if (tensorCount < 0) return out;
+    for (const auto& q : state.queues[CK_Tensor]) {
+        const int qsize = static_cast<int>(q.ops.size());
+        const int drainedEnd = qsize - tensorCount;  // ops [0, drainedEnd) are drained
+        for (int idx = 0; idx < drainedEnd; ++idx) {
+            StinkyInstruction* op = q.ops[idx];
+            if (op == nullptr) continue;
+            const auto* mt = op->getModifier<MemTokenData>();
+            if (mt == nullptr) continue;
+            out.insert(out.end(), mt->tokens.begin(), mt->tokens.end());
+        }
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -118,6 +161,7 @@ bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
 // ---------------------------------------------------------------------------
 
 int PerPredQueue::countFrom(StinkyInstruction* op) const {
+    if (saturatedOps.find(op) != saturatedOps.end()) return static_cast<int>(kMaxInFlight);
     auto it = std::find(ops.begin(), ops.end(), op);
     if (it == ops.end()) return 0;
     return static_cast<int>(std::distance(it, ops.end()));
@@ -149,11 +193,10 @@ WaitDataflow::WaitDataflow(Function& /*func*/, const DominanceInfo& /*domInfo*/,
                            const std::vector<BasicBlock*>& rpo)
     : rpo(rpo) {
     const unsigned n = static_cast<unsigned>(rpo.size());
-    // A self-loop that never drains a counter fills its per-pred queue one op
-    // per fixed-point iteration up to kMaxInFlight before the lattice
-    // stabilises, so the cap floor must clear that window for the fixed point
-    // to be reached. The solver breaks early on convergence, so this only
-    // affects genuinely slow / non-convergent inputs.
+    // Wait-count immediates are capped to the hardware window
+    // (kMaxInFlight - 1). Keep a floor above that window so loop-carried
+    // capped waits have enough sweeps to propagate before the conservative
+    // cap-hit fallback fires. The solver breaks early on convergence.
     const unsigned floor = static_cast<unsigned>(kMaxInFlight) + 8u;
     iterationCap = std::min<unsigned>(256u, std::max<unsigned>(floor, 2u * n));
 
@@ -197,6 +240,7 @@ DataflowState WaitDataflow::mergeFromPredecessors(
                 PerPredQueue q;
                 q.pred = p;
                 q.ops = predQ.ops;
+                q.saturatedOps = predQ.saturatedOps;
                 // Dedup identical (pred, ops) queues. A back-edge otherwise
                 // re-copies the same per-pred queue on every fixed-point
                 // iteration: the predecessor's exit already contains the
@@ -208,7 +252,7 @@ DataflowState WaitDataflow::mergeFromPredecessors(
                 // is loss-free and restores convergence.
                 bool dup = false;
                 for (const auto& existing : entry.queues[c]) {
-                    if (existing.pred == q.pred && existing.ops == q.ops) {
+                    if (existing == q) {
                         dup = true;
                         break;
                     }
@@ -308,6 +352,7 @@ struct CounterEmitState {
 // Trim every per-pred queue in a counter to keep at most `keep` tail ops.
 void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
     for (auto& q : qs) {
+        q.saturatedOps.clear();
         if (keep <= 0) {
             q.ops.clear();
         } else if (static_cast<int>(q.ops.size()) > keep) {
@@ -319,22 +364,21 @@ void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
 // Append a local in-block memop to every per-pred queue. Local ops are in
 // flight on every CFG path through this block, so they join every path's
 // tail. If no per-pred queue exists yet, create a synthetic one
-// (pred == nullptr) so the in-block prefix is still tracked. The queue is
-// capped at kMaxInFlight so an undrained counter cannot grow it forever.
-// Returns true if the cap had to drop an op -- i.e. the queue exceeded the
-// hardware in-flight window -- so the caller can flag the overflow for an
-// end-of-solve diagnostic.
+// (pred == nullptr) so the in-block prefix is still tracked. Keep a bounded
+// tail for convergence; older producers are moved to saturatedOps so a later
+// consumer still observes the maximum representable wait.
 bool appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
     if (qs.empty()) qs.push_back(PerPredQueue{});
-    bool dropped = false;
+    bool saturated = false;
     for (auto& q : qs) {
         q.ops.push_back(op);
         while (q.ops.size() > kMaxInFlight) {
+            q.saturatedOps.insert(q.ops.front());
             q.ops.pop_front();
-            dropped = true;
+            saturated = true;
         }
     }
-    return dropped;
+    return saturated;
 }
 
 // Human-readable name for a counter, for diagnostics.
@@ -348,6 +392,8 @@ const char* counterName(CounterKind c) {
             return "scalar (kmcnt)";
         case CK_Tensor:
             return "tensor (tlcnt)";
+        case CK_Async:
+            return "async (asynccnt)";
         default:
             return "?";
     }
@@ -363,6 +409,8 @@ int getCounterField(const WaitCountSpec& spec, CounterKind c) {
             return spec.kmCount;
         case CK_Tensor:
             return spec.tensorCount;
+        case CK_Async:
+            return spec.asyncCount;
         default:
             return WaitCountSpec::kUnused;
     }
@@ -382,6 +430,9 @@ void setCounterField(WaitCountSpec& spec, CounterKind c, int w) {
         case CK_Tensor:
             spec.tensorCount = w;
             break;
+        case CK_Async:
+            spec.asyncCount = w;
+            break;
         default:
             break;
     }
@@ -391,6 +442,7 @@ void setCounterField(WaitCountSpec& spec, CounterKind c, int w) {
 void trimPredQueues(std::vector<PerPredQueue>& qs, BasicBlock* pred, int keep) {
     for (auto& q : qs) {
         if (q.pred != pred) continue;
+        q.saturatedOps.clear();
         if (keep <= 0) {
             q.ops.clear();
         } else if (static_cast<int>(q.ops.size()) > keep) {
@@ -421,7 +473,13 @@ DataflowState adjustedEntry(BasicBlock& bb, const WaitInsertionPlan& plan,
     return state;
 }
 
-void restoreTensorState(DataflowState& state, const DataflowState& frozen) {
+void restoreTensorState(DataflowState& state, const DataflowState& frozen,
+                        bool keepLiveTensorState) {
+    // Untagged tensor anchors are fences: if this block has one, live tensor
+    // queues from back-edges must reach it instead of being replaced by the
+    // sweep-0 frozen snapshot.
+    if (keepLiveTensorState) return;
+
     state.queues[CK_Tensor] = frozen.queues[CK_Tensor];
     for (auto& kv : state.phiSummaries) {
         auto it = frozen.phiSummaries.find(kv.first);
@@ -549,7 +607,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                 bool overlap =
                     (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
                 if (!overlap) continue;
-                tightenRequired(CK_DS, qsize - idx - 1);
+                tightenRequired(CK_DS, clampWaitCount(qsize - idx - 1));
             }
         }
     };
@@ -574,10 +632,34 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                 StinkyInstruction* op = q.ops[idx];
                 if (op == inst) continue;
                 if (op->getModifier<MemTokenData>() == nullptr) {
-                    tightenRequired(CK_Tensor, qsize - idx - 1);
+                    tightenRequired(CK_Tensor, clampWaitCount(qsize - idx - 1));
                 }
             }
         }
+    }
+
+    // WAR-on-LDS for the async counter, mirroring scanDsAntiDeps. asynccnt
+    // tracks global_store_async_from_lds_*, an LDS reader with no register dest;
+    // an LDS writer (tensor_load / ds_write) or barrier reusing a buffer it is
+    // still reading must drain asynccnt first.
+    auto scanAsyncAntiDeps = [&](const std::vector<int>& anchorTokens) {
+        for (const auto& q : state.queues[CK_Async]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                StinkyInstruction* op = q.ops[idx];
+                if (op == inst) continue;
+                auto* opTokens = op->getModifier<MemTokenData>();
+                bool overlap =
+                    (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
+                if (!overlap) continue;
+                tightenRequired(CK_Async, qsize - idx - 1);
+            }
+        }
+    };
+
+    if (isLdsWriterAnchor(*inst) || isBarrier(*inst)) {
+        const auto* tk = inst->getModifier<MemTokenData>();
+        if (tk != nullptr) scanAsyncAntiDeps(tk->tokens);
     }
 
     // Conservative MemTokenData fallbacks. An untagged anchor or
@@ -586,6 +668,10 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
         anyOpInFlight(CK_Tensor)) {
         required[CK_Tensor] = 0;
+    }
+    if ((isLdsWriterAnchor(*inst) || isBarrier(*inst)) &&
+        inst->getModifier<MemTokenData>() == nullptr && anyOpInFlight(CK_Async)) {
+        required[CK_Async] = 0;
     }
     if (isLdsWriterAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
         anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {
@@ -673,6 +759,9 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
                 case CK_Tensor:
                     spec.tensorCount = required[c];
                     break;
+                case CK_Async:
+                    spec.asyncCount = required[c];
+                    break;
                 default:
                     break;
             }
@@ -686,8 +775,6 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         CounterKind self = classifyMemOp(*inst);
         if (self != CK_Count) {
             if (appendToAllPaths(state.queues[self], inst)) {
-                // Counter issued past its hardware in-flight window without
-                // draining; the oldest provably-complete op was dropped.
                 overflowSites.emplace(&bb, self);
             }
             emit[self].recordNewOp();
@@ -698,29 +785,24 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
     // union queue would lose per-pred position info and force downstream
     // consumers to compute strictly conservative (over-deep) waits. Each
     // successor's mergeFromPredecessors copies all queues across,
-    // retagging them as via-this-pred. The per-pred queue length cap
-    // (kMaxInFlight, applied in appendToAllPaths) is what bounds the
-    // lattice in place of the old exit-collapse, so a self-loop with an
-    // undrained counter still converges.
+    // retagging them as via-this-pred. Wait values derived from these queues
+    // are capped to the hardware maximum immediate (kMaxInFlight - 1).
 }
 
 void WaitDataflow::reportCounterOverflow() const {
-    // One line per (block, counter) that overflowed the in-flight window in
-    // the converged transfer pass, emitted in deterministic RPO order.
-    // Non-fatal: the dropped ops are provably complete, so the plan stays
-    // correct, but a counter pinned at the full window is a strong hint of a
-    // missing drain (real RAW hazard) or dead async loads.
+    // One line per (block, counter) whose bounded queue saturated in the
+    // converged transfer pass, emitted in deterministic RPO order.
+    // Non-fatal: saturated producers are still tracked in saturatedOps and
+    // report the maximum representable wait count.
     for (BasicBlock* bb : rpo) {
         for (int c = 0; c < CK_Count; ++c) {
             if (overflowSites.find({bb, static_cast<CounterKind>(c)}) == overflowSites.end())
                 continue;
-            std::cerr
-                << "[WaitDataflow] warning: block '" << bb->getLabel() << "' overflowed the "
-                << counterName(static_cast<CounterKind>(c))
-                << " in-flight window (kMaxInFlight=" << kMaxInFlight
-                << "): the counter was issued past its hardware window without draining, so "
-                   "the oldest provably-complete op(s) were dropped. Confirm a drain (barrier "
-                   "/ wait) is not required here.\n";
+            std::cerr << "[WaitDataflow] warning: block '" << bb->getLabel() << "' saturated the "
+                      << counterName(static_cast<CounterKind>(c))
+                      << " queue (kMaxInFlight=" << kMaxInFlight
+                      << "): older producer(s) are tracked at the maximum wait count "
+                      << kMaxWaitCount << ". Confirm a deeper drain is not required here.\n";
         }
     }
 }
@@ -741,18 +823,18 @@ bool WaitDataflow::solve() {
     for (unsigned iter = 0; iter < iterationCap; ++iter) {
         bool changed = false;
         // Cleared each sweep so that, at the fixed point, overflowSites holds
-        // exactly the steady-state overflows (the converged sweep re-runs
-        // every block's transfer and re-detects any sustained overflow).
+        // exactly the steady-state queue saturations.
         overflowSites.clear();
         for (BasicBlock* bb : rpo) {
+            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
             DataflowState entry = mergeFromPredecessors(*bb);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
-                restoreTensorState(entry, result.entryState[bb]);
+                restoreTensorState(entry, result.entryState[bb], keepLiveTensorState);
             }
             DataflowState working = entry;
             transferBlock(*bb, working);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
-                restoreTensorState(working, result.exitState[bb]);
+                restoreTensorState(working, result.exitState[bb], keepLiveTensorState);
             }
 
             PASS_DEBUG({
@@ -777,10 +859,9 @@ bool WaitDataflow::solve() {
             result.entryState[bb] = std::move(entry);
         }
         if (!changed) {
-            // Fixed point reached: surface any counter that overflowed its
-            // hardware in-flight window (issued past the cap without draining).
-            reportCounterOverflow();
-            PASS_DEBUG({ std::cerr << "[WaitDataflow] converged in " << iter << " iterations\n"; });
+            PASS_DEBUG(reportCounterOverflow());
+            PASS_DEBUG(
+                { std::cerr << "[WaitDataflow] solver converged in " << iter << " iterations\n"; });
             return true;
         }
     }
@@ -817,11 +898,13 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
     std::unordered_map<const BasicBlock*, DataflowState> finalExit;
     std::unordered_map<StinkyInstruction*, WaitCountSpec> newAnchors;
 
+    bool converged = false;
     for (unsigned iter = 0; iter < iterationCap; ++iter) {
         bool changed = false;
         newAnchors.clear();
 
         for (BasicBlock* bb : rpo) {
+            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
             // Entry = merge of recomputed predecessor exits (back-edges
             // start at bottom and tighten over iterations), then apply the
             // optimizer's predecessor tail drains.
@@ -829,7 +912,8 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
             state = adjustedEntry(*bb, optimizerPlan, state);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
                 auto eit = finalEntry.find(bb);
-                if (eit != finalEntry.end()) restoreTensorState(state, eit->second);
+                if (eit != finalEntry.end())
+                    restoreTensorState(state, eit->second, keepLiveTensorState);
             }
             finalEntry[bb] = state;
             CounterEmitState emit[CK_Count];
@@ -845,6 +929,14 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 // Emit the optimizer's planned wait where present (floor),
                 // else the freshly recomputed requirement.
                 WaitCountSpec applySpec = mergePlanAndComputed(optimizerPlan, inst, computed, emit);
+
+                // Capture the drained tensor-token union from the LIVE (pre-trim)
+                // queues, so the emitted s_wait_tensorcnt can carry it. This is the
+                // final anchor set (finalizePlan overwrites plan.anchorWaits below),
+                // and the queues here are exactly those the wait drains.
+                if (applySpec.tensorCount != WaitCountSpec::kUnused) {
+                    applySpec.tensorTokens = drainedTensorTokens(state, applySpec.tensorCount);
+                }
 
                 for (int c = 0; c < CK_Count; ++c) {
                     int w = getCounterField(applySpec, static_cast<CounterKind>(c));
@@ -863,7 +955,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
 
             auto it = finalExit.find(bb);
             if (!loopCarriedTokenDepsEnabled && iter > 0 && it != finalExit.end()) {
-                restoreTensorState(state, it->second);
+                restoreTensorState(state, it->second, keepLiveTensorState);
             }
             if (it == finalExit.end() || !(it->second == state)) {
                 finalExit[bb] = std::move(state);
@@ -871,7 +963,16 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
             }
         }
 
-        if (!changed) break;
+        if (!changed) {
+            PASS_DEBUG({
+                std::cerr << "[WaitDataflow] finalizePlan converged in " << iter << " iterations\n";
+            });
+            converged = true;
+            break;
+        }
+    }
+    if (!converged) {
+        std::cerr << "[WaitDataflow] finalizePlan iteration cap " << iterationCap << " hit\n";
     }
 
     plan.anchorWaits = std::move(newAnchors);
@@ -888,6 +989,7 @@ WaitInsertionPlan WaitDataflow::materializePlan() const {
                 if (entry.second.bufferCount != WaitCountSpec::kUnused) spec.bufferCount = 0;
                 if (entry.second.kmCount != WaitCountSpec::kUnused) spec.kmCount = 0;
                 if (entry.second.tensorCount != WaitCountSpec::kUnused) spec.tensorCount = 0;
+                if (entry.second.asyncCount != WaitCountSpec::kUnused) spec.asyncCount = 0;
                 if (spec.isValid()) plan.anchorWaits[entry.first] = spec;
             }
         }

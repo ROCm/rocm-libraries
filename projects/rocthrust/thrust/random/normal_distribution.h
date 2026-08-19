@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/pair.h>
 #include <thrust/random/detail/normal_distribution_base.h>
 #include <thrust/random/detail/random_core_access.h>
@@ -58,7 +51,7 @@ namespace random
  *  #include <thrust/random/linear_congruential_engine.h>
  *  #include <thrust/random/normal_distribution.h>
  *
- *  int main()
+ *  int main(void)
  *  {
  *    // create a minstd_rand object to act as our source of randomness
  *    thrust::minstd_rand rng;
@@ -125,7 +118,7 @@ public:
    *  \p normal_distribution do not depend on values produced by any random
    *  number generator prior to invoking this function.
    */
-  THRUST_HOST_DEVICE void reset();
+  THRUST_HOST_DEVICE void reset(void);
 
   // generating functions
 
@@ -155,14 +148,14 @@ public:
    *
    *  \return The mean (expected value) of this \p normal_distribution's output.
    */
-  THRUST_HOST_DEVICE result_type mean() const;
+  THRUST_HOST_DEVICE result_type mean(void) const;
 
   /*! This method returns the value of the parameter with which this \p normal_distribution
    *  was constructed.
    *
    *  \return The standard deviation of this \p uniform_real_distribution's output.
    */
-  THRUST_HOST_DEVICE result_type stddev() const;
+  THRUST_HOST_DEVICE result_type stddev(void) const;
 
   /*! This method returns a \p param_type object encapsulating the parameters with which this
    *  \p normal_distribution was constructed.
@@ -170,7 +163,7 @@ public:
    *  \return A \p param_type object encapsulating the parameters (i.e., the mean and standard deviation) of this \p
    * normal_distribution.
    */
-  THRUST_HOST_DEVICE param_type param() const;
+  THRUST_HOST_DEVICE param_type param(void) const;
 
   /*! This method changes the parameters of this \p normal_distribution using the values encapsulated
    *  in a given \p param_type object.
@@ -184,14 +177,14 @@ public:
    *
    *  \return The lower bound of this \p normal_distribution's half-open interval.
    */
-  THRUST_HOST_DEVICE result_type min THRUST_PREVENT_MACRO_SUBSTITUTION() const;
+  THRUST_HOST_DEVICE result_type min THRUST_PREVENT_MACRO_SUBSTITUTION(void) const;
 
   /*! This method returns the smallest number larger than largest floating point number this \p
    * uniform_real_distribution can potentially produce.
    *
    *  \return The upper bound of this \p normal_distribution's half-open interval.
    */
-  THRUST_HOST_DEVICE result_type max THRUST_PREVENT_MACRO_SUBSTITUTION() const;
+  THRUST_HOST_DEVICE result_type max THRUST_PREVENT_MACRO_SUBSTITUTION(void) const;
 
   /*! \cond
    */
