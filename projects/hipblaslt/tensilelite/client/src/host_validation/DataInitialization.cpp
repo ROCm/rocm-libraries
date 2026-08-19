@@ -74,8 +74,8 @@ namespace TensileLite::Client
                 return toHostValidationScalarType(type);
             case rocisa::DataType::E8:
                 // Generation operates on the shared raw OCP E8M0 encoding.
-                // Tensile's later numerical interpretation of raw zero remains
-                // a product compatibility concern.
+                // Tensile applies its product-specific numerical interpretation
+                // of raw zero later.
                 return ScalarType::E8M0;
             default:
                 return std::nullopt;
@@ -126,8 +126,8 @@ namespace TensileLite::Client
                 }
                 if(dataType == rocisa::DataType::BFloat6)
                 {
-                    // Preserve the existing Tensile compatibility value even
-                    // though the E3M2 format itself has a larger finite range.
+                    // Tensile uses 7.5 for this mode even though E3M2 has a
+                    // larger finite range.
                     return replicated(GenerationRecipe::constant({.value = 7.5}));
                 }
                 return replicated(GenerationRecipe::typeMaximum());
