@@ -92,23 +92,23 @@ ParityRunInfo runParity(GemmRequest& pointwiseProblem, GemmRequest& blockedProbl
     using namespace roc::host_validation;
 
     BlockedGemmBackend backend;
-    const GemmResult pointwise =
+    const GemmRunInfo pointwise =
         referenceGemm(pointwiseProblem, {
                                             .backend = GemmBackend::Pointwise,
                                             .requireRequestedBackend = true,
                                         });
-    const GemmResult blocked = referenceGemm(blockedProblem,
-                                             {
-                                                 .backend = GemmBackend::Blocked,
-                                                 .requireRequestedBackend = true,
-                                             },
-                                             &backend);
-    require(blocked.runInfo.backendUsed == GemmBackend::Blocked,
+    const GemmRunInfo blocked = referenceGemm(blockedProblem,
+                                              {
+                                                  .backend = GemmBackend::Blocked,
+                                                  .requireRequestedBackend = true,
+                                              },
+                                              &backend);
+    require(blocked.backendUsed == GemmBackend::Blocked,
             "Blocked backend run information mismatch.");
     require(compare(blockedOutput, pointwiseOutput).passed(), mismatchMessage);
     return {
-        .pointwise = pointwise.runInfo,
-        .blocked = blocked.runInfo,
+        .pointwise = pointwise,
+        .blocked = blocked,
     };
 }
 
@@ -158,13 +158,13 @@ void testFinalizerAndSmallEdgeBlock() {
                              &backend)
                 .supported,
             "Blocked backend unexpectedly rejected the test GEMM.");
-    const GemmResult full = referenceGemm(problem,
-                                          {
-                                              .backend = GemmBackend::Blocked,
-                                              .requireRequestedBackend = true,
-                                          },
-                                          &backend);
-    require(full.runInfo.outputElementsWritten == 4 && full.runInfo.outputElementsCovered == 4,
+    const GemmRunInfo full = referenceGemm(problem,
+                                           {
+                                               .backend = GemmBackend::Blocked,
+                                               .requireRequestedBackend = true,
+                                           },
+                                           &backend);
+    require(full.outputElementsWritten == 4 && full.outputElementsCovered == 4,
             "Full blocked GEMM reported the wrong output counts.");
     const Tensor expected =
         Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{120, 0, 132, 0});
@@ -172,15 +172,14 @@ void testFinalizerAndSmallEdgeBlock() {
 
     fillTensor(d, untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({0});
-    const GemmResult selected = referenceGemm(problem,
-                                              {
-                                                  .backend = GemmBackend::Blocked,
-                                                  .requireRequestedBackend = true,
-                                              },
-                                              &backend);
-    require(
-        selected.runInfo.outputElementsWritten == 1 && selected.runInfo.outputElementsCovered == 4,
-        "Selected blocked GEMM reported the wrong write or coverage count.");
+    const GemmRunInfo selected = referenceGemm(problem,
+                                               {
+                                                   .backend = GemmBackend::Blocked,
+                                                   .requireRequestedBackend = true,
+                                               },
+                                               &backend);
+    require(selected.outputElementsWritten == 1 && selected.outputElementsCovered == 4,
+            "Selected blocked GEMM reported the wrong write or coverage count.");
     require(d.loadAs<float>({0, 0}) == 120 && d.loadAs<float>({0, 1}) == untouchedValue &&
                 d.loadAs<float>({1, 0}) == untouchedValue &&
                 d.loadAs<float>({1, 1}) == untouchedValue,
@@ -188,13 +187,13 @@ void testFinalizerAndSmallEdgeBlock() {
 
     fillTensor(d, untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({});
-    const GemmResult empty = referenceGemm(problem,
-                                           {
-                                               .backend = GemmBackend::Blocked,
-                                               .requireRequestedBackend = true,
-                                           },
-                                           &backend);
-    require(empty.runInfo.outputElementsWritten == 0 && empty.runInfo.outputElementsCovered == 0,
+    const GemmRunInfo empty = referenceGemm(problem,
+                                            {
+                                                .backend = GemmBackend::Blocked,
+                                                .requireRequestedBackend = true,
+                                            },
+                                            &backend);
+    require(empty.outputElementsWritten == 0 && empty.outputElementsCovered == 0,
             "Empty blocked output selection reported output work.");
     requireOnlySelectedOutputsStored(d, OutputSelection::explicitIndices({}));
 }

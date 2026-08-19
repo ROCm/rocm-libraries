@@ -12,12 +12,11 @@
 #include <vector>
 
 namespace roc::host_validation {
-// Standalone Problem types bind the input and caller-owned output tensors for
-// one operation. GEMM separates reusable numerical semantics (GemmProblem)
-// from invocation state (GemmRequest). Execution types select implementation
-// policy without changing numerical semantics. Result types return output
-// aliases plus RunInfo; RunInfo fields count completed work as documented by
-// each operation.
+// Problem types describe reusable numerical inputs and requested result types.
+// Request types bind a Problem to caller-owned destinations. Owning calls
+// return Result types containing newly allocated outputs plus RunInfo; request
+// calls return RunInfo directly. Execution types select implementation policy
+// without changing numerical semantics.
 
 // Shared pointwise activation selector for GEMM and standalone epilogue
 // descriptors. Consumers provide any activation parameters separately.

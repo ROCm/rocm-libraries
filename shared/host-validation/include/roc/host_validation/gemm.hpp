@@ -148,10 +148,9 @@ struct GemmOutputOptions {
     OutputSelection selection = OutputSelection::all();
 };
 
-// referenceGemm returns the request's D tensor as output; it aliases the same
-// storage rather than copying the destination.
+// Owning GEMM output and completed-work metadata.
 struct GemmResult {
-    Tensor output;  // Alias of GemmRequest::d.
+    Tensor output;
     GemmRunInfo runInfo;
 };
 
@@ -170,10 +169,9 @@ class GemmBackendImplementation {
 GemmSupportInfo queryGemmSupport(const GemmRequest& request, const GemmExecution& execution = {},
                                  const GemmBackendImplementation* backendImplementation = nullptr);
 
-// Executes the request, mutates selected D coordinates, and returns D's alias
-// plus completed-work metadata.
-GemmResult referenceGemm(const GemmRequest& request, const GemmExecution& execution = {},
-                         const GemmBackendImplementation* backendImplementation = nullptr);
+// Executes the request, mutates selected D coordinates, and returns completed-work metadata.
+GemmRunInfo referenceGemm(const GemmRequest& request, const GemmExecution& execution = {},
+                          const GemmBackendImplementation* backendImplementation = nullptr);
 
 // Allocates and zero-initializes D, then delegates to the caller-owned request
 // path. Unselected logical coordinates remain zero.
