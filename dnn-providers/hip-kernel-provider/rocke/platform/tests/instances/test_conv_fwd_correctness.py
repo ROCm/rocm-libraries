@@ -6,7 +6,7 @@ Runs a small sweep of conv shapes and pipeline/epilogue combinations, verifies
 each kernel output against a float32 reference, and asserts no failures.
 
 Coverage:
-  - Pipelines: mem, compv3, compv4 (MFMA arches); mem, wavelet (WMMA/gfx1250)
+  - Pipelines: mem, compv3, compv4, basic (MFMA arches); mem, wavelet (WMMA/gfx1250)
   - Epilogues: default, cshuffle
   - Shapes: regular 3x3, pointwise 1x1, strided 2x2, dilated, padded, large channel
   - Dtypes: fp16, bf16
@@ -117,6 +117,23 @@ _SHAPES: List[_Shape] = [
     _Shape(
         "3x3_asym_N2H7W14C16K16", N=2, Hi=7, Wi=14, C=16, K=16, Y=3, X=3, pH=1, pW=1
     ),
+    # --- grouped conv (groups=2): exercises the grid-per-group index and the
+    # group-aware weight/output slicing; the reference tensor uses C//groups
+    # per-group channels (kept here because the reference fix is what made
+    # this shape correct to test — removing it hides grouped-conv regressions)
+    _Shape(
+        "3x3_g2_N2H8W8C32K32",
+        N=2,
+        Hi=8,
+        Wi=8,
+        C=32,
+        K=32,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=2,
+    ),
 ]
 
 # Tile config: (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn)
@@ -126,7 +143,7 @@ _WMMA_TILE = (32, 32, 32, 1, 1, 16)  # wave32 — smaller warp grid
 
 # Pipelines valid per arch
 _MFMA_PIPELINES = ("mem", "compv3", "compv4", "basic")
-_WMMA_PIPELINES = ("mem", "compv3", "compv4", "basic", "wavelet")
+_WMMA_PIPELINES = ("mem", "wavelet")
 
 _EPILOGUES = ("default", "cshuffle")
 _DTYPES = ("fp16", "bf16")
@@ -325,7 +342,7 @@ def _run_one(
     rt.free(D_dev)
 
     out_f32 = D_cpu.float()
-    ref_f32 = ref.float().cpu() if arch == "gfx1250" else ref.float().cpu()
+    ref_f32 = ref.float().cpu()
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)

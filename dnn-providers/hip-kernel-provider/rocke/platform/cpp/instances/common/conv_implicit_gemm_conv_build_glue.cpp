@@ -605,9 +605,14 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->wavelet_K_iters
             = (rocke_conv_problem_k_gemm(ctx->p) + ctx->block_k - 1) / ctx->block_k;
         /* epi_barriers = (no_alias ? 0 : war_barriers) + 1 (RAW), war_barriers=2 for wavelet.
-         * Matches CShuffleEpilogue.compute_barrier_count(no_alias, war_barriers=2). */
+         * This formula is the C++ mirror of CShuffleEpilogue.compute_barrier_count; both must
+         * stay in sync.  war_barriers=2: one WAR before the cshuffle store (load waves overwrote
+         * A/B LDS) and one WAR before the cshuffle re-read (math waves may still read C LDS). */
         if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
-            ctx->wavelet_epi_barriers = spec->cshuffle_no_alias ? 1 : 3;
+        {
+            const int _war_barriers = 2; /* wavelet always uses war_barriers=2 */
+            ctx->wavelet_epi_barriers = (spec->cshuffle_no_alias ? 0 : _war_barriers) + 1;
+        }
         else
             ctx->wavelet_epi_barriers = 0;
 

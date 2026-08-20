@@ -493,7 +493,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = spec.pipeline in ("compv4",) or spec.async_dma or spec.unroll_k
+    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -947,7 +947,7 @@ def build_implicit_gemm_conv(
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
     # regardless of the chosen `compv*` flag.
-    double_buffer = spec.pipeline in ("compv4",) or spec.async_dma or spec.unroll_k
+    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
