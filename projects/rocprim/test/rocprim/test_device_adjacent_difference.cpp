@@ -33,6 +33,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 #include <rocprim/block/block_load.hpp>
 #include <rocprim/block/block_store.hpp>
@@ -208,7 +209,40 @@ using RocprimDeviceAdjacentDifferenceTestsParams = ::testing::Types<
                                    rocprim::default_config,
                                    true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceTests, RocprimDeviceAdjacentDifferenceTestsParams);
+inline std::string adjacent_difference_alias_tag(common::api_variant a)
+{
+    switch(a)
+    {
+        case common::api_variant::no_alias: return "NoAlias";
+        case common::api_variant::alias: return "Alias";
+        default: return "InPlace";
+    }
+}
+struct RocprimDeviceAdjacentDifferenceTestsNameGenerator
+{
+    template<class T>
+    static std::string tt()
+    {
+        if constexpr(std::is_same_v<T, custom_int64_array>) return "ArrayInt64x8";
+        else return type_tag<T>();
+    }
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = tt<typename Params::input_type>() + "_"
+                        + tt<typename Params::output_type>() + "_"
+                        + (Params::left ? "Left" : "Right") + "_"
+                        + adjacent_difference_alias_tag(Params::aliasing);
+        if constexpr(std::is_same_v<typename Params::config, custom_config_0>) n += "_Cfg0";
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::use_indirect_iterator) n += "_Indirect";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceTests,
+                 RocprimDeviceAdjacentDifferenceTestsParams,
+                 RocprimDeviceAdjacentDifferenceTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
 {
@@ -493,8 +527,20 @@ using RocprimDeviceAdjacentDifferenceLargeTestsParams = ::testing::Types<
     DeviceAdjacentDifferenceLargeParams<false, common::api_variant::alias>,
     DeviceAdjacentDifferenceLargeParams<true, common::api_variant::no_alias, true>>;
 
+struct RocprimDeviceAdjacentDifferenceLargeTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = std::string(Params::left ? "Left" : "Right") + "_"
+                        + adjacent_difference_alias_tag(Params::aliasing);
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
 TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
-                 RocprimDeviceAdjacentDifferenceLargeTestsParams);
+                 RocprimDeviceAdjacentDifferenceLargeTestsParams,
+                 RocprimDeviceAdjacentDifferenceLargeTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 {
