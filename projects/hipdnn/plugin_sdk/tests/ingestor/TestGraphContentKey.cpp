@@ -295,10 +295,13 @@ TEST(TestIngestorGraphContentKey, AnEmptyGraphDoesNotMatchAContentCarryingOne)
     EXPECT_NE(GraphContentKey{empty}, keyFor(populated));
 }
 
-/// An IGraph whose bytes cannot be retained -- an invalid graph, or an implementation
-/// that supplies none. The key must be unusable and must match nothing, including
-/// another unkeyable graph: two graphs we know nothing about are not known to be the
-/// same computation, and treating them as equal would serve one's ranking for the other.
+/// An IGraph that does **not** override `bytes()`, which is the whole point: it stands in
+/// for an out-of-tree implementor written before the method existed. That it compiles at
+/// all is the non-breaking guarantee; that its key is unusable is the safety guarantee.
+///
+/// Such a key must match nothing, including another one like it: two graphs we cannot
+/// identify are not known to be the same computation, and treating them as equal would
+/// serve one's measured ranking for the other.
 class UnkeyableGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
@@ -338,10 +341,6 @@ public:
         getTensorMap() const override
     {
         return _tensors;
-    }
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
-    {
-        return {};
     }
 
 private:

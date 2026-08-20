@@ -44,8 +44,14 @@ public:
     /// directly -- unlike UnPack(), which deep-copies into a GraphT whose nodes,
     /// strings and attribute unions each heap-allocate.
     ///
-    /// Empty when the graph is not valid.
-    virtual SerializedBlobView bytes() const = 0;
+    /// Empty when the graph is not valid, or when an implementation does not supply the
+    /// bytes. Callers must treat empty as "cannot identify this graph" and degrade --
+    /// never as an empty graph that matches other empty ones. `GraphContentKey` declines
+    /// to cache under such a graph and never matches one against another.
+    virtual SerializedBlobView bytes() const
+    {
+        return {};
+    }
 };
 
 class GraphWrapper : public IGraph
