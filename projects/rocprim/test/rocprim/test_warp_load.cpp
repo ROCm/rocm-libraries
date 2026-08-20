@@ -27,6 +27,7 @@
 
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_types.hpp"
 
 #include <rocprim/config.hpp>
 #include <rocprim/type_traits.hpp>
@@ -242,7 +243,18 @@ std::vector<T> stripe_vector(const std::vector<T>& v,
     return striped;
 }
 
-TYPED_TEST_SUITE(WarpLoadTest, WarpLoadTestParams);
+struct WarpLoadTestNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::type>() + "_i"
+               + std::to_string(Params::items_per_thread) + "_w"
+               + std::to_string(Params::warp_size) + "_m"
+               + std::to_string(static_cast<int>(Params::method));
+    }
+};
+TYPED_TEST_SUITE(WarpLoadTest, WarpLoadTestParams, WarpLoadTestNameGenerator);
 
 TYPED_TEST(WarpLoadTest, WarpLoad)
 {

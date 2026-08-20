@@ -324,6 +324,7 @@ inline std::string type_tag()
     else if constexpr(std::is_same_v<T, double>) return "Double";
     else if constexpr(std::is_same_v<T, rocprim::half>) return "Half";
     else if constexpr(std::is_same_v<T, rocprim::bfloat16>) return "Bfloat16";
+    else if constexpr(std::is_same_v<T, float2>) return "Float2";
     else if constexpr(std::is_same_v<T, common::custom_type<int, int, true>>) return "CustomInt2";
     else if constexpr(std::is_same_v<T, common::custom_type<double, double, true>>)
         return "CustomDouble2";
