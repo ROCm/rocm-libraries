@@ -209,9 +209,22 @@ static std::vector<char> reachableFrom(unsigned start,
 // an earlier node to the node it is visiting), so program order stays a valid topological
 // order and the graph stays acyclic. The live-out edges below are the one exception, and
 // they say why they are safe.
+//
+// The live-out chain -- in a loop body region, the counter compare the latch branch
+// reads -- carries a second constraint on top of those edges, pulling the other way: an
+// earliest clock that keeps it from issuing far ahead of the branch. See the live-out
+// branch below and DAGNode::earliestClock.
+
+// How close the live-out SCC def should sit to the end of its region, in estimated
+// cycles. Small enough to read as part of the loop's exit test rather than as work
+// stranded mid-region, and wide enough to leave the queue several instructions of slack
+// to place it in.
+constexpr int kLiveOutSccDefLeadCycles = 50;
+
 static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
                                        const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
-                                       std::vector<std::unordered_set<unsigned>>& dagGraph) {
+                                       std::vector<std::unordered_set<unsigned>>& dagGraph,
+                                       int regionCycles) {
     const std::vector<HandshakeBarrier> barriers = collectHandshakeBarriers(dagNodes);
     if (barriers.empty()) return;
 
@@ -254,6 +267,18 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
                                      << " chain (dagId=" << first->id << ") after barrier wait"
                                      << " (dagId=" << barrier.wait->id << ")\n");
             }
+            // Those edges say the def may not go before the last barrier. They do not say
+            // it should go there, and left at that it does: it is a one-cycle SALU that
+            // the barrier frees, so the queue issues it immediately and the value then
+            // sits live across everything that follows -- a whole region's tail of WMMA
+            // between the compare and the branch that reads it. Hold it back to within
+            // kLiveOutSccDefLeadCycles of the region end instead, so it lands next to its
+            // reader. The floor is only a preference: see DAGNode::earliestClock.
+            first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-out chain"
+                                 << " (dagId=" << first->id << ") held back to clock >= "
+                                 << first->earliestClock << " (region " << regionCycles
+                                 << " cycles)\n");
             continue;
         }
 
@@ -348,8 +373,22 @@ static void scheduleRegionWithMovableSideEffects(
 
     if (regionSize == 0) return;
 
+    // Prefix sum over the region in original program order: cumCycles[k] = the
+    // estimated absolute cycle at which dagNodes[k] would start, if the unmodified
+    // program order were followed exactly (WMMA -> latencyCycles, its full co-issue
+    // window; otherwise issueCycles). Turns a "must be within N cycles of" requirement
+    // into a plain clock number instead of a node to hop before, which is what both
+    // DAGNode::hazardDeadline and DAGNode::earliestClock are built from. The last entry
+    // is the region's estimated length, i.e. where the terminator that follows it sits.
+    std::vector<int> cumCycles(regionSize + 1, 0);
+    for (unsigned k = 0; k < regionSize; ++k) {
+        StinkyInstruction* inst = dagNodes[k].inst;
+        cumCycles[k + 1] =
+            cumCycles[k] + (isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+    }
+
     if (readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.clusterBarrier)
-        applyClusterBarrierSccRule(dagNodes, instToId, dagGraph);
+        applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
 
     // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
     // and DsReadOrder config. Lower priority = pick first.
@@ -472,9 +511,10 @@ static void scheduleRegionWithMovableSideEffects(
     // Prefix sum over the region in original program order: cumCycles[k] = the
     // estimated absolute cycle at which dagNodes[k] would start, if the unmodified
     // program order were followed exactly (WMMA -> latencyCycles, its full co-issue
-    // window; otherwise issueCycles). Used below to turn "producer must precede its
-    // consumer by N cycles" into a plain deadline number instead of a node to hop
-    // before — see DAGNode::hazardDeadline.
+    // window; otherwise issueCycles). Turns a "must be within N cycles of" requirement
+    // into a plain clock number instead of a node to hop before, which is what both
+    // DAGNode::hazardDeadline and DAGNode::earliestClock are built from. The last entry
+    // is the region's estimated length, i.e. where the terminator that follows it sits.
     std::vector<int> cumCycles(regionSize + 1, 0);
     for (unsigned k = 0; k < regionSize; ++k) {
         StinkyInstruction* inst = dagNodes[k].inst;

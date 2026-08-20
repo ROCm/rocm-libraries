@@ -390,6 +390,25 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return -1;
     }
 
+    // Estimated cycles the schedule spends between \p from and \p to, counting neither
+    // end. Same scale the scheduler plans on (a WMMA costs the co-issue window it opens,
+    // anything else its issue cycles), so a distance measured here is comparable to the
+    // cycle leads the passes are written against. -1 if the two are not in this order.
+    static int cyclesBetween(const BasicBlock& block, const StinkyInstruction* from,
+                             const StinkyInstruction* to) {
+        int total = 0;
+        bool started = false;
+        for (const IRBase& ir : block) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (inst == to) return started ? total : -1;
+            if (started) total += isMatrixInstruction(*inst) ? inst->latencyCycles
+                                                             : inst->issueCycles;
+            if (inst == from) started = true;
+        }
+        return -1;
+    }
+
     // Scheduled index of the last `s_barrier_wait`, or -1.
     static int lastBarrierWaitPosition(const BasicBlock& block) {
         int idx = 0, last = -1;
@@ -1524,6 +1543,94 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinsLiveOutSccDefBelowLastBar
     EXPECT_GT(sccDefPos, barrierPos)
         << "the live-out SCC def must be scheduled after the last workgroup barrier, so the "
            "cluster-barrier handshake cannot clobber SCC inside its live range";
+}
+
+// The pin above says how early the live-out compare may go, not how late, and on its own
+// it puts the compare right behind the barrier: it is a one-cycle SALU the barrier frees,
+// so the queue takes it at once. That is the whole schedule away from the branch whenever
+// the barrier has work behind it, which is the ordinary shape of an unrolled body -- the
+// barrier opens the next buffer and the loads and WMMA that read it follow.
+//
+// So the region below hangs a tail off the barrier: loads carrying the barrier's LDS
+// token, and a WMMA per load reading what it brought in. None of it can be scheduled
+// until the barrier issues, and all of it costs far more than the lead the rule allows.
+//
+// The lead these two are written against is applyClusterBarrierSccRule's
+// kLiveOutSccDefLeadCycles.
+constexpr int kSccDefLeadCycles = 50;
+
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBranch) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+
+    for (int i = 0; i < 12; i++) {
+        createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/320 + i, /*ldsToken=*/1);
+        createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/500 + i * 8,
+                                       /*src0Start=*/100 + i * 8);
+    }
+
+    StinkyInstruction* branch = createSCbranchReadingScc(body);
+
+    const int beforeCount = countStinkyInstructions(*body);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount)
+        << "the SCC rule must not drop instructions";
+
+    const int barrierPos = lastBarrierWaitPosition(*body);
+    const int sccDefPos = positionOf(*body, sccDef);
+    ASSERT_GE(barrierPos, 0);
+    ASSERT_GE(sccDefPos, 0);
+    EXPECT_GT(sccDefPos, barrierPos)
+        << "the live-out def must still be scheduled below the last workgroup barrier:"
+        << scheduleOrder(*body);
+
+    const int lead = cyclesBetween(*body, sccDef, branch);
+    ASSERT_GE(lead, 0) << "the compare must be scheduled before the branch that reads it";
+    EXPECT_LE(lead, kSccDefLeadCycles)
+        << "the compare must also wait for the branch to come within " << kSccDefLeadCycles
+        << " cycles instead of issuing the moment the barrier frees it:" << scheduleOrder(*body);
+}
+
+// The same region with the rule off, which is also what the pin alone used to give: the
+// compare goes as early as it can and its value then spans the barrier's whole tail. That
+// is the distance the ceiling above closes.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLeavesSccDefFarFromItsBranch) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+
+    for (int i = 0; i < 12; i++) {
+        createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/320 + i, /*ldsToken=*/1);
+        createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/500 + i * 8,
+                                       /*src0Start=*/100 + i * 8);
+    }
+
+    StinkyInstruction* branch = createSCbranchReadingScc(body);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/false);
+
+    const int lead = cyclesBetween(*body, sccDef, branch);
+    ASSERT_GE(lead, 0);
+    EXPECT_GT(lead, kSccDefLeadCycles)
+        << "with the rule off nothing keeps the compare near its branch:"
+        << scheduleOrder(*body);
 }
 
 // A live-out def written between two barriers. Following the barrier above it is not

@@ -55,6 +55,11 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// Set to 0 to co-locate the signal with the wait.
 constexpr int kRule3SignalLeadCycles = 500;
 
+/// Minimum Part-A cycles (wait→loop head) before the opening segment may wrap to the latch
+/// for the remaining lead. Avoids hoisting when the head climb is too short to justify a
+/// loop-carried signal.
+constexpr int kMinHeadAccumForLoopWrap = kRule3SignalLeadCycles / 4;
+
 /// Ceiling on how far ahead of its wait the signal may end up after climbing out of a live
 /// SCC range. The climb has to clear the whole range, so its cost is the length of that
 /// range, not a constant; past this ceiling it buys correctness at more overlap than it is
@@ -596,11 +601,18 @@ struct Rule3SignalAnchor {
     bool crossedLoopHead = false;
 };
 
+/// True when \p segBegin is the opening segment of \p loopHead.
+bool isFirstLoopSegment(BasicBlock::iterator segBegin, StinkyInstruction* loopHead) {
+    if (loopHead == nullptr) return false;
+    auto headIt = BasicBlock::iterator(loopHead);
+    return segBegin == headIt || segBegin == std::next(headIt);
+}
+
 Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
     int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors,
-    int maxHops) {
+    int maxHops, StinkyInstruction* loopHead) {
     if (leadCycles <= 0) return {defaultAnchor, 0};
     auto refIt = cycleMap.find(referenceAnchor);
     if (refIt == cycleMap.end()) return {defaultAnchor, 0};
@@ -654,9 +666,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
     };
 
-    auto settle = [&](IRBase* climbed) -> IRBase* {
+    auto settle = [&](IRBase* climbed, int64_t totalAccum) -> IRBase* {
         if (leadPoint == nullptr || climbed == leadPoint) return climbed;
-        if (accum <= maxLeadCycles) return climbed;
+        if (totalAccum <= maxLeadCycles) return climbed;
         StinkyInstruction* below = findSccDeadPointBelow(leadPoint, sccLimit(leadPoint));
         return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
     };
@@ -681,6 +693,69 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return {anchor, hops, crossedLoopHead};
     };
 
+    // When the head-phase climb reaches the loop head short of the lead target, wrap to the
+    // latch and plant the signal only `remainder` cycles up from the loop end. Part A is
+    // wait→head; part B is latch→anchor for the remaining cycles only.
+    auto scanTailForRemainder = [&](StinkyInstruction* latch, int64_t headAccum,
+                                    int64_t remainder) -> Rule3SignalAnchor {
+        crossedLoopHead = true;
+        hops = 1;
+
+        int64_t tailAccum = 0;
+        auto latchCycleIt = cycleMap.find(latch);
+        int64_t tailPrevCycle =
+            (latchCycleIt != cycleMap.end()) ? static_cast<int64_t>(latchCycleIt->second)
+                                             : prevCycle;
+        bool tailSccLive = readsScc(*latch) || (sccLive && !writesScc(*latch));
+        bool tailTargetMet = false;
+        StinkyInstruction* tailLeadPoint = nullptr;
+
+        auto tailIt = BasicBlock::iterator(latch);
+        while (tailIt != bbBegin) {
+            --tailIt;
+            auto* tailInst = dyn_cast<StinkyInstruction>(tailIt.getNodePtr());
+            if (tailInst == nullptr) continue;
+
+            tailSccLive =
+                readsScc(*tailInst) || (tailSccLive && !writesScc(*tailInst));
+
+            if (isClusterBarrierWait(*tailInst)) {
+                return report(clearScc(anchorAfterWorkgroupBarrierFollowing(tailInst, defaultAnchor)));
+            }
+            if (isSegmentBoundary(*tailInst)) {
+                if (isCall(*tailInst) || isUnconditionalBranch(*tailInst)) {
+                    return report(clearScc(defaultAnchor));
+                }
+                if (loopHead != nullptr && tailInst == loopHead) {
+                    return report(clearScc(loopHead));
+                }
+                continue;
+            }
+            if (isWorkgroupBarrierSignal(*tailInst) && priorWaitAnchors.count(tailInst) != 0) {
+                return report(clearScc(anchorAfterWorkgroupBarrierPair(tailInst, defaultAnchor)));
+            }
+            if (isWorkgroupBarrierSignal(*tailInst) || isWorkgroupBarrierWait(*tailInst)) continue;
+
+            auto tailCycleIt = cycleMap.find(tailInst);
+            if (tailCycleIt != cycleMap.end()) {
+                const int64_t cyc = static_cast<int64_t>(tailCycleIt->second);
+                if (cyc <= tailPrevCycle) tailAccum += tailPrevCycle - cyc;
+                tailPrevCycle = cyc;
+                if (tailAccum >= remainder) {
+                    if (!tailTargetMet) tailLeadPoint = tailInst;
+                    tailTargetMet = true;
+                }
+            }
+            leadPoint = tailLeadPoint;
+            if (tailTargetMet && !tailSccLive) {
+                return report(clearScc(settle(tailInst, headAccum + tailAccum)));
+            }
+        }
+        leadPoint = tailLeadPoint;
+        IRBase* fallback = (loopHead != nullptr) ? static_cast<IRBase*>(loopHead) : defaultAnchor;
+        return report(clearScc(settle(fallback, headAccum + tailAccum)));
+    };
+
     auto it = BasicBlock::iterator(referenceAnchor);
     while (it != bbBegin) {
         --it;
@@ -697,6 +772,16 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             return report(clearScc(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor)));
         }
         if (isSegmentBoundary(*inst)) {
+            if (loopHead != nullptr && inst == loopHead) {
+                if (targetMet && !sccLive) return report(clearScc(settle(inst, accum)));
+                if (accum >= kMinHeadAccumForLoopWrap && accum < leadCycles && maxHops > 0 &&
+                    hops == 0 && isFirstLoopSegment(segBegin, loopHead)) {
+                    StinkyInstruction* latch = findLatchBranchFor(inst);
+                    if (latch == nullptr) return report(clearScc(curSegBegin.getNodePtr()));
+                    return scanTailForRemainder(latch, accum, leadCycles - accum);
+                }
+                if (accum >= leadCycles) continue;
+            }
             // Calls and unconditional branches are not crossed: the first has no modelled
             // predecessor and the second's is another jump, so neither yields an edge whose
             // compensation this pass can account for.
@@ -739,10 +824,10 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         // clearScc has the last word even here. `sccLive` is carried along the one path the
         // climb took, while clearScc reads the range off the code below the anchor, so it
         // also covers a reader the climb never walked past.
-        if (targetMet && !sccLive) return report(clearScc(settle(inst)));
+        if (targetMet && !sccLive) return report(clearScc(settle(inst, accum)));
     }
     // Running out of block can leave the anchor inside a range that starts above it.
-    return report(clearScc(settle(curSegBegin.getNodePtr())));
+    return report(clearScc(settle(curSegBegin.getNodePtr(), accum)));
 }
 
 StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
@@ -1277,7 +1362,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
                     trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
                     kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
-                    kMaxSegmentHops);
+                    kMaxSegmentHops, head);
                 // Read the exit label and climb the preheader now: once the handshakes go
                 // in, the body is full of this pass's own skip branches and barriers, and
                 // neither the loop's real exit nor an unspoken-for stretch of preheader is
@@ -1301,7 +1386,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                             found = findRule3SignalAnchorByCycleLead(
                                 trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
                                 kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles,
-                                priorWaitAnchors, /*maxHops=*/0);
+                                priorWaitAnchors, /*maxHops=*/0, head);
                         }
                     }
                 }
