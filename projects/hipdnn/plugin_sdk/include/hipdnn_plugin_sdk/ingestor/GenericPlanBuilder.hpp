@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -182,7 +183,9 @@ public:
         // Check 2 asks the same coverage-and-orderability question as Check 1, but of
         // the knob-filtered candidates; the two are independent, so Check 1 can fail
         // while Check 2 passes.
-        const WinnerKey winnerKey{GraphContentKey{opGraph}, DeviceKey{context.deviceProperties}};
+        const WinnerKey winnerKey{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+            DeviceKey{context.deviceProperties}};
         if(const auto record = _stateManager.winnerFor(winnerKey); record.has_value())
         {
             if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
