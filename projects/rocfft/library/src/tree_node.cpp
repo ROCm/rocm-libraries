@@ -371,9 +371,9 @@ IndexType TransposeNode::GetKernelIndexType() const
     if(MaxKernelIndex(io_data_label::INPUT) > static_cast<size_t>(INT32_MAX)
        || MaxKernelIndex(io_data_label::OUTPUT) > static_cast<size_t>(INT32_MAX))
     {
-        return IndexType::_64BIT;
+        return IndexType::U64;
     }
-    return IndexType::_32BIT;
+    return IndexType::U32;
 }
 
 size_t LeafNode::MaxKernelIndex(io_data_label io) const

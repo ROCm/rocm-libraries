@@ -46,8 +46,8 @@ struct GridParam;
 // generated kernels. Kernels declare such arguments as "index_type".
 enum class IndexType
 {
-    _32BIT,
-    _64BIT,
+    U32,
+    U64,
 };
 
 // Helper class that handles alignment of kernel arguments
@@ -66,7 +66,7 @@ public:
 
         switch(itype.value())
         {
-        case IndexType::_32BIT:
+        case IndexType::U32:
         {
             if(value > std::numeric_limits<unsigned int>::max())
                 throw std::runtime_error("index value overflows 32-bit kernel index_type");
@@ -74,7 +74,7 @@ public:
             append(&v, sizeof(v));
             break;
         }
-        case IndexType::_64BIT:
+        case IndexType::U64:
         {
             unsigned long long v = value;
             append(&v, sizeof(v));
@@ -140,7 +140,7 @@ private:
     }
 
     std::vector<char> buf;
-    IndexType         itype = IndexType::_32BIT;
+    IndexType         itype = IndexType::U32;
 };
 
 // Base class for a runtime compiled kernel.  Subclassed for
@@ -322,9 +322,9 @@ static const char* rtc_index_name(IndexType itype)
 {
     switch(itype)
     {
-    case IndexType::_32BIT:
+    case IndexType::U32:
         return "_i32";
-    case IndexType::_64BIT:
+    case IndexType::U64:
         return "_i64";
     }
 
@@ -335,9 +335,9 @@ static const char* rtc_index_type(IndexType itype)
 {
     switch(itype)
     {
-    case IndexType::_32BIT:
+    case IndexType::U32:
         return "unsigned int";
-    case IndexType::_64BIT:
+    case IndexType::U64:
         return "unsigned long long";
     }
 
@@ -348,9 +348,9 @@ static const char* rtc_index_type_decl(IndexType itype)
 {
     switch(itype)
     {
-    case IndexType::_32BIT:
+    case IndexType::U32:
         return "typedef unsigned int index_type;\n";
-    case IndexType::_64BIT:
+    case IndexType::U64:
         return "typedef unsigned long long index_type;\n";
     }
 

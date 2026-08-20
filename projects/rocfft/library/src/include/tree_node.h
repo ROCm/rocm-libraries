@@ -1043,7 +1043,7 @@ public:
     // Overridden by nodes that use narrower index types
     virtual IndexType GetKernelIndexType() const
     {
-        return IndexType::_64BIT;
+        return IndexType::U64;
     }
     // Max element index the kernel would compute for a given I/O side.
     size_t       MaxKernelIndex(io_data_label io) const;

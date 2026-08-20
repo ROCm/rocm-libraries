@@ -105,13 +105,13 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     Variable input_var{"input", "scalar_type", true, true};
     Variable output_var{"output", "scalar_type", true, true};
     Variable twiddles_large_var{"twiddles_large", "const scalar_type", true, true};
-    Variable dim_var{"dim", rtc_index_type(IndexType::_32BIT)};
-    Variable length0_var{"length0", rtc_index_type(IndexType::_32BIT)};
-    Variable length1_var{"length1", rtc_index_type(IndexType::_32BIT)};
-    Variable length2_var{"length2", rtc_index_type(IndexType::_32BIT)};
-    Variable gridX{"gridX", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
-    Variable gridY{"gridY", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
-    Variable gridZ{"gridZ", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
+    Variable dim_var{"dim", rtc_index_type(IndexType::U32)};
+    Variable length0_var{"length0", rtc_index_type(IndexType::U32)};
+    Variable length1_var{"length1", rtc_index_type(IndexType::U32)};
+    Variable length2_var{"length2", rtc_index_type(IndexType::U32)};
+    Variable gridX{"gridX", "const " + std::string(rtc_index_type(IndexType::U32))};
+    Variable gridY{"gridY", "const " + std::string(rtc_index_type(IndexType::U32))};
+    Variable gridZ{"gridZ", "const " + std::string(rtc_index_type(IndexType::U32))};
     Variable lengths_var{"lengths", "const size_t", true, true};
     Variable stride_in0_var{"stride_in0", "index_type"};
     Variable stride_in1_var{"stride_in1", "index_type"};
@@ -170,12 +170,12 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
                               "following variables to recover block indices in a 3-D fashion:"};
 
-    Variable old_blockIdx_x{"old_blockIdx_x", rtc_index_type(IndexType::_32BIT)};
-    Variable old_blockIdx_y{"old_blockIdx_y", rtc_index_type(IndexType::_32BIT)};
-    Variable old_blockIdx_z{"old_blockIdx_z", rtc_index_type(IndexType::_32BIT)};
-    Variable tileBlockIdx_y{"tileBlockIdx_y", rtc_index_type(IndexType::_32BIT)};
-    Variable tileBlockIdx_x{"tileBlockIdx_x", rtc_index_type(IndexType::_32BIT)};
-    Variable remaining{"remaining", rtc_index_type(IndexType::_32BIT)};
+    Variable old_blockIdx_x{"old_blockIdx_x", rtc_index_type(IndexType::U32)};
+    Variable old_blockIdx_y{"old_blockIdx_y", rtc_index_type(IndexType::U32)};
+    Variable old_blockIdx_z{"old_blockIdx_z", rtc_index_type(IndexType::U32)};
+    Variable tileBlockIdx_y{"tileBlockIdx_y", rtc_index_type(IndexType::U32)};
+    Variable tileBlockIdx_x{"tileBlockIdx_x", rtc_index_type(IndexType::U32)};
+    Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
 
     // if a 1-D grid was provided because creating a natural 3-D grid exceeded allowed limits, then remap it to a 3-D grid.
     if(!specs.grid3D)
@@ -225,8 +225,8 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
         func.body += Assign{length2_var, 1};
     }
 
-    Variable tile_x_index{"tile_x_index", rtc_index_type(IndexType::_32BIT)};
-    Variable tile_y_index{"tile_y_index", rtc_index_type(IndexType::_32BIT)};
+    Variable tile_x_index{"tile_x_index", rtc_index_type(IndexType::U32)};
+    Variable tile_y_index{"tile_y_index", rtc_index_type(IndexType::U32)};
     func.body += Declaration{tile_x_index, "threadIdx.x"};
     func.body += Declaration{tile_y_index, "threadIdx.y"};
 
@@ -247,7 +247,7 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     // use specified dim to avoid loops if possible
     if(specs.dim > 3)
     {
-        Variable d{"d", rtc_index_type(IndexType::_32BIT)};
+        Variable d{"d", rtc_index_type(IndexType::U32)};
         For      offset_loop{
             d,
             3,
@@ -270,7 +270,7 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
 
     // loop variables for reading/writing
-    Variable i{"i", rtc_index_type(IndexType::_32BIT)};
+    Variable i{"i", rtc_index_type(IndexType::U32)};
     Variable logical_row{"logical_row", "auto"};
     Variable logical_col{"logical_col", "auto"};
     Variable idx0{"idx0", "auto"};

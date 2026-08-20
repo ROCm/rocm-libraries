@@ -39,7 +39,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
         return generator;
     }
 
-    if(node.GetKernelIndexType() != IndexType::_32BIT)
+    if(node.GetKernelIndexType() != IndexType::U32)
         throw std::runtime_error("RealComplex copy kernel does not yet support 64-bit indexing");
 
     // input_size is the innermost dimension
@@ -144,7 +144,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
         return generator;
     }
 
-    if(node.GetKernelIndexType() != IndexType::_32BIT)
+    if(node.GetKernelIndexType() != IndexType::U32)
         throw std::runtime_error("RealComplexEven kernel does not yet support 64-bit indexing");
 
     // Input_size is the innermost dimension
