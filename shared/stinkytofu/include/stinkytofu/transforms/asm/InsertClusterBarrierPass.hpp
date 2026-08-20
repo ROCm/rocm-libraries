@@ -30,9 +30,22 @@ namespace stinkytofu {
 
 namespace cluster_barrier {
 
-/// Gate for Rule 3 hoisting and scheduler live-out SCC lead (`kRule3CrossLoop`).
-/// Default false. Rebuild rocisa after changing. See docs/developer/cluster-barrier.md.
-constexpr bool kRule3CrossLoop = false;
+/// Single toggle for Rule 3 cross-loop hoisting (0 = off, 1 = on).
+///
+/// To enable cross-loop in the pass **and** compile the cross-loop unit tests, set this macro
+/// to 1 and rebuild (rocisa / stinkytofu and `unit_tests`). The tests gate on the same
+/// `STINKY_KRULE3_CROSS_LOOP` via `IF_RULE3_CROSS_LOOP` in tests/unit/TestHelpers.hpp — there
+/// is no separate UT define; pass and tests must stay in sync.
+///
+/// `kRule3CrossLoop` mirrors this macro for runtime `if` checks. `#if STINKY_KRULE3_CROSS_LOOP`
+/// in tests reads the same value. The preprocessor cannot use `constexpr`, so change this macro
+/// (not `kRule3CrossLoop`).
+#ifndef STINKY_KRULE3_CROSS_LOOP
+#define STINKY_KRULE3_CROSS_LOOP 0
+#endif
+
+/// Gate for Rule 3 hoisting and scheduler live-out SCC lead.
+inline constexpr bool kRule3CrossLoop = STINKY_KRULE3_CROSS_LOOP != 0;
 
 }  // namespace cluster_barrier
 

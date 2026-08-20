@@ -214,25 +214,6 @@ StinkyInstruction* findFirstTensorLoadBetween(BasicBlock::iterator start,
     return nullptr;
 }
 
-/// Whether a token is already outstanding just above \p anchor, i.e. whether the closest
-/// cluster barrier above it is a signal rather than a wait. Adding a second signal here
-/// would put two in flight at once, which the handshake does not allow -- and a signal this
-/// pass planted on an earlier run reads exactly the same way, so this is also what keeps a
-/// second run from planting it again.
-bool hasOutstandingClusterSignalAbove(StinkyInstruction* anchor) {
-    BasicBlock* parent = anchor->getParent();
-    if (parent == nullptr) return false;
-    auto it = BasicBlock::iterator(anchor);
-    while (it != parent->begin()) {
-        --it;
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (isClusterBarrierWait(*inst)) return false;
-        if (isClusterBarrierSignal(*inst)) return true;
-    }
-    return false;
-}
-
 /// Whether a cluster wait already stands anywhere above \p anchor in its block.
 bool hasClusterBarrierWaitAbove(StinkyInstruction* anchor) {
     BasicBlock* parent = anchor->getParent();
@@ -240,16 +221,6 @@ bool hasClusterBarrierWaitAbove(StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
     while (it != parent->begin()) {
         --it;
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (isClusterBarrierWait(*inst)) return true;
-    }
-    return false;
-}
-
-/// Whether a cluster wait already stands in ``[start, endExclusive)``.
-bool hasClusterBarrierWaitBetween(BasicBlock::iterator start, BasicBlock::iterator endExclusive) {
-    for (auto it = start; it != endExclusive; ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (isClusterBarrierWait(*inst)) return true;
@@ -360,15 +331,11 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
     waitInst->addModifier<CommentData>(CommentData{comment});
 }
 
-/// A handshake is a signal and the wait that drinks the token some other workgroup posted.
-/// \p waitAnchor is null when the load behind this trigger is already covered by a wait that
-/// was planted before this ran -- Rule 2's -- and only the signal half is missing.
+/// WaveIdx-gated cluster signal at \p signalAnchor, then wait at \p waitAnchor (the trigger).
 void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRBuilder& irBuilder,
                                 GfxArchID archId) {
     insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId);
-    if (waitAnchor != nullptr) {
-        insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
-    }
+    insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
 /// Emit `s_wait_tensorcnt 0` immediately before \p anchor (the instruction
@@ -394,6 +361,13 @@ bool isLabelNamed(const StinkyInstruction& inst, const char* name) {
     if (!isLabel(inst)) return false;
     const auto* labelData = inst.getModifier<LabelData>();
     return labelData != nullptr && labelData->label == name;
+}
+
+bool isKernelLabelForPreLoopClimb(const StinkyInstruction& inst) {
+    if (!isLabel(inst)) return false;
+    const auto* labelData = inst.getModifier<LabelData>();
+    if (labelData == nullptr) return true;
+    return labelData->label.find("skipCB") == std::string::npos;
 }
 
 bool isTextblockContaining(IRBase* ir, const char* marker) {
@@ -878,97 +852,46 @@ IRBase* anchorJustBelow(StinkyInstruction* behind, StinkyInstruction* limit) {
     return limit;
 }
 
-/// Where the compensating signal goes in the preheader.
+/// Where the compensating signal goes in the preheader (`kRule3CrossLoop` only).
 ///
-/// The loop's own handshakes have to earn their lead instruction by instruction, because each
-/// one climbs past work that its own wait is waiting for. This one is the opposite: it says
-/// the run-up is done and the next workgroup may move in, so it belongs at the end of the
-/// run-up rather than the start of it. The search therefore climbs from the loop head and
-/// takes the first thing it can sit behind.
-///
-/// The climb stops at the cluster wait Rule 2 planted before the function's first tensor
-/// load. A signal put over that wait would be posting a token this very wait drinks, and the
-/// loop would never see it. That wait is the only one the preheader ever holds, and it is
-/// what makes the preheader a place a signal may be posted at all -- without it there is
-/// nothing above to have drunk Rule 1's token, and a second one would go in flight.
-///
-/// Three things can carry the signal, in this order:
-///
-///  - A workgroup barrier already in the run-up: the signal goes just below its wait. Wave 0
-///    speaks for the whole group and may not announce this workgroup ready while its other
-///    waves are still working, and a barrier that is already there costs nothing.
-///  - Failing that, the lowest label: the signal brings its own barrier and goes below the
-///    label, because a label is where the run-up's paths rejoin and so is reached however the
-///    preheader was entered.
-///  - Failing that, the last tensor load below the cluster wait: again with its own barrier,
-///    and below the load because the run-up's own loads are the work this signal is
-///    announcing as finished.
-///
-/// Unlike the Rule 1 signal no trip-count gate goes with the planted barrier: this signal is
-/// paired with a wait below the loop, and both are reached on exactly the same paths.
-///
-/// Nothing else is expected to come up. A run-up with no cluster wait, or one that holds
-/// neither barrier nor label nor load, is not a shape this pass built, and the honest answer
-/// is that there is no spot -- the caller then gives up the crossing that made it ask.
-///
-/// The same goes for a live SCC range covering the chosen spot. The bounds above it are
-/// floors, so such a range can only be escaped downwards, and it may well outlast the
-/// preheader.
+/// Climb from the loop head upward and take the nearest of ``s_barrier_wait -1``,
+/// ``label_*``, or ``tensor_load_to_lds``. Signal-only after an existing workgroup wait;
+/// plant a workgroup barrier pair before the signal after a label or load.
 PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
     BasicBlock* parent = (loopHead != nullptr) ? loopHead->getParent() : nullptr;
     if (parent == nullptr) return {};
 
-    // One climb from the loop head up to Rule 2's wait, remembering the lowest of each thing
-    // the signal could sit behind. All three are collected in the same pass because the order
-    // they are preferred in is not the order they appear in.
-    StinkyInstruction* workgroupWait = nullptr;
-    StinkyInstruction* lastLabel = nullptr;
-    StinkyInstruction* lastTensorLoad = nullptr;
-    bool reachedClusterWait = false;
     auto it = BasicBlock::iterator(loopHead);
     while (it != parent->begin()) {
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
-        if (isClusterBarrierWait(*inst)) {
-            reachedClusterWait = true;
-            break;
-        }
-        // Labels are pseudo instructions, so they have to be read before that filter runs.
-        if (isLabel(*inst)) {
-            if (lastLabel == nullptr) lastLabel = inst;
+
+        StinkyInstruction* behind = nullptr;
+        bool needsWorkgroupBarrier = true;
+        if (!isPseudoInst(inst) && isWorkgroupBarrierWait(*inst)) {
+            behind = inst;
+            needsWorkgroupBarrier = false;
+        } else if (isKernelLabelForPreLoopClimb(*inst)) {
+            behind = inst;
+        } else if (!isPseudoInst(inst) && isTensorLoad(*inst)) {
+            behind = inst;
+        } else {
             continue;
         }
-        if (isPseudoInst(inst)) continue;
-        if (workgroupWait == nullptr && isWorkgroupBarrierWait(*inst)) workgroupWait = inst;
-        if (lastTensorLoad == nullptr && isTensorLoad(*inst)) lastTensorLoad = inst;
-    }
-    if (!reachedClusterWait) return {};
 
-    StinkyInstruction* behind = nullptr;
-    bool needsWorkgroupBarrier = true;
-    if (workgroupWait != nullptr) {
-        behind = workgroupWait;
-        needsWorkgroupBarrier = false;
-    } else if (lastLabel != nullptr) {
-        behind = lastLabel;
-    } else {
-        behind = lastTensorLoad;
-    }
-    if (behind == nullptr) return {};
+        IRBase* anchor = anchorJustBelow(behind, loopHead);
+        if (anchor == nullptr) anchor = loopHead;
 
-    IRBase* anchor = anchorJustBelow(behind, loopHead);
-    if (anchor == nullptr) anchor = loopHead;
-
-    // The signal opens with `s_cmp_eq_u32 sgprWaveIdx, 0`, so it may not land in front of a
-    // compare whose result a branch below still wants.
-    auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
-    if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) {
-        return {anchor, needsWorkgroupBarrier};
+        auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+        if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) {
+            return {anchor, needsWorkgroupBarrier};
+        }
+        StinkyInstruction* dead = findSccDeadPointBelow(anchorInst, loopHead);
+        if (dead == nullptr) return {};
+        return {dead, needsWorkgroupBarrier};
     }
-    StinkyInstruction* dead = findSccDeadPointBelow(anchorInst, loopHead);
-    if (dead == nullptr) return {};
-    return {dead, needsWorkgroupBarrier};
+    return {};
 }
 
 /// Plant `s_branch <label>` in front of \p anchor.
@@ -1209,9 +1132,6 @@ class InsertClusterBarrierPassImpl : public Pass {
             struct TriggerSite {
                 StinkyInstruction* trigger = nullptr;
                 BasicBlock::iterator segBegin;
-                /// False when the load behind this trigger is already covered by a wait Rule 2
-                /// planted, leaving only the signal half of the handshake to place.
-                bool needsWait = true;
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
@@ -1239,17 +1159,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                     // is no next trip to hand a token to and no exit to compensate at, and the
                     // run-up's own load is Rule 2's business.
                     if (findEnclosingLoopHead(trigger) == nullptr) continue;
-                    // A wait already standing between this trigger and its load is Rule 2's,
-                    // and it is this load's token. Planting a second one above it would leave
-                    // two waits drinking what one signal posted. The signal is still owed --
-                    // the barrier here is what lets this workgroup announce itself, and
-                    // whichever wait comes next is the one that collects it.
-                    const bool needsWait =
-                        !hasClusterBarrierWaitBetween(BasicBlock::iterator(trigger), it);
-                    // A lone signal adds a token instead of passing one along, so it may only
-                    // go where none is outstanding.
-                    if (!needsWait && hasOutstandingClusterSignalAbove(trigger)) continue;
-                    triggers.push_back({trigger, segBegin, needsWait});
+                    triggers.push_back({trigger, segBegin});
 
                     // Record the instruction right after this cooperative
                     // tensor_load group so a producer-side tensor drain can be
@@ -1274,10 +1184,9 @@ class InsertClusterBarrierPassImpl : public Pass {
                 }
             }
 
-            // Only the triggers that are getting a wait of their own are stops for a climb.
             std::unordered_set<StinkyInstruction*> priorWaitAnchors;
             for (const TriggerSite& site : triggers) {
-                if (site.needsWait) priorWaitAnchors.insert(site.trigger);
+                priorWaitAnchors.insert(site.trigger);
             }
 
             struct LoopCompensation {
@@ -1331,8 +1240,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                         }
                     }
                 }
-                pending.emplace_back(trigger, found.anchor,
-                                     site.needsWait ? static_cast<IRBase*>(trigger) : nullptr);
+                pending.emplace_back(trigger, found.anchor, static_cast<IRBase*>(trigger));
             }
 
             StinkyInstruction* tailTL = nullptr;

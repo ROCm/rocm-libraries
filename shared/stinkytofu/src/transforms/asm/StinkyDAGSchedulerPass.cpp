@@ -187,47 +187,11 @@ static std::vector<char> reachableFrom(unsigned start,
     return seen;
 }
 
-// --- Special rule: cluster-barrier SCC protection (ClusterBarrier kernels only) ---
-//
-// InsertClusterBarrierPass runs at kernel scope AFTER this pass. It expands a handshake
-// ahead of each of its cluster waits:
-//
-//     s_cmp_eq_u32   sgprWaveIdx, 0
-//     s_cbranch_scc0 label_skipCBPreSignal_<hash>
-//     s_barrier_signal -3
-//   label_skipCBPreSignal_<hash>:
-//
-// The sequence clobbers SCC. InsertClusterBarrierPass will climb its anchor out of a
-// live SCC range rather than split one, but only as far as the nearest boundary it may
-// not cross (a cluster wait, a segment edge, a prior handshake's barrier). Keeping the
-// chain off the barrier here is what leaves it that room.
-//
-// Which barrier, though, is not something this pass can know: the anchor is picked by a
-// cycle-lead climb over the whole segment and comes to rest wherever the lead runs out,
-// and where it stops on a barrier it may be any of them -- the pass reads a workgroup
-// barrier as a place a signal may be posted, not as a thing to be counted. So every
-// workgroup barrier is treated as a handshake site here.
-//
-// So no def..last-reader range may contain a barrier. Note what that does and
-// does not forbid: the chain may still schedule wholly before or wholly after the
-// barrier, and may still move as a whole in either direction. Only splitting it is
-// illegal. That is a disjunction, which a DAG edge cannot express -- an edge would fix
-// one side at graph-build time and cost the freedom to hoist. So the common case is
-// enforced dynamically instead: the nodes are tagged here and CDNA5ReadyQueue refuses
-// to issue a barrier while a chain is open.
-//
-// A lock can only work when every reader is free to issue without the barrier going
-// first, so a chain with a reader that depends on a barrier is pinned after it with an
-// ordinary edge instead. Those edges always run from a lower to a higher program-order
-// id, as does every other edge in the region (the RAW/WAR/WAW loop above only ever links
-// an earlier node to the node it is visiting), so program order stays a valid topological
-// order and the graph stays acyclic. The live-out edges below are the one exception, and
-// they say why they are safe.
-//
-// Live-out SCC chain: always pin def after barrier waits. kRule3CrossLoop false: pin only.
-// kRule3CrossLoop true: also set earliestClock below (see cluster-barrier.md).
+// Cluster-barrier SCC rule (ClusterBarrier kernels only). See cluster-barrier.md.
+// Scheduler runs before InsertClusterBarrierPass; keeps chains off handshake barriers
+// and pins live-out defs after waits. kRule3CrossLoop gates earliestClock on live-out defs.
 
-// kRule3CrossLoop true only. How close the live-out SCC def sits to the region end.
+// kRule3CrossLoop true only.
 constexpr int kLiveOutSccDefLeadCycles = 50;
 
 static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
