@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s05_makesubiterschedule_sia2_2_work_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT64x16x32_MI16x1u5jlqgUo4RXNQdIcH75xq8r-Bkbw9UdKjVjroXVX4WY=',
+      'err': 0,
+    }),
+  ])
+# ---

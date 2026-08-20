@@ -1,0 +1,67 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S07 IncLdsBufSwitch LocalReadAddrOrig backup VGPR characterization (gfx942).
+#
+# Target: Tensile/KernelWriter.py lines 8690-8697
+#   (self.states.IncLdsBufSwitch backup of startVgprLocalReadAddrOrig for A/B;
+#    MXSA/MXSB arms need MX which gfx942 lacks -> A/B arms only here).
+#
+# IncLdsBufSwitch derivation (KernelWriter.py:7355): kernel["NumLdsBlk"] >= 3.
+# numLdsBlk becomes PrefetchGlobalRead when PGR >= 3 (Solution.py:4962-4966),
+# so IncLdsBufSwitch = True.  PGR>=3 is only accepted with DirectToLdsA and
+# DirectToLdsB, PrefetchLocalRead>=1, ScheduleIterAlg==3 (Solution.py:5580-5586),
+# so this config uses the working gfx942 DirectToLds recipe from
+# Tensile/Tests/common/gemm/dtl.yaml (fp16 HPA NN, WorkGroup[16,16,1],
+# LocalReadVectorWidth 4, DirectToLds 1) with PrefetchGlobalRead bumped to 3.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - WorkGroup:
+          - [16, 16, 1]
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   2, 2,  2, 2 ]
+        - GlobalReadVectorWidthA: [2]
+        - GlobalReadVectorWidthB: [2]
+        - PrefetchGlobalRead: [3]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [4]
+        - DirectToLds: [1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - GlobalSplitU: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

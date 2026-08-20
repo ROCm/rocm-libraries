@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s01_lraoffsetconversionfordtlandnlc_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT64x16x256_MI16xatZMxiYMip2O5rBHXm1P26ct33oNWNA4-pd8e22WY8w=',
+      'err': 0,
+    }),
+  ])
+# ---

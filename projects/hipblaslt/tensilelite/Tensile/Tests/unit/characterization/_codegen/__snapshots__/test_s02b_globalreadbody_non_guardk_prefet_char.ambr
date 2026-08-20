@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s02b_globalreadbody_non_guardk_prefet_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_S_B_UserArgs_MT64x64x16_MI16x16x1u2Zr71gfHhw0vWCmLrcVZXaKSw0CfiN333DT8vBznn4=',
+      'err': 0,
+    }),
+  ])
+# ---

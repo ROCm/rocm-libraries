@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s06_usef32xemulation_usetailloopinnl_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT32x32x64_MI16x1k1UaGWBoxrstvfXsFpsEsFXaCV4Hf94SoEie6vRoVdM=',
+      'err': 0,
+    }),
+  ])
+# ---

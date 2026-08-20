@@ -1,0 +1,59 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S05 _makeSubIterSchedule SIA2 (2-workgroup interleave) pack path.
+#
+# Target: Tensile/KernelWriter.py, scheduleIterAlg==2 block, specifically the
+#   packItems-non-empty sub-path (pack module split / coalesced-read
+#   distribution and pack scheduling inside the mfma loop). Probe confirmed
+#   coverage of lines 1090,1091,1092,1137,1138,1139,1144,1145,1146,1147,1148,1149.
+#
+# Base: gfx942 BBS MFMA, SIA=2 requires LRVW=4. Differences:
+#   * ProblemType NN (TransposeA/B = False) so TLUA=TLUB=True.
+#   * TransposeLDS:[0] -> UnrollMajorLDSA/B = 0, required for
+#     instPerPackA/B = int(MIInputPerThread * 0.5 * 1) > 0 (bf16, HasEccHalf
+#     gfx942). Non-zero instPerPack => packItems non-empty => the pack-
+#     distribution lines execute.
+#   * ScheduleIterAlg:[2] only, GlobalSplitU:[1] (SIA2+GSU2 is rejected).
+################################################################################
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+        - LocalReadVectorWidth: [4]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [2]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [True]
+        - ClusterLocalRead: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
