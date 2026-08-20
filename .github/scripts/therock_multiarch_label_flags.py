@@ -82,7 +82,18 @@ from ci_utils import append_step_summary, set_github_output
 #     "ci:miopen-hipdnn-wrapper": [
 #         "-DTHEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON",
 #     ],
-LABEL_GATED_THEROCK_FLAGS: dict[str, list[str]] = {}
+#
+# TEMPORARY DEMO ENTRY - do not merge. The `ci:demo-label-flag` entry below
+# exists only to exercise this mechanism end to end on a throwaway pull
+# request. `MIOPEN_ENABLE_HIPDNN_WRAPPER` is declared in TheRock's FLAGS.cmake
+# (DEFAULT_VALUE OFF, SUB_PROJECTS MIOpen) at the TheRock commit this branch
+# pins to, so the injected option actually reaches a cmake command line rather
+# than being silently ignored. Delete this entry, the `ci:demo-label-flag`
+# repository label, and the demo job in therock-multi-arch-ci.yml when the
+# demonstration is done.
+LABEL_GATED_THEROCK_FLAGS: dict[str, list[str]] = {
+    "ci:demo-label-flag": ["-DTHEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON"],
+}
 
 # Deliberately narrow, and it carries the whole safety argument for splicing
 # these tokens onto a shell command line in another repository:

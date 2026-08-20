@@ -205,6 +205,21 @@ jobs:
           BASELINE_RUN_ID: ${{ inputs.baseline_run_id || '' }}
         run: python .github/scripts/therock_multiarch_label_flags.py
 
+  # TEMPORARY DEMO JOB - do not merge. Its whole purpose is to make the label
+  # gate visible from the pull request checks list: a skipped job and a running
+  # job both show up there, so applying and removing the label flips this entry
+  # between the two without anyone opening a run. The name states the flag
+  # state rather than what the job does, because the name is the demonstration.
+  demo_flag_visible:
+    name: DEMO label-gated flag is ON
+    needs: label_flags
+    if: needs.label_flags.outputs.flags_active == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo "labels matched: ${{ needs.label_flags.outputs.matched_labels }}"
+          echo "flags injected: ${{ needs.label_flags.outputs.flags }}"
+
   setup:
     needs: [ci-env, configure, resolve_therock_ref, label_flags]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
