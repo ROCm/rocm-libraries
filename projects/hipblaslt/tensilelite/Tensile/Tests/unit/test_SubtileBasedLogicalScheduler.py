@@ -3408,12 +3408,13 @@ class TestIntegration:
             sched.deallocVgprTiles(writer)
 
 class TestPreloopReorderGR:
-    """Tests for TENSILE_PRELOOP_REORDER_GR — the PGR=2 preloop GR reorder.
+    """Tests for the PGR=2 preloop GR reorder (always active for PGR=2 subtile kernels).
 
-    With the flag on, build_preloop() must emit:
-      batch-0 GR → SRD inc → SkipToNLL guard → batch-1 GR → initC → WaitGR → Sync → LR → SkipToNGLL
-    instead of the stock:
-      batch-0 GR → SRD inc → initC → WaitGR → Sync → LR → SkipToNLL guard → batch-1 GR → SkipToNGLL
+    build_preloop() must emit the StreamK-safe two-branch structure:
+      batch-0 GR → initC → SkipToPreloopReorderPartial → batch-1 GR
+      → WaitGR(num_gr_total) → branch PreloopReorderJoin
+      → label PreloopReorderPartial → WaitGR(force_drain) → label PreloopReorderJoin
+      → Sync → LR → SkipToNLL → GL2 → SkipToNGLL
     """
 
     def _build(self, cfg):
@@ -3429,27 +3430,8 @@ class TestPreloopReorderGR:
                 for group in partition
                 for em in group]
 
-    def test_reorder_off_stock_order(self, monkeypatch):
-        """Flag off: SkipToNLL must follow LR (stock order)."""
-        monkeypatch.delenv("TENSILE_PRELOOP_REORDER_GR", raising=False)
-        cfg = make_cfg_256x256_fp4(pgr=2)
-        sched = self._build(cfg)
-        seq = self._op_sequence(sched)
-        op_types = [t for t, _ in seq]
-
-        # LR before SkipToNLL in stock order
-        lr_idx = next(i for i, t in enumerate(op_types) if t == 'lr')
-        skip_nll_idx = next(
-            (i for i, (t, s) in enumerate(seq)
-             if t == 'skip' and getattr(s, 'target', None) == 'NLL'),
-            None
-        )
-        assert skip_nll_idx is not None, "SkipToNLL not found in preloop"
-        assert lr_idx < skip_nll_idx, \
-            "Stock order: LR should precede SkipToNLL"
-
-    def test_reorder_on_structure(self, monkeypatch):
-        """Flag on (maxUnroll=1): StreamK-safe reorder structure.
+    def test_reorder_structure(self):
+        """PGR=2 (maxUnroll=1): StreamK-safe reorder structure.
 
         The reorder emits a two-branch structure to guard MT1 GRs from partial
         K-range workgroups (StreamK tail), then shares initC / WaitGR / Sync /
@@ -3469,7 +3451,6 @@ class TestPreloopReorderGR:
           GL2 prefetch ops
           SkipToNGLL
         """
-        monkeypatch.setenv("TENSILE_PRELOOP_REORDER_GR", "1")
         cfg = make_cfg_256x256_fp4(pgr=2)
         sched = self._build(cfg)
         seq = self._op_sequence(sched)
@@ -3502,10 +3483,9 @@ class TestPreloopReorderGR:
         assert lr_idx < skip_nll_idx, \
             "Reorder (StreamK-safe): SkipToNLL must follow LR, not precede initC"
 
-    def test_reorder_on_wait_gr_uses_num_gr_total(self, monkeypatch):
-        """Flag on: two WaitGROps — full-path uses num_gr_total, partial uses force_drain."""
+    def test_reorder_wait_gr_uses_num_gr_total(self):
+        """Two WaitGROps — full-path uses num_gr_total, partial uses force_drain."""
         from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
-        monkeypatch.setenv("TENSILE_PRELOOP_REORDER_GR", "1")
         cfg = make_cfg_256x256_fp4(pgr=2)
         sched = self._build(cfg)
         seq = self._op_sequence(sched)
@@ -3522,9 +3502,8 @@ class TestPreloopReorderGR:
         assert partial_wgop.force_drain, \
             "Partial-path wait_gr must use force_drain=True (vmcnt 0)"
 
-    def test_reorder_on_multi_du_skip_nll_after_lr(self, monkeypatch):
-        """Flag on (maxUnroll>1): SkipToNLL must follow LR (StreamK-safe, same as maxUnroll=1)."""
-        monkeypatch.setenv("TENSILE_PRELOOP_REORDER_GR", "1")
+    def test_reorder_multi_du_skip_nll_after_lr(self):
+        """maxUnroll>1: SkipToNLL must follow LR (StreamK-safe, same as maxUnroll=1)."""
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=2)
         assert cfg.numUnroll.get('A', 1) > 1 or cfg.numUnroll.get('B', 1) > 1, \
             "Prerequisite: cfg must be multi-DU"

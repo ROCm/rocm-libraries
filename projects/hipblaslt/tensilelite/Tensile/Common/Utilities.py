@@ -127,21 +127,6 @@ def preloopCoverInterleaveLevel() -> int:
         return 1 if raw != "0" else 0
 
 
-def preloopReorderGREnabled() -> bool:
-    """True when the PGR=2 preloop GR reorder is active (Stage 6).
-
-    Moves batch-1 global reads to before initC so both batches are in-flight
-    during initC, reducing the preloop s_waitcnt vmcnt shadow from vmcnt(0) to
-    vmcnt(N1) where N1 = number of batch-1 buffer_load instructions.  Unset or
-    ``0`` preserves stock emission byte-for-byte.
-
-    Preconditions assumed by the call site (not checked here):
-    - ``PrefetchGlobalRead == 2``
-    - ``DirectToLdsA`` and ``DirectToLdsB`` (both tensors are DTL)
-    - PAP is disabled (``PrefetchAcrossPersistentA == 0``)
-    """
-    return os.environ.get("TENSILE_PRELOOP_REORDER_GR", "0") != "0"
-
 # Global
 _global_ti = rocIsa.getInstance()
 
