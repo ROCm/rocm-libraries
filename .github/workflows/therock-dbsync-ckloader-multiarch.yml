@@ -28,25 +28,19 @@
 # pinned to this branch's commit, so the built miopen_gtest INCLUDES the loader change.
 name: "TheRock dbsync (CK-loader multiarch experiment)"
 
+# NOTE: push-triggered (not workflow_dispatch) because a brand-new workflow file on a
+# feature branch is not dispatchable until it lands on the default branch. artifact_run_id
+# is hardcoded to the TheRock multi_arch_ci build of THIS branch's commit (497b340).
 on:
-  workflow_dispatch:
-    inputs:
-      artifact_run_id:
-        description: "Run id that produced the MIOpen artifacts (source-CK build of THIS branch)"
-        type: string
-        required: true
-      artifact_repo:
-        description: "Repo hosting artifact_run_id (ROCm/TheRock for a multi_arch_ci dispatch)"
-        type: string
-        default: "ROCm/TheRock"
-      fetch_artifact_args:
-        description: "MIOpen component fetch_artifact_args"
-        type: string
-        default: "--blas --miopen --rand --tests"
-      therock_ref:
-        description: "ROCm/TheRock ref providing build_tools"
-        type: string
-        default: "main"
+  push:
+    branches:
+      - users/jlichtne/almiopen-1779-ckloader-multiarch
+
+env:
+  ARTIFACT_RUN_ID_INPUT: "32392734358"
+  ARTIFACT_REPO: "ROCm/TheRock"
+  FETCH_ARTIFACT_ARGS: "--blas --miopen --rand --tests"
+  THEROCK_REF: "main"
 
 permissions:
   contents: read
@@ -70,7 +64,7 @@ jobs:
       run:
         shell: bash
     env:
-      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      ARTIFACT_RUN_ID: "32392734358"
       OUTPUT_ARTIFACTS_DIR: "./build"
       THEROCK_BIN_DIR: "./build/bin"
       AMDGPU_FAMILIES: ${{ matrix.family }}
@@ -80,7 +74,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ${{ inputs.therock_ref }}
+          ref: ${{ env.THEROCK_REF }}
 
       - name: Checkout rocm-libraries (scripts)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -112,17 +106,17 @@ jobs:
           uv pip install -r requirements-test.txt
           uv pip freeze
 
-      - name: Fetch artifact (source-CK build for ${{ matrix.family }}) from ${{ inputs.artifact_repo }}
+      - name: Fetch artifact (source-CK build for ${{ matrix.family }}) from ${{ env.ARTIFACT_REPO }}
         timeout-minutes: 15
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python ./build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
-            --run-github-repo="${{ inputs.artifact_repo }}" \
+            --run-github-repo="${{ env.ARTIFACT_REPO }}" \
             --artifact-group="${AMDGPU_FAMILIES}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
-            ${{ inputs.fetch_artifact_args }}
+            ${{ env.FETCH_ARTIFACT_ARGS }}
 
       - name: Inspect artifact (CK plugin + DBs must be present)
         run: |
