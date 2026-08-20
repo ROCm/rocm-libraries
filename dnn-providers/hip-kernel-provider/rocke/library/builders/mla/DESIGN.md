@@ -3,6 +3,16 @@
 > **Status:** Design spike (no kernel code). DoD = this doc approved. No implementation
 > in scope, and **nothing here is measured**: the µs figures in §4 and the WG/CU figures
 > in §5 are analytical estimates, labelled as such at each use.
+>
+> **Revision 2 (AICK-1502) — prefill scope correction.** Revision 1 specified two prefill
+> regimes in §2.5 but scoped only one of them in §9, and gave §8.2 a bench plan whose
+> every shape belonged to the *unscoped* regime. This revision adds §3.1 (the
+> full-prompt materialize path), rows 3–4 of §9's table (that path plus the §2.5
+> dispatch), and §8.2's chunked shape family — the only shapes that exercise the §3
+> kernel in the regime it exists for, and the sweep that turns §2.5's ~200 threshold
+> from a citation into a measurement. It also adds a trap list to §9 and paper citations
+> to §11. **No equation or geometry value changed**; §0–§2 and §4–§5 are re-verified
+> against the primary sources now listed in §11 and stand as written.
 
 Covers DeepSeek V2/V3/V3.1/R1 and Kimi-K2. The kernel family splits into
 two distinct kernels (prefill and decode-absorb) and a separate fp8 phase for
@@ -22,6 +32,7 @@ gfx950+. All sections below are specifications; nothing is a tuning history.
   - [2.5 Prefill strategy: absorption vs materialize crossover](#25-prefill-strategy-absorption-vs-materialize-crossover)
   - [2.6 Online softmax](#26-online-softmax)
 - [3. Prefill kernel specification](#3-prefill-kernel-specification)
+  - [3.1 Full-prompt prefill: the materialize path](#31-full-prompt-prefill-the-materialize-path)
 - [4. Decode-absorb kernel specification](#4-decode-absorb-kernel-specification)
 - [5. Per-arch tiling and LDS budget](#5-per-arch-tiling-and-lds-budget)
   - [5.1 gfx942](#51-gfx942)
@@ -37,6 +48,7 @@ gfx950+. All sections below are specifications; nothing is a tuning history.
   - [8.2 Benchmark shapes](#82-benchmark-shapes)
   - [8.3 Parity baselines](#83-parity-baselines)
 - [9. Implementation scoping](#9-implementation-scoping)
+  - [Known implementation traps](#known-implementation-traps)
 - [10. State of the art — public MLA kernel implementations](#10-state-of-the-art--public-mla-kernel-implementations)
   - [10.1 AITER (AMD Inference Toolkit)](#101-aiter-amd-inference-toolkit)
   - [10.2 FlashMLA (DeepSeek)](#102-flashmla-deepseek)
@@ -337,20 +349,49 @@ amortizes poorly; at large $S_q$ it becomes cheap enough that materializing full
 $K, V$ once and running standard flash attention is cheaper than streaming $W_{UK}$
 through every workgroup in a tiled flash loop.
 
-The crossover point (empirically ~171–228 query tokens, measured by SGLang on Hopper
-and approximately hardware-independent) defines two prefill regimes:
+The crossover point (~171–228 query tokens, reported by SGLang on Hopper and asserted
+there to be approximately hardware-independent) defines two prefill regimes:
 
-| Regime | $S_q$ threshold | Strategy |
-|---|---|---|
-| Short prefill / chunked prefill | $S_q \lesssim 200$ | Latent expansion inside flash loop (§3 kernel) |
-| Long prefill | $S_q \gtrsim 200$ | Materialize $K, V$ once → standard flash attention |
+| Regime | $S_q$ | $S_k$ | Strategy |
+|---|---|---|---|
+| **Chunked prefill** | $\lesssim 200$ (the scheduler's chunk) | independent of $S_q$; grows to the full context | Latent expansion inside flash loop (**§3 kernel**) |
+| **Full-prompt prefill** | $\gtrsim 200$ | $S_k \approx S_q$ | Materialize $K, V$ once → standard flash attention (**§3.1**) |
 
-The materialization path (`c_KV · W_UK → K, V`, then standard `mla_prefill_fwd`
-→ pass expanded K/V directly) incurs a separate GEMM launch; the in-loop path fuses
-expansion with attention but is
-memory-bandwidth-bound on W_UK at large tile counts. The dispatch heuristic
-must implement this threshold — it is not a kernel property but a launch-time
-decision in `library/dispatch/attention/`.
+**Both regimes are in scope.** §9 carries deliverables for each; neither is optional,
+and the dispatch heuristic between them is a launch-time decision in
+`library/dispatch/attention/`, not a kernel property.
+
+> **"Short prefill" would be a misnomer — read the first row as *chunked* prefill.**
+> The regimes are separated by $S_q$, and $S_q$ is decoupled from context length: under
+> chunked prefill the scheduler fixes $S_q$ at the chunk size while $S_k$ grows to the
+> full context. That combination is the *worst* case for materialization and the reason
+> the first row exists. Materializing costs
+> $O(S_k \cdot r_{KV} \cdot H_q \cdot (d_{\text{nope}} + d_V))$ of expansion to serve
+> $O(S_q \cdot S_k)$ of attention, so the expansion overhead per query token scales as
+> $1/S_q$ — at a 512-token chunk against 64 K of context you pay the full per-head
+> expansion of 64 K tokens to attend with 512 queries. The $S_q = S_k$ shapes of §8.2
+> are the *best* case for materialization by construction, because there the expansion
+> amortizes over the largest query count the geometry permits. Do not read a
+> full-prompt-prefill measurement as evidence about the chunked regime.
+>
+> Chunked prefill is the production-dominant path for long-context serving, and the
+> regime is load-bearing enough that AITER ships hand-written assembly restricted to
+> $S_q < 160$ for it (§10.1). §3's input table carries `cu_seqlens_k` separately from
+> `cu_seqlens_q` for exactly this reason.
+
+> **The threshold is a citation, not a measurement.** ~200 comes from SGLang on Hopper
+> (§10.6) and is repeated here because it is the only published figure; nothing in this
+> doc measures it on gfx942 or gfx950, and the "approximately hardware-independent"
+> claim is SGLang's, not ours. The independent evidence is directional only: Yun et al.
+> (§11) report the prefill attention block 2.02× *worse* with absorption at
+> $B = 1, L = 4096$, and the decode block 119× *better* at $B = 256, L = 4096$ —
+> confirming that a crossover exists and which way it runs, but fixing no token count.
+> **Measure it before it is baked into the dispatch heuristic**; §8.2's chunked shapes
+> are the sweep that does so.
+
+The materialization path (`c_KV · W_UK → K, V`, then standard flash attention over the
+expanded tensors) incurs a separate GEMM launch; the in-loop path fuses expansion with
+attention but is memory-bandwidth-bound on `W_UK` at large tile counts.
 
 > **The materialize path does not "just reuse" the existing kernels.** MLA's
 > materialized form is asymmetric — `hdim_q = d_nope + d_rope = 192`,
@@ -506,6 +547,63 @@ fixed here.
 > `softmax_lse` is blocked on CK's paged path (§10.4), and the baseline that *is*
 > buildable at (192,128) is the non-paged `fmha_fwd` — so the number measures a
 > contiguous-KV kernel, not MLA's paged cache. State that alongside the measurement.
+
+### 3.1 Full-prompt prefill: the materialize path
+
+**Same op** (`mla_prefill_fwd`, §7.1), different internal strategy; §2.5's threshold
+selects between this and the §3 flash loop at launch time. This path is **not** a new
+attention kernel — it is two pre-GEMMs feeding the *existing* rocKE unified attention at
+an asymmetric head dimension. Its cost is therefore concentrated in the spec layer, not
+in a tiling.
+
+```
+# Pre-kernel 1 — the W_UQ GEMM, shared verbatim with §3 step 2.
+  q[h] = q_latent · W_UQ[h]  → [total_q, H_q, d_nope + d_rope]; split, rotate q_rope
+
+# Pre-kernel 2 — the KV expansion, PER HEAD (§0):
+  K_nope[:, h, :] = c_KV · W_UK_K[h]              # [S_k, H_q, d_nope]
+  V[:, h, :]      = c_KV · W_UV[h]                # [S_k, H_q, d_V]
+  K_exp[:, h, :]  = concat(K_nope[:, h, :], K_rope)   # [S_k, H_q, d_nope + d_rope]
+                                                  #   K_rope is head-shared (§2.1) and is
+                                                  #   BROADCAST across h, not expanded
+
+# Attention — standard rocKE unified attention, no MLA-specific code:
+  hdim_q = d_nope + d_rope = 192,  hdim_v = d_V = 128,  H_k = H_q,  causal
+```
+
+> **After expansion this is MHA, not MQA.** The latent is shared across heads but its
+> expansion is not (§0), so `K_exp` and `V` carry a full head axis and
+> $H_k = H_q = 128$. Any design that reuses a single head-shared `[S_k, 1, ·]` K/V cache
+> here is solving a different problem — see the trap list in §9.
+
+**Materialized footprint, and why the path is regime-limited.** At
+$S_k = 8192,\ H_q = 128$, bf16, per layer per sequence:
+
+```
+K_exp : 8192 x 128 x 192 x 2 B = 384 MiB
+V     : 8192 x 128 x 128 x 2 B = 256 MiB
+total                          = 640 MiB
+```
+
+This is the concrete form of §2.5's $1/S_q$ argument: the footprint is set by $S_k$ and
+$H_q$ alone and does not shrink as the query count shrinks. It is affordable when
+$S_q \approx S_k$ and ruinous under chunked prefill.
+
+**Enabling work — the spec layer, and it is the whole cost of this path.** MLA's
+materialized form is asymmetric ($\texttt{hdim\_q} = 192$, $\texttt{hdim\_v} = 128$) and
+the current stack collapses or rejects that at the five sites §7.2 enumerates. Those
+five edits *are* this path's deliverable; there is no new tiling to write.
+
+> **Do not pad the head dimension to 256 to dodge the gate.** Padding
+> $192 \to 256$ on the score side and $128 \to 256$ on the value side makes the shape
+> admissible to `UNIFIED_HEAD_SIZES` without any spec-layer change, and it is the
+> obvious shortcut. It permanently discards **25% of the QK MFMA lanes and 50% of the
+> PV lanes**, on a path whose entire justification is that it is cheaper than the flash
+> loop. Admit 192 per §7.2 instead — the merit argument is there, and FlashInfer's MLA
+> prefill mode runs natively at `(head_dim_k, head_dim_v) = (192, 128)` (§10.5), so the
+> asymmetric shape is the one the ecosystem already targets. This shortcut was taken in
+> an early implementation draft and measured at ~0.33× the AITER Triton baseline; treat
+> that as a recorded negative result, not as a starting point.
 
 ---
 
@@ -1456,11 +1554,40 @@ Two `seqlen_k` values suffice on the length axis — the flash loop is linear in
 and the pre-step is invariant, so two points fix the line; but see §4 on the
 `B = 32, kv_len = 8192` KV working set exceeding MALL.
 
-Prefill sweep: `seqlen_q = seqlen_k ∈ {512, 1024, 2048, 4096, 8192}` at `batch = 1`,
-plus `batch = 4` at the two short lengths. **The prefill batch axis is narrower than
+Prefill sweep, **two families**:
+
+1. **Full-prompt** — `seqlen_q = seqlen_k ∈ {512, 1024, 2048, 4096, 8192}` at
+   `batch = 1`, plus `batch = 4` at the two short lengths.
+2. **Chunked** — `seqlen_q ∈ {128, 256, 512}` × `seqlen_k ∈ {8192, 32768}` at
+   `batch = 1`, plus `batch = 4` at `(seqlen_q, seqlen_k) = (256, 8192)`.
+
+> **Family 1 alone cannot measure this design, and an earlier revision of this section
+> shipped only family 1.** Every family-1 shape has $S_q = S_k \ge 512$, so every one of
+> them sits on the **materialize** side of §2.5's threshold — the §3 flash loop, which is
+> the kernel §9 scopes, is never measured in the regime it exists for. Family 2 fixes
+> that and does three things family 1 cannot:
+>
+> - **It brackets the §2.5 threshold.** `seqlen_q = 128` is below it, `256` just above,
+>   `512` well above — so the two strategies' cost curves cross inside the sweep and the
+>   ~200 figure gets a local number instead of a Hopper citation (§2.5).
+> - **It is the only place $S_q \neq S_k$.** §3's input table carries `cu_seqlens_k`
+>   separately from `cu_seqlens_q` precisely because chunked prefill decouples them, and
+>   no family-1 shape exercises that. The causal mask against a $S_k \gg S_q$ context is
+>   a distinct code path from the square-mask case, not a parameterisation of it.
+> - **It is where the materialize path is supposed to lose.** §2.5's $1/S_q$ argument
+>   and §3.1's 640 MiB footprint predict a large gap at `(128, 32768)`. If the gap is
+>   *not* there, §2.5's two-branch dispatch is unjustified and the design should be
+>   amended to drop one branch. That is the cheapest falsification available and it
+>   should be run before either kernel is tuned.
+>
+> `seqlen_k = 32768` matches the decode sweep's upper bound, so both kernels are
+> exercised against the same maximum context.
+
+**The prefill batch axis is narrower than
 decode's on purpose, and it measures something else.** Decode needs batch because the
 pre-step is batch-invariant while the flash loop is not, so the crossovers above only
-appear across `B`. Prefill has no such crossover: its pre-kernel amortizes over
+appear across `B`. Prefill has no *batch* crossover (its $S_q$ crossover is §2.5's, and
+that is swept on the `seqlen_q` axis above, not this one): its pre-kernel amortizes over
 `total_q = batch × seqlen_q` (§3), so batch and `seqlen_q` are interchangeable for it and
 a uniform-length batch sweep re-measures points the length sweep already covers, at
 multiplied cost. What batch buys at prefill is coverage of the **packed-varlen path** —
@@ -1512,17 +1639,74 @@ that drive gfx942/gfx950 MLA decode performance.
 
 ## 9. Implementation scoping
 
-| Kernel | Arch | Dtype | Spec |
-|---|---|---|---|
-| MLA prefill | gfx942 | bf16 | §3, §5.1 prefill tiling |
-| MLA prefill | gfx950 | bf16 | §3, §5.2 prefill tiling |
-| MLA decode-absorb | gfx942 | bf16 | §4, §5.1 decode tiling |
-| MLA decode-absorb | gfx950 | bf16 | §4, §5.2 decode tiling |
-| MLA prefill | gfx950+ | fp8 e4m3 | §6 fp8 plan, §3 struct |
-| MLA decode-absorb | gfx950+ | fp8 e4m3 | §6 fp8 plan, §4 struct |
+| # | Deliverable | Arch | Dtype | Spec |
+|---|---|---|---|---|
+| 1 | MLA prefill — chunked (in-loop expansion) | gfx942 | bf16 | §3, §5.1 prefill tiling |
+| 2 | MLA prefill — chunked (in-loop expansion) | gfx950 | bf16 | §3, §5.2 prefill tiling |
+| 3 | MLA prefill — full-prompt (materialize) | arch-independent | bf16 | **§3.1** + §7.2 spec-layer edits |
+| 4 | Prefill strategy dispatch (§2.5 threshold) | arch-independent | — | **§2.5**, `library/dispatch/attention/` |
+| 5 | MLA decode-absorb | gfx942 | bf16 | §4, §5.1 decode tiling |
+| 6 | MLA decode-absorb | gfx950 | bf16 | §4, §5.2 decode tiling |
+| 7 | MLA prefill | gfx950+ | fp8 e4m3 | §6 fp8 plan, §3 struct |
+| 8 | MLA decode-absorb | gfx950+ | fp8 e4m3 | §6 fp8 plan, §4 struct |
 
 Each bf16 kernel delivers: kernel impl + parity gate + bench run against
 `mla_shapes.json`. The fp8 kernels additionally deliver the fp8 KV cache dequant path.
+
+> **Rows 3 and 4 are new in this revision, and their absence was a defect.** §2.5 has
+> always specified two prefill regimes and required a dispatch heuristic between them,
+> but an earlier revision of this table scoped only the in-loop kernel. That left the
+> design mandating a two-branch dispatch with nothing to dispatch *to* on the
+> full-prompt side, while §8.2's bench plan measured only that side — three sections
+> implying three different scopes. Rows 3 and 4 close it.
+>
+> **Row 3 is not a kernel row.** It writes no tiling: it is the per-head expansion GEMM
+> plus §7.2's five spec-layer edits, after which the *existing* unified attention runs
+> the shape at `(hdim_q, hdim_v) = (192, 128)`. It is listed arch-independent for that
+> reason — the arch-specific tiling it lands on is already shipped. It is also the
+> cheapest of the eight and the one that unblocks a number on the §8.2 family-1 shapes
+> soonest; schedule it accordingly, but see the padding warning in §3.1 before starting.
+>
+> **Row 4 depends on rows 1–3 and on a measurement.** The threshold it implements is a
+> Hopper citation until §8.2's family-2 sweep gives it a local value (§2.5). Ship rows
+> 1–3 with a provisional constant, then set it from the sweep; do not treat ~200 as
+> settled. If family 2 shows the two branches within measurement noise across the whole
+> $S_q$ range, row 4 collapses to a constant and one of rows 1/3 should be dropped from
+> the design — record that outcome rather than shipping a dispatch that chooses between
+> equivalents.
+
+#### Known implementation traps
+
+Four errors that an implementation draft has already made, all of which pass a naive
+parity gate because they are mirrored into the reference. Each is a spec violation
+stated elsewhere in this doc; they are collected here because §9 is what an implementer
+reads.
+
+1. **`W_UK` / `W_UV` are per head — dropping the head axis is not a simplification, it
+   is a different operator.** DeepSeek-V2 §2.1.2 defines
+   $W^{UK}, W^{UV} \in \mathbb{R}^{d_h n_h \times d_c}$, so
+   $k^C_t = W^{UK} c^{KV}_t$ has width $d_h \cdot n_h = 16384$, not $d_h = 128$ (§0,
+   §2.3, §3 steps 6–7, §3.1, §8.1). A head-shared `[r_KV, d_nope]` up-projection makes
+   the expanded K/V shareable across heads and every downstream cost model wrong. If the
+   *reference* also drops the axis, the parity gate cannot detect it — check the
+   reference's shapes against §8.1 before trusting a green gate.
+2. **$K_{\text{rope}}$ *is* head-shared — and it is the only part of K that is.** It is
+   $\mathbb{R}^{d^R_h}$ per token, broadcast across heads (§2.1). Getting item 1 right
+   by giving `k_rope` a head axis is the opposite error.
+3. **RoPE is not optional on the query side.** $K_{\text{rope}}$ is stored
+   *post*-rotation (§2.1), so `positions` is a required input and the query rotation
+   must happen (§3 step 3, §4 pre-step). A reference that omits it agrees with a kernel
+   that omits it.
+4. **`scale` is host-supplied, and the kernel ABI wants `scale · log₂(e)`, not
+   `log₂(scale)`.** The value is $1/\sqrt{d_{\text{nope}} + d_{\text{rope}}} =
+   1/\sqrt{192}$ (§0; DeepSeek-V2 Eq. 18 divides by $\sqrt{d_h + d^R_h}$), never
+   $1/\sqrt{576}$. The `scale_log2` parameter every rocKE attention kernel takes is the
+   *base-2-exponent form* used by the `exp2` softmax — see
+   `library/builders/common/parity_fmha_extended.py` (`math.log2(math.e) /
+   math.sqrt(head_size)`) and `library/tests/differential/numeric_attention.py`.
+   `log2(scale)` is a different number ($-3.79$ against $0.104$ at $\sqrt{192}$) and
+   fails every shape, which makes it a useful smoke test: if a first correctness run is
+   uniformly wrong rather than marginally wrong, check this before the kernel.
 
 **The pre-kernels are deliverables too.** Both ops now normatively span two device
 kernels (§3 step 2, §4 pre-step), and neither pre-kernel appears in the table above.
@@ -1699,6 +1883,15 @@ custom rocKE kernel is still the deliverable (§9).
 - Decode kernel: 128-head MQA in latent space, reusing `c_KV` as both K and V for
   the score + value step (same as §2.4).
 - CK backend for gfx942 prefill; supports gfx942 and gfx950.
+- **The MLA API carries `kv_lora_rank` and `qk_rope_head_dim` as separate parameters
+  rather than a single `head_dim`**, and its two modes are
+  `(head_dim_k, head_dim_v) = (576, 512)` for decode-absorb and **`(192, 128)` for
+  prefill** — i.e. exactly the asymmetric score/value split §7.2 proposes to admit and
+  §3.1 forbids padding away. The upstream engine (arXiv:2501.01005, §11) also states the
+  anti-pattern directly: a naive implementation decompresses the latent to full KV and
+  then runs standard attention, wasting bandwidth, where the fused form keeps the latent
+  projection inside the tiled kernel. That is §2.5's two regimes seen from the kernel
+  side.
 
 ### 10.6 SGLang weight absorption
 
@@ -1728,6 +1921,44 @@ deployed at scale in SGLang (PR #905, #1138). Key implementation details:
 - `library/kernels/gfx950/attention_tiled_2d.py`, `attention_tiled_2d_fastkv_regp.py` — gfx950 baselines; `register_pv` and `ds_read_tr` patterns
 - `library/kernels/common/attention_arch.py` — arch gating (`_NARROW_TILED_2D_ARCHES`, `validate_tiled_attention_arch`)
 - `platform/cpp/instances/gfx950/attention_tiled_2d_kv_body_pv_epilogue.cpp` — `ds_read_tr16_b64` usage in V staging
+
+**Papers — the primary sources for §0–§2 and §5.**
+
+Every geometry value in §1, the per-head shape of $W_{UK}$ (§0), the head-shared
+$K_{\text{rope}}$ (§2.1), the $1/\sqrt{192}$ scale (§0) and the absorption identity
+(§2.4) are checkable against these; §9's trap list cites them. Where this doc and a
+paper disagree, the paper wins.
+
+- **DeepSeek-V2** — `arXiv:2405.04434`. §2.1 is the defining MLA specification.
+  §2.1.2 gives $W^{UK}, W^{UV} \in \mathbb{R}^{d_h n_h \times d_c}$ (the **per-head**
+  up-projection, §0) and the absorption statement (*"$W^{UK}$ can be absorbed into
+  $W^Q$, and $W^{UV}$ can be absorbed into $W^O$"*, §2.4). §2.1.3 Eq. 15 defines
+  $k^R_t = \text{RoPE}(W^{KR}h_t)$ as *a shared key* $\in \mathbb{R}^{d^R_h}$ — the
+  post-rotation storage and head-sharing of §2.1. Eq. 18 divides the score by
+  $\sqrt{d_h + d^R_h}$ — the $1/\sqrt{192}$ of §0, not $1/\sqrt{576}$. §3.1.2 gives
+  $n_h{=}128,\ d_h{=}128,\ d_c{=}512,\ d'_c{=}1536,\ d^R_h{=}64$ — the DeepSeek row of §1.
+- **DeepSeek-V3** — `arXiv:2412.19437`. Confirms the same MLA geometry at V3 scale and
+  the 61-layer depth used in §4's `W_abs` working-set argument.
+- **Kimi-K2** — `arXiv:2507.20534`. Table 2 gives 64 attention heads against
+  DeepSeek-V3's 128 at equal depth (61 layers) — the Kimi row of §1 — and the rationale
+  (at 128 K context, 64→128 heads is *"an 83% increase in inference FLOPs"*), which is
+  why $H_q$ is the only axis this kernel family parameterizes over.
+- **Yun et al., *Rethinking LLM Inference Bottlenecks: Insights from Latent Attention
+  and Mixture-of-Experts*** — `arXiv:2507.15465`. Independent hardware analysis of the
+  §2.5 split, and the strongest external support for two distinct kernels: it
+  recommends *"the prefill stage uses MLA without reordering and the decode stage uses
+  MLA with reordering"* ("reordering" = absorption). Quantifies both directions —
+  prefill attention 2.02× **worse** with absorption at $B{=}1, L{=}4096$; decode 119×
+  **better** at $B{=}256, L{=}4096$; decode score-layer arithmetic intensity ≈1 → ≈100 —
+  and prices the prefill penalty at $d_{KV_{co}}/d_{hd} = 512/128 = 4\times$ the
+  score-layer compute. It fixes **no token threshold**, which is why §2.5's ~200 stays a
+  citation until §8.2's family-2 sweep measures it.
+- **FlashInfer** — `arXiv:2501.01005`. See §10.5 for the `(192, 128)` prefill mode and
+  the fused-vs-decompressed statement.
+- **MLA sequence-parallelism training regression** — `arXiv:2607.17644`. Not
+  load-bearing here (training-side), but it independently states the inference win as
+  *never materializing or recomputing $K^C$/$V^C$ over the growing cache* — the §2.5
+  $1/S_q$ argument from the memory side.
 
 **External (state of the art — see §10):**
 - AITER MLA: `github.com/ROCm/aiter` / `rocm.blogs.amd.com/software-tools-optimization/aiter-mla/`
