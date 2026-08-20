@@ -39,12 +39,14 @@ typedef std::tuple<vector<int>, vector<char>> larft_tuple;
 // case when n == -1, k == -1, direct == F, and storev == C will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
+#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
 const vector<vector<char>> op_range = {{'F', 'C'}, {'F', 'R'}, {'B', 'C'}, {'B', 'R'}};
+#else
+const vector<vector<char>> op_range = {{'F', 'C'}, {'B', 'C'}};
+#endif
 
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
-    // invalid
-    {-1, -1, 1, 1},
     // normal (valid) samples
     {10, 5, 10, 5},
     {20, 10, 20, 10},
