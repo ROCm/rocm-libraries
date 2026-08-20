@@ -3452,6 +3452,7 @@ class TestPreloopReorderGR:
           SkipToNGLL
         """
         cfg = make_cfg_256x256_fp4(pgr=2)
+        assert cfg.pgr == 2, "This test targets the PGR=2 reorder path"
         sched = self._build(cfg)
         seq = self._op_sequence(sched)
         op_types = [t for t, _ in seq]
@@ -3487,6 +3488,7 @@ class TestPreloopReorderGR:
         """Two WaitGROps — full-path uses num_gr_total, partial uses force_drain."""
         from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
         cfg = make_cfg_256x256_fp4(pgr=2)
+        assert cfg.pgr == 2, "This test targets the PGR=2 reorder path"
         sched = self._build(cfg)
         seq = self._op_sequence(sched)
 
