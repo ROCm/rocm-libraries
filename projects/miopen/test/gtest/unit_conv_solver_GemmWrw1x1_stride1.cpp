@@ -35,6 +35,11 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 1, 1}, {0, 0}, {1, 1}, {1, 1}, datatype},
+        // A 1x1 filter maps onto a single GEMM in NHWC too, without im2col or a transposition.
+        TestCase{{datatype, miopenTensorNHWC, {1, 8, 8, 8}},
+                 {datatype, miopenTensorNHWC, {8, 8, 1, 1}},
+                 datatype,
+                 {{0, 0}, {1, 1}, {1, 1}}},
         // clang-format on
     };
 }
