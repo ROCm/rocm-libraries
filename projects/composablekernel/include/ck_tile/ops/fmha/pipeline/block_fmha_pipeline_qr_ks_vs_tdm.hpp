@@ -168,6 +168,10 @@ struct BlockFmhaPipelineQRKSVSTdm
     static_assert(!kBlockScale || kHwGemm1Scale,
                   "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
 
+    // Only the scaled MMA applies the dynamic P exponent; without it O is off by 2^k.
+    static_assert(!kQuantized || kHwGemm1Scale,
+                  "qr_tdm pipeline: a quantized run needs the scaled MMA in gemm1");
+
     static_assert(!kHwGemm1Scale || kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                   "qr_tdm pipeline: the scaled gemm1 assumes kK1 is one warp-GEMM K step");
 

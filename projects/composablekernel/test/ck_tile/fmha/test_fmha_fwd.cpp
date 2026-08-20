@@ -80,8 +80,8 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     }
 };
 
-// Only d=128 reaches the TDM pipeline, no splitkv/appendkv instances are generated, and all
-// four quantization scales exist there.
+// d=128 is the only head dim the whole fp8 family shares; fp8fp32 has no d=64 tile. No
+// splitkv/appendkv instances are generated, and all four quantization scales exist here.
 struct Fp8FamilyTestConfigs
 {
     static constexpr auto HDimValues         = std::array{std::tuple{128, -1}};

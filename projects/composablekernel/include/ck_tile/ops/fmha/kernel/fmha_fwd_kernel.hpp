@@ -2916,11 +2916,12 @@ struct FmhaFwdKernel
                 // make_k_dram above: TDM box-major DMA can't honor software
                 // XOR'd dram views, the unmerge/xor/merge_v3 chain below is
                 // dead code for TDM, and calculate_offset(unit_vec) would
-                // otherwise produce an XOR-polluted stride. Return the
-                // affine pad-only view so the box copy reads the right rows.
+                // otherwise produce an XOR-polluted stride. Return the naive
+                // view: a pad transform reports the pad rows as real and the
+                // DMA reads past the end of V.
                 if constexpr(kPipelineName == "qr_tdm")
                 {
-                    return v_dram_pad;
+                    return v_dram_naive;
                 }
                 else
                 {

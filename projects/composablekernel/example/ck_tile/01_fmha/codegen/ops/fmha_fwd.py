@@ -405,8 +405,7 @@ class FmhaFwdApiTrait:
             else:
                 assert False
         elif self.pipeline_tag == "qr_tdm":
-            # fp8 runs a K=128 WMMA, which is wrong on a padded head dim.
-            if self.dpad == "t" and not self.dtype.startswith("fp8"):
+            if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
@@ -426,7 +425,7 @@ class FmhaFwdApiTrait:
             else:
                 assert False
         elif self.pipeline_tag == "qr_tdm":
-            if self.dvpad == "t" and not self.dtype.startswith("fp8"):
+            if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
             return f"a.hdim_v % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
@@ -1462,7 +1461,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         elif dtype in cls._DT_FP8_FP8BF16:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 64,  64) : [FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
+                ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
+                              FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 #(256, 256) : [FmhaFwdTileSize( 64,  32,  64, 256,  64,  256,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
@@ -1481,13 +1481,13 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         def check_gemm0_k(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
-            # Only qr_tdm runs the K=128 WMMA; qr's k0 prefetch asserts k0_loops >= 2.
+            # qr's k0 prefetch needs >= 2 loops; qr_tdm has none and takes the 1-loop tile.
             if problem_ctx.dtype not in cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32:
                 return True
-            if (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128):
-                return True
-            is_tdm = kernel_ctx.pipeline.tag == "qr_tdm"
-            return (kernel_ctx.tile.F_wk0 == 128) == is_tdm
+            k0_loops = kernel_ctx.tile.F_bk0max // kernel_ctx.tile.F_bk0
+            if kernel_ctx.pipeline.tag == "qr_tdm":
+                return k0_loops == 1
+            return k0_loops >= 2
 
         return [*super().get_rules(), check_gemm0_k]
 
@@ -1531,18 +1531,20 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
-            # no need lse/dropout kernels
-            if hdim == 128 and hdim_v == 128:
-                for logits, qscale, mask, bias in itertools.product(
+            # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
+            # slope-dependent quantization bias the OUT gain check reads as a systematic error.
+            if (hdim, hdim_v) in ((128, 128), (64, 64)):
+                for logits, qscale, mask, bias, lse in itertools.product(
                     ["f"],
                     ["no", "pertensor", "perhead", "blockscale"],
                     get_mask_map(mask_impl).keys(),
-                    ["no"],
+                    ["no", "bias"],
+                    ["f", "t"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
 
             for logits, qscale, mask, bias in itertools.product(
                 ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]

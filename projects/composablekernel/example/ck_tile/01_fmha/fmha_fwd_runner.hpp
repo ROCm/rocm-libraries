@@ -2770,60 +2770,62 @@ fwd_result fmha_fwd_run(mode_enum mode,
             bool cur_pass = true;
             if constexpr(supports_qscale)
             {
-              if(!have_absmag)
-              {
-                cur_pass = stock_check();
-              }
-              else
-              {
-                // A full ULP rather than half: the device quantizes P against a per-32
-                // group scale and that scale is itself rounded, so P carries two
-                // roundings. The reference keeps P in fp32, so all of that error lands
-                // here. u_o likewise, since out and ref are both rounded to ODataType.
-                const double u_p = std::pow(2.0, -ck_tile::numeric_traits<PDataType>::mant);
-                const double u_o = std::pow(2.0, -ck_tile::numeric_traits<ODataType>::mant);
-
-                const ck_tile::index_t n_head = o_host_result.get_lengths()[0];
-                std::vector<double> num(n_head, 0.0), den(n_head, 0.0);
-                int    over  = 0;
-                double worst = 0;
-                o_host_result.ForEach([&](auto& self, auto idx) {
-                    const double o = ck_tile::type_convert<float>(self(idx));
-                    const double r = ck_tile::type_convert<float>(o_host_ref(idx));
-                    const double c =
-                        std::abs(ck_tile::type_convert<float>(absmag_ref(idx)));
-                    const double lim = u_p * c + u_o * std::abs(r);
-                    const double err = std::abs(o - r);
-                    if(lim > 0 && err / lim > worst)
-                        worst = err / lim;
-                    // Negated so that a NaN, which compares false either way, is caught.
-                    if(!(err <= lim))
-                        ++over;
-                    num[idx[0]] += (o - r) * r;
-                    den[idx[0]] += r * r;
-                });
-                // The bound is blind to a systematic gain, which scales with |O| while
-                // the bound scales with (P|V|)/l >= |O|. alpha is (g - 1) exactly for a
-                // uniform gain. Taken per head, so that a fault confined to one head is
-                // not averaged away by the others.
-                double worst_alpha = 0;
-                for(ck_tile::index_t h = 0; h < n_head; ++h)
+                if(!have_absmag)
                 {
-                    const double a = (den[h] > 0 ? num[h] / den[h] : 0.0);
-                    if(!(std::abs(a) <= std::abs(worst_alpha)))
-                        worst_alpha = a;
+                    cur_pass = stock_check();
                 }
-                // The largest per-head |alpha| a correct kernel produced over the
-                // forward matrix, measured on this base, was 2.3e-3.
-                constexpr double alpha_max = 1e-2;
-                cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_max);
-                if(over != 0)
-                    std::cerr << "OUT accuracy bound: " << over << " elements over, worst "
-                              << worst << "x" << std::endl;
-                if(!(std::abs(worst_alpha) <= alpha_max))
-                    std::cerr << "OUT systematic gain: per-head alpha " << worst_alpha
-                              << " exceeds " << alpha_max << std::endl;
-              }
+                else
+                {
+                    // A full ULP rather than half: the device quantizes P against a per-32
+                    // group scale and that scale is itself rounded, so P carries two
+                    // roundings. The reference keeps P in fp32, so all of that error lands
+                    // here. u_o likewise, since out and ref are both rounded to ODataType.
+                    const double u_p = std::pow(2.0, -ck_tile::numeric_traits<PDataType>::mant);
+                    const double u_o = std::pow(2.0, -ck_tile::numeric_traits<ODataType>::mant);
+                    // u_o * |r| is the ULP only while r is normal; subnormal spacing is fixed.
+                    const double u_o_floor = u_o * static_cast<double>(ck_tile::type_convert<float>(
+                                                       ck_tile::numeric<ODataType>::min()));
+
+                    const ck_tile::index_t n_head = o_host_result.get_lengths()[0];
+                    std::vector<double> num(n_head, 0.0), den(n_head, 0.0);
+                    int over     = 0;
+                    double worst = 0;
+                    o_host_result.ForEach([&](auto& self, auto idx) {
+                        const double o   = ck_tile::type_convert<float>(self(idx));
+                        const double r   = ck_tile::type_convert<float>(o_host_ref(idx));
+                        const double c   = std::abs(ck_tile::type_convert<float>(absmag_ref(idx)));
+                        const double lim = u_p * c + std::max(u_o * std::abs(r), u_o_floor);
+                        const double err = std::abs(o - r);
+                        if(lim > 0 && err / lim > worst)
+                            worst = err / lim;
+                        // Negated so that a NaN, which compares false either way, is caught.
+                        if(!(err <= lim))
+                            ++over;
+                        num[idx[0]] += (o - r) * r;
+                        den[idx[0]] += r * r;
+                    });
+                    // The bound is blind to a systematic gain, which scales with |O| while
+                    // the bound scales with (P|V|)/l >= |O|. alpha is (g - 1) exactly for a
+                    // uniform gain. Taken per head, so that a fault confined to one head is
+                    // not averaged away by the others.
+                    double worst_alpha = 0;
+                    for(ck_tile::index_t h = 0; h < n_head; ++h)
+                    {
+                        const double a = (den[h] > 0 ? num[h] / den[h] : 0.0);
+                        if(!(std::abs(a) <= std::abs(worst_alpha)))
+                            worst_alpha = a;
+                    }
+                    // The largest per-head |alpha| a correct kernel produced over the
+                    // forward matrix, measured on this base, was 2.3e-3.
+                    constexpr double alpha_max = 1e-2;
+                    cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_max);
+                    if(over != 0)
+                        std::cerr << "OUT accuracy bound: " << over << " elements over, worst "
+                                  << worst << "x" << std::endl;
+                    if(!(std::abs(worst_alpha) <= alpha_max))
+                        std::cerr << "OUT systematic gain: per-head alpha " << worst_alpha
+                                  << " exceeds " << alpha_max << std::endl;
+                }
             }
             else
             {

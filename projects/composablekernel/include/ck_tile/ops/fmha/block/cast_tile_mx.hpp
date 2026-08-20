@@ -81,6 +81,8 @@ CK_TILE_DEVICE auto cast_tile_mx_wmma(DstTensor& dst_tensor, const SrcTensor& sr
             float scale = bit_cast<float>(
                 (bit_cast<uint32_t>(max_abs * rcp_dst_max) + numeric_traits<float>::mant_mask) &
                 numeric_traits<float>::head_mask);
+            // An all-zero sub-block rounds to a zero scale, and type_convert<e8m0_t>(0.f) is NaN.
+            scale = max(scale, numeric<float>::min());
 
             // Convert using scales
             static_for<0, values_per_lane / values_per_vec, 1>{}([&](auto j) {
