@@ -1,0 +1,9 @@
+// Ranks the one kernel each pack ships. A heuristic is required even where there is
+// nothing to choose between within a pack.
+{
+  "version": "1.0",
+  "id": "17b563ff-4f50-5e65-afaf-fb72d45004be",
+  "name": "BatchnormSelector",
+  "kind": "native",
+  "payload": "hipkernel.batchnorm.score"
+}

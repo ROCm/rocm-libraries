@@ -1,0 +1,28 @@
+// The single-node fwd-inference pack: one kernel, runtime-compiled, delegating to the
+// existing BatchnormFwdInferenceParams/Plan.
+{
+  "version": "1.0",
+  "id": "9ad6e21b-e014-5a82-b072-29f860817308",
+  "name": "hipkernel:batchnorm_fwd_inference",
+  "matchers": [
+    "c82eb379-e7de-56c7-b96e-651829b98e2a"
+  ],
+  "engine": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "dispatch": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "8d336059-791e-5e53-b7a6-b4c2c4ae92ee",
+      "name": "batchnorm_fwd_inference",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEstInvVar"
+      },
+      "metadata": {
+        "variant": "fwd_inference"
+      },
+      "priority": 0
+    }
+  ]
+}

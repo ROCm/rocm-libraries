@@ -1,0 +1,9 @@
+// Selects the plain fwd-inference variant graph_match already determined and
+// validated: true only when the bound variant token names this pack's own variant.
+{
+  "version": "1.0",
+  "id": "c82eb379-e7de-56c7-b96e-651829b98e2a",
+  "name": "BatchnormFwdInference",
+  "scope": "graph",
+  "match_symbol": "hipkernel.batchnorm.fwd_inference_match"
+}

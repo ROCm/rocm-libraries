@@ -1,0 +1,10 @@
+// Which of graph_match's two disjoint topologies this graph took: backward. The graph
+// gate itself -- fp32 compute, no override shapes, a tensor configuration the validator
+// accepts -- already ran in graph_match; this only reads back which branch bound.
+{
+  "version": "1.0",
+  "id": "7d679612-99bf-513b-b601-797b953a5023",
+  "name": "RMSnormIsBackward",
+  "scope": "graph",
+  "match_symbol": "hipkernel.rmsnorm.is_backward"
+}

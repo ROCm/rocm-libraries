@@ -1,0 +1,8 @@
+// Ranks the surviving kernels. Every kernel this engine ships is an exact shape match for a given accumulator type, so ranking only has to be total, not clever; the knob filter (not this heuristic) is what decides a32 vs a16 when both are catalog entries for the same shape.
+{
+  "version": "1.0",
+  "id": "7efa7fe9-c277-59a2-a5bc-b271c89b1d93",
+  "name": "AsmSdpaBackwardSelector",
+  "kind": "native",
+  "payload": "hipkernel.asm_sdpa_bwd.score"
+}

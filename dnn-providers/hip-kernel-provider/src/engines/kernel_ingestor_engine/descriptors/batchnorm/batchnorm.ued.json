@@ -1,0 +1,19 @@
+// The batchnorm engine: one engine id serving eight packs, one per fusion variant its
+// graph_match discriminates among -- plain forward inference, forward inference with
+// variance, forward training, backward, and each of those fused with a pointwise
+// activation node. graph_match runs the full node-count-and-attribute-type dispatch and
+// every tensor-configuration check once per (graph, device) and binds which variant won;
+// each pack's own matcher then only compares that bound variant against its own name.
+{
+  "version": "1.0",
+  "id": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "name": "hipkernel:Batchnorm",
+  "sdk_version": "1.2.0",
+  "graph_match": { "native": "hipkernel.batchnorm.graph_match" },
+  "heuristic": "17b563ff-4f50-5e65-afaf-fb72d45004be",
+  "metadata": "8ded9a58-5800-5e05-ae2d-79570438ff46",
+  "knobs": [],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

@@ -1,0 +1,23 @@
+// The one pack, over the one kernel. No arch list: the kernel is compiled for whatever device the call is for.
+{
+  "version": "1.0",
+  "id": "c8771c55-1e19-5a5b-8e8f-630ac478a4c3",
+  "name": "hipkernel:resample_fwd",
+  "matchers": [],
+  "engine": "d08cae46-b6d2-5861-ad3c-c708d04af37b",
+  "dispatch": "26d12bf1-b67a-55ab-a1a4-31e62fa734b3",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "20740a98-248e-584f-a5ba-ee1ea40a15da",
+      "name": "resample_fwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ResampleFwd.cpp",
+        "entry_point": "ResampleFwd"
+      },
+      "metadata": {},
+      "priority": 0
+    }
+  ]
+}

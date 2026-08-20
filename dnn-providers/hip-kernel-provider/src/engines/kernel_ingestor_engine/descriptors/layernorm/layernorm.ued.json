@@ -1,0 +1,14 @@
+// The layernorm forward engine. One kernel, runtime-compiled: every launch input is derived from the graph's own shape, so there is nothing to vary and no knob to expose.
+{
+  "version": "1.0",
+  "id": "d213fe22-de7f-547d-89f6-de1c11c69b07",
+  "name": "hipkernel:LayernormForward",
+  "sdk_version": "1.2.0",
+  "graph_match": { "native": "hipkernel.layernorm_fwd.graph_match" },
+  "heuristic": "54351f77-90c0-51a8-ba97-e891e3f446eb",
+  "metadata": "7b1cad10-1776-512d-8f35-a2edf1e9f237",
+  "knobs": [],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

@@ -1,0 +1,8 @@
+// Ranks the one kernel this engine ships. A heuristic is required even where there is nothing to choose between.
+{
+  "version": "1.0",
+  "id": "54351f77-90c0-51a8-ba97-e891e3f446eb",
+  "name": "LayernormForwardSelector",
+  "kind": "native",
+  "payload": "hipkernel.layernorm_fwd.score"
+}

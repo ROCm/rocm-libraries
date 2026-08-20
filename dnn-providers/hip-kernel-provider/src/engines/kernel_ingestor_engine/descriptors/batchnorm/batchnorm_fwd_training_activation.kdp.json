@@ -1,0 +1,28 @@
+// The two-node fused pack: fwd training + activation, delegating to the existing
+// BatchnormFwdTrainingParams/Plan built from both nodes.
+{
+  "version": "1.0",
+  "id": "784b81f1-b91d-5481-8c32-8e814c98cc56",
+  "name": "hipkernel:batchnorm_fwd_training_activation",
+  "matchers": [
+    "b46592f7-a229-5b64-bdea-11e7e33963a6"
+  ],
+  "engine": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "dispatch": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "4a10a041-71e5-51ce-93eb-3c5096eb39b0",
+      "name": "batchnorm_fwd_training_activation",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "variant": "fwd_training_activation"
+      },
+      "priority": 0
+    }
+  ]
+}

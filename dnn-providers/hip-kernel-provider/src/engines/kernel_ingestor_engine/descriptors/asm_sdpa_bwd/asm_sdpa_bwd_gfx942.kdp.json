@@ -1,0 +1,324 @@
+// The gfx942 backward dqdkdv kernels this engine's graphs select between, one entry per (dtype, hdim, mask, acc_type) tuple that survives batch mode and the pssk=1/pddv=1 pin (see AsmSdpaBackwardVariantFields.kmd.json). Each kernel's odo and (a32 only) dq_convert companions are not independently selectable -- AITER ships exactly one of each per (dtype, hdim) -- so they are not modeled as catalog entries; the dispatch handler resolves them itself from the selected kernel's dtype/hdim metadata.
+{
+  "version": "1.0",
+  "id": "e5ce11cd-73cb-5d0f-b321-0f256c159dec",
+  "name": "hipkernel:asm_sdpa_bwd_gfx942",
+  "matchers": [
+    "fa2dbf44-efa6-5624-a59a-d6e355e92312"
+  ],
+  "engine": "aba07bcf-89a3-5eda-96f3-2c3f47ece794",
+  "dispatch": "5db019aa-fa10-53be-9679-c033e34ad83a",
+  "arch": [
+    "gfx942"
+  ],
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "07de879a-b39b-5d1a-990d-a0e3037d9db4",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_bf16_hd128_nomask_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_bf16_a32_rtne_psskddv.co",
+        "code_object_symbol": "_ZN5aiter36fmha_bwd_hd128_bf16_a32_rtne_psskddvE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim": 128,
+        "mask": 0,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dea38aea-9985-5c77-aa92-b809b12f63f6",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_bf16_hd128_causal_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_a32_rtne_psskddv.co",
+        "code_object_symbol": "_ZN5aiter43fmha_bwd_hd128_bf16_causal_a32_rtne_psskddvE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim": 128,
+        "mask": 1,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "97b814c3-45f3-5370-93ef-4a19aeac442d",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_bf16_hd128_causalbr_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtne_psskddv.co",
+        "code_object_symbol": "_ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtne_psskddvE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim": 128,
+        "mask": 2,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "82506e0c-a122-5557-8688-ac00d8dd3e68",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_bf16_hd128_swa_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_bf16_swa_a32_rtne_psskddv.co",
+        "code_object_symbol": "_ZN5aiter40fmha_bwd_hd128_bf16_swa_a32_rtne_psskddvE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim": 128,
+        "mask": 3,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dbc518a8-0bbd-593c-af3d-5528d7ecc21d",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_bf16_hd192_nomask_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd192_bf16_a32_rtne_psskddv.co",
+        "code_object_symbol": "_ZN5aiter36fmha_bwd_hd192_bf16_a32_rtne_psskddvE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim": 192,
+        "mask": 0,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 64,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2c0faba2-1e5b-5f21-b57e-6164675ac649",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_bf16_hd192_causal_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd192_bf16_causal_a32_rtne_psskddv.co",
+        "code_object_symbol": "_ZN5aiter43fmha_bwd_hd192_bf16_causal_a32_rtne_psskddvE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim": 192,
+        "mask": 1,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 64,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fe7cdb26-c987-5a41-ab0d-b6e2ee04d769",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_bf16_hd192_causalbr_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd192_bf16_causal_br_a32_rtne_psskddv.co",
+        "code_object_symbol": "_ZN5aiter46fmha_bwd_hd192_bf16_causal_br_a32_rtne_psskddvE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim": 192,
+        "mask": 2,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 64,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "51b3c1a2-3be7-5e48-a701-b962b38f3b78",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_fp16_hd128_nomask_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_fp16_a32_psskddv.co",
+        "code_object_symbol": "_ZN5aiter31fmha_bwd_hd128_fp16_a32_psskddvE"
+      },
+      "metadata": {
+        "dtype": "fp16",
+        "hdim": 128,
+        "mask": 0,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "56b61225-b8df-5075-98a9-42512defe234",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_fp16_hd128_causal_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_fp16_causal_a32_psskddv.co",
+        "code_object_symbol": "_ZN5aiter38fmha_bwd_hd128_fp16_causal_a32_psskddvE"
+      },
+      "metadata": {
+        "dtype": "fp16",
+        "hdim": 128,
+        "mask": 1,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f6c78b39-700c-51b5-9019-15567b4dd91f",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_fp16_hd128_causalbr_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_fp16_causal_br_a32_psskddv.co",
+        "code_object_symbol": "_ZN5aiter41fmha_bwd_hd128_fp16_causal_br_a32_psskddvE"
+      },
+      "metadata": {
+        "dtype": "fp16",
+        "hdim": 128,
+        "mask": 2,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c047adc4-3e3c-5e20-bf22-0183da4c395c",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_fp16_hd128_swa_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd128_fp16_swa_a32_psskddv.co",
+        "code_object_symbol": "_ZN5aiter35fmha_bwd_hd128_fp16_swa_a32_psskddvE"
+      },
+      "metadata": {
+        "dtype": "fp16",
+        "hdim": 128,
+        "mask": 3,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 192,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "726a7011-a347-5266-8a72-51e0097521ca",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_fp16_hd192_nomask_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd192_fp16_a32_psskddv.co",
+        "code_object_symbol": "_ZN5aiter31fmha_bwd_hd192_fp16_a32_psskddvE"
+      },
+      "metadata": {
+        "dtype": "fp16",
+        "hdim": 192,
+        "mask": 0,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 64,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a895fceb-2b54-5040-8bfa-8a48673fa616",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_fp16_hd192_causal_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd192_fp16_causal_a32_psskddv.co",
+        "code_object_symbol": "_ZN5aiter38fmha_bwd_hd192_fp16_causal_a32_psskddvE"
+      },
+      "metadata": {
+        "dtype": "fp16",
+        "hdim": 192,
+        "mask": 1,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 64,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "01505f60-a6ec-5970-a14d-389b8defe3f8",
+      "name": "asm_sdpa_bwd.gfx942.dqdkdv_fp16_hd192_causalbr_a32",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_bwd/bwd_hd192_fp16_causal_br_a32_psskddv.co",
+        "code_object_symbol": "_ZN5aiter41fmha_bwd_hd192_fp16_causal_br_a32_psskddvE"
+      },
+      "metadata": {
+        "dtype": "fp16",
+        "hdim": 192,
+        "mask": 2,
+        "pssk": 1,
+        "pddv": 1,
+        "mode": 0,
+        "ts": 64,
+        "arch": "gfx942",
+        "sdpa.bwd.accumulator_type": "a32"
+      },
+      "priority": 0
+    }
+  ]
+}

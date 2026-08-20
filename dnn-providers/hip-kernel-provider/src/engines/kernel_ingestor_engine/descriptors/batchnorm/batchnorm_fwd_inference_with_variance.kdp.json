@@ -1,0 +1,28 @@
+// The single-node fwd-inference-with-variance pack, delegating to the existing
+// BatchnormFwdInferenceWithVarianceParams/Plan.
+{
+  "version": "1.0",
+  "id": "36c08b95-be70-5da4-a368-80a871b03352",
+  "name": "hipkernel:batchnorm_fwd_inference_with_variance",
+  "matchers": [
+    "ae805407-7fa3-5c76-a691-14f9e4285b0b"
+  ],
+  "engine": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "dispatch": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "ce89a125-7320-528b-bbae-d84e1f69b6dd",
+      "name": "batchnorm_fwd_inference_with_variance",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEst"
+      },
+      "metadata": {
+        "variant": "fwd_inference_with_variance"
+      },
+      "priority": 0
+    }
+  ]
+}

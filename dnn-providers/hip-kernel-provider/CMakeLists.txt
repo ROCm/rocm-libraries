@@ -355,6 +355,40 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # removal under every generator. One list feeds staging, install, and the dependency
     # edge below, so the three cannot disagree about what a descriptor tree contains.
     set(HIPDNN_DESCRIPTOR_FILES
+        asm_sdpa_bwd/asm_sdpa_bwd.kmd.json
+        asm_sdpa_bwd/asm_sdpa_bwd.udd.json
+        asm_sdpa_bwd/asm_sdpa_bwd.ued.json
+        asm_sdpa_bwd/asm_sdpa_bwd.uhd.json
+        asm_sdpa_bwd/asm_sdpa_bwd_gfx942.kdp.json
+        asm_sdpa_bwd/asm_sdpa_bwd_gfx950.kdp.json
+        asm_sdpa_bwd/kernel_shape_matches_graph.umd.json
+        asm_sdpa_fwd/asm_sdpa_fwd.kmd.json
+        asm_sdpa_fwd/asm_sdpa_fwd.udd.json
+        asm_sdpa_fwd/asm_sdpa_fwd.ued.json
+        asm_sdpa_fwd/asm_sdpa_fwd.uhd.json
+        asm_sdpa_fwd/asm_sdpa_fwd_gfx942.kdp.json
+        asm_sdpa_fwd/asm_sdpa_fwd_gfx950.kdp.json
+        asm_sdpa_fwd/kernel_shape_matches_graph.umd.json
+        batchnorm/batchnorm.kmd.json
+        batchnorm/batchnorm.udd.json
+        batchnorm/batchnorm.ued.json
+        batchnorm/batchnorm.uhd.json
+        batchnorm/batchnorm_bwd.kdp.json
+        batchnorm/batchnorm_bwd.umd.json
+        batchnorm/batchnorm_bwd_activation.kdp.json
+        batchnorm/batchnorm_bwd_activation.umd.json
+        batchnorm/batchnorm_fwd_inference.kdp.json
+        batchnorm/batchnorm_fwd_inference.umd.json
+        batchnorm/batchnorm_fwd_inference_activation.kdp.json
+        batchnorm/batchnorm_fwd_inference_activation.umd.json
+        batchnorm/batchnorm_fwd_inference_with_variance.kdp.json
+        batchnorm/batchnorm_fwd_inference_with_variance.umd.json
+        batchnorm/batchnorm_fwd_inference_with_variance_activation.kdp.json
+        batchnorm/batchnorm_fwd_inference_with_variance_activation.umd.json
+        batchnorm/batchnorm_fwd_training.kdp.json
+        batchnorm/batchnorm_fwd_training.umd.json
+        batchnorm/batchnorm_fwd_training_activation.kdp.json
+        batchnorm/batchnorm_fwd_training_activation.umd.json
         conv_fwd/conv_fwd.kdp.json
         conv_fwd/conv_fwd.kmd.json
         conv_fwd/conv_fwd.udd.json
@@ -362,6 +396,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         conv_fwd/conv_fwd.uhd.json
         conv_fwd/conv_fwd_f16_block64.ukd.json
         conv_fwd/kernel_dtype_matches_graph.umd.json
+        layernorm/layernorm.kmd.json
+        layernorm/layernorm.ued.json
+        layernorm/layernorm.uhd.json
+        layernorm/layernorm_forward.kdp.json
+        layernorm/layernorm_forward_dispatch.udd.json
         pointwise/kernel_dtype_matches_graph.umd.json
         pointwise/operation_is_add.umd.json
         pointwise/operation_is_mul.umd.json
@@ -373,6 +412,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         pointwise/pointwise_add.kdp.json
         pointwise/pointwise_mul.kdp.json
         pointwise/pointwise_sub.kdp.json
+        resample/resample.kmd.json
+        resample/resample.udd.json
+        resample/resample.ued.json
+        resample/resample.uhd.json
+        resample/resample_fwd.kdp.json
+        rmsnorm/rmsnorm.kmd.json
+        rmsnorm/rmsnorm.ued.json
+        rmsnorm/rmsnorm.uhd.json
+        rmsnorm/rmsnorm_backward.kdp.json
+        rmsnorm/rmsnorm_backward_dispatch.udd.json
+        rmsnorm/rmsnorm_forward.kdp.json
+        rmsnorm/rmsnorm_forward_dispatch.udd.json
+        rmsnorm/rmsnorm_is_backward.umd.json
+        rmsnorm/rmsnorm_is_forward.umd.json
     )
 
     # Wiped once per configure, not once per build. copy_if_different below makes an

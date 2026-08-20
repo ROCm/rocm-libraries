@@ -15,6 +15,16 @@ const std::vector<IngestorPack>& ingestorPacks()
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols},
+#ifdef HIPDNN_ENGINE_ASM_SDPA
+        {"hipkernel:AsmSdpaForward", &registerAsmSdpaForwardSymbols},
+        {"hipkernel:AsmSdpaBackward", &registerAsmSdpaBackwardSymbols},
+#endif
+#ifdef HIPDNN_ENGINE_HIP_MLOPS
+        {"hipkernel:LayernormForward", &registerLayernormForwardSymbols},
+        {"hipkernel:Resample", &registerResampleSymbols},
+        {"hipkernel:RMSnorm", &registerRMSnormSymbols},
+        {"hipkernel:Batchnorm", &registerBatchnormSymbols},
+#endif
     };
     return s_packs;
 }

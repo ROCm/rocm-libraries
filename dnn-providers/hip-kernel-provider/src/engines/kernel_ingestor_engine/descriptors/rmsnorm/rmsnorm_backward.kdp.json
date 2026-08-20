@@ -1,0 +1,30 @@
+// The backward pack, over the one backward kernel entry, "RMSnormBwdData". Its
+// dispatch handler also launches the plan's second kernel, "RMSnormBwdWeightBias",
+// which is part of the same RMSnormBwdPlan and has no independent variant of its own,
+// so it is not a second KDP kernel entry -- see RMSnormNative.cpp's dispatch handler.
+{
+  "version": "1.0",
+  "id": "fed755c8-aba6-5331-9f44-b7f62f4353e5",
+  "name": "hipkernel:rmsnorm_bwd",
+  "matchers": [
+    "7d679612-99bf-513b-b601-797b953a5023"
+  ],
+  "engine": "67e83ac7-6d91-57cb-b330-a5a565d92bfa",
+  "dispatch": "6236018a-07d5-50ed-b9f7-cc82e1ccd942",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "b64b2b4d-1df6-56b2-881b-b817b5451dd6",
+      "name": "rmsnorm_bwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "RMSNormBwd.cpp",
+        "entry_point": "RMSnormBwdData"
+      },
+      "metadata": {
+        "direction": "backward"
+      },
+      "priority": 0
+    }
+  ]
+}

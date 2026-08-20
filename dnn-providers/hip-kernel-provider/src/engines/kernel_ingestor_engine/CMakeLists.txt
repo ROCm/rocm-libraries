@@ -25,6 +25,28 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
 )
 
+# The ASM SDPA packs reuse that engine's code objects, kernarg ABI and module cache, so
+# they are only buildable where that engine is. Their descriptors are staged
+# unconditionally and simply fail their symbol pre-flight when it is not, which drops the
+# engine with a logged reason rather than failing the load.
+if(ENABLE_ASM_SDPA_ENGINE)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/AsmSdpaForwardNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/AsmSdpaBackwardNative.cpp
+    )
+endif()
+
+# Same shape as the ASM packs above: these reuse the MLOps engine's validators, params
+# and plans, so they need the engine that defines them.
+if(ENABLE_HIP_MLOPS_ENGINE)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/LayernormForwardNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ResampleNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/RMSnormNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/BatchnormNative.cpp
+    )
+endif()
+
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
 # definition must reach this object library, not only the static library tests link.
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)

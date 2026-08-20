@@ -1,0 +1,9 @@
+// Selects the plain fwd-training variant graph_match already determined and
+// validated: true only when the bound variant token names this pack's own variant.
+{
+  "version": "1.0",
+  "id": "6ecd8246-3e04-5054-97e6-24f78b309269",
+  "name": "BatchnormFwdTraining",
+  "scope": "graph",
+  "match_symbol": "hipkernel.batchnorm.fwd_training_match"
+}

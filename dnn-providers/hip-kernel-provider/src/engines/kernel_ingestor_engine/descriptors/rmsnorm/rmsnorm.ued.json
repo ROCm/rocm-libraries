@@ -1,0 +1,24 @@
+// The RMSnorm engine: one engine id serving the forward and backward packs. Forward and
+// backward have disjoint node-attribute topologies, so graph_match tries each in turn and
+// binds only which one matched; both packs' dispatch handlers re-derive every operand
+// from the graph node directly, exactly as the plans they wrap always have. The two
+// packs share one KMD and one UHD (a single-kernel pack has nothing to rank either way),
+// so splitting them into two engines would duplicate an identical heuristic and schema
+// for no reason -- the Pointwise add/mul shape, not the Pointwise/PointwiseSub one.
+//
+// sdk_version floors the engine at the plugin API that carries runtime pass-by-value
+// scalars: epsilon may arrive as a user-supplied value at execute rather than baked in,
+// and an engine claiming only the baseline is filtered out of such a graph entirely.
+{
+  "version": "1.0",
+  "id": "67e83ac7-6d91-57cb-b330-a5a565d92bfa",
+  "name": "hipkernel:RMSnorm",
+  "sdk_version": "1.2.0",
+  "graph_match": { "native": "hipkernel.rmsnorm.graph_match" },
+  "heuristic": "d0cd32c5-cf5b-5b6b-866b-fbea433adc57",
+  "metadata": "feabc38b-0fa7-5f70-85d5-dce8d77bc203",
+  "knobs": [],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

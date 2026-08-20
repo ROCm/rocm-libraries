@@ -33,8 +33,11 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
         return lp; // zero guard — matches bwd KernelTiles::gridDim() pattern
     }
 
-    const bool isHd192x128Gfx942
-        = params.headDimQk == 192 && params.headDimV == 128 && params.archString == "gfx942";
+    // Compared on the base identifier: a device reports its target with a feature suffix
+    // (`gfx942:sramecc+:xnack-`), and an equality test against the bare name silently
+    // drops this whole path -- same grid, wrong block width, no error anywhere.
+    const bool isHd192x128Gfx942 = params.headDimQk == 192 && params.headDimV == 128
+                                   && params.archString.rfind("gfx942", 0) == 0;
     const bool masked = params.maskType != plan_utils::MaskType::NO_MASK;
 
     // tune_opt: default 5; downgrade to 3 when masked and either nhead is

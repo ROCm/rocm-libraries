@@ -1,0 +1,8 @@
+// Kernel-scoped: keeps a dqdkdv kernel whose dtype, head dim and mask metadata all equal what the graph asks for. This is the CSV lookup, one candidate at a time; the accumulator axis is left to the acc_type knob filter rather than this matcher, so both a32 and a16 catalog entries survive for a shape that has both and the caller (or the knob's ranked default) picks between them.
+{
+  "version": "1.0",
+  "id": "fa2dbf44-efa6-5624-a59a-d6e355e92312",
+  "name": "KernelShapeMatchesGraph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.asm_sdpa_bwd.kernel_match"
+}

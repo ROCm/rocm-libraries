@@ -1,0 +1,28 @@
+// The three-node fused pack: fwd inference + activation backward + batchnorm backward,
+// delegating to the existing BatchnormBwdParams/Plan built from all three nodes.
+{
+  "version": "1.0",
+  "id": "95ab7ced-c276-5153-a769-bf0317fe4ae8",
+  "name": "hipkernel:batchnorm_bwd_activation",
+  "matchers": [
+    "e6a8cc41-d0a1-5fff-a7f7-51d39e15c794"
+  ],
+  "engine": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "dispatch": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "81190beb-f08a-5dc5-8389-f56e7b8d3e3a",
+      "name": "batchnorm_bwd_activation",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "variant": "bwd_activation"
+      },
+      "priority": 0
+    }
+  ]
+}

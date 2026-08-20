@@ -1,0 +1,23 @@
+// The one pack, over the one kernel. No arch list: the kernel is compiled for whatever device the call is for.
+{
+  "version": "1.0",
+  "id": "2f0dff27-7465-57ad-8457-c6e1ed9a3a81",
+  "name": "hipkernel:layernorm_fwd",
+  "matchers": [],
+  "engine": "d213fe22-de7f-547d-89f6-de1c11c69b07",
+  "dispatch": "2a442897-a90d-5d28-8c55-30b863329545",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "3468e26c-fd99-5d01-a66c-425511dfd860",
+      "name": "layernorm_fwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "LayernormFwd.cpp",
+        "entry_point": "LayernormFwd"
+      },
+      "metadata": {},
+      "priority": 0
+    }
+  ]
+}

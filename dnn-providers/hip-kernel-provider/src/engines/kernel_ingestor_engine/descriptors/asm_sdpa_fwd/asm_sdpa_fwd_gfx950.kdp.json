@@ -1,0 +1,58 @@
+// The gfx950 forward kernels, one entry per row of that architecture's fmha_v3_fwd/fmha_fwd.csv. Split per architecture because the code objects are, and because the arch list below is what prunes the other one on this device.
+{
+  "version": "1.0",
+  "id": "6084c27f-cad8-5b42-bc50-44f1277f5c49",
+  "name": "hipkernel:asm_sdpa_fwd_gfx950",
+  "matchers": [
+    "dac1b0f2-526a-5f5b-bb71-190f9f65b9fd"
+  ],
+  "engine": "8a522d82-ed3e-5f80-8a39-a343cf4bb51c",
+  "dispatch": "97f991a4-b330-57a9-8491-821271248461",
+  "arch": [
+    "gfx950"
+  ],
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "6d813220-4e48-5ccd-9e14-e2566f39137e",
+      "name": "asm_sdpa_fwd.gfx950.fwd_hd128_bf16",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx950/fmha_v3_fwd/fwd_hd128_bf16.co",
+        "code_object_symbol": "_ZN5aiter19fmha_fwd_hd128_bf16E"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mask": 0,
+        "mode": 0,
+        "bf16_cvt": 0,
+        "ts_qo": 256,
+        "ts_kv": 64
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2b2c019e-28d9-5315-bf00-e95067ab847c",
+      "name": "asm_sdpa_fwd.gfx950.fwd_hd192_hd128_bf16",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx950/fmha_v3_fwd/fwd_hd192_hd128_bf16.co",
+        "code_object_symbol": "_ZN5aiter25fmha_fwd_hd192_hd128_bf16E"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim_q": 192,
+        "hdim_v": 128,
+        "mask": 0,
+        "mode": 0,
+        "bf16_cvt": 0,
+        "ts_qo": 128,
+        "ts_kv": 128
+      },
+      "priority": 0
+    }
+  ]
+}

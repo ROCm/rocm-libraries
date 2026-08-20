@@ -1,0 +1,14 @@
+// The resample forward engine. One kernel, runtime-compiled: mode, padding scheme, dims, strides and window are all read off the graph and baked into the compile as macros, so there is nothing to vary and no knob to expose.
+{
+  "version": "1.0",
+  "id": "d08cae46-b6d2-5861-ad3c-c708d04af37b",
+  "name": "hipkernel:Resample",
+  "sdk_version": "1.2.0",
+  "graph_match": { "native": "hipkernel.resample_fwd.graph_match" },
+  "heuristic": "92ce553b-89b1-579e-9c49-ad88fc8b5fe9",
+  "metadata": "64f0823a-5e47-5418-b167-8f32f2faf86b",
+  "knobs": [],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

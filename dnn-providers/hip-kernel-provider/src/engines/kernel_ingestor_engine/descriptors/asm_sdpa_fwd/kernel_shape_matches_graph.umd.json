@@ -1,0 +1,8 @@
+// Kernel-scoped: keeps a kernel whose dtype, head dims, mask and batch mode metadata all equal what the graph asks for. This is the CSV lookup, one candidate at a time.
+{
+  "version": "1.0",
+  "id": "dac1b0f2-526a-5f5b-bb71-190f9f65b9fd",
+  "name": "KernelShapeMatchesGraph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.asm_sdpa_fwd.kernel_match"
+}

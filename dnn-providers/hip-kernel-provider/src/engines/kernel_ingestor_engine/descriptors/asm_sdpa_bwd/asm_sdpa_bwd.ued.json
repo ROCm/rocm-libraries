@@ -1,0 +1,13 @@
+// The AITER assembly SDPA backward engine. Its kernels are prebuilt code objects, not runtime-compiled source, so it declares no runtime_compilation behavior note. The accumulator precision knob selects between a 3-kernel FP32-accumulator pipeline (a32) and a 2-kernel BF16-accumulator one (a16); it is string-valued because the two paths are qualitatively different pipelines, not points on a numeric range.
+{
+  "version": "1.0",
+  "id": "aba07bcf-89a3-5eda-96f3-2c3f47ece794",
+  "name": "hipkernel:AsmSdpaBackward",
+  "sdk_version": "1.2.0",
+  "graph_match": { "native": "hipkernel.asm_sdpa_bwd.graph_match" },
+  "heuristic": "7efa7fe9-c277-59a2-a5bc-b271c89b1d93",
+  "metadata": "344d45ee-3939-56fa-82a9-74e9830d90f1",
+  "knobs": [
+    "sdpa.bwd.accumulator_type"
+  ]
+}

@@ -1,0 +1,44 @@
+// One field per column of fmha_bwd_dqdkdv.csv that the graph or kernel matcher reads. `atomic32` is renamed `acc_type` and carries the string values "a32"/"a16" rather than the CSV's 1/0, because it is also this engine's user-facing knob and a string is what tells the two pipeline shapes apart; the dispatch handler maps it back to the CSV's int column when it resolves a row. `hdim_q` and `hdim_v` collapse to one `hdim` field: the graph matcher declines every graph where they differ (RFC 0008 asymmetric-head-dim restriction), so a kernel row with unequal hdim_q/hdim_v could never be selected and is left out of the catalog rather than carried as dead metadata. `pssk`, `pddv`, `mode` and `ts` are carried even though every authored row pins pssk=1, pddv=1, mode=0 (batch mode; group mode has a different kernarg layout the engine does not build) -- they are the CSV's own dispatch tuple, and a future row exercising a different value should not require widening this schema.
+{
+  "version": "1.0",
+  "id": "344d45ee-3939-56fa-82a9-74e9830d90f1",
+  "name": "AsmSdpaBackwardVariantFields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "hdim",
+      "type": "int"
+    },
+    {
+      "name": "mask",
+      "type": "int"
+    },
+    {
+      "name": "sdpa.bwd.accumulator_type",
+      "type": "string"
+    },
+    {
+      "name": "pssk",
+      "type": "int"
+    },
+    {
+      "name": "pddv",
+      "type": "int"
+    },
+    {
+      "name": "mode",
+      "type": "int"
+    },
+    {
+      "name": "ts",
+      "type": "int"
+    },
+    {
+      "name": "arch",
+      "type": "string"
+    }
+  ]
+}

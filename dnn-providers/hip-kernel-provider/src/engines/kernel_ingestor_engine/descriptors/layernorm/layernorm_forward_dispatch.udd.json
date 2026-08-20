@@ -1,0 +1,7 @@
+// Derives the normalized dimension, extents and element types from the graph, compiles the kernel for them, and launches it.
+{
+  "version": "1.0",
+  "id": "2a442897-a90d-5d28-8c55-30b863329545",
+  "name": "LayernormForwardDispatch",
+  "dispatch_symbol": "hipkernel.layernorm_fwd.dispatch"
+}

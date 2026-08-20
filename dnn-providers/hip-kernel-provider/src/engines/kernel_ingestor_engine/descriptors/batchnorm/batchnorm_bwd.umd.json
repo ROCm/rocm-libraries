@@ -1,0 +1,9 @@
+// Selects the plain backward variant graph_match already determined and validated:
+// true only when the bound variant token names this pack's own variant.
+{
+  "version": "1.0",
+  "id": "da81113f-98dc-553c-a36a-bf69abb8be44",
+  "name": "BatchnormBwd",
+  "scope": "graph",
+  "match_symbol": "hipkernel.batchnorm.bwd_match"
+}
