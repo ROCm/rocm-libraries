@@ -264,6 +264,19 @@ cusolverDirectMode_t hip2cuda_direct(hipsolverDirectMode_t direct)
     }
 }
 
+hipsolverDirectMode_t cuda2hip_direct(cusolverDirectMode_t direct)
+{
+    switch(direct)
+    {
+    case CUBLAS_DIRECT_FORWARD:
+        return HIPSOLVER_DIRECT_FORWARD;
+    case CUBLAS_DIRECT_BACKWARD:
+        return HIPSOLVER_DIRECT_BACKWARD;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
 cusolverStorevMode_t hip2cuda_storev(hipsolverStorevMode_t storev)
 {
     switch(storev)
@@ -272,6 +285,19 @@ cusolverStorevMode_t hip2cuda_storev(hipsolverStorevMode_t storev)
         return CUBLAS_STOREV_COLUMNWISE;
     case HIPSOLVER_STOREV_ROWWISE:
         return CUBLAS_STOREV_ROWWISE;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+hipsolverStorevMode_t cuda2hip_storev(cusolverStorevMode_t storev)
+{
+    switch(storev)
+    {
+    case CUBLAS_STOREV_COLUMNWISE:
+        return HIPSOLVER_STOREV_COLUMNWISE;
+    case CUBLAS_STOREV_ROWWISE:
+        return HIPSOLVER_STOREV_ROWWISE;
     default:
         throw HIPSOLVER_STATUS_INVALID_ENUM;
     }

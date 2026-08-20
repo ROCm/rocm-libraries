@@ -692,9 +692,12 @@ try
             rocsolver_zgeqrf_64((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
         return HIPSOLVER_STATUS_INVALID_ENUM;
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
+    }
 
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
     return status;
 }
 catch(...)
@@ -832,9 +835,12 @@ try
         rocsolver_zgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
         return HIPSOLVER_STATUS_INVALID_ENUM;
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
+    }
 
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
     return status;
 }
 catch(...)
@@ -1017,9 +1023,12 @@ try
                                 ldb));
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, lwork);
         return HIPSOLVER_STATUS_INVALID_ENUM;
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lwork);
+    }
 
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lwork);
     return status;
 }
 catch(...)
@@ -1216,6 +1225,7 @@ try
     }
     else
     {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 
@@ -1404,7 +1414,11 @@ try
             (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
         return HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
     return status;
 }
@@ -2217,7 +2231,10 @@ try
                                                batchSize));
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
@@ -2541,7 +2558,10 @@ try
                                             static_cast<rocblas_int>(batchSize)));
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
@@ -2816,7 +2836,10 @@ try
                                                                 ldb));
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
         status = HIPSOLVER_STATUS_INVALID_ENUM;
+    }
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
     return status;
