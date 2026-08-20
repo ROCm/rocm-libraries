@@ -317,6 +317,8 @@ inline std::string type_tag()
     else if constexpr(std::is_same_v<T, long>) return "Long";
     else if constexpr(std::is_same_v<T, unsigned long>) return "Ulong";
     else if constexpr(std::is_same_v<T, unsigned long long>) return "Uint64";
+    else if constexpr(std::is_same_v<T, long long>) return "Int64";
+    else if constexpr(std::is_same_v<T, char>) return "Char";
     else if constexpr(std::is_same_v<T, bool>) return "Bool";
     else if constexpr(std::is_same_v<T, float>) return "Float";
     else if constexpr(std::is_same_v<T, double>) return "Double";
@@ -329,6 +331,10 @@ inline std::string type_tag()
         return "CustomFloat2";
     else if constexpr(std::is_same_v<T, common::custom_type<uint8_t, uint8_t, true>>)
         return "CustomUint8_2";
+    else if constexpr(std::is_same_v<T, common::custom_type<short, short, true>>)
+        return "CustomShort2";
+    else if constexpr(std::is_same_v<T, common::custom_huge_type<1024, long long>>)
+        return "CustomLarge";
 #if ROCPRIM_HAS_INT128_SUPPORT
     else if constexpr(std::is_same_v<T, rocprim::uint128_t>) return "Uint128";
     else if constexpr(std::is_same_v<T, rocprim::int128_t>) return "Int128";
