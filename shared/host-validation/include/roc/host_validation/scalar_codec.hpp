@@ -3,9 +3,8 @@
 
 #pragma once
 
-// Private header-only implementation for scalar conversion and encoded storage. Public callers
-// include scalar.hpp; this file is installed only because Scalar and Tensor templates instantiate
-// these definitions in consumer translation units.
+// Template definitions for scalar conversion and encoded storage. Public code includes scalar.hpp,
+// which includes this file after declaring the scalar API.
 #include <algorithm>
 #include <bit>
 #include <cmath>
