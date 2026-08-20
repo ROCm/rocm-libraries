@@ -2805,6 +2805,11 @@ class Solution(collections.abc.Mapping):
       if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
+      if state["1LDSBuffer"] == -1:
+        state["1LDSBuffer"] = 0
+      if state["1LDSBuffer"] and state["PrefetchGlobalRead"] == 2:
+        reject(state, printRejectionReason, "TDM requires at least 2 LDS buffers for PGR2")
+        return
 
     # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
     # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
@@ -5190,6 +5195,18 @@ class Solution(collections.abc.Mapping):
         # force 1LDSBuffer = 0
         state["1LDSBuffer"] = 0
 
+    # disable TDMPlusLdsBuf if not applicable. TDMPlusLdsBuf asks for PGR+1 (3) LDS
+    # buffers for PGR2 without requiring DirectToLds. -1 (auto) is still unresolved
+    # after this block; it is settled by the MaxLDS check further below.
+    if state["TDMPlusLdsBuf"] != 0:
+      if not (state["enableTDMA"] and state["enableTDMB"]) or state["PrefetchGlobalRead"] != 2:
+        state["TDMPlusLdsBuf"] = 0
+      # PAP saves and restores the TDM LDS bank through a single bit in
+      # SkPrefetchPrimed, which cannot name three buffers. PAP implies StreamK==3,
+      # so plain StreamK keeps the extra buffer and only PAP falls back to two.
+      if state["PrefetchAcrossPersistent"]:
+        state["TDMPlusLdsBuf"] = 0
+
     # Here, 1LDSBuffer == -1 is not resolved yet.
     # (cannot move 1LDSBuffer==-1 resolution code above because of referring ldsNumBytesAB)
     # Assuming larger buffer here
@@ -5201,6 +5218,10 @@ class Solution(collections.abc.Mapping):
       state["1LDSBuffer"] = 0
     if state["PrefetchGlobalRead"] >= 2 and state["DtlPlusLdsBuf"]:
       # PGR>=2 + DtlPlusLdsBuf case, try to allocate PGR+1 LDSBlk to schedule GR over barrier
+      numLdsBlk = state["PrefetchGlobalRead"] + 1
+    if state["PrefetchGlobalRead"] == 2 and state["TDMPlusLdsBuf"]:
+      # PGR2 + TDMPlusLdsBuf case, allocate PGR+1 (3) LDSBlk to schedule GR over barrier
+      # (same as DtlPlusLdsBuf but without the DirectToLds requirement)
       numLdsBlk = state["PrefetchGlobalRead"] + 1
 
     def setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB):
@@ -5307,6 +5328,24 @@ class Solution(collections.abc.Mapping):
         ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
         # unset DtlPlusLdsBuf
         state["DtlPlusLdsBuf"] = 0
+      if state["TDMPlusLdsBuf"] == -1:
+        if ldsNumBytesAB > state["MaxLDS"]:
+          numLdsBlk -= 1
+          # continue with original logic for PGR2 + numLdsBlk==2, mimic the original StoreSwapAddr logic
+          # The power-of-two rounding above is skipped for numLdsBlk>=3, so it has to
+          # happen here: at 2 buffers without StoreSwapAddr the swap is an xor by
+          # LdsOffsetA_Blk, which is only correct for a power of two.
+          if offsetBlk > 0 and (state["1LDSBuffer"] != 1) and \
+              (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"]):
+            state["StoreSwapAddr"] = True
+          else:
+            offsetBlk = roundupOffsetBlk
+          # re-calculate LDS size with numLdsBlk==2
+          ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
+          # unset TDMPlusLdsBuf
+          state["TDMPlusLdsBuf"] = 0
+        else:
+          state["TDMPlusLdsBuf"] = 1
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
