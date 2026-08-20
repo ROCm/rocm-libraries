@@ -58,7 +58,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  2, 16,  2, 2]
         - DepthU: [256]
         - TDMInst: [3]
-        - TDMSplit: [False, True]
+        # Pinned False rather than swept. Upstream 97e1223a3f9 (PR #10911)
+        # rejects TDMSplit unconditionally in Solution.py, so the True half of
+        # this axis was 8 cells that all reject: sweeping it measured 6 of 16
+        # valid where the honest grid is 6 of 8. Against the pre-rebase 9 of 16,
+        # the 3 cells lost were exactly the valid TDMSplit=True ones. Widen this
+        # back to [False, True] when upstream re-enables TDMSplit -- the per-row
+        # guards and their xfailed tests are still in place for that.
+        - TDMSplit: [False]
         - TDMFuse: [0, 5]
         - PrefetchGlobalRead: [2]
         - PrefetchGlobalReadA: [1, 2]
