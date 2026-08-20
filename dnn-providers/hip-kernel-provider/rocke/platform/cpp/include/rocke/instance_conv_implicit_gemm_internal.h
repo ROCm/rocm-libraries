@@ -199,6 +199,12 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* block_m_off_v; /* grid.block_m_off OR swizzled row*tile_m */
     rocke_value_t* block_n_off_v; /* grid.block_n_off OR swizzled col*tile_n */
 
+    /* ---- grouped conv state (groups > 1; both NULL for groups == 1) ---- *
+     * group_idx      = b.block_id_z()           (the CTA's group in [0, groups))
+     * k_out_group_base = b.mul(group_idx, kpg)  (absolute output-filter base for B/D) */
+    rocke_value_t* group_idx;
+    rocke_value_t* k_out_group_base;
+
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
     bool double_buffer; /* compv4 || async_dma || unroll_k     */

@@ -30,6 +30,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
@@ -464,6 +465,49 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CpCover_EmittedAtE
     EXPECT_EQ(countSGetpc(*func), 4);  // 1 cover (entry) + 3 arms (MGE)
     EXPECT_TRUE(firstGetpcBeforeLabel(*func, "label_MultiGemmEnd"));  // cover is at entry
     EXPECT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);
+}
+
+// With the gfx1250 hardware-entrypoint prologue present (s_mov_b64 s[64:65], 0 / v_nop /
+// global_prefetch_b8, inserted by InsertInitialUnclausedVmemPass), the entry CP cover must be
+// placed AFTER it so the prologue stays the kernel's first executed code.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CpCover_FollowsEntryPrologue) {
+    buildThreeArmEmittableKernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createInsertInitialUnclausedVmemPass());
+    pm.addPass(createSwInstructionPrefetchAbsDynamicPass(/*baseSgpr=*/64, {}, /*cpCover=*/true));
+    pm.run(*func);
+
+    ASSERT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);  // cover emitted
+    EXPECT_EQ(countSGetpc(*func), 4);                                    // 1 cover + 3 arms
+
+    // The cover burst must sit immediately AFTER the 3-instruction prologue: collect the
+    // non-pseudo instruction stream and check the window around global_prefetch_b8.
+    // (The predicated ladder anchors at label_MultiGemmEnd, which this synthetic kernel puts
+    // at the very entry; in real kernels MGE is deep in the prolog.)
+    std::vector<uint16_t> ops;
+    for (auto it = bb->begin(); it != bb->end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction* inst = cast<StinkyInstruction>(n);
+        if (isPseudoInst(inst)) continue;
+        ops.push_back(inst->getUnifiedOpcode());
+    }
+    size_t pf = ops.size();
+    for (size_t i = 0; i < ops.size(); ++i) {
+        if (ops[i] == GFX::global_prefetch_b8) {
+            pf = i;
+            break;
+        }
+    }
+    ASSERT_LT(pf, ops.size()) << "prologue global_prefetch_b8 not found";
+    ASSERT_GE(pf, 2u);
+    EXPECT_EQ(ops[pf - 2], GFX::s_mov_b64);
+    EXPECT_EQ(ops[pf - 1], GFX::v_nop);
+    ASSERT_LT(pf + 1, ops.size());
+    EXPECT_EQ(ops[pf + 1], GFX::s_getpc_b64) << "CP cover must start right after the prologue";
 }
 
 // EMPTY entry-stub BB: real Tensile kernels have an empty CFG-stub as func.getEntryBlock()

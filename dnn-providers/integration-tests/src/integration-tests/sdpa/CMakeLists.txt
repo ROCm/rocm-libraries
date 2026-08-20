@@ -7,6 +7,7 @@ target_sources(${INTEGRATION_TESTS_EXE}
         IntegrationGoldenRefSdpaFwdInference.cpp
 )
 
+
 if(BUILD_CPP_GRAPH_TESTS)
     target_sources(${INTEGRATION_TESTS_EXE}
         PRIVATE

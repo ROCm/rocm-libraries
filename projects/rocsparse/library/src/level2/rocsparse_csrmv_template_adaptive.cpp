@@ -26,6 +26,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
+#include "rocsparse_csrmv_adaptive_analysis.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "internal/generic/rocsparse_v2_spmv.h"
@@ -42,27 +43,11 @@
 
 namespace rocsparse
 {
-    __attribute__((unused)) static uint32_t flp2(uint32_t x)
-    {
-        x |= (x >> 1);
-        x |= (x >> 2);
-        x |= (x >> 4);
-        x |= (x >> 8);
-        x |= (x >> 16);
-        return x - (x >> 1);
-    }
+    // numThreadsForReduction() and flp2() were lifted (behavior-preserving) into
+    // library/src/include/rocsparse_csrmv_adaptive_analysis.hpp so they can be
+    // unit-tested without linking this device translation unit. The call sites
+    // below use the default wg_size argument, which equals WG_SIZE (256).
 
-    // Short rows in CSR-Adaptive are batched together into a single row block.
-    // If there are a relatively small number of these, then we choose to do
-    // a horizontal reduction (groups of threads all reduce the same row).
-    // If there are many threads (e.g. more threads than the maximum size
-    // of our workgroup) then we choose to have each thread serially reduce
-    // the row.
-    // This function calculates the number of threads that could team up
-    // to reduce these groups of rows. For instance, if you have a
-    // workgroup size of 256 and 4 rows, you could have 64 threads
-    // working on each row. If you have 5 rows, only 32 threads could
-    // reliably work on each row because our reduction assumes power-of-2.
     // Choose the general (non-symmetric) CSR-adaptive workgroup size from the
     // average nnz/row. For dense rows a smaller workgroup lowers reduction/sync
     // overhead and raises occupancy; short-row matrices keep the historical 256.
@@ -73,31 +58,13 @@ namespace rocsparse
     // workgroup on 32-wide parts while wide-wavefront (64) parts retain the
     // original 256-thread workgroup instead of dropping to a half-occupancy 128.
     //
-    // Both the analysis (which bakes numThreadsForReduction into wg_ids) and the
-    // kernel launch derive the size from the handle + m/nnz, so they always agree
-    // without storing extra state. The symmetric adaptive kernels are unaffected:
-    // they never read wg_ids.
+    // Unlike the pure-math flp2()/numThreadsForReduction() helpers, general_wg_size
+    // depends on the runtime handle (wavefront_size), so it stays in this device
+    // translation unit rather than the host-testable analysis header.
     static inline uint32_t general_wg_size(rocsparse_handle handle, int64_t m, int64_t nnz)
     {
         const bool dense = (m > 0 && (double)nnz >= 32.0 * (double)m);
         return dense ? (4u * (uint32_t)handle->wavefront_size) : 256u;
-    }
-
-    static uint64_t numThreadsForReduction(uint64_t num_rows, uint32_t wg_size)
-    {
-#if defined(__INTEL_COMPILER)
-        return wg_size >> (_bit_scan_reverse(num_rows - 1) + 1);
-#elif(defined(__clang__) && __has_builtin(__builtin_clz)) \
-    || !defined(__clang) && defined(__GNUG__)             \
-           && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 30202)
-        return (wg_size >> (8 * sizeof(int) - __builtin_clz(num_rows - 1)));
-#elif defined(_MSC_VER) && (_MSC_VER >= 1400)
-        uint64_t bit_returned;
-        _BitScanReverse(&bit_returned, (num_rows - 1));
-        return wg_size >> (bit_returned + 1);
-#else
-        return flp2(wg_size / num_rows);
-#endif
     }
 
     template <typename I>
