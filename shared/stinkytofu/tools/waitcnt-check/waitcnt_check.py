@@ -51,6 +51,25 @@ WAIT_MOD_FIELDS: Dict[str, Tuple[CK, str]] = {
 K_UNUSED = -1
 K_MAX_IN_FLIGHT = 64
 
+# Counters that retire out of issue order (CounterOrder::OutOfOrder in
+# WaitDataflow.cpp), where a nonzero wait names no particular op so only 0 is
+# usable. kmcnt also does not count instructions (+1 per single-DWORD fetch, +2
+# per fetch of two or more DWORDs), a second reason a queue index cannot become
+# an immediate.
+OUT_OF_ORDER_COUNTERS: Set[CK] = {CK.KM}
+
+
+def wait_to_drain(ck: CK, count_from: int) -> int:
+    """Wait immediate that guarantees the op at `count_from` positions from the
+    queue tail (1 == tail) has completed, or K_UNUSED if it is not in flight.
+    Mirrors C++ waitcnt::waitToDrain -- the only place a queue position becomes
+    a wait immediate."""
+    if count_from <= 0:
+        return K_UNUSED
+    if ck in OUT_OF_ORDER_COUNTERS:
+        return 0
+    return min(count_from - 1, K_MAX_IN_FLIGHT - 1)
+
 
 # ---------------------------------------------------------------------------
 # Lexer
@@ -823,7 +842,11 @@ class CounterState:
 
     def trim_queue(self, ck: CK, keep: int) -> List[Instruction]:
         """Trim every per-pred queue to keep at most `keep` tail ops;
-        return the distinct ops drained (for reporting)."""
+        return the distinct ops drained (for reporting).
+
+        On an out-of-order counter a nonzero `keep` drains no *identifiable*
+        op -- the ops that completed could be any of them -- so nothing may be
+        removed from the queue."""
         drained: List[Instruction] = []
         seen: Set[int] = set()
 
@@ -831,6 +854,9 @@ class CounterState:
             if op.uid not in seen:
                 seen.add(op.uid)
                 drained.append(op)
+
+        if keep > 0 and ck in OUT_OF_ORDER_COUNTERS:
+            return drained
 
         for q in self.queues[ck]:
             if keep <= 0:
@@ -1160,14 +1186,13 @@ def _dump_violation_detail(
 
     # Required wait: strictest (smallest keep) that still drains every
     # undrained producer on this counter, i.e. min over producers of
-    # (count_from - 1).
+    # wait_to_drain(count_from).
     required = K_UNUSED
     for prod, c in undrained:
         if c != ck:
             continue
-        n = state.count_from(ck, prod)
-        if n > 0:
-            w = n - 1
+        w = wait_to_drain(ck, state.count_from(ck, prod))
+        if w != K_UNUSED:
             required = w if required == K_UNUSED else min(required, w)
     req_str = "none" if required == K_UNUSED else str(required)
     lines.append(
@@ -1184,7 +1209,7 @@ def _dump_violation_detail(
         lines.append(f"        queue[{qi}] pred=^{pred} depth={len(q.ops)}")
         size = len(q.ops)
         for idx, op in enumerate(q.ops):
-            drain = size - idx - 1  # keep value that drains this op
+            drain = wait_to_drain(ck, size - idx)  # keep value that drains this op
             mark = "  <-- undrained producer" if op.uid in bad_uids else ""
             lines.append(
                 f"          idx {idx}: {op.opcode} @ line {op.line} "
@@ -1265,7 +1290,7 @@ class WaitCntValidator:
                         continue
                     self._reported_counters.add(ck)
                     n = state.count_from(ck, prod)
-                    w_needed = n - 1
+                    w_needed = wait_to_drain(ck, n)
                     self.result.violations.append(
                         Violation(
                             kind="MISSING",

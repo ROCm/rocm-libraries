@@ -103,6 +103,11 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 # publishes the merged environment as
 # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT so that later call
 # can forward it to whichever suites actually exist.
+#
+# No descriptor entry: this suite loads the real plugin, and the engine resolves its
+# descriptor tree relative to the loaded module -- the staged copy in a build tree, the
+# installed copy in an install tree. Naming one explicitly would pin the build path into
+# the install-time CTest file and stop the installed descriptors from ever being read.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
     LABELS slow
     ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
