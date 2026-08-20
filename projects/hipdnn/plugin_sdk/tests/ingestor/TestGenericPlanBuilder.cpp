@@ -34,6 +34,7 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
+#include "ContentCarryingTestGraph.hpp"
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -1278,6 +1279,51 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
         << "a record measured on another device must not decide this one's kernel";
 }
 
+/// The graph-half counterpart of the device test above. `TestGraph` carries no content,
+/// so every instance keys alike and cannot express this; the content-carrying fixture
+/// makes the two graphs genuinely different computations.
+TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const auto properties = testDeviceProperties();
+
+    using Spec = ContentCarryingTestGraph::Spec;
+    const ContentCarryingTestGraph graph{Spec{}};
+    Spec wider;
+    wider.tensors[0].dims = {4, 16};
+    const ContentCarryingTestGraph otherGraph{wider};
+
+    WinnerRecord record;
+    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        {
+            record.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    manager->recordWinner(winnerKeyFor(otherGraph, properties), record);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "a record measured for another graph must not decide this one's kernel";
+}
+
 /// D7's narrow-then-wide half: a record written under a narrow knob filter does NOT
 /// cover a later unfiltered run, so that run must re-benchmark rather than serve the
 /// best of a subset it never fully measured. Observable without timing: benchmarking
@@ -1655,6 +1701,68 @@ TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuild
     EXPECT_EQ(stored->front().kernelId, testId(0x72))
         << "the fastest sampled candidate must rank first, not the heuristic front";
     EXPECT_EQ(stored->back().kernelId, testId(0x70)) << "and the slowest must rank last";
+}
+
+/// A ranking sampled under one numbering must be served for the same graph numbered
+/// differently. Key-level equality is pinned in TestGraphContentKey.cpp; this adds that
+/// the record `recordWinner` wrote under the first key is found by `winnerFor` under the
+/// second, and orders the catalog.
+TEST(TestIngestorGenericPlanBuilder, ARecordSampledUnderOneNumberingIsServedForAnother)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
+
+    using Spec = ContentCarryingTestGraph::Spec;
+    Spec low;
+    low.tensors
+        = {ContentCarryingTestGraph::TensorSpec{1}, ContentCarryingTestGraph::TensorSpec{2}};
+    low.nodes[0].in0TensorUid = 1;
+    low.nodes[0].out0TensorUid = 2;
+
+    Spec high;
+    high.tensors
+        = {ContentCarryingTestGraph::TensorSpec{1000}, ContentCarryingTestGraph::TensorSpec{2000}};
+    high.nodes[0].in0TensorUid = 1000;
+    high.nodes[0].out0TensorUid = 2000;
+
+    const ContentCarryingTestGraph sampled{low};
+    const ContentCarryingTestGraph renumbered{high};
+    const auto properties = testDeviceProperties();
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, sampled, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext sampledContext;
+    sampledContext.setExecutionSettings(settings);
+    builder.buildPlan(handle, sampled, engineConfig, sampledContext);
+    std::vector<std::byte> workspace(sampledContext.plan().getWorkspaceSize(handle));
+    sampledContext.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    ASSERT_EQ(manager->winnerCacheSize(), 1U) << "sampling must have recorded one ranking";
+    const auto stored = manager->winnerFor(winnerKeyFor(renumbered, properties));
+    ASSERT_TRUE(stored.has_value())
+        << "the renumbered graph must find the record the sampled graph wrote";
+    EXPECT_EQ(stored->front().kernelId, testId(0x72))
+        << "and it must be the sampled ranking, not the heuristic order";
+
+    // The served path: the record orders the catalog for the renumbered graph, so its
+    // plan is built from the measured front rather than re-sampled.
+    const auto ordered = manager->sortedDefinitions(MatchContext{renumbered, 0, properties});
+    ASSERT_FALSE(ordered.empty());
+    EXPECT_EQ(ordered.front().kernelId, testId(0x72))
+        << "the renumbered graph must be ordered by the record it hit";
 }
 
 /// D7's narrow-then-wide half, the write-back side: `ANarrowRecordDoesNotCoverAWiderRunAndTriggersReBenchmarking`
