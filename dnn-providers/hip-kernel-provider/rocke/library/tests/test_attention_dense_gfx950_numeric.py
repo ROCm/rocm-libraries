@@ -191,36 +191,21 @@ class TestDenseNumeric:
 # These verify the online softmax rescale logic that IR parity alone cannot validate.
 # Cohort format: (dtype, head_size, num_query_heads, num_kv_heads, persistent, sliding_window, causal)
 _SINK_COHORT = [
-    ("bf16", 128, 32, 8, False, 0, True),  # bf16 D128 GQA default (plain causal)
-    ("bf16", 64, 32, 8, False, 0, True),  # bf16 D64 GQA default (plain causal)
-    ("fp16", 128, 32, 8, False, 0, True),  # fp16 D128 GQA default (plain causal)
-    (
-        "bf16",
-        128,
-        32,
-        8,
-        False,
-        128,
-        True,
-    ),  # bf16 D128 GQA SWA (sinks + sliding window)
-    (
-        "fp16",
-        128,
-        32,
-        8,
-        False,
-        256,
-        True,
-    ),  # fp16 D128 GQA SWA (sinks + sliding window)
-    (
-        "bf16",
-        128,
-        32,
-        8,
-        False,
-        0,
-        False,
-    ),  # bf16 D128 GQA non-causal (full attention + sinks)
+    # Plain causal (no sliding window)
+    ("bf16", 128, 32, 8, False, 0, True),  # bf16 D128 GQA default
+    ("bf16", 128, 32, 8, True, 0, True),  # bf16 D128 GQA persistent
+    ("bf16", 64, 32, 8, False, 0, True),  # bf16 D64 GQA default
+    ("bf16", 64, 32, 8, True, 0, True),  # bf16 D64 GQA persistent
+    ("fp16", 128, 32, 8, False, 0, True),  # fp16 D128 GQA default
+    ("fp16", 128, 32, 8, True, 0, True),  # fp16 D128 GQA persistent
+    # SWA (sinks + sliding window)
+    ("bf16", 128, 32, 8, False, 128, True),  # bf16 D128 GQA SWA default
+    ("bf16", 128, 32, 8, True, 128, True),  # bf16 D128 GQA SWA persistent
+    ("fp16", 128, 32, 8, False, 256, True),  # fp16 D128 GQA SWA default
+    ("fp16", 128, 32, 8, True, 256, True),  # fp16 D128 GQA SWA persistent
+    # Non-causal (full attention + sinks)
+    ("bf16", 128, 32, 8, False, 0, False),  # bf16 D128 GQA non-causal default
+    ("bf16", 128, 32, 8, True, 0, False),  # bf16 D128 GQA non-causal persistent
 ]
 
 
