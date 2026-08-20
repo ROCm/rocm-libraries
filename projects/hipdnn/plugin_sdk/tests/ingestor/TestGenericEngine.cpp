@@ -79,9 +79,9 @@ TEST(TestIngestorGenericEngine, IsApplicableTrueWhenTheStateManagerHasASurviving
 
 TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
 {
-    // Distinct symbol avoids colliding with ScopedTestSymbols' matcher elsewhere.
+    // Distinct symbol avoids colliding with ScopedTestSymbols' graph match elsewhere.
     constexpr const char* REJECT_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.reject";
-    const auto rejectMatcher = scopedGraphMatcher(REJECT_SYMBOL, &rejectGraph);
+    GraphMatchRegistry::registerSymbol(REJECT_SYMBOL, &rejectGraph);
     const ScopedBlockSizeScore scorer;
 
     MetadataSchema schema;
@@ -93,18 +93,17 @@ TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
     KernelDescriptorPack pack;
     pack.id = PACK_ID;
     pack.name = "test pack";
-    pack.matcherIds = {GRAPH_MATCHER_ID};
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
     pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
 
     auto stateManager = std::make_unique<KernelIngestorStateManager<StubHandle>>(
         std::move(schema),
-        std::vector<MatchDescriptor>{
-            {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, REJECT_SYMBOL}},
+        std::vector<MatchDescriptor>{},
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        REJECT_SYMBOL);
 
     const StubDeviceResolver resolver;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(stateManager), resolver);
@@ -113,6 +112,8 @@ TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
     const TestGraph graph(makeGraphId(0x61));
 
     EXPECT_FALSE(engine.isApplicable(handle, graph));
+
+    GraphMatchRegistry::unregisterSymbol(REJECT_SYMBOL);
 }
 
 TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)

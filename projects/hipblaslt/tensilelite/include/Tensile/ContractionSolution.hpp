@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,6 +53,179 @@
 
 namespace TensileLite
 {
+    #define CustomArgSemantic_MACRO \
+        /* Core GEMM problem args */ \
+        X_MACRO(SizeFree0) \
+        X_MACRO(SizeFree1) \
+        X_MACRO(SizeFree2) \
+        X_MACRO(SizeFree3) \
+        X_MACRO(SizeSum) \
+        X_MACRO(SizeSumDiv2) \
+        X_MACRO(SizeSum1) \
+        X_MACRO(SizeSum2) \
+        X_MACRO(StrideA0) \
+        X_MACRO(StrideA1) \
+        X_MACRO(StrideA2) \
+        X_MACRO(StrideB0) \
+        X_MACRO(StrideB1) \
+        X_MACRO(StrideB2) \
+        X_MACRO(StrideC0) \
+        X_MACRO(StrideC1) \
+        X_MACRO(StrideC2) \
+        X_MACRO(StrideD0) \
+        X_MACRO(StrideD1) \
+        X_MACRO(StrideD2) \
+        X_MACRO(StrideE0) \
+        X_MACRO(StrideE1) \
+        X_MACRO(StrideScaleA0) \
+        X_MACRO(StrideScaleA1) \
+        X_MACRO(StrideScaleB0) \
+        X_MACRO(StrideScaleB1) \
+        X_MACRO(StrideA0Bytes) \
+        X_MACRO(StrideB0Bytes) \
+        X_MACRO(StrideC0Bytes) \
+        X_MACRO(StrideD0Bytes) \
+        X_MACRO(StrideMetadata0) \
+        X_MACRO(StrideMetadata1) \
+        X_MACRO(StrideCK) \
+        X_MACRO(Alpha) \
+        X_MACRO(Beta) \
+        X_MACRO(SplitK) \
+        X_MACRO(OutputBF16) \
+        X_MACRO(Padding) \
+        X_MACRO(ConstantZero) \
+        X_MACRO(ConstantOne) \
+        X_MACRO(DebugPattern) \
+        /* Pointer args */ \
+        X_MACRO(AddressA) \
+        X_MACRO(AddressB) \
+        X_MACRO(AddressC) \
+        X_MACRO(AddressD) \
+        X_MACRO(AddressE) \
+        X_MACRO(AddressMetadata) \
+        X_MACRO(AddressWorkspace) \
+        X_MACRO(AddressFlags) \
+        X_MACRO(AddressSynchronizer) \
+        X_MACRO(AddressTD) \
+        X_MACRO(AddressScaleA) \
+        X_MACRO(AddressScaleB) \
+        X_MACRO(AddressScaleC) \
+        X_MACRO(AddressScaleD) \
+        X_MACRO(AddressMXScaleA) \
+        X_MACRO(AddressMXScaleB) \
+        X_MACRO(AddressScaleAlphaVec) \
+        X_MACRO(AddressBias) \
+        X_MACRO(AddressAmaxOut) \
+        X_MACRO(AmaxWS) \
+        X_MACRO(AmaxSync) \
+        X_MACRO(Synchronizer) \
+        X_MACRO(DebugBuffer) \
+        /* Kernel metadata args */ \
+        X_MACRO(GemmInfo) \
+        X_MACRO(GemmCount) \
+        X_MACRO(InternalArgs) \
+        X_MACRO(InternalArgs1) \
+        X_MACRO(TensileInternalArg0) \
+        X_MACRO(TensileInternalArg1) \
+        X_MACRO(NumWorkGroups) \
+        /* StreamK scheduling args */ \
+        X_MACRO(ItersPerTile) \
+        X_MACRO(MagicNumberItersPerTile) \
+        X_MACRO(MagicShiftItersPerTile) \
+        X_MACRO(TotalIters) \
+        X_MACRO(SKItersPerWG) \
+        X_MACRO(SKGrid) \
+        X_MACRO(SKTilesAndSplit) \
+        /* Packed batch dimension divisors */ \
+        X_MACRO(MagicNumberSize) \
+        X_MACRO(MagicShiftSize) \
+        /* Epilogue control args */ \
+        X_MACRO(BiasType) \
+        X_MACRO(StrideBias) \
+        X_MACRO(FactorDim) \
+        X_MACRO(ActivationTypeArg) \
+        X_MACRO(ActivationArg) \
+        X_MACRO(GSUSync) \
+        /* Random seed args */ \
+        X_MACRO(RNDSeed)
+
+    enum class CustomArgSemantic
+    {
+        #define X_MACRO(name) name,
+        CustomArgSemantic_MACRO
+        #undef X_MACRO
+        COUNT,
+    };
+
+    std::string toString(CustomArgSemantic arg);
+    CustomArgSemantic fromStringCustomArgSemantic(std::string& str);
+    std::ostream& operator<<(std::ostream& stream, const CustomArgSemantic& t);
+    std::istream& operator>>(std::istream& stream, CustomArgSemantic& t);
+
+    struct CustomArgDefinition
+    {
+        CustomArgType type;
+        CustomArgSemantic semantic;
+        size_t padding = 0;
+        size_t index   = 0;
+    };
+
+    std::string toString(CustomArgDefinition arg);
+    std::ostream& operator<<(std::ostream& stream, const CustomArgDefinition& t);
+    std::istream& operator>>(std::istream& stream, CustomArgDefinition& t);
+
+    enum CustomGridSize
+    {
+        One,
+        TilesX,
+        TilesY,
+        Batch,
+        TilesXY,
+        TilesXYBatch,
+        StreamKWithBatch,
+        StreamKNoBatch,
+        TilesXYBatchGSU,
+        CustomGridSize_Count,
+    };
+
+    std::string toString(CustomGridSize mode);
+    CustomGridSize fromStringCustomGridSize(std::string& str);
+    std::ostream& operator<<(std::ostream& stream, const CustomGridSize& t);
+    std::istream& operator>>(std::istream& stream, CustomGridSize& t);
+
+    enum CustomWorkspaceType
+    {
+        None,
+        SplitK,
+        StreamK,
+        StreamKWithReduction,
+        CustomWorkspaceType_Count,
+    };
+
+    std::string toString(CustomWorkspaceType type);
+    CustomWorkspaceType fromStringCustomWorkspaceType(std::string& str);
+    std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t);
+    std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t);
+
+    struct CustomKernel
+    {
+        // Every member needs a default: mapOptional leaves absent keys untouched, so an
+        // incomplete logic file would otherwise deserialize into indeterminate values.
+        std::string name;
+        std::vector<CustomArgDefinition> args;
+        dim3 macrotile{0, 0, 0};
+        dim3 threads{0, 0, 0};
+        vector3<CustomGridSize> grid{CustomGridSize::One, CustomGridSize::One, CustomGridSize::One};
+        CustomWorkspaceType workspaceType = CustomWorkspaceType::None;
+        size_t workspaceSizePerElemC      = 0;
+        size_t workspaceSizePerElemBias   = 0;
+        // True when this CustomKernel was auto-populated for a Tensile-generated
+        // kernel (vs. a hand-written custom kernel).  Generated kernels still
+        // rely on sizeMapping for workspace/Stream-K decisions, so several code
+        // paths must treat them like the legacy non-custom case.
+        bool generated = false;
+    };
+
     template <typename TAct>
     struct DeviceUserArguments
     {
@@ -155,8 +329,6 @@ namespace TensileLite
         size_t workspaceSizePerElemBias = 0;
 
         bool activationFused = true;
-
-        std::string customKernelName;
 
         int  workGroupMappingXCC                    = 0;
         int  workGroupMappingXCCGroup               = 0;
@@ -362,6 +534,8 @@ namespace TensileLite
 
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
+        void                 calculateTiles(dim3& tiles,
+                                            ContractionSolution::Problem const& problem) const;
         void                 calculateGrid(dim3&                               workGroupSize,
                                            dim3&                               numWorkGroups,
                                            ContractionSolution::Problem const& problem) const;
@@ -482,6 +656,21 @@ namespace TensileLite
                             KA&                      args,
                             StreamKSettings const&   sk) const;
 
+        template <bool T_Debug>
+        void calculateInternalArgs(uint32_t&                           internalArg0,
+                                   uint32_t&                           internalArg1,
+                                   Hardware const*                     hardware,
+                                   const ContractionProblemParameters& param,
+                                   int32_t                             autoWGM,
+                                   size_t                              autoWGMXCC,
+                                   size_t                              autoWGMXCCCHUNK,
+                                   size_t                              autoWGMXCCSPLITK,
+                                   size_t                              autoStaggerUMapping,
+                                   size_t                              autoStaggerU,
+                                   size_t                              autoStaggerUStrideShift,
+                                   uint32_t                            autoGsuVal,
+                                   AdaptiveGemmNTAB                    ntab) const;
+
         // Common kernel related arguments (e.g. gemm_count, arg type, MT, GSU...)
         template <bool T_Debug, bool Legacy, typename KA>
         void kernelArgs(uint32_t                            gemmCount,
@@ -508,6 +697,17 @@ namespace TensileLite
                                                       KA&                         h_args,
                                                       uint32_t                    gsu) const;
 
+        template <bool T_Debug>
+        KernelInvocation generateCustomCall(Problem const&           problem,
+                                            ContractionInputs const& inputs,
+                                            Hardware const&          hardware,
+                                            StreamKSettings const&   sk) const;
+
+        // Temporary: the proven per-feature argument-packing path, restored from
+        // develop and used for all Tensile-generated kernels while the generic
+        // generateCustomCall path is validated for newer features (subtile,
+        // gfx950, StreamK work-stealing). Handwritten/external custom kernels
+        // still go through generateCustomCall. See gating in solve().
         template <bool T_Debug>
         KernelInvocation generateSingleCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
@@ -681,6 +881,7 @@ namespace TensileLite
             = std::make_shared<Predicates::True<Hardware>>();
 
         SizeMapping sizeMapping;
+        CustomKernel customKernel;
 
         InternalArgsSupport internalArgsSupport;
 
