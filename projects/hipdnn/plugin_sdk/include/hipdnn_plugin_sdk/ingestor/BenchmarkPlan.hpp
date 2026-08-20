@@ -36,6 +36,12 @@ namespace hipdnn_plugin_sdk::ingestor
 constexpr int BENCHMARK_WARMUP_RUNS = 1;
 constexpr int BENCHMARK_ITERATIONS = 7;
 
+// A zero iteration count would leave sampleCandidate()'s reduction at its DBL_MAX seed
+// and report that as a real measurement, which reads as a successful benchmark rather
+// than the honest no-usable-candidate path.
+static_assert(BENCHMARK_ITERATIONS > 0, "benchmarking must time at least one iteration");
+static_assert(BENCHMARK_WARMUP_RUNS >= 0);
+
 namespace detail
 {
 
@@ -76,6 +82,12 @@ struct HipEventPair
 template <typename THandle>
 class BenchmarkPlan : public IPlan<THandle>
 {
+    static_assert(HasGetStream<THandle>::value,
+                  "BenchmarkPlan requires THandle to have a 'hipStream_t getStream() const' "
+                  "method: the default timer brackets each candidate with HIP events on that "
+                  "stream. Required even when a Timer is injected, since both arms of the "
+                  "constructor's default are instantiated.");
+
 public:
     /// A sub-plan and the kernel it was built for. The vector is typed on IPlan rather
     /// than GenericPlan so tests can substitute doubles, and IPlan has no kernel
@@ -103,10 +115,6 @@ public:
         : _candidates(std::move(candidates))
         , _timer(timer ? std::move(timer) : makeHipEventTimer())
     {
-        static_assert(HasGetStream<THandle>::value,
-                      "BenchmarkPlan requires THandle to have a 'hipStream_t getStream() const' "
-                      "method");
-
         if(_candidates.empty())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
