@@ -267,7 +267,7 @@ inv build --architecture gfx1100 --clean
 * `TENSILELITE_EXPERIMENTAL` Process experimental logic files (default: see below)
 * `HIPBLASLT_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
 * `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
-* `HIPBLASLT_GFX1250_REVISION` gfx1250 ASIC revision to build for, `v0` or `v1`; `invoke build` probes the local GPU and sets it when unset (default: empty, treated as `v1`)
+* `HIPBLASLT_ASIC_REVISION` gfx1250 ASIC revision to build for, `v0` or `v1`; `invoke build` probes the local GPU and sets it when unset (default: empty, treated as `v1`)
 
 > [!NOTE]
 > To determine defaults for the `TensileCreateLibrary` command generated when building the device

@@ -7,7 +7,7 @@ gfx1250 ships as two silicon revisions (v0 and v1) that share the same ISA and
 compiler arch name "gfx1250", so rocm_agent_enumerator/amdgpu-arch cannot tell
 them apart. The only in-process signal is hipDeviceProp_t::asicRevision
 (empirically v0 -> 0, v1 -> 1). The functions here let tox generate/test v0
-kernels on a v0 machine while defaulting to the shipping v1 everywhere else.
+kernels on a v0 machine while defaulting to v1 everywhere else.
 
 This module deliberately carries no invoke dependency and lives inside the
 packaged Tensile tree so the ROCm test artifacts can exercise the mapping and
@@ -56,9 +56,9 @@ def _revision_to_gpu_target(base_arch, asic_revision):
     """Map a detected base arch + ASIC revision to a Tensile --gpu-targets value.
 
     Only gfx1250 revision 0 is the pre-production v0. Everything else -- the
-    shipping v1 (revision 1), an unknown revision (-1 when HIP is too old to
+    v1 (revision 1), an unknown revision (-1 when HIP is too old to
     expose the field), any future/unexpected value, and every non-gfx1250 arch --
-    is returned unchanged so tests default to the shipping stepping.
+    is returned unchanged so tests default to the v1 stepping.
     """
     if base_arch == "gfx1250" and asic_revision == 0:
         return "gfx1250v0"
@@ -70,7 +70,7 @@ def _probe_asic_revision(build_dir=None, device_id=0):
 
     Returns a (arch, revision) tuple on success, or None on any failure (hipcc
     missing, build error, no device, non-zero exit, or unparsable output) so the
-    caller can fall back to the shipping default. Never raises.
+    caller can fall back to the v1 default. Never raises.
     """
     hipcc = shutil.which("hipcc")
     if not hipcc:
@@ -137,7 +137,7 @@ def detect_gpu_revision_target(build_dir=None, device_id=0):
 
     Non-gfx1250 arches are returned unchanged without probing. For gfx1250, the
     ASIC revision is probed via HIP: revision 0 -> gfx1250v0, otherwise (and on
-    any probe failure or arch mismatch) -> gfx1250 (the shipping v1 default).
+    any probe failure or arch mismatch) -> gfx1250 (the v1 default).
     """
     base_arch = detect_gpu_arch()
     if base_arch != "gfx1250":
@@ -158,7 +158,7 @@ def detect_gpu_revision_target(build_dir=None, device_id=0):
         return "gfx1250"
 
     target = _revision_to_gpu_target("gfx1250", revision)
-    # Only revision 0 is v0; anything else (incl. unseen values) is shipping, so
+    # Only revision 0 is v0; anything else (incl. unseen values) is v1, so
     # the raw number is the only thing telling a confirmed v1 from an unknown.
     print(f"gfx1250 asicRevision {revision} -> {target}")
     return target

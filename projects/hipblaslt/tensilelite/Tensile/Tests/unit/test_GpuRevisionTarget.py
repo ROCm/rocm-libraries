@@ -5,7 +5,7 @@
 
 gfx1250 ships as two silicon revisions (v0, v1) that share one ISA, arch name
 and compiler target; only hipDeviceProp_t::asicRevision tells them apart
-(v0 -> 0, everything else -> shipping v1). This file covers, in order:
+(v0 -> 0, everything else -> v1). This file covers, in order:
 
   * the pure revision -> --gpu-targets mapping and its probe wrapper,
   * the invoke -> CMake build wiring that carries the revision, and
@@ -65,7 +65,7 @@ _needs_hipblaslt_tasks = pytest.mark.skipif(
 
 GFX1250 = "gfx1250"
 GFX1250V0 = "gfx1250v0"
-REVISION_OPT = "-DHIPBLASLT_GFX1250_REVISION"
+REVISION_OPT = "-DHIPBLASLT_ASIC_REVISION"
 
 
 # --------------------------------------------------------------------------- #
@@ -217,7 +217,7 @@ class TestTargetsIncludeGfx1250:
 
 
 @_needs_hipblaslt_tasks
-class TestGfx1250RevisionOption:
+class TestAsicRevisionOption:
     """What reaches CMake. A gfx1250 build ships both revisions' trees by
     default and lets the runtime pick by asicRevision, so the build machine no
     longer decides anything and is never probed. The option is emitted even when
@@ -226,31 +226,31 @@ class TestGfx1250RevisionOption:
     only v0."""
 
     def test_the_default_builds_both_trees(self):
-        assert hipblaslt_tasks._gfx1250_revision_option("gfx1250", None) == f"{REVISION_OPT}="
+        assert hipblaslt_tasks._asic_revision_option("gfx1250", None) == f"{REVISION_OPT}="
 
     def test_the_default_does_not_look_at_the_local_gpu(self):
         # The build is machine-independent by construction: nothing here may
         # reach for a device, or two CI runners produce different packages.
-        assert not hasattr(hipblaslt_tasks, "_detect_gfx1250_revision")
+        assert not hasattr(hipblaslt_tasks, "_detect_asic_revision")
 
     def test_a_build_without_gfx1250_emits_nothing(self):
-        assert hipblaslt_tasks._gfx1250_revision_option("gfx942", None) is None
+        assert hipblaslt_tasks._asic_revision_option("gfx942", None) is None
 
     @pytest.mark.parametrize("pinned", ["v0", "v1"])
     def test_an_explicit_revision_prunes_to_one_tree(self, pinned):
-        assert hipblaslt_tasks._gfx1250_revision_option("gfx1250", pinned) == f"{REVISION_OPT}={pinned}"
+        assert hipblaslt_tasks._asic_revision_option("gfx1250", pinned) == f"{REVISION_OPT}={pinned}"
 
     def test_an_explicit_revision_applies_even_without_gfx1250_targets(self):
         # Cross-building: the caller decides, so a target list naming no gfx1250
         # still emits the option (to keep the cache from going stale).
-        assert hipblaslt_tasks._gfx1250_revision_option("gfx942", "v0") == f"{REVISION_OPT}=v0"
+        assert hipblaslt_tasks._asic_revision_option("gfx942", "v0") == f"{REVISION_OPT}=v0"
 
     @pytest.mark.parametrize("bogus", ["0", "v2", "V0", "gfx1250v0"])
     def test_an_unrecognized_revision_is_rejected(self, bogus):
         # Anything else reaches CMake as a comparison matching neither branch,
         # which would quietly build the wrong set of trees.
         with pytest.raises(SystemExit) as exit_info:
-            hipblaslt_tasks._gfx1250_revision_option("gfx1250", bogus)
+            hipblaslt_tasks._asic_revision_option("gfx1250", bogus)
         assert exit_info.value.code == 2
 
 
@@ -260,7 +260,7 @@ class TestTheBuildSaysWhichRevisionItChose:
     the failure it guards against is a v0 part finding no library of its own."""
 
     def _option(self, capsys, architecture, pinned):
-        hipblaslt_tasks._gfx1250_revision_option(architecture, pinned)
+        hipblaslt_tasks._asic_revision_option(architecture, pinned)
         return capsys.readouterr().out
 
     def test_the_default_says_both_and_who_decides(self, capsys):
@@ -271,11 +271,11 @@ class TestTheBuildSaysWhichRevisionItChose:
     def test_a_pinned_revision_says_it_was_pinned(self, capsys):
         out = self._option(capsys, "gfx1250", "v1")
         assert "gfx1250 ASIC revision: v1" in out
-        assert "pinned by --gfx1250-revision" in out
+        assert "pinned by --asic-revision" in out
         assert "no gfx1250" not in out  # that caveat is for gfx1250-free builds
 
     def test_pinning_v1_does_not_read_as_the_default(self, capsys):
-        # Pruning to the shipping tree leaves v0 silicon with no library of its
+        # Pruning to the v1 tree leaves v0 silicon with no library of its
         # own, so it must not be reported the same way the both-trees default is.
         out = self._option(capsys, "gfx1250", "v1")
         assert "both" not in out
@@ -310,7 +310,7 @@ class TestBuildTaskCommandLine:
         assert self._short_flags(flag) == (short,)
 
     def test_the_revision_option_takes_no_letter(self):
-        assert self._short_flags("--gfx1250-revision") == ("1",)
+        assert self._short_flags("--asic-revision") == ()
 
 
 # --------------------------------------------------------------------------- #

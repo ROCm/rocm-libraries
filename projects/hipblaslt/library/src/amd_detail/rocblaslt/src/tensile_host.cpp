@@ -2869,7 +2869,7 @@ namespace
                         // Grab the chosen subdir name before the move. It differs
                         // from the base `processor` only for a silicon revision
                         // (e.g. gfx1250v0); log that -- the only runtime signal a
-                        // non-shipping revision was loaded.
+                        // non-v1 revision was loaded.
                         const auto libArch = processor_path.filename().string();
                         path               = std::move(processor_path);
                         if(libArch != processor

@@ -320,7 +320,7 @@ def _install_blis(c, build_dir: Path):
 # pin restricts the build to a single revision; it goes to CMake in its own cache
 # variable, never GPU_TARGETS -- extops/matrix-transform would feed gfx1250v0 to
 # --offload-arch, and it is not in the supported-target list.
-_GFX1250_REVISIONS = ("v0", "v1")
+_ASIC_REVISIONS = ("v0", "v1")
 
 
 def _targets_include_gfx1250(architecture: str) -> bool:
@@ -334,40 +334,40 @@ def _targets_include_gfx1250(architecture: str) -> bool:
     )
 
 
-def _validate_gfx1250_revision(gfx1250_revision):
+def _validate_asic_revision(asic_revision):
     """Rejected here rather than in CMake, where an unrecognized value matches
-    no branch and quietly builds the shipping revision instead."""
-    if gfx1250_revision and gfx1250_revision not in _GFX1250_REVISIONS:
-        print("--gfx1250-revision must be 'v0' or 'v1'")
+    no branch and quietly builds the default v1 revision instead."""
+    if asic_revision and asic_revision not in _ASIC_REVISIONS:
+        print("--asic-revision must be 'v0' or 'v1'")
         sys.exit(2)
 
 
-def _gfx1250_revision_option(architecture: str, gfx1250_revision):
+def _asic_revision_option(architecture: str, asic_revision):
     """The CMake option selecting which gfx1250 ASIC-revision trees to build, or
     None when the build cannot produce gfx1250. The default builds both trees (no
-    local probe; the runtime picks by asicRevision); --gfx1250-revision prunes to
+    local probe; the runtime picks by asicRevision); --asic-revision prunes to
     one. Emitted even when empty, because the value is cached and builds are
     incremental: an unset one would let a dir previously pinned to v0 stay v0."""
-    _validate_gfx1250_revision(gfx1250_revision)
+    _validate_asic_revision(asic_revision)
     targetsGfx1250 = _targets_include_gfx1250(architecture)
-    if gfx1250_revision:
+    if asic_revision:
         # Emitted even with no gfx1250 target (the value is cached); say so, or
         # the line reads as though it changed something in the build.
-        how = "pinned by --gfx1250-revision"
+        how = "pinned by --asic-revision"
         if not targetsGfx1250:
             how += ", though these targets contain no gfx1250"
-        chose = gfx1250_revision
+        chose = asic_revision
     elif not targetsGfx1250:
         return None
     else:
-        # CMake reads an empty value as "both"; --gfx1250-revision defaults to
+        # CMake reads an empty value as "both"; --asic-revision defaults to
         # None here, and interpolating that would send it the literal "None",
         # which its validation rejects outright.
-        gfx1250_revision = ""
+        asic_revision = ""
         how = "the runtime selects by asicRevision"
         chose = "both"
     print(f"gfx1250 ASIC revision: {chose} ({how})")
-    return f"-DHIPBLASLT_GFX1250_REVISION={gfx1250_revision}"
+    return f"-DHIPBLASLT_ASIC_REVISION={asic_revision}"
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +381,7 @@ def _gfx1250_revision_option(architecture: str, gfx1250_revision):
         "clients": "Build library clients.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "architecture": "GPU target(s), e.g. 'all' or 'gfx90a:xnack+;gfx90a:xnack-'.",
-        "gfx1250_revision": "Build only one gfx1250 ASIC-revision tree, 'v0' or 'v1'; the default builds both.",
+        "asic_revision": "Build only one gfx1250 ASIC-revision tree, 'v0' or 'v1'; the default builds both.",
         "cpu_ref_lib": "CPU reference library for testing: 'blis' or 'lapack'.",
         "use_system_packages": "Use system-installed msgpack/blas/lapack (requires --install-deps).",
         "debug": "Build with CMAKE_BUILD_TYPE=Debug.",
@@ -450,7 +450,7 @@ def build(
     # Appended rather than grouped with --architecture: invoke derives short
     # flags in signature order, so inserting a parameter mid-signature takes
     # -g from --gprof and cascades onto --logic-filter's -f.
-    gfx1250_revision=None,
+    asic_revision=None,
 ):
     _supported_distros()
 
@@ -506,7 +506,7 @@ def build(
         print("--gprof requires --static.")
         sys.exit(2)
 
-    _validate_gfx1250_revision(gfx1250_revision)
+    _validate_asic_revision(asic_revision)
 
     # PATH setup — use os.pathsep (';' on Windows, ':' on Linux)
     # lib/llvm/bin is Windows-only: the ROCm Windows SDK stores tools there
@@ -544,7 +544,7 @@ def build(
     ]
 
     if not no_tensile:
-        revision_opt = _gfx1250_revision_option(architecture, gfx1250_revision)
+        revision_opt = _asic_revision_option(architecture, asic_revision)
         if revision_opt:
             cmake_opts.append(revision_opt)
 

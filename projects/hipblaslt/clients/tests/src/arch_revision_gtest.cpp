@@ -18,16 +18,16 @@ namespace
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", 0), "gfx1250v0");
     }
 
-    TEST(ArchRevisionSmoke, Gfx1250ShippingRevisionKeepsTheBaseName)
+    TEST(ArchRevisionSmoke, Gfx1250V1RevisionKeepsTheBaseName)
     {
-        // Shipping v1 is revision 1; it must map to the plain gfx1250 tree.
+        // v1 is revision 1; it must map to the plain gfx1250 tree.
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", 1), "gfx1250");
     }
 
-    TEST(ArchRevisionSmoke, Gfx1250UnknownOrFutureRevisionDefaultsToShipping)
+    TEST(ArchRevisionSmoke, Gfx1250UnknownOrFutureRevisionDefaultsToV1)
     {
         // -1 is what HIP reports when it is too old to expose the field; any
-        // unseen value must default to the shipping tree rather than invent a
+        // unseen value must default to the v1 tree rather than invent a
         // subtree that was never built.
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", -1), "gfx1250");
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", 2), "gfx1250");

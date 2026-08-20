@@ -159,7 +159,7 @@ def validate(install_root: Path) -> List[str]:
         # ExtOp and Transform are resolved at runtime from gcnArchName, which is
         # the architecture name on either revision, so they live in the base
         # subtree only and a revision subtree that carried copies would be
-        # shipping files nothing opens.
+        # dead files nothing opens.
         if not revision_of:
             for template in REQUIRED_PER_BASE_FILES:
                 if not _has_required_file(entries, template, base):

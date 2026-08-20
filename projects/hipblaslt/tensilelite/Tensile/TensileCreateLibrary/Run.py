@@ -1148,9 +1148,9 @@ def run():
             selectedByArch[arch] = selectedByArch.get(arch, 0) + 1
     for logicArch in sorted(set(requestedRevision) | set(selectedByArch)):
         revisionName = requestedRevision.get(logicArch)
-        # Name it as the build's flags do ("v0"/"shipping"), so one grep finds
+        # Name it as the build's flags do ("v0"/"v1"), so one grep finds
         # this line and the invoke and CMake ones.
-        revision = revisionName.removeprefix(logicArch) if revisionName else "shipping"
+        revision = revisionName.removeprefix(logicArch) if revisionName else "v1"
         selected = selectedByArch.get(logicArch, 0)
         dropped = droppedByRevision.get(logicArch, 0)
         print1(
@@ -1159,14 +1159,14 @@ def run():
         )
         # A revision replaces the arch's tuning rather than adding to it, so an
         # uncovered problem type has no solution and fails at runtime with no
-        # useful message. A shipping build dropping revision logic is correct,
+        # useful message. A v1 build dropping revision logic is correct,
         # so warn only a revision build whose coverage is partial or empty.
         if logicArch in requestedRevision and (not selected or dropped):
             printWarning(
                 f"{revision} tuning replaces {logicArch}'s rather than adding to"
                 f" it ({selected} selected, {dropped} dropped); problem types with"
                 f" no {revision} logic have no solution and fail at runtime. Build"
-                f" {logicArch} without a revision for the shipping one."
+                f" {logicArch} without a revision for v1."
             )
 
     for logicFile in logicFiles:

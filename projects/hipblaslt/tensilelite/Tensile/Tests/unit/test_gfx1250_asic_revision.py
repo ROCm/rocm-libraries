@@ -1305,7 +1305,7 @@ def test_v0_build_selects_only_the_asic_revisions_logic(
 def test_v1_build_selects_only_the_architectures_logic(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """The mirror, and the isolation the shipping revision needs: v0's logic
+    """The mirror, and the isolation the v1 revision needs: v0's logic
     sits in the same tree and declares the same architecture, so a plain
     gfx1250 build globs it up unless ``ScheduleName`` excludes it. It would
     otherwise ship v0-derived solutions in every gfx1250 library built after v0
@@ -1408,10 +1408,10 @@ def test_a_revision_build_warns_that_the_dropped_tuning_has_no_replacement(
     assert f"replaces {GFX1250}'s rather than adding to it" in out
     assert "1 selected, 1 dropped" in out
     assert "fail at runtime" in out
-    assert "without a revision for the shipping one" in out
+    assert "without a revision for v1" in out
 
 
-def test_the_shipping_revision_reports_itself_without_warning(
+def test_the_v1_revision_reports_itself_without_warning(
     monkeypatch, tmp_path, restore_global_parameters, capsys
 ):
     """A v1 build drops the revision's logic the other way -- the correct, full
@@ -1421,7 +1421,7 @@ def test_the_shipping_revision_reports_itself_without_warning(
     )
 
     out = capsys.readouterr().out
-    assert f"{GFX1250} ASIC revision: shipping" in out
+    assert f"{GFX1250} ASIC revision: v1" in out
     assert "WARNING" not in out
 
 

@@ -15,11 +15,11 @@ set(TENSILELITE_OFFLOADBUNDLER "" CACHE STRING "Path to clang-offload-bundler.")
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
 
-set(HIPBLASLT_GFX1250_REVISION "" CACHE STRING "gfx1250 ASIC revisions to build ('' = both v0 and v1, 'v1' = shipping only, 'v0' = v0 only).")
+set(HIPBLASLT_ASIC_REVISION "" CACHE STRING "gfx1250 ASIC revisions to build ('' = both v0 and v1, 'v1' = v1 only, 'v0' = v0 only).")
 
 # Reject an unrecognized value rather than silently building the wrong revisions.
-if(NOT HIPBLASLT_GFX1250_REVISION MATCHES "^(v0|v1)?$")
-    message(FATAL_ERROR "HIPBLASLT_GFX1250_REVISION must be '', 'v0' or 'v1', got '${HIPBLASLT_GFX1250_REVISION}'")
+if(NOT HIPBLASLT_ASIC_REVISION MATCHES "^(v0|v1)?$")
+    message(FATAL_ERROR "HIPBLASLT_ASIC_REVISION must be '', 'v0' or 'v1', got '${HIPBLASLT_ASIC_REVISION}'")
 endif()
 
 if(NOT HIPBLASLT_LIBLOGIC_PATH)
@@ -28,23 +28,23 @@ endif()
 
 # gfx1250's two ASIC revisions (v0/v1) need different tuned kernels; the runtime
 # picks library/gfx1250/ (v1) vs library/gfx1250v0/ by asicRevision. The default
-# builds both (v1 here, v0 by the second command below); HIPBLASLT_GFX1250_REVISION
+# builds both (v1 here, v0 by the second command below); HIPBLASLT_ASIC_REVISION
 # only prunes which. GPU_TARGETS is untouched (it also feeds extops/transform/
 # validation on the base name); only the bare gfx1250 reaches here.
 set(_main_arches ${GPU_TARGETS})
 set(_build_gfx1250v0 OFF)
 if("gfx1250" IN_LIST GPU_TARGETS)
-    if(HIPBLASLT_GFX1250_REVISION STREQUAL "v0")
+    if(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
         list(TRANSFORM _main_arches REPLACE "^gfx1250$" "gfx1250v0")  # v0 in place of v1
         message(STATUS "hipBLASLt: gfx1250 ASIC revision v0 only")
-    elseif(HIPBLASLT_GFX1250_REVISION STREQUAL "v1")
-        message(STATUS "hipBLASLt: gfx1250 ASIC revision v1 only (shipping)")
+    elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v1")
+        message(STATUS "hipBLASLt: gfx1250 ASIC revision v1 only")
     else()
         set(_build_gfx1250v0 ON)  # both
         message(STATUS "hipBLASLt: gfx1250 ASIC revisions v0 and v1 (runtime selects by asicRevision)")
     endif()
-elseif(HIPBLASLT_GFX1250_REVISION STREQUAL "v0")
-    message(WARNING "HIPBLASLT_GFX1250_REVISION=v0 but GPU_TARGETS names no gfx1250 "
+elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
+    message(WARNING "HIPBLASLT_ASIC_REVISION=v0 but GPU_TARGETS names no gfx1250 "
                     "(${GPU_TARGETS}); nothing in this build is for the v0 revision.")
 endif()
 

@@ -80,7 +80,7 @@ def test_multiple_stale_dats_each_flagged(tmp_path):
 
 # --------------------------------------------------------------------------- #
 # ASIC-revision subtrees. gfx1250 ships as two silicon revisions that share one
-# ISA and one compiler target, so the shipping tree is library/gfx1250/ and the
+# ISA and one compiler target, so the v1 tree is library/gfx1250/ and the
 # pre-production one is library/gfx1250v0/. Only the DIRECTORY carries the
 # stepping: every file inside either subtree is named for the compiler target,
 # gfx1250. The runtime picks the directory from asicRevision and then forms the
@@ -98,7 +98,7 @@ def _make_v0_dir(root: Path) -> Path:
 
 
 def test_a_complete_v0_subtree_is_accepted(tmp_path):
-    """The layout an --gfx1250-revision-less build actually produces: the base
+    """The layout an --asic-revision-less build actually produces: the base
     tree with everything, plus a revision tree holding only Tensile artifacts,
     all named for the compiler target."""
     _make_arch_dir(tmp_path, "gfx1250")
