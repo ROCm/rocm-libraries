@@ -519,7 +519,7 @@ TEST(TestRMSnormBwdPlanFp16, CompileSetsCorrectDefinesForTripleNodeGraph)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=10"));
 }
 
-TEST(TestRMSnormBwdPlanBFp16, CompileSetsCorrectDefinesForSingleNodeGraph)
+TEST(TestRMSnormBwdPlanBfp16, CompileSetsCorrectDefinesForSingleNodeGraph)
 {
     auto [mockCompiler, capturedOptions]
         = setupMockCompileChain({150528, 50176, 224, 1},
@@ -544,7 +544,7 @@ TEST(TestRMSnormBwdPlanBFp16, CompileSetsCorrectDefinesForSingleNodeGraph)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormBwdPlanBFp16, CompileSetsCorrectDefinesForTripleNodeGraph)
+TEST(TestRMSnormBwdPlanBfp16, CompileSetsCorrectDefinesForTripleNodeGraph)
 {
     auto [mockCompiler, capturedOptions] = setupFusedActivationMockCompileChain(
         {150528, 50176, 224, 1},
@@ -561,9 +561,9 @@ TEST(TestRMSnormBwdPlanBFp16, CompileSetsCorrectDefinesForTripleNodeGraph)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTER_SIZE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_X_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DY_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DX_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_X_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DY_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DX_TYPE=__bf16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=10"));
