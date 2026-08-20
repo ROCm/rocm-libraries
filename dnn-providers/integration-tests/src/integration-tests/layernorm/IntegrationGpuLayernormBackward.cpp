@@ -164,7 +164,7 @@ protected:
         this->registerRmsValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
         this->registerRmsValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
-        this->synthesis().setGlobalSeed(layernormTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(layernormTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

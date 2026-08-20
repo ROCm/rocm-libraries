@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
@@ -209,6 +210,8 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeFpropReturnsZero)
 
 TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropReturnsZero)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -219,6 +222,8 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropReturnsZero)
 
 TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropParallelReturnsNonzero)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({768, 256, 16, 1},
                                                                             {1024, 3, 16, 16});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -230,6 +235,8 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropParallelReturnsNonzero)
 
 TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropWithoutOptionalTensorsReturnsNonzero)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
         {150528, 50176, 224, 1},
         {2, 3, 224, 224},
