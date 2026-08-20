@@ -1033,6 +1033,12 @@ def render_markdown(
         lines.append("_No claim-bearing bundles found._")
         return "\n".join(lines) + "\n"
 
+    if not targets:
+        lines.append(
+            f"_{len(units)} bundle(s) found, none carrying any support claim._"
+        )
+        return "\n".join(lines) + "\n"
+
     by_family: dict[str, list[ClaimUnit]] = defaultdict(list)
     for unit in units:
         by_family[unit.family].append(unit)
@@ -1208,7 +1214,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         target = args.output
-        regen_cmd = REGEN_OVERVIEW_COMMAND if args.overview_only else REGEN_COMMAND
+        if args.format == "json":
+            regen_cmd = REGEN_JSON_COMMAND
+        elif args.overview_only:
+            regen_cmd = REGEN_OVERVIEW_COMMAND
+        else:
+            regen_cmd = REGEN_COMMAND
         if str(target) == "-":
             print("error: --check needs a file to compare against", file=sys.stderr)
             return 2
@@ -1230,8 +1241,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if str(args.output) == "-":
         try:
-            sys.stdout.write(document)
-            sys.stdout.flush()
+            sys.stdout.buffer.write(document.encode("utf-8"))
+            sys.stdout.buffer.flush()
         except BrokenPipeError:
             # `| head` closing the pipe early is the caller's choice, not a
             # failure. Point the remaining buffered writes at devnull so the

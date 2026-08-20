@@ -1158,6 +1158,52 @@ class TestSidecarEdgeCases:
         c0 = next(u for u in units if u.case_id == "c0")
         assert c0.claims["E"] == {GFX942, GFX90A}
 
+    def test_units_with_no_targets_shows_message(self, bundle_root: Path) -> None:
+        _single_bundle(bundle_root, "quick/Conv/D", "C", claims={})
+        units = collect_units(bundle_root)
+        md = render_markdown(units, 0)
+        assert "1 bundle(s) found, none carrying any support claim" in md
+        assert "Op family" not in md
+
+
+class TestCheckRegenCommand:
+    def test_check_json_uses_json_regen_command(self, bundle_root: Path) -> None:
+        import tempfile
+
+        out = Path(tempfile.mkdtemp()) / "matrix.json"
+        _single_bundle(
+            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
+        )
+        main(
+            [
+                "--bundles-dir",
+                str(bundle_root),
+                "--format",
+                "json",
+                "--output",
+                str(out),
+            ]
+        )
+        out.write_text("stale", encoding="utf-8")
+        import io
+        from contextlib import redirect_stderr
+
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            rc = main(
+                [
+                    "--bundles-dir",
+                    str(bundle_root),
+                    "--format",
+                    "json",
+                    "--output",
+                    str(out),
+                    "--check",
+                ]
+            )
+        assert rc == 1
+        assert "--format json" in buf.getvalue()
+
 
 # --------------------------------------------------------------------------
 # The committed tree
@@ -1398,7 +1444,8 @@ class TestRealBundleTree:
         """`--output - | head` must exit quietly, not print a traceback.
 
         Piping into a pager or `head` is the whole reason '-' exists, and every
-        one of those consumers closes the pipe before 300 KB has drained.
+        one of those consumers closes the pipe before 420 KB has drained.
+        Uses a Python one-liner instead of `head` for cross-platform support.
         """
         script = Path(__file__).with_name("render_support_matrix.py")
         renderer = subprocess.Popen(
@@ -1407,12 +1454,19 @@ class TestRealBundleTree:
             stderr=subprocess.PIPE,
         )
         assert renderer.stdout is not None
-        head = subprocess.Popen(
-            ["head", "-1"], stdin=renderer.stdout, stdout=subprocess.PIPE
+        # Read one line then close — equivalent to `head -1` but works on
+        # Windows where `head` is not available.
+        reader = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(sys.stdin.buffer.readline()); sys.exit(0)",
+            ],
+            stdin=renderer.stdout,
+            stdout=subprocess.PIPE,
         )
-        # Ours must be the only handle left, or the pipe never breaks.
         renderer.stdout.close()
-        head.communicate()
+        reader.communicate()
         assert renderer.wait() == 0
         assert renderer.stderr is not None
         assert renderer.stderr.read() == b""

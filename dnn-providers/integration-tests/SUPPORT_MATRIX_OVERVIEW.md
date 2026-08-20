@@ -11,10 +11,10 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 
 | Op family | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC |
 |-----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | — | — | 🟡 528/840 | 🟡 624/840 | — |
-| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — |
+| **Batchnorm** | — | — | 🟡 528/842 | 🟡 624/842 | — |
+| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — |
 | **BatchnormInference** | — | — | 🟡 351/471 | 🟡 447/471 | — |
-| **BatchnormInferenceVarianceExt** | — | — | 🟡 144/264 | 🟡 240/264 | — |
+| **BatchnormInferenceVarianceExt** | — | — | 🟡 144/266 | 🟡 240/266 | — |
 | **BlockScaleDequantize** | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 108/108 | ✅ 108/108 |
 | **ConvolutionFwd** | — | — | — | 🟡 708/1188 | 🟡 708/1188 |
@@ -22,7 +22,7 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 | **Layernorm** | — | — | ✅ 708/708 | — | — |
 | **Matmul** | — | ✅ 333/333 | — | — | — |
 | **Pointwise** | — | — | — | ✅ 6/6 | — |
-| **RMSNorm** | — | — | ✅ 168/168 | — | — |
+| **RMSNorm** | — | — | 🟡 168/172 | — | — |
 | **RMSNormBackward** | — | — | ✅ 960/960 | — | — |
 | **Reduction** | — | — | — | — | — |
 | **Sdpa** | — | — | — | — | — |
@@ -31,10 +31,10 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 
 | Op family | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC |
 |-----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | — | — | 🟡 528/840 | 🟡 624/840 | — |
-| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — |
+| **Batchnorm** | — | — | 🟡 528/842 | 🟡 624/842 | — |
+| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — |
 | **BatchnormInference** | — | — | 🟡 351/471 | 🟡 447/471 | — |
-| **BatchnormInferenceVarianceExt** | — | — | 🟡 144/264 | 🟡 240/264 | — |
+| **BatchnormInferenceVarianceExt** | — | — | 🟡 144/266 | 🟡 240/266 | — |
 | **BlockScaleDequantize** | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 108/108 | ✅ 108/108 |
 | **ConvolutionFwd** | — | — | — | 🟡 108/1188 | 🟡 108/1188 |
@@ -42,7 +42,7 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 | **Layernorm** | — | — | ✅ 708/708 | — | — |
 | **Matmul** | — | ✅ 333/333 | — | — | — |
 | **Pointwise** | — | — | — | ✅ 6/6 | — |
-| **RMSNorm** | — | — | ✅ 168/168 | — | — |
+| **RMSNorm** | — | — | 🟡 168/172 | — | — |
 | **RMSNormBackward** | — | — | ✅ 960/960 | — | — |
 | **Reduction** | — | — | — | — | — |
 | **Sdpa** | — | — | — | — | — |
@@ -51,10 +51,10 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 
 | Op family | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC |
 |-----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | — | — | 🟡 528/840 | 🟡 624/840 | — |
-| **BatchnormBackward** | — | — | 🟡 132/192 | ✅ 192/192 | — |
+| **Batchnorm** | — | — | 🟡 528/842 | 🟡 624/842 | — |
+| **BatchnormBackward** | — | — | 🟡 132/193 | 🟡 192/193 | — |
 | **BatchnormInference** | — | — | 🟡 351/471 | 🟡 447/471 | — |
-| **BatchnormInferenceVarianceExt** | — | — | 🟡 144/264 | 🟡 240/264 | — |
+| **BatchnormInferenceVarianceExt** | — | — | 🟡 144/266 | 🟡 240/266 | — |
 | **BlockScaleDequantize** | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 108/108 | ✅ 108/108 |
 | **ConvolutionFwd** | — | — | — | 🟡 972/1188 | 🟡 972/1188 |
@@ -62,7 +62,7 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 | **Layernorm** | — | — | ✅ 708/708 | — | — |
 | **Matmul** | — | ✅ 333/333 | — | — | — |
 | **Pointwise** | — | — | — | ✅ 6/6 | — |
-| **RMSNorm** | — | — | ✅ 168/168 | — | — |
+| **RMSNorm** | — | — | 🟡 168/172 | — | — |
 | **RMSNormBackward** | — | — | ✅ 960/960 | — | — |
 | **Reduction** | — | — | — | — | — |
-| **Sdpa** | 🟡 12/35 | — | — | — | — |
+| **Sdpa** | 🟡 12/50 | — | — | — | — |

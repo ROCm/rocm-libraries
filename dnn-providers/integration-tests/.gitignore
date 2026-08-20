@@ -2,7 +2,7 @@
 .migration_reports/
 
 # The rendered engine support matrix (RFC 0015 §11). Generated, not committed:
-# it is ~300 KB today and grows with every bundle and every new gfx target,
+# it is ~420 KB today and grows with every bundle and every new gfx target,
 # which is both a large diff on every sidecar edit and close enough to the size
 # at which GitHub stops rendering a markdown file to be a problem. It is a pure
 # view of the committed .support.json sidecars, so anyone can rebuild it from a

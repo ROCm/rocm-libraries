@@ -760,7 +760,7 @@ stops rendering on GitHub at all.
 
 **Sidecar as source of truth.** The `support.json` sidecars are authoritative; the matrix is
 derived. It is **generated on demand and not committed** — a contributor who wants it runs the
-renderer against their checkout. This is deliberate: the rendered document is ~300 KB and grows
+renderer against their checkout. This is deliberate: the rendered document is ~420 KB and grows
 with every bundle and every gfx target added, which makes it both a large diff on every sidecar
 edit and close enough to the size at which GitHub stops rendering markdown to be a liability.
 Not committing it also removes the drift problem outright rather than policing it: there is no

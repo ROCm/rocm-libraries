@@ -253,7 +253,7 @@ python3 dnn-providers/integration-tests/scripts/render_support_matrix.py
 
 ### Rendering the support matrix
 
-`SUPPORT_MATRIX.md` is **generated, not committed** — it is ~300 KB and grows
+`SUPPORT_MATRIX.md` is **generated, not committed** — it is ~420 KB and grows
 with every bundle and every gfx target, which would mean a large diff on every
 sidecar edit and a file near the size at which GitHub stops rendering markdown.
 Run the command above to produce your own copy; it is git-ignored, so it will
@@ -262,7 +262,9 @@ people rendering the same checkout get byte-identical files.
 
 `SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the compact (~4 KB)
 overview-only variant produced by `--overview-only`, small enough to render on
-GitHub. A nightly CI job regenerates it automatically.
+GitHub. A pre-commit hook (`check-support-matrix-overview`) fails if it is
+stale — regenerate with `--overview-only`; a nightly CI job also opens a PR to
+refresh it.
 
 Useful flags:
 
