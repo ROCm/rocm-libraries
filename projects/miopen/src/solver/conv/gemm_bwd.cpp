@@ -748,11 +748,10 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
     // that the 1x1 solvers do not handle.
     if(!problem.IsLayoutDefault() && !gemm::UseNhwcViaTranspose(problem))
         return false;
-    // The transposes are batched 2D transposes over (C x H*W); they have their own type and size
-    // limits, and 3D (NDHWC) is not wired up here.
+    // A batched transpose only sees (batch, channels, spatial), so NDHWC works the same way as
+    // NHWC. The transposes still have their own type and size limits.
     if(gemm::UseNhwcViaTranspose(problem) &&
-       !(problem.Is2d() &&
-         BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
+       !(BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
                                                 problem.GetIn().GetLengths()) &&
          BatchedTransposeSolution::IsApplicable(problem.GetOutDataType(),
                                                 problem.GetOut().GetLengths())))
@@ -850,26 +849,25 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
     std::vector<OpKernelArg> w_trans_args;
     if(nhwc_transpose)
     {
-        const auto trans_dy = TransposeSolutionNhwc2Default{context,
-                                                            dyDesc.GetType(),
-                                                            static_cast<uint32_t>(in_n),
-                                                            static_cast<uint32_t>(wei_k),
-                                                            static_cast<uint32_t>(out_spatial[0]),
-                                                            static_cast<uint32_t>(out_spatial[1])};
-        const auto trans_dx = TransposeSolutionDefault2Nhwc{context,
-                                                            dxDesc.GetType(),
-                                                            static_cast<uint32_t>(in_n),
-                                                            static_cast<uint32_t>(in_c),
-                                                            static_cast<uint32_t>(in_spatial[0]),
-                                                            static_cast<uint32_t>(in_spatial[1])};
+        const auto trans_dy =
+            BatchedTransposeSolution{context,
+                                     dyDesc.GetType(),
+                                     static_cast<uint32_t>(dyDesc.GetLengths()[0]),
+                                     static_cast<uint32_t>(gemm::TensorSpatialSize(dyDesc)),
+                                     static_cast<uint32_t>(dyDesc.GetLengths()[1])};
+        const auto trans_dx =
+            BatchedTransposeSolution{context,
+                                     dxDesc.GetType(),
+                                     static_cast<uint32_t>(dxDesc.GetLengths()[0]),
+                                     static_cast<uint32_t>(dxDesc.GetLengths()[1]),
+                                     static_cast<uint32_t>(gemm::TensorSpatialSize(dxDesc))};
         // KYXC -> KCYX. Each of the K filters is a (Y*X) x (C/group) matrix to transpose.
         const auto trans_w =
-            TransposeSolutionNhwc2Default{context,
-                                          wDesc.GetType(),
-                                          static_cast<uint32_t>(wDesc.GetLengths()[0]),
-                                          static_cast<uint32_t>(wDesc.GetLengths()[1]),
-                                          static_cast<uint32_t>(wei_spatial[0]),
-                                          static_cast<uint32_t>(wei_spatial[1])};
+            BatchedTransposeSolution{context,
+                                     wDesc.GetType(),
+                                     static_cast<uint32_t>(wDesc.GetLengths()[0]),
+                                     static_cast<uint32_t>(gemm::TensorSpatialSize(wDesc)),
+                                     static_cast<uint32_t>(wDesc.GetLengths()[1])};
         solution.construction_params.push_back(trans_dy.GetKernelInfo());
         solution.construction_params.push_back(trans_w.GetKernelInfo());
         solution.construction_params.push_back(trans_dx.GetKernelInfo());

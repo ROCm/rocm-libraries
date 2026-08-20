@@ -65,6 +65,11 @@ double SlowdownFactor(int n_oper, double oper_factor, double multiple_oper_facto
 MIOPEN_INTERNALS_EXPORT bool IsNhwcTransposeEnabled();
 MIOPEN_INTERNALS_EXPORT bool IsNhwcIm2colEnabled();
 
+/// Elements per (batch, channel) plane: H*W for 4D, D*H*W for 5D. Also gives Y*X / Z*Y*X for a
+/// weight tensor. Lets the NHWC<->NCHW transposes be expressed identically for 2D and 3D, since
+/// a batched transpose only ever sees (batch, channels, spatial).
+MIOPEN_INTERNALS_EXPORT std::size_t TensorSpatialSize(const TensorDescriptor& desc);
+
 /// True when this problem is NHWC and should be served by transposing around the NCHW path.
 MIOPEN_INTERNALS_EXPORT bool UseNhwcViaTranspose(const miopen::conv::ProblemDescription& problem);
 

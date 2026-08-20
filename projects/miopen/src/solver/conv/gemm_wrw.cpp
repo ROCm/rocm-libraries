@@ -450,11 +450,10 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     // 1x1 solver does not handle.
     if(!problem.IsLayoutDefault() && !gemm::UseNhwcViaTranspose(problem))
         return false;
-    // The transposes are batched 2D transposes; they have their own type/size limits and 3D
-    // (NDHWC) is not wired up here.
+    // A batched transpose only sees (batch, channels, spatial), so NDHWC works the same way
+    // as NHWC.
     if(gemm::UseNhwcViaTranspose(problem) &&
-       !(problem.Is2d() &&
-         BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
+       !(BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
                                                 problem.GetIn().GetLengths()) &&
          BatchedTransposeSolution::IsApplicable(problem.GetOutDataType(),
                                                 problem.GetOut().GetLengths())))
@@ -561,30 +560,24 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
     std::vector<OpKernelArg> dy_trans_args, x_trans_args, dw_trans_args;
     if(nhwc_transpose)
     {
-        const auto sp = [&](const TensorDescriptor& d, int i) {
-            return static_cast<uint32_t>(d.GetLengths()[2 + i]);
-        };
         const auto trans_dy =
-            TransposeSolutionNhwc2Default{context,
-                                          dyDesc.GetType(),
-                                          static_cast<uint32_t>(dyDesc.GetLengths()[0]),
-                                          static_cast<uint32_t>(dyDesc.GetLengths()[1]),
-                                          sp(dyDesc, 0),
-                                          sp(dyDesc, 1)};
+            BatchedTransposeSolution{context,
+                                     dyDesc.GetType(),
+                                     static_cast<uint32_t>(dyDesc.GetLengths()[0]),
+                                     static_cast<uint32_t>(gemm::TensorSpatialSize(dyDesc)),
+                                     static_cast<uint32_t>(dyDesc.GetLengths()[1])};
         const auto trans_x =
-            TransposeSolutionNhwc2Default{context,
-                                          xDesc.GetType(),
-                                          static_cast<uint32_t>(xDesc.GetLengths()[0]),
-                                          static_cast<uint32_t>(xDesc.GetLengths()[1]),
-                                          sp(xDesc, 0),
-                                          sp(xDesc, 1)};
+            BatchedTransposeSolution{context,
+                                     xDesc.GetType(),
+                                     static_cast<uint32_t>(xDesc.GetLengths()[0]),
+                                     static_cast<uint32_t>(gemm::TensorSpatialSize(xDesc)),
+                                     static_cast<uint32_t>(xDesc.GetLengths()[1])};
         const auto trans_dw =
-            TransposeSolutionDefault2Nhwc{context,
-                                          dwDesc.GetType(),
-                                          static_cast<uint32_t>(dwDesc.GetLengths()[0]),
-                                          static_cast<uint32_t>(dwDesc.GetLengths()[1]),
-                                          sp(dwDesc, 0),
-                                          sp(dwDesc, 1)};
+            BatchedTransposeSolution{context,
+                                     dwDesc.GetType(),
+                                     static_cast<uint32_t>(dwDesc.GetLengths()[0]),
+                                     static_cast<uint32_t>(dwDesc.GetLengths()[1]),
+                                     static_cast<uint32_t>(gemm::TensorSpatialSize(dwDesc))};
         solution.construction_params.push_back(trans_dy.GetKernelInfo());
         solution.construction_params.push_back(trans_x.GetKernelInfo());
         solution.construction_params.push_back(trans_dw.GetKernelInfo());

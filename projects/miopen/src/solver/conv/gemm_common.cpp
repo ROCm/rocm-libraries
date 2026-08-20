@@ -27,6 +27,8 @@
 #include <miopen/env.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
+#include <numeric>
+
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_GEMM_NHWC_TRANSPOSE)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_GEMM_NHWC_IM2COL)
 
@@ -38,6 +40,13 @@ namespace gemm {
 bool IsNhwcTransposeEnabled() { return env::enabled(MIOPEN_DEBUG_CONV_GEMM_NHWC_TRANSPOSE); }
 
 bool IsNhwcIm2colEnabled() { return env::enabled(MIOPEN_DEBUG_CONV_GEMM_NHWC_IM2COL); }
+
+std::size_t TensorSpatialSize(const TensorDescriptor& desc)
+{
+    const auto& lens = desc.GetLengths();
+    return std::accumulate(
+        lens.begin() + 2, lens.end(), std::size_t{1}, std::multiplies<std::size_t>());
+}
 
 bool UseNhwcViaTranspose(const miopen::conv::ProblemDescription& problem)
 {
