@@ -233,6 +233,9 @@ class _SetupNewTilePapTdmWriter:
     def releaseWaveIdxAfterStagger(self, kernel):
         return kwa_module.KernelWriterAssembly.releaseWaveIdxAfterStagger(self, kernel)
 
+    def hoistWaveParityWrapUSel(self, kernel, tpa, tpb):
+        return self._module("hoistWaveParityWrapUSel")
+
     def declareStaggerParms(self, kernel):
         return self._module("declareStaggerParms")
 
@@ -829,7 +832,11 @@ def test_setup_new_tile_releases_waveidx_after_stagger_for_wave_separated_tdm(mo
         # that flips every later parity site to the Serial recompute.
         assert "undefineSgpr_WaveIdx" not in module_names
         assert "ReleaseWaveIdxAfterStagger" in module_names
+        assert "hoistWaveParityWrapUSel" in module_names
         assert module_names.index("calculateStagger_B") < module_names.index(
+            "hoistWaveParityWrapUSel"
+        )
+        assert module_names.index("hoistWaveParityWrapUSel") < module_names.index(
             "ReleaseWaveIdxAfterStagger"
         )
         assert writer.states.waveIdxReleasedAfterStagger is True

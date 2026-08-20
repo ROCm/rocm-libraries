@@ -99,6 +99,7 @@ _CONFIGS = {
 
 _UNDEF_RE = re.compile(r"^\s*\.set\s+sgprWaveIdx\s*,\s*UNDEF\s*$", re.MULTILINE)
 _WAVEIDX_READ_RE = re.compile(r"s\[sgprWaveIdx\]")
+_LOOP_BEGIN_RE = re.compile(r"^label_LoopBeginL:", re.MULTILINE)
 
 
 def _emit_with_reg_state(config_path, arch, limit):
@@ -249,3 +250,27 @@ def test_streamk_tdm_stagger_prologue_keeps_cheap_parity_read(emitted):
             f"{variant}: no direct s[sgprWaveIdx] parity read before the release; "
             "the stagger prologue lost its fast path"
         )
+
+
+def test_streamk_tdm_wrapua_hoisted_before_kloop(emitted):
+    """A/B WrapU is selected once before the unroll loop, while WaveIdx is live.
+
+    MX scale WrapUMXSA/WrapUMXSB stay in-loop (hoistedWrapUSel=False): those
+    offsets use scale strides, so an A/B-selected WrapU would wrap the scale
+    descriptor to the wrong address. Peak SGPR must stay at the 106 cap.
+    """
+    for r in emitted:
+        src, variant = r["src"], r["variant"]
+        begin = _LOOP_BEGIN_RE.search(src)
+        assert begin is not None, f"{variant}: missing label_LoopBeginL"
+        prologue = src[: begin.start()]
+        assert "hoist: WrapUA = parity ? WrapUB" in prologue, (
+            f"{variant}: WrapUA wave-parity select was not hoisted before the K-loop"
+        )
+        if variant == _TIGHT_VARIANT:
+            assert r["poolSize"] <= 106, (
+                f"{variant}: poolSize={r['poolSize']} exceeds MaxSgpr 106"
+            )
+            assert r["overflowed"] == 0, (
+                f"{variant}: overflowedResources={r['overflowed']}"
+            )
