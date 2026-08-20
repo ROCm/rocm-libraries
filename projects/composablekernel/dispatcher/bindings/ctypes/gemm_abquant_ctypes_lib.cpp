@@ -62,21 +62,9 @@ int dispatcher_run_abquant_gemm(const void* A,
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_abquant_gemm";
 
-    if(!g_initialized)
-    {
-        std::cerr << kFn << ": not initialized\n";
+    if(!check_initialized(kFn, g_initialized) || !check_non_null(kFn, {A, B, AQ, BQ, C}) ||
+       !check_positive_dims(kFn, {M, N, K, QK_A, QK_B, QN_B}))
         return -1;
-    }
-    if(!A || !B || !AQ || !BQ || !C)
-    {
-        std::cerr << kFn << ": null pointer argument\n";
-        return -1;
-    }
-    if(M <= 0 || N <= 0 || K <= 0 || QK_A <= 0 || QK_B <= 0 || QN_B <= 0)
-    {
-        std::cerr << kFn << ": invalid dimensions\n";
-        return -1;
-    }
 
     // Graceful reject: PreshuffleB is not supported for fp4 (BDataType==pk_fp4_t),
     // exactly as Old-TE THROWS in run_gemm_quant_example.inc:994-1001. The fp4
@@ -257,18 +245,8 @@ int dispatcher_run_abquant_gemm(const void* A,
     args.stride_AQ = static_cast<ck_tile::index_t>(stride_AQ);
     args.stride_BQ = static_cast<ck_tile::index_t>(stride_BQ);
 
-    const float exec_time = launch<SelectedKernel>(args, time_ms != nullptr);
-    if(exec_time < 0.0f)
-    {
-        std::cerr << kFn << ": kernel reported unsupported args\n";
-        return -2;
-    }
-
-    BRIDGE_HIP_CHECK(
-        kFn, hipMemcpy(C, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
-    if(time_ms)
-        *time_ms = exec_time;
-    return 0;
+    return launch_and_copyback<SelectedKernel, CDataType>(
+        kFn, args, C, C_dev, static_cast<std::size_t>(M) * N, time_ms);
 }
 
 } // extern "C"

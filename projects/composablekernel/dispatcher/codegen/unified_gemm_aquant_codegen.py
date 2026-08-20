@@ -41,7 +41,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from codegen_common import make_gemm_aquant_kernel_name, gemm_aquant_effective_epilogue
+from codegen_common import (
+    make_gemm_aquant_kernel_name,
+    gemm_aquant_effective_epilogue,
+    emit_generated_header_preamble,
+    emit_single_kernel_include_footer,
+    run_codegen_cli,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -267,17 +273,9 @@ class AQuantKernelHeaderGenerator:
                     WarpTileM, WarpTileN, WarpTileK,
                     TransposeC>>;"""
 
-        return f"""\
-// SPDX-License-Identifier: MIT
-// Auto-generated AQuant (A-only quantized) GEMM kernel header.
-// DO NOT EDIT -- regenerate via unified_gemm_aquant_codegen.py
-#pragma once
-
-#include "ck_tile/core.hpp"
-#include "ck_tile/host/kernel_launch.hpp"
-#include "ck_tile/ops/gemm_quant.hpp"
-#include "ck_tile/ops/epilogue.hpp"
-
+        return emit_generated_header_preamble(
+            "AQuant (A-only quantized) GEMM", "unified_gemm_aquant_codegen.py"
+        ) + f"""\
 namespace {ns} {{
 
 constexpr const char* KERNEL_NAME = "{spec.name}";
@@ -404,24 +402,25 @@ using SelectedKernel = {struct};
 
 }} // namespace {ns}
 
-#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
-using SelectedKernel = {ns}::{struct};
-constexpr const char* KERNEL_NAME = {ns}::KERNEL_NAME;
-using ADataType   = {ck_a};
-using BDataType   = {ck_b};
-using CDataType   = {ck_c};
-using QDataType   = {ck_q};
-using AccDataType = {ck_acc};
-using QuantGroupSize = {ns}::QuantGroupSize;
-using ALayout = {ns}::ALayout;
-using BLayout = {ns}::BLayout;
-using CLayout = {ns}::CLayout;
-// AQ scale-tensor layout: RowMajor for rcr/rrr/crr, ColumnMajor for ccr.
-// The ctypes lib derives stride_AQ from this (RowMajor -> QK_A, ColumnMajor -> M).
-using AQLayout = {ns}::AQLayout;
-constexpr ck_tile::index_t GroupSizeK = {ns}::{struct}::GroupSizeK;
-#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
-"""
+""" + emit_single_kernel_include_footer(
+            ns=ns,
+            struct=struct,
+            ck_a=ck_a,
+            ck_b=ck_b,
+            ck_c=ck_c,
+            ck_q=ck_q,
+            ck_acc=ck_acc,
+            extra_lines=(
+                f"using QuantGroupSize = {ns}::QuantGroupSize;\n"
+                f"using ALayout = {ns}::ALayout;\n"
+                f"using BLayout = {ns}::BLayout;\n"
+                f"using CLayout = {ns}::CLayout;\n"
+                "// AQ scale-tensor layout: RowMajor for rcr/rrr/crr, ColumnMajor for ccr.\n"
+                "// The ctypes lib derives stride_AQ from this (RowMajor -> QK_A, ColumnMajor -> M).\n"
+                f"using AQLayout = {ns}::AQLayout;\n"
+                f"constexpr ck_tile::index_t GroupSizeK = {ns}::{struct}::GroupSizeK;"
+            ),
+        )
 
 
 # =============================================================================
@@ -558,107 +557,21 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
 # =============================================================================
 
 
-def generate_kernels(
-    output_dir: Path,
-    config: Optional[dict] = None,
-    parallel: bool = True,
-) -> List[Path]:
-    """Generate all AQuant kernel headers into output_dir.
-
-    Returns list of generated .hpp paths.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    cfg = config or _default_config()
-    specs = _build_specs(cfg)
-
-    if not specs:
-        log.warning("No kernel specs produced from config -- check variant_keys and tile_configs")
-        return []
-
-    log.info("Generating %d AQuant kernel headers into %s", len(specs), output_dir)
-
-    gen = AQuantKernelHeaderGenerator()
-    generated: List[Path] = []
-
-    def _generate_one(spec: AQuantKernelSpec) -> Path:
-        header = gen.generate(spec)
-        out_path = output_dir / f"{spec.name}.hpp"
-        out_path.write_text(header)
-        log.info("  wrote %s", out_path.name)
-        return out_path
-
-    if parallel and len(specs) > 1:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as ex:
-            futures = {ex.submit(_generate_one, s): s for s in specs}
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    generated.append(fut.result())
-                except Exception as e:
-                    log.error("Failed generating %s: %s", futures[fut].name, e)
-    else:
-        for spec in specs:
-            try:
-                generated.append(_generate_one(spec))
-            except Exception as e:
-                log.error("Failed generating %s: %s", spec.name, e)
-
-    log.info("Generated %d / %d headers", len(generated), len(specs))
-    return generated
-
-
 # =============================================================================
 # CLI
 # =============================================================================
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="AQuant (A-only quantized) GEMM kernel header generator"
+    return run_codegen_cli(
+        description="AQuant (A-only quantized) GEMM kernel header generator",
+        op_label="AQuant",
+        make_generator=AQuantKernelHeaderGenerator,
+        build_specs=_build_specs,
+        default_config=_default_config,
+        arch_aware=True,
+        default_gfx_arch="gfx950",
     )
-    parser.add_argument("--output-dir", type=Path,
-                        help="Directory to write generated .hpp files "
-                             "(required unless --list-names)")
-    parser.add_argument("--config", type=Path,
-                        help="JSON config file (defaults to built-in sweep)")
-    parser.add_argument("--config-json", type=str,
-                        help="Inline JSON config string")
-    parser.add_argument("--no-parallel", action="store_true",
-                        help="Disable parallel generation")
-    parser.add_argument("--gfx-arch", type=str, default="gfx950",
-                        help="Target GPU arch for the built-in default sweep's "
-                             "arch-derived WarpTileK (128 on gfx950, 32/64 on gfx942). "
-                             "Ignored when --config/--config-json is given.")
-    parser.add_argument("--list-names", action="store_true",
-                        help="Print kernel names that would be generated and exit")
-    args = parser.parse_args()
-
-    cfg: Optional[dict] = None
-    if args.config_json:
-        try:
-            cfg = json.loads(args.config_json)
-        except json.JSONDecodeError as e:
-            log.error("Invalid --config-json: %s", e)
-            return 1
-    elif args.config:
-        with open(args.config) as f:
-            cfg = json.load(f)
-
-    if args.list_names:
-        specs = _build_specs(cfg or _default_config(args.gfx_arch))
-        for s in specs:
-            print(s.name)
-        return 0
-
-    if args.output_dir is None:
-        parser.error("--output-dir is required unless --list-names is given")
-
-    paths = generate_kernels(
-        output_dir=args.output_dir,
-        config=cfg,
-        parallel=not args.no_parallel,
-    )
-    return 0 if paths else 1
 
 
 if __name__ == "__main__":
