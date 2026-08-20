@@ -194,6 +194,7 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "block_size",
         "num_kv_blocks",
         "use_sinks",
+        "causal_bottom_right",
     }
 )
 
@@ -215,6 +216,9 @@ _SPEC_PERTURBATIONS = {
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
     "causal": (False, True),
+    # gfx950-only diagonal alignment; this builder never reads it and its
+    # supports_attention_dense refuses it, so there is no legal second value here.
+    "causal_bottom_right": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
     "dtype": ("bf16", "fp16"),
     "sliding_window": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
     "ragged": (),  # unbuildable
@@ -428,6 +432,14 @@ def test_supports_rejects_non_gfx942():
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
         (dict(sliding_window=64), "sliding_window"),
         (dict(use_sinks=True), "sinks"),
+        # Lives on the shared spec but is implemented only in the gfx950 builder. If
+        # supports let it through, this builder would emit a top-left mask while
+        # gfx942_kernel_name inherited the shared name's `br` tag -- a wrong result
+        # under a symbol claiming to be right.
+        (
+            dict(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True),
+            "causal_bottom_right",
+        ),
     ],
 )
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):

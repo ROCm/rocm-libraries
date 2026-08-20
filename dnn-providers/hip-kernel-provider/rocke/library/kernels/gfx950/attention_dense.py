@@ -129,14 +129,29 @@ class AttentionDenseSpec:
     #   0-cost when False: the offset is a build-time int, so nothing is emitted and
     #   the IR is byte-identical.
     #
-    #   Needed for CHUNKED PREFILL, where a chunk of queries is scored against a longer
-    #   KV cache (vLLM / SGLang issue this on every chunk). The queries are the LAST
-    #   seqlen_q positions of the sequence, so top-left alignment would let query 0 see
-    #   only key 0 -- it builds and runs and is silently wrong.
+    #   This is the alignment a query block gets when it is the LAST seqlen_q positions
+    #   of a longer sequence -- scored against a KV cache that already holds everything
+    #   before it. Under top-left alignment such a block would let query 0 see only
+    #   key 0: it builds, it runs, and it is silently wrong. MaskType
+    #   BOTTOM_RIGHT_CAUSAL (2) names exactly this case.
+    #
+    #   SCOPE TODAY: statically-shaped, tile-aligned specs only. seqlen_q must be a
+    #   multiple of 256 and seqlen_kv a multiple of block_n, because the aligned path
+    #   requires it and the offset has to land on a tile boundary. The two paths that
+    #   take arbitrary lengths are both excluded -- `ragged` is self-attention only
+    #   (seqlen_q == seqlen_kv, so the offset is always 0) and `varlen` needs a runtime
+    #   per-sequence offset. A general chunked-prefill request from vLLM / SGLang, whose
+    #   KV length is arbitrary, therefore does NOT reach this path yet; extending
+    #   ragged/varlen to bottom-right is the follow-up that would get there.
     #
     #   Requires causal=True and seqlen_q <= seqlen_kv. Not supported with persistent
-    #   (that path derives the diagonal separately and needs its own offset) or with
-    #   sliding_window (the window band would have to shift with it).
+    #   (that path derives the diagonal separately and needs its own offset), with
+    #   sliding_window (the window band would have to shift with it), or with varlen
+    #   (see the validation for why a baked offset is wrong there).
+    #
+    #   gfx950 ONLY. The gfx942 dense kernel reuses this spec class and does not read
+    #   this field, so its supports_attention_dense() rejects it rather than emitting a
+    #   `br` symbol that runs a top-left mask.
     causal_bottom_right: bool = False
     dtype: str = "bf16"
     # sliding_window: left-context window W. 0 = disabled (full causal, the
@@ -333,6 +348,19 @@ class AttentionDenseSpec:
             if self.sliding_window > 0:
                 raise ValueError(
                     "causal_bottom_right is not supported with sliding_window>0"
+                )
+            if self.varlen:
+                # The offset below is baked from seqlen_q/seqlen_kv, which under varlen
+                # are the PADDED MAXIMA -- the real per-sequence lengths only exist at
+                # runtime, in cu_seqlens. Every sequence in the batch would get the same
+                # baked diagonal, and the n_upper clamp keeps it in bounds, so this is
+                # wrong numerics rather than a fault. Bottom-right is specified per
+                # sequence for variable lengths, so it needs a runtime
+                # (seqlen_kv_b - seqlen_q_b), not a compile-time constant.
+                raise ValueError(
+                    "causal_bottom_right is not supported with varlen=True (the "
+                    "diagonal offset would be baked from the padded maxima, not each "
+                    "sequence's own length)"
                 )
             if self.seqlen_q > self.seqlen_kv:
                 raise ValueError(
