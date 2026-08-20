@@ -28,8 +28,8 @@ class AsmKpackArchive
 public:
     static AsmKpackArchive& instance()
     {
-        static AsmKpackArchive singleton;
-        return singleton;
+        static AsmKpackArchive s_singleton;
+        return s_singleton;
     }
 
     struct KernelData
@@ -46,7 +46,7 @@ public:
 
         void* data = nullptr;
         size_t size = 0;
-        kpack_error_t err = kpack_get_kernel(archive, tocKey.c_str(), arch.c_str(), &data, &size);
+        const kpack_error_t err = kpack_get_kernel(archive, tocKey.c_str(), arch.c_str(), &data, &size);
         if(err != KPACK_SUCCESS)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -76,7 +76,7 @@ private:
 
     kpack_archive_t getOrOpenArchive(const std::string& arch)
     {
-        std::lock_guard<std::mutex> lock(_mutex);
+        const std::lock_guard<std::mutex> lock(_mutex);
 
         auto it = _archives.find(arch);
         if(it != _archives.end())
@@ -88,7 +88,7 @@ private:
                          / ("hip_kernel_provider_sdpa_" + arch + ".kpack");
 
         kpack_archive_t archive = nullptr;
-        kpack_error_t err = kpack_open(kpackPath.string().c_str(), &archive);
+        const kpack_error_t err = kpack_open(kpackPath.string().c_str(), &archive);
         if(err != KPACK_SUCCESS)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
