@@ -68,7 +68,11 @@ function(add_benchmark benchmark_src)
   elseif(HIP_COMPILER STREQUAL "nvcc")
     target_link_libraries(${BENCHMARK_TARGET} PRIVATE nvidia-ml)
   else()
-    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+    if(TARGET amd_smi)
+      target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+    else()
+      target_compile_definitions(${BENCHMARK_TARGET} PRIVATE PRIMBENCH_NO_MONITORING)
+    endif()
   endif()
 
   set_target_properties(${BENCHMARK_TARGET}
