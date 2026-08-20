@@ -214,10 +214,9 @@ protected:
     }
 
     /// Like buildAndCompile(), but drives create_execution_plan_ext() with explicit
-    /// knob settings instead of create_execution_plans()'s heuristic default path --
-    /// the only way to set global.benchmarking, which add_engine_sweep() and the
-    /// default heuristic path both strip (plan §3 "The benchmarking knob is explicitly
-    /// excluded from the only enumeration path there is").
+    /// knob settings instead of create_execution_plans()'s heuristic default path.
+    /// That is the only way to set global.benchmarking, which add_engine_sweep() and
+    /// the default heuristic path both strip.
     void buildAndCompileWithKnobs(Graph& graph,
                                   int64_t pinnedEngineId,
                                   const std::vector<KnobSetting>& knobSettings)
@@ -425,17 +424,12 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 
 // global.benchmarking: the composite plan built when the knob is set
 
-/// Drives global.benchmarking=1 through the real frontend against the shipped
-/// pointwise pack, verifying the numerical result against the CPU reference exactly as
-/// every other case in this file does. Per plan §9 uncertainty 2, this asserts
-/// correctness of the result, never which candidate kernel won the internal timing --
-/// the two block-size-64/256 FLOAT candidates ReportsAKnobWhoseValuesComeFromTheCatalog
-/// already proves survive knob filtering for this graph may be indistinguishable
-/// within noise, and the feature is still correct if it picks either one (or falls
-/// back to the ranked front on an all-unusable sampling pass) as long as the winner
-/// actually executes and produces the right answer. This is also the only test in the
-/// whole feature that proves timing runs at all -- see 06-gotchas.md "Enumeration
-/// proves much less than it looks".
+/// Drives global.benchmarking=1 through the frontend against the shipped pointwise
+/// pack, verifying the numerical result against the CPU reference. Asserts correctness
+/// only, never which candidate won the internal timing: the two block-size-64/256
+/// FLOAT candidates surviving knob filtering for this graph may be indistinguishable
+/// within noise, and either winner -- or the ranked-front fallback on an all-unusable
+/// sampling pass -- is correct so long as it produces the right answer.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 {
     auto graph = buildPointwiseAddGraph();
@@ -448,11 +442,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
-    // First execute() pays the priming/sampling cost (by design, see docs); the second
-    // reuses the cached winner. Both must still produce the correct numerical result --
-    // the sampling pass itself writes real answers into the caller's buffers on its
-    // final (delegated) call, and executeAndVerify() re-randomizes and re-checks every
-    // time, so a benchmarking-only correctness regression cannot hide behind either call.
+    // The first execute() samples every candidate; the second reuses the cached winner.
+    // Both must produce the correct result, and executeAndVerify() re-randomizes and
+    // re-checks each time.
     executeAndVerify(*graph, workspace.get(), /*seed=*/0);
     executeAndVerify(*graph, workspace.get(), /*seed=*/1);
 }

@@ -31,9 +31,8 @@ namespace hipdnn_plugin_sdk::ingestor
 /// name.
 using KnobFilter = std::map<std::string, int64_t>;
 
-/// What `TSettings` used with GenericPlanBuilder must carry, grouped so a second
-/// provider adopts the whole contract by embedding one member rather than replicating
-/// loose fields by name.
+/// What a `TSettings` used with GenericPlanBuilder must carry, grouped so a second
+/// provider embeds one member rather than replicating loose fields by name.
 struct IngestorSettings
 {
     KnobFilter knobFilter;
@@ -44,8 +43,7 @@ struct IngestorSettings
 /// candidate, and this builds a plan for whichever one selection chose.
 /// @tparam THandle Must expose `hipStream_t getStream() const`, the stream benchmarking
 ///         times kernels on. Required of ingestor users only -- validateHandleType()
-///         does not ask for it, so a provider that never instantiates these templates
-///         pays nothing.
+///         does not ask for it.
 /// @tparam TSettings Must carry an `IngestorSettings ingestorSettings` member.
 /// @tparam TContext Must expose `const TSettings& executionSettings() const`, holding
 ///         the settings initializeExecutionSettings() populated.
@@ -141,9 +139,9 @@ public:
     }
 
     /// The override is consulted unconditionally: it must change the outcome even when
-    /// engineConfig is invalid or carries no knob at all, since that combination is what
-    /// makes a plain hipdnnExecute (no autotune, no knob) benchmark. readBenchmarkingEnabled
-    /// always runs so the knob's own answer is available to value_or() when unset.
+    /// engineConfig is invalid or carries no knob, which is what makes a plain
+    /// hipdnnExecute benchmark. readBenchmarkingEnabled() always runs so the knob's own
+    /// answer is available to value_or().
     void initializeExecutionSettings(const THandle& /*handle*/,
                                      const IGraph& /*opGraph*/,
                                      const IEngineConfig& engineConfig,
@@ -168,8 +166,7 @@ public:
 
         // The settings this context already carries, not a second parse of engineConfig:
         // initializeExecutionSettings() ran against this same config immediately before
-        // and the engine stored the result. Re-reading is both wasted work and a second
-        // place for the two paths to disagree.
+        // and the engine stored the result.
         const auto& settings = executionContext.executionSettings().ingestorSettings;
         const auto filtered = applyKnobFilter(catalog.entries, settings.knobFilter);
         if(filtered.empty())
@@ -216,7 +213,7 @@ public:
         }
 
         // An empty vector here (every candidate's GenericPlan threw) throws
-        // INTERNAL_ERROR out of BenchmarkPlan's own constructor, propagating unhandled.
+        // INTERNAL_ERROR out of BenchmarkPlan's constructor, propagating unhandled.
         executionContext.setPlan(
             std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates), handle));
     }
@@ -310,9 +307,9 @@ private:
         return filter;
     }
 
-    /// Separate from readKnobFilter(): this knob is never a metadata filter entry, it
-    /// is a plain on/off. Absent knob or invalid config both read as false; a non-int
-    /// setting throws, naming the knob, matching every other knob's type contract.
+    /// Separate from readKnobFilter(): this knob is a plain on/off, never a metadata
+    /// filter entry. Absent knob or invalid config both read as false; a non-int setting
+    /// throws, matching every other knob's type contract.
     bool readBenchmarkingEnabled(const IEngineConfig& engineConfig) const
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;

@@ -18,6 +18,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -28,82 +29,49 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Timing constants, not knobs: Part 1 fixes the mechanism. These are starting values,
-/// not measured ones -- the gfx942 run confirmed sampling executes and selects, but did
-/// not measure per-candidate variance, so whether this many iterations makes a pointwise
-/// kernel's timing stable is still open (plan §9 uncertainty 1).
+/// Sampling counts, matching MIOpen's EvaluateInvokers: one untimed warmup followed by
+/// up to eight total runs per candidate.
 constexpr int BENCHMARK_WARMUP_RUNS = 1;
-constexpr int BENCHMARK_ITERATIONS = 5;
+constexpr int BENCHMARK_ITERATIONS = 7;
 
 namespace detail
 {
 
-/// Owns at most one hipEvent_t and always destroys it, including when a candidate's
-/// execute() throws between construction and destruction.
-class ScopedHipEvent
+/// A hipEvent_t that destroys itself, or an empty ScopedResource if creation failed.
+inline hipdnn_data_sdk::utilities::ScopedResource<hipEvent_t> createScopedHipEvent()
 {
-public:
-    ScopedHipEvent()
+    hipEvent_t event = nullptr;
+    if(hipEventCreate(&event) != hipSuccess)
     {
-        if(hipEventCreate(&_event) != hipSuccess)
-        {
-            _event = nullptr;
-        }
+        return {};
     }
-
-    ~ScopedHipEvent()
-    {
-        if(_event != nullptr)
-        {
-            // Nothing actionable in a destructor; the event is being discarded anyway.
-            static_cast<void>(hipEventDestroy(_event));
-        }
-    }
-
-    ScopedHipEvent(const ScopedHipEvent&) = delete;
-    ScopedHipEvent& operator=(const ScopedHipEvent&) = delete;
-    ScopedHipEvent(ScopedHipEvent&&) = delete;
-    ScopedHipEvent& operator=(ScopedHipEvent&&) = delete;
-
-    bool valid() const
-    {
-        return _event != nullptr;
-    }
-
-    hipEvent_t get() const
-    {
-        return _event;
-    }
-
-private:
-    hipEvent_t _event = nullptr;
-};
+    // Nothing actionable on a destroy failure; the event is being discarded anyway.
+    return {event, [](hipEvent_t handle) { static_cast<void>(hipEventDestroy(handle)); }};
+}
 
 } // namespace detail
 
-/// A composite IPlan owning every knob-filtered catalog entry as its own GenericPlan,
-/// timing each on the first execute() and delegating every call after to the fastest.
-/// Wraps GenericPlan rather than widening it: a single-kernel plan's construction,
-/// workspace query, and null-prepared check stay exactly what they are today.
+/// An IPlan owning one GenericPlan per knob-filtered catalog entry. Times each candidate
+/// on the first execute() and delegates every call to the fastest. Wraps GenericPlan
+/// rather than widening it, leaving single-kernel construction, workspace query, and the
+/// null-prepared check unchanged.
 ///
-/// Timing goes through IPlan::execute() only, on the handle's own stream -- this class
-/// never touches a dispatcher, a PreparedDispatch, or any HIP launch API beyond the
-/// bracketing events.
+/// Timing goes through IPlan::execute() only, bracketed by HIP events on the handle's
+/// stream; this class touches no dispatcher, PreparedDispatch, or HIP launch API.
 template <typename THandle>
 class BenchmarkPlan : public IPlan<THandle>
 {
 public:
-    /// One sub-plan plus the kernel it was built for. kernelId rides alongside because
-    /// IPlan has no kernel accessor and must not grow one -- it is what the selection
-    /// log names and what a future disk-backed cache would persist against.
+    /// A sub-plan and the kernel it was built for. IPlan has no kernel accessor, so the
+    /// id rides alongside for the selection log.
     struct Candidate
     {
         DescriptorId kernelId;
         std::unique_ptr<IPlan<THandle>> plan;
     };
 
-    /// @param handle Used once, here, to size every sub-plan's workspace requirement;
-    ///        execute() always uses the handle its own caller passes.
+    /// @param handle Sizes every sub-plan's workspace requirement; execute() uses the
+    ///        handle its own caller passes.
     /// @throws HipdnnPluginException(INTERNAL_ERROR) if @p candidates is empty.
     BenchmarkPlan(std::vector<Candidate> candidates, const THandle& handle)
         : _candidates(std::move(candidates))
@@ -130,11 +98,9 @@ public:
         return _workspaceBytes;
     }
 
-    /// Sampling runs candidates against the caller's real buffers, so a candidate that
-    /// fails mid-loop can leave a partial result behind. What makes that safe is that
-    /// this function always ends with the delegated execute below, which overwrites the
-    /// output with the winner's. Never add an early return between resolveChosen() and
-    /// that delegation.
+    /// Sampling runs candidates against the caller's buffers, so a candidate failing
+    /// mid-loop can leave a partial result behind. The delegated execute below overwrites
+    /// it with the winner's output; never add an early return before that delegation.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     void execute(const THandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -146,15 +112,9 @@ public:
     }
 
 private:
-    /// Resolves _chosen on the first call under the mutex; every later call returns the
-    /// cached winner without re-sampling. Two threads racing the first execute() see one
-    /// sampling pass, not two.
-    ///
-    /// The lock is held across the whole sweep, so a second thread executing with
-    /// different buffers blocks until sampling finishes rather than proceeding in
-    /// parallel. That is the deliberate trade for sampling exactly once: a
-    /// double-checked lock here would let two threads sample concurrently, against each
-    /// other's buffers. Only the first execute() pays it.
+    /// Resolves _chosen on the first call and caches it. The lock spans the whole sweep,
+    /// so a second thread racing the first execute() blocks instead of sampling against
+    /// the first thread's buffers.
     size_t resolveChosen(const THandle& handle,
                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                          uint32_t numDeviceBuffers,
@@ -204,9 +164,9 @@ private:
         return best;
     }
 
-    /// The minimum timed execute() over BENCHMARK_ITERATIONS, after BENCHMARK_WARMUP_RUNS
-    /// untimed ones, or nullopt if the candidate threw or a HIP event call failed -- both
-    /// are a loss for this candidate, never a throw out of resolveChosen().
+    /// The fastest of BENCHMARK_ITERATIONS timed executes, after BENCHMARK_WARMUP_RUNS
+    /// untimed ones. Returns nullopt if the candidate threw or a HIP event call failed;
+    /// both score the candidate unusable rather than throwing out of resolveChosen().
     std::optional<double> sampleCandidate(size_t index,
                                           const THandle& handle,
                                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -246,17 +206,17 @@ private:
         }
     }
 
-    /// One warmup-free, timed execute() bracketed by hipEvents on handle.getStream() --
-    /// never the null stream, or a plan on a non-default stream measures nothing.
+    /// One timed execute(), bracketed by HIP events on handle.getStream() rather than the
+    /// null stream, so a plan on a non-default stream still measures its own work.
     std::optional<double> timeOneExecute(const Candidate& candidate,
                                          const THandle& handle,
                                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                          uint32_t numDeviceBuffers,
                                          void* workspace) const
     {
-        const detail::ScopedHipEvent start;
-        const detail::ScopedHipEvent stop;
-        if(!start.valid() || !stop.valid())
+        const auto start = detail::createScopedHipEvent();
+        const auto stop = detail::createScopedHipEvent();
+        if(start.isEmpty() || stop.isEmpty())
         {
             return std::nullopt;
         }

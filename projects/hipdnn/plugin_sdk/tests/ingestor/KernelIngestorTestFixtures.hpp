@@ -246,11 +246,8 @@ inline void ensureNoopDispatchRegistered(const std::string& symbol = "test.dispa
 
 /// The minimal handle the state-manager and plan-builder tests pass around. It carries
 /// a stream because GenericPlanBuilder requires one of any ingestor handle, and an
-/// equality operator so per-handle device resolution can still be asserted.
-///
-/// Implicitly convertible from int, deliberately: these tests identify handles by a
-/// bare literal (`0`, `1`) and the conversion keeps every one of those call sites
-/// reading as it did when this was an int alias.
+/// equality operator so per-handle device resolution can be asserted. Implicitly
+/// convertible from int so tests can keep identifying handles by a bare literal.
 struct TestHandle
 {
     // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
@@ -657,9 +654,9 @@ private:
     const IKernelDispatchHandler<THandle>* _previous = nullptr;
 };
 
-/// Models a real provider handle, which always carries a stream: every shipped handle
-/// exposes getStream(), and GenericPlanBuilder static_asserts it, since benchmarking
-/// times candidate kernels on that stream.
+/// Models a real provider handle: every shipped handle exposes getStream(), and
+/// GenericPlanBuilder static_asserts it, since benchmarking times candidates on that
+/// stream.
 struct StubHandle
 {
     void storeEngineDetailsDetachedBuffer(const void* /*ptr*/,

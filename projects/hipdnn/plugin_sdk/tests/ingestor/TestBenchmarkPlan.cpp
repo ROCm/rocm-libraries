@@ -33,13 +33,8 @@
 /**
  * @file TestBenchmarkPlan.cpp
  * @brief Unit tests for BenchmarkPlan.hpp: the composite plan GenericPlanBuilder
- *        constructs when `global.benchmarking` is on.
- *
- * Phase 1 ships exactly one case here: the no-knob oracle, proving the benchmarking-off
- * path through buildPlan() is provably untouched -- it never reaches BenchmarkPlan at
- * all. Phase 2 adds BenchmarkPlan's own cases (workspace-as-max, empty-candidate throw,
- * single-candidate execute, winner-resolved-once, all-unusable-falls-back-to-0, and
- * buffer/workspace pass-through) to this same file.
+ *        constructs when `global.benchmarking` is on, plus the oracle proving the
+ *        benchmarking-off path never reaches it.
  */
 namespace
 {
@@ -53,8 +48,7 @@ using ::testing::Return;
 
 /// A minimal TContext exposing the plan buildPlan() set, so a test can execute() it and
 /// observe which candidate launched. Local to this file, mirroring
-/// TestGenericPlanBuilder.cpp's own KnobFilterContext rather than widening a shared
-/// fixture for one test's needs.
+/// TestGenericPlanBuilder.cpp's own KnobFilterContext.
 struct OracleContext
 {
     void setExecutionSettings(const StubSettings& settings)
@@ -84,9 +78,8 @@ private:
 
 using OraclePlanBuilder = GenericPlanBuilder<StubHandle, StubSettings, OracleContext>;
 
-/// Three kernels, no matchers at all (pack.matcherIds is empty, exactly as
-/// makeStubStateManager() sets up for its one-kernel case), so every kernel always
-/// survives catalog construction and only the heuristic decides rank.
+/// Three kernels with no matchers, so every kernel survives catalog construction and
+/// only the heuristic decides rank.
 std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubStateManager()
 {
     MetadataSchema schema;
@@ -113,11 +106,9 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubState
         GRAPH_MATCH_SYMBOL);
 }
 
-/// Phase 1 oracle (plan §8): with benchmarking off and a three-kernel catalog,
-/// buildPlan() must take the exact branch it takes today -- one plain GenericPlan for
-/// the ranked front, BenchmarkPlan never constructed -- and that plan must launch
-/// exactly once, on the kernel the heuristic ranked first. scoreByBlockSize ranks by
-/// BLOCK_SIZE, so kernel_256_float (0x65) outranks the two 64-block kernels.
+/// With benchmarking off, buildPlan() builds one plain GenericPlan for the ranked front
+/// and never constructs a BenchmarkPlan, launching exactly once. scoreByBlockSize ranks
+/// by BLOCK_SIZE, so kernel_256_float (0x65) outranks the two 64-block kernels.
 TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRankedFrontOnce)
 {
     // A leaked override must not make this look benchmarked; the oracle asserts the
@@ -145,7 +136,7 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
     const TestGraph graph(makeGraphId(0x50));
     // No knob set and an invalid config: readBenchmarkingEnabled() and the unset
     // HIPDNN_FORCE_BENCHMARKING override both read as off, matching a plain
-    // hipdnnExecute with no autotune -- today's behaviour, unchanged.
+    // hipdnnExecute with no autotune.
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
                                                                                           0);
 
@@ -162,16 +153,13 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 }
 
 // ---------------------------------------------------------------------------
-// Task 2.3: BenchmarkPlan's own unit -- construction, resolution, delegation.
-// These construct BenchmarkPlan directly, not through buildPlan(), so they never
-// exercise GenericPlanBuilder's `if constexpr` branch.
+// BenchmarkPlan's own unit: construction, resolution, delegation. These construct
+// BenchmarkPlan directly rather than through buildPlan().
 // ---------------------------------------------------------------------------
 
-/// A handle satisfying HasGetStream, local to this file: StubHandle (used by the
-/// oracle above) has no getStream(), and BenchmarkPlan's constructor static_asserts
-/// it. The null stream is a valid hipStream_t for these tests -- every case here is
-/// hardware-independent by construction (see FakePlan below), so it never depends on
-/// what the null stream actually does on a given machine.
+/// A handle satisfying HasGetStream, which BenchmarkPlan's constructor static_asserts.
+/// StubHandle (used by the oracle above) has no getStream(). Every case below is
+/// hardware-independent, so the null stream's behaviour never matters.
 struct BenchmarkTestHandle
 {
     // Non-static: this models a real handle's instance accessor, which is what
@@ -185,11 +173,9 @@ struct BenchmarkTestHandle
 
 /// A minimal IPlan double recording every execute() call's arguments and count.
 /// Throws on the first @p throwForCalls invocations (default 0, never throws), then
-/// succeeds and counts a "launch" thereafter -- this is what makes the all-unusable
-/// case hardware-independent: BENCHMARK_WARMUP_RUNS == 1, so a plan that throws on
-/// call 1 is caught by sampleCandidate()'s try/catch before the timed loop ever
-/// constructs a hipEvent, so the test's outcome cannot depend on whether this machine
-/// has a working HIP device.
+/// succeeds and counts a "launch". With BENCHMARK_WARMUP_RUNS == 1, a plan that throws
+/// on call 1 is caught by sampleCandidate()'s try/catch before the timed loop
+/// constructs a hipEvent, keeping the all-unusable case hardware-independent.
 class FakePlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
 {
 public:
@@ -285,12 +271,11 @@ TEST(TestIngestorBenchmarkPlan, ConstructorThrowsInternalErrorOnAnEmptyCandidate
     }
 }
 
-/// A one-candidate composite still samples (1 warmup + BENCHMARK_ITERATIONS timed
-/// calls) before delegating to the only candidate there is. The absolute count is
-/// deliberately not asserted: it depends on whether hipEvent creation succeeds in this
-/// environment, which decides whether the timed loop runs at all. What must hold
-/// either way is that the sole candidate received the delegated execute, and that a
-/// second execute() adds exactly one more launch to it rather than re-sampling.
+/// A one-candidate composite still samples before delegating to the only candidate.
+/// The absolute call count is not asserted: it depends on whether hipEvent creation
+/// succeeds here, which decides whether the timed loop runs. What must hold either way
+/// is that the sole candidate received the delegated execute, and that a second
+/// execute() adds exactly one more launch rather than re-sampling.
 TEST(TestIngestorBenchmarkPlan, ASingleCandidateCompositeExecutesThatOne)
 {
     auto sub = std::make_unique<FakePlan>(64);
@@ -310,11 +295,9 @@ TEST(TestIngestorBenchmarkPlan, ASingleCandidateCompositeExecutesThatOne)
     EXPECT_EQ(subRaw->launchCount(), afterFirst + 1);
 }
 
-/// The winner is resolved once: a second execute() call must add exactly one more
-/// launch to whichever candidate won -- never re-run the whole sampling pass, which
-/// would add more than one launch (however many resolveChosen's own sampling calls
-/// contributed the first time, a quantity that itself varies with HIP device
-/// availability and is deliberately not asserted here).
+/// A second execute() adds exactly one more launch to whichever candidate won, never
+/// re-running the sampling pass. The first call's launch count varies with HIP device
+/// availability and is deliberately not asserted.
 TEST(TestIngestorBenchmarkPlan, TheWinnerIsResolvedOnceAcrossRepeatedExecuteCalls)
 {
     auto first = std::make_unique<FakePlan>(64);
@@ -339,12 +322,10 @@ TEST(TestIngestorBenchmarkPlan, TheWinnerIsResolvedOnceAcrossRepeatedExecuteCall
     EXPECT_EQ(totalLaunchesAfterSecondCall - totalLaunchesAfterFirstCall, 1);
 }
 
-/// Every candidate throws on its very first invocation -- caught inside
-/// sampleCandidate() before any hipEvent is touched, so this is deterministic
-/// regardless of whether this machine has a working HIP device. resolveChosen() must
-/// fall back to index 0 (logging ERROR) rather than propagating, and the real delegate
-/// call that follows -- FakePlan's second invocation -- succeeds, so execute() itself
-/// must not throw.
+/// Every candidate throws on its first invocation, caught inside sampleCandidate()
+/// before any hipEvent is touched. resolveChosen() falls back to index 0 rather than
+/// propagating, and the delegated call that follows succeeds, so execute() must not
+/// throw.
 TEST(TestIngestorBenchmarkPlan, AllCandidatesUnusableStillDelegatesToCandidateZero)
 {
     auto first = std::make_unique<FakePlan>(64, /*throwForCalls=*/1);

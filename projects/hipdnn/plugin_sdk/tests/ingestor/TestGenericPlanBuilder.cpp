@@ -611,7 +611,7 @@ TEST(TestIngestorGenericPlanBuilder, AnUnstampedGraphReadsAsTheBaselineAndMatche
 }
 
 // ---------------------------------------------------------------------------
-// Task 2.2: the benchmarking knob composes with the knob filter and buildPlan()
+// The benchmarking knob composes with the knob filter and buildPlan()
 // ---------------------------------------------------------------------------
 
 TEST(TestIngestorGenericPlanBuilder,
@@ -702,13 +702,11 @@ TEST(TestIngestorGenericPlanBuilder, AnInvalidEngineConfigLeavesBenchmarkingFals
 }
 
 /// Three kernels, no matchers, so all three survive to become benchmarking candidates.
-/// Scored with ScopedConstantScore (every kernel ties at 1.0) so rank() falls through to
-/// priority: kernel_64 outranks the other two and becomes the ranked front, while the
-/// catalog's workspace max (256, from kernel_256) stays strictly larger than the
-/// front's own workspace (64) -- the only way "front alone" and "max across all
-/// candidates" are distinguishable observations. Templated so both the plain `int`
-/// TestHandle (benchmarking-off path) and the getStream()-capable handle below
-/// (benchmarking-on path) can share one catalog shape.
+/// ScopedConstantScore ties every kernel at 1.0, so rank() falls through to priority
+/// and kernel_64 becomes the ranked front. The catalog's workspace max (256, from
+/// kernel_256) stays strictly larger than the front's own (64), which is what makes
+/// "front alone" and "max across all candidates" distinguishable. Templated so the
+/// plain TestHandle and the getStream()-capable handle below share one catalog shape.
 template <typename THandle>
 std::unique_ptr<KernelIngestorStateManager<THandle>> makeThreeKernelWorkspaceStateManager()
 {
@@ -737,11 +735,9 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeThreeKernelWorkspaceSta
         "test.graph");
 }
 
-/// A handle satisfying HasGetStream, local to this file: proving the benchmarking-on
-/// branch of buildPlan() actually constructs a BenchmarkPlan (not just that it would,
-/// if a handle supported it) needs a handle that takes the `if constexpr` true leg.
-/// The null stream is a valid hipStream_t for this purpose -- these tests never reach
-/// BenchmarkPlan::execute()'s HIP calls, only its constructor's workspace query.
+/// A handle satisfying HasGetStream, needed to take buildPlan()'s `if constexpr` true
+/// leg and actually construct a BenchmarkPlan. These tests reach only its constructor's
+/// workspace query, never execute()'s HIP calls, so the null stream suffices.
 struct StreamCapableHandle
 {
     // Non-static: this models a real handle's instance accessor, which is what
@@ -830,11 +826,9 @@ private:
 
 using StreamPlanBuilder = GenericPlanBuilder<StreamCapableHandle, StreamSettings, StreamContext>;
 
-/// The composite's observable signature through IPlan: with benchmarking on, the
-/// context receives a plan (a BenchmarkPlan, opaquely, behind IPlan) whose workspace is
-/// the max over all three knob-filtered candidates (256, kernel_256's) -- not the
-/// ranked front's alone (kernel_64's 64, since ScopedConstantScore ties every kernel
-/// and priority breaks the tie toward kernel_64).
+/// With benchmarking on, the plan the context receives reports the workspace max over
+/// all three knob-filtered candidates (256, kernel_256's), not the ranked front's own
+/// 64.
 TEST(TestIngestorGenericPlanBuilder, BuildPlanWithBenchmarkingOnSizesForTheMaxAcrossAllCandidates)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -863,10 +857,9 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanWithBenchmarkingOnSizesForTheMaxAc
     EXPECT_EQ(context.plan().getWorkspaceSize(handle), 256U);
 }
 
-/// With benchmarking unset, buildPlan() still takes the original single-plan branch:
-/// the context receives a plan sized for the ranked front kernel alone (kernel_64's
-/// 64), not the catalog max (256) the benchmarking-on case above reports for the exact
-/// same catalog and knob filter.
+/// With benchmarking unset, buildPlan() takes the single-plan branch: the plan is sized
+/// for the ranked front alone (64), not the catalog max (256) the case above reports
+/// for the same catalog and knob filter.
 TEST(TestIngestorGenericPlanBuilder, BuildPlanWithBenchmarkingOffSizesForTheRankedFrontAlone)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -895,12 +888,12 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanWithBenchmarkingOffSizesForTheRank
 }
 
 // ---------------------------------------------------------------------------
-// Task 2.2b: HIPDNN_FORCE_BENCHMARKING composes as value_or, never an OR
+// HIPDNN_FORCE_BENCHMARKING composes as value_or, never an OR
 // ---------------------------------------------------------------------------
 
 /// Unset and never touched vs. unset via ScopedEnvironmentVariableSetter's one-arg
-/// clearing form must produce byte-identical IngestorSettings -- the regression guard
-/// for "unset means today", independent of how the test harness represents "unset".
+/// clearing form must produce identical IngestorSettings, independent of how the test
+/// harness represents "unset".
 TEST(TestIngestorGenericPlanBuilderOverride, UnsetOverrideWithNoKnobChangesNothing)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
@@ -922,8 +915,7 @@ TEST(TestIngestorGenericPlanBuilderOverride, UnsetOverrideWithNoKnobChangesNothi
     EXPECT_TRUE(settings.ingestorSettings.knobFilter.empty());
 }
 
-/// The regression guard the plan names explicitly: with the knob set to 1, an unset
-/// override must not change the outcome -- the knob still wins.
+/// With the knob set to 1, an unset override must not change the outcome.
 TEST(TestIngestorGenericPlanBuilderOverride, UnsetOverrideWithKnobSetToOneStillWins)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
@@ -945,8 +937,7 @@ TEST(TestIngestorGenericPlanBuilderOverride, UnsetOverrideWithKnobSetToOneStillW
     EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 }
 
-/// Forces on with no knob at all -- the plain-execute path with no autotune, the reason
-/// the override exists in the first place.
+/// Forces on with no knob at all: the plain-execute path with no autotune.
 TEST(TestIngestorGenericPlanBuilderOverride, OverrideOnForcesBenchmarkingWithNoKnobSet)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
@@ -967,9 +958,8 @@ TEST(TestIngestorGenericPlanBuilderOverride, OverrideOnForcesBenchmarkingWithNoK
     EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 }
 
-/// Forces on even with an invalid IEngineConfig -- the override must be consulted
-/// outside the config's early return, since an invalid config is exactly the state a
-/// plain hipdnnExecute with no autotune presents.
+/// Forces on even with an invalid IEngineConfig: the override is consulted outside the
+/// config's early return, and an invalid config is what a plain hipdnnExecute presents.
 TEST(TestIngestorGenericPlanBuilderOverride, OverrideOnForcesBenchmarkingWithAnInvalidConfig)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
@@ -990,9 +980,8 @@ TEST(TestIngestorGenericPlanBuilderOverride, OverrideOnForcesBenchmarkingWithAnI
     EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 }
 
-/// The sharpest case in the set: `0` must force off even when the knob asked for on --
-/// exactly what an `||` composition would get silently wrong (a false override term
-/// never clearing a true knob term).
+/// `0` forces off even when the knob asked for on, which an `||` composition could not
+/// express: a false override term never clears a true knob term.
 TEST(TestIngestorGenericPlanBuilderOverride, OverrideOffForcesBenchmarkingFalseEvenWithKnobSetToOne)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
@@ -1090,7 +1079,7 @@ TEST(TestIngestorGenericPlanBuilderOverride, TheOverrideIsReReadOnEveryCallNotCa
 }
 
 // ---------------------------------------------------------------------------
-// Task 2.2b-i: exhaustive vocabulary parsing, TEST_P over the full accepted set
+// Exhaustive vocabulary parsing over the full accepted set
 // ---------------------------------------------------------------------------
 
 struct OverrideVariantCase

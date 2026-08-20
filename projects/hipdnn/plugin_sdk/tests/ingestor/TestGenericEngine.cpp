@@ -181,10 +181,8 @@ TEST(TestIngestorGenericEngine, GetDetailsAdvertisesTheBenchmarkingKnobOutOfBand
     EXPECT_EQ(constraint.step(), 1);
 }
 
-/// A UED naming no knobs of its own still gets the out-of-band prepend: the
-/// advertisement does not depend on the engine declaring anything, only on the handle
-/// being able to supply a stream (plan §4 "The frontend sees this engine as
-/// exhaustive-capable").
+/// A UED naming no knobs of its own still gets the out-of-band prepend: advertisement
+/// does not depend on the engine declaring anything.
 TEST(TestIngestorGenericEngine, GetDetailsAdvertisesExactlyTheBenchmarkingKnobWhenNoneAreDeclared)
 {
     const ScopedTestSymbols symbols;
@@ -207,9 +205,7 @@ TEST(TestIngestorGenericEngine, GetDetailsAdvertisesExactlyTheBenchmarkingKnobWh
 }
 
 /// The out-of-band knob never enters EngineDescriptor.knobs, so a UED declaring no
-/// knobs at all must not trip findUndeclaredKnob's std::invalid_argument -- the
-/// construction-time bypass the whole feature depends on (plan §4 "Advertising it
-/// never breaks engine construction").
+/// knobs must not trip findUndeclaredKnob's std::invalid_argument.
 TEST(TestIngestorGenericEngine, ConstructingAnEngineWithNoDeclaredKnobsNeverThrows)
 {
     const ScopedTestSymbols symbols;

@@ -491,9 +491,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 
 namespace
 {
-/// Builds a single-knob EngineConfig flatbuffer for "global.benchmarking", matching
-/// the shape the four tests above construct by hand. @p builder must outlive the
-/// returned wrapper's use.
+/// Builds a single-knob EngineConfig flatbuffer for "global.benchmarking". @p builder
+/// must outlive the returned wrapper's use.
 hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
     makeBenchmarkingKnobConfig(flatbuffers::FlatBufferBuilder& builder, int64_t value)
 {
@@ -518,8 +517,8 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
 }
 } // namespace
 
-// Task 2.2c: HIPDNN_FORCE_BENCHMARKING honoured outside the isValid() branch, so it
-// also reaches the plain-execute path (no knob, or an invalid config).
+// HIPDNN_FORCE_BENCHMARKING is honoured outside the isValid() branch, so it also
+// reaches the plain-execute path (no knob, or an invalid config).
 
 TEST(TestMiopenEngine, ForceBenchmarkingOnSetsBenchmarkingEnabledWithNoKnob)
 {
@@ -544,8 +543,7 @@ TEST(TestMiopenEngine, ForceBenchmarkingOnSetsBenchmarkingEnabledWithNoKnob)
     EXPECT_TRUE(ctx.executionSettings().benchmarkingEnabled());
 }
 
-/// The case that regresses if the override were applied inside the isValid() branch:
-/// an invalid config is exactly the plain-execute path the override must still reach.
+/// An invalid config is the plain-execute path, which the override must still reach.
 TEST(TestMiopenEngine, ForceBenchmarkingOnSetsBenchmarkingEnabledWithAnInvalidConfig)
 {
     SKIP_IF_NO_DEVICES();
@@ -564,8 +562,8 @@ TEST(TestMiopenEngine, ForceBenchmarkingOnSetsBenchmarkingEnabledWithAnInvalidCo
     EXPECT_TRUE(ctx.executionSettings().benchmarkingEnabled());
 }
 
-/// The sharpest case: `0` forces off even when the knob itself asked for on -- what an
-/// `||` composition would get silently wrong.
+/// `0` forces off even when the knob asked for on, which an `||` composition could not
+/// express.
 TEST(TestMiopenEngine, ForceBenchmarkingOffOverridesAKnobEnabledRun)
 {
     SKIP_IF_NO_DEVICES();
@@ -585,9 +583,8 @@ TEST(TestMiopenEngine, ForceBenchmarkingOffOverridesAKnobEnabledRun)
     EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
 }
 
-/// A leaked environment variable must not make the existing four cases lie: this pins
-/// one of them (knob=1 -> enabled) with the variable explicitly cleared, so a CI runner
-/// carrying a stray HIPDNN_FORCE_BENCHMARKING from a prior test cannot silently pass.
+/// Pins knob=1 -> enabled with the variable explicitly cleared, so a runner carrying a
+/// stray HIPDNN_FORCE_BENCHMARKING cannot make this pass for the wrong reason.
 TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabledWithOverrideExplicitlyUnset)
 {
     SKIP_IF_NO_DEVICES();

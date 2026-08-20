@@ -104,11 +104,9 @@ public:
         flatbuffers::FlatBufferBuilder builder;
 
         std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
-        // Advertised out-of-band, like MIOpen's createBenchmarkingKnob: never entering
-        // _engine.knobs means findUndeclaredKnob never sees it and readKnobFilter never
-        // filters on it. Unconditional, because every ingestor engine can benchmark --
-        // the class-level static_assert requires THandle to supply the stream timing
-        // runs on.
+        // Advertised out-of-band: staying out of _engine.knobs keeps findUndeclaredKnob
+        // from seeing it and readKnobFilter from filtering on it. Unconditional, since
+        // the class-level static_assert already requires THandle to supply a stream.
         knobOffsets.push_back(KnobFactory::createIntKnob(
             builder, BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {}));
         for(const auto& knob : _planBuilder.getCustomKnobs(handle, opGraph))

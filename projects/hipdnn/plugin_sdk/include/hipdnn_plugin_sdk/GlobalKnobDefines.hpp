@@ -19,15 +19,14 @@ static constexpr const char* WORKSPACE_SIZE_LIMIT_KNOB_NAME = "global.workspace_
 /// Not gated on HIPDNN_ENABLE_KERNEL_INGESTOR: MIOpen consumes it in flag-off builds too.
 static constexpr const char* FORCE_BENCHMARKING_ENV_NAME = "HIPDNN_FORCE_BENCHMARKING";
 
-/// Reads and parses HIPDNN_FORCE_BENCHMARKING per call (never cached), following
-/// hipdnn_data_sdk::logging::detail::stringToSeverity()'s shape: normalize with
-/// toLower(trim(...)) and match a literal set. Unset, empty, whitespace-only, or any
-/// unrecognized value returns std::nullopt.
+/// Reads and parses HIPDNN_FORCE_BENCHMARKING per call, never cached. Normalizes with
+/// toLower(trim(...)) and matches a literal set, following
+/// hipdnn_data_sdk::logging::detail::stringToSeverity(). Unset, empty, whitespace-only,
+/// or any unrecognized value returns std::nullopt.
 ///
-/// Unset and empty are silent, and are the same thing here: getEnv() yields "" for
-/// both, so the two cannot be told apart. Every value that survives that check and
-/// still fails to parse -- whitespace-only included -- logs a WARN naming the variable
-/// and the value, since a caller who set something meant something by it.
+/// Unset and empty are indistinguishable -- getEnv() yields "" for both -- and are
+/// silent. Any other value that fails to parse logs a WARN naming the variable and the
+/// value.
 inline std::optional<bool> benchmarkingOverrideFromEnv()
 {
     const auto raw = hipdnn_data_sdk::utilities::getEnv(FORCE_BENCHMARKING_ENV_NAME);
