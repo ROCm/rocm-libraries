@@ -21,6 +21,12 @@
 # whole SDPA surface here is safe.
 _common_excludes: &common_excludes
   - "*DISABLED*"
+  # SdpaBackward bundles fail on two independent issues:
+  #   1. ASM kernel .co files missing from TheRock artifact (hipError 301)
+  #   2. CPU reference rejects LSE tensor shape ("lse must be rank-4")
+  # Tracked upstream — re-enable once hip-kernel-provider ships the kernels
+  # and the CPU ref handles the new LSE layout.
+  - "*SdpaBackward*"
 
 # TEMPORARY TIER REMAPPING (revert once CI has proper test-label support).
 # Mirrors HIP_MLOPS_ENGINE_test_categories_integration.yaml's rationale: CI
