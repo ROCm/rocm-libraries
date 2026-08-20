@@ -30,8 +30,8 @@ namespace stinkytofu {
 
 namespace cluster_barrier {
 
-/// When true, Rule 3 may hoist signals across loop segments. When false, signals stay
-/// inside their segment and the scheduler only pins live-out SCC compares after barriers.
+/// Gate for Rule 3 hoisting and scheduler live-out SCC lead (`kRule3CrossLoop`).
+/// Default false. Rebuild rocisa after changing. See docs/developer/cluster-barrier.md.
 constexpr bool kRule3CrossLoop = false;
 
 }  // namespace cluster_barrier

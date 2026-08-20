@@ -608,6 +608,8 @@ bool isFirstLoopSegment(BasicBlock::iterator segBegin, StinkyInstruction* loopHe
     return segBegin == headIt || segBegin == std::next(headIt);
 }
 
+/// Walk backward from the wait for cycle lead. \p maxHops 0 = in-segment only
+/// (kRule3CrossLoop false); 1 = one segment hop allowed (kRule3CrossLoop true).
 Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
@@ -693,9 +695,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return {anchor, hops, crossedLoopHead};
     };
 
-    // When the head-phase climb reaches the loop head short of the lead target, wrap to the
-    // latch and plant the signal only `remainder` cycles up from the loop end. Part A is
-    // wait→head; part B is latch→anchor for the remaining cycles only.
+    // kRule3CrossLoop true only: wait→head; part B latch→anchor for the remainder.
     auto scanTailForRemainder = [&](StinkyInstruction* latch, int64_t headAccum,
                                     int64_t remainder) -> Rule3SignalAnchor {
         crossedLoopHead = true;
@@ -774,6 +774,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         if (isSegmentBoundary(*inst)) {
             if (loopHead != nullptr && inst == loopHead) {
                 if (targetMet && !sccLive) return report(clearScc(settle(inst, accum)));
+                // kRule3CrossLoop true only: latch wrap when head climb falls short.
                 if (accum >= kMinHeadAccumForLoopWrap && accum < leadCycles && maxHops > 0 &&
                     hops == 0 && isFirstLoopSegment(segBegin, loopHead)) {
                     StinkyInstruction* latch = findLatchBranchFor(inst);
@@ -782,9 +783,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                 }
                 if (accum >= leadCycles) continue;
             }
-            // Calls and unconditional branches are not crossed: the first has no modelled
-            // predecessor and the second's is another jump, so neither yields an edge whose
-            // compensation this pass can account for.
+            // Stops at segment boundary once maxHops is exhausted (0 when kRule3CrossLoop false).
             if (hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst)) {
                 return report(clearScc(curSegBegin.getNodePtr()));
             }
@@ -995,7 +994,7 @@ void retargetBranch(StinkyInstruction& branch, const std::string& newLabel) {
     }
 }
 
-/// Balance the tokens a hoisted loop leaves outstanding.
+/// kRule3CrossLoop true only. Balance tokens left outstanding by a hoisted loop (see md).
 ///
 /// A handshake that climbed out of its segment leaves its signal above some edge, and every
 /// path that leaves the loop below that signal carries a token out with it. Two things are
@@ -1298,6 +1297,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // and a loop whose segments disagree is no harder to balance than one where
                 // they all hoist.
                 StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                // kRule3CrossLoop false: maxHops=0, climb stays in-segment. true: one hop.
                 const int maxSegmentHops =
                     cluster_barrier::kRule3CrossLoop ? kMaxSegmentHops : 0;
                 Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
@@ -1308,7 +1308,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // in, the body is full of this pass's own skip branches and barriers, and
                 // neither the loop's real exit nor an unspoken-for stretch of preheader is
                 // easy to tell apart from them.
-                if (found.hops > 0) {
+                if (found.hops > 0) {  // kRule3CrossLoop true only: cross-segment compensation
                     const auto [slot, isNew] = hoistedHeads.emplace(head, hoistedLoops.size());
                     if (isNew) hoistedLoops.push_back({head, findLoopExitLabelName(head), {}});
                     // Only a signal that crossed the back edge feeds the next trip instead of
@@ -1381,6 +1381,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
                 (void)trigger;
             }
+            // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
             for (const LoopCompensation& comp : hoistedLoops) {
                 emitLoopCarriedCompensation(comp.head, comp.exitLabel, comp.preLoopSignal, bb, func,
                                             archId);
