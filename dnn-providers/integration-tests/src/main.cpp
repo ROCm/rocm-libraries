@@ -167,12 +167,15 @@ int main(int argc, char** argv) noexcept
                   "--test-engine). Implies --allow-bundles, since bundles are what "
                   "carry the claims. Idempotent: no support change = zero git diff.");
         parser.add_argument("--emit-support-observations")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Emit ##support-snapshot:{json} lines to stdout after the run. "
+                  "Pure side effect: never changes the verdict. "
+                  "Implies --allow-bundles.");
+        parser.add_argument("--support-observations-dir")
             .default_value(std::string{})
-            .implicit_value(std::string{"stdout"})
-            .help("Emit support-observation snapshots after the run. Always writes "
-                  "##support-snapshot:{json} lines to stdout. When a directory path "
-                  "is given, also writes one JSON file per target under that path. "
-                  "Pure side effect: never changes the verdict.");
+            .help("Write snapshot JSON files to this directory (one per target). "
+                  "Implies --emit-support-observations.");
         std::vector<std::string> remainingArgs;
         try
         {
@@ -326,11 +329,12 @@ int main(int argc, char** argv) noexcept
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
 
-        const auto emitArg = parser.get<std::string>("--emit-support-observations");
-        opts.emitSupportObservations = !emitArg.empty();
-        if(opts.emitSupportObservations && emitArg != "stdout")
+        opts.emitSupportObservations = parser.get<bool>("--emit-support-observations");
+        const auto obsDir = parser.get<std::string>("--support-observations-dir");
+        if(!obsDir.empty())
         {
-            opts.supportObservationsDir = emitArg;
+            opts.emitSupportObservations = true;
+            opts.supportObservationsDir = obsDir;
         }
 
         // The write path drains the log into sidecars and diverts every bundle
@@ -519,14 +523,28 @@ int main(int argc, char** argv) noexcept
                 {
                     const auto& outDir
                         = hipdnn_integration_tests::TestConfig::get().getSupportObservationsDir();
-                    std::filesystem::create_directories(outDir);
-                    for(const auto& snapshot : snapshots)
+                    try
                     {
-                        const auto arch = snapshot["target"]["arch"].get<std::string>();
-                        const auto platform = snapshot["target"]["platform"].get<std::string>();
-                        const auto filename = arch + "_" + platform + ".snapshot.json";
-                        std::ofstream out(outDir / filename);
-                        out << snapshot.dump(2) << "\n";
+                        std::filesystem::create_directories(outDir);
+                        for(const auto& snapshot : snapshots)
+                        {
+                            const auto arch = snapshot["target"]["arch"].get<std::string>();
+                            const auto platform = snapshot["target"]["platform"].get<std::string>();
+                            const auto filename = arch + "_" + platform + ".snapshot.json";
+                            std::ofstream out(outDir / filename);
+                            if(!out.good())
+                            {
+                                std::cerr << "warning: could not write " << (outDir / filename)
+                                          << "\n";
+                                continue;
+                            }
+                            out << snapshot.dump(2) << "\n";
+                        }
+                    }
+                    catch(const std::exception& e)
+                    {
+                        std::cerr << "warning: snapshot directory write failed: " << e.what()
+                                  << " (observations still emitted to stdout)\n";
                     }
                 }
             }

@@ -170,11 +170,20 @@ public:
                                            ? key.sidecarPath.parent_path().generic_string()
                                            : relative.generic_string();
 
+            // Sweep sidecars are "support.json"; single-graph sidecars are
+            // "<Graph>.support.json". Strip the double extension to recover the
+            // graph stem the Python harvester needs for multi-graph disambiguation.
+            const auto sidecarStem = key.sidecarPath.stem();
+            const auto graphStem = std::filesystem::path(sidecarStem).stem();
+            const std::string graphStr = graphStem.generic_string();
+
             nlohmann::json obs;
             obs["bundle"] = bundle;
             obs["case_id"]
                 = key.caseId.empty() ? nlohmann::json(nullptr) : nlohmann::json(key.caseId);
             obs["engine"] = key.engineName;
+            obs["graph"]
+                = (graphStr == "support") ? nlohmann::json(nullptr) : nlohmann::json(graphStr);
             obs["verdict"] = toString(val.support);
             obs["enforcement_level"] = toString(val.enforcementLevel);
 

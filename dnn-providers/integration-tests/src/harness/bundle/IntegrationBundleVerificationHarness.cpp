@@ -341,10 +341,12 @@ void IntegrationBundleVerificationHarness::runComparison()
         return;
     }
 
-    // Harvest observes and then gets out of the way: the test runs to whatever
-    // verdict it would have reached anyway (RFC 0015 §12.1). Hence no early
-    // return here, and hence the try/catch — a failed query costs a JSONL line,
-    // never a red test.
+    // Record which engines accept this graph BEFORE verification runs.
+    // Observations are about engine capability (graph acceptance), not numerical
+    // correctness — a graph the engine accepts but whose output mismatches the
+    // reference is still "supported" (RFC 0015 §12.1). The test then runs to
+    // whatever verdict it would have reached anyway; hence no early return, and
+    // the try/catch ensures a failed query never turns a green test red.
     if(TestConfig::get().emitSupportObservations())
     {
         recordSupportObservationsQuietly();

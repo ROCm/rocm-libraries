@@ -193,6 +193,7 @@ def _observation_error(obs: dict) -> str | None:
     if graph is not None and (not isinstance(graph, str) or not graph):
         return f"field 'graph' must be a non-empty string or null, got {graph!r}"
 
+    # Validated for forward-compat; not consumed by the harvest pipeline today.
     level = obs.get("enforcement_level")
     if level is not None and level not in VALID_ENFORCEMENT_LEVELS:
         return (
@@ -205,13 +206,13 @@ def _observation_error(obs: dict) -> str | None:
 
 def parse_snapshot(
     data: dict,
-) -> list[tuple[ObservationKey, str, str | None]]:
-    """Parse a snapshot dict into a list of ``(key, verdict, graph)`` tuples.
+) -> tuple[list[tuple[ObservationKey, str, str | None]], list[str]]:
+    """Parse a snapshot dict into ``(valid_records, per_observation_errors)``.
 
-    Validates ``schema_version``, ``target``, and each observation entry.
-    Raises :class:`ValueError` for structural problems.  Individual malformed
-    observations are collected and re-raised as a single ``ValueError`` listing
-    all problems, so the caller can report them together.
+    Raises :class:`ValueError` for structural problems (bad schema_version,
+    missing target, non-array observations).  Individual malformed observations
+    are collected into the second element of the return tuple so the caller can
+    log them without discarding the valid records from the same file.
     """
     if not isinstance(data, dict):
         raise ValueError(f"snapshot must be an object, got {type(data).__name__}")
@@ -265,9 +266,7 @@ def parse_snapshot(
             platform=platform,
         )
         results.append((key, obs["verdict"], obs.get("graph")))
-    if errors:
-        raise ValueError("; ".join(errors))
-    return results
+    return results, errors
 
 
 def load_snapshots(
@@ -317,11 +316,15 @@ def load_snapshots(
             continue
 
         try:
-            parsed = parse_snapshot(data)
+            parsed, obs_errors = parse_snapshot(data)
         except ValueError as exc:
             warn(f"{path}: {exc}; skipping file")
-            stats.records_malformed += 1
+            stats.files_failed += 1
             continue
+
+        for err in obs_errors:
+            warn(f"{path}: {err}")
+            stats.records_malformed += 1
 
         for key, verdict, graph in parsed:
             stats.records_valid += 1
@@ -409,13 +412,22 @@ def index_bundles(root: pathlib.Path) -> dict[str, BundleEntry]:
     return entries
 
 
-def _pairs_from_support(support: object) -> set[tuple[str, str]]:
+def _pairs_from_support(
+    support: object, path: pathlib.Path | None = None
+) -> set[tuple[str, str]]:
     """Flatten a ``{arch: [platform, ...]}`` map into ``(arch, platform)`` pairs."""
     pairs: set[tuple[str, str]] = set()
     if not isinstance(support, dict):
+        if support is not None and path is not None:
+            warn(f"{path}: 'support' must be an object, got {type(support).__name__}")
         return pairs
     for arch, platforms in support.items():
         if not isinstance(platforms, list):
+            if path is not None:
+                warn(
+                    f"{path}: support[{arch!r}] must be a list,"
+                    f" got {type(platforms).__name__}"
+                )
             continue
         for platform in platforms:
             if isinstance(platform, str):
@@ -482,7 +494,7 @@ def read_sidecar(path: pathlib.Path, is_sweep: bool) -> Sidecar:
             for group in value:
                 if not isinstance(group, dict):
                     continue
-                pairs = _pairs_from_support(group.get("support"))
+                pairs = _pairs_from_support(group.get("support"), path)
                 cases = group.get("cases")
                 if not isinstance(cases, list):
                     continue
@@ -497,7 +509,7 @@ def read_sidecar(path: pathlib.Path, is_sweep: bool) -> Sidecar:
                             case_id, set()
                         ).update(pairs)
         else:
-            pairs = _pairs_from_support(value)
+            pairs = _pairs_from_support(value, path)
             if pairs:
                 sidecar.cells.setdefault(engine, {})[None] = pairs
     return sidecar
@@ -676,7 +688,9 @@ def harvest(
 
         sidecar = sidecars.get(sidecar_path)
         if sidecar is None:
-            assert entry is not None
+            if entry is None:
+                stats.unplaceable += 1
+                continue
             sidecar = read_sidecar(sidecar_path, entry.is_sweep)
             sidecars[sidecar_path] = sidecar
 
@@ -946,6 +960,14 @@ def main(argv: list[str] | None = None) -> int:
     merged, graph_hints, load_stats = load_snapshots(args.observations)
     if load_stats.files_read == 0:
         warn("no snapshot file could be read")
+        return 1
+
+    if not merged:
+        warn(
+            f"read {load_stats.files_read} snapshot file(s) but none contained"
+            f" usable observations ({load_stats.records_malformed} record(s)"
+            f" malformed, {load_stats.files_failed} file(s) failed)"
+        )
         return 1
 
     warn_unknown_engines({key.engine for key in merged}, "the observation files")

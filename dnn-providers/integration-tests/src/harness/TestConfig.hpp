@@ -206,6 +206,8 @@ public:
 
         instance._enforceSupportClaims = opts.enforceSupportClaims;
         instance._writeSupportClaims = opts.writeSupportClaims;
+        instance._emitSupportObservations = opts.emitSupportObservations;
+        instance._supportObservationsDir = std::move(opts.supportObservationsDir);
 
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
@@ -224,7 +226,7 @@ public:
         // still exit 0 — a silent no-op that reads as success. This sits after the
         // env override so that neither an omitted --allow-bundles nor a stray
         // HIPDNN_TEST_ALLOW_BUNDLES=0 in the environment can reintroduce it.
-        if(instance._writeSupportClaims)
+        if(instance._writeSupportClaims || instance._emitSupportObservations)
         {
             instance._allowBundles = true;
         }
@@ -232,9 +234,6 @@ public:
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
-
-        instance._emitSupportObservations = opts.emitSupportObservations;
-        instance._supportObservationsDir = std::move(opts.supportObservationsDir);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).

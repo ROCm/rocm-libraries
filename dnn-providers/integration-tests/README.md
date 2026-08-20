@@ -317,7 +317,9 @@ same machine with no engine changes produces zero git diff.
 # CI run (one shard, one GPU):
 ./hipdnn_integration_tests \
     --test-article path/to/article.so \
-    --emit-support-observations=/tmp/snapshots
+    --allow-bundles \
+    --emit-support-observations \
+    --support-observations-dir /tmp/snapshots
 
 # Offline: union snapshots from every shard/GPU/OS and diff against the tree:
 python3 scripts/harvest_support_observations.py \
@@ -334,10 +336,10 @@ claim. When a run reports `declined` for a cell the tree already claims as
 `supported`, that is flagged as a conflict for a human to investigate — not
 silently applied.
 
-`--emit-support-observations` also accepts no argument (stdout-only mode):
+Without `--support-observations-dir`, snapshots are emitted to stdout only:
 
 ```bash
-./hipdnn_integration_tests --emit-support-observations
+./hipdnn_integration_tests --allow-bundles --emit-support-observations
 # Snapshots appear as ##support-snapshot:{json} lines in stdout.
 # CI greps them into files for the harvest tool.
 ```

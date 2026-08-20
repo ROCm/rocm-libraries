@@ -182,7 +182,8 @@ class TestParseSnapshot:
         return data
 
     def test_parses_a_well_formed_snapshot(self) -> None:
-        parsed = parse_snapshot(self._snap([_record("quick/A")]))
+        parsed, errors = parse_snapshot(self._snap([_record("quick/A")]))
+        assert not errors
         assert len(parsed) == 1
         key, verdict, graph = parsed[0]
         assert key == ObservationKey("quick/A", None, MIOPEN, "gfx942", "linux")
@@ -190,12 +191,16 @@ class TestParseSnapshot:
         assert graph is None
 
     def test_carries_the_optional_graph_hint(self) -> None:
-        parsed = parse_snapshot(self._snap([_record("quick/A", graph="Small")]))
+        parsed, errors = parse_snapshot(self._snap([_record("quick/A", graph="Small")]))
+        assert not errors
         _, _, graph = parsed[0]
         assert graph == "Small"
 
     def test_case_id_becomes_part_of_the_key(self) -> None:
-        parsed = parse_snapshot(self._snap([_record("full/S", case_id="case_0")]))
+        parsed, errors = parse_snapshot(
+            self._snap([_record("full/S", case_id="case_0")])
+        )
+        assert not errors
         key, _, _ = parsed[0]
         assert key.case_id == "case_0"
         assert key.unit == ("full/S", "case_0")
@@ -224,35 +229,52 @@ class TestParseSnapshot:
         with pytest.raises(ValueError, match="'target'"):
             parse_snapshot({"schema_version": 1, "observations": []})
 
-    def test_rejects_observation_missing_engine(self) -> None:
+    def test_flags_observation_missing_engine(self) -> None:
         bad_obs = {"bundle": "a", "verdict": "supported"}
-        with pytest.raises(ValueError, match="'engine'"):
-            parse_snapshot(self._snap([bad_obs]))
+        parsed, errors = parse_snapshot(self._snap([bad_obs]))
+        assert not parsed
+        assert any("'engine'" in e for e in errors)
 
-    def test_rejects_empty_bundle_name(self) -> None:
+    def test_flags_empty_bundle_name(self) -> None:
         bad_obs = {"bundle": "", "engine": "E", "verdict": "supported"}
-        with pytest.raises(ValueError, match="'bundle'"):
-            parse_snapshot(self._snap([bad_obs]))
+        parsed, errors = parse_snapshot(self._snap([bad_obs]))
+        assert not parsed
+        assert any("'bundle'" in e for e in errors)
 
-    def test_rejects_an_unrecognised_verdict(self) -> None:
-        with pytest.raises(ValueError, match="unknown verdict"):
-            parse_snapshot(self._snap([_record("quick/A", verdict="maybe")]))
+    def test_flags_an_unrecognised_verdict(self) -> None:
+        parsed, errors = parse_snapshot(
+            self._snap([_record("quick/A", verdict="maybe")])
+        )
+        assert not parsed
+        assert any("unknown verdict" in e for e in errors)
 
     def test_rejects_a_platform_no_sidecar_may_contain(self) -> None:
         with pytest.raises(ValueError, match="invalid platform"):
             parse_snapshot(self._snap([], target=("gfx942", "freebsd")))
 
-    def test_rejects_an_unrecognised_enforcement_level(self) -> None:
-        with pytest.raises(ValueError, match="enforcement_level"):
-            parse_snapshot(
-                self._snap([_record("quick/A", enforcement_level="paranoid")])
-            )
+    def test_flags_an_unrecognised_enforcement_level(self) -> None:
+        parsed, errors = parse_snapshot(
+            self._snap([_record("quick/A", enforcement_level="paranoid")])
+        )
+        assert not parsed
+        assert any("enforcement_level" in e for e in errors)
 
     def test_ignores_the_shape_of_provenance(self) -> None:
         """Never read here; a malformed one must not cost a real observation."""
         data = self._snap([_record("quick/A")], provenance="whatever")
-        parsed = parse_snapshot(data)
+        parsed, errors = parse_snapshot(data)
+        assert not errors
         assert parsed[0][0].bundle == "quick/A"
+
+    def test_good_observations_survive_alongside_bad_ones(self) -> None:
+        """A single malformed observation must not discard valid siblings."""
+        good = _record("quick/A")
+        bad = {"bundle": "quick/B", "verdict": "supported"}  # missing engine
+        parsed, errors = parse_snapshot(self._snap([good, bad]))
+        assert len(parsed) == 1
+        assert parsed[0][0].bundle == "quick/A"
+        assert len(errors) == 1
+        assert "'engine'" in errors[0]
 
 
 # --------------------------------------------------------------------------
@@ -334,6 +356,27 @@ class TestUnion:
         merged, _, stats = load_snapshots([old, good])
         assert len(merged) == 1
         assert stats.files_failed == 1
+
+    def test_bad_observations_in_a_file_do_not_discard_good_ones(
+        self, tmp_path: Path
+    ) -> None:
+        good = _record("quick/A")
+        bad = {"bundle": "quick/B", "verdict": "supported"}  # missing engine
+        path = tmp_path / "mixed.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "target": {"arch": "gfx942", "platform": "linux"},
+                    "observations": [good, bad],
+                }
+            ),
+            encoding="utf-8",
+        )
+        merged, _, stats = load_snapshots([path])
+        assert len(merged) == 1
+        assert stats.records_valid == 1
+        assert stats.records_malformed == 1
 
     def test_missing_schema_version_is_detected(self, tmp_path: Path) -> None:
         bad = tmp_path / "noversion.json"
