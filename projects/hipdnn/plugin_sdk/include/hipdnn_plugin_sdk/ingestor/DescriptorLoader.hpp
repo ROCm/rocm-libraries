@@ -1160,24 +1160,27 @@ inline KernelMatch findKernelForPack(const KernelMap& kernels,
         // catalog order. Nothing in the format ranks them, and an arch-specific spelling
         // silently shadowing an arch-independent one is the shadowing the drop-in rule
         // refuses elsewhere.
-        return {nullptr, names + ", which several descriptors define within the pack's arch"};
+        return {nullptr, names + ", which several descriptors define within the pack's arch", {}};
     }
     if(covered != nullptr)
     {
         // A conflicted definition is unusable, and falling through to another would hide
         // the collision the conflict recorded.
-        return covered->conflicted ? KernelMatch{nullptr, names + ", which no descriptor defines"}
-                                   : KernelMatch{&covered->descriptor, {}, covered->path};
+        return covered->conflicted
+                   ? KernelMatch{nullptr, names + ", which no descriptor defines", {}}
+                   : KernelMatch{&covered->descriptor, {}, covered->path};
     }
     if(!reaching.empty())
     {
         return {nullptr,
                 names + ", which declares arch " + reaching + " reaching past the pack's "
-                    + describeArch(packArch)};
+                    + describeArch(packArch),
+                {}};
     }
     return {nullptr,
             exists ? names + ", which is defined only for another arch"
-                   : names + ", which no descriptor defines"};
+                   : names + ", which no descriptor defines",
+            {}};
 }
 
 /// Checks and completes one kernel's metadata against its engine's KMD, mirroring the
