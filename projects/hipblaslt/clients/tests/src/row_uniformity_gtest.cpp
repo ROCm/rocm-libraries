@@ -33,7 +33,17 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -93,6 +103,43 @@ namespace
         if(const char* env = std::getenv("HIPBLASLT_TENSILE_LIBPATH"))
             roots.emplace_back(env);
 
+        auto appendRootsFromBinary = [&](const std::filesystem::path& binary) {
+            std::error_code       ec;
+            std::filesystem::path resolved = std::filesystem::weakly_canonical(binary, ec);
+            if(ec)
+                resolved = binary;
+            const std::filesystem::path libDir = resolved.parent_path();
+            roots.push_back(libDir / "hipblaslt" / "library");
+            roots.push_back(libDir.parent_path() / "Tensile" / "library");
+            roots.push_back(libDir / "library");
+        };
+
+#ifdef _WIN32
+        // hipblaslt-test links the DLL, so the loaded module is the runtime
+        // probe root. Taking &hipblasLtCreate would hit this binary's import
+        // thunk instead of libhipblaslt.dll.
+        HMODULE hModule = GetModuleHandleA("libhipblaslt.dll");
+        if(hModule == nullptr)
+            hModule = GetModuleHandleA("hipblaslt.dll");
+        if(hModule != nullptr)
+        {
+            std::string raw(MAX_PATH, '\0');
+            for(;;)
+            {
+                DWORD n = GetModuleFileNameA(
+                    hModule, raw.data(), static_cast<DWORD>(raw.size()));
+                if(n == 0)
+                    break;
+                if(n < raw.size())
+                {
+                    raw.resize(n);
+                    appendRootsFromBinary(raw);
+                    break;
+                }
+                raw.assign(raw.size() * 2, '\0');
+            }
+        }
+#else
         // Taking &hipblasLtCreate here would yield this binary's PLT stub, which
         // dladdr resolves to the test executable rather than to the library.
         // dlsym returns the definition itself, so its directory is the one the
@@ -100,18 +147,8 @@ namespace
         Dl_info info{};
         void*   entry = dlsym(RTLD_DEFAULT, "hipblasLtCreate");
         if(entry != nullptr && dladdr(entry, &info) != 0 && info.dli_fname != nullptr)
-        {
-            std::error_code       ec;
-            std::filesystem::path resolved
-                = std::filesystem::weakly_canonical(std::filesystem::path(info.dli_fname), ec);
-            if(ec)
-                resolved = std::filesystem::path(info.dli_fname);
-
-            const std::filesystem::path libDir = resolved.parent_path();
-            roots.push_back(libDir / "hipblaslt" / "library");
-            roots.push_back(libDir.parent_path() / "Tensile" / "library");
-            roots.push_back(libDir / "library");
-        }
+            appendRootsFromBinary(info.dli_fname);
+#endif
 
         return roots;
     }
