@@ -44,7 +44,15 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "groupe
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from unified_grouped_gemm_tensorquant_codegen import make_tensorquant_kernel_name  # noqa: E402
+# Import from codegen_common, not from the codegen script: the runtime path should not
+# depend on the generator. This matches how the aquant/bquant/abquant utils resolve
+# their name builders, and keeps the shared tile/trait defaults in one place so this
+# module's default_*_config() cannot drift from the codegen's _default_config().
+from codegen_common import (  # noqa: E402
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
+    make_tensorquant_kernel_name,
+)
 
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
@@ -236,6 +244,9 @@ class TensorQuantDispatcherLib:
         converts it with asfortranarray before passing it here.  Using
         ascontiguousarray on a 2-D F-contiguous array would silently copy it back
         to C order, making the declared stride_B=K incorrect.
+
+        C is the output buffer and is written in place by the C library, so it must
+        already be C-contiguous; a non-contiguous C raises rather than being copied.
         """
         import numpy as np
         A  = np.ascontiguousarray(A)
@@ -243,7 +254,18 @@ class TensorQuantDispatcherLib:
         B  = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
         AQ = np.ascontiguousarray(AQ)
         BQ = np.ascontiguousarray(BQ)
-        C  = np.ascontiguousarray(C)
+
+        # Inputs may be copied into a contiguous temporary because the copy is what
+        # gets uploaded. C may not: the library memcpys the device result back into
+        # whatever buffer this pointer names. Copying C would send the results into a
+        # temporary that is discarded on return, and the caller's array would silently
+        # keep its pre-call contents.
+        if not C.flags["C_CONTIGUOUS"]:
+            raise ValueError(
+                "C must be a C-contiguous array; it is written in place. "
+                "Pass np.ascontiguousarray(C) and copy the result back yourself, "
+                "or allocate C with np.empty/np.zeros."
+            )
 
         time_ms = ctypes.c_float(0.0)
         rc = self._lib.dispatcher_run_gemm(
@@ -351,9 +373,9 @@ class TensorQuantGpuGemmRunner:
         # B is column-major (rcr layout): the kernel expects leading dim = K (stride_B = K),
         # which means elements are stored column-first in memory (Fortran order).
         # Reorder here so the raw pointer passed to C++ matches the stride we declare below.
+        # (self._lib.run also calls asfortranarray; on an already-F-contiguous array that
+        # is a no-op, so the conversion happens exactly once.)
         B = np.asfortranarray(B)
-        if not B.flags["F_CONTIGUOUS"]:
-            raise RuntimeError("B is not F-contiguous after asfortranarray — unexpected numpy state")
 
         # TensorQuant: single scalar scale per tensor → AQ/BQ strides are 1
         stride_A  = K
@@ -625,33 +647,37 @@ def setup_multiple_tensorquant_dispatchers(
 # =============================================================================
 
 
-def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
-    """Return the default fp8 TensorQuant config."""
+def _default_config(dtype: str, gfx_arch: str) -> TensorQuantKernelConfig:
+    """Build the default config for `dtype` from the shared codegen defaults.
+
+    Sourcing tile and traits from codegen_common means this runtime default and the
+    codegen's _default_config() cannot drift: a tile change in one place changes the
+    kernel name produced by both, so the .so the runner looks for is the .so codegen
+    emits. Every trait that feeds the kernel name (pipeline/epilogue/scheduler and all
+    four pad/persistent flags) is forwarded from the shared dict; only block_size and
+    k_block_per_cu are codegen-only and are left to the dataclass defaults.
+    """
+    traits = ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS
     return TensorQuantKernelConfig(
-        dtype="fp8",
+        dtype=dtype,
         layout="rcr",
-        pipeline="compv3",
-        epilogue="cshuffle",
-        scheduler="intrawave",
-        tile_m=128, tile_n=128, tile_k=64,
-        warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pad_m=True,
+        pipeline=traits["pipeline"],
+        epilogue=traits["epilogue"],
+        scheduler=traits["scheduler"],
+        **ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+        pad_m=traits["pad_m"],
+        pad_n=traits["pad_n"],
+        pad_k=traits["pad_k"],
+        persistent=traits["persistent"],
         gfx_arch=gfx_arch,
     )
+
+
+def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
+    """Return the default fp8 TensorQuant config."""
+    return _default_config("fp8", gfx_arch)
 
 
 def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
     """Return the default bf8 TensorQuant config."""
-    return TensorQuantKernelConfig(
-        dtype="bf8",
-        layout="rcr",
-        pipeline="compv3",
-        epilogue="cshuffle",
-        scheduler="intrawave",
-        tile_m=128, tile_n=128, tile_k=64,
-        warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pad_m=True,
-        gfx_arch=gfx_arch,
-    )
+    return _default_config("bf8", gfx_arch)

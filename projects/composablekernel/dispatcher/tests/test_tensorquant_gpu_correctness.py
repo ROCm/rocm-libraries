@@ -6,7 +6,7 @@
 """
 GPU correctness tests for TensorQuant GEMM dispatcher.
 
-Requires a gfx950 GPU and hipcc in PATH.  Skipped automatically when neither
+Requires a gfx942 or gfx950 GPU and hipcc in PATH.  Skipped automatically when neither
 is available (pytest.skip) so CI without a GPU still passes.
 
 Tests:
@@ -99,17 +99,37 @@ def _require_ml_dtypes():
         )
 
 
-def _encode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    """Encode float32 → fp8/bf8 bytes (uint8 view). Requires ml_dtypes."""
+def _fp8_uses_ocp(arch: str) -> bool:
+    """Mirror the -DCK_USE_OCP_FP8 compile logic in grouped_gemm_tensorquant_utils.py.
+
+    gfx950 / gfx12 build the kernel with OCP fp8 (e4m3fn / e5m2); every other
+    supported arch (notably gfx942) uses the native FNUZ format
+    (e4m3fnuz / e5m2fnuz). The host-side encoding MUST match the format the kernel
+    was compiled for, otherwise the reinterpreted bytes decode to NaN/Inf on device.
+    """
+    return "gfx950" in arch or "gfx12" in arch
+
+
+def _fp8_ml_dtype(dtype: str):
+    """Return the ml_dtypes fp8 type matching the compiled kernel's arch."""
     _require_ml_dtypes()
-    ml_t = _ml_dtypes.float8_e4m3fn if dtype == "fp8" else _ml_dtypes.float8_e5m2
+    if _fp8_uses_ocp(_GFX_ARCH):
+        return _ml_dtypes.float8_e4m3fn if dtype == "fp8" else _ml_dtypes.float8_e5m2
+    return _ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else _ml_dtypes.float8_e5m2fnuz
+
+
+def _encode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
+    """Encode float32 → fp8/bf8 bytes (uint8 view). Requires ml_dtypes.
+
+    The fp8 format (OCP vs FNUZ) follows the compiled kernel's arch; see _fp8_uses_ocp.
+    """
+    ml_t = _fp8_ml_dtype(dtype)
     return arr.astype(ml_t).view(np.uint8)
 
 
 def _decode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
     """Decode fp8/bf8 bytes (uint8 view) → float32. Requires ml_dtypes."""
-    _require_ml_dtypes()
-    ml_t = _ml_dtypes.float8_e4m3fn if dtype == "fp8" else _ml_dtypes.float8_e5m2
+    ml_t = _fp8_ml_dtype(dtype)
     return arr.view(ml_t).astype(np.float32)
 
 

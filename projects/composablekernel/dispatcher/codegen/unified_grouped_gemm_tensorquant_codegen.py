@@ -31,6 +31,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from codegen_common import (
+    ROWCOL_TENSOR_QUANT_BASE_PIPELINE_MAP,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
+    ROWCOL_TENSOR_QUANT_EPILOGUE_MAP,
+    ROWCOL_TENSOR_QUANT_PIPELINE_MAP,
+    ROWCOL_TENSOR_QUANT_SUPPORTED_LAYOUTS,
+    make_tensorquant_kernel_name,
+)
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
@@ -69,36 +79,26 @@ TENSORQUANT_SCHEDULER_TO_CK = {
     "default":   "ck_tile::GemmPipelineScheduler::Default",
 }
 
+# TensorQuant currently supports only the CompV3 pipeline with a CShuffle epilogue.
+# These maps make the config keys load-bearing: the emitted C++ is interpolated from
+# them, and _build_specs rejects any key that is absent. Without that, a config
+# naming an unsupported pipeline would produce a header *named* for it while
+# containing a CompV3 kernel -- silently mislabelled for any name-keyed autotuner.
+TENSORQUANT_PIPELINE_MAP      = dict(ROWCOL_TENSOR_QUANT_PIPELINE_MAP)
+TENSORQUANT_BASE_PIPELINE_MAP = dict(ROWCOL_TENSOR_QUANT_BASE_PIPELINE_MAP)
+TENSORQUANT_EPILOGUE_MAP      = dict(ROWCOL_TENSOR_QUANT_EPILOGUE_MAP)
+TENSORQUANT_SUPPORTED_LAYOUTS = ROWCOL_TENSOR_QUANT_SUPPORTED_LAYOUTS
+
 
 # =============================================================================
 # Kernel name helper (byte-exact with instance builder naming)
 # =============================================================================
-
-def make_tensorquant_kernel_name(
-    dtype: str,
-    layout: str,
-    pipeline: str,
-    epilogue: str,
-    scheduler: str,
-    pad_m: bool,
-    pad_n: bool,
-    pad_k: bool,
-    persistent: bool,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
-) -> str:
-    """Produce the exact kernel name that the instance builder generates."""
-    tile_str = (
-        f"{tile_m}x{tile_n}x{tile_k}_"
-        f"{warp_m}x{warp_n}x{warp_k}_"
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}"
-    )
-    return (
-        f"grouped_gemm_tensorquant_{dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}_"
-        f"{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_{str(pad_k).capitalize()}_"
-        f"{str(persistent).capitalize()}_{tile_str}"
-    )
+#
+# make_tensorquant_kernel_name lives in codegen_common alongside the aquant/bquant/
+# abquant builders and is re-exported here so existing
+# `from unified_grouped_gemm_tensorquant_codegen import make_tensorquant_kernel_name`
+# imports keep working.
+__all__ = ["make_tensorquant_kernel_name", "generate_kernels", "main"]
 
 
 # =============================================================================
@@ -194,6 +194,12 @@ class TensorQuantKernelHeaderGenerator:
 
         scheduler_ck = TENSORQUANT_SCHEDULER_TO_CK[spec.scheduler]
 
+        # Interpolated rather than hardwired, so the kernel name and the emitted code
+        # cannot disagree. _build_specs guarantees these keys exist.
+        pipeline_ck      = TENSORQUANT_PIPELINE_MAP[spec.pipeline]
+        base_pipeline_ck = TENSORQUANT_BASE_PIPELINE_MAP[spec.pipeline]
+        epilogue_ck      = TENSORQUANT_EPILOGUE_MAP[spec.epilogue]
+
         pad_m      = str(spec.pad_m).lower()
         pad_n      = str(spec.pad_n).lower()
         pad_k      = str(spec.pad_k).lower()
@@ -256,6 +262,9 @@ struct {struct} {{
     static constexpr ck_tile::index_t WarpTileM      = {t.warp_tile_m};
     static constexpr ck_tile::index_t WarpTileN      = {t.warp_tile_n};
     static constexpr ck_tile::index_t WarpTileK      = {t.warp_tile_k};
+    // Informational only: the launch below uses Kernel::BlockSize(), which the
+    // pipeline derives from the warp counts. Changing the `block_size` config key
+    // changes this constant but not the launch geometry.
     static constexpr ck_tile::index_t BlockSize       = {spec.block_size};
     static constexpr int               kBlockPerCu    = {spec.k_block_per_cu};
 
@@ -269,13 +278,27 @@ struct {struct} {{
     static constexpr bool PreshuffleB         = false;
     static constexpr bool UsePersistentKernel = {persistent};
 
+    // TileGemmShape's trailing template parameters are PermuteA_ / PermuteB_. This
+    // bridge does not use preshuffled operands, so both are false.
+    static constexpr bool PermuteA = false;
+    static constexpr bool PermuteB = false;
+
     using TileShape = ck_tile::TileGemmShape<
         ck_tile::sequence<TileM, TileN, TileK>,
         ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, WarpPerBlock_K>,
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>,
-        false, false>;
+        PermuteA, PermuteB>;
 
-    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;
+    // GemmSpatiallyLocalTilePartitioner groups workgroups to improve cache reuse; the
+    // two integers are GroupNum (number of big groups) and M01 (groups in the M dim
+    // within a spatially local WGP). The values below are the gfx94x-tuned defaults
+    // used by the tile_engine instance builder and the 17_grouped_gemm examples, where
+    // they appear as TileParitionerGroupNum / TileParitionerM01.
+    static constexpr ck_tile::index_t TilePartitionerGroupNum = 8;
+    static constexpr ck_tile::index_t TilePartitionerM01      = 4;
+
+    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<
+        TileShape, TilePartitionerGroupNum, TilePartitionerM01>;
 
     using GemmQuantTraits = ck_tile::TileGemmQuantTraits<
         kPadM, kPadN, kPadK,
@@ -292,11 +315,19 @@ struct {struct} {{
     using Traits = ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, {ns}::ALayout, {ns}::BLayout, {ns}::CLayout>;
     using GemmPipelineProblem = ck_tile::GemmPipelineProblem<
         ADataType, BDataType, AccDataType, TileShape, Traits>;
-    using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>;
+    using BaseGemmPipeline = {base_pipeline_ck}<GemmPipelineProblem>;
 
+    // preprocess runs once before every kernel invocation, including each iteration of
+    // the timing loop (see ck_tile::launch_kernel_time_mask). Callers must use it to
+    // re-zero C whenever k_batch > 1: split-K selects the atomic_add epilogue, so a
+    // C that is zeroed only once ends up holding the sum over cold_niters + nrepeat
+    // launches. The overload below supplies a no-op and is safe only for k_batch == 1,
+    // where the epilogue is `set` and repeated launches are idempotent.
+    template <typename PreprocessFunc>
     static float launch(const std::vector<ck_tile::QuantGroupedGemmHostArgs>& gemm_descs,
                         const ck_tile::stream_config& stream,
-                        void* kargs_ptr)
+                        void* kargs_ptr,
+                        PreprocessFunc preprocess)
     {{
         constexpr auto scheduler = {scheduler_ck};
 
@@ -320,9 +351,9 @@ struct {struct} {{
                 has_hot_loop_v,
                 tail_number_v>;
 
-            using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<QuantGemmProblem>;
+            using GemmPipeline = {pipeline_ck}<QuantGemmProblem>;
 
-            using GemmEpilogue = ck_tile::CShuffleEpilogue<
+            using GemmEpilogue = {epilogue_ck}<
                 ck_tile::CShuffleEpilogueProblem<
                     ADataType, BDataType, ck_tile::tuple<>,
                     AccDataType, CDataType, ck_tile::tuple<>,
@@ -352,8 +383,9 @@ struct {struct} {{
                                                 stream.stream_id_));
 
             constexpr int kBlockPerCu_ = kBlockPerCu;
-            return ave_time = ck_tile::launch_kernel(
+            return ave_time = ck_tile::launch_kernel_time_mask(
                 stream,
+                preprocess,
                 ck_tile::make_kernel<kBlockPerCu_>(
                     Kernel{{}},
                     grids,
@@ -364,6 +396,14 @@ struct {struct} {{
         }};
 
         return ave_time = BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    }}
+
+    // Convenience overload for k_batch == 1. See the note on preprocess above.
+    static float launch(const std::vector<ck_tile::QuantGroupedGemmHostArgs>& gemm_descs,
+                        const ck_tile::stream_config& stream,
+                        void* kargs_ptr)
+    {{
+        return launch(gemm_descs, stream, kargs_ptr, []() {{}});
     }}
 }};
 
@@ -390,45 +430,67 @@ using AccDataType = {ck_acc};
 
 
 def _default_config() -> dict:
+    # Traits and tile come from codegen_common so this default and the runtime
+    # default_{fp8,bf8}_config() in grouped_gemm_tensorquant_utils.py cannot drift.
     return {
         "dtypes": ["fp8", "bf8"],
-        "layouts": ["rcr"],
-        "pipeline": "compv3",
-        "epilogue": "cshuffle",
-        "scheduler": "intrawave",
-        "pad_m": True,
-        "pad_n": False,
-        "pad_k": True,
-        "persistent": False,
-        "block_size": 256,
-        "k_block_per_cu": 1,
-        "tile_configs": [
-            {"tile_m": 128, "tile_n": 128, "tile_k": 64,
-             "warp_m": 2, "warp_n": 2, "warp_k": 1,
-             "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16},
-        ],
+        "layouts": list(TENSORQUANT_SUPPORTED_LAYOUTS),
+        **ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
+        "tile_configs": [dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE)],
     }
 
 
 def _build_specs(config: dict) -> List[TensorQuantKernelSpec]:
     specs = []
-    pipeline   = config.get("pipeline", "compv3")
-    epilogue   = config.get("epilogue", "cshuffle")
-    scheduler  = config.get("scheduler", "intrawave")
-    pad_m      = config.get("pad_m", False)
-    pad_n      = config.get("pad_n", False)
-    pad_k      = config.get("pad_k", True)
-    persistent = config.get("persistent", False)
-    block_size    = config.get("block_size", 256)
-    k_block_per_cu = config.get("k_block_per_cu", 1)
+    defaults   = ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS
+    pipeline   = config.get("pipeline", defaults["pipeline"])
+    epilogue   = config.get("epilogue", defaults["epilogue"])
+    scheduler  = config.get("scheduler", defaults["scheduler"])
+    pad_m      = config.get("pad_m", defaults["pad_m"])
+    pad_n      = config.get("pad_n", defaults["pad_n"])
+    pad_k      = config.get("pad_k", defaults["pad_k"])
+    persistent = config.get("persistent", defaults["persistent"])
+    block_size     = config.get("block_size", defaults["block_size"])
+    k_block_per_cu = config.get("k_block_per_cu", defaults["k_block_per_cu"])
+
+    # Reject unsupported pipeline/epilogue/scheduler up front rather than emitting a
+    # header whose name advertises something the generated code does not implement.
+    if pipeline not in TENSORQUANT_PIPELINE_MAP:
+        log.warning(
+            "Unsupported pipeline '%s' (supported: %s) — no kernels generated",
+            pipeline, ", ".join(sorted(TENSORQUANT_PIPELINE_MAP)),
+        )
+        return []
+    if epilogue not in TENSORQUANT_EPILOGUE_MAP:
+        log.warning(
+            "Unsupported epilogue '%s' (supported: %s) — no kernels generated",
+            epilogue, ", ".join(sorted(TENSORQUANT_EPILOGUE_MAP)),
+        )
+        return []
+    if scheduler not in TENSORQUANT_SCHEDULER_TO_CK:
+        log.warning(
+            "Unsupported scheduler '%s' (supported: %s) — no kernels generated",
+            scheduler, ", ".join(sorted(TENSORQUANT_SCHEDULER_TO_CK)),
+        )
+        return []
 
     for dtype, layout, tile_dict in itertools.product(
         config.get("dtypes", ["fp8"]),
-        config.get("layouts", ["rcr"]),
+        config.get("layouts", list(TENSORQUANT_SUPPORTED_LAYOUTS)),
         config.get("tile_configs", []),
     ):
         if dtype not in TENSORQUANT_VARIANTS:
             log.warning("Unknown dtype %s — skipping", dtype)
+            continue
+
+        # A non-rcr layout would flip BLayout in the generated header while the ctypes
+        # bridge kept requiring stride_A == K, stride_B == K, stride_C == N, so the
+        # kernel would build but every call would be rejected at runtime.
+        if layout not in TENSORQUANT_SUPPORTED_LAYOUTS:
+            log.warning(
+                "Unsupported layout '%s' (supported: %s) — skipping",
+                layout, ", ".join(TENSORQUANT_SUPPORTED_LAYOUTS),
+            )
             continue
 
         tile = TensorQuantTileConfig(

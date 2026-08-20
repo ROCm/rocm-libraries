@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -58,6 +59,13 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
             return -1;                                                                         \
         }                                                                                      \
     }
+
+// GFX_ARCH is normally injected by CMake (-DGFX_ARCH="gfx942"). Define a sentinel if
+// it is missing so a hand-rolled compile fails the is_supported_arch() check below with
+// a readable message instead of dying on an undeclared identifier.
+#ifndef GFX_ARCH
+#define GFX_ARCH "unknown"
+#endif
 
 // g_ref_count is process-global but scoped to this .so image: each kernel variant
 // is compiled into its own .so, so there is no cross-kernel symbol aliasing.
@@ -129,6 +137,13 @@ int dispatcher_initialize()
 }
 
 /**
+ * Short-name alias for dispatcher_initialize(). Every other ctypes lib in this
+ * directory exports both spellings; generic loaders (e.g. ctypes_utils.py) bind
+ * `dispatcher_init`, so omitting it would make this .so unusable through them.
+ */
+int dispatcher_init() { return dispatcher_initialize(); }
+
+/**
  * Run RowColQuant Grouped GEMM: C[M,N] = dequant(A[M,K], AQ[M,1]) @ dequant(B[K,N], BQ[1,N])
  *
  * A, B, AQ, BQ, C are host pointers to flat packed arrays.
@@ -140,9 +155,11 @@ int dispatcher_initialize()
  *   M, N, K          - matrix dimensions (single problem)
  *   stride_A         - leading dimension of A (row-major: K)
  *   stride_B         - leading dimension of B (col-major: K)
- *   stride_AQ        - ignored; present for ABI symmetry with other quant ops.
- *                      The kernel uses broadcast stride=0 for AQ and BQ.
- *   stride_BQ        - ignored; see stride_AQ.
+ *   stride_AQ        - must be 1. Present for ABI symmetry with the other quant ops;
+ *                      the RowColQuant kernel hardwires the scale strides and never
+ *                      reads this field. Values other than 1 are rejected rather than
+ *                      silently ignored.
+ *   stride_BQ        - must be 1; see stride_AQ.
  *   stride_C         - leading dimension of C (row-major: N)
  *   QK_A             - number of AQ elements (== M); used only for buffer sizing.
  *   QK_B             - number of BQ elements (== N); used only for buffer sizing.
@@ -225,6 +242,44 @@ int dispatcher_run_gemm(const void* A,
         return -1;
     }
 
+    // Symmetric with the tensorquant bridge. The kernel ignores these fields entirely
+    // (QuantType::RowColQuant builds its AQ/BQ views with literal strides), so accepting
+    // an arbitrary value would silently do nothing at all.
+    if(stride_AQ != 1 || stride_BQ != 1)
+    {
+        std::cerr << "dispatcher_run_gemm: stride_AQ and stride_BQ must be 1 (the RowColQuant "
+                  << "kernel hardwires its scale strides); got stride_AQ=" << stride_AQ
+                  << " stride_BQ=" << stride_BQ << "\n";
+        return -1;
+    }
+
+    // The ABI takes int64_t but ck_tile::QuantGroupedGemmHostArgs stores ck_tile::index_t
+    // (int32_t). Without this check a >2^31 dimension would wrap to a negative extent and
+    // the kernel would read out of bounds instead of reporting an error.
+    {
+        constexpr int64_t kIndexMax = static_cast<int64_t>(
+            std::numeric_limits<ck_tile::index_t>::max());
+        const int64_t to_narrow[] = {M, N, K, stride_A, stride_B, stride_C};
+        for(int64_t v : to_narrow)
+        {
+            if(v > kIndexMax)
+            {
+                std::cerr << "dispatcher_run_gemm: dimension or stride " << v
+                          << " exceeds the " << kIndexMax
+                          << " limit of ck_tile::index_t (int32)\n";
+                return -1;
+            }
+        }
+        // M * N and M * K are computed in int64 for the byte counts below, but the kernel
+        // also derives tile counts from M and N; a product this large will not fit either.
+        if(M > kIndexMax / N || M * N > kIndexMax)
+        {
+            std::cerr << "dispatcher_run_gemm: M*N (" << M << "*" << N
+                      << ") exceeds the range of ck_tile::index_t (int32)\n";
+            return -1;
+        }
+    }
+
     const ADataType* A_host   = static_cast<const ADataType*>(A);
     const BDataType* B_host   = static_cast<const BDataType*>(B);
     const AQDataType* AQ_host = static_cast<const AQDataType*>(AQ);
@@ -260,7 +315,8 @@ int dispatcher_run_gemm(const void* A,
     HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<AQDataType>(QK_A)));
     // BQ: per-col scale [1, N] -- 1 row, QK_B cols
     HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<BQDataType>(QK_B)));
-    HIP_CHECK(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)));
+    const std::size_t c_bytes = elements_to_bytes<CDataType>(M * N);
+    HIP_CHECK(hipMalloc(&C_dev, c_bytes));
 
     // Allocate kargs device buffer for grouped GEMM kernel args (1 group)
     HIP_CHECK(hipMalloc(&kargs_dev, sizeof(ck_tile::QuantGemmTransKernelArg)));
@@ -272,7 +328,7 @@ int dispatcher_run_gemm(const void* A,
         hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<AQDataType>(QK_A), hipMemcpyHostToDevice));
     HIP_CHECK(
         hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<BQDataType>(QK_B), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
+    HIP_CHECK(hipMemset(C_dev, 0, c_bytes));
 
     // Build QuantGroupedGemmHostArgs for single-group launch.
     //
@@ -280,23 +336,16 @@ int dispatcher_run_gemm(const void* A,
     //   host  - QK_A == M and QK_B == N were validated at the top of this function, and
     //           the AQ/BQ device buffers were sized from them (M and N elements).
     //   kernel- reads M per-row A scales and N per-col B scales, deriving the counts
-    //           from M/N directly. The QK_A/QK_B fields below are therefore ignored,
-    //           and the scale strides must be 0: the kernel broadcasts scale[row] across
-    //           the row (AQ) and scale[col] down the column (BQ). Any non-zero stride
-    //           makes it walk past the end of the scale buffer and return garbage.
+    //           from M/N directly.
     //
-    // Naming the constants keeps the two halves legible; the assertion re-states the
-    // host half so a future kernel that starts honouring QK_A/QK_B cannot silently
-    // inherit a placeholder of 1 and read out of bounds.
+    // Under QuantType::RowColQuant the kernel builds its scale views with literal
+    // strides -- AQ as (M, N) strided (1, 0) and BQ as (M, N) strided (0, 1), see
+    // gemm_quant_kernel.hpp -- so the QK_A/QK_B and stride_AQ/stride_BQ fields of the
+    // host args are never read. The values below are placeholders; naming them records
+    // that they are inert rather than tuned. If a future kernel revision starts
+    // honouring them, the names are the thing to grep for.
     constexpr auto kQuantGroupsIgnoredByKernel = static_cast<ck_tile::index_t>(1);
-    constexpr auto kBroadcastScaleStride       = static_cast<ck_tile::index_t>(0);
-
-    if(QK_A != M || QK_B != N)
-    {
-        std::cerr << "dispatcher_run_gemm: internal error, scale-count invariant violated\n";
-        cleanup();
-        return -1;
-    }
+    constexpr auto kScaleStrideIgnoredByKernel = static_cast<ck_tile::index_t>(0);
 
     ck_tile::QuantGroupedGemmHostArgs args(A_dev,
                                            B_dev,
@@ -312,29 +361,51 @@ int dispatcher_run_gemm(const void* A,
                                            static_cast<ck_tile::index_t>(stride_A),
                                            static_cast<ck_tile::index_t>(stride_B),
                                            static_cast<ck_tile::index_t>(stride_C),
-                                           kBroadcastScaleStride,  // stride_AQ
-                                           kBroadcastScaleStride); // stride_BQ
+                                           kScaleStrideIgnoredByKernel,  // stride_AQ
+                                           kScaleStrideIgnoredByKernel); // stride_BQ
 
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
     const bool do_time = (time_ms != nullptr);
-    // stream_config fields (positional): stream_id, time_kernel, log_level,
-    //   cold_niters, nrepeat, do_log_perf, use_gpu_timer, rotating_count
+    // stream_config fields, in declaration order (see ck_tile/host/stream_config.hpp):
+    //   stream_id_, time_kernel_, log_level_, cold_niters_, nrepeat_,
+    //   is_gpu_timer_, flush_cache_, rotating_count_
+    // Note there is no do_log_perf member; is_gpu_timer_ selects hipEvent timing over
+    // wall-clock, and flush_cache_ enables the rotating-buffer cache flush.
     ck_tile::stream_config stream_cfg{
-        nullptr,          // stream_id
-        do_time,          // time_kernel
-        0,                // log_level
-        do_time ? 3 : 0,  // cold_niters
-        do_time ? 10 : 1, // nrepeat
-        do_time,          // do_log_perf
-        false,            // use_gpu_timer
-        1,                // rotating_count
+        nullptr,          // stream_id_
+        do_time,          // time_kernel_
+        0,                // log_level_
+        do_time ? 3 : 0,  // cold_niters_
+        do_time ? 10 : 1, // nrepeat_
+        do_time,          // is_gpu_timer_
+        false,            // flush_cache_
+        1,                // rotating_count_
+    };
+
+    // Split-K selects the atomic_add epilogue, so C must start at zero before *every*
+    // launch -- not just the first. With timing enabled the kernel runs
+    // cold_niters_ + nrepeat_ times, and a C zeroed only once would come back holding
+    // the sum of all of them. SelectedKernel::launch forwards this hook to
+    // ck_tile::launch_kernel_time_mask, which calls it before each invocation.
+    // For k_batch == 1 the epilogue is `set` and repeated launches are idempotent, so
+    // the memset is skipped to keep the timing loop measuring only the kernel.
+    hipError_t clear_err = hipSuccess;
+    auto clear_c         = [&]() {
+        if(k_batch > 1)
+        {
+            hipError_t e = hipMemsetAsync(C_dev, 0, c_bytes, stream_cfg.stream_id_);
+            // Record the first failure rather than aborting: this runs inside the
+            // kernel-launch helper, which has no way to propagate an error out.
+            if(e != hipSuccess && clear_err == hipSuccess)
+                clear_err = e;
+        }
     };
 
     float exec_time = -1.0f;
     try
     {
-        exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev);
+        exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev, clear_c);
     }
     catch(const std::exception& e)
     {
@@ -349,6 +420,14 @@ int dispatcher_run_gemm(const void* A,
         return -3;
     }
 
+    if(clear_err != hipSuccess)
+    {
+        std::cerr << "dispatcher_run_gemm: failed to clear C between split-K launches: "
+                  << hipGetErrorString(clear_err) << "\n";
+        cleanup();
+        return -1;
+    }
+
     if(exec_time < 0.0f)
     {
         std::cerr << "dispatcher_run_gemm: kernel reported unsupported args\n";
@@ -357,7 +436,7 @@ int dispatcher_run_gemm(const void* A,
     }
 
     // Copy result back
-    HIP_CHECK(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(C_host, C_dev, c_bytes, hipMemcpyDeviceToHost));
 
     if(time_ms)
         *time_ms = exec_time;

@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -61,6 +62,13 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
             return -1;                                                                         \
         }                                                                                      \
     }
+
+// GFX_ARCH is normally injected by CMake (-DGFX_ARCH="gfx942"). Define a sentinel if
+// it is missing so a hand-rolled compile fails the is_supported_arch() check below with
+// a readable message instead of dying on an undeclared identifier.
+#ifndef GFX_ARCH
+#define GFX_ARCH "unknown"
+#endif
 
 // g_ref_count is process-global but scoped to this .so image: each kernel variant
 // is compiled into its own .so, so there is no cross-kernel symbol aliasing.
@@ -130,6 +138,13 @@ int dispatcher_initialize()
     g_ref_count.fetch_add(1, std::memory_order_release);
     return 0;
 }
+
+/**
+ * Short-name alias for dispatcher_initialize(). Every other ctypes lib in this
+ * directory exports both spellings; generic loaders (e.g. ctypes_utils.py) bind
+ * `dispatcher_init`, so omitting it would make this .so unusable through them.
+ */
+int dispatcher_init() { return dispatcher_initialize(); }
 
 /**
  * Run TensorQuant Grouped GEMM: C[M,N] = (scale_A * A[M,K]) @ (scale_B * B[K,N])
@@ -231,6 +246,33 @@ int dispatcher_run_gemm(const void* A,
         return -1;
     }
 
+    // The ABI takes int64_t but ck_tile::QuantGroupedGemmHostArgs stores ck_tile::index_t
+    // (int32_t). Without this check a >2^31 dimension would wrap to a negative extent and
+    // the kernel would read out of bounds instead of reporting an error.
+    {
+        constexpr int64_t kIndexMax = static_cast<int64_t>(
+            std::numeric_limits<ck_tile::index_t>::max());
+        const int64_t to_narrow[] = {M, N, K, stride_A, stride_B, stride_C};
+        for(int64_t v : to_narrow)
+        {
+            if(v > kIndexMax)
+            {
+                std::cerr << "dispatcher_run_gemm: dimension or stride " << v
+                          << " exceeds the " << kIndexMax
+                          << " limit of ck_tile::index_t (int32)\n";
+                return -1;
+            }
+        }
+        // M * N and M * K are computed in int64 for the byte counts below, but the kernel
+        // also derives tile counts from M and N; a product this large will not fit either.
+        if(M > kIndexMax / N || M * N > kIndexMax)
+        {
+            std::cerr << "dispatcher_run_gemm: M*N (" << M << "*" << N
+                      << ") exceeds the range of ck_tile::index_t (int32)\n";
+            return -1;
+        }
+    }
+
     const ADataType* A_host   = static_cast<const ADataType*>(A);
     const BDataType* B_host   = static_cast<const BDataType*>(B);
     const AQDataType* AQ_host = static_cast<const AQDataType*>(AQ);
@@ -265,7 +307,8 @@ int dispatcher_run_gemm(const void* A,
     // TensorQuant: single scalar scale per tensor -- 1 element each
     HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<AQDataType>(1)));
     HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<BQDataType>(1)));
-    HIP_CHECK(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)));
+    const std::size_t c_bytes = elements_to_bytes<CDataType>(M * N);
+    HIP_CHECK(hipMalloc(&C_dev, c_bytes));
 
     // Allocate kargs device buffer for grouped GEMM kernel args (1 group)
     HIP_CHECK(hipMalloc(&kargs_dev, sizeof(ck_tile::QuantGemmTransKernelArg)));
@@ -275,16 +318,19 @@ int dispatcher_run_gemm(const void* A,
     HIP_CHECK(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<AQDataType>(1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<BQDataType>(1), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
+    HIP_CHECK(hipMemset(C_dev, 0, c_bytes));
 
     // Build QuantGroupedGemmHostArgs for single-group launch.
     //
-    // The quantization semantics of TensorQuant are carried entirely by these four
-    // values, so name them rather than writing bare 1s at the call site:
+    // These four values name the TensorQuant contract rather than writing bare 1s at
+    // the call site:
     //   - one scale covers the whole tensor, hence a quant-group count of 1;
     //   - the scale buffer holds exactly one element, hence a scale stride of 1.
     // Host-side validation above already rejected any QK_A/QK_B/stride_AQ/stride_BQ
     // that disagrees, so these constants restate a checked invariant, not a guess.
+    // The kernel itself does not read them: under QuantType::TensorQuant it simply
+    // dereferences aq_ptr/bq_ptr (see gemm_quant_kernel.hpp). They are kept correct so
+    // the host args stay meaningful, not because the kernel depends on them today.
     constexpr auto kTensorWiseQuantGroups = static_cast<ck_tile::index_t>(1);
     constexpr auto kTensorWiseScaleStride = static_cast<ck_tile::index_t>(1);
 
@@ -308,23 +354,45 @@ int dispatcher_run_gemm(const void* A,
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
     const bool do_time = (time_ms != nullptr);
-    // stream_config fields (positional): stream_id, time_kernel, log_level,
-    //   cold_niters, nrepeat, do_log_perf, use_gpu_timer, rotating_count
+    // stream_config fields, in declaration order (see ck_tile/host/stream_config.hpp):
+    //   stream_id_, time_kernel_, log_level_, cold_niters_, nrepeat_,
+    //   is_gpu_timer_, flush_cache_, rotating_count_
+    // Note there is no do_log_perf member; is_gpu_timer_ selects hipEvent timing over
+    // wall-clock, and flush_cache_ enables the rotating-buffer cache flush.
     ck_tile::stream_config stream_cfg{
-        nullptr,          // stream_id
-        do_time,          // time_kernel
-        0,                // log_level
-        do_time ? 3 : 0,  // cold_niters
-        do_time ? 10 : 1, // nrepeat
-        do_time,          // do_log_perf
-        false,            // use_gpu_timer
-        1,                // rotating_count
+        nullptr,          // stream_id_
+        do_time,          // time_kernel_
+        0,                // log_level_
+        do_time ? 3 : 0,  // cold_niters_
+        do_time ? 10 : 1, // nrepeat_
+        do_time,          // is_gpu_timer_
+        false,            // flush_cache_
+        1,                // rotating_count_
+    };
+
+    // Split-K selects the atomic_add epilogue, so C must start at zero before *every*
+    // launch -- not just the first. With timing enabled the kernel runs
+    // cold_niters_ + nrepeat_ times, and a C zeroed only once would come back holding
+    // the sum of all of them. SelectedKernel::launch forwards this hook to
+    // ck_tile::launch_kernel_time_mask, which calls it before each invocation.
+    // For k_batch == 1 the epilogue is `set` and repeated launches are idempotent, so
+    // the memset is skipped to keep the timing loop measuring only the kernel.
+    hipError_t clear_err = hipSuccess;
+    auto clear_c         = [&]() {
+        if(k_batch > 1)
+        {
+            hipError_t e = hipMemsetAsync(C_dev, 0, c_bytes, stream_cfg.stream_id_);
+            // Record the first failure rather than aborting: this runs inside the
+            // kernel-launch helper, which has no way to propagate an error out.
+            if(e != hipSuccess && clear_err == hipSuccess)
+                clear_err = e;
+        }
     };
 
     float exec_time = -1.0f;
     try
     {
-        exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev);
+        exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev, clear_c);
     }
     catch(const std::exception& e)
     {
@@ -339,6 +407,14 @@ int dispatcher_run_gemm(const void* A,
         return -3;
     }
 
+    if(clear_err != hipSuccess)
+    {
+        std::cerr << "dispatcher_run_gemm: failed to clear C between split-K launches: "
+                  << hipGetErrorString(clear_err) << "\n";
+        cleanup();
+        return -1;
+    }
+
     if(exec_time < 0.0f)
     {
         std::cerr << "dispatcher_run_gemm: kernel reported unsupported args\n";
@@ -347,7 +423,7 @@ int dispatcher_run_gemm(const void* A,
     }
 
     // Copy result back
-    HIP_CHECK(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(C_host, C_dev, c_bytes, hipMemcpyDeviceToHost));
 
     if(time_ms)
         *time_ms = exec_time;
