@@ -620,6 +620,38 @@ class TestHelpers(unittest.TestCase):
         )
         self.assertEqual(ldr.rows_per_vec, 8)
 
+    def test_coalesced_loader_vector_axis_validation(self):
+        # A mistyped vector_axis must fail fast (not silently fall through to the
+        # "col" branch), at both construction entry points.
+        with self.assertRaises(ValueError):
+            CoalescedTileLoader.choose_vec(
+                tile_rows=64, tile_cols=64, block_size=256, vector_axis="Row"
+            )
+        with self.assertRaises(ValueError):
+            CoalescedTileLoader(
+                tile_rows=64,
+                tile_cols=64,
+                block_size=256,
+                load_vec=1,
+                vector_axis="Row",
+            )
+
+    def test_coalesced_loader_from_tile_normalizes_scalar_axis(self):
+        # When choose_vec collapses to 1 the axis is irrelevant; from_tile must
+        # normalise "row" back to the canonical scalar "col" path so a vec==1
+        # loader is byte-identical regardless of the axis requested.
+        ldr = CoalescedTileLoader.from_tile(
+            tile_rows=64, tile_cols=1, block_size=64, max_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr.load_vec, 1)
+        self.assertEqual(ldr.vector_axis, "col")
+        # A width > 1 keeps the requested row axis.
+        ldr_vec = CoalescedTileLoader.from_tile(
+            tile_rows=64, tile_cols=64, block_size=256, max_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr_vec.load_vec, 8)
+        self.assertEqual(ldr_vec.vector_axis, "row")
+
     def test_async_loader_choose_dwords(self):
         # 128 halves wide => has to be multiple of 8 halves (dwords=4):
         # tile_rows=64, tile_cols=128, threads=256: chunks = 64*128/8 = 1024 ≥ 256 ✓

@@ -1527,10 +1527,20 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                     cap_b = wb;
                     break;
                 }
-            (void)rocke_coalesced_tile_loader_choose_vec_axis(
+            /* Mirror the Python choose_vec, which RAISES ValueError when the tile
+             * geometry admits no usable width (not even 1): fail fast here too so
+             * a bad geometry surfaces as a clear error instead of silently
+             * degrading to the scalar path and diverging from the Python engine. */
+            rocke_status_t sva = rocke_coalesced_tile_loader_choose_vec_axis(
                 ctx->block_m, ctx->block_k, ctx->threads, cap_a, /*row=*/true, &va);
-            (void)rocke_coalesced_tile_loader_choose_vec_axis(
+            rocke_status_t svb = rocke_coalesced_tile_loader_choose_vec_axis(
                 ctx->block_n, ctx->block_k, ctx->threads, cap_b, /*row=*/true, &vb);
+            if(sva != ROCKE_OK || svb != ROCKE_OK)
+            {
+                rocke_i_set_err(
+                    b, ROCKE_ERR_VALUE, "wgrad: no usable free-axis load_vec for tile geometry");
+                return false;
+            }
             if(va > 1)
                 axis_a = true;
             else

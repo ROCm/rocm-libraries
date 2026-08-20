@@ -62,6 +62,11 @@ DescriptorFn = Callable[[IRBuilder, Value, Value], Tuple[Value, Optional[Value]]
 # Bytes per element for the dtypes CoalescedTileLoader / AsyncTileLoader support.
 _ELEM_BYTES: dict = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
 
+# The two admissible ``vector_axis`` values.  Kept as a module constant so the
+# validation in ``choose_vec`` (classmethod entry point) and ``__post_init__``
+# (direct-construction entry point) can never drift.
+_VALID_VECTOR_AXES = ("col", "row")
+
 
 @dataclass(frozen=True)
 class CoalescedTileLoader:
@@ -115,6 +120,17 @@ class CoalescedTileLoader:
     # flat-K behaviour.
     inner_dim: Optional[int] = None
 
+    def __post_init__(self) -> None:
+        # Fail fast on a mistyped ``vector_axis`` (e.g. "Row"): silently falling
+        # through to the "col" branch would change the (row, col) decode and be
+        # very hard to diagnose.  Valid paths are untouched, so byte-identity of
+        # every existing loader is preserved.
+        if self.vector_axis not in _VALID_VECTOR_AXES:
+            raise ValueError(
+                f"CoalescedTileLoader: vector_axis must be one of "
+                f"{_VALID_VECTOR_AXES}, got {self.vector_axis!r}"
+            )
+
     @classmethod
     def choose_vec(
         cls,
@@ -136,6 +152,11 @@ class CoalescedTileLoader:
              one chunk per thread per phase — otherwise some threads
              would be idle).
         """
+        if vector_axis not in _VALID_VECTOR_AXES:
+            raise ValueError(
+                f"choose_vec: vector_axis must be one of {_VALID_VECTOR_AXES}, "
+                f"got {vector_axis!r}"
+            )
         axis = tile_rows if vector_axis == "row" else tile_cols
         v = max_vec
         while v >= 1:
@@ -170,6 +191,12 @@ class CoalescedTileLoader:
             max_vec=max_vec,
             vector_axis=vector_axis,
         )
+        # When the width collapses to 1 the axis is semantically irrelevant, but
+        # a "row" axis would still emit the transposed (row, col) decode.
+        # Normalise back to the canonical scalar "col" path so a vec==1 loader is
+        # byte-identical to the historical scalar loader regardless of the axis
+        # requested (and matches the col-only C++ ``from_tile``).
+        axis = "col" if vec == 1 else vector_axis
         return cls(
             tile_rows=tile_rows,
             tile_cols=tile_cols,
@@ -177,7 +204,7 @@ class CoalescedTileLoader:
             load_vec=vec,
             elem_dtype=elem_dtype,
             use_buffer_rsrc=use_buffer_rsrc,
-            vector_axis=vector_axis,
+            vector_axis=axis,
         )
 
     @property
