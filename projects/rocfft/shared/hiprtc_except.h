@@ -22,6 +22,8 @@
 #define ROCFFT_HIPRTC_EXCEPT_H
 
 #include <hip/hiprtc.h>
+#include <stdexcept>
+#include <string>
 
 // errors specifically from hiprtc APIs
 struct hiprtc_runtime_error : public std::runtime_error
