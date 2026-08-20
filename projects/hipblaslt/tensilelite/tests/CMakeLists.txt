@@ -127,9 +127,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
             INSTALL_EXECUTABLE "./tensilelite-tests"
         )
 
-        rocm_install(
+        # Note: rocm_install(TARGETS ...) always installs executables to the
+        # standard CMAKE_INSTALL_BINDIR; its underlying rocm_install_targets()
+        # has no DESTINATION keyword for TARGETS mode. Use plain install()
+        # here so tensilelite-tests lands in its own subdir alongside data/
+        # and CTestTestfile.cmake (see TEST_DATA_DIR comment above).
+        install(
             TARGETS tensilelite-tests
-            DESTINATION "${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
             COMPONENT tests
         )
         rocm_install(
