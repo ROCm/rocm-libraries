@@ -208,9 +208,9 @@ void rocfft_plan_t::LogFields(const char* description, const std::vector<rocfft_
         const auto& f = fields[fieldIdx];
 
         os << description << " field " << fieldIdx << ":" << std::endl;
-        for(size_t brickIdx = 0; brickIdx < f.bricks.size(); ++brickIdx)
+        for(size_t brickIdx = 0; brickIdx < f.num_bricks(); ++brickIdx)
         {
-            const auto& b = f.bricks[brickIdx];
+            const auto& b = f.get_brick(brickIdx);
             os << "  brick " << brickIdx << ":" << std::endl;
             os << "    comm_rank: " << b.location.comm_rank << std::endl;
             os << "    device: " << b.location.device << std::endl;

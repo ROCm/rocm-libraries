@@ -39,7 +39,7 @@ std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_i
         size_t src_idx = 0;
         for(const auto& f : fields)
         {
-            for(const auto& b : f.bricks)
+            for(const auto& b : f.get_bricks())
             {
                 int device_id = b.location.device;
                 if(b.location.comm_rank != local_comm_rank)
