@@ -28,6 +28,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Matmul | FP16, BFP16, FP32 | NCHW, NCDHW | CPU Reference |  |
 | Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
 | Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
+| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
