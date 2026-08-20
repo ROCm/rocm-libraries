@@ -319,6 +319,105 @@ set_tests_properties(GenInstructionsTest PROPERTIES
 add_dependencies(tests test_gen_instructions)
 
 # =============================================================================
+# ASan Repro Test (InsertAsanCheckPass end-to-end, requires a real gfx1250 GPU)
+# =============================================================================
+# Optional: stinkytofu itself has zero HIP/GPU-runtime dependency, so this is
+# gated on finding hip and amdclang++ (neither of which the rest of this
+# build requires) plus gfx1250 actually being one of the configured archs.
+# Skips gracefully (SKIP_RETURN_CODE) at runtime if no gfx1250 GPU is present
+# -- see AsanReproTest.cpp -- matching the plain-executable +
+# SKIP_RETURN_CODE pattern already used for environment-dependent tests
+# elsewhere in this repo (e.g. shared/origami/python/CMakeLists.txt).
+if(NOT WIN32 AND "Gfx1250" IN_LIST STINKYTOFU_ARCHS_TO_BUILD)
+    find_package(hip QUIET)
+
+    # A pip-wheel ROCm SDK's ROCM_PATH is
+    # <venv-root>/lib/pythonX.Y/site-packages/_rocm_sdk_devel: the
+    # amdclang++ hardlink living directly under its own bin/ is broken (its
+    # amdllvm companion isn't hardlinked alongside it -- see the
+    # worktree-venv skill's documented gotcha, ROCm/TheRock#7141); the
+    # working console-script trampoline lives at the venv root's bin/
+    # instead. Try that first, then fall back to ROCM_PATH/bin for a plain
+    # system ROCm install (where ROCM_PATH already is the root).
+    if(ROCM_PATH)
+        set(_stinkytofu_resolved_rocm_path "${ROCM_PATH}")
+    elseif(DEFINED ENV{ROCM_PATH})
+        set(_stinkytofu_resolved_rocm_path "$ENV{ROCM_PATH}")
+    endif()
+    if(_stinkytofu_resolved_rocm_path)
+        get_filename_component(_stinkytofu_rocm_venv_root
+            "${_stinkytofu_resolved_rocm_path}/../../../.." ABSOLUTE)
+    endif()
+    # Check file existence directly rather than find_program(): find_program
+    # kept resolving to the broken hardlink under ROCM_PATH/bin even with
+    # HINTS + NO_DEFAULT_PATH restricted to the venv root (root
+    # CMakeLists.txt's CMAKE_PREFIX_PATH append appears to take precedence
+    # some other way); a direct EXISTS check sidesteps that entirely.
+    if(_stinkytofu_rocm_venv_root AND EXISTS "${_stinkytofu_rocm_venv_root}/bin/amdclang++")
+        set(STINKYTOFU_AMDCLANGPP_EXECUTABLE "${_stinkytofu_rocm_venv_root}/bin/amdclang++"
+            CACHE FILEPATH "amdclang++ for asan-repro kernel assembly" FORCE)
+    elseif(_stinkytofu_resolved_rocm_path AND EXISTS "${_stinkytofu_resolved_rocm_path}/bin/amdclang++")
+        set(STINKYTOFU_AMDCLANGPP_EXECUTABLE "${_stinkytofu_resolved_rocm_path}/bin/amdclang++"
+            CACHE FILEPATH "amdclang++ for asan-repro kernel assembly" FORCE)
+    else()
+        find_program(STINKYTOFU_AMDCLANGPP_EXECUTABLE NAMES amdclang++)
+    endif()
+
+    if(hip_FOUND AND STINKYTOFU_AMDCLANGPP_EXECUTABLE)
+        set(ASAN_REPRO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../examples/asan-repro")
+        set(ASAN_REPRO_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/asan_repro")
+        set(ASAN_REPRO_BODY_S "${ASAN_REPRO_DIR}/kernel_body.s")
+        set(ASAN_REPRO_DESCRIPTOR_S "${ASAN_REPRO_DIR}/kernel_descriptor.s")
+        set(ASAN_REPRO_INSTRUMENTED_S "${ASAN_REPRO_BUILD_DIR}/kernel_instrumented.s")
+        set(ASAN_REPRO_CO "${ASAN_REPRO_BUILD_DIR}/kernel.co")
+
+        add_custom_command(
+            OUTPUT "${ASAN_REPRO_INSTRUMENTED_S}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${ASAN_REPRO_BUILD_DIR}"
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/asan_repro_build_kernel.sh"
+                    "$<TARGET_FILE:stinkytofu-opt>" "${ASAN_REPRO_BODY_S}"
+                    "${ASAN_REPRO_DESCRIPTOR_S}" "${ASAN_REPRO_INSTRUMENTED_S}"
+            DEPENDS stinkytofu-opt "${ASAN_REPRO_BODY_S}" "${ASAN_REPRO_DESCRIPTOR_S}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/asan_repro_build_kernel.sh"
+            COMMENT "Running InsertAsanCheckPass on the asan-repro kernel"
+            VERBATIM
+        )
+
+        add_custom_command(
+            OUTPUT "${ASAN_REPRO_CO}"
+            COMMAND "${STINKYTOFU_AMDCLANGPP_EXECUTABLE}" -x assembler
+                    -target amdgcn-amd-amdhsa -mcpu=gfx1250
+                    "${ASAN_REPRO_INSTRUMENTED_S}" -o "${ASAN_REPRO_CO}"
+            DEPENDS "${ASAN_REPRO_INSTRUMENTED_S}"
+            COMMENT "Assembling the asan-repro kernel for gfx1250"
+            VERBATIM
+        )
+
+        add_custom_target(asan_repro_kernel_co DEPENDS "${ASAN_REPRO_CO}"
+            COMMENT "Build the asan-repro gfx1250 kernel code object")
+
+        add_executable(AsanReproTest AsanReproTest.cpp)
+        target_compile_options(AsanReproTest PRIVATE -fsanitize=address -fno-omit-frame-pointer -g)
+        target_link_options(AsanReproTest PRIVATE -fsanitize=address)
+        target_link_libraries(AsanReproTest PRIVATE hip::host)
+        target_compile_definitions(AsanReproTest PRIVATE
+            ASAN_REPRO_KERNEL_CO="${ASAN_REPRO_CO}")
+        add_dependencies(AsanReproTest asan_repro_kernel_co)
+
+        add_test(NAME AsanRepro.OOBAccessDetected COMMAND AsanReproTest)
+        set_tests_properties(AsanRepro.OOBAccessDetected PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "gpu;asan"
+            TIMEOUT 60
+        )
+
+        add_dependencies(tests AsanReproTest)
+    else()
+        message(STATUS "  - Skipping AsanReproTest (hip or amdclang++ not found)")
+    endif()
+endif()
+
+# =============================================================================
 # Python Tests (pytest)
 # =============================================================================
 
