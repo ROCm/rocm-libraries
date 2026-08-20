@@ -35,6 +35,7 @@
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_types.hpp"
 
 #include <rocprim/config.hpp>
 #include <rocprim/functional.hpp>
@@ -82,7 +83,17 @@ using ThreadOperationTestParams
 #endif
                        >;
 
-TYPED_TEST_SUITE(RocprimThreadOperationTests, ThreadOperationTestParams);
+struct RocprimThreadOperationTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::type>();
+    }
+};
+TYPED_TEST_SUITE(RocprimThreadOperationTests,
+                 ThreadOperationTestParams,
+                 RocprimThreadOperationTestsNameGenerator);
 
 template<class Type>
 __global__
