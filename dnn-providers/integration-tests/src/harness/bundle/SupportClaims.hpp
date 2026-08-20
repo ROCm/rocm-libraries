@@ -126,6 +126,19 @@ SupportClaims loadSupportClaimsFromPath(const std::filesystem::path& sidecarPath
 /// The file must exist; throws std::runtime_error if it cannot be opened or parsed.
 SweepSupportClaims loadSweepSupportClaimsFromPath(const std::filesystem::path& sidecarPath);
 
+/// Locator for a single-graph bundle: the sidecar sits beside the graph JSON,
+/// and there is no case id.
+///   "dir/Small.json" -> sidecar "dir/Small.support.json"
+SupportClaimLocator singleGraphClaimLocator(const std::filesystem::path& bundleJsonPath);
+
+/// Locator for one case of a template sweep. Every case of a sweep shares the
+/// single support.json next to sweep.json; `caseId` selects the claim group
+/// within it.
+///   "dir/sweep.json" + "case_a" -> sidecar    "dir/support.json"
+///                                  diagnostic "dir/sweep.json#case_a"
+SupportClaimLocator sweepCaseClaimLocator(const std::filesystem::path& sweepJsonPath,
+                                          const std::string& caseId);
+
 /// Load single-graph support claims from the {Name}.support.json companion of
 /// `bundleJsonPath`. Returns std::nullopt when the file does not exist.
 std::optional<SupportClaims> loadSupportClaims(const std::filesystem::path& bundleJsonPath);
@@ -133,5 +146,14 @@ std::optional<SupportClaims> loadSupportClaims(const std::filesystem::path& bund
 /// Load template-sweep support claims from support.json under `sweepDir`.
 /// Returns std::nullopt when the file does not exist.
 std::optional<SweepSupportClaims> loadSweepSupportClaims(const std::filesystem::path& sweepDir);
+
+/// Serialize a single-graph claims struct back to JSON.
+nlohmann::json toJson(const SupportClaims& claims);
+
+/// Serialize a sweep claims struct back to JSON.
+nlohmann::json toJson(const SweepSupportClaims& claims);
+
+/// Canonical JSON string: sorted keys, 2-space indent, trailing newline.
+std::string dumpCanonical(const nlohmann::json& json);
 
 } // namespace hipdnn_integration_tests::bundle

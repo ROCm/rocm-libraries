@@ -12,6 +12,7 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
@@ -19,6 +20,7 @@
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
+#include "common/PlatformUtils.hpp"
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
@@ -27,6 +29,7 @@
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
@@ -256,8 +259,65 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     _verified = true;
 }
 
+// Hand-rolls the query loop instead of delegating to observeAllSupport because
+// it records raw SupportObservations (engine supported yes/no), not SupportResults.
+void IntegrationBundleVerificationHarness::observeSupportOnly()
+{
+    auto handle = getSharedHandle();
+
+    const std::vector<uint8_t> graphBytes(
+        _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+
+    hipdnn_frontend::graph::Graph graph;
+    auto err = graph.from_binary(handle, graphBytes);
+    if(err.is_bad())
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
+                                                                             << err.get_message());
+        return;
+    }
+
+    std::vector<int64_t> engineIds;
+    auto status = graph.get_ranked_engine_ids(engineIds);
+
+    if(!isResolved(status.get_code()))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for " << _bundlePath << ": "
+                                                                           << status.get_message());
+        return;
+    }
+
+    auto engines = LoadedEngineTable::get().all();
+    if(TestConfig::get().hasEngineName())
+    {
+        const std::string targetName(TestConfig::get().getEngineName());
+        engines.erase(std::remove_if(engines.begin(),
+                                     engines.end(),
+                                     [&](const LoadedEngine& e) { return e.name != targetName; }),
+                      engines.end());
+    }
+
+    const std::string arch = baseArchToken(TestConfig::get().getCurrentArch());
+    const std::string platform = currentPlatform();
+
+    for(const auto& engine : engines)
+    {
+        const bool engineIsSupported
+            = std::find(engineIds.begin(), engineIds.end(), engine.id) != engineIds.end();
+
+        SupportObservationLog::get().record(
+            {_claimLocator, engine.name, arch, platform, engineIsSupported});
+    }
+}
+
 void IntegrationBundleVerificationHarness::runComparison()
 {
+    if(TestConfig::get().writeSupportClaims())
+    {
+        observeSupportOnly();
+        return;
+    }
+
     if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
     {
         enforceAtLevel(_bundle->metadata.enforcementLevel);

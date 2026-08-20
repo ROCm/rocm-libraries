@@ -57,6 +57,8 @@ SupportResult evaluateSupport(hipdnn_frontend::ErrorCode errorCode,
                               const std::string& platform,
                               std::string_view queryMessage = {});
 
+bool isResolved(hipdnn_frontend::ErrorCode code);
+
 std::string baseArchToken(std::string_view fullArch);
 std::string formatVerdictMessage(const SupportResult& result);
 

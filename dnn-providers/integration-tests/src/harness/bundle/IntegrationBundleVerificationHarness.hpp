@@ -131,6 +131,8 @@ protected:
         return _inputFillRecipes;
     }
 
+    void observeSupportOnly();
+
 private:
     bool _requiresDevice;
     mutable bool _verified = false;

@@ -58,17 +58,14 @@ bool isFailure(SupportVerdict verdict)
     }
 }
 
-namespace
-{
-
-// Whitelist: only these two codes mean the query resolved and we can trust the
-// ranked list. Everything else (including future enum values) is unresolved —
-// fail closed toward "cannot evaluate", never toward a false "declined".
 bool isResolved(hipdnn_frontend::ErrorCode code)
 {
     return code == hipdnn_frontend::ErrorCode::OK
            || code == hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED;
 }
+
+namespace
+{
 
 bool isInRankedList(const std::vector<int64_t>& rankedIds, int64_t engineId)
 {

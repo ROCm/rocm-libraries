@@ -198,11 +198,28 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
 
 } // namespace detail
 
+// Absolute path of the integration-test-bundles directory in the checkout this
+// binary was built from, baked in by the top-level CMakeLists. Only write mode
+// uses it (see resolveDataDir below). The fallback keeps this header compilable
+// in any build that does not define it; an empty path simply fails the existence
+// check and takes the warn-and-degrade branch.
+#ifndef HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR
+#define HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR ""
+#endif
+
 // Resolves the bundle data root: an explicit CLI/env override from the shared
 // TestConfig singleton if one was provided, otherwise the conventional install
 // location next to the test binary (../lib/integration-test-bundles). This must
 // match where the top-level integration-tests/CMakeLists.txt copies and installs
 // the bundles (lib/integration-test-bundles).
+//
+// Write mode is the one exception. The copy beside the binary is a configure-time
+// snapshot, so sidecars written into it never show up in `git status` and are
+// clobbered by the next cmake run — the write would look like it worked and leave
+// nothing behind. So --write-support-claims targets the source checkout instead.
+// An explicit --golden-data-dir still wins, and a binary whose source tree is no
+// longer present (an installed package, say) degrades to the snapshot with a
+// warning rather than refusing to run.
 inline std::filesystem::path resolveDataDir()
 {
     auto& config = TestConfig::get();
@@ -210,8 +227,28 @@ inline std::filesystem::path resolveDataDir()
     {
         return config.getGoldenDataDir();
     }
-    return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-           / "../lib/integration-test-bundles";
+
+    std::filesystem::path stagedBundlesDir
+        = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+          / "../lib/integration-test-bundles";
+    if(!config.writeSupportClaims())
+    {
+        return stagedBundlesDir;
+    }
+
+    std::filesystem::path sourceBundlesDir = HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR;
+    if(sourceBundlesDir.empty() || !std::filesystem::exists(sourceBundlesDir))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("--write-support-claims: bundle source tree "
+                               << sourceBundlesDir << " is not present; writing into "
+                               << stagedBundlesDir
+                               << " instead. Those sidecars are not under version control. "
+                                  "Pass --golden-data-dir to choose the destination.");
+        return stagedBundlesDir;
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO("--write-support-claims: writing sidecars under " << sourceBundlesDir);
+    return sourceBundlesDir;
 }
 
 inline void registerBundleTests()

@@ -39,10 +39,6 @@ nlohmann::json makeSweepGroup(const std::vector<std::string>& cases,
     return group;
 }
 
-// Unique-per-test scratch directory, derived from the TEST macro's own source
-// line (mirrors TestBundleDiscoveryFixture::SetUp() in TestBundleDiscovery.cpp)
-// rather than an unseeded std::rand(), which can collide across concurrent
-// test processes sharing the same default seed.
 ScopedDirectory makeScopedTestDir(const std::string& prefix)
 {
     auto path

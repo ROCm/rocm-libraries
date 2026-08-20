@@ -27,6 +27,8 @@
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportClaimWriter.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
@@ -150,6 +152,13 @@ int main(int argc, char** argv) noexcept
             .help("Enforce engine support claims from .support.json sidecars. "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
                   "a test FAIL instead of a silent SKIP.");
+        parser.add_argument("--write-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Observe live engine support and write .support.json sidecars. "
+                  "Requires --test-article (mode B: all engines, or mode C with "
+                  "--test-engine). Implies --allow-bundles, since bundles are what "
+                  "carry the claims. Idempotent: no support change = zero git diff.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -302,6 +311,22 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
+        opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
+
+        if(opts.writeSupportClaims && !opts.articlePath.has_value())
+        {
+            std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
+                      << "Mode A (auto-select) cannot generate support claims.\n";
+            return 1;
+        }
+
+        if(opts.writeSupportClaims && opts.enforceSupportClaims)
+        {
+            std::cerr << "--write-support-claims and --enforce-support-claims are "
+                      << "mutually exclusive.\n";
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -406,7 +431,26 @@ int main(int argc, char** argv) noexcept
 
         int exitCode = result;
 
-        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
+        if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
+        {
+            const auto writeSummary = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
+                hipdnn_integration_tests::bundle::SupportObservationLog::get().all());
+            std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
+                      << "  written: " << writeSummary.filesWritten
+                      << "  unchanged: " << writeSummary.filesUnchanged
+                      << "  errors: " << writeSummary.errors.size() << "\n";
+            for(const auto& error : writeSummary.errors)
+            {
+                std::cerr << "  ERROR: " << error << "\n";
+            }
+            if(!writeSummary.errors.empty())
+            {
+                exitCode = 1;
+            }
+        }
+
+        if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims()
+           && hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
            && hipdnn_integration_tests::bundle::verifiedNothing(
                hipdnn_integration_tests::bundle::supportClaimCoverage()))
         {
