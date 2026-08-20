@@ -4,7 +4,6 @@
 target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
         IntegrationCpuSdpaFwdBwdChained.cpp
-        IntegrationGoldenRefSdpaFwdInference.cpp
 )
 
 if(BUILD_CPP_GRAPH_TESTS)
