@@ -278,8 +278,10 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
     EXPECT_EQ(knob.default_value.AsIntValue()->value, 256);
 }
 
-TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValues)
+TEST(TestIngestorGenericPlanBuilder, ExposesAStringFieldAsAStringConstrainedKnob)
 {
+    // A knob's type follows its field's. dtype takes string values, so it becomes a knob
+    // whose legal values are the dtypes the catalog implements for this graph.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
@@ -287,6 +289,36 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValue
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x95));
+    const auto knobs = builder.getCustomKnobs(0, graph);
+
+    ASSERT_EQ(knobs.size(), 2U);
+
+    const auto dtypeKnob = std::find_if(
+        knobs.begin(), knobs.end(), [](const auto& knob) { return knob.knob_id == DTYPE; });
+    ASSERT_NE(dtypeKnob, knobs.end());
+
+    // The kernel matcher keeps only FLOAT kernels on this graph, so that is the whole
+    // legal set: a knob offers what the catalog can serve, not what the schema could name.
+    const auto* constraint = dtypeKnob->constraint.AsStringConstraint();
+    ASSERT_NE(constraint, nullptr);
+    EXPECT_EQ(constraint->valid_values, (std::vector<std::string>{"FLOAT"}));
+
+    const auto* defaultValue = dtypeKnob->default_value.AsStringValue();
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(defaultValue->value, "FLOAT");
+}
+
+TEST(TestIngestorGenericPlanBuilder, SkipsAKnobWhoseFieldHasNoKnobRepresentation)
+{
+    // Bool, float and int-list fields have no KnobT form; such a field is internal
+    // rather than reported as a broken knob.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, "no_such_value_kind"});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x96));
     const auto knobs = builder.getCustomKnobs(0, graph);
 
     ASSERT_EQ(knobs.size(), 1U);

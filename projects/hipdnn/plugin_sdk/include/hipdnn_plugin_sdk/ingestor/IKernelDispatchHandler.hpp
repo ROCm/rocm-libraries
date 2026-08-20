@@ -31,6 +31,20 @@ class IKernelDispatchHandler
 public:
     virtual ~IKernelDispatchHandler() = default;
 
+    /// Can this handler load a kernel whose code comes from @p kind?
+    ///
+    /// A handler *is* the adapter, so it is the only thing that knows which kinds it can
+    /// act on; the state manager asks before admitting a kernel rather than assuming a
+    /// set. Without the question, a kernel whose kind no handler implements passes
+    /// validation, passes matching, and reaches prepare() -- a throw after applicability
+    /// already promised the graph. Defaults to embedded source alone, which is what a
+    /// handler that never considered the question supports.
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual bool supportsSourceKind(KernelSourceKind kind) const
+    {
+        return kind == KernelSourceKind::EMBEDDED_SOURCE;
+    }
+
     /// Global scratch this kernel requires, in bytes. Lives on this interface
     /// because the query arrives before a kernel is chosen.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)

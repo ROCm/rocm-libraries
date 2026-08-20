@@ -33,7 +33,7 @@ KernelDefinition makeKernelWithMetadata(MetadataValues metadata)
     return {testId(0x01),
             PACK_ID,
             DISPATCH_ID,
-            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
+            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel", "", ""},
             std::move(metadata),
             /*priority=*/0,
             /*arch=*/{}};
