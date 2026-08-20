@@ -378,6 +378,10 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "paged not yet implemented for plain-causal (sliding_window>0 only)"
                 )
+        if self.use_sinks and self.paged:
+            raise ValueError("use_sinks is not yet supported with paged KV")
+        if self.use_sinks and self.varlen:
+            raise ValueError("use_sinks is not yet supported with varlen")
 
     @property
     def num_waves(self) -> int:
@@ -431,7 +435,7 @@ class AttentionDenseSpec:
         if self.sliding_window > 0:
             parts.append(f"swa{self.sliding_window}")
         if self.use_sinks:
-            parts.append(f"sinks")
+            parts.append("sinks")
         if self.varlen:
             parts.append("varlen")
         if self.paged:
@@ -561,7 +565,7 @@ def build_attention_dense(
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
     if use_sinks:
-        rcp_ln2 = b.const_f32(1.4426950408889634)
+        rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
 
     qb = b.block_id_x()
@@ -1012,7 +1016,7 @@ def build_attention_dense(
     else:
         m_init = neg_inf
 
-    m0, _alpha0, _skip0 = softmax_max(s0, m_init)
+    m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     p0_vals = [
         [_exp2(b.fsub(s0[nsub][i], m0)) for i in range(16)] for nsub in range(N_SUB)
@@ -1025,7 +1029,7 @@ def build_attention_dense(
     if use_sinks:
         # Rescale l_init by alpha0: when m0 > m_init (sink), multiply by alpha0 to change
         # the sink's contribution from exp(sink - m_init) = 1.0 to exp(sink - m0).
-        l0 = b.fadd(l0, b.fmul(l_init, _alpha0))
+        l0 = b.fadd(l0, b.fmul(l_init, alpha0))
     o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
     pk0 = relayout_p(p0_vals)
 
@@ -1275,7 +1279,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
     if use_sinks:
-        rcp_ln2 = b.const_f32(1.4426950408889634)
+        rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
 
     # 1 row/instr => per-row padded pitch (bank-conflict fix); packed D<128 =>
@@ -2049,8 +2053,20 @@ def run_attention_dense_torch(
                         )
     if not spec.use_sinks and sinks is not None:
         raise ValueError("sinks provided but spec.use_sinks is False")
-    if spec.use_sinks and sinks is None:
-        raise ValueError("spec.use_sinks=True requires sinks that are not None")
+    if spec.use_sinks:
+        if sinks is None:
+            raise ValueError("spec.use_sinks=True requires sinks that are not None")
+        if sinks.shape != (spec.num_query_heads,):
+            raise ValueError(
+                f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
+            )
+        if sinks.dtype != q.dtype:
+            raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
+        if not sinks.is_contiguous():
+            raise ValueError("sinks must be contiguous")
+        if not sinks.is_cuda:
+            raise ValueError("sinks must be a CUDA tensor")
+
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 

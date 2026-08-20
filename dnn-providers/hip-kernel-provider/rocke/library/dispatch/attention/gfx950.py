@@ -49,10 +49,6 @@ def _dense_spec(req: OperatorRequest):
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
     ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
-    if sw > 0 and ragged:
-        raise ValueError(
-            f"ragged tensors can not be used with a sliding_window > 0 (got sliding_window of {sw})"
-        )
     nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)

@@ -114,34 +114,40 @@ def run(
 
         # When sinks are enabled, must use manual implementation (torch SDPA doesn't support sinks)
         if spec.use_sinks:
-            # Manual attention computation (matches parity_unified_attention.py pattern)
-            attn = torch.einsum("bhqd,bhkd->bhqk", qh, kh) / math.sqrt(D)
-
-            # Apply causal and/or sliding window masks
-            if spec.causal or W > 0:
-                qi = torch.arange(Sq, device=dev).view(-1, 1)
-                ki = torch.arange(Skv, device=dev).view(1, -1)
-                mask = torch.zeros(Sq, Skv, dtype=torch.bool, device=dev)
-                if spec.causal:
-                    mask |= ki > qi  # Causal: mask future tokens
-                if W > 0:
-                    mask |= ki <= (qi - W)  # Sliding window: mask tokens beyond window
-                attn.masked_fill_(mask.view(1, 1, Sq, Skv), float("-inf"))
-
-            # Add sinks to attention scores (append virtual sink token)
-            if sinks is not None:
-                # Sinks are raw attention scores (same domain as attn)
-                sink_scores = sinks.float().view(1, Hq, 1, 1).expand(B, Hq, Sq, 1)
-                attn = torch.cat([attn, sink_scores], dim=-1)  # [B, Hq, Sq, Skv+1]
-
-            # Softmax over all scores (including sink)
-            attn = torch.softmax(attn, dim=-1)
-
-            # Remove sink from attention weights (sink has no V vector)
-            if sinks is not None:
-                attn = attn[..., :-1]  # [B, Hq, Sq, Skv]
-
-            ref = torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
+            # Query-chunked attention to avoid OOM on large seqlens.
+            # Computing attn=[B, Hq, Sq, Skv] all at once allocates B*Hq*Sq*Skv*4 bytes
+            # (fp32), e.g., 34.4 GB for Sq=8192, Hq=128, then torch.cat and torch.softmax
+            # each allocate another copy. Chunking over queries caps memory at ~1 GiB per
+            # chunk and is exact (softmax normalizes along keys, so query rows are
+            # independent).
+            ki = torch.arange(Skv, device=dev).view(1, -1)
+            sink_col = sinks.float().view(1, Hq, 1, 1)
+            # Cap each chunk at ~1 GiB of scores (B*Hq*q_blk*(Skv+1)*4 bytes)
+            q_blk = max(1, min(Sq, (1 << 30) // max(1, B * Hq * (Skv + 1) * 4)))
+            ref = torch.empty_like(qh)
+            for q0 in range(0, Sq, q_blk):
+                q1 = min(q0 + q_blk, Sq)
+                qn = q1 - q0
+                attn = torch.einsum("bhqd,bhkd->bhqk", qh[:, :, q0:q1], kh) / math.sqrt(
+                    D
+                )
+                if spec.causal or W > 0:
+                    # Global query indices: chunk-local arange slides the mask boundary
+                    qi = torch.arange(q0, q1, device=dev).view(-1, 1)
+                    mask = torch.zeros(qn, Skv, dtype=torch.bool, device=dev)
+                    if spec.causal:
+                        mask |= ki > qi  # Causal: mask future tokens
+                    if W > 0:
+                        mask |= ki <= (
+                            qi - W
+                        )  # Sliding window: mask tokens beyond window
+                    attn.masked_fill_(mask.view(1, 1, qn, Skv), float("-inf"))
+                attn = torch.cat([attn, sink_col.expand(B, Hq, qn, 1)], dim=-1)
+                attn = torch.softmax(attn, dim=-1)[
+                    ..., :-1
+                ]  # Softmax then drop sink column
+                ref[:, :, q0:q1] = torch.einsum("bhqk,bhkd->bhqd", attn, vh)
+            ref = ref.transpose(1, 2)
 
         else:
             # Original fast path: use PyTorch's optimized SDPA when sinks not needed

@@ -196,5 +196,285 @@ class TestSWASinkComposition(unittest.TestCase):
         self.assertIn("sinks", kname)
 
 
+class TestSinksValidation(unittest.TestCase):
+    """Verify run_attention_dense_torch validates sinks parameter correctly."""
+
+    def test_sinks_rejected_when_use_sinks_false(self):
+        """Providing sinks when spec.use_sinks=False raises ValueError."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=False,  # Sinks disabled
+        )
+
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        # Minimal mock for sinks (validation checks if it's not None)
+        sinks = [0.0] * spec.num_query_heads
+
+        with self.assertRaises(ValueError) as cm:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=0.125,
+                sinks=sinks,  # Should be rejected
+            )
+
+        self.assertIn("sinks provided but spec.use_sinks is False", str(cm.exception))
+
+    def test_sinks_required_when_use_sinks_true(self):
+        """Not providing sinks when spec.use_sinks=True raises ValueError."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=True,  # Sinks enabled
+        )
+
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+
+        with self.assertRaises(ValueError) as cm:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=0.125,
+                sinks=None,  # Missing sinks
+            )
+
+        self.assertIn("spec.use_sinks=True requires sinks", str(cm.exception))
+
+    def test_sinks_wrong_shape_rejected(self):
+        """Sinks with incorrect shape raises ValueError."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        # Mock sinks with wrong shape (16 instead of spec.num_query_heads=8)
+        wrong_size = spec.num_query_heads * 2
+        sinks = SimpleNamespace(
+            shape=(wrong_size,),
+            dtype="bfloat16",
+            is_contiguous=lambda: True,
+            is_cuda=True,
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=0.125,
+                sinks=sinks,
+            )
+
+        err_msg = str(cm.exception)
+        self.assertIn("sinks must have shape", err_msg)
+        self.assertIn(f"({spec.num_query_heads},)", err_msg)
+        self.assertIn(f"({wrong_size},)", err_msg)
+
+    def test_sinks_wrong_dtype_rejected(self):
+        """Sinks with dtype mismatch raises ValueError."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        # Mock sinks with wrong dtype (float16 instead of bfloat16)
+        sinks = SimpleNamespace(
+            shape=(spec.num_query_heads,),
+            dtype="float16",
+            is_contiguous=lambda: True,
+            is_cuda=True,
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=0.125,
+                sinks=sinks,
+            )
+
+        err_msg = str(cm.exception)
+        self.assertIn("sinks dtype", err_msg)
+        self.assertIn("must match q dtype", err_msg)
+
+    def test_sinks_non_contiguous_rejected(self):
+        """Non-contiguous sinks raises ValueError."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        # Mock non-contiguous sinks
+        sinks = SimpleNamespace(
+            shape=(spec.num_query_heads,),
+            dtype="bfloat16",
+            is_contiguous=lambda: False,
+            is_cuda=True,
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=0.125,
+                sinks=sinks,
+            )
+
+        self.assertIn("sinks must be contiguous", str(cm.exception))
+
+    def test_sinks_cpu_tensor_rejected(self):
+        """CPU sinks tensor raises ValueError (would silently produce garbage)."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        # Mock CPU tensor (is_cuda=False)
+        sinks = SimpleNamespace(
+            shape=(spec.num_query_heads,),
+            dtype="bfloat16",
+            is_contiguous=lambda: True,
+            is_cuda=False,
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=0.125,
+                sinks=sinks,
+            )
+
+        self.assertEqual(str(cm.exception), "sinks must be a CUDA tensor")
+
+
 if __name__ == "__main__":
     unittest.main()

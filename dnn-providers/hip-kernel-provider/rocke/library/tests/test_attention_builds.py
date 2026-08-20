@@ -1586,8 +1586,8 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="bf16",
             use_sinks=True,
         )
-        qshape = (1, 256, 32, 64)
-        kvshape = (1, 256, 8, 64)
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
         q = SimpleNamespace(shape=qshape)
         k = SimpleNamespace(shape=kvshape)
         v = SimpleNamespace(shape=kvshape)
@@ -1627,8 +1627,8 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="bf16",
             use_sinks=False,
         )
-        qshape = (1, 256, 32, 64)
-        kvshape = (1, 256, 8, 64)
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
         q = SimpleNamespace(shape=qshape)
         k = SimpleNamespace(shape=kvshape)
         v = SimpleNamespace(shape=kvshape)
@@ -1671,13 +1671,19 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="bf16",
             use_sinks=True,
         )
-        qshape = (1, 256, 32, 64)
-        kvshape = (1, 256, 8, 64)
-        q = SimpleNamespace(shape=qshape)
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
         k = SimpleNamespace(shape=kvshape)
         v = SimpleNamespace(shape=kvshape)
         out = SimpleNamespace(shape=qshape)
-        sinks = [0.0] * spec.num_query_heads
+        # Mock sinks tensor with all required attributes
+        sinks = SimpleNamespace(
+            shape=(spec.num_query_heads,),
+            dtype="bfloat16",
+            is_contiguous=lambda: True,
+            is_cuda=True,
+        )
         sentinel = RuntimeError("reached-compile")
 
         ad._DENSE_LAUNCHER_CACHE.clear()
@@ -1693,6 +1699,62 @@ class TestAttentionHelpers(unittest.TestCase):
                     sinks=sinks,
                 )
             self.assertIs(ok.exception, sentinel)
+
+    def test_gfx950_dense_sinks_rejected_with_paged(self):
+        """AttentionDenseSpec.__post_init__ rejects use_sinks with paged."""
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = dict(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        # Valid: sinks without paged
+        spec = AttentionDenseSpec(**base)
+        self.assertTrue(spec.use_sinks)
+
+        # Reject: use_sinks + paged
+        with self.assertRaises(ValueError) as ctx:
+            AttentionDenseSpec(
+                paged=True, block_size=16, num_kv_blocks=512, sliding_window=128, **base
+            )
+        self.assertEqual(
+            str(ctx.exception), "use_sinks is not yet supported with paged KV"
+        )
+
+    def test_gfx950_dense_sinks_rejected_with_varlen(self):
+        """AttentionDenseSpec.__post_init__ rejects use_sinks with varlen."""
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = dict(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        # Valid: sinks without varlen
+        spec = AttentionDenseSpec(**base)
+        self.assertTrue(spec.use_sinks)
+
+        # Reject: use_sinks + varlen
+        with self.assertRaises(ValueError) as ctx:
+            AttentionDenseSpec(varlen=True, **base)
+        self.assertEqual(
+            str(ctx.exception), "use_sinks is not yet supported with varlen"
+        )
 
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
