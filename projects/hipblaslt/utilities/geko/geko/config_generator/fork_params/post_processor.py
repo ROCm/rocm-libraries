@@ -22,7 +22,7 @@ class BasePostProcessor(BaseParamBuilder):
     """Base class for post-processing MI groups and fork params.
 
     Runs after MIDesigner + OptimizationParams have produced their
-    outputs.  Heuristic-only (GA params don't depend on MI properties).
+    outputs.  Heuristic-only (generic params don't depend on MI properties).
 
     Decorate methods with @mark_post_process.  Each receives
     (fork_params, mi_groups) and returns the modified pair.
