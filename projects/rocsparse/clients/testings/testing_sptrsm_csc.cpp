@@ -311,6 +311,12 @@ void testing_sptrsm_csc_bad_arg(const Arguments& arg)
                                                        p_error));
                         break;
                     }
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+                    case rocsparse_sptrsm_input_diagonal_mode:
+                    {
+                        break;
+                    }
+#endif
                     }
                 }
                 //
@@ -441,6 +447,13 @@ void testing_sptrsm_csc(const Arguments& arg)
     {
         return;
     }
+
+#ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
+    if(arg.diagonal_mode != 0)
+    {
+        return;
+    }
+#endif
 
     const J                    K               = arg.K;
     const rocsparse_operation  trans_A         = arg.transA;
@@ -788,6 +801,19 @@ void testing_sptrsm_csc(const Arguments& arg)
                                                          p_error));
     }
 
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    {
+        const rocsparse_diagonal_mode diagonal_mode
+            = static_cast<rocsparse_diagonal_mode>(arg.diagonal_mode);
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+                                                         sptrsm_descr,
+                                                         rocsparse_sptrsm_input_diagonal_mode,
+                                                         &diagonal_mode,
+                                                         sizeof(diagonal_mode),
+                                                         p_error));
+    }
+#endif
+
     {
         size_t buffer_size_in_bytes;
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_buffer_size(handle,
@@ -822,23 +848,44 @@ void testing_sptrsm_csc(const Arguments& arg)
         // on the right-hand side (trans_C) is passed through unchanged.
         J analysis_pivot = -1;
         J solve_pivot    = -1;
-        host_cscsm<I, J, T>(M,
-                            K,
-                            nnz_A,
-                            trans_A,
-                            trans_C,
-                            halpha[0],
-                            hcsc_col_ptr.data(),
-                            hcsc_row_ind.data(),
-                            hcsc_val.data(),
-                            hC,
-                            ldc,
-                            order_C,
-                            diag,
-                            uplo,
-                            base,
-                            &analysis_pivot,
-                            &solve_pivot);
+        if(arg.diagonal_mode != 0)
+        {
+            host_diagonal_solve<I, J, T>(trans_A,
+                                         M,
+                                         K,
+                                         halpha[0],
+                                         hcsc_col_ptr.data(),
+                                         hcsc_row_ind.data(),
+                                         hcsc_val.data(),
+                                         hC,
+                                         hC,
+                                         ldc,
+                                         order_C,
+                                         base,
+                                         arg.diagonal_mode,
+                                         &analysis_pivot,
+                                         &solve_pivot);
+        }
+        else
+        {
+            host_cscsm<I, J, T>(M,
+                                K,
+                                nnz_A,
+                                trans_A,
+                                trans_C,
+                                halpha[0],
+                                hcsc_col_ptr.data(),
+                                hcsc_row_ind.data(),
+                                hcsc_val.data(),
+                                hC,
+                                ldc,
+                                order_C,
+                                diag,
+                                uplo,
+                                base,
+                                &analysis_pivot,
+                                &solve_pivot);
+        }
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 

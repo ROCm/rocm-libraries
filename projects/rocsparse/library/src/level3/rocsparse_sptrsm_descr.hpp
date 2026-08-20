@@ -43,6 +43,9 @@ protected:
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsm_info> m_csrsm_info{};
     float                                  m_local_host_alpha_value[4];
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_diagonal_mode m_diagonal_mode{rocsparse_diagonal_mode_none};
+#endif
 
 public:
     void* get_local_host_alpha()
@@ -52,6 +55,11 @@ public:
     rocsparse_csrsm_info get_csrsm_info();
     void                 set_csrsm_info(rocsparse_csrsm_info value);
     void                 set_shared_csrsm_info(std::shared_ptr<_rocsparse_csrsm_info> value);
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_diagonal_mode get_diagonal_mode() const;
+    void                    set_diagonal_mode(rocsparse_diagonal_mode value);
+#endif
 
     ~_rocsparse_sptrsm_descr();
 

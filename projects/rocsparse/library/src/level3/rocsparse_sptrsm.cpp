@@ -29,12 +29,15 @@
 
 #include "../conversion/rocsparse_convert_array.hpp"
 #include "../conversion/rocsparse_convert_scalar.hpp"
+#include "../level2/rocsparse_diagonal_solve.hpp"
 #include "internal/level3/rocsparse_csrsm.h"
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_sptrsm_descr.hpp"
+#include "rocsparse_trm_info.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)
@@ -75,6 +78,9 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
     case rocsparse_sptrsm_input_scalar_datatype:
     case rocsparse_sptrsm_input_scalar_alpha:
     case rocsparse_sptrsm_input_analysis_policy:
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    case rocsparse_sptrsm_input_diagonal_mode:
+#endif
     {
         return false;
     }
@@ -138,6 +144,26 @@ try
         sptrsm_descr->set_scalar_alpha(data);
         return rocsparse_status_success;
     }
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    case rocsparse_sptrsm_input_diagonal_mode:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_diagonal_mode),
+                           rocsparse_status_invalid_size);
+        const rocsparse_diagonal_mode diagonal_mode
+            = *reinterpret_cast<const rocsparse_diagonal_mode*>(data);
+        ROCSPARSE_CHECKARG(3,
+                           data,
+                           (diagonal_mode != rocsparse_diagonal_mode_none
+                            && diagonal_mode != rocsparse_diagonal_mode_signed
+                            && diagonal_mode != rocsparse_diagonal_mode_absolute),
+                           rocsparse_status_invalid_value);
+        sptrsm_descr->set_diagonal_mode(diagonal_mode);
+        return rocsparse_status_success;
+    }
+#endif
 
     case rocsparse_sptrsm_input_scalar_datatype:
     {
@@ -1242,6 +1268,122 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    static rocsparse_status sptrsm_diagonal_solve(rocsparse_handle            handle,
+                                                  rocsparse_operation         operation,
+                                                  rocsparse_operation         X_operation,
+                                                  rocsparse_diagonal_mode     diagonal_mode,
+                                                  const void*                 alpha,
+                                                  rocsparse_const_spmat_descr A,
+                                                  rocsparse_const_dnmat_descr X,
+                                                  const rocsparse_dnmat_descr Y,
+                                                  rocsparse_csrsm_info        csrsm_info)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            (csrsm_info == nullptr) ? rocsparse_status_invalid_pointer : rocsparse_status_success,
+            "the analysis stage must be executed before a diagonal solve");
+
+        rocsparse_const_spmat_descr eff     = A;
+        rocsparse_operation         slot_op = operation;
+        _rocsparse_mat_descr        descr_csr;
+        _rocsparse_spmat_descr      mat_csr;
+        switch(A->format)
+        {
+        case rocsparse_format_csr:
+        {
+            break;
+        }
+        case rocsparse_format_csc:
+        {
+#ifndef ROCSPARSE_WITH_CSC_TRSM
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
+            eff     = &mat_csr;
+            slot_op = (operation == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                                              : rocsparse_operation_none;
+            break;
+#endif
+        }
+        default:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        }
+        }
+
+        const rocsparse::trm_info_t* trm_info = csrsm_info->get(slot_op, eff->descr->fill_mode);
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            (trm_info == nullptr || trm_info->get_diag_ind() == nullptr)
+                ? rocsparse_status_invalid_pointer
+                : rocsparse_status_success,
+            "the analysis stage did not provide the diagonal offsets required by the diagonal "
+            "solve");
+
+        hipStream_t stream = handle->stream;
+
+        csrsm_info->create_singularity_numeric_exact(1, eff->col_type, stream);
+        auto numeric_exact = csrsm_info->get_singularity_numeric_exact();
+        if(eff->col_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::assign_device_async<int32_t>(1,
+                                                        (int32_t*)numeric_exact->get_position(),
+                                                        (const int32_t*)csrsm_info->get_position(),
+                                                        stream));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::assign_device_async<int64_t>(1,
+                                                        (int64_t*)numeric_exact->get_position(),
+                                                        (const int64_t*)csrsm_info->get_position(),
+                                                        stream));
+        }
+
+        const int64_t nrhs    = Y->cols;
+        const bool    is_host = (handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        const bool x_transposed = (X_operation != rocsparse_operation_none);
+        const bool conj_x       = (X_operation == rocsparse_operation_conjugate_transpose);
+        const bool x_col_major  = (X->order == rocsparse_order_column);
+        const bool y_col_major  = (Y->order == rocsparse_order_column);
+
+        const int64_t x_row_stride
+            = x_transposed ? (x_col_major ? X->ld : 1) : (x_col_major ? 1 : X->ld);
+        const int64_t x_col_stride
+            = x_transposed ? (x_col_major ? 1 : X->ld) : (x_col_major ? X->ld : 1);
+        const int64_t y_row_stride = y_col_major ? 1 : Y->ld;
+        const int64_t y_col_stride = y_col_major ? Y->ld : 1;
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve(handle,
+                                                            operation,
+                                                            diagonal_mode,
+                                                            alpha,
+                                                            eff,
+                                                            eff->row_type,
+                                                            trm_info->get_diag_ind(),
+                                                            trm_info->get_transposed_perm(),
+                                                            nrhs,
+                                                            X->const_values,
+                                                            x_row_stride,
+                                                            x_col_stride,
+                                                            static_cast<int64_t>(0),
+                                                            Y->values,
+                                                            y_row_stride,
+                                                            y_col_stride,
+                                                            static_cast<int64_t>(0),
+                                                            static_cast<int64_t>(1),
+                                                            conj_x,
+                                                            numeric_exact->get_position(),
+                                                            1,
+                                                            is_host));
+
+        return rocsparse_status_success;
+    }
+#endif
+
     static rocsparse_status sptrsm(rocsparse_handle            handle,
                                    rocsparse_sptrsm_descr      sptrsm_descr,
                                    rocsparse_const_spmat_descr A,
@@ -1533,6 +1675,24 @@ namespace rocsparse
 
             RETURN_IF_ROCSPARSE_ERROR(
                 convert_scalars(handle, sptrsm_descr, sptrsm_descr->get_scalar_alpha(), &alpha));
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            if(sptrsm_descr->get_diagonal_mode() != rocsparse_diagonal_mode_none)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::sptrsm_diagonal_solve(handle,
+                                                     operation,
+                                                     X_operation,
+                                                     sptrsm_descr->get_diagonal_mode(),
+                                                     alpha,
+                                                     A,
+                                                     X,
+                                                     Y,
+                                                     sptrsm_descr->get_csrsm_info()));
+                sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
+                return rocsparse_status_success;
+            }
+#endif
 
             switch(sptrsm_case)
             {
