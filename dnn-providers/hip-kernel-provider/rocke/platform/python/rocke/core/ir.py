@@ -354,10 +354,20 @@ def _abspath(filename: str) -> str:
 
 
 def _path_has_dir_component(path: str, name: str) -> bool:
-    """True if ``name`` is a directory component of ``path``, not a substring."""
+    """True if ``name`` is a directory component of ``path``, not a substring.
 
-    norm = path.replace("\\", "/")
-    return f"/{name}/" in f"/{norm}/"
+    Splits only on this host's separators (``os.sep`` and ``os.altsep``), so a
+    POSIX filename that happens to contain a backslash is not cut into
+    components, and a native Windows path is.
+    """
+
+    seps = [os.sep]
+    if os.altsep:
+        seps.append(os.altsep)
+    parts = [path]
+    for sep in seps:
+        parts = [p for part in parts for p in part.split(sep) if p]
+    return name in parts
 
 
 def _frame_role(filename: str) -> str:

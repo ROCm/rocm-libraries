@@ -147,6 +147,31 @@ def frames(loc):
     return out
 
 
+def native_abs(*parts: str) -> str:
+    """Absolute fake path using this host's separators, not a POSIX ``/tmp`` string.
+
+    Concatenates rather than calling ``os.path.join`` so a component containing
+    ``:`` is not treated as a drive on Windows (which would discard the root).
+    """
+
+    root = os.path.abspath(os.sep)
+    if not root.endswith(os.sep):
+        root += os.sep
+    return root + os.sep.join(parts)
+
+
+def assert_difile(testcase, ll, path):
+    """The DIFile node for ``path``, split and escaped the way this host does."""
+
+    directory, filename = os.path.split(path)
+    testcase.assertIn(
+        'filename: "{}", directory: "{}"'.format(
+            _escape_md_string(filename), _escape_md_string(directory)
+        ),
+        ll,
+    )
+
+
 class TestLocationCapture(unittest.TestCase):
     def test_every_op_gets_a_location_in_this_file(self):
         kernel = build_flat(capture_loc=True)
@@ -327,26 +352,30 @@ class TestSingleFrameFallback(unittest.TestCase):
 
     def test_a_path_containing_a_colon_still_parses(self):
         kernel = build_flat(capture_loc=True)
-        kernel.body.ops[-1].loc = "/tmp/od:d/weird.py:7"
+        path = native_abs("od:d", "weird.py")
+        kernel.body.ops[-1].loc = f"{path}:7"
         ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        self.assertIn('filename: "weird.py"', ll)
-        self.assertIn('directory: "/tmp/od:d"', ll)
+        assert_difile(self, ll, path)
 
     def test_a_path_containing_a_semicolon_still_parses(self):
         kernel = build_flat(capture_loc=True)
-        kernel.body.ops[-1].loc = ir_mod.join_loc(["/tmp/a;b/kernel.py:7"])
+        path = native_abs("a;b", "kernel.py")
+        kernel.body.ops[-1].loc = ir_mod.join_loc([f"{path}:7"])
         ll = lower_kernel_to_llvm(kernel, arch="gfx950")
-        self.assertIn('filename: "kernel.py"', ll)
-        self.assertIn('directory: "/tmp/a;b"', ll)
+        assert_difile(self, ll, path)
 
 
 class TestLocFrameEncoding(unittest.TestCase):
     def test_a_semicolon_in_the_path_survives_join_and_split(self):
-        frame = "/tmp/a;b/kernel.py:7:0:emit"
+        frame = f"{native_abs('a;b', 'kernel.py')}:7:0:emit"
+        self.assertEqual(ir_mod.split_loc(ir_mod.join_loc([frame])), [frame])
+
+    def test_a_windows_path_with_a_semicolon_survives_join_and_split(self):
+        frame = r"C:\proj\a;b\kernel.py:7:0:emit"
         self.assertEqual(ir_mod.split_loc(ir_mod.join_loc([frame])), [frame])
 
     def test_two_frames_still_split(self):
-        a, b = "/a.py:1:0:f", "/b.py:2:0:g"
+        a, b = "a.py:1:0:f", "b.py:2:0:g"
         self.assertEqual(ir_mod.split_loc(ir_mod.join_loc([a, b])), [a, b])
 
     def test_a_backslash_that_is_not_an_escape_is_kept(self):
@@ -368,8 +397,8 @@ class TestInstalledLayout(unittest.TestCase):
     produced a full chain.
     """
 
-    CHECKOUT = os.path.join("/src", "rocke", "platform", "python", "rocke")
-    INSTALLED = os.path.join("/venv", "lib", "python3.12", "site-packages", "rocke")
+    CHECKOUT = native_abs("src", "rocke", "platform", "python", "rocke")
+    INSTALLED = native_abs("venv", "lib", "python3.12", "site-packages", "rocke")
 
     def roles_under(self, root):
         """Roles of the same modules with the package rooted at ``root``."""
@@ -423,8 +452,18 @@ class TestInstalledLayout(unittest.TestCase):
         saved = ir_mod._FRAME_ROLE
         ir_mod._FRAME_ROLE = {}
         try:
-            path = os.path.join("/work", "site-packages-experiments", "kernel.py")
-            self.assertEqual(ir_mod._frame_role(path), "user")
+            self.assertEqual(
+                ir_mod._frame_role(
+                    native_abs("work", "site-packages-experiments", "kernel.py")
+                ),
+                "user",
+            )
+            # A Windows-separator spelling of the same name, including on POSIX
+            # where ``\\`` is an ordinary filename byte rather than a split.
+            self.assertEqual(
+                ir_mod._frame_role(r"C:\work\site-packages-experiments\kernel.py"),
+                "user",
+            )
         finally:
             ir_mod._FRAME_ROLE = saved
 
@@ -518,18 +557,35 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
     def test_engines_agree_on_a_path_with_a_semicolon(self):
         engine_or_skip()
         kernel = build_flat(capture_loc=True)
-        kernel.body.ops[-1].loc = ir_mod.join_loc(["/tmp/a;b/kernel.py:7"])
+        path = native_abs("a;b", "kernel.py")
+        kernel.body.ops[-1].loc = ir_mod.join_loc([f"{path}:7"])
         cpp = self.lower_with("cpp", kernel)
         self.assertEqual(cpp, self.lower_with("python", kernel))
-        self.assertIn('directory: "/tmp/a;b"', cpp)
+        assert_difile(self, cpp, path)
+
+    def test_engines_agree_on_a_windows_path_with_a_semicolon(self):
+        """Same as the native-separator case, but with a drive-letter spelling.
+
+        On a POSIX host the backslashes stay in the basename; on Windows they
+        split. Either way both engines have to agree, and ``;`` must not cut
+        the loc into two frames.
+        """
+        engine_or_skip()
+        kernel = build_flat(capture_loc=True)
+        path = r"C:\proj\a;b\kernel.py"
+        kernel.body.ops[-1].loc = ir_mod.join_loc([f"{path}:7"])
+        cpp = self.lower_with("cpp", kernel)
+        self.assertEqual(cpp, self.lower_with("python", kernel))
+        assert_difile(self, cpp, path)
 
     def test_engines_agree_on_a_quote_in_the_filename(self):
         engine_or_skip()
         kernel = build_flat(capture_loc=True)
-        kernel.body.ops[-1].loc = '/tmp/weird"file.py:7'
+        path = native_abs('weird"file.py')
+        kernel.body.ops[-1].loc = f"{path}:7"
         cpp = self.lower_with("cpp", kernel)
         self.assertEqual(cpp, self.lower_with("python", kernel))
-        self.assertIn('filename: "weird\\22file.py"', cpp)
+        assert_difile(self, cpp, path)
 
 
 # Enough to pin the separator handling: absolute and relative paths on both
@@ -568,7 +624,7 @@ PATH_SPLIT_CASES = (
     "dir\\",
     "C:/Users/me/file.py",
     "C:\\Users\\me/file.py",
-    "/tmp/od:d/weird.py",
+    "/od:d/weird.py",
     "/:",
     "/:/",
     ".",
@@ -862,7 +918,9 @@ class TestSerializationRoundTrip(unittest.TestCase):
 
     def test_a_semicolon_in_the_path_survives_serialize(self):
         kernel = build_flat(capture_loc=True)
-        kernel.body.ops[-1].loc = ir_mod.join_loc(["/tmp/a;b/kernel.py:7:0:emit"])
+        kernel.body.ops[-1].loc = ir_mod.join_loc(
+            [f"{native_abs('a;b', 'kernel.py')}:7:0:emit"]
+        )
         reparsed = parse(serialize(kernel))
         self.assertEqual(reparsed.body.ops[-1].loc, kernel.body.ops[-1].loc)
         self.assertEqual(
