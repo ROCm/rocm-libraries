@@ -59,6 +59,22 @@ pytestmark = pytest.mark.unit
 
 _ARCH = "gfx950"
 
+
+@pytest.fixture(autouse=True)
+def _pin_rocisa_gfx950():
+    """Pin the process-global rocIsa singleton to gfx950 for every test here.
+
+    The mock-writer emits (Sections 1/2/4) carry no ISA of their own and render
+    through whatever arch a prior test left in the singleton. On an xdist worker
+    that previously ran a gfx12 emit, ``VAddU32`` renders as ``v_add_nc_u32``
+    instead of the CDNA ``v_add_u32`` these tests assert on. Re-pinning to gfx950
+    before each test makes the instruction forms order-independent.
+    """
+    from codegen_harness import _init_rocisa_for
+
+    _init_rocisa_for({"ISA": (9, 5, 0), "WavefrontSize": 64})
+    yield
+
 _CONFIG = os.path.join(
     os.path.dirname(__file__),
     "data",
