@@ -35,8 +35,8 @@
 
 /**
  * @file TestBenchmarkPlan.cpp
- * @brief Unit tests for BenchmarkPlan.hpp: the composite plan GenericPlanBuilder
- *        constructs when `global.benchmarking` is on, plus the oracle proving the
+ * @brief Unit tests for BenchmarkPlan.hpp: construction, workspace sizing, execution
+ *        delegation, and ranked capture/write-back, plus the oracle proving buildPlan()'s
  *        benchmarking-off path never reaches it.
  */
 namespace
@@ -114,8 +114,8 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubState
 /// by BLOCK_SIZE, so kernel_256_float (0x65) outranks the two 64-block kernels.
 TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRankedFrontOnce)
 {
-    // A leaked override must not make this look benchmarked; the oracle asserts the
-    // no-knob path is untouched, so the environment must genuinely be unset here.
+    // A leaked override must not make this look benchmarked: the environment must
+    // genuinely be unset here.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarkingGuard(
         hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME);
     const ScopedTestSymbols symbols;
@@ -166,8 +166,8 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 /// records an event, so the null stream's behaviour never matters.
 struct BenchmarkTestHandle
 {
-    // Non-static: this models a real handle's instance accessor, which is what
-    // HasGetStream detects.
+    // Non-static: models a real handle's instance accessor, which is what HasGetStream
+    // detects.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     hipStream_t getStream() const
     {
@@ -496,9 +496,9 @@ TEST(TestIngestorBenchmarkPlan, AllCandidatesUnusableStillDelegatesToCandidateZe
 
     EXPECT_NO_THROW(plan.execute(handle, nullptr, 0, nullptr));
 
-    // Candidate 0 is the documented fallback: its second call (the real delegate,
-    // after its first sampling call threw) must have launched. Candidate 1 is faster
-    // by the timer, which never runs for a candidate that throws during warmup.
+    // Candidate 0 is the documented fallback: its second call, the real delegate, must
+    // have launched. Candidate 1 is faster by the timer, which never runs for a
+    // candidate that throws during warmup.
     EXPECT_EQ(firstRaw->launchCount(), 1);
     EXPECT_EQ(secondRaw->launchCount(), 0);
 }
@@ -530,12 +530,9 @@ TEST(TestIngestorBenchmarkPlan, BuffersAndWorkspaceArriveAtTheChosenSubPlanUnmod
 // Ranked capture and write-back (D6, D11)
 // ---------------------------------------------------------------------------
 
-/// Sampling needs real hipEvents, so on a machine with no device every candidate scores
-/// unusable and no ranking is ever produced -- which would leave every assertion below
-/// green while proving nothing. This subclass supplies deterministic times through the
-/// protected seam instead, so ordering, omission and the all-unusable case are decided by
-/// the code under test rather than by whether a GPU happened to be present. The real
-/// hipEvent path is proven separately on gfx942.
+/// Supplies deterministic times through the protected seam so ordering, omission and the
+/// all-unusable case are decided by the code under test, not by GPU availability. The
+/// real hipEvent path is proven separately on gfx942.
 class DeterministicBenchmarkPlan : public TestBenchmarkPlan
 {
 public:
@@ -578,7 +575,6 @@ TEST(TestIngestorBenchmarkPlan, SamplingRecordsEveryUsableCandidateInMeasuredOrd
 {
     std::vector<RankedEntry> recorded;
     const BenchmarkTestHandle handle;
-    // Candidate 1 is fastest, then 2, then 0.
     const DeterministicBenchmarkPlan plan(
         threeCandidates(), handle, {5.0, 1.0, 3.0}, [&recorded](std::vector<RankedEntry> ranking) {
             recorded = std::move(ranking);
@@ -631,16 +627,12 @@ TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
     EXPECT_FALSE(invoked) << "caching index 0 when nothing was usable would cache a guess";
 }
 
-/// The explicit no-caching path: every SDK fixture and every flag-off caller constructs
-/// a BenchmarkPlan without a callback, and selection must be unaffected.
-///
-/// Asserts which candidate ran, not merely that nothing crashed -- a test that only
-/// survived the call would pass with the wrong kernel chosen.
+/// The explicit no-caching path: every flag-off caller constructs a BenchmarkPlan
+/// without a callback, and selection must be unaffected.
 TEST(TestIngestorBenchmarkPlan, AnAbsentCallbackLeavesSelectionUnchanged)
 {
     auto candidates = threeCandidates();
-    // Candidate 1 is the deterministic winner; hold its sub-plan so its launches can be
-    // counted through the IPlan the BenchmarkPlan delegates to.
+    // Hold the deterministic winner's sub-plan to count its launches.
     auto* const expectedWinner = static_cast<FakePlan*>(candidates[1].plan.get());
 
     const BenchmarkTestHandle handle;

@@ -20,28 +20,20 @@ namespace hipdnn_plugin_sdk::ingestor
 /// `DeviceProperties`, so a benchmarked ranking is never served to a device it was not
 /// measured on.
 ///
-/// Field by field rather than a `memcpy` of the struct, for two reasons that are easy
-/// to rediscover the hard way: `gcnArchName` is a `std::string`, so its object bytes are
-/// a pointer/length/capacity triple rather than the characters anyone means to hash, and
-/// the struct's padding bytes are unspecified -- hashing them would make the key depend
-/// on whatever the allocator last left there.
+/// `gcnArchName` is a `std::string`, not raw bytes, and the struct has unspecified
+/// padding, so this cannot be a `memcpy` of the struct.
 ///
-/// `DeviceId` is deliberately absent. It is a per-process HIP ordinal, so it identifies
-/// a slot rather than a device, and including it would key otherwise-identical runs
-/// apart. This type takes a `const DeviceProperties&` and never sees a `MatchContext`,
-/// so that exclusion holds by construction rather than by remembering.
+/// `DeviceId` is deliberately absent -- it identifies a slot, not a device.
 ///
-/// Widening `DeviceProperties` does NOT extend the key on its own: a new field is hashed
-/// only once `fold()` below emits it. `TestDeviceKey.cpp` pins the field set with a
-/// structured binding that fails to compile when the struct grows, which is the reminder.
+/// Widening `DeviceProperties` does NOT extend the key on its own -- a new field is
+/// hashed only once `fold()` below emits it. `TestDeviceKey.cpp` pins the field set
+/// with a structured binding that fails to compile when the struct grows.
 struct DeviceKey
 {
     DeviceKey() = default;
 
-    /// Copies @p properties rather than referencing them: a key outlives the
-    /// `MatchContext` that produced it (records live in the cache indefinitely), and
-    /// `MatchContext` holds `DeviceProperties` by reference, so borrowing here would
-    /// dangle the moment the plan went away.
+    /// Copies @p properties rather than referencing them: `MatchContext` holds
+    /// `DeviceProperties` by reference, and a key outlives its `MatchContext`.
     explicit DeviceKey(DeviceProperties properties)
         : _properties(std::move(properties))
         , _hash(fold(_properties))
@@ -58,13 +50,7 @@ struct DeviceKey
         return _properties;
     }
 
-    /// Hash first as a cheap reject, then a **full field comparison** -- the same
-    /// narrow-then-confirm shape as GraphContentKey and as the pre-existing CatalogKey,
-    /// which compares all 16 UUID bytes rather than trusting its own fold.
-    ///
-    /// Comparing the hash alone would mean two genuinely different devices whose folds
-    /// collide compare equal, and a ranking measured on one would be served for the
-    /// other. The struct is three small fields, so there is no reason to accept that.
+    /// Hash first as a cheap reject, then a full field comparison.
     bool operator==(const DeviceKey& other) const
     {
         return _hash == other._hash && _properties.gcnArchName == other._properties.gcnArchName
@@ -78,10 +64,8 @@ struct DeviceKey
     }
 
 protected:
-    /// Test seam: overrides the narrowing hash so a collision can be forced. Nothing in
-    /// production calls this -- the point of the tests that do is to prove `operator==`
-    /// still rejects on the fields when the hash agrees, which is unobservable otherwise
-    /// because a real FNV-1a collision cannot be produced on demand.
+    /// Test seam: overrides the narrowing hash so a collision can be forced. Proves
+    /// `operator==` still rejects on the fields when the hash agrees.
     void forceHash(uint64_t hash)
     {
         _hash = hash;

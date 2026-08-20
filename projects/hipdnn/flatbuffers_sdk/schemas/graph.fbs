@@ -27,12 +27,9 @@ include "resample_bwd_attributes.fbs";
 include "moe_grouped_matmul_attributes.fbs";
 include "moe_grouped_matmul_bwd_attributes.fbs";
 
-// Marks a field as carrying request identity rather than computation content.
-// Fields annotated with it are excluded from the generated cache-key hash and
-// logical-equality functions (cachekey_generated.h). The policy is opt-out: an
-// unannotated field participates, so a new field cannot silently stop being
-// compared. The question every annotation must answer is: would a kernel
-// measurement taken on one graph still be valid for the other?
+// Excludes a field from the generated cache-key hash/equality (cachekey_generated.h).
+// Opt-out: an unannotated field always participates. Apply only if a benchmark result
+// would still transfer to a different value of the field.
 attribute "cache_ignore";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;

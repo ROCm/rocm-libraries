@@ -74,23 +74,10 @@ public:
 
     /// When to start warning that the winner cache has grown unexpectedly large.
     ///
-    /// The winner cache is **unbounded and never evicts** -- deliberately not an
-    /// `LruCache`, despite `_catalogCache` sitting right beside it. The catalog cache's
-    /// own justification above is why: evicting a catalog costs a rematch, CPU work over
-    /// descriptors. Evicting a *winner* costs either a full device benchmark sweep or a
-    /// silent fall back to the heuristic front -- a quality regression whose trigger is
-    /// how many unrelated graphs happened to pass through since. Same program, same
-    /// input, different kernel.
-    ///
-    /// Unbounded is safe because entries are created only by benchmarking, which is
-    /// opt-in and costs candidates x (warmup + iterations) device executions each: they
-    /// cannot accumulate by accident, because the GPU time dwarfs the memory.
-    ///
-    /// So this is a tripwire, not a cap. Passing it does not evict, refuse, or change
-    /// behaviour -- it logs once, so pathological growth is visible rather than silent. A
-    /// hard cap was rejected: silently ceasing to cache new graphs is its own confusing
-    /// failure mode. The number is far above any plausible honest working set for a
-    /// process that had to benchmark its way to each entry.
+    /// Not an `LruCache` (D8): evicting a winner costs a GPU benchmark sweep or a silent
+    /// quality regression, not a rematch. Unbounded is safe because entries are created
+    /// only by opt-in benchmarking, so this is a tripwire, not a cap -- passing it logs
+    /// once and changes nothing else.
     static constexpr size_t WINNER_CACHE_WARNING_THRESHOLD = 4096;
 
     /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
@@ -193,32 +180,21 @@ public:
 
     /// The ordered catalog and the state matching bound, from one lookup.
     ///
-    /// The catalog needs an order; there are two sources for one. A benchmarked record
-    /// covering the whole catalog supplies a **measured** order, and is preferred --
-    /// `rank()` is then never called, which is the point: a caller who paid for a
-    /// benchmark sweep should not go on paying the heuristic's cost forever after.
-    /// Otherwise `rank()` supplies a **heuristic** order, exactly as before.
-    ///
-    /// This is Check 1. Check 2 lives at the plan-building lookup site and asks the same
-    /// coverage question of the knob-filtered candidates -- different set, different
-    /// moment, same predicate. Check 1 failing does not preclude Check 2 passing: a
-    /// partial record still orders heuristically here, and a knob filter may still narrow
-    /// the candidates down to kernels the record does cover.
+    /// A benchmarked record covering the whole catalog supplies a measured order and
+    /// `rank()` is never called; otherwise the heuristic orders it (Check 1; Check 2 is
+    /// the knob-filtered counterpart at the lookup site).
     Catalog sortedCatalog(const MatchContext& context) const
     {
         Catalog catalog = catalogFor(context);
 
-        // A catalog already ordered from a record is final: the measurement cannot be
-        // improved on, and re-checking would re-walk the record on every call.
+        // Already ordered from a record: final, nothing left to improve.
         if(catalog.isSorted && catalog.orderedFromRecord)
         {
             return catalog;
         }
 
-        // A heuristically sorted catalog, however, is only provisionally ordered. The
-        // benchmark sweep that produces a record runs *after* the buildPlan that sorted
-        // and memoized this catalog, so returning early here on `isSorted` alone would
-        // pin the guess forever and Check 1 would never fire in the flow it exists for.
+        // Heuristic order is only provisional -- Check 1 must still run before falling
+        // back, since a benchmark sweep can postdate the memoized sort (D22).
         if(!orderFromWinnerRecord(catalog, context))
         {
             if(catalog.isSorted)
@@ -238,25 +214,21 @@ public:
         return catalog;
     }
 
-    /// Records @p record under @p key, replacing any earlier ranking for it.
-    ///
-    /// Replacement rather than insert-if-absent: a later sweep is the one that measured
-    /// the current candidate set, and the coverage gate only ever re-benchmarks to widen
-    /// what a record covers. Preferring the older, narrower ranking would defeat that.
+    /// Records @p record under @p key, replacing any earlier ranking for it: a later
+    /// sweep measured the current candidate set, and the coverage gate only widens.
     void recordWinner(const WinnerKey& key, WinnerRecord record) const
     {
         if(record.empty())
         {
-            // An all-unusable sweep has no ranking to record, and storing an empty
-            // record would read as a covered hit for the empty candidate set.
+            // An all-unusable sweep has nothing to record; an empty record would read
+            // as a covered hit for the empty candidate set.
             return;
         }
 
         if(!key.graph.isUsable())
         {
-            // Nothing to key on, so nothing may be stored: an unkeyable graph never
-            // matches on lookup (GraphContentKey::operator==), so the entry would be
-            // unreachable and repeated sweeps would grow the map without bound.
+            // Unkeyable graphs never match on lookup (GraphContentKey::operator==), so
+            // storing here would leak memory on an unreachable entry.
             HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked ranking could not be cached "
                                    "because its graph yields no key");
             return;
@@ -666,19 +638,15 @@ private:
         return true;
     }
 
-    /// Check 1: if a record covers the whole catalog, reorder @p catalog by it and
-    /// return true, having consulted no heuristic. Returns false to mean "no measured
-    /// order available" -- the caller then ranks as it always has.
+    /// Check 1: reorders @p catalog by a covering record and returns true; false means
+    /// no measured order was available, and the caller ranks as it always has.
     ///
-    /// Coverage is required, not merely a hit. A record measuring only some of the
-    /// catalog cannot order the rest, and interleaving measured entries with unmeasured
-    /// ones would invent a ranking nobody took.
+    /// Coverage is required, not merely a hit: a partial record cannot order the rest,
+    /// and interleaving measured with unmeasured entries would not be a valid order.
     bool orderFromWinnerRecord(Catalog& catalog, const MatchContext& context) const
     {
-        // Cheap rejection first. Building a WinnerKey costs a full graph UnPack -- a deep
-        // copy of every node and tensor -- so on the default path, where nobody has ever
-        // benchmarked and the map is empty, that work would be done and thrown away on
-        // every call. One uncontended mutex acquisition avoids it.
+        // Cheap rejection first: building a WinnerKey costs a full graph UnPack, so this
+        // avoids that cost on the default, never-benchmarked path.
         if(catalog.entries.empty() || winnerCacheSize() == 0)
         {
             return false;
@@ -687,9 +655,7 @@ private:
         const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
         if(!key.graph.isUsable())
         {
-            // No bytes to key on -- an invalid graph, or an IGraph implementation that
-            // does not supply them. Such graphs never match each other either, so there
-            // is nothing to look up.
+            // No bytes to key on; such graphs never match each other either.
             return false;
         }
 
@@ -702,9 +668,8 @@ private:
         auto ordered = orderByRecord(*record, catalog.entries);
         if(ordered.size() != catalog.entries.size())
         {
-            // Covered by kernel id, but some entry's pack or dispatch has moved since it
-            // was measured. Ordering by a record that no longer describes these kernels
-            // would be worse than ranking them, so decline the whole record.
+            // Covered by kernel id, but this entry's pack/dispatch has moved since
+            // measurement -- decline the whole record rather than order by stale data.
             return false;
         }
 
@@ -727,11 +692,9 @@ private:
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
 
-    /// Unbounded, never evicted, under its own mutex -- see
-    /// WINNER_CACHE_WARNING_THRESHOLD for why this is not an LruCache. Separate from
-    /// _catalogCache's lock because the two are consulted at different moments and a
-    /// shared lock would serialize benchmarking write-back against ordinary catalog
-    /// lookups.
+    /// Unbounded, never evicted, own mutex (see WINNER_CACHE_WARNING_THRESHOLD). Separate
+    /// from _catalogCache's lock: a shared lock would serialize benchmarking write-back
+    /// against ordinary catalog lookups.
     mutable std::unordered_map<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
     mutable std::mutex _winnerCacheMutex;
     mutable bool _winnerCacheGrowthWarned = false;

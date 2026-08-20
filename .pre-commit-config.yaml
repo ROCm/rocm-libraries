@@ -131,9 +131,8 @@ repos:
         files: ^projects/hipdnn/(data_sdk|flatbuffers_sdk)/schemas/.*\.fbs$
         pass_filenames: true
 
-      # Regenerates the cache-key header when a schema it derives from changes.
-      # Separate from flatc-hipdnn because the annotation it reads is invisible to
-      # flatc's C++ output; it re-derives the whole header, so filenames are not passed.
+      # Separate from flatc-hipdnn: the annotation it reads is invisible to flatc's
+      # C++ output. Re-derives the whole header, so pass_filenames is false.
       - id: cache-key-hipdnn
         name: cache key codegen (hipDNN)
         entry: python projects/hipdnn/scripts/gen_cache_key.py

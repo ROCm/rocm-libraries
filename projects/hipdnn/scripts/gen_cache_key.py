@@ -1,21 +1,17 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Generate the graph cache-key header from the FlatBuffers schemas.
+"""Generate the cache-key header (cachekey_generated.h) from the FlatBuffers schemas.
 
-Emits ``hashAppend()`` and ``logicallyEqual()`` over the zero-copy FlatBuffers
-accessors for every type reachable from a root table, honouring the
-``cache_ignore`` schema annotation. The generated code has no runtime
-dependency on FlatBuffers reflection and performs no allocation.
+Emits hashAppend()/logicallyEqual() over the zero-copy FlatBuffers accessors, with no
+allocation and no runtime reflection dependency, honouring the ``cache_ignore`` schema
+annotation -- read from the binary schema, since flatc's C++ output doesn't expose it.
+Hash and comparison walk each type's fields from one traversal, so the two cannot
+disagree about which fields matter.
 
-The annotation is invisible to flatc's C++ backend -- it survives only into the
-binary schema -- so the field policy is read back from a ``.bfbs`` produced by
-flatc itself rather than by parsing ``.fbs`` text. Parsing, resolving and
-validating the schema stays flatc's job; this script only walks the result.
-
-Run manually, from the build via cmake/FlatBuffersGenerate.cmake, or through the
-``flatc-hipdnn`` pre-commit hook. Mirrors run_flatc.py's conventions: same
-flatc-version gate, same shared flag file, same failure reporting.
+Takes no arguments: it re-derives the whole header. Run manually, from the build via
+the custom target in flatbuffers_sdk/CMakeLists.txt, or through the ``cache-key-hipdnn``
+pre-commit hook.
 """
 
 import os
@@ -26,9 +22,7 @@ import tempfile
 
 _HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Fields carrying this annotation are excluded from the hash and the comparison.
-# The policy is opt-out: an unannotated field participates, so adding a field to
-# a schema cannot silently drop it from the key.
+# Opt-out: an unannotated field always participates in the hash and comparison.
 IGNORE_ATTRIBUTE = "cache_ignore"
 
 # Roots to generate for, as (schema file, fully-qualified root table, output header).
@@ -43,9 +37,8 @@ TARGETS = [
 SDK_DIR = "flatbuffers_sdk"
 NAMESPACE = "hipdnn_flatbuffers_sdk"
 
-# flatc escapes C++ keywords in accessor names by appending an underscore
-# (idl_gen_cpp.cpp). Mirror that or the emitted code will not compile: the
-# `virtual` field on TensorAttributes is a live example.
+# flatc escapes C++ keywords in accessor names with a trailing underscore
+# (idl_gen_cpp.cpp); mirror it or emitted code won't compile (e.g. `virtual`).
 CPP_KEYWORDS = frozenset(
     """alignas alignof and and_eq asm auto bitand bitor bool break case catch char
     char16_t char32_t class compl concept const constexpr const_cast continue decltype
@@ -114,11 +107,8 @@ def _run(argv):
 def _resolve_reflection_schema(flatc_path, work_dir):
     """Path to the reflection schema flatc needs to decode a .bfbs.
 
-    Prefers a copy installed next to flatc -- TheRock ships one at
-    share/flatbuffers/reflection/reflection.fbs -- because that copy is upstream's
-    own, tracked at the same version as the flatc producing the .bfbs. Falls back to
-    the embedded copy below when building against a stock FlatBuffers install, which
-    does not ship the schema at all.
+    Prefers the copy installed next to flatc, tracked at the same version; falls
+    back to the embedded copy for a stock FlatBuffers install that omits it.
     """
     if flatc_path:
         prefix = os.path.dirname(os.path.dirname(os.path.abspath(flatc_path)))
@@ -137,9 +127,8 @@ def _resolve_reflection_schema(flatc_path, work_dir):
 def load_schema(flatc_path, schemas_dir, schema_file, work_dir):
     """Return the parsed reflection.Schema for `schema_file` as plain Python.
 
-    flatc emits the binary schema, then decodes it back to JSON. Using flatc for
-    both steps keeps hipDNN free of any .fbs parser: parsing, resolving and
-    validating the schema stays flatc's job.
+    flatc parses, resolves, validates and emits/decodes the schema; this script
+    never parses .fbs text itself.
     """
     import json
 
@@ -567,14 +556,12 @@ class Emitter:
             self.w("    }")
 
 
-# Fallback only, used when flatc's install tree has no reflection.fbs -- upstream
-# FlatBuffers installs the C++ reflection headers but not the schema itself.
-# TheRock ships it (third-party/flatbuffers/post_hook_therock-flatbuffers.cmake),
-# and _resolve_reflection_schema() prefers that copy.
+# Fallback used when flatc's install tree lacks reflection.fbs (stock FlatBuffers
+# installs ship the C++ reflection headers but not the schema itself; TheRock does
+# ship it, and _resolve_reflection_schema() prefers that copy).
 #
-# This is the upstream reflection.fbs trimmed to the fields this generator reads.
-# FlatBuffers field additions are backward compatible, so a newer flatc's .bfbs
-# still decodes against it and simply carries fields we ignore.
+# Trimmed to the fields this generator reads; new-flatc .bfbs files still decode
+# against it since FlatBuffers field additions are backward compatible.
 _REFLECTION_SCHEMA = """
 namespace reflection;
 

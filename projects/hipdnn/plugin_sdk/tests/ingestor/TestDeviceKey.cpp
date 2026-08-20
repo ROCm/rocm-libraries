@@ -93,10 +93,9 @@ TEST(TestIngestorDeviceKey, StdHashAgreesWithTheKeysOwnHash)
     EXPECT_EQ(std::hash<DeviceKey>{}(key), static_cast<size_t>(key.hash()));
 }
 
-/// The hash narrows; the fields decide. Constructed so the two keys carry the SAME hash
-/// while describing different devices -- if `operator==` ever regresses to comparing the
-/// fold alone, a ranking measured on one device would be served for the other, and this
-/// is the only test that would notice.
+/// The hash narrows; the fields decide. Constructed so the two keys share a hash while
+/// describing different devices -- if `operator==` regressed to comparing the fold
+/// alone, a ranking measured on one device would be served for the other.
 TEST(TestIngestorDeviceKey, EqualHashesWithDifferentPropertiesStillCompareUnequal)
 {
     struct CollidingKey : DeviceKey

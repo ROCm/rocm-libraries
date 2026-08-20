@@ -185,9 +185,8 @@ public:
     }
 };
 
-/// Reports a device (deviceId != NO_DEVICE) whose properties are unresolved: models
-/// a HIP query that "succeeds" but returns a device the ingestor cannot identify by
-/// arch, distinct from ThrowingDeviceResolver's outright query failure above.
+/// Reports a resolved device (deviceId != NO_DEVICE) whose properties are unresolvable
+/// by arch, distinct from ThrowingDeviceResolver's outright query failure above.
 class UnresolvedArchDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
@@ -225,9 +224,8 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceResolverTh
     EXPECT_FALSE(builder.isApplicable(0, graph));
 }
 
-// contextFor's D10 guard rejects a device whose gcnArchName is empty; isApplicable's
-// existing catch-all (unchanged) must still turn that throw into a decline with a
-// logged error, exactly as it does for ThrowingDeviceResolver above.
+// contextFor's D10 guard rejects a device with an empty gcnArchName; isApplicable's
+// existing catch-all must turn that throw into a decline with a logged error.
 TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnresolved)
 {
     auto recorder
@@ -246,8 +244,8 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnre
         << recorder.getRecordedLogsAsString();
 }
 
-// The other side of the same guard: a caller that actually needs a plan gets a loud
-// failure, not a plan built for a device nobody identified.
+// The other side of the same guard: a caller that needs a plan gets a loud failure,
+// not a plan built for a device nobody identified.
 TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceArchIsUnresolved)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -261,8 +259,7 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceAr
     const TestGraph graph(makeGraphId(0x95));
     KnobFilterContext context;
 
-    // The status, not merely the type: D10 specifies INTERNAL_ERROR, and a guard that
-    // threw some other plugin status would still satisfy EXPECT_THROW.
+    // The status, not merely the type: D10 specifies INTERNAL_ERROR.
     try
     {
         builder.buildPlan(0, graph, engineConfig, context);
@@ -866,10 +863,8 @@ private:
 
 using BenchmarkPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, BenchmarkContext>;
 
-/// Supplies deterministic sample times through BenchmarkPlan's D11 seam, so the ranking
-/// and write-back are decided by the code under test rather than by whether a GPU is
-/// present. Mirrors TestBenchmarkPlan.cpp's subclass, on the stream-capable handle the
-/// builder tests use.
+/// Supplies deterministic sample times through BenchmarkPlan's D11 seam, mirroring
+/// TestBenchmarkPlan.cpp's subclass on the stream-capable handle the builder tests use.
 class DeterministicStreamBenchmarkPlan : public BenchmarkPlan<StreamCapableHandle>
 {
 public:
@@ -964,10 +959,9 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
 // Check 2: the winner-cache coverage gate and ranked walk at the lookup site
 // ---------------------------------------------------------------------------
 
-/// Workspace size is the observable proxy for "which kernel was selected": the three
-/// fixture kernels report 64, 128 and 256, and the heuristic ties every score so
-/// priority puts kernel_64 (workspace 64) at the front. A record naming kernel_256
-/// therefore proves the cache decided, not the heuristic -- with no timing involved.
+/// Workspace size is the observable proxy for "which kernel was selected": the heuristic
+/// ties every score and priority puts kernel_64 at the front, so a record naming
+/// kernel_256 proves the cache decided, with no timing involved.
 WinnerKey winnerKeyFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                        const DeviceProperties& properties)
 {
@@ -1005,7 +999,7 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     const TestGraph graph(makeGraphId(0xD1));
     const auto properties = testDeviceProperties();
 
-    // Rank kernel_256 first -- the opposite of what the heuristic would choose.
+    // Rank kernel_256 first, the opposite of the heuristic's choice.
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     WinnerRecord record;
@@ -1031,15 +1025,10 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
         << "the measured winner must beat the heuristic front";
 }
 
-/// D7's mirror, half one: benchmark wide, then run narrow. The narrower candidate set is
-/// fully covered by the wider record, so the run is served -- no re-benchmarking.
-///
-/// The candidate set must have more than one member, or the served answer would equal
-/// `filtered.front()` of a one-element list and the assertion would hold with the cache
-/// switched off. The record here is wider than the catalog: it carries an extra entry
-/// for a kernel this engine does not admit, while still covering all three live
-/// candidates. Coverage must hold, and the served kernel must be the record's front
-/// (kernel_256), not the heuristic's (kernel_64, pinned by priority).
+/// D7's mirror, half one: benchmark wide, then run narrow. The record is wider than the
+/// catalog -- it carries an extra entry for a kernel this engine does not admit -- while
+/// still covering all three live candidates, so it must be served (kernel_256), not the
+/// heuristic front (kernel_64).
 TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1064,10 +1053,8 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     }
     ASSERT_EQ(record.size(), 3U);
 
-    // An entry for a kernel this engine does not admit -- what a prior, wider run would
-    // have left behind. It must be skipped without failing coverage: entries present in
-    // the record but absent from the candidate set are ordinary skip-and-fall-back, never
-    // a re-benchmark trigger.
+    // A prior wider run's leftover entry for a kernel this engine does not admit. Must
+    // be skipped without failing coverage.
     record.push_back(RankedEntry{testId(0xAA), testId(0xF0), testId(0xD0), 0.05});
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -1086,9 +1073,8 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
            "64 would mean the cache was skipped and the heuristic front used";
 }
 
-/// D7's mirror, half two: a record covering only part of the filtered set, with
-/// benchmarking OFF. It must serve the best covered entry rather than decline -- those
-/// entries were genuinely measured, and this run cannot re-benchmark.
+/// D7's mirror, half two: a partial record with benchmarking OFF must serve the best
+/// covered entry rather than decline -- those entries were genuinely measured.
 TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffStillServesWhatItCovers)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1105,7 +1091,6 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffStillServe
     const TestGraph graph(makeGraphId(0xD3));
     const auto properties = testDeviceProperties();
 
-    // Only kernel_256 was ever measured; the other two candidates are uncovered.
     WinnerRecord record;
     for(const auto& kernel : catalogFor(*manager, graph, properties))
     {
@@ -1210,13 +1195,11 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
         << "a record measured on another device must not decide this one's kernel";
 }
 
-/// D7's narrow-then-wide half, and the case the human called out: a record written under
-/// a narrow knob filter does NOT cover a later unfiltered run, so that run must ignore it
-/// and re-benchmark rather than serve the best of a subset it never fully measured.
-///
-/// Observable without timing: benchmarking builds a BenchmarkPlan sized for the max over
-/// all candidates (256), while a served cache hit builds a plain GenericPlan sized for
-/// the one kernel it chose. Workspace size therefore says which path ran.
+/// D7's narrow-then-wide half: a record written under a narrow knob filter does NOT
+/// cover a later unfiltered run, so that run must re-benchmark rather than serve the
+/// best of a subset it never fully measured. Observable without timing: benchmarking
+/// sizes for the max over all candidates (256), a served hit sizes for the one kernel
+/// chosen (128 or less).
 TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTriggersReBenchmarking)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1263,11 +1246,9 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
            "filtered set re-benchmarked, not served from the narrow subset";
 }
 
-/// The mirror, and the one existing tests never covered: two buildPlan calls for the same
-/// graph and device, where the first populates the cache by benchmarking and the second
-/// is served from it with no BenchmarkPlan built. This is the shape an EXHAUSTIVE
-/// autotune() run takes -- prime, then plan again -- minus autotune itself, so it is
-/// deterministic and needs no device.
+/// Two buildPlan calls for the same graph and device: the first populates the cache by
+/// benchmarking, the second is served from it with no BenchmarkPlan built -- the shape
+/// an EXHAUSTIVE autotune() run takes, minus autotune itself.
 TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRanking)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1283,15 +1264,12 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     const auto properties = testDeviceProperties();
     const StreamCapableHandle handle;
 
-    // Stand in for the priming sweep's write-back: a full ranking naming kernel_256,
-    // which the heuristic would never choose (it ties every score, so priority puts
-    // kernel_64 first).
+    // Stand in for the priming sweep's write-back: a ranking naming kernel_256, which
+    // the heuristic (tied scores, priority order) would never choose.
     const auto catalog = manager->sortedDefinitions(MatchContext{graph, 0, properties});
     ASSERT_EQ(catalog.size(), 3U);
-    // Rank kernel_128 first. Deliberately the MIDDLE workspace: a served hit yields a
-    // plain GenericPlan sized 128, whereas a re-benchmark yields a BenchmarkPlan sized
-    // for the max across all three (256). The two paths are therefore distinguishable by
-    // workspace alone -- picking kernel_256 would have made them identical.
+    // Rank kernel_128 first -- the MIDDLE workspace, so a served hit (128) and a
+    // re-benchmark (256, the max) are distinguishable by workspace alone.
     WinnerRecord ranking;
     for(const auto& kernel : catalog)
     {
@@ -1519,10 +1497,8 @@ TEST(TestIngestorGenericPlanBuilderOverride, TheOverrideIsReReadOnEveryCallNotCa
 // ---------------------------------------------------------------------------
 
 /// Substitutes a deterministic sampling plan through the builder's own seam, so the
-/// callback and key under test are the ones `buildPlan` actually captured -- not a
-/// hand-built pair. Without this the write-back is unreachable at the SDK tier: the real
-/// sampler needs hipEvents, so on a device-less runner every candidate scores unusable
-/// and the callback is correctly never invoked.
+/// callback and key under test are the ones `buildPlan` actually captured. The real
+/// sampler needs hipEvents, which a device-less runner never provides.
 class DeterministicStreamPlanBuilder : public StreamPlanBuilder
 {
 public:
@@ -1576,8 +1552,6 @@ TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuild
 
     ASSERT_EQ(manager->winnerCacheSize(), 0U) << "nothing is recorded until execute() samples";
 
-    // The sampling plan sizes for the largest candidate (kernel_256), and every
-    // sub-plan's launch is handed the same buffer.
     std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
     context.plan().execute(handle, nullptr, 0U, workspace.data());
 
@@ -1586,10 +1560,9 @@ TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuild
     ASSERT_TRUE(stored.has_value())
         << "the callback buildPlan captured must have written the ranking back";
     ASSERT_EQ(stored->size(), 3U) << "every usable candidate belongs in the record";
-    // Rank 0 must be the candidate the deterministic sampler timed fastest -- the LAST
-    // in catalog order, which is the opposite of the heuristic front. Compare against
-    // the ids directly rather than re-reading sortedDefinitions: that now returns the
-    // record's own order, so it can no longer serve as an independent baseline.
+    // Rank 0 must be the LAST candidate in catalog order (the deterministic sampler's
+    // fastest), the opposite of the heuristic front. Compared against ids directly, not
+    // sortedDefinitions, which now returns the record's own order.
     EXPECT_EQ(stored->front().kernelId, testId(0x72))
         << "the fastest sampled candidate must rank first, not the heuristic front";
     EXPECT_EQ(stored->back().kernelId, testId(0x70)) << "and the slowest must rank last";

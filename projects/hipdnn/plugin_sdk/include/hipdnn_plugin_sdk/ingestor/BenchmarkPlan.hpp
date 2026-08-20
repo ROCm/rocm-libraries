@@ -236,9 +236,8 @@ private:
             return resolved;
         }
 
-        // Every usable candidate's time is retained, not just the running minimum: the
-        // winner cache stores the whole ranking so a later run whose knob filter excludes
-        // the winner can still serve the best surviving candidate.
+        // Every usable candidate's time is retained, not just the running minimum, so a
+        // later run whose knob filter excludes the winner can still serve the runner-up.
         std::vector<std::pair<double, size_t>> ranked;
         ranked.reserve(_candidates.size());
 
@@ -248,18 +247,16 @@ private:
                 = sampleCandidate(index, handle, deviceBuffers, numDeviceBuffers, workspace);
             if(!timeMs.has_value())
             {
-                // Omitted from the ranking, never appended with a sentinel time: a
-                // candidate that threw or failed to time is known-broken, and recording
-                // it as a low-ranked fallback would let it be served ahead of the normal
-                // ranked path on a later run.
+                // Omitted, never appended with a sentinel time: a candidate that failed to
+                // time must never be served ahead of the normal ranked path.
                 continue;
             }
             ranked.emplace_back(*timeMs, index);
         }
 
         // stable_sort, not sort: ties must resolve to the lowest candidate index. A plain
-        // std::sort would reorder equal times arbitrarily and silently change which
-        // kernel wins -- and micro-kernels at a few microseconds do tie.
+        // std::sort would reorder equal times arbitrarily and silently change which kernel
+        // wins.
         std::stable_sort(ranked.begin(), ranked.end(), [](const auto& lhs, const auto& rhs) {
             return lhs.first < rhs.first;
         });
@@ -270,8 +267,7 @@ private:
             HIPDNN_PLUGIN_LOG_ERROR("ingestor: benchmarking found no usable candidate among "
                                     << _candidates.size() << " kernel(s); defaulting to "
                                     << toString(_candidates.front().kernelId));
-            // Nothing is recorded here: an all-unusable sweep has no ranking, and caching
-            // index 0 would cache a guess.
+            // Nothing is recorded here: an all-unusable sweep has no ranking to cache.
         }
         else
         {
