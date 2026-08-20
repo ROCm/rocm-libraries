@@ -15,14 +15,14 @@ and reject `pip install` without `--break-system-packages`. Use a venv instead:
 # One-time setup
 python3 -m venv ~/.venv/rocm-scripts
 source ~/.venv/rocm-scripts/bin/activate
-pip install pydantic requests pytest
+pip install -r .github/requirements.txt
 ```
 
 Or without activating:
 
 ```bash
 python3 -m venv /tmp/rocm-scripts-venv
-/tmp/rocm-scripts-venv/bin/pip install pydantic requests pytest
+/tmp/rocm-scripts-venv/bin/pip install -r .github/requirements.txt
 ```
 
 No build step is required. All scripts are plain Python 3.12 and import only
@@ -159,18 +159,16 @@ When fixing a bug in an existing script:
 3. **Run the full suite** to confirm nothing regressed.
 
 Tests that document *current* buggy behavior (written before the fix) should
-include a comment that:
-- References the relevant issue or PR
-- Describes what currently happens
-- Shows what the assertion should change to after the fix
+use `@pytest.mark.xfail(strict=True)` so the suite stays green until the bug
+is fixed, at which point the mark is simply removed. The `reason` string should:
+- Describe what is currently broken
+- Reference the relevant issue or PR
 
 ```python
+@pytest.mark.xfail(reason="BUG: <description of what currently happens>, see ALMIOPEN-XXXX", strict=True)
 def test_some_buggy_behavior(self):
-    # BUG: <description of what currently happens>.
     result = sut.some_function(...)
-    self.assertEqual(result, CURRENT_WRONG_VALUE)
-    # After the fix, assert:
-    #   self.assertEqual(result, CORRECT_VALUE)
+    assert result == CORRECT_VALUE  # the value it SHOULD produce
 ```
 
 ---
@@ -182,7 +180,7 @@ Add a lightweight job to `pre-commit.yml` or a new `scripts-unit-tests.yml`:
 ```yaml
 - name: Run script unit tests
   run: |
-    pip install pydantic requests pytest
+    pip install -r .github/requirements.txt
     pytest .github/scripts/tests/ -v
 ```
 

@@ -3,11 +3,11 @@
 Baseline unit tests for pr_merge_sync_patches.py.
 
 These tests document the CURRENT behavior of every testable function,
-including known-buggy behavior. Tests that capture a known bug are marked
-with a BUG comment describing WHAT CURRENTLY HAPPENS.
+including known-buggy behavior. Tests that capture a known bug are decorated
+with @pytest.mark.xfail(strict=True) and assert the DESIRED behavior.
 When a bug is fixed:
-  1. Update the marked test to assert the DESIRED behavior (it will fail).
-  2. Fix the production code until the test passes.
+  1. Remove the @pytest.mark.xfail decorator.
+  2. Run the suite — the test should now pass.
 """
 
 import os
@@ -17,6 +17,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 
@@ -109,12 +111,13 @@ class GetSubtreeInfoTest(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].name, "tensile")
 
+    @pytest.mark.xfail(
+        reason="BUG: when no subtrees match the config the caller silently exits 0 — no error is surfaced; after the fix this should raise or trigger a non-zero exit",
+        strict=True,
+    )
     def test_unmatched_subtree_returns_empty_list(self):
-        # BUG: when no subtrees match the config, the function returns [] and
-        # logs a warning. The caller (main) then silently exits 0 — no error is
-        # surfaced. After the fix this should raise or trigger a non-zero exit.
-        result = sut.get_subtree_info(self.config, ["projects/doesnotexist"])
-        self.assertEqual(result, [])
+        with self.assertRaises(SystemExit):
+            sut.get_subtree_info(self.config, ["projects/doesnotexist"])
 
     def test_unmatched_subtree_logs_warning(self):
         with self.assertLogs("pr_merge_sync_patches", level="WARNING") as cm:
@@ -191,40 +194,32 @@ class ExtractCommitMessageTest(unittest.TestCase):
         result = sut._extract_commit_message_from_patch(FIXTURES / "no_pr_ref.patch")
         self.assertTrue(result.startswith("Fix the thing without a PR ref"))
 
+    @pytest.mark.xfail(
+        reason="BUG: [PATCH N/M] prefixes are not stripped; only the literal '[PATCH]' token is matched so '[PATCH 2/5]' leaks through",
+        strict=True,
+    )
     def test_multi_part_patch_prefix_is_NOT_stripped(self):
-        # BUG: [PATCH N/M] prefixes are NOT stripped by the current code.
-        # Only the literal string "[PATCH]" is matched. "[PATCH 2/5]" is left in.
         result = sut._extract_commit_message_from_patch(FIXTURES / "multi_part.patch")
-        self.assertIn("[PATCH 2/5]", result)
-        # After the fix, this should NOT be in the result:
-        #   self.assertFalse(result.startswith("[PATCH"))
+        self.assertFalse(result.startswith("[PATCH"))
 
+    @pytest.mark.xfail(
+        reason="BUG: MIME-encoded words (=?UTF-8?q?...?=) in the Subject line are left as raw encoded text; the current code performs no MIME decoding",
+        strict=True,
+    )
     def test_mime_encoded_subject_is_NOT_decoded(self):
-        # BUG: MIME-encoded words (=?UTF-8?q?...?=) in the Subject line are left
-        # as raw encoded text. The current code performs no MIME decoding.
         result = sut._extract_commit_message_from_patch(FIXTURES / "mime_encoded.patch")
-        self.assertIn("=?UTF-8?q?", result)
-        # After the fix, the result should be plain text:
-        #   self.assertNotIn("=?UTF-8?q?", result)
-        #   self.assertIn("mémoire", result)
+        self.assertNotIn("=?UTF-8?q?", result)
+        self.assertIn("mémoire", result)
 
+    @pytest.mark.xfail(
+        reason="BUG: when git folds a long Subject across multiple lines (RFC 2822) the current code reads only the first line; the continuation is picked up as body text instead of being joined into the subject",
+        strict=True,
+    )
     def test_folded_subject_continuation_is_included_verbatim(self):
-        # BUG: when git folds a long Subject across multiple lines (RFC 2822),
-        # the current code reads only the first line of the Subject header. The
-        # continuation line (leading whitespace) is then picked up as body text,
-        # NOT joined into the subject. This produces a truncated subject where
-        # the remainder appears as the first line of the body.
         result = sut._extract_commit_message_from_patch(
             FIXTURES / "folded_subject.patch"
         )
-        # Current behavior: the subject is just the first line (truncated).
-        first_line = result.splitlines()[0]
-        self.assertTrue(
-            first_line.endswith("folded"),
-            f"Expected truncated first line ending with 'folded', got: {first_line!r}",
-        )
-        # After the fix, the subject should be the fully unfolded single line:
-        #   self.assertIn("across two lines", result.splitlines()[0])
+        self.assertIn("across two lines", result.splitlines()[0])
 
     def test_body_stops_at_patch_separator(self):
         # The "---" line that separates the commit message from the stat/diff
@@ -233,17 +228,15 @@ class ExtractCommitMessageTest(unittest.TestCase):
         # The separator itself should not appear.
         self.assertNotIn("\n---\n", result)
 
+    @pytest.mark.xfail(
+        reason="BUG: any line starting with '---' is treated as the patch separator and stops extraction, truncating legitimate body content that contains visual separator lines",
+        strict=True,
+    )
     def test_body_stops_at_first_line_starting_with_dashes(self):
-        # BUG: any line that starts with "---" is treated as the patch separator
-        # and stops extraction — even "------- separator" lines inside the commit
-        # body. This can truncate legitimate body content.
         result = sut._extract_commit_message_from_patch(
             FIXTURES / "body_with_dashes.patch"
         )
-        # Current behavior: body is cut at the "------- separator" line.
-        self.assertNotIn("second paragraph", result)
-        # After the fix, only the exact "---\n" patch-separator line should stop
-        # extraction, so the second paragraph would be preserved.
+        self.assertIn("second paragraph", result)
 
     def test_patch_with_no_subject_line_returns_empty_string(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as f:
@@ -443,10 +436,11 @@ class StageChangesTest(unittest.TestCase):
         sut._stage_changes(self.repo)
         self.assertIn("README.md", self._staged_files())
 
+    @pytest.mark.xfail(
+        reason="BUG: 'git add .' respects .gitignore and silently drops new untracked files that match ignore patterns",
+        strict=True,
+    )
     def test_gitignored_file_is_NOT_staged(self):
-        # BUG: `git add .` respects .gitignore and silently drops new untracked
-        # files that match ignore patterns. After the fix, the file SHOULD appear
-        # in staged files.
         (self.repo / ".gitignore").write_text("*.log\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -454,10 +448,7 @@ class StageChangesTest(unittest.TestCase):
         (self.repo / "output.log").write_text("some log content")
         sut._stage_changes(self.repo)
 
-        # Current (buggy) behavior: output.log is not staged.
-        self.assertNotIn("output.log", self._staged_files())
-        # After the fix, assert:
-        #   self.assertIn("output.log", self._staged_files())
+        self.assertIn("output.log", self._staged_files())
 
     def test_previously_force_tracked_file_modifications_are_staged(self):
         # `git add .` DOES stage modifications to already-tracked files even when
@@ -480,11 +471,11 @@ class StageChangesTest(unittest.TestCase):
         # Modifications to already-tracked files ARE staged even under .gitignore.
         self.assertIn("generated/output.h", self._staged_files())
 
+    @pytest.mark.xfail(
+        reason="BUG: if a patch introduces a brand-new file whose path matches .gitignore, 'git add .' silently skips it; the sync appears to succeed but the file is never committed to the sub-repo",
+        strict=True,
+    )
     def test_new_gitignored_file_added_by_patch_is_NOT_staged(self):
-        # BUG: the real failure mode. If a patch introduces a brand-new file
-        # whose path matches .gitignore (e.g. a generated header), `git add .`
-        # silently skips it. The sync appears to succeed but the file is never
-        # committed to the sub-repo.
         (self.repo / ".gitignore").write_text("generated/\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -496,10 +487,7 @@ class StageChangesTest(unittest.TestCase):
 
         sut._stage_changes(self.repo)
 
-        # Current (buggy) behavior: the new file is silently not staged.
-        self.assertNotIn("generated/new_output.h", self._staged_files())
-        # After the fix (e.g. `git add --force .`), assert:
-        #   self.assertIn("generated/new_output.h", self._staged_files())
+        self.assertIn("generated/new_output.h", self._staged_files())
 
 
 # ---------------------------------------------------------------------------
@@ -550,18 +538,16 @@ class ApplyPatchTest(unittest.TestCase):
         content = (self.repo / "file.txt").read_text()
         self.assertIn("line2 modified", content)
 
+    @pytest.mark.xfail(
+        reason="BUG: applying a patch a second time raises RuntimeError; there is no already-synced guard and no --3way flag so it errors out instead of being a no-op",
+        strict=True,
+    )
     def test_applying_same_patch_twice_raises(self):
-        # BUG: applying a patch a second time (when the changes are already
-        # present) raises a RuntimeError. There is no already-synced guard and
-        # no --3way flag, so the second apply errors out instead of being a no-op.
         sut._apply_patch(self.repo, self.patch_file)
         _git(["add", "."], cwd=self.repo)
         _git(["commit", "-m", "apply patch"], cwd=self.repo)
 
-        with self.assertRaises(RuntimeError):
-            sut._apply_patch(self.repo, self.patch_file)
-        # After the fix (--3way + already-synced guard), this should be a no-op:
-        #   sut._apply_patch(self.repo, self.patch_file)  # does not raise
+        sut._apply_patch(self.repo, self.patch_file)  # should be a no-op, not raise
 
     def test_patch_failure_raises_runtime_error(self):
         # Corrupt the working tree so the patch cannot apply cleanly.
@@ -577,12 +563,23 @@ class ApplyPatchTest(unittest.TestCase):
 
 class PushChangesTest(unittest.TestCase):
 
+    @pytest.mark.xfail(
+        reason="BUG: push failures are not retried — they propagate immediately; after the fix there should be retry logic before the error propagates",
+        strict=True,
+    )
     def test_push_failure_propagates_as_runtime_error(self):
-        # BUG: push failures are not retried — they propagate immediately.
-        # After the fix there should be retry logic before the error propagates.
-        with patch.object(sut, "_run_git", side_effect=RuntimeError("push rejected")):
-            with self.assertRaises(RuntimeError):
-                sut._push_changes(Path("/tmp/fake"), "develop")
+        call_count = 0
+
+        def fail_then_succeed(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("push rejected")
+            return ""
+
+        with patch.object(sut, "_run_git", side_effect=fail_then_succeed):
+            sut._push_changes(Path("/tmp/fake"), "develop")  # should retry, not raise
+        self.assertGreater(call_count, 1)
 
     def test_successful_push_calls_git_push_origin_branch(self):
         with patch.object(sut, "_run_git") as mock_git:
@@ -592,18 +589,15 @@ class PushChangesTest(unittest.TestCase):
             ["push", "origin", "develop"], cwd=Path("/tmp/repo")
         )
 
+    @pytest.mark.xfail(
+        reason="BUG: after a successful push there is no verification step (e.g. fetching the remote to confirm the commit landed); the current code calls _run_git exactly once and returns",
+        strict=True,
+    )
     def test_no_post_push_verification_performed(self):
-        # BUG: after a successful push there is no verification step
-        # (e.g., fetching the remote to confirm the commit landed). The current
-        # code calls _run_git exactly once (the push itself) and then returns.
-        #
-        # This test is intentionally written against call_count so that when a
-        # retry or verification step is added, the test breaks and forces the
-        # author to explicitly update it with the new expected call sequence.
         with patch.object(sut, "_run_git") as mock_git:
             mock_git.return_value = ""
             sut._push_changes(Path("/tmp/repo"), "develop")
-        self.assertEqual(mock_git.call_count, 1)
+        self.assertGreater(mock_git.call_count, 1)
 
 
 # ---------------------------------------------------------------------------
