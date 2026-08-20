@@ -140,7 +140,7 @@ namespace rocisa
             module->addComment(comment);
         }
 
-        if(rocIsa::getInstance().getAsmCaps()["HasAdd_PC_i64"])
+        if(capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasAdd_PC_i64"))
         {
             //what '.' does is to create a label right before that instruction
             //So s_add_pc_i64 (target_label - .) effectively becomes:
@@ -504,7 +504,7 @@ namespace rocisa
                      const std::string&                        comment = "")
     {
         rocIsa& instance = rocIsa::getInstance();
-        if(instance.getArchCaps()["NoSDWA"])
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
         {
             return std::make_shared<VCvtF16toF32>(
                 dst,
@@ -542,7 +542,7 @@ namespace rocisa
         }
 
         rocIsa& instance = rocIsa::getInstance();
-        if(instance.getArchCaps()["NoSDWA"])
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
         {
             return std::make_shared<VCvtF32toF16>(
                 dst,
@@ -568,7 +568,7 @@ namespace rocisa
     {
         int     selInt   = static_cast<int>(sel);
         rocIsa& instance = rocIsa::getInstance();
-        if(instance.getArchCaps()["NoSDWA"])
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
         {
             VOP3PModifiers vop3;
             vop3.op_sel.push_back(selInt);
@@ -597,7 +597,7 @@ namespace rocisa
     {
         int     selInt   = static_cast<int>(sel);
         rocIsa& instance = rocIsa::getInstance();
-        if(instance.getArchCaps()["NoSDWA"])
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
         {
             VOP3PModifiers vop3;
             vop3.op_sel.push_back(selInt);
@@ -625,7 +625,7 @@ namespace rocisa
                        const std::string&                                comment = "")
     {
         rocIsa& instance = rocIsa::getInstance();
-        if(!instance.getAsmCaps()["HasBF16CVT"])
+        if(!capOrDefault(instance.getAsmCaps(), "HasBF16CVT"))
         {
             if((vi % 2) == 1)
             {
@@ -638,7 +638,7 @@ namespace rocisa
                 dst, 16, src, "cvt bf16 to fp32. " + comment);
         }
 
-        if(instance.getArchCaps()["NoSDWA"])
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
         {
             VOP3PModifiers vop3;
             vop3.op_sel.push_back(vi % 2);

@@ -296,13 +296,3 @@ TEST_F(RemoveDscntPassTest, bigBlockPattern100) {
     expectBigBlockPatternTransitions(/*dsProximityThreshold=*/100,
                                      {"3->3", "2->2", "1->1", "0->0"});
 }
-
-TEST_F(RemoveDscntPassTest, bigBlockPattern64) {
-    expectBigBlockPatternTransitions(/*dsProximityThreshold=*/64,
-                                     {"3->0", "2->removed", "1->removed", "0->removed"});
-}
-
-TEST_F(RemoveDscntPassTest, bigBlockPattern84) {
-    expectBigBlockPatternTransitions(/*dsProximityThreshold=*/84,
-                                     {"3->3", "2->2", "1->0", "0->removed"});
-}

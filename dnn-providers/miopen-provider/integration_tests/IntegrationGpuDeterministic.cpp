@@ -516,7 +516,7 @@ protected:
         }
 
         PointwiseAttributes activAttrs;
-        activAttrs.set_mode(static_cast<PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             activAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());
