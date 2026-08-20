@@ -12,9 +12,9 @@
 #include <optional>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceKey.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -42,7 +42,7 @@ using WinnerRecord = std::vector<RankedEntry>;
 /// a record, which is why the coverage gate exists.
 struct WinnerKey
 {
-    GraphContentKey graph;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
     DeviceKey device;
 
     bool operator==(const WinnerKey& other) const
@@ -60,7 +60,8 @@ struct WinnerKeyHash
 {
     size_t operator()(const WinnerKey& key) const noexcept
     {
-        const size_t graphHash = std::hash<GraphContentKey>{}(key.graph);
+        const size_t graphHash
+            = std::hash<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey>{}(key.graph);
         const size_t deviceHash = std::hash<DeviceKey>{}(key.device);
         return graphHash
                ^ (deviceHash + 0x9e3779b97f4a7c15ULL + (graphHash << 6) + (graphHash >> 2));

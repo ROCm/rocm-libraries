@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -667,7 +668,9 @@ private:
             return std::nullopt;
         }
 
-        const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
+        const WinnerKey key{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
+            DeviceKey{context.deviceProperties}};
         if(!key.graph.isUsable())
         {
             // No bytes to key on; such graphs never match each other either.

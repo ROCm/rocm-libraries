@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
@@ -19,6 +20,8 @@ namespace hipdnn_plugin_sdk::ingestor::testing
 {
 namespace
 {
+
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 
 KernelDefinition definitionFor(uint8_t kernel, uint8_t pack = 0xF0, uint8_t dispatch = 0xD0)
 {
