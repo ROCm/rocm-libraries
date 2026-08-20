@@ -4,6 +4,9 @@
 #include "convnd_fwd_common.hpp"
 
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle_v3.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_wmma_cshuffle_v3.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_d_wmma_cshuffle_v3_large_tensor.hpp"
 
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 
@@ -25,9 +28,58 @@ static constexpr auto ConvSpec =
 
 static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::MNKPadding;
 
+// template <ck::index_t NDimSpatial, typename InLayout, typename WeiLayout, typename OutLayout>
+// using DeviceGroupedConvNDFwdInstance =
+//     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<
+//         NDimSpatial,
+//         InLayout,
+//         WeiLayout,
+//         ck::Tuple<>,
+//         OutLayout,
+//         InDataType,
+//         WeiDataType,
+//         AccDataType,
+//         CShuffleDataType,
+//         ck::Tuple<>,
+//         OutDataType,
+//         InElementOp,
+//         WeiElementOp,
+//         OutElementOp,
+//         ConvSpec,    // ConvForwardSpecialization
+//         GemmSpec,    // GemmSpecialization
+//         1,           //
+//         512,         // BlockSize
+//         512,         // MPerBlock
+//         64,         // NPerBlock
+//         128,          // KPerBlock
+//         16,          // AK1
+//         16,          // BK1
+//         16,          // MPerXdl
+//         16,          // NPerXdl
+//         8,           // MXdlPerWave
+//         1,           // NXdlPerWave
+//         S<8, 32, 2>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
+//         S<1, 0, 2>,  // ABlockTransferThreadClusterArrangeOrder
+//         S<1, 0, 2>,  // ABlockTransferSrcAccessOrder
+//         2,           // ABlockTransferSrcVectorDim
+//         8,           // ABlockTransferSrcScalarPerVector
+//         8,           // ABlockTransferDstScalarPerVector_AK1
+//         1,           // ABlockLdsExtraM
+//         S<8, 32, 2>, // BBlockTransferThreadClusterLengths_BK0_N_BK1
+//         S<1, 0, 2>,  // BBlockTransferThreadClusterArrangeOrder
+//         S<1, 0, 2>,  // BBlockTransferSrcAccessOrder
+//         2,           // BBlockTransferSrcVectorDim
+//         8,           // BBlockTransferSrcScalarPerVector
+//         8,           // BBlockTransferDstScalarPerVector_BK1
+//         1,           // BBlockLdsExtraN
+//         1,
+//         1,
+//         S<1, 64, 1, 8>,
+//         8>;
+
 template <ck::index_t NDimSpatial, typename InLayout, typename WeiLayout, typename OutLayout>
 using DeviceGroupedConvNDFwdInstance =
-    ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<
+    ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<
         NDimSpatial,
         InLayout,
         WeiLayout,
@@ -44,25 +96,24 @@ using DeviceGroupedConvNDFwdInstance =
         OutElementOp,
         ConvSpec,    // ConvForwardSpecialization
         GemmSpec,    // GemmSpecialization
-        1,           //
         256,         // BlockSize
         128,         // MPerBlock
-        128,         // NPerBlock
+        256,         // NPerBlock
         64,          // KPerBlock
-        16,          // AK1
-        16,          // BK1
+        8,           // AK1
+        8,           // BK1
         16,          // MPerXdl
         16,          // NPerXdl
         4,           // MXdlPerWave
         4,           // NXdlPerWave
-        S<4, 64, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
+        S<8, 32, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
         S<1, 0, 2>,  // ABlockTransferThreadClusterArrangeOrder
         S<1, 0, 2>,  // ABlockTransferSrcAccessOrder
         2,           // ABlockTransferSrcVectorDim
         8,           // ABlockTransferSrcScalarPerVector
         8,           // ABlockTransferDstScalarPerVector_AK1
         1,           // ABlockLdsExtraM
-        S<4, 64, 1>, // BBlockTransferThreadClusterLengths_BK0_N_BK1
+        S<8, 32, 1>, // BBlockTransferThreadClusterLengths_BK0_N_BK1
         S<1, 0, 2>,  // BBlockTransferThreadClusterArrangeOrder
         S<1, 0, 2>,  // BBlockTransferSrcAccessOrder
         2,           // BBlockTransferSrcVectorDim
@@ -72,7 +123,114 @@ using DeviceGroupedConvNDFwdInstance =
         1,
         1,
         S<1, 32, 1, 8>,
-        4>;
+        8,
+        ck::BlockGemmPipelineScheduler::Intrawave,
+        ck::BlockGemmPipelineVersion::v4,
+        InDataType,
+        WeiDataType,
+        true,
+        1,
+        false>;
+
+// template <ck::index_t NDimSpatial, typename InLayout, typename WeiLayout, typename OutLayout>
+// using DeviceGroupedConvNDFwdInstance =
+//     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<
+//         NDimSpatial,
+//         InLayout,
+//         WeiLayout,
+//         ck::Tuple<>,
+//         OutLayout,
+//         InDataType,
+//         WeiDataType,
+//         AccDataType,
+//         CShuffleDataType,
+//         ck::Tuple<>,
+//         OutDataType,
+//         InElementOp,
+//         WeiElementOp,
+//         OutElementOp,
+//         ConvSpec,    // ConvForwardSpecialization
+//         GemmSpec,    // GemmSpecialization
+//         512,         // BlockSize
+//         512,         // MPerBlock
+//         64,         // NPerBlock
+//         128,          // KPerBlock
+//         8,          // AK1
+//         8,          // BK1
+//         16,          // MPerXdl
+//         16,          // NPerXdl
+//         2,           // MXdlPerWave
+//         4,           // NXdlPerWave
+//         S<16, 32, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
+//         S<1, 0, 2>,  // ABlockTransferThreadClusterArrangeOrder
+//         S<1, 0, 2>,  // ABlockTransferSrcAccessOrder
+//         2,           // ABlockTransferSrcVectorDim
+//         8,           // ABlockTransferSrcScalarPerVector
+//         8,           // ABlockTransferDstScalarPerVector_AK1
+//         1,           // ABlockLdsExtraM
+//         S<16, 32, 1>, // BBlockTransferThreadClusterLengths_BK0_N_BK1
+//         S<1, 0, 2>,  // BBlockTransferThreadClusterArrangeOrder
+//         S<1, 0, 2>,  // BBlockTransferSrcAccessOrder
+//         2,           // BBlockTransferSrcVectorDim
+//         8,           // BBlockTransferSrcScalarPerVector
+//         8,           // BBlockTransferDstScalarPerVector_BK1
+//         1,           // BBlockLdsExtraN
+//         1,
+//         4,
+//         S<1, 64, 1, 8>,
+//         8,
+//         ck::BlockGemmPipelineScheduler::Intrawave,
+//         ck::BlockGemmPipelineVersion::v1,
+//         false>;
+
+// template <ck::index_t NDimSpatial, typename InLayout, typename WeiLayout, typename OutLayout>
+// using DeviceGroupedConvNDFwdInstance =
+//     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor<
+//         NDimSpatial,
+//         InLayout,
+//         WeiLayout,
+//         ck::Tuple<>,
+//         OutLayout,
+//         InDataType,
+//         WeiDataType,
+//         AccDataType,
+//         CShuffleDataType,
+//         ck::Tuple<>,
+//         OutDataType,
+//         InElementOp,
+//         WeiElementOp,
+//         OutElementOp,
+//         ConvSpec,    // ConvForwardSpecialization
+//         GemmSpec,    // GemmSpecialization
+//         256,         // BlockSize
+//         256,         // MPerBlock
+//         256,         // NPerBlock
+//         64,          // KPerBlock
+//         8,          // K1
+//         16,          // MPerXdl
+//         16,          // NPerXdl
+//         8,           // MXdlPerWave
+//         4,           // NXdlPerWave
+//         S<8, 32, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
+//         S<1, 0, 2>,  // ABlockTransferThreadClusterArrangeOrder
+//         S<1, 0, 2>,  // ABlockTransferSrcAccessOrder
+//         2,           // ABlockTransferSrcVectorDim
+//         8,           // ABlockTransferSrcScalarPerVector
+//         8,           // ABlockTransferDstScalarPerVector_AK1
+//         1,           // ABlockLdsExtraM
+//         S<8, 32, 1>, // BBlockTransferThreadClusterLengths_BK0_N_BK1
+//         S<1, 0, 2>,  // BBlockTransferThreadClusterArrangeOrder
+//         S<1, 0, 2>,  // BBlockTransferSrcAccessOrder
+//         2,           // BBlockTransferSrcVectorDim
+//         8,           // BBlockTransferSrcScalarPerVector
+//         8,           // BBlockTransferDstScalarPerVector_BK1
+//         1,           // BBlockLdsExtraN
+//         1,
+//         1,
+//         S<1, 32, 1, 8>,
+//         8,
+//         ck::BlockGemmPipelineScheduler::Intrawave,
+//         ck::BlockGemmPipelineVersion::v1>;
 
 #include "run_convnd_fwd_example.inc"
 
