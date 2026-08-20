@@ -177,9 +177,7 @@ class ResolveRefTest(unittest.TestCase):
 class BaselineValidationTest(unittest.TestCase):
     def test_exact_match_is_accepted(self):
         sha = "a" * 40
-        client = FakeClient(
-            named_commit=Commit(sha=sha, committed_at=dt(1))
-        )
+        client = FakeClient(named_commit=Commit(sha=sha, committed_at=dt(1)))
 
         result = rtr.validate_baseline(
             client,
@@ -196,9 +194,7 @@ class BaselineValidationTest(unittest.TestCase):
     def test_different_ref_is_rejected(self):
         current_sha = "a" * 40
         baseline_sha = "b" * 40
-        client = FakeClient(
-            named_commit=Commit(sha=baseline_sha, committed_at=dt(1))
-        )
+        client = FakeClient(named_commit=Commit(sha=baseline_sha, committed_at=dt(1)))
 
         result = rtr.validate_baseline(
             client,
