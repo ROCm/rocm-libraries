@@ -60,11 +60,11 @@ public:
     {
     }
     // append a value for an argument declared as "index_type"
-    void append_index(size_t value, std::optional<IndexType> itype = std::nullopt)
+    void append_index(size_t value, const std::optional<IndexType>& forced_itype = std::nullopt)
     {
-        itype = itype.has_value() ? itype.value() : this->itype;
+        const auto arg_type = forced_itype.has_value() ? forced_itype.value() : itype;
 
-        switch(itype.value())
+        switch(arg_type)
         {
         case IndexType::U32:
         {
