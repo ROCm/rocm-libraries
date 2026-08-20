@@ -116,6 +116,38 @@ TEST(TestIngestorWinnerCache, OrderByRecordDropsRecordEntriesAbsentFromTheCandid
     EXPECT_EQ(ordered[0].kernelId, present.kernelId);
 }
 
+// Rank 0's kernelId is present in the candidates, but its pack no longer agrees; the
+// entry must be skipped (not treated as terminal), letting rank 1 take over. Distinct
+// from the single-entry skip tests above, which only prove exhaustion.
+TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroPackIsStale)
+{
+    const auto staleRankZero = definitionFor(0x01, 0xA1);
+    const auto validRankOne = definitionFor(0x02);
+    const WinnerRecord record{entryFor(definitionFor(0x01, 0xB2), 1.0),
+                              entryFor(validRankOne, 2.0)};
+
+    const auto ordered = orderByRecord(record, {staleRankZero, validRankOne});
+
+    ASSERT_EQ(ordered.size(), 1U);
+    EXPECT_EQ(ordered[0].kernelId, validRankOne.kernelId)
+        << "a stale rank 0 must fall through to rank 1, not empty the result";
+}
+
+// Same fall-through, but the disagreement is on dispatchId instead of packId.
+TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroDispatchIsStale)
+{
+    const auto staleRankZero = definitionFor(0x01, 0xF0, 0xD1);
+    const auto validRankOne = definitionFor(0x02);
+    const WinnerRecord record{entryFor(definitionFor(0x01, 0xF0, 0xD2), 1.0),
+                              entryFor(validRankOne, 2.0)};
+
+    const auto ordered = orderByRecord(record, {staleRankZero, validRankOne});
+
+    ASSERT_EQ(ordered.size(), 1U);
+    EXPECT_EQ(ordered[0].kernelId, validRankOne.kernelId)
+        << "a stale rank 0 must fall through to rank 1, not empty the result";
+}
+
 TEST(TestIngestorWinnerCache, KeysDifferingOnlyInDeviceAreDistinct)
 {
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};

@@ -132,12 +132,16 @@ repos:
         pass_filenames: true
 
       # Separate from flatc-hipdnn: the annotation it reads is invisible to flatc's
-      # C++ output. Re-derives the whole header, so pass_filenames is false.
+      # C++ output. Fires on the schemas (transitively, via the generator reading
+      # their fields through flatc) and on the generator script itself, since a
+      # change to its emitter/filter/type-walk logic can desync the checked-in
+      # header just like a schema change can. Re-derives the whole header, so
+      # pass_filenames is false.
       - id: cache-key-hipdnn
         name: cache key codegen (hipDNN)
         entry: python projects/hipdnn/scripts/gen_cache_key.py
         language: python
-        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$
         pass_filenames: false
 
       - id: gtest-format-miopen
