@@ -315,6 +315,7 @@ inline std::string type_tag()
     else if constexpr(std::is_same_v<T, short>) return "Short";
     else if constexpr(std::is_same_v<T, unsigned short>) return "Ushort";
     else if constexpr(std::is_same_v<T, long>) return "Long";
+    else if constexpr(std::is_same_v<T, unsigned long>) return "Ulong";
     else if constexpr(std::is_same_v<T, unsigned long long>) return "Uint64";
     else if constexpr(std::is_same_v<T, bool>) return "Bool";
     else if constexpr(std::is_same_v<T, float>) return "Float";
