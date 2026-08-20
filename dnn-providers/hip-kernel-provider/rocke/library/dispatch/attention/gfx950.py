@@ -30,6 +30,11 @@ from .common import (
 # block_n (KV tile) the dense candidate ships; 64 is the resource-efficient
 # peak (see AttentionDenseSpec.block_n).
 _DENSE_BLOCK_N = 64
+# AttentionRequest.mask_type carries the engine's MaskType ordinals, defined in
+# src/engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp:
+#   0 = NO_MASK, 1 = TOP_LEFT_CAUSAL, 2 = BOTTOM_RIGHT_CAUSAL, 3 = SLIDING_WINDOW
+# Everything nonzero is causal; only the alignment differs between 1 and 2.
+_MASK_BOTTOM_RIGHT_CAUSAL = 2
 
 
 def _dense_spec(req: OperatorRequest):
@@ -63,6 +68,14 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
+    # MaskType.BOTTOM_RIGHT_CAUSAL. Only the non-persistent grid implements the shifted
+    # diagonal, so under "auto" -- where persistent is a heuristic about work size, not
+    # something the caller asked for -- pick the grid that can serve the mask instead of
+    # declining. An explicit dense_persistent="on" is a caller request, so leave it and
+    # let the spec reject the combination.
+    bottom_right = int(req.mask_type) == _MASK_BOTTOM_RIGHT_CAUSAL
+    if bottom_right and mode == "auto":
+        persistent = False
     return AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -71,6 +84,7 @@ def _dense_spec(req: OperatorRequest):
         num_kv_heads=int(req.nhead_k),
         head_size=int(req.hdim_q),
         causal=(int(req.mask_type) != 0),
+        causal_bottom_right=bottom_right,
         dtype=req.dtype.lower(),
         block_n=bn,
         persistent=persistent,
