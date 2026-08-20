@@ -528,10 +528,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
-    // A node asked to land within a fixed cycle lead of its reader (see
-    // DAGNode::earliestClock), whose clock has not come round yet. Only the phases that
-    // have other work to offer consult this; the Phase G fallback does not, so holding a
-    // node back can cost it its lead but never the schedule's progress.
+    // Hold until clock >= earliestClock. No-op when kRule3CrossLoop false (earliestClock unset).
     bool heldBackForLead(const DAGNode* node) const {
         return clock_ < node->earliestClock;
     }

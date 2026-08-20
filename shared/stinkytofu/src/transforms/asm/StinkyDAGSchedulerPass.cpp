@@ -211,15 +211,10 @@ static std::vector<char> reachableFrom(unsigned start,
 // order and the graph stays acyclic. The live-out edges below are the one exception, and
 // they say why they are safe.
 //
-// The live-out chain -- in a loop body region, the counter compare the latch branch
-// reads -- carries a second constraint on top of those edges, pulling the other way: an
-// earliest clock that keeps it from issuing far ahead of the branch. See the live-out
-// branch below and DAGNode::earliestClock.
+// Live-out SCC chain: always pin def after barrier waits. kRule3CrossLoop false: pin only.
+// kRule3CrossLoop true: also set earliestClock below (see cluster-barrier.md).
 
-// How close the live-out SCC def should sit to the end of its region, in estimated
-// cycles. Small enough to read as part of the loop's exit test rather than as work
-// stranded mid-region, and wide enough to leave the queue several instructions of slack
-// to place it in.
+// kRule3CrossLoop true only. How close the live-out SCC def sits to the region end.
 constexpr int kLiveOutSccDefLeadCycles = 50;
 
 static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
@@ -268,13 +263,7 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
                                      << " chain (dagId=" << first->id << ") after barrier wait"
                                      << " (dagId=" << barrier.wait->id << ")\n");
             }
-            // Those edges say the def may not go before the last barrier. They do not say
-            // it should go there, and left at that it does: it is a one-cycle SALU that
-            // the barrier frees, so the queue issues it immediately and the value then
-            // sits live across everything that follows -- a whole region's tail of WMMA
-            // between the compare and the branch that reads it. Hold it back to within
-            // kLiveOutSccDefLeadCycles of the region end instead, so it lands next to its
-            // reader. The floor is only a preference: see DAGNode::earliestClock.
+            // kRule3CrossLoop true only: lead ceiling on live-out SCC def (see cluster-barrier.md).
             if (cluster_barrier::kRule3CrossLoop) {
                 first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
                 PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-out chain"
