@@ -141,10 +141,10 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     // and widening them to 64BIT would cost registers for nothing
 
     auto num_lengths = data.node->length.size();
-    kargs.append_index(num_lengths, IndexType::_32BIT);
-    kargs.append_index(data.node->length[0], IndexType::_32BIT);
-    kargs.append_index(data.node->length[1], IndexType::_32BIT);
-    kargs.append_index(num_lengths > 2 ? data.node->length[2] : 1, IndexType::_32BIT);
+    kargs.append_index(num_lengths, IndexType::U32);
+    kargs.append_index(data.node->length[0], IndexType::U32);
+    kargs.append_index(data.node->length[1], IndexType::U32);
+    kargs.append_index(num_lengths > 2 ? data.node->length[2] : 1, IndexType::U32);
     kargs.append_ptr(data.node->devKernArg.lengths());
 
     kargs.append_index(data.node->inStride[0]);
@@ -172,9 +172,9 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
                                          data.node->batch,
                                          std::multiplies<unsigned int>());
 
-    kargs.append_index(gridX, IndexType::_32BIT);
-    kargs.append_index(gridY, IndexType::_32BIT);
-    kargs.append_index(gridZ, IndexType::_32BIT);
+    kargs.append_index(gridX, IndexType::U32);
+    kargs.append_index(gridY, IndexType::U32);
+    kargs.append_index(gridZ, IndexType::U32);
 
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);

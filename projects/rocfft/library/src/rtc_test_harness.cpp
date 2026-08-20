@@ -23,6 +23,7 @@
 #include "device/generator/generator.h"
 #include "device/kernel-generator-embed.h"
 #include "rtc_kernel.h"
+#include "rtc_kernel.h"
 
 #if __has_include(<filesystem>)
 #include <filesystem>
@@ -78,10 +79,10 @@ std::string cleanup_type(std::string type, const std::string& function_name)
     // does not include.  The kernel name says how wide it is.
     if(type == "index_type")
     {
-        if(function_name.find(rtc_index_name(IndexType::_64BIT)) != std::string::npos)
-            type = rtc_index_type(IndexType::_64BIT);
-        else if(function_name.find(rtc_index_name(IndexType::_32BIT)) != std::string::npos)
-            type = rtc_index_type(IndexType::_32BIT);
+        if(function_name.find(rtc_index_name(IndexType::U64)) != std::string::npos)
+            type = rtc_index_type(IndexType::U64);
+        else if(function_name.find(rtc_index_name(IndexType::U32)) != std::string::npos)
+            type = rtc_index_type(IndexType::U32);
     }
     return type;
 }
@@ -186,8 +187,8 @@ std::string test_harness_launch(const Function& f)
             launch.body += Call{"kargs.append_int", {arg.name}};
         else if(actual_type == "unsigned int")
             launch.body += Call{"kargs.append_unsigned_int", {arg.name}};
-        else if(actual_type == rtc_index_type(IndexType::_64BIT))
-            launch.body += Call{"kargs.append_index", {arg.name, "IndexType::_64BIT"}};
+        else if(actual_type == rtc_index_type(IndexType::U64))
+            launch.body += Call{"kargs.append_index", {arg.name, "IndexType::U64"}};
         else if(actual_type == "double")
             launch.body += Call{"kargs.append_double", {"1.0"}};
         else if(actual_type == "float")
