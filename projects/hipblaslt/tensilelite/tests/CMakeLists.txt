@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(GTest REQUIRED)
-include(GoogleTest)
 
 add_executable(tensilelite-tests)
 add_subdirectory(configs)
@@ -80,8 +79,6 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
     target_link_libraries(tensilelite-tests PRIVATE hipblaslt::mxdatagen)
 endif()
 
-gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
-
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
 
 if(HIPBLASLT_ENABLE_OPENMP)
@@ -151,7 +148,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
             RENAME "CTestTestfile.cmake"
         )
     else()
-        message(STATUS "tensilelite-tests: shared/ctest not found (e.g. standalone checkout), skipping CTest categories")
+        message(STATUS "tensilelite-tests: shared/ctest not found (e.g. standalone checkout), falling back to gtest_discover_tests()")
+        include(GoogleTest)
+        gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
     endif()
 else()
     message(STATUS "tensilelite-tests: No test_categories.yaml (CTest categories not used)")
