@@ -45,6 +45,8 @@ _SKIP_REASON = (
 
 def _run_benchmark(*extra_args, timeout=600):
     """Run benchmark_implicit_gemm_conv in a subprocess and return (rc, output)."""
+    import io
+
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": _PYDIR}
     cmd = [
         sys.executable,
@@ -63,14 +65,24 @@ def _run_benchmark(*extra_args, timeout=600):
         "1",
         *extra_args,
     ]
-    proc = subprocess.run(
+    # Stream output to the terminal in real time and also collect it for
+    # assertions.  Using Popen + readline avoids the buffering that hides
+    # progress when capture_output=True is used with subprocess.run.
+    buf = io.StringIO()
+    with subprocess.Popen(
         cmd,
         env=env,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=timeout,
-    )
-    return proc.returncode, (proc.stdout + proc.stderr)
+        bufsize=1,
+    ) as proc:
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            buf.write(line)
+        proc.wait(timeout=timeout)
+    return proc.returncode, buf.getvalue()
 
 
 @unittest.skipUnless(ARCH in _SUPPORTED_ARCHES and _HAS_TORCH, _SKIP_REASON)

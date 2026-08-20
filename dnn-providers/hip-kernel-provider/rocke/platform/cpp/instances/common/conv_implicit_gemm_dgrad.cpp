@@ -165,17 +165,10 @@ bool rocke_dgrad_conv_spec_is_strided(const rocke_dgrad_conv_spec_t* s)
 
 bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
 {
-    if(s->split_k > 1)
-        return true;
-    if(!rocke_dgrad_conv_spec_is_strided(s))
-        return false;
-    /* Count actual non-empty sub-GEMMs (some tilde phases can be empty for
-     * small filters), mirroring the Python len(compute_sub_gemms()) > 1 check. */
-    rocke_tilde_decomposition_t tilde = rocke_compute_tilde(&s->problem);
-    rocke_sub_gemm_params_t sgs[128];
-    int n = rocke_enumerate_sub_gemms(
-        &s->problem, &tilde, s->tile_m, s->tile_n, s->tile_k, _max(s->split_k, 1), sgs, 128);
-    return n > 1;
+    /* split_k>1: multiple CTAs accumulate into the same dX elements via atomic_add.
+     * Tilde sub-GEMMs with split_k=1 write to disjoint (n,hi,wi) positions and
+     * use direct buffer_store — no atomics needed. */
+    return s->split_k > 1;
 }
 
 rocke_status_t
@@ -270,8 +263,9 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         return false;
     }
 
-    /* vector_size_c > 1 incompatible with default epilogue. */
-    if(s->vector_size_c > 1 && strcmp(s->epilogue, "default") == 0)
+    /* vector_size_c > 1 incompatible with default epilogue — except when
+     * split_k > 1 uses the atomic epilogue which ignores vector_size_c. */
+    if(s->vector_size_c > 1 && strcmp(s->epilogue, "default") == 0 && s->split_k <= 1)
     {
         snprintf(reason,
                  reason_cap,
@@ -1069,8 +1063,7 @@ struct tilde_dy_ctx_t
 {
     rocke_value_t* block_m_off;
     rocke_value_t* k_off;
-    rocke_value_t* ydot_times_xdot;
-    rocke_value_t* rec_x_dot_slice;
+    rocke_value_t* rec_x_dot_slice; // xdot_slice for yx_rem decomposition
     rocke_value_t* hw_tilde;
     rocke_value_t* rec_w_tilde_slice;
     rocke_value_t* rec_h_tilde_slice_begin;
@@ -1079,7 +1072,7 @@ struct tilde_dy_ctx_t
     rocke_value_t* rec_a_embed_w_coeff;
     rocke_value_t* c_Ho;
     rocke_value_t* c_Wo;
-    rocke_value_t* c_K;
+    rocke_value_t* c_K; // K_conv — innermost divisor in k_dg decomposition
     rocke_value_t* c0;
 };
 
@@ -1093,8 +1086,10 @@ static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
     rocke_value_t* m_sub = rocke_b_add(b_, ctx->block_m_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
 
-    rocke_value_t* k_out = rocke_b_div(b_, k_sub, ctx->ydot_times_xdot);
-    rocke_value_t* yx_rem = rocke_b_mod(b_, k_sub, ctx->ydot_times_xdot);
+    // k_out innermost (CK-compatible): k_sub = ydot*xdot_slice*K + xdot*K + k_out
+    // Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim K).
+    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_K);
+    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_K);
     rocke_value_t* ydot = rocke_b_div(b_, yx_rem, ctx->rec_x_dot_slice);
     rocke_value_t* xdot = rocke_b_mod(b_, yx_rem, ctx->rec_x_dot_slice);
 
@@ -1135,7 +1130,6 @@ struct tilde_w_ctx_t
 {
     rocke_value_t* block_n_off;
     rocke_value_t* k_off;
-    rocke_value_t* ydot_times_xdot;
     rocke_value_t* rec_x_dot_slice;
     rocke_value_t* rec_b_y_stride;
     rocke_value_t* rec_b_y_offset;
@@ -1158,8 +1152,10 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     rocke_value_t* c_val = rocke_b_add(b_, ctx->block_n_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
 
-    rocke_value_t* k_out = rocke_b_div(b_, k_sub, ctx->ydot_times_xdot);
-    rocke_value_t* yx_rem = rocke_b_mod(b_, k_sub, ctx->ydot_times_xdot);
+    // Same k_out-innermost decomposition as _tilde_dy_descriptor (must match).
+    // B (KYXC) stride along k_out = Y*X*C — not contiguous; load_vec_b stays 1.
+    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_K);
+    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_K);
     rocke_value_t* ydot = rocke_b_div(b_, yx_rem, ctx->rec_x_dot_slice);
     rocke_value_t* xdot = rocke_b_mod(b_, yx_rem, ctx->rec_x_dot_slice);
 
@@ -1182,6 +1178,182 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     if(out_valid)
         *out_valid = valid;
     return safe_offset;
+}
+
+// ===========================================================================
+// ===========================================================================
+// Tilde non-atomic epilogues (split_k==1 strided convolutions)
+//
+// For split_k==1 the tilde decomposition guarantees each sub-GEMM writes to
+// a disjoint subset of dX elements, so plain buffer_store is safe.
+//
+// Shared addr_fn (tilde_dx_ctx_t / _tilde_dx_addr_fn):
+//   m_global  -> (n_val, htl, wtl) via hw_tilde / w_tilde_slice
+//   hi        = htl * d_h_stride + d_h_offset
+//   wi        = wtl * d_w_stride + d_w_offset
+//   NHWC off  = ((n_val * Hi + hi) * Wi + wi) * C + n_global
+//
+// Two functions mirror the non-tilde (stride=1) pattern:
+//   _emit_dgrad_tilde_direct_epilogue   -- scalar store, no LDS staging
+//   _emit_dgrad_tilde_cshuffle_epilogue -- LDS-staged, vector_size_c-wide stores
+// ===========================================================================
+
+struct tilde_dx_ctx_t
+{
+    rocke_value_t* hw_tilde;
+    rocke_value_t* w_tilde_slice;
+    rocke_value_t* d_h_stride;
+    rocke_value_t* d_h_offset;
+    rocke_value_t* d_w_stride;
+    rocke_value_t* d_w_offset;
+    rocke_value_t* c_Hi;
+    rocke_value_t* c_Wi;
+    rocke_value_t* c_C;
+    rocke_value_t* c0;
+};
+
+static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_ir_builder_t* b,
+                                         rocke_value_t* hw_tilde,
+                                         rocke_value_t* w_tilde_slice,
+                                         rocke_value_t* d_h_stride,
+                                         rocke_value_t* d_h_offset,
+                                         rocke_value_t* d_w_stride,
+                                         rocke_value_t* d_w_offset,
+                                         rocke_value_t* c_Hi,
+                                         rocke_value_t* c_Wi,
+                                         rocke_value_t* c_C)
+{
+    tilde_dx_ctx_t ctx;
+    ctx.hw_tilde = hw_tilde;
+    ctx.w_tilde_slice = w_tilde_slice;
+    ctx.d_h_stride = d_h_stride;
+    ctx.d_h_offset = d_h_offset;
+    ctx.d_w_stride = d_w_stride;
+    ctx.d_w_offset = d_w_offset;
+    ctx.c_Hi = c_Hi;
+    ctx.c_Wi = c_Wi;
+    ctx.c_C = c_C;
+    ctx.c0 = rocke_b_const_i32(b, 0);
+    return ctx;
+}
+
+// Epilogue addr_fn: (m_global, n_global) -> (element offset, hw_valid).
+// bounds_m / bounds_n (m < gemm_m, n < C) are handled by the epilogue caller.
+static rocke_value_t* _tilde_dx_addr_fn(rocke_ir_builder_t* b,
+                                        rocke_value_t* m_global,
+                                        rocke_value_t* n_global,
+                                        rocke_value_t** out_valid,
+                                        void* user)
+{
+    tilde_dx_ctx_t* ctx = (tilde_dx_ctx_t*)user;
+
+    // Decompose m_global -> (n_val, htl, wtl)
+    rocke_value_t* n_val = rocke_b_div(b, m_global, ctx->hw_tilde);
+    rocke_value_t* m_rem = rocke_b_mod(b, m_global, ctx->hw_tilde);
+    rocke_value_t* htl = rocke_b_div(b, m_rem, ctx->w_tilde_slice);
+    rocke_value_t* wtl = rocke_b_mod(b, m_rem, ctx->w_tilde_slice);
+
+    rocke_value_t* hi = rocke_b_add(b, rocke_b_mul(b, htl, ctx->d_h_stride), ctx->d_h_offset);
+    rocke_value_t* wi = rocke_b_add(b, rocke_b_mul(b, wtl, ctx->d_w_stride), ctx->d_w_offset);
+
+    // hi/wi validity (padding guard; bounds_m/bounds_n cover m/n separately)
+    rocke_value_t* hi_ok
+        = rocke_b_land(b, rocke_b_cmp_ge(b, hi, ctx->c0), rocke_b_cmp_lt(b, hi, ctx->c_Hi));
+    rocke_value_t* wi_ok
+        = rocke_b_land(b, rocke_b_cmp_ge(b, wi, ctx->c0), rocke_b_cmp_lt(b, wi, ctx->c_Wi));
+    rocke_value_t* hw_ok = rocke_b_land(b, hi_ok, wi_ok);
+
+    if(out_valid)
+        *out_valid = hw_ok;
+
+    // NHWC element offset: ((n_val * Hi + hi) * Wi + wi) * C + n_global
+    rocke_value_t* _o0 = rocke_b_mul(b, n_val, ctx->c_Hi);
+    rocke_value_t* _o1 = rocke_b_add(b, _o0, hi);
+    rocke_value_t* _o2 = rocke_b_mul(b, _o1, ctx->c_Wi);
+    rocke_value_t* _o3 = rocke_b_add(b, _o2, wi);
+    rocke_value_t* _o4 = rocke_b_mul(b, _o3, ctx->c_C);
+    rocke_value_t* offset = rocke_b_add(b, _o4, n_global);
+
+    // OOB sentinel: address the hardware will not commit
+    return rocke_b_select(b, hw_ok, offset, rocke_b_const_i32(b, 0x7FFFFFFF));
+}
+
+// Scalar (per-element) store — mirrors _emit_dgrad_direct_epilogue for the tilde case.
+static void _emit_dgrad_tilde_direct_epilogue(rocke_ir_builder_t* b,
+                                              const rocke_dgrad_conv_spec_t* spec,
+                                              const rocke_mfma_atom_t* atom,
+                                              const rocke_warp_grid_t* grid,
+                                              rocke_value_t* const* accs,
+                                              int num_accs,
+                                              rocke_value_t* dx_rsrc,
+                                              rocke_value_t* bounds_m,
+                                              rocke_value_t* bounds_n,
+                                              rocke_value_t* hw_tilde,
+                                              rocke_value_t* w_tilde_slice,
+                                              rocke_value_t* d_h_stride,
+                                              rocke_value_t* d_h_offset,
+                                              rocke_value_t* d_w_stride,
+                                              rocke_value_t* d_w_offset,
+                                              rocke_value_t* c_Hi,
+                                              rocke_value_t* c_Wi,
+                                              rocke_value_t* c_C)
+{
+    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(b,
+                                            hw_tilde,
+                                            w_tilde_slice,
+                                            d_h_stride,
+                                            d_h_offset,
+                                            d_w_stride,
+                                            d_w_offset,
+                                            c_Hi,
+                                            c_Wi,
+                                            c_C);
+    rocke_direct_epilogue_t epi;
+    epi.atom = atom;
+    epi.grid = *grid;
+    epi.out_dtype = spec->dtype_d;
+    rocke_direct_epilogue_store(
+        b, &epi, accs, num_accs, _tilde_dx_addr_fn, &ctx, dx_rsrc, bounds_m, bounds_n, false);
+}
+
+// LDS-staged wide store — mirrors _emit_dgrad_cshuffle_epilogue for the tilde case.
+// The N dimension (channel index) is contiguous in dX for fixed m, so the
+// cshuffle epilogue can issue vector_size_c-wide buffer stores along N.
+static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
+                                                const rocke_dgrad_conv_spec_t* spec,
+                                                const rocke_mfma_atom_t* atom,
+                                                const rocke_warp_grid_t* grid,
+                                                rocke_value_t* const* accs,
+                                                int num_accs,
+                                                rocke_value_t* dx_rsrc,
+                                                rocke_value_t* bounds_m,
+                                                rocke_value_t* bounds_n,
+                                                rocke_value_t* hw_tilde,
+                                                rocke_value_t* w_tilde_slice,
+                                                rocke_value_t* d_h_stride,
+                                                rocke_value_t* d_h_offset,
+                                                rocke_value_t* d_w_stride,
+                                                rocke_value_t* d_w_offset,
+                                                rocke_value_t* c_Hi,
+                                                rocke_value_t* c_Wi,
+                                                rocke_value_t* c_C)
+{
+    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(b,
+                                            hw_tilde,
+                                            w_tilde_slice,
+                                            d_h_stride,
+                                            d_h_offset,
+                                            d_w_stride,
+                                            d_w_offset,
+                                            c_Hi,
+                                            c_Wi,
+                                            c_C);
+    int max_store_vec
+        = (spec->has_vector_size_c && spec->vector_size_c > 1) ? spec->vector_size_c : 8;
+    rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
+    epi.out_dtype = spec->dtype_d;
+    rocke_cshuffle_epilogue_store(
+        b, &epi, accs, num_accs, _tilde_dx_addr_fn, &ctx, dx_rsrc, bounds_m, bounds_n);
 }
 
 // ===========================================================================
@@ -1229,11 +1401,14 @@ static rocke_kernel_def_t*
     rocke_value_t* W = rocke_b_param(b, "W", ab_global, &ro_opts);
 
     bool needs_atomic = rocke_dgrad_conv_spec_needs_atomic(spec);
+    // split_k>1 uses atomic_add (multiple blocks accumulate into same dX elements).
+    // Tilde sub-GEMMs with split_k=1 use direct buffer_store (disjoint writes), so writeonly.
+    bool uses_atomic_store = (spec->split_k > 1);
     rocke_param_opts_t d_opts;
     memset(&d_opts, 0, sizeof(d_opts));
     d_opts.noalias = true;
     d_opts.noalias_set = true;
-    if(!needs_atomic)
+    if(!uses_atomic_store)
     {
         d_opts.writeonly = true;
         d_opts.writeonly_set = true;
@@ -1390,8 +1565,8 @@ static rocke_kernel_def_t*
     rocke_value_t* c_X = rocke_b_const_i32(b, p->X);
     rocke_value_t* c_dg_N = rocke_b_const_i32(b, p->C);
 
-    // K decomposition divisors (runtime)
-    rocke_value_t* ydot_times_xdot = rocke_b_mul(b, rec_y_dot_slice, rec_x_dot_slice);
+    // k_out-innermost: k_sub = ydot*xdot_slice*K + xdot*K + k_out
+    // (c_K is the innermost divisor; ydot_times_xdot no longer needed in descriptors)
     rocke_value_t* hw_tilde = rocke_b_mul(b, rec_h_tilde_slice, rec_w_tilde_slice);
 
     // ---- LDS ----
@@ -1431,17 +1606,40 @@ static rocke_kernel_def_t*
 
     // k_off_capture is managed via the tilde descriptor context structs
 
-    // ---- loaders (sync only, load_vec=1) ----
     int threads = block_size;
+    // load_vec_a: k_out innermost -> consecutive k_sub -> consecutive k_out
+    // -> contiguous in dY (NHWK, last dim K).  Condition: K % load_vec_a == 0.
+    // For split_k > 1 the slice boundary may not be K-aligned; use 1 there.
+    int load_vec_a = 1;
+    if(spec->split_k <= 1)
+    {
+        bool is_fp32_a = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
+        int max_from_K = 1;
+        int kand[] = {is_fp32_a ? 4 : 8, 4, 2, 1};
+        for(int v : kand)
+            if(p->K % v == 0)
+            {
+                max_from_K = v;
+                break;
+            }
+        int safe_vec = max_from_K;
+        rocke_coalesced_tile_loader_choose_vec(block_m, block_k, block_size, max_from_K, &safe_vec);
+        load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : safe_vec;
+    }
+    // load_vec_b: B (KYXC) stride along k_out = Y*X*C != 1 — non-contiguous along K.
+    // Vectorising B requires a transposed loader; keep at 1 for now.
+    int load_vec_b = 1;
+
     rocke_coalesced_tile_loader_t a_sync_loader;
     rocke_coalesced_tile_loader_t b_sync_loader;
-    rocke_coalesced_tile_loader_from_tile(block_m, block_k, threads, 1, true, &a_sync_loader);
-    rocke_coalesced_tile_loader_from_tile(block_n, block_k, threads, 1, true, &b_sync_loader);
+    rocke_coalesced_tile_loader_from_tile(
+        block_m, block_k, threads, load_vec_a, true, &a_sync_loader);
+    rocke_coalesced_tile_loader_from_tile(
+        block_n, block_k, threads, load_vec_b, true, &b_sync_loader);
 
     tilde_dy_ctx_t dy_tctx;
     dy_tctx.block_m_off = block_m_off_v;
     dy_tctx.k_off = NULL;
-    dy_tctx.ydot_times_xdot = ydot_times_xdot;
     dy_tctx.rec_x_dot_slice = rec_x_dot_slice;
     dy_tctx.hw_tilde = hw_tilde;
     dy_tctx.rec_w_tilde_slice = rec_w_tilde_slice;
@@ -1457,7 +1655,6 @@ static rocke_kernel_def_t*
     tilde_w_ctx_t w_tctx;
     w_tctx.block_n_off = block_n_off_v;
     w_tctx.k_off = NULL;
-    w_tctx.ydot_times_xdot = ydot_times_xdot;
     w_tctx.rec_x_dot_slice = rec_x_dot_slice;
     w_tctx.rec_b_y_stride = rec_b_y_stride;
     w_tctx.rec_b_y_offset = rec_b_y_offset;
@@ -1613,7 +1810,8 @@ static rocke_kernel_def_t*
     rocke_value_t* epi_accs[ROCKE_CONV_MAX_ACCS];
     rocke_conv_apply_accumulator_epilogue(b, &spec->acc_epilogue, final_accs, num_final, epi_accs);
 
-    // ---- epilogue dispatch (mirrors Python _build_tilde_dgrad) ----
+    // ---- epilogue dispatch ----
+    bool is_split_k_atomic = (spec->split_k > 1);
     if(!needs_atomic)
     {
         // Single sub-GEMM, split_k=1: direct buffer_store (no atomics needed).
@@ -1633,9 +1831,57 @@ static rocke_kernel_def_t*
         else
             _emit_dgrad_direct_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
     }
+    else if(!is_split_k_atomic && !is_wmma && atom)
+    {
+        // Multiple tilde sub-GEMMs, split_k=1: tilde decomposition guarantees
+        // each sub-GEMM writes to disjoint (n,hi,wi) coordinates — no atomics.
+        bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+        if(use_cshuffle)
+        {
+            _emit_dgrad_tilde_cshuffle_epilogue(b,
+                                                spec,
+                                                atom,
+                                                &grid,
+                                                epi_accs,
+                                                num_final,
+                                                dx_rsrc,
+                                                rec_gemm_m, /* bounds_m (runtime) */
+                                                c_dg_N, /* bounds_n (compile-time C) */
+                                                hw_tilde,
+                                                rec_w_tilde_slice,
+                                                rec_d_h_stride,
+                                                rec_d_h_offset,
+                                                rec_d_w_stride,
+                                                rec_d_w_offset,
+                                                c_Hi,
+                                                c_Wi,
+                                                c_C);
+        }
+        else
+        {
+            _emit_dgrad_tilde_direct_epilogue(b,
+                                              spec,
+                                              atom,
+                                              &grid,
+                                              epi_accs,
+                                              num_final,
+                                              dx_rsrc,
+                                              rec_gemm_m, /* bounds_m (runtime) */
+                                              c_dg_N, /* bounds_n (compile-time C) */
+                                              hw_tilde,
+                                              rec_w_tilde_slice,
+                                              rec_d_h_stride,
+                                              rec_d_h_offset,
+                                              rec_d_w_stride,
+                                              rec_d_w_offset,
+                                              c_Hi,
+                                              c_Wi,
+                                              c_C);
+        }
+    }
     else
     {
-        // Multiple sub-GEMMs or split_k>1: overlapping writes require atomics.
+        // split_k>1 or WMMA tilde: overlapping writes require atomics.
         _emit_dgrad_tilde_atomic_epilogue(b,
                                           spec,
                                           atom,

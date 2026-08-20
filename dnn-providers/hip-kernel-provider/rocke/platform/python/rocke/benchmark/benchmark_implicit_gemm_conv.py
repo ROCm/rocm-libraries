@@ -1954,6 +1954,7 @@ def _run_dgrad_sweep(
     arch: str,
     target,
     compile_kernel,
+    jobs: int = 1,
     ConvDataSpec,
     DgradConvSpec,
     build_implicit_gemm_conv_dgrad,
@@ -2054,27 +2055,12 @@ def _run_dgrad_sweep(
         flush=True,
     )
 
-    rt = Runtime()
-    results: List[Result] = []
-    n_built = 0
+    from rocke.instances.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+    import struct as _struct
+
+    # ---- Phase 1: build + validate all specs, collect kernels ----
+    pending = []  # (spec, resolved_split_k) tuples with their kernels
     n_skipped = 0
-
-    dY_dev = rt.alloc(dY_t.nbytes)
-    W_dev = rt.alloc(W_t.nbytes)
-    dX_dev = rt.alloc(dX_t.nbytes)
-    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
-    rt.memcpy_h2d(W_dev, _u8(W_t), W_t.nbytes)
-    rt.memset(dX_dev, 0, dX_t.nbytes)
-
-    ref_out: torch.Tensor | None = None
-    if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import dgrad_reference
-
-        ref_out = dgrad_reference(_dY_f32, _W_f32, p)
-        print(
-            f"Dgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
-        )
 
     for (
         tile_m,
@@ -2150,19 +2136,47 @@ def _run_dgrad_sweep(
             n_skipped += 1
             continue
 
-        try:
-            artifact = compile_kernel(kernel, arch=arch)
-        except Exception:
-            n_skipped += 1
-            continue
-        n_built += 1
+        pending.append((spec, resolved_split_k, kernel))
 
-        # All dgrad kernels require sub_gemm_buf / num_sub_gemms regardless of
-        # stride, because the kernel ABI always includes those parameters.  For
-        # stride=1 there is exactly one non-empty sub-GEMM so the buffer holds a
-        # single record and the binary-search degenerates trivially.
-        from rocke.instances.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
-        import struct as _struct
+    # ---- Phase 2: compile in parallel ----
+    artifact_map = _compile_kernels_parallel(
+        [k for _, _, k in pending], compile_kernel, arch, jobs
+    )
+    n_built = len(artifact_map)
+    n_skipped += len(pending) - n_built
+
+    print(
+        f"Compiled {n_built}/{len(pending)} dgrad kernels "
+        f"({n_skipped} skipped total).",
+        flush=True,
+    )
+
+    # ---- Phase 3: allocate GPU buffers, verify, benchmark ----
+    rt = Runtime()
+    results: List[Result] = []
+
+    dY_dev = rt.alloc(dY_t.nbytes)
+    W_dev = rt.alloc(W_t.nbytes)
+    dX_dev = rt.alloc(dX_t.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(W_dev, _u8(W_t), W_t.nbytes)
+    rt.memset(dX_dev, 0, dX_t.nbytes)
+
+    ref_out: torch.Tensor | None = None
+    if args.verify or args.dump_fail:
+        from rocke.benchmark.conv_reference import dgrad_reference
+
+        ref_out = dgrad_reference(_dY_f32, _W_f32, p)
+        print(
+            f"Dgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+            flush=True,
+        )
+
+    n_measured = 0
+    for spec, resolved_split_k, kernel in pending:
+        artifact = artifact_map.get(kernel.name)
+        if artifact is None:
+            continue
 
         sub_gemms = spec.compute_sub_gemms()
         buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
@@ -2174,7 +2188,6 @@ def _run_dgrad_sweep(
             len(buf_bytes),
         )
         flat_tiles = sub_gemms[-1].block_end
-        sig = ext_sig
         grid = (flat_tiles, 1, resolved_split_k)
         values = {
             "A": dY_dev,
@@ -2190,7 +2203,7 @@ def _run_dgrad_sweep(
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
             kernel_name=artifact.kernel_name,
-            signature=sig,
+            signature=ext_sig,
         )
         block = (spec.block_size, 1, 1)
         stream = 0
@@ -2232,40 +2245,43 @@ def _run_dgrad_sweep(
             timed_fn = lambda: launcher(values, config=cfg)
 
         ms = time_launches(
-            timed_fn,
-            warmup=args.warmup,
-            iters=args.iters,
-            stream=stream,
+            timed_fn, warmup=args.warmup, iters=args.iters, stream=stream
         )
         synchronize_and_release(stream)
 
         cur_tflops = (flop / ms) * 1e-9
         cur_gbps = (bytes_xfer / ms) * 1e-6
+        n_measured += 1
 
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
-                tile_m=tile_m,
-                tile_n=tile_n,
-                tile_k=tile_k,
-                warp_m=warp_m,
-                warp_n=warp_n,
-                warp_tile_mn=warp_tile_mn,
-                warp_tile_k=warp_tile_k,
-                pipeline=pipeline,
-                epilogue=epilogue,
+                tile_m=spec.tile_m,
+                tile_n=spec.tile_n,
+                tile_k=spec.tile_k,
+                warp_m=spec.warp_m,
+                warp_n=spec.warp_n,
+                warp_tile_mn=spec.warp_tile_m,
+                warp_tile_k=spec.warp_tile_k,
+                pipeline=spec.pipeline,
+                epilogue=spec.epilogue,
                 split_k=resolved_split_k,
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
+                vec_a=vec_a,
+                vec_b=1,
+                vec_c=vec_c,
             )
         )
 
+        _lva = vec_a if resolved_split_k <= 1 else 1
         print(
-            f"[{n_built:4d}] tile={tile_m}x{tile_n}x{tile_k} "
-            f"warp={warp_m}x{warp_n} "
-            f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
-            f"{pipeline}/{epilogue:9s} spk{resolved_split_k:<3d} "
+            f"[{n_measured:4d}] tile={spec.tile_m}x{spec.tile_n}x{spec.tile_k} "
+            f"warp={spec.warp_m}x{spec.warp_n} "
+            f"atom={spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k} "
+            f"{spec.pipeline}/{spec.epilogue:9s} spk{resolved_split_k:<3d} "
+            f"vec={_lva}/1/{vec_c} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -2276,7 +2292,9 @@ def _run_dgrad_sweep(
     rt.free(W_dev)
     rt.free(dX_dev)
 
-    print(f"\nDgrad sweep done: {n_built} built, {n_skipped} skipped.", flush=True)
+    print(
+        f"\nDgrad sweep done: {n_measured} measured, {n_skipped} skipped.", flush=True
+    )
 
     if not results:
         print("No valid dgrad configurations found.", file=sys.stderr)
@@ -2285,18 +2303,20 @@ def _run_dgrad_sweep(
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
 
-    print(f"\n{'='*72}")
+    print(f"\n{'='*80}")
     print(f"Top {top_n} dgrad configurations for {arch} {dtype} {p.short()}")
-    print(f"{'='*72}")
+    print(f"{'='*80}")
     hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
     print(hdr)
-    print("-" * 72)
+    print("-" * 80)
     for rank, r in enumerate(results[:top_n], 1):
+        _lva_r = r.vec_a if r.split_k <= 1 else 1
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
-            f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
+            f"{r.pipeline}/{r.epilogue} spk{r.split_k} "
+            f"vec={_lva_r}/1/{r.vec_c}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 

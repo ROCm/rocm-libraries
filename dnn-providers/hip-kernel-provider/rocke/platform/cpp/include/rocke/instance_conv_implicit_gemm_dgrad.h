@@ -155,7 +155,8 @@ int rocke_dgrad_conv_spec_dg_K_padded(const rocke_dgrad_conv_spec_t* s);
 /* spec.is_strided: true when sH != 1 or sW != 1 or dH != 1 or dW != 1. */
 bool rocke_dgrad_conv_spec_is_strided(const rocke_dgrad_conv_spec_t* s);
 
-/* spec.needs_atomic: true when num_sub_gemms > 1 or split_k > 1. */
+/* spec.needs_atomic: true when split_k > 1 (atomic accumulation across CTAs).
+ * Tilde sub-GEMMs with split_k=1 use direct buffer_store (disjoint writes). */
 bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s);
 
 /* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). */
