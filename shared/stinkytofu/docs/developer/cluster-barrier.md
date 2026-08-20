@@ -60,14 +60,14 @@ of the whole kernel.
 
 ---
 
-## Rule 3 -- Cluster handshake before loop loads
+## Rule 3 -- Loop-body cluster handshake
 
-For each `tensor_load_to_lds` whose segment contains a preceding workgroup
-`s_barrier_signal -1`, the pass emits a cluster handshake:
+Rule 3 applies only to **`tensor_load_to_lds` inside a loop**. For each qualifying
+load whose segment contains a preceding workgroup `s_barrier_signal -1` (the
+**trigger**), the pass emits a full handshake independent of Rules 1 and 2:
 
 - **Rule 3(a)** -- WaveIdx-gated `s_barrier_signal -3` at the signal anchor.
-- **Rule 3(b)** -- bare `s_barrier_wait -3` immediately before the workgroup
-  `s_barrier_signal -1`.
+- **Rule 3(b)** -- bare `s_barrier_wait -3` immediately before the trigger.
 
 Multiple loads sharing the same workgroup signal receive one handshake.
 
@@ -174,8 +174,11 @@ has no `drain loop-carried cluster signal` wait.
   the remaining cycles only (Part A: wait→head; Part B: latch→anchor).
 - When `found.hops > 0`, **loop-carried compensation** runs via
   `emitLoopCarriedCompensation`:
-  - Optional **preheader signal** when the climb crossed the back edge (first
-    trip waits on a token the hoisted signal will not post in time).
+  - Optional **preheader signal** when the climb crossed the back edge.
+    `findPreLoopSignalAnchor` climbs from the loop head and stops at the nearest
+    `s_barrier_wait -1`, kernel `label_*`, or `tensor_load_to_lds` (pass `skipCB*`
+    labels are skipped). Signal-only after a workgroup wait; workgroup barrier +
+    signal after a label or load.
   - **Drain wait** at loop exit: `s_barrier_wait -3` with comment
     `drain loop-carried cluster signal`.
   - **`label_*_skipCBWait`** on paths that leave the loop with no token in
@@ -205,11 +208,9 @@ exit has drain wait + skip path.
 
 ### Tests
 
-- `InsertClusterBarrierPassTest`: cross-loop tests use `SKIP_UNLESS_RULE3_CROSS_LOOP()`;
+- `InsertClusterBarrierPassTest` / `DAGSchedulerPassTest`: cross-loop cases use
+  `IF_RULE3_CROSS_LOOP` (omitted from the binary while `STINKY_KRULE3_CROSS_LOOP` is 0);
   `CrossLoopOffKeepsSignalsInsideTheirSegments` requires false.
-- `DAGSchedulerPassTest`: `ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBranch`
-  requires true; `ClusterBarrierSccRule_CrossLoopOffLeavesSccDefFarFromItsBranch`
-  requires false.
 
 ---
 

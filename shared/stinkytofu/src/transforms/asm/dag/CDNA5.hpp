@@ -497,22 +497,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // case: which queue (NonWmmaKind: kOther or kValu) promotedNode_ must be popped from.
     int promotedKind_ = -1;
 
-    // --- Cluster-barrier SCC protection (see applyClusterBarrierSccRule) ---
-    // The SCC def-use chain currently open (0 = none) and how many of its readers have
-    // still to issue. A chain opens when its def issues and closes on its last reader;
-    // in between, no barrier that InsertClusterBarrierPass would anchor a handshake on
-    // may issue, so the SCC clobber cannot land inside the chain. The chain itself stays
-    // free to schedule on either side of such a barrier -- only splitting it is blocked.
-    // Per region: reset in onInitRegion.
+    // Open SCC chain blocks handshake barriers (see cluster-barrier.md).
     unsigned openSccChain_ = 0;
     unsigned sccReadersLeft_ = 0;
 
-    // A barrier that must wait for the open chain to close.
     bool sccChainBlocks(const DAGNode* node) const {
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
-    // Hold until clock >= earliestClock. No-op when kRule3CrossLoop false (earliestClock unset).
+    // kRule3CrossLoop false: no-op (earliestClock unset).
     bool heldBackForLead(const DAGNode* node) const {
         return clock_ < node->earliestClock;
     }
