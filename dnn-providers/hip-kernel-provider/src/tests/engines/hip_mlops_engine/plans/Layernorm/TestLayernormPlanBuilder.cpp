@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Types.hpp>
 
+#include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -210,7 +211,7 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeFpropReturnsZero)
 
 TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropReturnsZero)
 {
-    SKIP_IF_NO_DEVICES();
+    SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
 
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -222,20 +223,27 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropReturnsZero)
 
 TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropParallelReturnsNonzero)
 {
-    SKIP_IF_NO_DEVICES();
+    SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
 
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({768, 256, 16, 1},
-                                                                            {1024, 3, 16, 16});
+    // The answer is dependent on the number of multiprocessors
+    auto multiProcessorCount = static_cast<int64_t>(
+        hip_kernel_provider_common::getDeviceProperties(_dummyHandle.getStream())
+            .multiProcessorCount);
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        {3072 * multiProcessorCount, 1024 * multiProcessorCount, 32, 1},
+        {4, 3, 32 * multiProcessorCount, 32});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
 
-    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 196608u);
+    // The answer is `sizeof(float) * 2 * innerSize * parallelSize` = `4 * 2 * (32 * 32 * 3 * multiProcessorCount) * 2` = `49152 * multiProcessorCount`
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings),
+              49152u * multiProcessorCount);
 }
 
 TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropWithoutOptionalTensorsReturnsNonzero)
 {
-    SKIP_IF_NO_DEVICES();
+    SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
 
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
         {150528, 50176, 224, 1},

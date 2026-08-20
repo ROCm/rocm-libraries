@@ -3,6 +3,7 @@
 
 #include "../TestPlanCommon.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
+#include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
@@ -155,9 +156,16 @@ TEST(TestLayernormBwdPlan, GetWorkspaceSizeParallelReturnsNonzero)
 {
     SKIP_IF_NO_DEVICES(); // getWorkspaceSize requires a device
 
-    auto [fbb, plan] = createPlanFromGraph({768, 256, 16, 1}, {1024, 3, 16, 16});
     const Handle handle;
-    EXPECT_EQ(plan.getWorkspaceSize(handle), 196608u);
+    // The answer is dependent on the number of multiprocessors
+    auto multiProcessorCount = static_cast<int64_t>(
+        hip_kernel_provider_common::getDeviceProperties(handle.getStream()).multiProcessorCount);
+    auto [fbb, plan]
+        = createPlanFromGraph({3072 * multiProcessorCount, 1024 * multiProcessorCount, 32, 1},
+                              {4, 3, 32 * multiProcessorCount, 32});
+
+    // The answer is `sizeof(float) * 2 * innerSize * parallelSize` = `4 * 2 * (32 * 32 * 3 * multiProcessorCount) * 2` = `49152 * multiProcessorCount`
+    EXPECT_EQ(plan.getWorkspaceSize(handle), 49152u * multiProcessorCount);
 }
 
 TEST(TestLayernormBwdPlan, GetWorkspaceSizeWithoutOptionalTensorsReturnsNonzero)
