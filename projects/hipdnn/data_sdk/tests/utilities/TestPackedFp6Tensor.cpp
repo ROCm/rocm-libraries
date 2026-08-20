@@ -274,14 +274,14 @@ TEST(TestPackedFp6Tensor, FillWithDataLeavesUncoveredBytesAlone)
 // ---------------------------------------------------------------------------
 
 template <typename T>
-class TestPackedFp6TensorMirror : public ::testing::Test
+class PackedFp6TensorMirror : public ::testing::Test
 {
 };
 
 using Fp6Types = ::testing::Types<fp6_e2m3, fp6_e3m2>;
-TYPED_TEST_SUITE(TestPackedFp6TensorMirror, Fp6Types, );
+TYPED_TEST_SUITE(PackedFp6TensorMirror, Fp6Types, );
 
-TYPED_TEST(TestPackedFp6TensorMirror, FillWithRandomValuesMirrorsUnpackedTensor)
+TYPED_TEST(PackedFp6TensorMirror, FillWithRandomValuesMirrorsUnpackedTensor)
 {
     // 24 elements covers every bitIndex residue (0, 6, 4, 2) several times over.
     const std::vector<int64_t> dims = {3, 8};
@@ -306,7 +306,7 @@ TYPED_TEST(TestPackedFp6TensorMirror, FillWithRandomValuesMirrorsUnpackedTensor)
     }
 }
 
-TYPED_TEST(TestPackedFp6TensorMirror, FillWithRandomValuesMirrorsAtIntegrationShape)
+TYPED_TEST(PackedFp6TensorMirror, FillWithRandomValuesMirrorsAtMxOperandShape)
 {
     // A real MX operand shape.
     const std::vector<int64_t> dims = {32, 128};
