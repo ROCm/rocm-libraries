@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""rocke.helpers.tiling.reflection -- structured describe() + text layout visualizer."""
+"""rocke.helpers.tiling.visualization -- structured describe() + text layout visualizer."""
 
 from __future__ import annotations
 

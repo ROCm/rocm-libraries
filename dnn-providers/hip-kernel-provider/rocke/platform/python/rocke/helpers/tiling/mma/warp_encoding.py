@@ -104,6 +104,7 @@ def _ab_strided_k_encoding(
     op_id: str,
     major_iter: int = 1,
     k_iter: int = 1,
+    interleaved: bool = False,
 ) -> WarpDistributionEncoding:
     """A/B operand StridedK encoding (CK ABWarpDstrEncStridedK), dense.
 
@@ -152,9 +153,21 @@ def _ab_strided_k_encoding(
     kinner_level = len(k_levels)
     k_levels.append(k_inner)
 
-    # registers (most significant first): major_iter, k_iter, then within-atom (num_access, k_inner).
-    reg_major = major_reg_major + k_reg_major + [2, 2]
-    reg_minor = major_reg_minor + k_reg_minor + [na_level, kinner_level]
+    # Register order. Default (SOA, subtile-contiguous): atom-iteration axes are the MAJOR
+    # (outer/slowest) registers, so each atom's registers are contiguous. interleaved (AOS):
+    # atom-iteration is the MINOR (inner/fastest) register -- an element's atom copies are adjacent,
+    # which matches a coalesced global load. The two differ only by a register reorder (same lanes,
+    # same elements), so `transform_fragment` moves between them with a compile-time shuffle.
+    iter_major = major_reg_major + k_reg_major
+    iter_minor = major_reg_minor + k_reg_minor
+    within_major = [2, 2]
+    within_minor = [na_level, kinner_level]
+    if interleaved:
+        reg_major = within_major + iter_major
+        reg_minor = within_minor + iter_minor
+    else:
+        reg_major = iter_major + within_major
+        reg_minor = iter_minor + within_minor
     return WarpDistributionEncoding(
         replication_lengths=(repeat,),
         hierarchical_lengths=(tuple(major_levels), tuple(k_levels)),
@@ -164,10 +177,25 @@ def _ab_strided_k_encoding(
         register_to_rh_minor=tuple(reg_minor),
     )
 
+def _raise_interleaved_broken(where: str) -> None:
+    raise RuntimeError(
+        f"{where}(interleaved=True) is BROKEN and must not be used: it only reorders registers while "
+        "keeping CANONICAL lane ownership, so it is NOT a real interleaved layout (no rectangular "
+        "per-lane patch, no coalescing gain). Build interleaved layouts as custom static tile "
+        "distributions with make_tile_desc (see kernels/tiling_gemm_interleaved_demo.py::"
+        "_wave_descs_interleaved)."
+    )
+
+
 def a_warp_encoding(
-    traits: MmaTraits, m_iter: int = 1, k_iter: int = 1
+    traits: MmaTraits, m_iter: int = 1, k_iter: int = 1, interleaved: bool = False
 ) -> WarpDistributionEncoding:
-    """A operand encoding (dense StridedK). Major dim = M; repeat = a_repeat."""
+    """A operand encoding (dense StridedK). Major dim = M; repeat = a_repeat.
+
+    ``interleaved=True`` is BROKEN and raises -- real interleaved layouts are custom static tile
+    distributions (``make_tile_desc``), not this register reorder."""
+    if interleaved:
+        _raise_interleaved_broken("a_warp_encoding")
     return _ab_strided_k_encoding(
         major_dim_size=traits.m,
         repeat=traits.a_repeat,
@@ -177,12 +205,18 @@ def a_warp_encoding(
         op_id=traits.op_id,
         major_iter=m_iter,
         k_iter=k_iter,
+        interleaved=interleaved,
     )
 
 def b_warp_encoding(
-    traits: MmaTraits, n_iter: int = 1, k_iter: int = 1
+    traits: MmaTraits, n_iter: int = 1, k_iter: int = 1, interleaved: bool = False
 ) -> WarpDistributionEncoding:
-    """B operand encoding (dense StridedK). Major dim = N; repeat = b_repeat."""
+    """B operand encoding (dense StridedK). Major dim = N; repeat = b_repeat.
+
+    ``interleaved=True`` is BROKEN and raises -- real interleaved layouts are custom static tile
+    distributions (``make_tile_desc``), not this register reorder."""
+    if interleaved:
+        _raise_interleaved_broken("b_warp_encoding")
     return _ab_strided_k_encoding(
         major_dim_size=traits.n,
         repeat=traits.b_repeat,
@@ -192,4 +226,5 @@ def b_warp_encoding(
         op_id=traits.op_id,
         major_iter=n_iter,
         k_iter=k_iter,
+        interleaved=interleaved,
     )

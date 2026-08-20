@@ -56,13 +56,14 @@ from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc, fragment_length, make_fragment
 from .layouts import make_tile_desc
 from .mma import TileMma, Tiling
-from .reflection import describe, render_forward_map, render_inverse_map
+from .visualization import describe, render_forward_map, render_inverse_map
 from .traits import (
     DEFAULT_TRAITS_PATH,
     MmaTraits,
     MmaTraitsCatalog,
     load_mma_traits,
 )
+from .transforms import transform_fragment
 
 __all__ = [
     # MMA operation
@@ -91,6 +92,7 @@ __all__ = [
     "load_fragment",
     "store_fragment",
     "fill_fragment",
+    "transform_fragment",
     "emit_tensor_coordinates",
     # Reflection
     "describe",

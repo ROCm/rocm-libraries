@@ -4,7 +4,14 @@ reference_docs/
 # Design docs kept out of the tracked repo until scrubbed for external publication.
 docs/tiling_design_plan.md
 docs/tiling_review_report.md
+docs/tiling_interleaving_design.md
+docs/tiling_interleaving_speed_run.md
 docs/README_tests.md
+
+# Throwaway scratch dirs (ad-hoc viz PNGs, rocprof probes, imported reference material). Never commit.
+# Compliance: keeps any artifact dropped here -- including export-controlled reference docs -- out of
+# the tracked tree. Applies to every `tmp/` under the tiling package.
+tmp/
 
 # Python / test caches.
 __pycache__/
