@@ -271,6 +271,53 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceAr
     }
 }
 
+// D10's guard also gates getMaxWorkspaceSize, which reaches contextFor before either
+// catalog lookup.
+TEST(TestIngestorGenericPlanBuilder,
+     GetMaxWorkspaceSizeThrowsInternalErrorWhenTheDeviceArchIsUnresolved)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const UnresolvedArchDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x99));
+
+    try
+    {
+        builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{});
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
+}
+
+// D10's guard also gates getCustomKnobs, which reaches contextFor before
+// sortedDefinitions.
+TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsThrowsInternalErrorWhenTheDeviceArchIsUnresolved)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const UnresolvedArchDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x9D));
+
+    try
+    {
+        builder.getCustomKnobs(0, graph);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
+}
+
 TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenAMatcherThrows)
 {
     const ScopedSymbols symbols(
@@ -1025,6 +1072,49 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
         << "the measured winner must beat the heuristic front";
 }
 
+/// D16's scope note: Check 1 governs every `sortedCatalog` consumer, including
+/// `getCustomKnobs`, whose `choices.front()` becomes the knob's advertised default.
+/// Same rig as `TestWinnerCache.cpp`'s `ACoveringRecordOrdersTheCatalogWithoutTheHeuristic`:
+/// record the heuristic's order reversed, covering the WHOLE catalog, and assert the
+/// advertised default is the measured front, not the heuristic's own front (kernel_64,
+/// via ScopedConstantScore's tie plus priority).
+TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultUnderACoveringRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xDA));
+    const auto properties = testDeviceProperties();
+
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+        << "this test needs the heuristic front to differ from the record's";
+
+    WinnerRecord record;
+    double time = 1.0;
+    for(auto kernel = catalog.rbegin(); kernel != catalog.rend(); ++kernel)
+    {
+        record.push_back(rankedEntryFor(*kernel, time));
+        time += 1.0;
+    }
+    manager->recordWinner(winnerKeyFor(graph, properties), record);
+
+    const auto knobs = builder.getCustomKnobs(0, graph);
+
+    ASSERT_EQ(knobs.size(), 1U);
+    const auto& knob = knobs.front();
+    EXPECT_EQ(knob.knob_id, BLOCK_SIZE);
+    ASSERT_TRUE(knob.default_value.AsIntValue() != nullptr);
+    EXPECT_EQ(knob.default_value.AsIntValue()->value, 256)
+        << "the advertised default must be the measured front (kernel_256, the record's "
+           "first entry), not the heuristic front (kernel_64)";
+}
+
 /// D7's mirror, half one: benchmark wide, then run narrow. The record is wider than the
 /// catalog -- it carries an extra entry for a kernel this engine does not admit -- while
 /// still covering all three live candidates, so it must be served (kernel_256), not the
@@ -1566,6 +1656,69 @@ TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuild
     EXPECT_EQ(stored->front().kernelId, testId(0x72))
         << "the fastest sampled candidate must rank first, not the heuristic front";
     EXPECT_EQ(stored->back().kernelId, testId(0x70)) << "and the slowest must rank last";
+}
+
+/// D7's narrow-then-wide half, the write-back side: `ANarrowRecordDoesNotCoverAWiderRunAndTriggersReBenchmarking`
+/// proves the wide run re-benchmarks (workspace sizes for the max), but never inspects
+/// the record afterward. D7 says the wide run must not just re-benchmark -- it must
+/// WRITE THE SUPERSET RANKING back, so the next run is fully covered. Driving that needs
+/// the deterministic seam: a device-less runner scores every real candidate unusable, so
+/// write-back never fires without it.
+TEST(TestIngestorGenericPlanBuilder,
+     ANarrowRecordThatTriggersReBenchmarkingWritesBackASupersetRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const StreamWorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const StreamDeviceResolver resolver;
+    const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xD9));
+    const auto properties = testDeviceProperties();
+    const StreamCapableHandle handle;
+
+    // A prior narrow run measured ONLY kernel_128, exactly as the sibling narrow test.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    WinnerRecord narrow;
+    for(const auto& kernel : catalog)
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        {
+            narrow.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    ASSERT_EQ(narrow.size(), 1U);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+
+    // Now a WIDE run, unfiltered, with benchmarking on, through the deterministic seam
+    // so sampling produces real usable candidates and write-back actually fires.
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    StreamSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    StreamContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    const auto stored = manager->winnerFor(winnerKeyFor(graph, properties));
+    ASSERT_TRUE(stored.has_value())
+        << "the wide re-benchmark must write its ranking back, not merely discard it";
+    EXPECT_TRUE(recordCovers(*stored, catalog))
+        << "the post-run record must cover every kernel in the wide filtered set, not "
+           "just kernel_128 the narrow record held";
+    EXPECT_EQ(stored->size(), 3U)
+        << "the superset write-back must carry all three benchmarked candidates";
 }
 
 } // namespace

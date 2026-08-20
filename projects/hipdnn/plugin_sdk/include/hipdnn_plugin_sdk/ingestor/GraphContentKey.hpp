@@ -32,6 +32,11 @@ namespace hipdnn_plugin_sdk::ingestor
 /// Exclusion lives on the field in `graph.fbs` as `(cache_ignore)`; nothing here
 /// re-states the list.
 ///
+/// Tensors and nodes are compared in vector order, which `IGraph`'s topological-order
+/// precondition already fixes: the frontend's sort is deterministic, so the same graph
+/// built the same way keys the same. Two different construction orders of one logical
+/// DAG miss rather than mismatch.
+///
 /// One contiguous copy of the serialized graph per key, since a cached record outlives
 /// the caller's buffer.
 class GraphContentKey

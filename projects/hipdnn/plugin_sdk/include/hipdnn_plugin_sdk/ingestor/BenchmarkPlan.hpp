@@ -97,7 +97,9 @@ public:
     /// against on a later run.
     ///
     /// The two staleness ids default and sit after `plan`, so a caller that does not
-    /// cache constructs a Candidate exactly as before.
+    /// cache constructs a Candidate exactly as before. A default-constructed packId
+    /// matches no id any in-tree pack declares, but descriptor loading does not reject a
+    /// nil UUID, so that is a convention rather than an enforced invariant.
     struct Candidate
     {
         DescriptorId kernelId;
