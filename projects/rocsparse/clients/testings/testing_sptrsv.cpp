@@ -492,6 +492,25 @@ namespace rocsparse_clients
                                        p_error);
         }
 
+        // Select the diagonal solve mode (rocsparse_diagonal_mode as an int, so the
+        // helper compiles when ROCSPARSE_WITH_DIAGONAL_SOLVE is off). It is togglable,
+        // so it can be set after the analysis stage.
+        void set_diagonal_mode(int32_t diagonal_mode)
+        {
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            rocsparse_error               p_error[1] = {nullptr};
+            const rocsparse_diagonal_mode dm = static_cast<rocsparse_diagonal_mode>(diagonal_mode);
+            rocsparse_sptrsv_set_input(this->m_handle,
+                                       this->m_descr,
+                                       rocsparse_sptrsv_input_diagonal_mode,
+                                       &dm,
+                                       sizeof(dm),
+                                       p_error);
+#else
+            (void)diagonal_mode;
+#endif
+        }
+
         sptrsv_descr(rocsparse_handle                handle,
                      int64_t                         batch_count,
                      const rocsparse_operation       operation,
@@ -541,6 +560,7 @@ namespace rocsparse_clients
                      rocsparse_clients::dnvec_descr<T>&       y,
                      const rocsparse_diag_type                diag,
                      const rocsparse_fill_mode                uplo,
+                     int32_t                                  diagonal_mode,
                      int64_t*                                 symbolic,
                      int64_t*                                 exact)
     {
@@ -582,21 +602,45 @@ namespace rocsparse_clients
                 const T* p    = host.val.data() + i * A.get_stride();
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
-                cpu_csrsv<I, J, T>(operation,
-                                   host.m,
-                                   host.nnz,
-                                   *halpha,
-                                   host.ptr,
-                                   host.ind,
-                                   p,
-                                   p_hx,
-                                   (int64_t)1,
-                                   p_hy,
-                                   diag,
-                                   uplo,
-                                   host.base,
-                                   symbolic + i,
-                                   exact + i);
+                if(diagonal_mode != 0)
+                {
+                    J sp = -1, np = -1;
+                    host_diagonal_solve<I, J, T>(operation,
+                                                 host.m,
+                                                 1,
+                                                 *halpha,
+                                                 host.ptr,
+                                                 host.ind,
+                                                 p,
+                                                 p_hx,
+                                                 p_hy,
+                                                 host.m,
+                                                 rocsparse_order_column,
+                                                 host.base,
+                                                 diagonal_mode,
+                                                 &sp,
+                                                 &np);
+                    symbolic[i] = sp;
+                    exact[i]    = np;
+                }
+                else
+                {
+                    cpu_csrsv<I, J, T>(operation,
+                                       host.m,
+                                       host.nnz,
+                                       *halpha,
+                                       host.ptr,
+                                       host.ind,
+                                       p,
+                                       p_hx,
+                                       (int64_t)1,
+                                       p_hy,
+                                       diag,
+                                       uplo,
+                                       host.base,
+                                       symbolic + i,
+                                       exact + i);
+                }
             }
 
             break;
@@ -618,26 +662,50 @@ namespace rocsparse_clients
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
 
-                J analysis_pivot = -1;
-                J solve_pivot    = -1;
-                host_cscsv<I, J, T>(operation,
-                                    host.m,
-                                    host.nnz,
-                                    *halpha,
-                                    host.ptr,
-                                    host.ind,
-                                    p,
-                                    p_hx,
-                                    (int64_t)1,
-                                    p_hy,
-                                    diag,
-                                    uplo,
-                                    host.base,
-                                    &analysis_pivot,
-                                    &solve_pivot);
+                if(diagonal_mode != 0)
+                {
+                    J sp = -1, np = -1;
+                    host_diagonal_solve<I, J, T>(operation,
+                                                 host.m,
+                                                 1,
+                                                 *halpha,
+                                                 host.ptr,
+                                                 host.ind,
+                                                 p,
+                                                 p_hx,
+                                                 p_hy,
+                                                 host.m,
+                                                 rocsparse_order_column,
+                                                 host.base,
+                                                 diagonal_mode,
+                                                 &sp,
+                                                 &np);
+                    symbolic[i] = sp;
+                    exact[i]    = np;
+                }
+                else
+                {
+                    J analysis_pivot = -1;
+                    J solve_pivot    = -1;
+                    host_cscsv<I, J, T>(operation,
+                                        host.m,
+                                        host.nnz,
+                                        *halpha,
+                                        host.ptr,
+                                        host.ind,
+                                        p,
+                                        p_hx,
+                                        (int64_t)1,
+                                        p_hy,
+                                        diag,
+                                        uplo,
+                                        host.base,
+                                        &analysis_pivot,
+                                        &solve_pivot);
 
-                symbolic[i] = analysis_pivot;
-                exact[i]    = solve_pivot;
+                    symbolic[i] = analysis_pivot;
+                    exact[i]    = solve_pivot;
+                }
             }
 #endif
             break;
@@ -675,6 +743,13 @@ void testing_sptrsv(const Arguments& arg)
     // CSC triangular solve support can be disabled at build time
     // (BUILD_WITH_CSC_TRSV=OFF); skip the CSC cases in that configuration.
     if(arg.formatA == rocsparse_format_csc)
+    {
+        return;
+    }
+#endif
+
+#ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
+    if(arg.diagonal_mode != 0)
     {
         return;
     }
@@ -722,6 +797,8 @@ void testing_sptrsv(const Arguments& arg)
     rocsparse_clients::sptrsv_descr sptrsv_descr(
         handle, batch_count, operation, alg, ttype, ttype, apol);
 
+    sptrsv_descr.set_diagonal_mode(arg.diagonal_mode);
+
     rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, p_error);
 
     host_dense_vector<int64_t> host_symbolic_position(batch_count);
@@ -761,6 +838,7 @@ void testing_sptrsv(const Arguments& arg)
                                                 y,
                                                 diag,
                                                 uplo,
+                                                arg.diagonal_mode,
                                                 cpu_symbolic_position,
                                                 cpu_numeric_position);
 
