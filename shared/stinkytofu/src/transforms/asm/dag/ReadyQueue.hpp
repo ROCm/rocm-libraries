@@ -90,20 +90,12 @@ struct DAGNode {
     // gate short of real cycles to cover the gap with, falling back to a simulated
     // wait that has no matching instruction.
     int hazardDeadline = INT_MAX;
-    // --- Cluster-barrier SCC protection (ClusterBarrier kernels only) ---
-    // Filled by applyClusterBarrierSccRule. A workgroup barrier, which is somewhere
-    // InsertClusterBarrierPass may anchor an SCC-clobbering handshake, so it must not
-    // issue while an SCC def-use chain is open (see CDNA5ReadyQueue::openSccChain_).
+    // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
     bool handshakeBarrier = false;
-    // Non-zero when this node belongs to a chain the ready queue keeps whole. Issuing
-    // the def opens the chain and the chain closes once all of its readers have issued;
-    // between those two points no workgroup barrier may be picked, which is what stops
-    // the handshake from landing inside the chain's live range. The chain stays free to
-    // schedule on either side of the barrier -- only splitting it is forbidden.
     unsigned sccChainId = 0;
-    unsigned sccChainReaders = 0;  // def node only: how many readers close the chain
+    unsigned sccChainReaders = 0;  // def node only
     bool sccChainDef = false;
-    // Earliest issue cycle. kRule3CrossLoop false: INT_MIN (no hold). true: live-out SCC def.
+    // kRule3CrossLoop false: INT_MIN. true: live-out SCC def lead floor.
     int earliestClock = INT_MIN;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}

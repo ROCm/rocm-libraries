@@ -37,12 +37,6 @@
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 
-#define SKIP_UNLESS_RULE3_CROSS_LOOP()                                                   \
-    do {                                                                                 \
-        if (!cluster_barrier::kRule3CrossLoop)                                         \
-            GTEST_SKIP() << "requires cluster_barrier::kRule3CrossLoop == true";         \
-    } while (0)
-
 static int countStinkyInstructions(const BasicBlock& bb) {
     int count = 0;
     for (const IRBase& ir : bb) {
@@ -1566,8 +1560,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinsLiveOutSccDefBelowLastBar
 // kLiveOutSccDefLeadCycles.
 constexpr int kSccDefLeadCycles = 50;
 
-TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBranch) {
-    SKIP_UNLESS_RULE3_CROSS_LOOP();
+IF_RULE3_CROSS_LOOP(TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBranch) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
 
@@ -1606,7 +1599,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBran
     EXPECT_LE(lead, kSccDefLeadCycles)
         << "the compare must also wait for the branch to come within " << kSccDefLeadCycles
         << " cycles instead of issuing the moment the barrier frees it:" << scheduleOrder(*body);
-}
+})
 
 // With cluster barrier on and kRule3CrossLoop false, only the barrier pin applies.
 TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_CrossLoopOffLeavesSccDefFarFromItsBranch) {
