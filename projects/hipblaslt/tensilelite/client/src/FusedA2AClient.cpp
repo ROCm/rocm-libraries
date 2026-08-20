@@ -204,10 +204,9 @@ namespace TensileLite
             // One u32 flag slot per source rank. Must stay in step with
             // emitComputeFlagAddr's *4 stride and the DRAIN poll's j*4.
             const size_t flagBytes = (size_t)W * sizeof(uint32_t);
-            // counter[dst_rank][token-tile], then counter2[dst_rank] at word index
-            // W*tokenTiles, then counter3 at W*tokenTiles + W, then the SDMA cursor
-            // pairs, then a guard tail (FusedA2ACounterSentinel.hpp). Only
-            // counterBytes is memset per launch.
+            // SDMA cursor pairs, counter2[dst_rank], counter3, then
+            // counter[dst_rank][token-tile], then a guard tail
+            // (FusedA2ACounterSentinel.hpp). Only counterBytes is memset per launch.
             const size_t counterBytes      = fusedA2ACounterPayloadBytes((uint32_t)W, tokenTiles);
             const size_t counterAllocBytes = fusedA2ACounterAllocBytes((uint32_t)W, tokenTiles);
             const size_t aBytes            = problem->a().totalAllocatedBytes();

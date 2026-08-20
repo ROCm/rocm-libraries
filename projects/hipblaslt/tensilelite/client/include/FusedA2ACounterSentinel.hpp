@@ -4,17 +4,24 @@
 #pragma once
 
 // Guard tail for the fused GEMM.A2A counter allocation. Four regions share
-// the allocation: W*tokenTiles first-level counter[dst_rank*tokenTiles+j],
-// a W-entry counter2[dst_rank], a single counter3, and the SDMA cursor pairs
-// (see FusedA2AClient.cpp counterBytes). The guard tail sits past the cursors
-// and catches only an overrun past the top region, by absorbing the write
-// inside the allocation instead of letting it reach whatever hipMalloc handed
-// back next. An off-by-one in a lower region lands on a live slot above it
-// instead -- at the top of counter2's range, that slot is counter3, so the
-// failure there is a mis-elected DRAIN owner rather than a loud error.
+// the allocation, in this order:
+//
+//   +0    cursors   MAX_RANKS * 2 * u64   SDMA cursor pair per queue
+//   +128  counter2  MAX_RANKS * u32       counter2[dst_rank]
+//   +160  counter3  1 * u32
+//   +164  counter1  W * tokenTiles * u32  counter1[dst_rank*tokenTiles + j]
+//   ...   guard tail
+//
+// The three leading regions are sized by FUSED_A2A_MAX_RANKS rather than the
+// runtime world size. The guard tail catches an overrun of counter1 -- the one
+// region whose index is computed at runtime -- by absorbing the write inside
+// the allocation instead of letting it reach whatever hipMalloc handed back
+// next.
 
 #include <cstddef>
 #include <cstdint>
+
+#include "FusedA2AKernArg.hpp" // FUSED_A2A_MAX_RANKS
 
 namespace TensileLite
 {
@@ -26,18 +33,17 @@ namespace TensileLite
         constexpr size_t FUSED_A2A_COUNTER_SENTINEL_WORDS
             = FUSED_A2A_COUNTER_SENTINEL_BYTES / sizeof(uint32_t);
 
-        // 8-aligned: the counts above are an odd or even number of words
-        // depending on W and tokenTiles, and s_atomic_umax_x2 needs its operand
-        // 2-register aligned.
-        constexpr size_t fusedA2ACounterCursorOffset(uint32_t worldSize, uint32_t tokenTiles)
-        {
-            return (((size_t)worldSize * tokenTiles + worldSize + 1) * sizeof(uint32_t) + 7)
-                   & ~(size_t)7;
-        }
-
         // [0] reservation, [1] commit. Interleaved per queue so the kernel
         // reaches both from one base and never needs W.
         constexpr size_t FUSED_A2A_CURSORS_PER_QUEUE = 2;
+
+        // Twinned with FUSED_A2A_COUNTER*_OFFSET in Tensile/Components/Signature.py.
+        constexpr size_t FUSED_A2A_COUNTER2_OFFSET
+            = (size_t)FUSED_A2A_MAX_RANKS * FUSED_A2A_CURSORS_PER_QUEUE * sizeof(uint64_t);
+        constexpr size_t FUSED_A2A_COUNTER3_OFFSET
+            = FUSED_A2A_COUNTER2_OFFSET + (size_t)FUSED_A2A_MAX_RANKS * sizeof(uint32_t);
+        constexpr size_t FUSED_A2A_COUNTER1_OFFSET
+            = FUSED_A2A_COUNTER3_OFFSET + sizeof(uint32_t);
 
         // Live counter bytes. size_t (not uint32) so a large W*tokenTiles cannot
         // wrap and under-allocate. The cursors are inside the per-launch memset
@@ -45,8 +51,8 @@ namespace TensileLite
         // before reserving.
         constexpr size_t fusedA2ACounterPayloadBytes(uint32_t worldSize, uint32_t tokenTiles)
         {
-            return fusedA2ACounterCursorOffset(worldSize, tokenTiles)
-                   + (size_t)worldSize * FUSED_A2A_CURSORS_PER_QUEUE * sizeof(uint64_t);
+            return FUSED_A2A_COUNTER1_OFFSET
+                   + (size_t)worldSize * tokenTiles * sizeof(uint32_t);
         }
 
         // What to hipMalloc: payload plus the guard tail. The per-launch memset

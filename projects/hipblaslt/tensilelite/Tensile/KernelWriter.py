@@ -9520,12 +9520,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # latched in graWorkGroup because NumWorkGroups0/1 can be borrowed as temps later.
     if kernel["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
-      # &counter3, resolved once in the prologue. The tally that consumes it is the
-      # only block every surviving work-group executes, so deriving the address there
-      # cost an exposed SMEM round trip 1152 times per launch at the champion shape.
+      # Counter-block base, loaded once in the prologue. Every region is reached
+      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
-      self.defineSgpr("FusedCounter3Ptr", 2, 2)
+      self.defineSgpr("FusedCounterPtr", 2, 2)
       # n_shard = FusedAM / FusedW, divided once in the prologue (W is not a
       # power of two, so this is a real u32 divide, not a shift).
       self.defineSgpr("FusedNShard", 1)

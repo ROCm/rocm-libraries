@@ -37,8 +37,8 @@ OFF_doorbell = 8 * FUSED_A2A_PEER_FIELDS.index("doorbell")
 assert OFF_doorbell == OFF_wptr + 8, "submitPacket's x4 load needs wptr then doorbell"
 assert OFF_recvPtr == OFF_flagPtr + 8, "the SDMA loader's x4 needs flagPtr then recvPtr"
 
-# Cursor pair, in this device's counter buffer; the caller passes the base of
-# its queue's pair (fusedA2ACounterCursorOffset in FusedA2ACounterSentinel.hpp).
+# Cursor pair, at the front of this device's counter buffer; the caller passes
+# the block base and its queue's byte offset (FusedA2ACounterSentinel.hpp).
 CUR_cachedWptr    = 0  # producer reservation cursor (CAS target)
 CUR_committedWptr = 8  # commit-serialization cursor
 CURSOR_PAIR_BYTES = 16
@@ -49,8 +49,10 @@ class SdmaRingEmitter:
     Persistent per-producer state lives in caller-owned SGPRs:
       * peerGroup (1 SGPR): this peer's group offset, rank*PEER_GROUP_BYTES,
         used as the SOFFSET of every peer-group load.
-      * cursorBase (2 SGPRs): this peer's cursor pair. 2-ALIGNED, and the pair
-        must be 8-byte aligned in memory for the 64-bit atomics.
+      * cursorBase (2 SGPRs) + cursorOff (1 SGPR): the counter-block base and
+        this peer's byte offset into the leading cursor region, passed as SBASE
+        and SOFFSET. cursorBase is 2-ALIGNED, and the pair it addresses is
+        8-byte aligned in memory for the 64-bit atomics.
       * cachedHwReadIdx (2 SGPRs): the private room-check cache. The caller
         seeds it ONCE at setup with emitRefreshCache(); this emitter refreshes
         it in-register and NEVER stores it back to memory.
@@ -117,7 +119,7 @@ class SdmaRingEmitter:
 
     # ---- cursor lazy-init --------------------------------------------------
 
-    def emitLazyInitCursors(self, module, w, peerGroupS, cursorBaseS):
+    def emitLazyInitCursors(self, module, w, peerGroupS, cursorBaseS, cursorOffS):
         """Raise both cursors to at least the hardware write pointer.
 
         MUST be emitted before the reserve loop: once a producer has reserved
@@ -138,10 +140,12 @@ class SdmaRingEmitter:
         module.add(SWaitCnt(kmcnt=0, comment="wait hwWptr load"))
         # Non-returning, so hwWptrS survives the first and feeds the second.
         module.add(SAtomicUmaxX2(dst=sgpr(hwWptrS, 2), base=sgpr(cursorBaseS, 2),
-                                 soffset=hex(CUR_cachedWptr),
+                                 soffset=sgpr(cursorOffS),
+                                 smem=SMEMModifiers(offset=CUR_cachedWptr),
                                  comment="cachedWptr = max(cachedWptr, hwWptr)"))
         module.add(SAtomicUmaxX2(dst=sgpr(hwWptrS, 2), base=sgpr(cursorBaseS, 2),
-                                 soffset=hex(CUR_committedWptr),
+                                 soffset=sgpr(cursorOffS),
+                                 smem=SMEMModifiers(offset=CUR_committedWptr),
                                  comment="committedWptr = max(committedWptr, hwWptr)"))
         module.add(SWaitCnt(kmcnt=0, comment="cursors raised before anyone reserves"))
         w.sgprPool.checkIn(hwWptrS)
@@ -149,8 +153,8 @@ class SdmaRingEmitter:
 
     # ---- ReserveQueueSpace (CAS, NOT fetch_add) ----------------------------
 
-    def emitReserveQueueSpace(self, module, w, peerGroupS, cursorBaseS, cachedHwReadIdxS,
-                              sizeInBytes, outCurS, outOffsetS):
+    def emitReserveQueueSpace(self, module, w, peerGroupS, cursorBaseS, cursorOffS,
+                              cachedHwReadIdxS, sizeInBytes, outCurS, outOffsetS):
         """Reserve `sizeInBytes` in the ring via a compare-exchange loop and
         compute the wrap-padding. outCurS (2 SGPRs) = reserved base index,
         outOffsetS (1 SGPR) = pad bytes, sizeInBytes a compile-time immediate.
@@ -184,7 +188,8 @@ class SdmaRingEmitter:
         # Seed the compare slot with the current value (see the docstring on why
         # a possibly-stale seed is safe here).
         module.add(SLoadB64(dst=sgpr(casDataS + 2, 2), base=sgpr(cursorBaseS, 2),
-                            soffset=hex(CUR_cachedWptr), smem=SMEMModifiers(glc=True),
+                            soffset=sgpr(cursorOffS),
+                            smem=SMEMModifiers(glc=True, offset=CUR_cachedWptr),
                             comment="seed cur = cachedWptr (hint; the CAS self-corrects)"))
         module.add(SWaitCnt(kmcnt=0, comment="wait cachedWptr seed"))
 
@@ -241,8 +246,8 @@ class SdmaRingEmitter:
         # instruction's own source registers, which that section explicitly
         # permits for an atomic returning its pre-op value.
         module.add(SAtomicCmpswapX2(
-            dst=sgpr(casDataS, 4), base=sgpr(cursorBaseS, 2), soffset=hex(CUR_cachedWptr),
-            smem=SMEMModifiers(glc=True),
+            dst=sgpr(casDataS, 4), base=sgpr(cursorBaseS, 2), soffset=sgpr(cursorOffS),
+            smem=SMEMModifiers(glc=True, offset=CUR_cachedWptr),
             comment="CAS cachedWptr cur->new (glc = return pre-op)"))
         module.add(SWaitCnt(kmcnt=0, comment="wait CAS return"))
         # The pre-op memory value comes back in casDataS[0:1]; we won iff it == cur.
@@ -394,7 +399,7 @@ class SdmaRingEmitter:
 
     # ---- submitPacket ------------------------------------------------------
 
-    def emitSubmitPacket(self, module, w, peerGroupS, cursorBaseS, baseS, pendingWptrS):
+    def emitSubmitPacket(self, module, w, peerGroupS, cursorBaseS, cursorOffS, baseS, pendingWptrS):
         """Serialize this producer's commit behind earlier reservations, then
         publish the packet.
 
@@ -440,7 +445,8 @@ class SdmaRingEmitter:
         module.add(SSleep(simm16=1, comment="submitPacket: backoff between polls (must stay INSIDE the spin body)"))
         # glc, so this is a poll and not one value read many times.
         module.add(SLoadB64(dst=sgpr(pollS, 2), base=sgpr(cursorBaseS, 2),
-                            soffset=hex(CUR_committedWptr), smem=SMEMModifiers(glc=True),
+                            soffset=sgpr(cursorOffS),
+                            smem=SMEMModifiers(glc=True, offset=CUR_committedWptr),
                             comment="poll committedWptr"))
         module.add(SWaitCnt(kmcnt=0, comment="wait committedWptr load"))
         module.add(SCmpEQU64(src0=sgpr(pollS, 2), src1=sgpr(baseS, 2),
@@ -471,8 +477,8 @@ class SdmaRingEmitter:
         # --- (2c) store committedWptr = pending -> unblocks next producer ---
         module.add(SStoreB64(
             src=sgpr(pendingWptrS, 2), base=sgpr(cursorBaseS, 2),
-            soffset=hex(CUR_committedWptr),
-            smem=SMEMModifiers(glc=True, isStore=True),
+            soffset=sgpr(cursorOffS),
+            smem=SMEMModifiers(glc=True, isStore=True, offset=CUR_committedWptr),
             comment="store committedWptr = pending"))
         module.add(SWaitCnt(kmcnt=0, comment="wait committedWptr store issued"))
 

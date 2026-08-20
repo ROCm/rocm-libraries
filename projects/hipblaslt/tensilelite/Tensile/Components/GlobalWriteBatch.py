@@ -128,45 +128,22 @@ def emitFusedA2ANShardLatch(module, kw, sgprName):
   kw.sgprPool.checkIn(wSgpr)
   kw.sgprPool.checkIn(amSgpr)
 
-def emitFusedA2ACounter3PtrLatch(module, kw, sgprName, tokenTilesName):
-  """Resolve &counter3 and latch ceil(N/MT1) in the PROLOGUE instead of once per
-  work-group at the tally.
-
-  counter_ptr and FusedW are kernel-invariant, so the address is
-  derived once before the main loop, where the SMEM latency disappears under the
-  GEMM.  The tally then needs a single register pair.
-
-  tokenTiles rides along because the handshake's counter index needs the same
-  value; latching it here keeps the two from drifting.
+def emitFusedA2ACounterPtrLatch(module, kw, sgprName, tokenTilesName):
+  """Latch the counter-block base and ceil(N/MT1) in the PROLOGUE instead of
+  once per work-group at the tally.
   """
   from .Signature import fusedA2AKernArgLayout
   layout    = fusedA2AKernArgLayout()
   fusedBase = kw.states.fusedA2AKernArgBase
   mt1       = kw.states.kernel["MacroTile1"]
   log2mt1   = int(log2(mt1))
-  wSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_latchW", preventOverflow=False)
-  ttSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_latchTT", preventOverflow=False)
   module.add(kw.argLoader.loadKernArg(sgprName, "KernArgAddress",
     sgprOffset=hex(fusedBase + layout["counter_ptr"]), dword=2))
-  module.add(kw.argLoader.loadKernArg(wSgpr, "KernArgAddress",
-    sgprOffset=hex(fusedBase + layout["FusedW"]), dword=1))
   module.add(SAddU32(dst=sgpr(tokenTilesName), src0=sgpr("SizesFree+1"), src1=mt1 - 1,
                      comment=f"tokenTiles = ceil(N / MT1={mt1}): N + MT1-1"))
   module.add(SLShiftRightB32(dst=sgpr(tokenTilesName), shiftHex=log2mt1, src=sgpr(tokenTilesName),
                              comment=f">> log2(MT1={mt1})"))
-  module.add(SWaitCnt(kmcnt=0, comment="wait counter_ptr/FusedW for the counter3 latch"))
-  module.add(SMulI32(dst=sgpr(ttSgpr), src0=sgpr(wSgpr), src1=sgpr(tokenTilesName),
-                     comment="W * tokenTiles"))
-  module.add(SAddU32(dst=sgpr(ttSgpr), src0=sgpr(ttSgpr), src1=sgpr(wSgpr),
-                     comment="counter3 index = W*tokenTiles + W (past counter2)"))
-  module.add(SLShiftLeftB32(dst=sgpr(ttSgpr), src=sgpr(ttSgpr), shiftHex=2,
-                            comment="* 4 (u32 byte offset)"))
-  module.add(SAddU32(dst=sgpr(sgprName), src0=sgpr(sgprName), src1=sgpr(ttSgpr),
-                     comment="FusedCounter3Ptr lo = counter_ptr + (W*tokenTiles+W)*4"))
-  module.add(SAddCU32(dst=sgpr(sgprName + "+1"), src0=sgpr(sgprName + "+1"), src1=0,
-                      comment="FusedCounter3Ptr hi (carry)"))
-  kw.sgprPool.checkIn(ttSgpr)
-  kw.sgprPool.checkIn(wSgpr)
+  module.add(SWaitCnt(kmcnt=0, comment="wait counter_ptr"))
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
@@ -2749,26 +2726,16 @@ class GlobalWriteBatchWriter:
 
     module.addComment1("fused-A2A: build + submit the SDMA COPY_SUBWIN + ATOMIC packet pair")
 
-    # --- this queue's cursor pair, past counter3. Same address as the host's
-    #     fusedA2ACounterCursorOffset(); derived from the latched
-    #     FusedCounter3Ptr because W is not in a register here. ---
-    cursorBaseSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaCursor", preventOverflow=False)
-    module.add(SAddU32(dst=sgpr(cursorBaseSgpr), src0=sgpr("FusedCounter3Ptr"), src1=4 + 7,
-                       comment="cursor region lo = &counter3 + 4, +7 to round up"))
-    module.add(SAddCU32(dst=sgpr(cursorBaseSgpr + 1), src0=sgpr("FusedCounter3Ptr+1"), src1=0,
-                        comment="cursor region hi (carry)"))
-    module.add(SAndB32(dst=sgpr(cursorBaseSgpr), src0=sgpr(cursorBaseSgpr), src1=hex(0xFFFFFFF8),
-                       comment="align8 (the +7 above completes the round-up)"))
-    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(dstRankSgpr),
+    # --- this queue's cursor pair sits at the front of the counter block, so
+    #     the base is FusedCounterPtr and only the per-queue stride is
+    #     computed; the emitter takes it as the SMEM SOFFSET. ---
+    cursorOffSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_sdmaCursorOff", preventOverflow=False)
+    module.add(SLShiftLeftB32(dst=sgpr(cursorOffSgpr), src=sgpr(dstRankSgpr),
                               shiftHex=int(log2(CURSOR_PAIR_BYTES)),
-                              comment="dst_rank * %d (cachedWptr, committedWptr)" % CURSOR_PAIR_BYTES))
-    module.add(SAddU32(dst=sgpr(cursorBaseSgpr), src0=sgpr(cursorBaseSgpr), src1=sgpr(tmpSgpr),
-                       comment="cursor pair lo = cursor region + dst_rank*%d" % CURSOR_PAIR_BYTES))
-    module.add(SAddCU32(dst=sgpr(cursorBaseSgpr + 1), src0=sgpr(cursorBaseSgpr + 1), src1=0,
-                        comment="cursor pair hi (carry)"))
+                              comment="cursor pair byte offset = dst_rank * %d" % CURSOR_PAIR_BYTES))
 
     # --- the counter buffer was zeroed for this launch. ---
-    ring.emitLazyInitCursors(module, kw, "FusedPeerGroupPtr", cursorBaseSgpr)
+    ring.emitLazyInitCursors(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr)
 
     # --- seed the private room-check cache from the live hardware rptr. ---
     cachedIdxSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaCachedIdx", preventOverflow=False)
@@ -2833,8 +2800,8 @@ class GlobalWriteBatchWriter:
     curSgpr  = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaCur", preventOverflow=False)
     pendSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaPend", preventOverflow=False)
     offSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_sdmaOff", preventOverflow=False)
-    ring.emitReserveQueueSpace(module, kw, "FusedPeerGroupPtr", cursorBaseSgpr, cachedIdxSgpr,
-                               totalDwords * 4, curSgpr, offSgpr)
+    ring.emitReserveQueueSpace(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
+                               cachedIdxSgpr, totalDwords * 4, curSgpr, offSgpr)
     module.add(SMovB64(dst=sgpr(pendSgpr, 2), src=sgpr(curSgpr, 2),
                        comment="pending = reserved base"))
     ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, COPY_PACKET_DWORDS,
@@ -2850,14 +2817,15 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(flagAddrSgpr)
     ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr,
                          ATOMIC_PACKET_DWORDS, pendSgpr, offSgpr)
-    ring.emitSubmitPacket(module, kw, "FusedPeerGroupPtr", cursorBaseSgpr, curSgpr, pendSgpr)
+    ring.emitSubmitPacket(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
+                          curSgpr, pendSgpr)
 
     kw.sgprPool.checkIn(pktSgpr)
     kw.sgprPool.checkIn(offSgpr)
     kw.sgprPool.checkIn(pendSgpr)
     kw.sgprPool.checkIn(curSgpr)
     kw.sgprPool.checkIn(cachedIdxSgpr)
-    kw.sgprPool.checkIn(cursorBaseSgpr)
+    kw.sgprPool.checkIn(cursorOffSgpr)
 
   def _emitFusedA2AWave0Election(self, module, skipLabelName):
     """Elect wave 0 as the work-group's single writer, then narrow EXEC to lane 0.
@@ -2899,7 +2867,8 @@ class GlobalWriteBatchWriter:
     # --- The gate and the three preamble blocks are built as sub-Modules so the
     #     emission order below reads as the structure it implements.  Sub-Modules
     #     render transparently. ---
-    from .Signature import fusedA2AKernArgLayout
+    from .Signature import (FUSED_A2A_COUNTER1_OFFSET, FUSED_A2A_COUNTER2_OFFSET,
+                            FUSED_A2A_COUNTER3_OFFSET, fusedA2AKernArgLayout)
     layout = fusedA2AKernArgLayout()
     fusedBase = kw.states.fusedA2AKernArgBase
     mt0 = self.kernel["MacroTile0"]
@@ -2976,7 +2945,8 @@ class GlobalWriteBatchWriter:
     module.add(argModule)
 
     # (3) counter slot = (dst_rank, j) with j = WorkGroup1 (the token-tile index): the
-    # counter array is W*tokenTiles u32 entries at index dst_rank*tokenTiles + j.  The
+    # counter array is W*tokenTiles u32 entries at index dst_rank*tokenTiles + j, past
+    # the block's fixed-size regions (FUSED_A2A_COUNTER1_OFFSET).  The
     # finer grain matters for overlap: the 10 producer WGs of one (p,j) packet are
     # consecutive in the WG launch order (linear id = WG0 + WG1*mTiles, WGM=1), so slot
     # (p,j) completes early instead of only at grid drain as the per-peer counter did.
@@ -2998,7 +2968,8 @@ class GlobalWriteBatchWriter:
     offSaddr = vgpr("off", 1, False, False, True)
     module.add(GlobalAtomicAddU32(
       dst=vgpr(vOld), vaddr=vgpr(vCntAddr, 2), data=vgpr(vOne), saddr=offSaddr,
-      modifier=GLOBALModifiers(glc=True, slc=False, scope=CacheScope.SCOPE_NONE),
+      modifier=GLOBALModifiers(offset=FUSED_A2A_COUNTER1_OFFSET, glc=True, slc=False,
+                               scope=CacheScope.SCOPE_NONE),
       comment="old = atomic_add(counter[dst_rank][j], 1) device scope, return pre-op (sc0)"))
     module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait counter atomic return (load counter)"))
 
@@ -3016,39 +2987,27 @@ class GlobalWriteBatchWriter:
 
     # (6) second-level, per-peer counter: converge the DRAIN spinners from tokenTiles
     # per peer down to exactly one, since the DRAIN poll address below depends only
-    # on dst_rank.  counter2 is a W-entry u32 array appended after the (p,j) counter
-    # array, at byte offset W*tokenTiles*4 (host: FusedA2AClient.cpp counterBytes).
+    # on dst_rank.  counter2 is a MAX_RANKS-entry u32 array at a fixed byte offset in
+    # the counter block (FUSED_A2A_COUNTER2_OFFSET).
     # It is incremented AFTER _emitFusedA2ASdmaIssue returns, so old2+1 == tokenTiles
     # identifies the WG that submitted this card's LAST packet to dst_rank.
     #
     # counter3 (below) owns the DRAIN election; this one only gates the SDMA-submit
     # machinery it shares with step (4).
     counter2PtrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCounter2Ptr", preventOverflow=False)
-    fusedWSgpr      = kw.sgprPool.checkOut(1, tag="fusedA2A_hsW", preventOverflow=False)
-    # counterPtrSgpr was advanced in place to &counter[dst_rank][j] at (3); reload the
-    # base instead of unwinding that add (cold path, at most one extra s_load per WG).
-    module.add(kw.argLoader.loadKernArg(counter2PtrSgpr, "KernArgAddress",
-      sgprOffset=hex(fusedBase + layout["counter_ptr"]), dword=2))
-    module.add(kw.argLoader.loadKernArg(fusedWSgpr, "KernArgAddress",
-      sgprOffset=hex(fusedBase + layout["FusedW"]), dword=1))
-    module.add(SWaitCnt(kmcnt=0, comment="wait counter_ptr/FusedW"))
-    module.add(SMulI32(dst=sgpr(tmpSgpr2), src0=sgpr(fusedWSgpr), src1=sgpr(tokenTilesSgpr),
-                       comment="W * tokenTiles (counter2 base index, past the (p,j) counter)"))
-    kw.sgprPool.checkIn(fusedWSgpr)
-    module.add(SAddU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=sgpr(dstRankSgpr),
-                       comment="counter2 index = W*tokenTiles + dst_rank"))
-    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(tmpSgpr2), shiftHex=2,
-                              comment="* 4 (u32 counter byte offset)"))
-    module.add(SAddU32(dst=sgpr(counter2PtrSgpr), src0=sgpr(counter2PtrSgpr), src1=sgpr(tmpSgpr2),
-                       comment="counter2[dst_rank] lo = counter_ptr + (W*tokenTiles+dst_rank)*4"))
-    module.add(SAddCU32(dst=sgpr(counter2PtrSgpr + 1), src0=sgpr(counter2PtrSgpr + 1), src1=0,
+    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(dstRankSgpr), shiftHex=2,
+                              comment="dst_rank * 4 (u32 counter byte offset)"))
+    module.add(SAddU32(dst=sgpr(counter2PtrSgpr), src0=sgpr("FusedCounterPtr"), src1=sgpr(tmpSgpr2),
+                       comment="counter2[dst_rank] lo = counter_ptr + dst_rank*4"))
+    module.add(SAddCU32(dst=sgpr(counter2PtrSgpr + 1), src0=sgpr("FusedCounterPtr+1"), src1=0,
                         comment="counter2[dst_rank] hi (carry)"))
     module.add(VMovB64(dst=vgpr(vCntAddr, 2), src=sgpr(counter2PtrSgpr, 2), comment="counter2 addr -> vgpr"))
     kw.sgprPool.checkIn(counter2PtrSgpr)
     module.add(VMovB32(dst=vgpr(vOne), src=1, comment="counter2 increment = 1"))
     module.add(GlobalAtomicAddU32(
       dst=vgpr(vOld), vaddr=vgpr(vCntAddr, 2), data=vgpr(vOne), saddr=offSaddr,
-      modifier=GLOBALModifiers(glc=True, slc=False, scope=CacheScope.SCOPE_NONE),
+      modifier=GLOBALModifiers(offset=FUSED_A2A_COUNTER2_OFFSET, glc=True, slc=False,
+                               scope=CacheScope.SCOPE_NONE),
       comment="old2 = atomic_add(counter2[dst_rank], 1) device scope, return pre-op (sc0)"))
     module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait counter2 atomic return"))
     module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr2), src=vgpr(vOld), comment="old2 -> sgpr"))
@@ -3067,14 +3026,14 @@ class GlobalWriteBatchWriter:
     module.add(localTallyLabel)
     module.add(localSyncModule)
 
-    # counter3: one u32 at word index W*tokenTiles + W (host mirror:
-    # fusedA2ACounterPayloadBytes in client/include/FusedA2ACounterSentinel.hpp),
+    # counter3: one u32 at FUSED_A2A_COUNTER3_OFFSET in the counter block (host
+    # mirror: client/include/FusedA2ACounterSentinel.hpp),
     # incremented by EVERY surviving WG -- PUSH WGs fall through the block above,
     # local WGs jump straight here from the PUSH gate.  The WG that takes it to
     # FusedTotalWGs is the globally last one; by then nothing else is queued, so
     # its DRAIN spin cannot starve a compute WG of its CU.
     #
-    # The address comes from the prologue latch (emitFusedA2ACounter3PtrLatch), not
+    # The address comes from the prologue latch (emitFusedA2ACounterPtrLatch), not
     # from kernarg here.  This block is the ONLY code every surviving work-group in
     # the grid runs, so anything left in it is paid ~NumWorkGroups0*NumWorkGroups1
     # times per launch -- 1152 times at the champion N=4096 shape.
@@ -3096,7 +3055,8 @@ class GlobalWriteBatchWriter:
                        comment="wrap limit = FusedTotalWGs - 1 (what the last WG reads back)"))
     module.add(SMovB32(dst=sgpr(c3Tmp), src=sgpr(c3Limit),
                        comment="SDATA in = limit; the atomic overwrites it with the pre-op value"))
-    module.add(SAtomicInc(dst=sgpr(c3Tmp), base=sgpr("FusedCounter3Ptr", 2), soffset=0,
+    module.add(SAtomicInc(dst=sgpr(c3Tmp), base=sgpr("FusedCounterPtr", 2),
+                          soffset=hex(FUSED_A2A_COUNTER3_OFFSET),
                           smem=SMEMModifiers(glc=True),
                           comment="old3 = atomic_inc(counter3), wrap at FusedTotalWGs-1, return pre-op"))
     module.add(SWaitCnt(kmcnt=0, comment="fused-A2A: wait counter3 atomic return (SMEM -> lgkmcnt)"))

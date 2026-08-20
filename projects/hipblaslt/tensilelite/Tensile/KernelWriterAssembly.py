@@ -3394,13 +3394,13 @@ class KernelWriterAssembly(KernelWriter):
     # up host-side, but those padded work-groups s_endpgm in the prologue
     # (clusterPadEarlyExit).
     if kernel["FusedGemmA2A"]:
-      from .Components.GlobalWriteBatch import emitFusedA2ACounter3PtrLatch, \
+      from .Components.GlobalWriteBatch import emitFusedA2ACounterPtrLatch, \
         emitFusedA2ANShardLatch
       module.add(FusedA2AWgRemap(self, kernel))
       module.add(SMulI32(dst=sgpr("FusedTotalWGs"), src0=sgpr("NumWorkGroups0"),
                          src1=sgpr("NumWorkGroups1"),
                          comment="FusedTotalWGs = NumWorkGroups0 * NumWorkGroups1 (counter3 election target)"))
-      emitFusedA2ACounter3PtrLatch(module, self, "FusedCounter3Ptr", "FusedTokenTiles")
+      emitFusedA2ACounterPtrLatch(module, self, "FusedCounterPtr", "FusedTokenTiles")
       emitFusedA2ANShardLatch(module, self, "FusedNShard")
 
     return module
