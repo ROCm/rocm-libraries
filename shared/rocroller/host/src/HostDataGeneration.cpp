@@ -23,8 +23,8 @@ namespace rocRoller::HostNumerics
     {
         using roc::host_validation::GenerationRecipe;
         using roc::host_validation::GenerationRecipeSettings;
-        using roc::host_validation::Layout;
         using roc::host_validation::IndexOrder;
+        using roc::host_validation::Layout;
         using roc::host_validation::MxDataRecipe;
         using roc::host_validation::MxGenerationProblem;
         using roc::host_validation::MxScaleGenerationMode;
@@ -143,9 +143,8 @@ namespace rocRoller::HostNumerics
                 throw std::invalid_argument(
                     "rocRoller GEMM generation requires non-overlapping matrix strides.");
             }
-            return descriptor.stride(0) < descriptor.stride(1)
-                       ? IndexOrder::FirstDimensionFastest
-                       : IndexOrder::LastDimensionFastest;
+            return descriptor.stride(0) < descriptor.stride(1) ? IndexOrder::FirstDimensionFastest
+                                                               : IndexOrder::LastDimensionFastest;
         }
 
         GenerationRecipe generationRecipe(TensorDescriptor const&   descriptor,
@@ -367,13 +366,13 @@ namespace rocRoller::HostNumerics
 
             auto   result      = roc::host_validation::generateMx(problem);
             auto   dataStorage = std::vector<std::byte>(result.data.storage().begin(),
-                                                        result.data.storage().end());
+                                                      result.data.storage().end());
             Tensor data        = Tensor::fromStorage(
                 result.data.type(), hostTensorLayout(descriptor), std::move(dataStorage));
 
             auto const scaleLayout  = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
             auto       scaleStorage = std::vector<std::byte>(result.scales.storage().begin(),
-                                                             result.scales.storage().end());
+                                                       result.scales.storage().end());
             Tensor     scales
                 = Tensor::fromStorage(result.scales.type(), scaleLayout, std::move(scaleStorage));
             std::optional<Tensor> reference;
@@ -382,8 +381,8 @@ namespace rocRoller::HostNumerics
                 auto referenceStorage = std::vector<std::byte>(result.reference.storage().begin(),
                                                                result.reference.storage().end());
                 reference             = Tensor::fromStorage(result.reference.type(),
-                                                            hostTensorLayout(descriptor),
-                                                            std::move(referenceStorage));
+                                                hostTensorLayout(descriptor),
+                                                std::move(referenceStorage));
             }
             return {std::move(data), std::move(scales), std::move(reference)};
         }
@@ -514,7 +513,7 @@ namespace rocRoller::HostNumerics
             initializationA,
             scaleTypeA == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                               scaleTypeA, 1, scaleBlockSize}},
+                                             scaleTypeA, 1, scaleBlockSize}},
             minimum,
             maximum,
             seed + 1);
@@ -523,7 +522,7 @@ namespace rocRoller::HostNumerics
             initializationB,
             scaleTypeB == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                               scaleTypeB, 0, scaleBlockSize}},
+                                             scaleTypeB, 0, scaleBlockSize}},
             minimum,
             maximum,
             seed + 2);
