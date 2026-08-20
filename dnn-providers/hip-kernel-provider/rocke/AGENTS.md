@@ -116,6 +116,7 @@ the matching doc first.
 | Last validated measurement numbers | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
 | GEMM perf | [gemm-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/gemm-optimization-rocke.md) |
 | LDS / bank conflicts | [lds-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/lds-optimization-rocke.md) |
+| Predict LDS conflicts from lane/address mappings | [lds-bank-conflict-expert](platform/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/SKILL.md) |
 | Prefetch / async DRAM→LDS | [prefetch-data-load-rocke.md](platform/dsl_docs/optimization/utilities/skills/prefetch-data-load-rocke.md) |
 | ISA / occupancy / resource inspection | [isa-inspection-rocke.md](platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md) |
 | Capture a kernel trace (rocprof) | [capture-kernel-trace-rocke.md](platform/dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md) |
