@@ -34,6 +34,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_segmented_scan.hpp>
@@ -102,7 +103,19 @@ using Params = ::testing::Types<
     params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>,
     params<int, int, ::rocprim::plus<int>, 0, 0, 1000, false, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceSegmentedScan, Params);
+struct RocprimDeviceSegmentedScanNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::input_type>() + "_"
+                        + type_tag<typename Params::output_type>();
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceSegmentedScan, Params, RocprimDeviceSegmentedScanNameGenerator);
 
 TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 {
