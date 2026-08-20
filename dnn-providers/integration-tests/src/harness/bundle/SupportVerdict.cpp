@@ -4,8 +4,12 @@
 #include "harness/bundle/SupportVerdict.hpp"
 
 #include <algorithm>
-#include <fstream>
+#include <filesystem>
+#include <optional>
+#include <set>
 #include <sstream>
+#include <stdexcept>
+#include <string_view>
 
 #include "common/PlatformUtils.hpp"
 #include "harness/TestConfig.hpp"
@@ -27,6 +31,8 @@ const char* toString(SupportVerdict verdict)
         return "CLAIM_BROKEN";
     case SupportVerdict::QUERY_ERRORED:
         return "QUERY_ERRORED";
+    case SupportVerdict::ENGINE_NOT_LOADED:
+        return "ENGINE_NOT_LOADED";
     case SupportVerdict::NOT_ENFORCED:
         return "NOT_ENFORCED";
     case SupportVerdict::UNCLAIMED_SUPPORT:
@@ -36,9 +42,19 @@ const char* toString(SupportVerdict verdict)
     }
 }
 
+// Fail-closed: unknown/future verdicts are failures by default.
 bool isFailure(SupportVerdict verdict)
 {
-    return verdict == SupportVerdict::CLAIM_BROKEN || verdict == SupportVerdict::QUERY_ERRORED;
+    switch(verdict)
+    {
+    case SupportVerdict::SATISFIED:
+    case SupportVerdict::NO_SIDECAR:
+    case SupportVerdict::NOT_ENFORCED:
+    case SupportVerdict::UNCLAIMED_SUPPORT:
+        return false;
+    default:
+        return true;
+    }
 }
 
 namespace
@@ -210,49 +226,38 @@ std::vector<SupportResult> evaluateAllEngines(hipdnn_frontend::ErrorCode errorCo
                                               const std::vector<int64_t>& rankedIds,
                                               const SupportClaimLocator& locator,
                                               const std::vector<LoadedEngine>& loadedEngines,
-                                              std::string_view queryMessage,
-                                              bool filterNotEnforced)
+                                              std::string_view queryMessage)
 {
     if(locator.sidecarPath.empty() || !std::filesystem::exists(locator.sidecarPath))
     {
         return {};
     }
 
-    std::ifstream file(locator.sidecarPath);
-    if(!file)
-    {
-        throw std::runtime_error("Could not open support claims file: "
-                                 + locator.sidecarPath.string());
-    }
-
-    auto json = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/false);
-    if(json.is_discarded())
-    {
-        throw std::runtime_error("support.json is not parseable JSON: "
-                                 + locator.sidecarPath.string());
-    }
-
     std::optional<SupportClaims> singleClaims;
     std::optional<SweepSupportClaims> sweepClaims;
     if(locator.isSweep())
     {
-        sweepClaims = parseSweepSupportClaimsJson(json, locator.sidecarPath.string());
+        sweepClaims = loadSweepSupportClaimsFromPath(locator.sidecarPath);
     }
     else
     {
-        singleClaims = parseSupportClaimsJson(json, locator.sidecarPath.string());
+        singleClaims = loadSupportClaimsFromPath(locator.sidecarPath);
     }
 
     const std::string arch = baseArchToken(TestConfig::get().getCurrentArch());
     const std::string platform = currentPlatform();
 
+    const std::set<std::string> claimedNames
+        = locator.isSweep() ? sweepClaims->claimedEngineNames(locator.caseId, arch, platform)
+                            : singleClaims->claimedEngineNames(arch, platform);
+
+    std::set<std::string> loadedNames;
     std::vector<SupportResult> results;
     for(const auto& engine : loadedEngines)
     {
-        const bool claimed
-            = locator.isSweep()
-                  ? sweepClaims->isClaimed(locator.caseId, engine.name, arch, platform)
-                  : singleClaims->isClaimed(engine.name, arch, platform);
+        loadedNames.insert(engine.name);
+
+        const bool claimed = claimedNames.count(engine.name) != 0;
 
         auto result = evaluateSupport(errorCode,
                                       rankedIds,
@@ -265,9 +270,21 @@ std::vector<SupportResult> evaluateAllEngines(hipdnn_frontend::ErrorCode errorCo
                                       platform,
                                       queryMessage);
 
-        if(!filterNotEnforced || result.verdict != SupportVerdict::NOT_ENFORCED)
+        results.push_back(std::move(result));
+    }
+
+    for(const auto& name : claimedNames)
+    {
+        if(loadedNames.count(name) == 0)
         {
-            results.push_back(std::move(result));
+            SupportResult r;
+            r.verdict = SupportVerdict::ENGINE_NOT_LOADED;
+            r.bundlePath = locator.diagnosticPath;
+            r.engineName = name;
+            r.arch = arch;
+            r.platform = platform;
+            r.detail = "sidecar claims support, but engine is not loaded in the runtime";
+            results.push_back(std::move(r));
         }
     }
 
@@ -276,24 +293,13 @@ std::vector<SupportResult> evaluateAllEngines(hipdnn_frontend::ErrorCode errorCo
 
 } // namespace
 
-std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode errorCode,
-                                                 const std::vector<int64_t>& rankedIds,
-                                                 const SupportClaimLocator& locator,
-                                                 const std::vector<LoadedEngine>& loadedEngines,
-                                                 std::string_view queryMessage)
-{
-    return evaluateAllEngines(
-        errorCode, rankedIds, locator, loadedEngines, queryMessage, /*filterNotEnforced=*/true);
-}
-
 std::vector<SupportResult> observeAllSupport(hipdnn_frontend::ErrorCode errorCode,
                                              const std::vector<int64_t>& rankedIds,
                                              const SupportClaimLocator& locator,
                                              const std::vector<LoadedEngine>& loadedEngines,
                                              std::string_view queryMessage)
 {
-    return evaluateAllEngines(
-        errorCode, rankedIds, locator, loadedEngines, queryMessage, /*filterNotEnforced=*/false);
+    return evaluateAllEngines(errorCode, rankedIds, locator, loadedEngines, queryMessage);
 }
 
 } // namespace hipdnn_integration_tests::bundle

@@ -16,23 +16,9 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-// Process-wide collector of support-claim verdicts. Mirrors UnverifiableBundleReport:
-// thread-safe Meyers singleton populated during test execution, printed once after
-// RUN_ALL_TESTS().
-//
-// Storage: every verdict lands in one vector and callers filter by SupportVerdict at
-// read time. Do not partition storage by verdict — the verdict is already a field on
-// the record, so a second encoding in the choice of container is redundant, and the
-// two encodings drift. Keeping one vector also means a new SupportVerdict enumerator
-// requires no change to this class at all.
-//
-// Progressive display:
-//   Level 1 (always): one-line counter summary
-//   Level 2 (if failures): per-bundle failure detail
-//   Level 3 (if unclaimed): the bundles that are supported but unclaimed
-//
-// Also provides the empty-query guard (RFC 0015 §7.2): enforcement is requested
-// but zero support queries were observed in the whole run.
+// Thread-safe singleton collecting support-claim verdicts. Printed once after
+// RUN_ALL_TESTS(). Also provides the empty-query guard: enforcement requested
+// but zero support queries observed.
 class SupportClaimReport
 {
 public:
@@ -47,38 +33,25 @@ public:
     SupportClaimReport(SupportClaimReport&&) = delete;
     SupportClaimReport& operator=(SupportClaimReport&&) = delete;
 
-    // Record one verdict. Callers must not pass NO_SIDECAR — a graph with no
-    // support.json has nothing to report, and admitting those records would both
-    // bury the real verdicts and break getGraphsWithClaimsVerified() below.
     void record(const SupportResult& result)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _records.push_back(result);
     }
 
-    // Both are counted at *discovery* time, before any decision to run or drop
-    // the graph, and both are run-level events rather than per-record ones.
-    // That placement is the whole design: a claim-bearing graph that fails to
-    // load registers no GTest case and so produces no SupportResult at all, so
-    // counting at discovery makes that silent drop *arm* the guard below instead
-    // of disarming it. This is exactly why these two cannot be derived from
-    // _records — they count graphs that may never appear there.
-
-    // Every graph found on disk.
+    // Counted at discovery time, not derivable from _records (a graph that
+    // fails to load produces no SupportResult but still arms the guard).
     void recordGraphFound()
     {
         _graphsFound.fetch_add(1, std::memory_order_relaxed);
     }
 
-    // ...of which these have a .support.json beside them.
     void recordGraphWithClaims()
     {
         _graphsWithClaims.fetch_add(1, std::memory_order_relaxed);
     }
 
-    // ...of which these we actually got to query. Counted once per graph at
-    // the call site, not once per engine — multi-engine enforcement produces
-    // N records per graph, so deriving from _records.size() would overcount.
+    // Counted once per graph, not per engine.
     void recordGraphWithClaimsVerified()
     {
         _graphsWithClaimsVerified.fetch_add(1, std::memory_order_relaxed);
@@ -131,8 +104,6 @@ public:
             records = _records;
         }
 
-        // One snapshot, one pass per verdict — so the Level 1 counters and the
-        // Level 2/3 listings below can never disagree with each other.
         const auto tally = [&records](SupportVerdict verdict) {
             return static_cast<size_t>(
                 std::count_if(records.begin(), records.end(), [verdict](const SupportResult& r) {
@@ -143,30 +114,23 @@ public:
         const size_t sat = tally(SupportVerdict::SATISFIED);
         const size_t broke = tally(SupportVerdict::CLAIM_BROKEN);
         const size_t err = tally(SupportVerdict::QUERY_ERRORED);
+        const size_t notLoaded = tally(SupportVerdict::ENGINE_NOT_LOADED);
         const size_t unc = tally(SupportVerdict::UNCLAIMED_SUPPORT);
         const size_t notEnf = tally(SupportVerdict::NOT_ENFORCED);
 
-        // Stay silent only when the run had nothing to enforce: not one sidecar
-        // anywhere, so not one record either. That is the pre-adoption state, and
-        // it is every run in the tree today. Once a sidecar exists we print even
-        // if there is nothing to say about it, because "enforcing nothing" is a
-        // result the user needs to see rather than silence that reads as success.
         if(records.empty() && getGraphsWithClaims() == 0)
         {
             return;
         }
 
-        // Level 1: one-line summary. The discovery counts come first because they
-        // are what makes a run of all-zeros legible: 12 graphs carrying claims and
-        // 0 queried is a broken run, while 0 and 0 is simply a run with nothing
-        // to enforce.
         os << "\n==== SUPPORT CLAIM SUMMARY ====\n"
            << "  graphs: " << getGraphsFound() << " found, " << getGraphsWithClaims()
-           << " with claims, " << records.size() << " queried\n"
+           << " with claims, " << getGraphsWithClaimsVerified() << " queried (" << records.size()
+           << " verdicts)\n"
            << "  satisfied: " << sat << "  broken: " << broke << "  errored: " << err
-           << "  unclaimed: " << unc << "  not-enforced: " << notEnf << "\n";
+           << "  not-loaded: " << notLoaded << "  unclaimed: " << unc
+           << "  not-enforced: " << notEnf << "\n";
 
-        // Level 2: failure detail (only when failures exist)
         if(broke + err > 0)
         {
             os << "\n---- CLAIM FAILURES (" << (broke + err) << ") ----\n";
@@ -187,8 +151,6 @@ public:
             }
         }
 
-        // Level 3: unclaimed support. Names the bundles, because a bare count
-        // tells the reader nothing they can act on.
         if(unc > 0)
         {
             os << "\n---- UNCLAIMED SUPPORT (" << unc << ") ----\n";
@@ -228,17 +190,9 @@ private:
     SupportClaimReport() = default;
 
     mutable std::mutex _mutex;
-    std::vector<SupportResult> _records; // every verdict; filter by SupportVerdict when reading
+    std::vector<SupportResult> _records;
 
     // found ⊇ withClaims ⊇ withClaimsVerified
-    //
-    // Example: 100 bundles on disk, 3 have a .support.json, 2 of those 3
-    // actually got their claims verified against loaded engines (1 failed to
-    // load). The remaining 97 have no sidecar — nothing to enforce.
-    //   _graphsFound = 100
-    //   _graphsWithClaims = 3
-    //   _graphsWithClaimsVerified = 2
-
     std::atomic<size_t> _graphsFound{0};
     std::atomic<size_t> _graphsWithClaims{0};
     std::atomic<size_t> _graphsWithClaimsVerified{0};

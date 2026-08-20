@@ -69,14 +69,20 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
         {
             SupportClaimReport::get().recordGraphWithClaimsVerified();
         }
+
+        std::string failureAggregate;
         for(const auto& v : allVerdicts)
         {
             SupportClaimReport::get().record(v);
             if(isFailure(v.verdict))
             {
-                FAIL() << formatVerdictMessage(v);
-                return;
+                failureAggregate += formatVerdictMessage(v);
             }
+        }
+        if(!failureAggregate.empty())
+        {
+            FAIL() << failureAggregate;
+            return;
         }
     }
 
@@ -187,14 +193,19 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
 
+    std::string failureAggregate;
     for(const auto& v : allVerdicts)
     {
         SupportClaimReport::get().record(v);
         if(isFailure(v.verdict))
         {
-            FAIL() << "[rung=" << rung << "] " << formatVerdictMessage(v);
-            return;
+            failureAggregate += formatVerdictMessage(v);
         }
+    }
+    if(!failureAggregate.empty())
+    {
+        FAIL() << "[rung=" << rung << "] " << failureAggregate;
+        return;
     }
 
     if(allVerdicts.empty())
@@ -563,6 +574,11 @@ std::optional<OutputTensors>
     catch(const EngineNotApplicableError& e)
     {
         error = e.what();
+        return std::nullopt;
+    }
+
+    if(::testing::Test::HasFatalFailure())
+    {
         return std::nullopt;
     }
 

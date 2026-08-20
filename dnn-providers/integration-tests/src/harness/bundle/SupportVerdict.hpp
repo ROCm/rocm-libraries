@@ -44,6 +44,9 @@ enum class SupportVerdict
     CLAIM_BROKEN, // engine declined                       → FAIL
     QUERY_ERRORED, // query broke; cannot tell yes from no  → FAIL
 
+    // ---- claimed engine is not loaded in the runtime at all ----
+    ENGINE_NOT_LOADED, // sidecar claims it, but the plugin didn't load → FAIL
+
     // ---- the sidecar exists but is silent about this cell: never a failure ----
     NOT_ENFORCED, // engine declined or query broke  → skip
     UNCLAIMED_SUPPORT, // engine supports it anyway       → pass; file needs a line
@@ -150,20 +153,9 @@ SupportResult checkSupportClaim(hipdnn_frontend::ErrorCode errorCode,
 /// Multi-engine enforcement: evaluate every loaded engine's claim from a single
 /// query result. Loads the sidecar once and calls evaluateSupport per engine.
 /// Dispatches to single-graph or sweep-case claims based on locator.isSweep().
-/// NOT_ENFORCED verdicts (unclaimed + declined, the uninteresting majority) are
-/// filtered out — only SATISFIED, CLAIM_BROKEN, QUERY_ERRORED, and
-/// UNCLAIMED_SUPPORT are returned. Returns empty when the sidecar file is absent.
-std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode errorCode,
-                                                 const std::vector<int64_t>& rankedIds,
-                                                 const SupportClaimLocator& locator,
-                                                 const std::vector<LoadedEngine>& loadedEngines,
-                                                 std::string_view queryMessage = {});
-
-/// Unfiltered variant of checkAllSupportClaims: returns ALL verdicts including
-/// NOT_ENFORCED. Use this when the caller needs to know that the query ran
-/// (non-empty result) regardless of whether any engine was claimed — avoids a
-/// false positive on the empty-query guard when a sidecar exists but no loaded
-/// engine is claimed for the current arch/platform.
+/// Returns ALL verdicts including NOT_ENFORCED so the caller can record them
+/// and avoid a false positive on the empty-query guard.
+/// Returns empty when the sidecar file is absent.
 std::vector<SupportResult> observeAllSupport(hipdnn_frontend::ErrorCode errorCode,
                                              const std::vector<int64_t>& rankedIds,
                                              const SupportClaimLocator& locator,

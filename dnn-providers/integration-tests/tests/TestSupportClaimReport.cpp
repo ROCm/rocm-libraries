@@ -177,6 +177,7 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
     SupportClaimReport::get().recordGraphFound();
     SupportClaimReport::get().recordGraphFound();
     SupportClaimReport::get().recordGraphWithClaims();
+    SupportClaimReport::get().recordGraphWithClaimsVerified();
     SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
 
     std::ostringstream oss;
@@ -320,6 +321,35 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
     SupportClaimReport::get().recordGraphWithClaimsVerified();
     SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
     EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
+}
+
+// ---------------------------------------------------------------------------
+// Multi-engine: 1 graph queried produces N verdicts (one per engine).
+// The queried count must be 1, not N.
+// ---------------------------------------------------------------------------
+
+TEST_F(TestSupportClaimReport, MultiEngineQueriedCountIsPerGraph)
+{
+    SupportClaimReport::get().recordGraphFound();
+    SupportClaimReport::get().recordGraphWithClaims();
+    SupportClaimReport::get().recordGraphWithClaimsVerified();
+
+    SupportResult r1 = makeResult(SupportVerdict::SATISFIED);
+    r1.engineName = "ENGINE_A";
+    SupportResult r2 = makeResult(SupportVerdict::NOT_ENFORCED);
+    r2.engineName = "ENGINE_B";
+
+    SupportClaimReport::get().record(r1);
+    SupportClaimReport::get().record(r2);
+
+    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsVerified(), 1u);
+    EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 2u);
+
+    std::ostringstream oss;
+    SupportClaimReport::get().print(oss);
+    const auto output = oss.str();
+
+    EXPECT_NE(output.find("1 queried (2 verdicts)"), std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

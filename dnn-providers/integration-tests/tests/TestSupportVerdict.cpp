@@ -12,10 +12,10 @@
 
 using hipdnn_frontend::ErrorCode;
 using hipdnn_integration_tests::bundle::baseArchToken;
-using hipdnn_integration_tests::bundle::checkAllSupportClaims;
 using hipdnn_integration_tests::bundle::evaluateSupport;
 using hipdnn_integration_tests::bundle::isFailure;
 using hipdnn_integration_tests::bundle::LoadedEngine;
+using hipdnn_integration_tests::bundle::observeAllSupport;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
 
@@ -307,6 +307,7 @@ TEST(TestSupportVerdict, ToStringCoversAllValues)
     EXPECT_STREQ(toString(SupportVerdict::SATISFIED), "SATISFIED");
     EXPECT_STREQ(toString(SupportVerdict::CLAIM_BROKEN), "CLAIM_BROKEN");
     EXPECT_STREQ(toString(SupportVerdict::QUERY_ERRORED), "QUERY_ERRORED");
+    EXPECT_STREQ(toString(SupportVerdict::ENGINE_NOT_LOADED), "ENGINE_NOT_LOADED");
     EXPECT_STREQ(toString(SupportVerdict::NOT_ENFORCED), "NOT_ENFORCED");
     EXPECT_STREQ(toString(SupportVerdict::UNCLAIMED_SUPPORT), "UNCLAIMED_SUPPORT");
 }
@@ -370,14 +371,25 @@ TEST(TestSupportVerdict, FormatVerdictMessageShowsClaimBroken)
 }
 
 // ---------------------------------------------------------------------------
-// checkAllSupportClaims: empty bundle path → empty results (no sidecar to load)
+// observeAllSupport: empty bundle path → empty results (no sidecar to load)
 // ---------------------------------------------------------------------------
 
 TEST(TestSupportVerdict, CheckAllEmptyWhenNoBundlePath)
 {
     const std::vector<LoadedEngine> engines = {{ENGINE_A, "ENGINE_A"}, {ENGINE_B, "ENGINE_B"}};
-    const auto results = checkAllSupportClaims(ErrorCode::OK, {ENGINE_A}, {}, engines);
+    const auto results = observeAllSupport(ErrorCode::OK, {ENGINE_A}, {}, engines);
     EXPECT_TRUE(results.empty());
+}
+
+TEST(TestSupportVerdict, EngineNotLoadedIsFailure)
+{
+    EXPECT_TRUE(isFailure(SupportVerdict::ENGINE_NOT_LOADED));
+}
+
+TEST(TestSupportVerdict, ToStringCoversEngineNotLoaded)
+{
+    using hipdnn_integration_tests::bundle::toString;
+    EXPECT_STREQ(toString(SupportVerdict::ENGINE_NOT_LOADED), "ENGINE_NOT_LOADED");
 }
 
 TEST(TestSupportVerdict, CheckAllEmptyWhenSidecarDoesNotExist)
@@ -385,7 +397,7 @@ TEST(TestSupportVerdict, CheckAllEmptyWhenSidecarDoesNotExist)
     using hipdnn_integration_tests::bundle::SupportClaimLocator;
     const SupportClaimLocator locator{"/no/such/file.support.json", {}, "Bundle.json"};
     const std::vector<LoadedEngine> engines = {{ENGINE_A, "ENGINE_A"}};
-    const auto results = checkAllSupportClaims(ErrorCode::OK, {ENGINE_A}, locator, engines);
+    const auto results = observeAllSupport(ErrorCode::OK, {ENGINE_A}, locator, engines);
     EXPECT_TRUE(results.empty());
 }
 

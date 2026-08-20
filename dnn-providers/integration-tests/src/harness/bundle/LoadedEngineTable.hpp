@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +44,8 @@ public:
         size_t numEngines = 0;
         if(hipdnnGetEngineCount_ext(handle, &numEngines) != HIPDNN_STATUS_SUCCESS)
         {
+            std::cerr << "[LoadedEngineTable] hipdnnGetEngineCount_ext failed; "
+                         "engine table will be empty\n";
             return;
         }
 
@@ -71,6 +74,11 @@ public:
     const std::vector<LoadedEngine>& all() const
     {
         return _engines;
+    }
+
+    bool isBuilt() const
+    {
+        return _built;
     }
 
     bool isLoaded(std::string_view name) const

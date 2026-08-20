@@ -262,10 +262,13 @@ inline void registerBundleTests()
     bundles.reserve(discovered.size());
     for(const auto& disc : discovered)
     {
-        SupportClaimReport::get().recordGraphFound();
-        if(std::filesystem::exists(detail::sidecarPathFor(disc)))
+        if(TestConfig::get().enforceSupportClaims())
         {
-            SupportClaimReport::get().recordGraphWithClaims();
+            SupportClaimReport::get().recordGraphFound();
+            if(std::filesystem::exists(detail::sidecarPathFor(disc)))
+            {
+                SupportClaimReport::get().recordGraphWithClaims();
+            }
         }
 
         auto outcome = detail::classifyBundle(disc);
