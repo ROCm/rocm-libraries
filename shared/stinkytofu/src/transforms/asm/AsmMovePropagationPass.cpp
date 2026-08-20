@@ -17,6 +17,22 @@ bool isSupportedMov(const StinkyInstruction& inst) {
     return uop == GFX::v_mov_b32 || uop == GFX::s_mov_b32;
 }
 
+bool isSafeMovDstReg(const StinkyRegister& reg) {
+    if (!reg.isRegister()) return false;
+    switch (reg.reg.type) {
+        case RegType::SCC:
+        case RegType::VCC:
+        case RegType::VCC_LO:
+        case RegType::VCC_HI:
+        case RegType::EXEC:
+        case RegType::EXEC_LO:
+        case RegType::EXEC_HI:
+            return false;
+        default:
+            return true;
+    }
+}
+
 bool isEligibleMov(const StinkyInstruction& inst) {
     if (!isSupportedMov(inst)) return false;
     if (inst.getDestRegs().size() != 1 || inst.getSrcRegs().size() != 1) return false;
@@ -26,6 +42,9 @@ bool isEligibleMov(const StinkyInstruction& inst) {
     if (!dst.isRegister() || !src.isRegister()) return false;
     if (dst.reg.num != 1 || src.reg.num != 1) return false;
     if (isPseudoReg(dst) || isPseudoReg(src)) return false;
+    // Never optimize mov that writes exec/vcc/scc, because they affect lane-mask/condition state
+    // and are implicitly consumed by later instructions.
+    if (!isSafeMovDstReg(dst)) return false;
 
     return true;
 }

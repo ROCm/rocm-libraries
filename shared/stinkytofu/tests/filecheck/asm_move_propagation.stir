@@ -81,3 +81,18 @@ st.func @remove_identity_move() {
   v0 = "st.v_mov_b32"(v0) { issueCycles = 1, latencyCycles = 1 }
   v2 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
 }
+
+#--- Do not optimize away mov writes to exec/vcc/scc-style control registers.
+# CHECK-LABEL: @keep_exec_write_move
+# CHECK: exec_lo0 = "st.s_mov_b32"(vcc_lo0)
+# CHECK: v2 = "st.v_add_f32"(v1, v3)
+# CHECK: exec_lo0 = "st.s_mov_b32"(s5)
+st.func @keep_exec_write_move() {
+^entry:
+  exec_lo0 = "st.s_mov_b32"(vcc_lo0) { issueCycles = 1, latencyCycles = 2 }
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v3) { issueCycles = 1, latencyCycles = 5 }
+  exec_lo0 = "st.s_mov_b32"(s5) { issueCycles = 1, latencyCycles = 2 }
+  v0 = "st.v_sub_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v2) { issueCycles = 1, latencyCycles = 1 }
+}
