@@ -500,20 +500,6 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
-    // Prefix sum over the region in original program order: cumCycles[k] = the
-    // estimated absolute cycle at which dagNodes[k] would start, if the unmodified
-    // program order were followed exactly (WMMA -> latencyCycles, its full co-issue
-    // window; otherwise issueCycles). Turns a "must be within N cycles of" requirement
-    // into a plain clock number instead of a node to hop before, which is what both
-    // DAGNode::hazardDeadline and DAGNode::earliestClock are built from. The last entry
-    // is the region's estimated length, i.e. where the terminator that follows it sits.
-    std::vector<int> cumCycles(regionSize + 1, 0);
-    for (unsigned k = 0; k < regionSize; ++k) {
-        StinkyInstruction* inst = dagNodes[k].inst;
-        cumCycles[k + 1] =
-            cumCycles[k] + (isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
-    }
-
     // Pre-scan: flag producers feeding a hazarded consumer, per the arch's hazard rule
     // table (a data-driven table of fixed producer->consumer cycle gaps keyed by register
     // file — e.g. SALU sgpr -> SMEM/tensor_load/VMEM address, VALU vgpr -> VMEM
