@@ -5321,7 +5321,10 @@ namespace TensileLite
         // Conservative simplification: a custom kernel is hand-written assembly
         // whose summation order is not described by sizeMapping, so none are
         // admitted. Admitting provably-safe custom kernels is planned separately.
-        if(!sizeMapping.customKernelName.empty())
+        // Gemm-From-Anywhere handwritten kernels are identified by customKernel
+        // (name set, generated false), not only sizeMapping.customKernelName.
+        if(!sizeMapping.customKernelName.empty()
+           || (!customKernel.name.empty() && !customKernel.generated))
             return false;
 
         // Atomic fixup of partial tiles accumulates in arrival order.
@@ -5370,8 +5373,13 @@ namespace TensileLite
         // Conservative simplification: a custom kernel is hand-written assembly
         // whose summation order is not described by sizeMapping, so none are
         // admitted. Admitting provably-safe custom kernels is planned separately.
-        if(!sizeMapping.customKernelName.empty())
-            reject("custom kernel " + sizeMapping.customKernelName
+        // Gemm-From-Anywhere handwritten kernels are identified by customKernel
+        // (name set, generated false), not only sizeMapping.customKernelName.
+        if(!sizeMapping.customKernelName.empty()
+           || (!customKernel.name.empty() && !customKernel.generated))
+            reject("custom kernel "
+                   + (sizeMapping.customKernelName.empty() ? customKernel.name
+                                                          : sizeMapping.customKernelName)
                    + " is not supported under uniform summation order");
 
         if(sizeMapping.streamK != 0)
