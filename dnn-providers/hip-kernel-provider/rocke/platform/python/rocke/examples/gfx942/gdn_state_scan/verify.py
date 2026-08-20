@@ -30,6 +30,10 @@ from .spec import GdnStateScanSpec
 
 ATOL = RTOL = 5e-2
 
+#: Target magnitude of the cumulative gate over the whole sequence. Keeps
+#: exp(gate) in a range where the state decay is actually observable.
+GATE_TOTAL = 2.5
+
 _SIG = [
     {"name": "Kt", "type": "ptr<bf16,global>"},
     {"name": "Wt", "type": "ptr<bf16,global>"},
@@ -41,6 +45,7 @@ _SIG = [
     {"name": "Ht", "type": "ptr<f32,global>"},
     {"name": "T_val", "type": "i32"},
     {"name": "NT_val", "type": "i32"},
+    {"name": "N_val", "type": "i32"},
 ]
 
 #: (label, T, H, BV, NR_SPLIT, gate). ``T`` not a multiple of BT exercises the
@@ -64,7 +69,8 @@ CONFIGS = [
 
 
 def run_one(label, T, H, BV, NR, gate="gk", *, K=128, V=128, arch="gfx942",
-            seed=0, verbose=False, vgpr_form=False):
+            seed=0, verbose=False, vgpr_form=False, swizzle=True, prefetch=False,
+            buffer_desc=False, xcd_remap=False):
     torch.manual_seed(seed)
     BT = 64
     use_gk = gate == "gk"
@@ -72,7 +78,9 @@ def run_one(label, T, H, BV, NR, gate="gk", *, K=128, V=128, arch="gfx942",
     Hg = H // 2 if (label == "g-gqa2") else H
     spec = GdnStateScanSpec(K=K, V=V, BV=BV, H=H, Hg=Hg, NR_SPLIT=NR,
                             USE_G=not use_gk, USE_GK=use_gk, arch=arch,
-                            MFMA_VGPR_FORM=vgpr_form)
+                            MFMA_VGPR_FORM=vgpr_form, LDS_SWIZZLE=swizzle,
+                            PREFETCH=prefetch, BUFFER_DESC=buffer_desc,
+                            XCD_REMAP=xcd_remap)
     kern = build_k5(spec)
     art = compile_kernel(kern, isa=f"amdgcn-amd-amdhsa--{arch}")
 
@@ -83,12 +91,21 @@ def run_one(label, T, H, BV, NR, gate="gk", *, K=128, V=128, arch="gfx942",
     h0 = torch.randn(1, H, V, K, device=dev) * 0.01
     NT = -(-T // BT)
 
+    # Per-token step is scaled by 1/T so the CUMULATIVE gate stays observable.
+    #
+    # This matters more than it looks. With a fixed step (the obvious choice,
+    # and what the upstream harness uses) the cumulative gate reaches ~-70 by
+    # T=192 and ~-410 by T=1024, so exp(g_last) underflows to zero and the
+    # state-decay term contributes *nothing* — the tests pass without ever
+    # exercising it. Scaling keeps exp(gate) around 0.6-0.9, which actually
+    # tests the decay.
+    step = GATE_TOTAL / max(T, 1)
     if use_gk:
-        gate_t = (torch.randn(T, H, K, device=dev).abs() * -0.1).cumsum(0).contiguous()
+        gate_t = (torch.randn(T, H, K, device=dev).abs() * -step).cumsum(0).contiguous()
         gk_arg, g_arg = gate_t, None
     else:
         # head-major [H, T], non-positive, cumulative along T
-        gate_t = (torch.randn(H, T, device=dev).abs() * -0.5).cumsum(1).contiguous()
+        gate_t = (torch.randn(H, T, device=dev).abs() * -step).cumsum(1).contiguous()
         gk_arg, g_arg = None, gate_t
 
     h_ref, vn_ref, fs_ref = ref_chunk_gated_delta_rule_fwd_h(
@@ -101,7 +118,8 @@ def run_one(label, T, H, BV, NR, gate="gk", *, K=128, V=128, arch="gfx942",
 
     ln = KernelLauncher(hsaco=art.hsaco, kernel_name=kern.name, signature=_SIG)
     ln(values={"Kt": k, "Wt": w, "Ut": u, "Gate": gate_t, "H0": h0,
-               "Vnew": Vn, "Hout": Ho, "Ht": Ht, "T_val": T, "NT_val": NT},
+               "Vnew": Vn, "Hout": Ho, "Ht": Ht,
+               "T_val": T, "NT_val": NT, "N_val": 1},
        config=LaunchConfig(grid=spec.grid(H), block=(spec.block_threads, 1, 1),
                            stream=int(torch.cuda.current_stream().cuda_stream),
                            fence=True))
@@ -129,6 +147,14 @@ def main(argv=None) -> int:
     ap.add_argument("--arch", default="gfx942")
     ap.add_argument("--only", default=None, help="run a single config by label")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--prefetch", action="store_true",
+                    help="enable loop-carried prefetch (PERF_PLAN P5)")
+    ap.add_argument("--buffer-desc", action="store_true",
+                    help="global loads via bounds-checked descriptors (P6)")
+    ap.add_argument("--xcd-remap", action="store_true",
+                    help="chiplet remap of the flat block id (P7)")
+    ap.add_argument("--no-swizzle", action="store_true",
+                    help="disable the LDS XOR swizzle (padded fallback)")
     ap.add_argument("--vgpr-form", action="store_true",
                     help="force VGPR-form MFMA (PERF_PLAN P0)")
     args = ap.parse_args(argv)
@@ -144,7 +170,11 @@ def main(argv=None) -> int:
 
     print(f"gdn_state_scan verify — arch={args.arch}, tol atol={ATOL} rtol={RTOL}")
     results = [run_one(*c, arch=args.arch, verbose=args.verbose,
-                       vgpr_form=args.vgpr_form) for c in configs]
+                       vgpr_form=args.vgpr_form,
+                       swizzle=not args.no_swizzle,
+                       prefetch=args.prefetch,
+                       buffer_desc=args.buffer_desc,
+                       xcd_remap=args.xcd_remap) for c in configs]
     n_ok = sum(results)
     print(f"{n_ok}/{len(results)} passed")
     return 0 if n_ok == len(results) else 1
