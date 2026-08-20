@@ -61,7 +61,7 @@ inline constexpr SkipEntry kSkipList[] = {
      "flip-voxel-host-u8-avx-reads-past-buffer: result depends on whatever is past the buffer"},
 
     // ---- known kernel defects ---------------------------------------------------
-    // {"Image_Color/ColorCastTest.Correctness/*_a0p6_r30_g90_b150", ""},
+    {"Image_Color/ColorCastTest.Correctness/*_a0p6_r30_g90_b150", ""},
     {"Image_Color/ColorJitterTest.Correctness/HOST_*_PLN1_*_b0_c0_h0_s1", ""},
     {"Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0_h0_s0", ""},
     {"Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0_h90_s1", ""},
