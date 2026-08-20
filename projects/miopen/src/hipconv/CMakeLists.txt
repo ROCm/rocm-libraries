@@ -1,4 +1,35 @@
 cmake_minimum_required(VERSION 3.21)
+
+# Take the GPU list from GPU_TARGETS, which is what a ROCm consumer sets.
+#
+# Enabling the HIP language is what fills CMAKE_HIP_ARCHITECTURES, from the build
+# machine's own devices, so this has to precede project(). Entries that are not
+# offload targets are dropped: GPU_TARGETS also carries TheRock family names such as
+# gfx94X-dcgpu, and hipconv serves no generic target.
+if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
+    set(_hipconv_gpus "")
+    foreach(_hipconv_gpu IN LISTS GPU_TARGETS)
+        string(REGEX REPLACE ":.*" "" _hipconv_logical "${_hipconv_gpu}")
+        if(_hipconv_logical MATCHES "^gfx[0-9a-f]+$")
+            list(APPEND _hipconv_gpus "${_hipconv_gpu}")
+        else()
+            message(STATUS
+                "hipconv: skipping GPU_TARGETS entry '${_hipconv_gpu}' (not an offload target)")
+        endif()
+    endforeach()
+    if(_hipconv_gpus)
+        set(CMAKE_HIP_ARCHITECTURES "${_hipconv_gpus}")
+    else()
+        # gfx942 is hipconv's cdna3 target, which declares no kernels of its own, so it
+        # is the cheapest stand-in. Detecting the build machine's devices instead would
+        # compile kernels for GPUs this build was never asked to serve.
+        message(WARNING
+            "hipconv: no GPU_TARGETS entry is an offload target; building for gfx942. "
+            "Set CMAKE_HIP_ARCHITECTURES to name the GPUs hipconv should serve.")
+        set(CMAKE_HIP_ARCHITECTURES gfx942)
+    endif()
+endif()
+
 project(hipconv LANGUAGES CXX HIP)
 
 set(HIPCONV_NUM_SHARDS 8 CACHE STRING "Number of shards for parallel kernel compilation")

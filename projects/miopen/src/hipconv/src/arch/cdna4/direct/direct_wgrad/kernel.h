@@ -239,6 +239,40 @@ inline LaunchParams get_launch_params(const Config& cfg)
     return launch;
 }
 
+// The FlatGrid the launch will build, from the host side.
+//
+// Mirrors the construction in conv2d_direct_wgrad_impl. The launch is the persistent grid, whose
+// width is a constant, so this needs nothing the kernel discovers at run time.
+inline FlatGrid flat_grid(const Conv2dParams& par, const Config& cfg)
+{
+    return FlatGrid{.groups           = par.groups,
+                    .c_per_group      = par.channels_per_group(),
+                    .k_per_group      = par.filters_per_group(),
+                    .images           = par.n,
+                    .out_cols         = par.q,
+                    .block_c          = cfg.group_c(),
+                    .block_k          = cfg.group_k(),
+                    .groups_per_block = cfg.waves_g,
+                    .block_cols       = cfg.w_unfold(),
+                    .unfold_n         = cfg.unfold_n,
+                    .workgroups       = persistent::PERSISTENT_GRID_SIZE};
+}
+
+// fp32 roundings on the longest path from a product to one dW element.
+//
+// See docs/algorithms/direct/direct-wgrad-tolerance.md. The main loop runs over the S rows, so
+// RowSchedule::iterations() is the chain length.
+inline size_t accumulation_depth(const Conv2dParams& par, const Config& cfg)
+{
+    const RowSchedule sched{.kh            = cfg.kh,
+                            .prefetch_rows = cfg.prefetch_rows,
+                            .pad_h         = par.pad_h,
+                            .s_rows        = par.h,
+                            .row_buffers   = cfg.row_buffers()};
+    return flat_grid(par, cfg).accumulation_depth(
+        sched.iterations(), MFMA_K, bunnies::arch_cdna4::mfma_f16_f16_f32_exact_block);
+}
+
 template <Config cfg, DataType DT>
 __device__ void conv2d_direct_wgrad_impl(const ToType<DT>* __restrict__ in,
                                          const ToType<DT>* __restrict__ delta,
@@ -550,6 +584,12 @@ public:
     LaunchParams get_launch_params(const Conv2dParams&) const override
     {
         return direct_wgrad::get_launch_params(cfg_);
+    }
+
+    // Supplies the blocked accumulation depth; the default would use all N*P*Q products.
+    void get_tolerance(const Conv2dParams& par, float& atol, float& rtol) const override
+    {
+        get_mixed_precision_tolerance(par, accumulation_depth(par, cfg_), atol, rtol);
     }
 
 private:

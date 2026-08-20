@@ -1,20 +1,27 @@
-function(hipconv_have_at_least_one_gpu targets out)
+# Computes the intersection of TARGETS and CMAKE_HIP_ARCHITECTURES.
+#
+# The result takes its elements from CMAKE_HIP_ARCHITECTURES, so target features
+# survive, and is deduplicated because CMake populates CMAKE_HIP_ARCHITECTURES
+# from rocm_agent_enumerator, which emits one entry per installed device.
+function(hipconv_intersect_gpus targets out)
+    set(served "")
     foreach(gpu IN LISTS CMAKE_HIP_ARCHITECTURES)
         string(REGEX REPLACE ":.*" "" logical "${gpu}")
-        foreach(target IN LISTS targets)
-            if(logical STREQUAL target)
-                set(${out} true PARENT_SCOPE)
-                return()
-            endif()
-        endforeach()
+        if("${logical}" IN_LIST targets)
+            list(APPEND served "${gpu}")
+        endif()
     endforeach()
-    set(${out} false PARENT_SCOPE)
+    if(served)
+        list(REMOVE_DUPLICATES served)
+    endif()
+    set(${out} "${served}" PARENT_SCOPE)
 endfunction()
 
 # Build one architecture's kernel library.
 #
-# TARGETS is the GPUs this architecture serves, independent of what the build
-# targets. (NPI development is exempt: We only build for what we target.)
+# TARGETS is the set of GPUs this architecture serves. Every architecture is built
+# whatever GPUs the build targets, NPI excepted; only its device code varies with
+# them. See docs/multi-arch-convergence.md.
 #
 # Options go ahead of TARGETS, which has to be last. publish_to_miopen.sh's
 # embargo guard reads an embargoed arch's GPU names straight out of its call
@@ -26,11 +33,11 @@ function(hipconv_add_arch_lib name)
         message(FATAL_ERROR "hipconv_add_arch_lib(${name}): TARGETS is required")
     endif()
 
-    if(ARG_NPI)
-        hipconv_have_at_least_one_gpu("${ARG_TARGETS}" have_gpu)
-        if(NOT have_gpu)
-            return()
-        endif()
+    # NPI is dropped when the build serves none of its GPUs, because its registry
+    # entry must not exist. Every other architecture is built regardless.
+    hipconv_intersect_gpus("${ARG_TARGETS}" served_gpus)
+    if(NOT served_gpus AND ARG_NPI)
+        return()
     endif()
 
     set(HIPCONV_ARCH_NAME "${name}")
@@ -48,9 +55,9 @@ function(hipconv_add_arch_lib name)
     )
     # One .cpp per kernel header, globbed here.
     #
-    # Autoshard kernels (direct, direct_l1, depthwise_1d/2d_toeplitz) instead generate
-    # their per-config shard TUs into the build tree, so only their host helper .cpp
-    # is globbed.
+    # hipconv_autoshard generates the per-config shard .cpp files for direct,
+    # direct_l1 and depthwise_1d/2d_toeplitz into the build tree and adds them
+    # with target_sources, so the glob sees only their host helper .cpp.
     file(GLOB variant_sources CONFIGURE_DEPENDS
         "grouped/*.cpp"
         "depthwise/*.cpp"
@@ -67,16 +74,26 @@ function(hipconv_add_arch_lib name)
         "${HIPCONV_ROOT}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(hipconv_arch_${name} PRIVATE hip::device)
-    # No HIP_ARCHITECTURES (except for NPI): each arch compiles for whatever the build targets.
     # Position-independent so the objects can link into libMIOpen.so
     set_target_properties(hipconv_arch_${name} PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         HIPCONV_ARCH_NAME ${name}
         HIPCONV_ARCH_TARGETS "${ARG_TARGETS}"
     )
-    if(ARG_NPI)
+    # Emit device code only for the GPUs this architecture serves.
+    #
+    # Which sources compile never varies, so the host code is the same in every
+    # build and only the offload bundles differ, as RFC0008 sharding requires. An
+    # architecture the build serves no GPU for still needs a non-empty
+    # HIP_ARCHITECTURES; it takes the first GPU in the build and its bundles go
+    # unused. See docs/multi-arch-convergence.md.
+    set(offload_gpus "${served_gpus}")
+    if(NOT offload_gpus AND CMAKE_HIP_ARCHITECTURES)
+        list(GET CMAKE_HIP_ARCHITECTURES 0 offload_gpus)
+    endif()
+    if(offload_gpus)
         set_target_properties(hipconv_arch_${name} PROPERTIES
-            HIP_ARCHITECTURES "${ARG_TARGETS}"
+            HIP_ARCHITECTURES "${offload_gpus}"
         )
     endif()
     # The shipped kernels' disassembly is what hot_loop_check.py reads, so the collection
@@ -94,6 +111,10 @@ function(hipconv_autoshard)
         ""
         ${ARGN})
     set(target hipconv_arch_${ARG_ARCH})
+    # An NPI architecture the build serves no GPU for has no target to shard into.
+    if(NOT TARGET ${target})
+        return()
+    endif()
     set(autoshard_target hipconv_arch_${ARG_ARCH}_${ARG_NAMESPACE}_autoshard)
     set(autoshard_cpp ${ARG_NAMESPACE}_autoshard.cpp)
     set(autogen_target ${autoshard_target}_generate)

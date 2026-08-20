@@ -4,6 +4,7 @@
 #include "arch_registry.h"
 #include "hip_util.h"
 #include "launch_params.h"
+#include "tolerance.h"
 
 #include <array>
 #include <atomic>
@@ -206,6 +207,11 @@ void get_tolerance(ConvKernelHandle kernel, const Conv2dParams& par, float& atol
     if(!kernel)
         throw std::invalid_argument("null kernel");
     kernel->get_tolerance(par, atol, rtol);
+}
+
+void get_recursive_summation_tolerance(const Conv2dParams& par, float& atol, float& rtol)
+{
+    get_mixed_precision_tolerance(par, atol, rtol);
 }
 
 struct ConvLaunch::State

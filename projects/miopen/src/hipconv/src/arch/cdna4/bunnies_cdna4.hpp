@@ -11,7 +11,17 @@ namespace bunnies
 struct arch_cdna4
 {
     static constexpr int wave_size = 64;
-    using buffer_t                 = __amdgpu_buffer_rsrc_t;
+
+    // Products summed exactly within one f16xf16->f32 MFMA before it rounds.
+    //
+    // A lane's whole operand, so the cross-lane reduction is what rounds and one instruction costs
+    // K/block - 1 roundings rather than K - 1. Measured on gfx950, identical for fp16 and bf16
+    // operands; see docs/algorithms/direct/direct-wgrad-tolerance.md. The ISA documents neither
+    // this nor its uniformity across operand types, so other MFMA families (fp8, fp64) and other
+    // arches need their own measurement rather than inheriting this one.
+    static constexpr int mfma_f16_f16_f32_exact_block = 8;
+
+    using buffer_t = __amdgpu_buffer_rsrc_t;
 
     template <fpfmt Fmt, int Rows, int Cols, use Use>
     struct map_fun;

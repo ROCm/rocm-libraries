@@ -8,6 +8,7 @@
 
 #include "conv2d_params.hpp"
 #include "export.hpp"
+#include "tolerance.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -126,8 +127,21 @@ HIPCONV_API hipconvError_t launch(ConvKernelHandle kernel,
                                   void* workspace    = nullptr,
                                   hipStream_t stream = nullptr);
 
+// The error bound `kernel` admits on `par`: |kernel - exact| <= atol + rtol * conv(|A|,|B|).
+// rtol is TOLERANCE_UNAVAILABLE when no model applies; check has_tolerance(rtol) first.
 HIPCONV_API void
 get_tolerance(ConvKernelHandle kernel, const Conv2dParams& par, float& atol, float& rtol);
+
+// The tolerance for a kernel that accumulates by recursive summation over the whole contraction.
+//
+// Also the error a float CPU reference admits, since recursive summation is what one does. A
+// kernel reporting a tolerance below this has a blocked accumulation that such a reference is too
+// coarse to check, so the caller owes it a more accurate one; see
+// docs/algorithms/direct/direct-wgrad-tolerance.md.
+//
+// rtol is TOLERANCE_UNAVAILABLE past the depth where the model applies.
+HIPCONV_API void
+get_recursive_summation_tolerance(const Conv2dParams& par, float& atol, float& rtol);
 
 // A bound (kernel, params) pair ready to launch.
 //
@@ -154,6 +168,7 @@ public:
 
     // Cached at construction; no Conv2dParams argument needed.
     size_t workspace_size() const noexcept;
+    // rtol is TOLERANCE_UNAVAILABLE when no model applies; see the free get_tolerance above.
     void get_tolerance(float& atol, float& rtol) const;
 
     // The bound parameters and kernel handle, for inspection or printing.

@@ -113,6 +113,22 @@ struct FlatGrid
     // Entries per segment, rounded up, so the last segments can come out short or empty.
     constexpr int items_per_split() const { return divup(items(), splits()); }
 
+    // fp32 roundings on the longest path from a product to one dW element.
+    //
+    // The tolerance's accumulation depth, which the blocking puts orders of magnitude below the
+    // N*P*Q products summed. `iterations` is RowSchedule::iterations(); rows the padding leaves
+    // empty add zero and cannot round, so this is an upper bound. Derivation in
+    // docs/algorithms/direct/direct-wgrad-tolerance.md.
+    constexpr size_t accumulation_depth(int iterations, int mfma_k, int exact_block) const
+    {
+        // srcC is the accumulator's own step, so `chain` counts it, once per mma.
+        const size_t within_mfma = static_cast<size_t>(mfma_k / exact_block) - 1;
+        const size_t chain       = static_cast<size_t>(items_per_split()) * iterations;
+        const size_t staging     = 1;
+        const size_t atomics     = static_cast<size_t>(splits()) - 1;
+        return within_mfma + chain + staging + atomics;
+    }
+
     // ---- the decode ----
     //
     // Cell c takes tile c % tiles() and segment c / tiles(), so the workgroups co-active at any

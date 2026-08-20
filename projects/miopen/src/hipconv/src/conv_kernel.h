@@ -137,6 +137,8 @@ public:
     // family answers for its own tuning story.
     virtual float get_weighted_throughput_index(const hipconv::Conv2dParams& par) const = 0;
 
+    // The error bound this kernel admits on `par`, or TOLERANCE_UNAVAILABLE when none applies.
+    // A family whose accumulation is blocked overrides this to pass its own depth.
     virtual void get_tolerance(const hipconv::Conv2dParams& par, float& atol, float& rtol) const
     {
         hipconv::get_mixed_precision_tolerance(par, atol, rtol);

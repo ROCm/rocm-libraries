@@ -1,5 +1,7 @@
 #include "tolerance.h"
 
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace hipconv
@@ -49,6 +51,10 @@ size_t get_accumulation_depth(const Conv2dParams& par)
 //
 // where n is the accumulation depth, and conv(|A|,|B|) is the convolution
 // of the componentwise absolute values.
+//
+// n is the caller's `depth`, which is the number of fp32 roundings on the longest path from a
+// product to the result. Recursive summation makes that the whole contraction, but a blocked
+// accumulation makes it far smaller, and the analysis below is indifferent to which.
 // (Cf. Theorem 3.1 with u_bar = u_fma = u = u_high; here identical to Higham's classical estimate
 // of the error of the dot product given in "Accuracy and Stability of Numerical Algorithms".)
 //
@@ -109,14 +115,21 @@ size_t get_accumulation_depth(const Conv2dParams& par)
 // giving the final error bound
 // |C-Ctilde| = (3*u_low^2 + (1 + 2*u_low) gamma(3*n, u_high)) (1 + 2*u_low) conv(|A|, |B|)
 //
-void get_mixed_precision_tolerance(const Conv2dParams& par, float& atol, float& rtol)
+void get_mixed_precision_tolerance(const Conv2dParams& par, size_t depth, float& atol, float& rtol)
 {
     // u_high is the per-multiply error of the MFMA/WMMA pipeline. This is the fp32 accumulation
     // roundoff (2^{-24}).
-    auto u_high      = get_unit_roundoff(DataType::fp32);
-    auto n           = get_accumulation_depth(par);
-    const auto gamma = [](auto n, double u) { return n * u / (1.0 - n * u); };
-    atol             = 0.0f;
+    auto u_high = get_unit_roundoff(DataType::fp32);
+    auto n      = depth;
+    // gamma(n, u) = nu/(1 - nu) holds only under nu < 1, assumed throughout the paper cited above.
+    //
+    // Past that the denominator crosses zero and the expression turns negative. Infinity stands in,
+    // and the check after the branches turns it into TOLERANCE_UNAVAILABLE.
+    const auto gamma = [](auto n, double u) {
+        const double nu = static_cast<double>(n) * u;
+        return nu < 1.0 ? nu / (1.0 - nu) : std::numeric_limits<double>::infinity();
+    };
+    atol = 0.0f;
 
     if(par.input_type == DataType::tf32)
     {
@@ -134,6 +147,22 @@ void get_mixed_precision_tolerance(const Conv2dParams& par, float& atol, float& 
             rtol = u_low + rtol * (1 + u_low);
         }
     }
+
+    // Past the hypothesis there is no bound to report.
+    //
+    // A bound that survives it can still be too loose to check anything against, which is the
+    // caller's judgement to make; see docs/algorithms/direct/direct-wgrad-tolerance.md.
+    if(!std::isfinite(rtol))
+    {
+        rtol = TOLERANCE_UNAVAILABLE;
+    }
+}
+
+void get_mixed_precision_tolerance(const Conv2dParams& par, float& atol, float& rtol)
+{
+    // Recursive summation over the whole contraction, which is the depth a kernel has unless it
+    // says otherwise.
+    get_mixed_precision_tolerance(par, get_accumulation_depth(par), atol, rtol);
 }
 
 } // namespace hipconv
