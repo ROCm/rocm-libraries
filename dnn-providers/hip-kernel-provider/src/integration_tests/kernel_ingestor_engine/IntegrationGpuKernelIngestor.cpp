@@ -26,6 +26,7 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
@@ -172,6 +173,16 @@ struct ExecuteCase
     std::string name;
     int iterations;
 };
+
+/// How many times the composite plan has resolved a winner, counted from the plugin's
+/// selection log. BenchmarkPlan emits exactly one of these per sampling sweep.
+size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& recorder)
+{
+    const auto logs = recorder.getRecordedLogs();
+    return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [](const auto& log) {
+        return log.message.find("benchmarking selected kernel") != std::string::npos;
+    }));
+}
 
 } // namespace
 
@@ -425,13 +436,29 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 // global.benchmarking: the composite plan built when the knob is set
 
 /// Drives global.benchmarking=1 through the frontend against the shipped pointwise
-/// pack, verifying the numerical result against the CPU reference. Asserts correctness
-/// only, never which candidate won the internal timing: the two block-size-64/256
-/// FLOAT candidates surviving knob filtering for this graph may be indistinguishable
-/// within noise, and either winner -- or the ranked-front fallback on an all-unusable
-/// sampling pass -- is correct so long as it produces the right answer.
+/// pack, verifying the numerical result against the CPU reference and confirming from
+/// the plugin's own logs that the composite plan actually ran a sampling sweep and
+/// resolved a winner once.
+///
+/// Which candidate wins is deliberately not asserted: the two block-size-64/256 FLOAT
+/// candidates surviving knob filtering for this graph may be indistinguishable within
+/// noise, and either winner is correct so long as it produces the right answer. What
+/// must hold is that benchmarking happened at all -- otherwise the case would pass
+/// identically with the feature removed.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 {
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    ASSERT_EQ(
+        hipdnn_frontend::setUserLogCallback(
+            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+            HIPDNN_SEV_INFO,
+            hipdnn_frontend::LogCallbackMode::SYNC,
+            this)
+            .code,
+        ErrorCode::OK);
+    ASSERT_EQ(hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO).code, ErrorCode::OK);
+
     auto graph = buildPointwiseAddGraph();
 
     std::vector<KnobSetting> knobSettings;
@@ -442,11 +469,43 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
+    // buildPlan() took the benchmarking branch rather than the single-plan one, and it
+    // had more than one candidate to choose between: a one-candidate sweep would prove
+    // nothing about selection.
+    EXPECT_TRUE(recorder.hasLogContaining("will benchmark"))
+        << "buildPlan() did not take the benchmarking branch. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("will benchmark 1 candidate(s)"))
+        << "expected more than one candidate to benchmark. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
     // The first execute() samples every candidate; the second reuses the cached winner.
     // Both must produce the correct result, and executeAndVerify() re-randomizes and
     // re-checks each time.
     executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+
+    EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel"))
+        << "the sampling sweep did not resolve a winner. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
+    const size_t selectionsAfterFirstExecute = countSelectionLogs(recorder);
+    ASSERT_EQ(selectionsAfterFirstExecute, 1U)
+        << "expected exactly one selection sweep. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
     executeAndVerify(*graph, workspace.get(), /*seed=*/1);
+
+    // The winner is resolved once for the plan's life: a second execute() must reuse it
+    // rather than re-sample.
+    EXPECT_EQ(countSelectionLogs(recorder), selectionsAfterFirstExecute)
+        << "the second execute() re-sampled instead of reusing the winner. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
+    static_cast<void>(hipdnn_frontend::setUserLogCallback(
+        hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+        HIPDNN_SEV_OFF,
+        hipdnn_frontend::LogCallbackMode::SYNC,
+        this));
 }
 
 TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)

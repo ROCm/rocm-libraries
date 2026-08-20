@@ -5,9 +5,11 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -154,12 +156,13 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 
 // ---------------------------------------------------------------------------
 // BenchmarkPlan's own unit: construction, resolution, delegation. These construct
-// BenchmarkPlan directly rather than through buildPlan().
+// BenchmarkPlan directly rather than through buildPlan(), and inject a deterministic
+// timer, so selection is provable without a device.
 // ---------------------------------------------------------------------------
 
 /// A handle satisfying HasGetStream, which BenchmarkPlan's constructor static_asserts.
-/// StubHandle (used by the oracle above) has no getStream(). Every case below is
-/// hardware-independent, so the null stream's behaviour never matters.
+/// StubHandle (used by the oracle above) has no getStream(). The injected timer never
+/// records an event, so the null stream's behaviour never matters.
 struct BenchmarkTestHandle
 {
     // Non-static: this models a real handle's instance accessor, which is what
@@ -173,9 +176,7 @@ struct BenchmarkTestHandle
 
 /// A minimal IPlan double recording every execute() call's arguments and count.
 /// Throws on the first @p throwForCalls invocations (default 0, never throws), then
-/// succeeds and counts a "launch". With BENCHMARK_WARMUP_RUNS == 1, a plan that throws
-/// on call 1 is caught by sampleCandidate()'s try/catch before the timed loop
-/// constructs a hipEvent, keeping the all-unusable case hardware-independent.
+/// succeeds and counts a "launch".
 class FakePlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
 {
 public:
@@ -204,11 +205,6 @@ public:
             throw std::runtime_error("FakePlan: simulated failure");
         }
         ++_launchCount;
-    }
-
-    int callCount() const
-    {
-        return _callCount;
     }
 
     int launchCount() const
@@ -243,6 +239,32 @@ private:
 
 using TestBenchmarkPlan = BenchmarkPlan<BenchmarkTestHandle>;
 
+/// The launch count a candidate accrues from one sampling pass: the untimed warmups
+/// plus the timed iterations. The winner adds one more for the delegated execute.
+constexpr int SAMPLING_LAUNCHES = BENCHMARK_WARMUP_RUNS + BENCHMARK_ITERATIONS;
+
+/// A timer returning a fixed duration per sub-plan, forwarding the real execute() so
+/// launch counts still accrue. A plan absent from @p durations is untimeable, which
+/// scores it unusable.
+TestBenchmarkPlan::Timer
+    fixedTimer(std::map<const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>*, double> durations)
+{
+    return [durations
+            = std::move(durations)](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+                                    const BenchmarkTestHandle& handle,
+                                    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                    uint32_t numDeviceBuffers,
+                                    void* workspace) -> std::optional<double> {
+        const auto found = durations.find(&plan);
+        if(found == durations.end())
+        {
+            return std::nullopt;
+        }
+        plan.execute(handle, deviceBuffers, numDeviceBuffers, workspace);
+        return found->second;
+    };
+}
+
 TEST(TestIngestorBenchmarkPlan, GetWorkspaceSizeIsTheMaxAcrossSubPlans)
 {
     std::vector<TestBenchmarkPlan::Candidate> candidates;
@@ -271,11 +293,98 @@ TEST(TestIngestorBenchmarkPlan, ConstructorThrowsInternalErrorOnAnEmptyCandidate
     }
 }
 
+/// The fastest candidate wins and takes the delegated execute; the loser is sampled and
+/// then never touched again. The two exact counts also pin BENCHMARK_WARMUP_RUNS and
+/// BENCHMARK_ITERATIONS: both candidates accrue exactly one sampling pass.
+TEST(TestIngestorBenchmarkPlan, TheFastestCandidateWinsAndOnlyItReceivesTheDelegatedExecute)
+{
+    auto slow = std::make_unique<FakePlan>(64);
+    auto fast = std::make_unique<FakePlan>(64);
+    const auto* slowRaw = slow.get();
+    const auto* fastRaw = fast.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(slow)});
+    candidates.push_back({testId(0x02), std::move(fast)});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, fixedTimer({{slowRaw, 5.0}, {fastRaw, 2.0}}));
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    EXPECT_EQ(fastRaw->launchCount(), SAMPLING_LAUNCHES + 1);
+    EXPECT_EQ(slowRaw->launchCount(), SAMPLING_LAUNCHES);
+}
+
+/// The winner is the one with the fastest single sample, not the fastest average: a
+/// descending sequence bottoming out below a rival's constant time must win even though
+/// its mean is worse.
+TEST(TestIngestorBenchmarkPlan, TheReductionKeepsTheMinimumSampleNotTheMean)
+{
+    auto descending = std::make_unique<FakePlan>(64);
+    auto steady = std::make_unique<FakePlan>(64);
+    const auto* descendingRaw = descending.get();
+    const auto* steadyRaw = steady.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(descending)});
+    candidates.push_back({testId(0x02), std::move(steady)});
+
+    // descending: 10, 9, ... down to 10 - (BENCHMARK_ITERATIONS - 1); steady: a constant
+    // strictly between that minimum and the descending mean, so min and mean disagree.
+    double nextSample = 10.0;
+    const TestBenchmarkPlan::Timer timer
+        = [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+              const BenchmarkTestHandle& planHandle,
+              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+              uint32_t numDeviceBuffers,
+              void* workspace) -> std::optional<double> {
+        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        if(&plan == steadyRaw)
+        {
+            return 8.0;
+        }
+        return nextSample--;
+    };
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle, timer);
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    // descending's samples are 10..4 (min 4, mean 7); steady's are all 8. A mean
+    // reduction would pick steady.
+    EXPECT_EQ(descendingRaw->launchCount(), SAMPLING_LAUNCHES + 1);
+    EXPECT_EQ(steadyRaw->launchCount(), SAMPLING_LAUNCHES);
+}
+
+/// A candidate the timer cannot time is scored unusable and abandoned mid-sweep, after
+/// its warmup and exactly one failed timed iteration.
+TEST(TestIngestorBenchmarkPlan, AnUntimeableCandidateIsScoredUnusableAndLosesToATimedOne)
+{
+    auto untimeable = std::make_unique<FakePlan>(64);
+    auto timed = std::make_unique<FakePlan>(64);
+    const auto* untimeableRaw = untimeable.get();
+    const auto* timedRaw = timed.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(untimeable)});
+    candidates.push_back({testId(0x02), std::move(timed)});
+
+    const BenchmarkTestHandle handle;
+    // Only the second candidate has a duration, so the first returns nullopt.
+    const TestBenchmarkPlan plan(std::move(candidates), handle, fixedTimer({{timedRaw, 9.0}}));
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    // The untimeable candidate ran its warmups, then bailed out of the timed loop
+    // without launching: the timer returns nullopt before forwarding execute().
+    EXPECT_EQ(untimeableRaw->launchCount(), BENCHMARK_WARMUP_RUNS);
+    EXPECT_EQ(timedRaw->launchCount(), SAMPLING_LAUNCHES + 1);
+}
+
 /// A one-candidate composite still samples before delegating to the only candidate.
-/// The absolute call count is not asserted: it depends on whether hipEvent creation
-/// succeeds here, which decides whether the timed loop runs. What must hold either way
-/// is that the sole candidate received the delegated execute, and that a second
-/// execute() adds exactly one more launch rather than re-sampling.
 TEST(TestIngestorBenchmarkPlan, ASingleCandidateCompositeExecutesThatOne)
 {
     auto sub = std::make_unique<FakePlan>(64);
@@ -285,45 +394,42 @@ TEST(TestIngestorBenchmarkPlan, ASingleCandidateCompositeExecutesThatOne)
     candidates.push_back({testId(0x01), std::move(sub)});
 
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(std::move(candidates), handle);
+    const TestBenchmarkPlan plan(std::move(candidates), handle, fixedTimer({{subRaw, 1.0}}));
 
     plan.execute(handle, nullptr, 0, nullptr);
-    const int afterFirst = subRaw->launchCount();
-    EXPECT_GE(afterFirst, 1);
+    EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 1);
 
     plan.execute(handle, nullptr, 0, nullptr);
-    EXPECT_EQ(subRaw->launchCount(), afterFirst + 1);
+    EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 2);
 }
 
-/// A second execute() adds exactly one more launch to whichever candidate won, never
-/// re-running the sampling pass. The first call's launch count varies with HIP device
-/// availability and is deliberately not asserted.
+/// A second execute() adds exactly one more launch to the winner and none to the loser:
+/// the sampling sweep runs once for the plan's life.
 TEST(TestIngestorBenchmarkPlan, TheWinnerIsResolvedOnceAcrossRepeatedExecuteCalls)
 {
-    auto first = std::make_unique<FakePlan>(64);
-    auto second = std::make_unique<FakePlan>(64);
-    const auto* firstRaw = first.get();
-    const auto* secondRaw = second.get();
+    auto slow = std::make_unique<FakePlan>(64);
+    auto fast = std::make_unique<FakePlan>(64);
+    const auto* slowRaw = slow.get();
+    const auto* fastRaw = fast.get();
 
     std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back({testId(0x01), std::move(first)});
-    candidates.push_back({testId(0x02), std::move(second)});
+    candidates.push_back({testId(0x01), std::move(slow)});
+    candidates.push_back({testId(0x02), std::move(fast)});
 
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(std::move(candidates), handle);
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, fixedTimer({{slowRaw, 5.0}, {fastRaw, 2.0}}));
 
     plan.execute(handle, nullptr, 0, nullptr);
-    const int totalLaunchesAfterFirstCall = firstRaw->launchCount() + secondRaw->launchCount();
-    ASSERT_GE(totalLaunchesAfterFirstCall, 1) << "the winner must have launched at least once";
-
     plan.execute(handle, nullptr, 0, nullptr);
-    const int totalLaunchesAfterSecondCall = firstRaw->launchCount() + secondRaw->launchCount();
+    plan.execute(handle, nullptr, 0, nullptr);
 
-    EXPECT_EQ(totalLaunchesAfterSecondCall - totalLaunchesAfterFirstCall, 1);
+    EXPECT_EQ(fastRaw->launchCount(), SAMPLING_LAUNCHES + 3);
+    EXPECT_EQ(slowRaw->launchCount(), SAMPLING_LAUNCHES);
 }
 
 /// Every candidate throws on its first invocation, caught inside sampleCandidate()
-/// before any hipEvent is touched. resolveChosen() falls back to index 0 rather than
+/// before the timer is reached. resolveChosen() falls back to index 0 rather than
 /// propagating, and the delegated call that follows succeeds, so execute() must not
 /// throw.
 TEST(TestIngestorBenchmarkPlan, AllCandidatesUnusableStillDelegatesToCandidateZero)
@@ -338,12 +444,14 @@ TEST(TestIngestorBenchmarkPlan, AllCandidatesUnusableStillDelegatesToCandidateZe
     candidates.push_back({testId(0x02), std::move(second)});
 
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(std::move(candidates), handle);
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, fixedTimer({{firstRaw, 5.0}, {secondRaw, 2.0}}));
 
     EXPECT_NO_THROW(plan.execute(handle, nullptr, 0, nullptr));
 
     // Candidate 0 is the documented fallback: its second call (the real delegate,
-    // after its first sampling call threw) must have launched.
+    // after its first sampling call threw) must have launched. Candidate 1 is faster
+    // by the timer, which never runs for a candidate that throws during warmup.
     EXPECT_EQ(firstRaw->launchCount(), 1);
     EXPECT_EQ(secondRaw->launchCount(), 0);
 }
@@ -357,7 +465,7 @@ TEST(TestIngestorBenchmarkPlan, BuffersAndWorkspaceArriveAtTheChosenSubPlanUnmod
     candidates.push_back({testId(0x01), std::move(sub)});
 
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(std::move(candidates), handle);
+    const TestBenchmarkPlan plan(std::move(candidates), handle, fixedTimer({{subRaw, 1.0}}));
 
     const std::array<hipdnnPluginDeviceBuffer_t, 1> buffers{
         {{/*uid=*/9, /*ptr=*/reinterpret_cast<void*>(0x5678)}}};

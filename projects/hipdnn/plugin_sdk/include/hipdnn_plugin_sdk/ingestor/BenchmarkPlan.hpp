@@ -6,9 +6,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -49,6 +51,19 @@ inline hipdnn_data_sdk::utilities::ScopedResource<hipEvent_t> createScopedHipEve
     return {event, [](hipEvent_t handle) { static_cast<void>(hipEventDestroy(handle)); }};
 }
 
+/// The event pair one timer records into. Created once and re-recorded on every sample:
+/// hipEventRecord() overwrites prior state.
+struct HipEventPair
+{
+    hipdnn_data_sdk::utilities::ScopedResource<hipEvent_t> start = createScopedHipEvent();
+    hipdnn_data_sdk::utilities::ScopedResource<hipEvent_t> stop = createScopedHipEvent();
+
+    bool isUsable() const
+    {
+        return !start.isEmpty() && !stop.isEmpty();
+    }
+};
+
 } // namespace detail
 
 /// An IPlan owning one GenericPlan per knob-filtered catalog entry. Times each candidate
@@ -56,25 +71,37 @@ inline hipdnn_data_sdk::utilities::ScopedResource<hipEvent_t> createScopedHipEve
 /// rather than widening it, leaving single-kernel construction, workspace query, and the
 /// null-prepared check unchanged.
 ///
-/// Timing goes through IPlan::execute() only, bracketed by HIP events on the handle's
-/// stream; this class touches no dispatcher, PreparedDispatch, or HIP launch API.
+/// Timing goes through IPlan::execute() only; this class touches no dispatcher,
+/// PreparedDispatch, or HIP launch API.
 template <typename THandle>
 class BenchmarkPlan : public IPlan<THandle>
 {
 public:
-    /// A sub-plan and the kernel it was built for. IPlan has no kernel accessor, so the
-    /// id rides alongside for the selection log.
+    /// A sub-plan and the kernel it was built for. The vector is typed on IPlan rather
+    /// than GenericPlan so tests can substitute doubles, and IPlan has no kernel
+    /// accessor, so the id rides alongside for the selection log.
     struct Candidate
     {
         DescriptorId kernelId;
         std::unique_ptr<IPlan<THandle>> plan;
     };
 
+    /// Times one execute() of a candidate, returning its elapsed milliseconds or nullopt
+    /// if the launch could not be timed. Defaults to HIP events on the handle's stream;
+    /// tests substitute a deterministic timer so selection is provable without a device.
+    using Timer = std::function<std::optional<double>(
+        const IPlan<THandle>&, const THandle&, const hipdnnPluginDeviceBuffer_t*, uint32_t, void*)>;
+
     /// @param handle Sizes every sub-plan's workspace requirement; execute() uses the
     ///        handle its own caller passes.
+    /// @param timer Overrides the default HIP-event timer. Only ever called from the
+    ///        sampling sweep, which holds _mutex, so it need not be thread-safe.
     /// @throws HipdnnPluginException(INTERNAL_ERROR) if @p candidates is empty.
-    BenchmarkPlan(std::vector<Candidate> candidates, const THandle& handle)
+    explicit BenchmarkPlan(std::vector<Candidate> candidates,
+                           const THandle& handle,
+                           Timer timer = {})
         : _candidates(std::move(candidates))
+        , _timer(timer ? std::move(timer) : makeHipEventTimer())
     {
         static_assert(HasGetStream<THandle>::value,
                       "BenchmarkPlan requires THandle to have a 'hipStream_t getStream() const' "
@@ -107,11 +134,65 @@ public:
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override
     {
-        const size_t chosen = resolveChosen(handle, deviceBuffers, numDeviceBuffers, workspace);
+        // Post-resolution reads take no lock: _chosen never changes once written, so the
+        // steady-state path the feature exists for has no serialization point.
+        size_t chosen = _chosen.load(std::memory_order_acquire);
+        if(chosen == NOT_RESOLVED)
+        {
+            chosen = resolveChosen(handle, deviceBuffers, numDeviceBuffers, workspace);
+        }
         _candidates[chosen].plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
     }
 
 private:
+    static constexpr size_t NOT_RESOLVED = std::numeric_limits<size_t>::max();
+
+    /// The default timer: HIP events on handle.getStream() rather than the null stream,
+    /// so a plan on a non-default stream still measures its own work. The event pair is
+    /// created on first use and reused for every subsequent sample.
+    static Timer makeHipEventTimer()
+    {
+        auto events = std::make_shared<std::optional<detail::HipEventPair>>();
+        return [events](const IPlan<THandle>& plan,
+                        const THandle& handle,
+                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers,
+                        void* workspace) -> std::optional<double> {
+            if(!events->has_value())
+            {
+                events->emplace();
+            }
+            if(!(*events)->isUsable())
+            {
+                return std::nullopt;
+            }
+
+            const auto start = (*events)->start.get();
+            const auto stop = (*events)->stop.get();
+            const auto stream = handle.getStream();
+
+            if(hipEventRecord(start, stream) != hipSuccess)
+            {
+                return std::nullopt;
+            }
+
+            plan.execute(handle, deviceBuffers, numDeviceBuffers, workspace);
+
+            if(hipEventRecord(stop, stream) != hipSuccess
+               || hipEventSynchronize(stop) != hipSuccess)
+            {
+                return std::nullopt;
+            }
+
+            float elapsedMs = 0.0F;
+            if(hipEventElapsedTime(&elapsedMs, start, stop) != hipSuccess)
+            {
+                return std::nullopt;
+            }
+            return static_cast<double>(elapsedMs);
+        };
+    }
+
     /// Resolves _chosen on the first call and caches it. The lock spans the whole sweep,
     /// so a second thread racing the first execute() blocks instead of sampling against
     /// the first thread's buffers.
@@ -121,9 +202,10 @@ private:
                          void* workspace) const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        if(_chosen.has_value())
+        if(const size_t resolved = _chosen.load(std::memory_order_relaxed);
+           resolved != NOT_RESOLVED)
         {
-            return *_chosen;
+            return resolved;
         }
 
         size_t best = 0;
@@ -160,13 +242,13 @@ private:
                                    << " ms among " << _candidates.size() << " candidate(s)");
         }
 
-        _chosen = best;
+        _chosen.store(best, std::memory_order_release);
         return best;
     }
 
     /// The fastest of BENCHMARK_ITERATIONS timed executes, after BENCHMARK_WARMUP_RUNS
-    /// untimed ones. Returns nullopt if the candidate threw or a HIP event call failed;
-    /// both score the candidate unusable rather than throwing out of resolveChosen().
+    /// untimed ones. Returns nullopt if the candidate threw or could not be timed; both
+    /// score the candidate unusable rather than throwing out of resolveChosen().
     std::optional<double> sampleCandidate(size_t index,
                                           const THandle& handle,
                                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -185,7 +267,7 @@ private:
             for(int iteration = 0; iteration < BENCHMARK_ITERATIONS; ++iteration)
             {
                 const auto sampleMs
-                    = timeOneExecute(candidate, handle, deviceBuffers, numDeviceBuffers, workspace);
+                    = _timer(*candidate.plan, handle, deviceBuffers, numDeviceBuffers, workspace);
                 if(!sampleMs.has_value())
                 {
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
@@ -206,46 +288,10 @@ private:
         }
     }
 
-    /// One timed execute(), bracketed by HIP events on handle.getStream() rather than the
-    /// null stream, so a plan on a non-default stream still measures its own work.
-    std::optional<double> timeOneExecute(const Candidate& candidate,
-                                         const THandle& handle,
-                                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                         uint32_t numDeviceBuffers,
-                                         void* workspace) const
-    {
-        const auto start = detail::createScopedHipEvent();
-        const auto stop = detail::createScopedHipEvent();
-        if(start.isEmpty() || stop.isEmpty())
-        {
-            return std::nullopt;
-        }
-
-        const auto stream = handle.getStream();
-        if(hipEventRecord(start.get(), stream) != hipSuccess)
-        {
-            return std::nullopt;
-        }
-
-        candidate.plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
-
-        if(hipEventRecord(stop.get(), stream) != hipSuccess
-           || hipEventSynchronize(stop.get()) != hipSuccess)
-        {
-            return std::nullopt;
-        }
-
-        float elapsedMs = 0.0F;
-        if(hipEventElapsedTime(&elapsedMs, start.get(), stop.get()) != hipSuccess)
-        {
-            return std::nullopt;
-        }
-        return static_cast<double>(elapsedMs);
-    }
-
     std::vector<Candidate> _candidates;
+    Timer _timer;
     size_t _workspaceBytes = 0;
-    mutable std::optional<size_t> _chosen;
+    mutable std::atomic<size_t> _chosen{NOT_RESOLVED};
     mutable std::mutex _mutex;
 };
 

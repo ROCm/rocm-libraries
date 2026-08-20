@@ -65,9 +65,9 @@ void initializeMiopenSettings(
     // Applied outside the isValid() branch and after the knob: an unset override leaves
     // the above untouched, =1 forces on even for an invalid config (the plain-execute
     // path), and =0 forces off a knob-enabled run.
-    if(const auto override = hipdnn_plugin_sdk::benchmarkingOverrideFromEnv())
+    if(const auto forced = hipdnn_plugin_sdk::benchmarkingOverrideFromEnv())
     {
-        executionSettings.setBenchmarkingEnabled(*override);
+        executionSettings.setBenchmarkingEnabled(*forced);
     }
 }
 
