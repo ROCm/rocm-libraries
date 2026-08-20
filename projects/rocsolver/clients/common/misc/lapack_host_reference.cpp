@@ -1867,6 +1867,51 @@ void zhetrd_(char* uplo,
              int* size_w,
              int* info);
 
+void ssytrd_sy2sb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   float* A,
+                   int* lda,
+                   float* Aband,
+                   int* ldab,
+                   float* tau,
+                   float* work,
+                   int* lwork,
+                   int* info);
+void dsytrd_sy2sb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   double* A,
+                   int* lda,
+                   double* Aband,
+                   int* ldab,
+                   double* tau,
+                   double* work,
+                   int* lwork,
+                   int* info);
+void chetrd_he2hb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   rocblas_float_complex* A,
+                   int* lda,
+                   rocblas_float_complex* Aband,
+                   int* ldab,
+                   rocblas_float_complex* tau,
+                   rocblas_float_complex* work,
+                   int* lwork,
+                   int* info);
+void zhetrd_he2hb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   rocblas_double_complex* A,
+                   int* lda,
+                   rocblas_double_complex* Aband,
+                   int* ldab,
+                   rocblas_double_complex* tau,
+                   rocblas_double_complex* work,
+                   int* lwork,
+                   int* info);
+
 void ssytd2_(char* uplo, int* n, float* A, int* lda, float* D, float* E, float* tau, int* info);
 void dsytd2_(char* uplo, int* n, double* A, int* lda, double* D, double* E, double* tau, int* info);
 void chetd2_(char* uplo,
@@ -6992,6 +7037,75 @@ void cpu_sytrd_hetrd<rocblas_double_complex, double>(rocblas_fill uplo,
     int info;
     char uploC = rocblas2char_fill(uplo);
     zhetrd_(&uploC, &n, A, &lda, D, E, tau, work, &size_w, &info);
+}
+
+// sy2sb & he2hb
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     float* A,
+                     rocblas_int lda,
+                     float* Aband,
+                     rocblas_int ldab,
+                     float* tau,
+                     float* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    ssytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     double* A,
+                     rocblas_int lda,
+                     double* Aband,
+                     rocblas_int ldab,
+                     double* tau,
+                     double* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    dsytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     rocblas_float_complex* A,
+                     rocblas_int lda,
+                     rocblas_float_complex* Aband,
+                     rocblas_int ldab,
+                     rocblas_float_complex* tau,
+                     rocblas_float_complex* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    chetrd_he2hb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     rocblas_double_complex* A,
+                     rocblas_int lda,
+                     rocblas_double_complex* Aband,
+                     rocblas_int ldab,
+                     rocblas_double_complex* tau,
+                     rocblas_double_complex* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    zhetrd_he2hb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
 // sytd2 & hetd2
