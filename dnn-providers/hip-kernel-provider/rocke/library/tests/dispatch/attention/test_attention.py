@@ -62,6 +62,57 @@ class TestAttentionDispatch(unittest.TestCase):
         self.assertEqual(r.spec.path, "3d")
         self.assertEqual(r.candidate.spec_id, "unified_3d")
 
+    def test_fp8_decode_gfx950_ocp_routes_3d(self):
+        # bf16 compute + OCP fp8 K/V decode on gfx950 (OCP-native) -> 3d fp8 path.
+        r = dispatch_attention(
+            _attn(
+                arch="gfx950",
+                batch=1,
+                nhead_q=16,
+                nhead_k=16,
+                seqlen_q=1,
+                seqlen_k=8192,
+                use_fp8=True,
+                fp8_fnuz=False,
+            )
+        )
+        self.assertEqual(r.spec.path, "3d")
+        self.assertEqual(r.candidate.spec_id, "unified_3d")
+
+    def test_fp8_decode_gfx942_fnuz_routes_3d(self):
+        # bf16 compute + fnuz fp8 K/V decode on gfx942 (fnuz-native) -> 3d fp8 path.
+        r = dispatch_attention(
+            _attn(
+                arch="gfx942",
+                batch=1,
+                nhead_q=16,
+                nhead_k=16,
+                seqlen_q=1,
+                seqlen_k=8192,
+                use_fp8=True,
+                fp8_fnuz=True,
+            )
+        )
+        self.assertEqual(r.spec.path, "3d")
+        self.assertEqual(r.candidate.spec_id, "unified_3d")
+
+    def test_fp8_decode_rejects_format_arch_mismatch(self):
+        # OCP fp8 on gfx942 and fnuz fp8 on gfx950 both mis-decode -> no candidate.
+        for arch, fnuz in (("gfx942", False), ("gfx950", True)):
+            with self.assertRaises(ValueError):
+                dispatch_attention(
+                    _attn(
+                        arch=arch,
+                        batch=1,
+                        nhead_q=16,
+                        nhead_k=16,
+                        seqlen_q=1,
+                        seqlen_k=8192,
+                        use_fp8=True,
+                        fp8_fnuz=fnuz,
+                    )
+                )
+
     def test_large_grid_routes_2d(self):
         # many seqs/heads -> num_2d > target -> 2d even with long kv.
         r = dispatch_attention(

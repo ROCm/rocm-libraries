@@ -91,6 +91,8 @@ class AttentionRequest(OperatorRequest):
     dtype: str = "fp16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    use_fp8: bool = False
+    fp8_fnuz: bool = False
     # --- gfx950 attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the persistent ~970-TFLOPS prefill path for large Sq:
@@ -126,6 +128,8 @@ class AttentionRequest(OperatorRequest):
             active.add("sliding_window")
         if bool(self.use_sinks):
             active.add("sinks")
+        if bool(self.use_fp8):
+            active.add("fp8")
         return frozenset(active)
 
 
@@ -228,6 +232,8 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         dtype=req.dtype.lower(),
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
+        use_fp8=bool(req.use_fp8),
+        fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=_resolve_num_cus(req),
         target_ctas=int(req.target_ctas),
     )
