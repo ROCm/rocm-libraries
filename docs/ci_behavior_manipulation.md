@@ -52,11 +52,11 @@ Adding a new flag therefore takes two pull requests, in order:
 
 There is no naming convention and none is enforced. `ci:<project>-<feature>` is suggested for new labels, matching the existing style, but nothing checks it. Avoid bare `ci:` names that collide with the already-crowded namespace (`ci:asan`, `ci:ccache`, `ci:smoke`, `ci:debug`, `ci:gpu:gfx942`, `ci:testonly`).
 
-Both multi-arch workflows read the same map, but each only reacts to labels on the events it subscribes to. Adding a mapped label starts a fresh run that builds with the flag on; removing it starts one that builds with the flag off. Adding or removing any *unmapped* label runs the short `Resolve label-gated cmake flags` job, which reports `label_relevant=false`, and everything expensive is skipped — nothing about the build configuration changed, so there is nothing to rebuild.
-
-A label already applied keeps taking effect on later pushes. On a `synchronize`, `opened` or `reopened` event the gate does not apply and the full label set of the pull request is still consulted, so a sticky label still injects its flag.
+Both multi-arch workflows read the same map, but each only reacts to labels on the events it subscribes to. Adding a mapped label starts a fresh run that builds with the flag on; removing it starts one that builds with the flag off. What decides the configuration is the set of labels on the pull request at the moment the run is triggered — never which label happened to change — so a label already applied keeps taking effect on later pushes, and removing one needs no special handling because it is simply absent from the next run's label set.
 
 ### Caveats
+
+**Any label change restarts the multi-arch presubmit, mapped or not.** These workflows cancel a pull request's in-progress run whenever a new one starts, and that cancellation happens before anything can inspect the label. Skipping the rebuild for an unmapped label would therefore not save the build — it was already killed — it would only leave the pull request with no build until the next push. So every label event rebuilds, and one that changes no flag rebuilds the same configuration. Batch label edits while a build is running if you care about the wasted runner time.
 
 **The gated build replaces the normal one.** A labeled pull request has no green flag-off signal, because both configurations would collide in the same artifact store. If you need the baseline too, put it in a second pull request — separate runs are namespaced by run ID and never collide.
 

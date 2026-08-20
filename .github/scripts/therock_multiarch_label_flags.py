@@ -10,17 +10,23 @@ cmake command line for every build stage. This script builds that JSON instead
 of the workflows hardcoding it, adding ``extra_cmake_options`` when the pull
 request carries a label listed in ``LABEL_GATED_THEROCK_FLAGS``.
 
-Two independent questions are answered here, and conflating them is the easiest
-way to get this wrong:
+One question is answered here: *does the pull request carry a gated label right
+now?* Membership in ``LABEL_GATED_THEROCK_FLAGS``, and nothing else. The full
+label set is consulted, so a label applied earlier keeps taking effect on later
+pushes.
 
-- *Does a label inject a flag?* Membership in ``LABEL_GATED_THEROCK_FLAGS``,
-  and nothing else. The full label set of the pull request is consulted, so a
-  label applied earlier keeps taking effect on later pushes.
-- *Does a label change justify a build at all?* Only for ``labeled`` /
-  ``unlabeled`` events, and only when the single label that changed is a key in
-  the map. That answer is exported as ``label_relevant`` and the workflows use
-  it to skip the expensive jobs when someone adds an unrelated label. Events
-  that are not label events ignore it entirely.
+Which label was just added or removed is deliberately not consulted, and a
+label event never skips the build. Both workflows cancel the in-progress run
+for a pull request the moment a new one is created, so on a ``labeled`` /
+``unlabeled`` event the previous build is already dead before this script gets
+to run. Declining to rebuild for a label the map does not know would therefore
+save nothing and would leave the pull request with no build at all until the
+next push. Every label event rebuilds; one that changes no flag simply rebuilds
+the same configuration.
+
+Reading only the present label set is also what makes removal work without a
+special case: on ``unlabeled`` the removed label is already absent from the
+payload, so the flag is off and the rebuild is a flag-off build.
 
 Labels are read from the event payload (``PR_LABELS_JSON``) rather than a live
 ``gh pr view``: the payload is the label state the run was triggered for, so
@@ -34,8 +40,6 @@ Environment inputs:
     therefore always builds flag-off.
 ``PR_LABELS_JSON``
     ``toJSON(github.event.pull_request.labels.*.name)``. Junk is tolerated.
-``CHANGED_LABEL``
-    ``github.event.label.name``; only set on ``labeled`` / ``unlabeled``.
 ``EXTERNAL_REPO_REPOSITORY`` / ``EXTERNAL_REPO_REF``
     The repository and commit the external-repo payload points at.
 ``PREBUILT_STAGES`` / ``BASELINE_RUN_ID``
@@ -209,8 +213,6 @@ def build_summary(
     matched: list[str],
     flags: list[str],
     external_repo: str,
-    changed_label: str,
-    label_relevant: bool,
 ) -> str:
     """Render the step summary. Names the exact labels it acted on."""
     lines: list[str] = []
@@ -226,11 +228,6 @@ def build_summary(
     else:
         label_list = ", ".join(f"`{label}`" for label in labels) if labels else "_none_"
         lines.append(f"- **Labels on this pull request:** {label_list}")
-        if changed_label:
-            lines.append(
-                f"- **Label just added/removed:** `{changed_label}` "
-                f"({'gated, so this run proceeds' if label_relevant else 'not gated, so the expensive jobs are skipped'})"
-            )
         matched_list = (
             ", ".join(f"`{label}`" for label in matched) if matched else "_none_"
         )
@@ -270,8 +267,6 @@ def main() -> None:
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     repository = os.environ.get("EXTERNAL_REPO_REPOSITORY", "")
     ref = os.environ.get("EXTERNAL_REPO_REF", "")
-    # Only meaningful on labeled/unlabeled; empty for every other event.
-    changed_label = os.environ.get("CHANGED_LABEL", "")
 
     # Label behavior must be unreachable from dispatch, push and nightlies.
     labels = (
@@ -281,7 +276,6 @@ def main() -> None:
     )
 
     matched, flags = collect_flags(labels)
-    label_relevant = bool(changed_label) and changed_label in LABEL_GATED_THEROCK_FLAGS
     external_repo = build_external_repo(repository, ref, flags)
 
     if flags:
@@ -301,7 +295,6 @@ def main() -> None:
         {
             "external_repo": external_repo,
             "flags_active": "true" if flags else "false",
-            "label_relevant": "true" if label_relevant else "false",
             "flags": " ".join(flags),
             "matched_labels": ",".join(matched),
         }
@@ -313,8 +306,6 @@ def main() -> None:
             matched=matched,
             flags=flags,
             external_repo=external_repo,
-            changed_label=changed_label,
-            label_relevant=label_relevant,
         )
     )
 

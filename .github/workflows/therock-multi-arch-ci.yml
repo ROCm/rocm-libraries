@@ -28,9 +28,11 @@ name: TheRock Multi-Arch CI
 on:
   # The `labeled`/`unlabeled` types exist for the label-gated cmake flags
   # resolved by the label_flags job: adding a gated label must rebuild with the
-  # flag on and removing one must rebuild with it off. Every other label change
-  # stops at label_flags, which reports label_relevant=false and skips the
-  # expensive jobs.
+  # flag on and removing one must rebuild with it off. Every label change
+  # rebuilds, including one that changes no flag - the concurrency group below
+  # cancels the in-progress run as soon as the label event creates a new one, so
+  # declining to rebuild would not save that build, it would only leave the pull
+  # request without one.
   # pull_request:
   #   types:
   #     - opened
@@ -151,10 +153,9 @@ jobs:
   # .github/scripts/therock_multiarch_label_flags.py. With no such label the
   # payload is byte-identical to the literal this job replaced.
   #
-  # This job carries no `if:` of its own: it is the thing that decides whether
-  # the rest of the workflow runs on a label event, so it always runs. Keep it
-  # dependency-free (stdlib, sparse checkout, no network) - if it fails or is
-  # cancelled, label_relevant is empty and label events skip the build.
+  # Every expensive job hangs off `setup`, which needs this one, so keep it
+  # dependency-free (stdlib, sparse checkout, no network): if it fails, the
+  # build is skipped rather than run with an unresolved configuration.
   label_flags:
     name: Resolve label-gated cmake flags
     runs-on: ubuntu-24.04
@@ -163,7 +164,6 @@ jobs:
     outputs:
       external_repo: ${{ steps.flags.outputs.external_repo }}
       flags_active: ${{ steps.flags.outputs.flags_active }}
-      label_relevant: ${{ steps.flags.outputs.label_relevant }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -178,8 +178,6 @@ jobs:
           # the run was triggered for, so logs and artifacts cannot disagree
           # with it, and it needs no token and works for forks.
           PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          # Only set on labeled/unlabeled; gates the run, does not inject.
-          CHANGED_LABEL: ${{ github.event.label.name }}
           EXTERNAL_REPO_REPOSITORY: ${{ github.repository }}
           EXTERNAL_REPO_REF: ${{ github.sha }}
           PREBUILT_STAGES: ${{ inputs.prebuilt_stages || '' }}
@@ -188,12 +186,6 @@ jobs:
 
   setup:
     needs: [configure, resolve_therock_ref, label_flags]
-    # A label change that injects nothing changes nothing about the build, so
-    # it must not start one. Non-label events short-circuit the first clause
-    # and run as before; everything expensive hangs off this job.
-    if: >-
-      ${{ (github.event.action != 'labeled' && github.event.action != 'unlabeled')
-          || needs.label_flags.outputs.label_relevant == 'true' }}
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "release"

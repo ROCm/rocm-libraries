@@ -206,7 +206,7 @@ class ExternalRepoTest(unittest.TestCase):
 
     def test_outputs_are_single_line_and_shell_safe(self):
         outputs, raw, _ = run_main({**BASE_ENV, "PR_LABELS_JSON": '["ci:two-flags"]'})
-        self.assertEqual(len(raw.splitlines()), 5)
+        self.assertEqual(len(raw.splitlines()), 4)
         self.assertNotIn("'", outputs["external_repo"])
         self.assertNotIn('"', outputs["flags"])
 
@@ -252,87 +252,59 @@ class PrebuiltStageGuardTest(unittest.TestCase):
         self.assertEqual(outputs["flags_active"], "false")
 
 
-class LabelRelevantTest(unittest.TestCase):
-    """`label_relevant` is what decides whether an expensive build runs."""
+class LabelPresenceTest(unittest.TestCase):
+    """Flag state depends on the present label set and on nothing else.
 
-    def test_mapped_changed_label_is_relevant(self):
+    Which label was just added or removed is not an input: the workflows always
+    rebuild on a label event, so there is no decision left for this script to
+    make beyond reading the payload.
+    """
+
+    def test_which_label_changed_is_not_an_input(self):
+        # Nothing may reintroduce a gate output, and a `CHANGED_LABEL`-style
+        # environment variable must not change the answer if one is left behind.
         outputs, _, _ = run_main(
             {
                 **BASE_ENV,
                 "PR_LABELS_JSON": '["ci:miopen-hipdnn-wrapper"]',
-                "CHANGED_LABEL": "ci:miopen-hipdnn-wrapper",
+                "CHANGED_LABEL": "documentation",
             }
         )
-        self.assertEqual(outputs["label_relevant"], "true")
-
-    def test_unmapped_changed_label_is_not_relevant(self):
-        for changed in ["ci:smoke", "documentation", "ci:gpu:gfx942"]:
-            with self.subTest(changed=changed):
-                outputs, _, _ = run_main(
-                    {
-                        **BASE_ENV,
-                        "PR_LABELS_JSON": f'["{changed}"]',
-                        "CHANGED_LABEL": changed,
-                    }
-                )
-                self.assertEqual(outputs["label_relevant"], "false")
-
-    def test_removing_a_mapped_label_is_relevant(self):
-        # `unlabeled`: the label is gone from the payload but still names a
-        # configuration change, so the flag-off build must run.
-        outputs, _, _ = run_main(
-            {
-                **BASE_ENV,
-                "PR_LABELS_JSON": "[]",
-                "CHANGED_LABEL": "ci:miopen-hipdnn-wrapper",
-            }
+        self.assertNotIn("label_relevant", outputs)
+        self.assertEqual(
+            sorted(outputs),
+            ["external_repo", "flags", "flags_active", "matched_labels"],
         )
-        self.assertEqual(outputs["label_relevant"], "true")
-        self.assertEqual(outputs["flags_active"], "false")
-
-    def test_no_changed_label_is_not_relevant(self):
-        # As on synchronize/opened/reopened. The workflow gate's first clause
-        # ("action is not labeled/unlabeled") is what carries those events;
-        # label_relevant can only ever suppress a label event itself.
-        for env in [{}, {"CHANGED_LABEL": ""}]:
-            with self.subTest(env=env):
-                outputs, _, _ = run_main({**BASE_ENV, "PR_LABELS_JSON": "[]", **env})
-                self.assertEqual(outputs["label_relevant"], "false")
-
-    def test_sticky_label_still_injects_without_a_label_event(self):
-        # The case most likely to regress if someone "simplifies" the two
-        # inputs into one: a push to a PR that already carries the label.
-        outputs, _, _ = run_main(
-            {
-                **BASE_ENV,
-                "GITHUB_EVENT_NAME": "pull_request",
-                "PR_LABELS_JSON": '["ci:miopen-hipdnn-wrapper"]',
-                "CHANGED_LABEL": "",
-            }
-        )
-        self.assertEqual(outputs["label_relevant"], "false")
         self.assertEqual(outputs["flags_active"], "true")
+
+    def test_sticky_label_injects_without_a_label_event(self):
+        # A push to a PR that already carries the label: the full label set is
+        # read on every event, so the flag stays on.
+        outputs, _, _ = run_main(
+            {**BASE_ENV, "PR_LABELS_JSON": '["ci:miopen-hipdnn-wrapper"]'}
+        )
+        self.assertEqual(outputs["flags_active"], "true")
+
+    def test_removed_label_yields_a_flag_off_build(self):
+        # `unlabeled` needs no special case: the removed label is already gone
+        # from the event payload, so the rebuild is simply flag-off.
+        outputs, _, _ = run_main({**BASE_ENV, "PR_LABELS_JSON": "[]"})
+        self.assertEqual(outputs["flags_active"], "false")
+        self.assertEqual(
+            outputs["external_repo"],
+            '{"repository":"ROCm/rocm-libraries","ref":"deadbeef"}',
+        )
 
     def test_membership_is_exact_string_not_a_pattern(self):
         outputs, _, _ = run_main(
-            {
-                **BASE_ENV,
-                "PR_LABELS_JSON": '["weird.label+name(1)"]',
-                "CHANGED_LABEL": "weird.label+name(1)",
-            }
+            {**BASE_ENV, "PR_LABELS_JSON": '["weird.label+name(1)"]'}
         )
-        self.assertEqual(outputs["label_relevant"], "true")
         self.assertEqual(outputs["flags"], "-DTHEROCK_FLAG_WEIRD=ON")
 
         # A string the key would match only if it were treated as a regex.
         outputs, _, _ = run_main(
-            {
-                **BASE_ENV,
-                "PR_LABELS_JSON": '["weirdXlabel+name1"]',
-                "CHANGED_LABEL": "weirdXlabel+name1",
-            }
+            {**BASE_ENV, "PR_LABELS_JSON": '["weirdXlabel+name1"]'}
         )
-        self.assertEqual(outputs["label_relevant"], "false")
         self.assertEqual(outputs["flags_active"], "false")
 
 
