@@ -512,6 +512,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
+    // A node asked to land within a fixed cycle lead of its reader (see
+    // DAGNode::earliestClock), whose clock has not come round yet. Only the phases that
+    // have other work to offer consult this; the Phase G fallback does not, so holding a
+    // node back can cost it its lead but never the schedule's progress.
+    bool heldBackForLead(const DAGNode* node) const {
+        return clock_ < node->earliestClock;
+    }
+
     void noteSccChainIssue(DAGNode* node);
 
     std::map<int, int> crossBBDsResiduals_;
@@ -855,6 +863,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     int bestWait = 0;
     int bestAff = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
+        if (heldBackForLead(n)) continue;
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
         // not clobber a live WMMA src (then the stall is free).
