@@ -497,8 +497,15 @@ class WaitGRCounts:
     B: int = 0
     SA: int = 0
     SB: int = 0
+    # When True, emit_wait_gr resolves the count as
+    # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
+    # — the exact number of batch-1 buffer_load instructions in flight.
+    # Used by the PGR=2 preloop GR reorder (TENSILE_PRELOOP_REORDER_GR).
+    use_num_gr_total: bool = False
 
     def __str__(self):
+        if self.use_num_gr_total:
+            return "num_gr_total"
         parts = []
         for t in ('A', 'B', 'SA', 'SB'):
             v = getattr(self, t)
@@ -3304,6 +3311,30 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
+    @staticmethod
+    def _make_reorder_label_op(name: str) -> InlineModuleOp:
+        """InlineModuleOp that defines a local label (used by the StreamK-safe
+        PGR=2 preloop GR reorder to mark the partial-tile and rejoin points)."""
+        def _build_label(emitter):
+            from rocisa.code import Module, Label
+            m = Module(f"reorder_label_{name}")
+            m.add(Label(name, ""))
+            return m
+        return InlineModuleOp(build=_build_label, label=f"reorder_label_{name}")
+
+    @staticmethod
+    def _make_reorder_branch_op(target: str) -> InlineModuleOp:
+        """InlineModuleOp that emits an unconditional s_branch to a local label
+        (rejoin after the full-path MT1 wait in the reorder preloop)."""
+        def _build_branch(emitter):
+            from rocisa.code import Module, Label
+            from rocisa.instruction import SBranch
+            m = Module(f"reorder_branch_{target}")
+            m.add(SBranch(labelName=Label(target, "").getLabelName(),
+                          comment=f"full K tile: MT1 issued, skip partial wait"))
+            return m
+        return InlineModuleOp(build=_build_branch, label=f"reorder_branch_{target}")
+
     def _mt0_preloop_gr_end(self, em_list) -> int:
         """Index in em_list where MT0 prefetch GR placements end (before GRInc/initC/wait)."""
         for i, em in enumerate(em_list):
@@ -3690,6 +3721,8 @@ class LogicalScheduler:
                     gl2_preloop_ops.append(GL2PrefetchIncOp())
                     gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+            from Tensile.Common.Utilities import preloopReorderGREnabled
+            _reorder = preloopReorderGREnabled()
             if maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
@@ -3699,6 +3732,57 @@ class LogicalScheduler:
                 for uid in range(maxUnroll):
                     mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
+            else:
+                preloop_ops = [
+                    *self._make_gr_all_tensors(0, all_tiles),
+                    *self._make_depops_all_tensors(GRIncOp),
+                ]
+                mt1_ops = self._make_preloop_mt1_grs()
+
+            if _reorder:
+                # PGR=2 preloop GR reorder, made StreamK-safe.
+                #
+                # The goal is to hoist the MT1 GR batch ahead of the GR wait so
+                # MT1's load latency is deferred into the main loop: the wait then
+                # only drains MT0 (vmcnt = num_gr_total leaves MT1's loads in
+                # flight). On the data-parallel path every workgroup runs the full
+                # K loop, so this is unconditionally safe.
+                #
+                # Under StreamK a workgroup may own only a partial K range and hit
+                # loopCounter<=1, which routes it to the NLL (no-load-loop). Two
+                # things must hold for that path:
+                #   1. initC / WaitGR / Sync / LR must still run — the NLL body
+                #      assumes the accumulators are zeroed, MT0 is resident in LDS,
+                #      and the first LR is done. The original reorder branched to
+                #      NLL *before* this setup and corrupted the StreamK tail.
+                #   2. MT1 GR must NOT be issued — its SRD has been advanced past
+                #      this workgroup's K range and the buffer_load faults (illegal
+                #      access), so it is guarded out for partial tiles.
+                #
+                # Because MT1 is conditional, the drain count differs per path:
+                # full path has MT0+MT1 in flight (wait to num_gr_total leaves MT1),
+                # partial path has only MT0 (wait to 0). We emit both waits on
+                # mutually exclusive branches and rejoin before Sync/LR. The NLL and
+                # NGLL skips stay after the shared setup, exactly as the stock path.
+                emitted = self._to_emitted([
+                    *preloop_ops,
+                    initC_op,
+                    SkipOp(compare='LE', value=1,
+                           target='PreloopReorderPartial', rawLabel=True,
+                           branchComment='partial K tile: skip MT1 GR prefetch'),
+                    *mt1_ops,
+                    WaitGROp(wait_gr_counts=WaitGRCounts(use_num_gr_total=True)),
+                    self._make_reorder_branch_op('PreloopReorderJoin'),
+                    self._make_reorder_label_op('PreloopReorderPartial'),
+                    WaitGROp(wait_gr_counts=WaitGRCounts(), force_drain=True),
+                    self._make_reorder_label_op('PreloopReorderJoin'),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                    *gl2_preloop_ops,
+                    SkipOp(compare='LE', value=2, target='NGLL'),
+                ])
+            else:
                 emitted = self._to_emitted([
                     *preloop_ops,
                     initC_op,
@@ -3707,19 +3791,6 @@ class LogicalScheduler:
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
                     *mt1_ops,
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
-            else:
-                emitted = self._to_emitted([
-                    *self._make_gr_all_tensors(0, all_tiles),
-                    *self._make_depops_all_tensors(GRIncOp),
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *self._make_preloop_mt1_grs(),
                     *gl2_preloop_ops,
                     SkipOp(compare='LE', value=2, target='NGLL'),
                 ])

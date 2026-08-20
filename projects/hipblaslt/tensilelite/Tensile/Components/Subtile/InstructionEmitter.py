@@ -290,6 +290,20 @@ class InstructionEmitter:
         if force_drain:
             grCnt = 0
             label = "full drain"
+        elif counts.use_num_gr_total:
+            # Exact buffer_load count from tileInfo (available on the emitter).
+            # Avoids the grMap formula which miscounts when loadRatioGR >= 1.
+            # Precondition: requires a fully constructed InstructionEmitter with
+            # tileInfoA, tileInfoB, and tileInfoMap set (always true in production;
+            # mock-only tests must supply them if testing this branch directly).
+            sa_info = self.tileInfoMap.get('SA')
+            sb_info = self.tileInfoMap.get('SB')
+            nA = self.tileInfoA.numGRTotal
+            nB = self.tileInfoB.numGRTotal
+            nSA = sa_info.numGRTotal if sa_info else 0
+            nSB = sb_info.numGRTotal if sb_info else 0
+            grCnt = nA + nB + nSA + nSB
+            label = f"per-subIterK: A={nA} B={nB} SA={nSA} SB={nSB}"
         else:
             grCnt = (counts.A * grMap['A'] +
                      counts.B * grMap['B'] +
