@@ -1772,7 +1772,7 @@ namespace
     }
 
     // Same Bias shape with the full CU count: on a stock MI300X (~304 CU) the
-    // resolution flips to parallel and must still be refused under coherence.
+    // resolution flips to parallel and must still be refused under uniform summation order.
     TEST_F(RowUniformityClauseTwo_pre_checkin, SplitRegime_4096x32x10240_AllCUs_Bias)
     {
         Problem problem{4096, 32, 10240, HIP_R_16BF, 0, /*useBias=*/true};
@@ -1780,13 +1780,13 @@ namespace
     }
 
     // =======================================================================
-    // Coherence-mode Stream-K grid steering (parallel admission + mixed-split snap)
+    // Uniform-summation-order Stream-K grid steering (parallel admission + mixed-split snap)
     //
     // Host-only: synthesised SK3 solution + gfx950 analytical HipAMDGPU, same
     // pattern as tensilelite CuCount_test (which CI does not build).
     // =======================================================================
 
-    TensileLite::hip::HipAMDGPU coherenceSteeringDevice()
+    TensileLite::hip::HipAMDGPU uniformitySteeringDevice()
     {
         using arch_t = origami::hardware_t::architecture_t;
         auto hw      = std::make_shared<origami::hardware_t>(
@@ -1806,7 +1806,7 @@ namespace
         TensileLite::hip::HipAMDGPU device;
         device.processor          = TensileLite::AMDGPU::Processor::gfx950;
         device.computeUnitCount   = 256;
-        device.deviceName         = "row_uniformity_coherence_steering";
+        device.deviceName         = "row_uniformity_grid_steering";
         device.analyticalHardware = hw;
         device.skDynamicGrid
             = static_cast<int>(origami::grid_selection_t::k_split_aware);
@@ -1816,7 +1816,7 @@ namespace
         return device;
     }
 
-    std::shared_ptr<TensileLite::ContractionSolution> coherenceSteeringSolution()
+    std::shared_ptr<TensileLite::ContractionSolution> uniformitySteeringSolution()
     {
         auto solution = probeSolution();
         solution->sizeMapping.depthU                = 64;
@@ -1827,7 +1827,7 @@ namespace
         return solution;
     }
 
-    TensileLite::ContractionProblemGemm coherenceGemm(size_t m, size_t n, size_t k)
+    TensileLite::ContractionProblemGemm uniformityGemm(size_t m, size_t n, size_t k)
     {
         auto problem = TensileLite::ContractionProblemGemm::GEMM(
             false, false, m, n, k, m, n, m, 1.0, false, 1);
@@ -1837,18 +1837,18 @@ namespace
         return problem;
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, KeepParallelUnderUniformSummationOrderWhenEligible)
+    TEST(RowUniformityGridSteering_pre_checkin, KeepParallelUnderUniformSummationOrderWhenEligible)
     {
-        auto solution = coherenceSteeringSolution();
-        auto device   = coherenceSteeringDevice();
-        auto problem  = coherenceGemm(512, 512, 8192);
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
+        auto problem  = uniformityGemm(512, 512, 8192);
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
 
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
 
         problem.setParams().setUniformSummationOrder(true);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel)
-            << "coherence must keep parallel when SK3 static, non-atomic, and obstacles clear";
+            << "uniform summation order must keep parallel when SK3 static, non-atomic, and obstacles clear";
 
         const size_t grid
             = solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel);
@@ -1865,41 +1865,41 @@ namespace
         // the same tile-symmetric PartialIdx mapping.
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderWhenIneligible)
+    TEST(RowUniformityGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderWhenIneligible)
     {
-        auto solution = coherenceSteeringSolution();
+        auto solution = uniformitySteeringSolution();
         solution->sizeMapping.streamKAtomic = 1;
-        auto device  = coherenceSteeringDevice();
-        auto problem = coherenceGemm(512, 512, 8192);
+        auto device  = uniformitySteeringDevice();
+        auto problem = uniformityGemm(512, 512, 8192);
 
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
 
         problem.setParams().setUniformSummationOrder(true);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree)
-            << "coherence must force tree when parallel is ineligible (StreamKAtomic=1)";
+            << "uniform summation order must force tree when parallel is ineligible (StreamKAtomic=1)";
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderCustomKernel)
+    TEST(RowUniformityGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderCustomKernel)
     {
-        auto solution = coherenceSteeringSolution();
+        auto solution = uniformitySteeringSolution();
         solution->customKernel.name      = "DummyCustomKernel";
         solution->customKernel.generated = false;
-        auto device  = coherenceSteeringDevice();
-        auto problem = coherenceGemm(512, 512, 8192);
+        auto device  = uniformitySteeringDevice();
+        auto problem = uniformityGemm(512, 512, 8192);
 
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree);
         problem.setParams().setUniformSummationOrder(true);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree);
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, NonDivisorGridBelowTilesSnapsToTiles)
+    TEST(RowUniformityGridSteering_pre_checkin, NonDivisorGridBelowTilesSnapsToTiles)
     {
-        auto solution = coherenceSteeringSolution();
-        auto device   = coherenceSteeringDevice();
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
         device.skDynamicGrid = 0;
         device.skFixedGrid   = 10;
 
-        auto         problem = coherenceGemm(512, 512, 1024);
+        auto         problem = uniformityGemm(512, 512, 1024);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
         ASSERT_EQ(tiles, 16u);
 
@@ -1909,14 +1909,14 @@ namespace
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles);
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, DivisorGridBelowTilesSnapsToTiles)
+    TEST(RowUniformityGridSteering_pre_checkin, DivisorGridBelowTilesSnapsToTiles)
     {
-        auto solution = coherenceSteeringSolution();
-        auto device   = coherenceSteeringDevice();
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
         device.skDynamicGrid = 0;
         device.skFixedGrid   = 8;
 
-        auto         problem = coherenceGemm(512, 512, 1024);
+        auto         problem = uniformityGemm(512, 512, 1024);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
         ASSERT_EQ(tiles, 16u);
 
@@ -1925,14 +1925,14 @@ namespace
             << "mixed GridDividesTiles (g0 | T, g0 < T) must snap up to all-full";
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, AllPartialNonDivisorFRequiresCapability)
+    TEST(RowUniformityGridSteering_pre_checkin, AllPartialNonDivisorFRequiresCapability)
     {
-        auto solution = coherenceSteeringSolution();
-        auto device   = coherenceSteeringDevice();
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
         device.skDynamicGrid = 0;
         device.skFixedGrid   = 8;
 
-        auto         problem = coherenceGemm(256, 256, 1088);
+        auto         problem = uniformityGemm(256, 256, 1088);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
         const size_t I
             = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
@@ -1949,14 +1949,14 @@ namespace
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ParallelSnapSkipsFIRequirement)
+    TEST(RowUniformityGridSteering_pre_checkin, ParallelSnapSkipsFIRequirement)
     {
-        auto solution = coherenceSteeringSolution();
-        auto device   = coherenceSteeringDevice();
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
         device.skDynamicGrid = 0;
         device.skFixedGrid   = 8;
 
-        auto         problem = coherenceGemm(256, 256, 1088);
+        auto         problem = uniformityGemm(256, 256, 1088);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
         const size_t I
             = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
@@ -1973,11 +1973,11 @@ namespace
             << "Parallel snap must skip F | I and keep T*F when workspace fits";
     }
 
-    TEST(RowUniformityCoherenceGridSteering_pre_checkin, ModeOffLeavesParallelReduction)
+    TEST(RowUniformityGridSteering_pre_checkin, ModeOffLeavesParallelReduction)
     {
-        auto solution = coherenceSteeringSolution();
-        auto device   = coherenceSteeringDevice();
-        auto problem  = coherenceGemm(512, 512, 8192);
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
+        auto problem  = uniformityGemm(512, 512, 8192);
 
         EXPECT_FALSE(problem.getParams().uniformSummationOrder());
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);

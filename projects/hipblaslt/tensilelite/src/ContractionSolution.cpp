@@ -150,9 +150,9 @@ namespace TensileLite
             });
         }
 
-        // One-shot notice when coherence-mode grid steering displaces a developer
+        // One-shot notice when uniform-summation-order grid steering displaces a developer
         // override (skFixedGrid) or production CU knobs (skMaxCUs / skGridMultiplier).
-        void warnStreamKCoherenceGridSnapOnce(size_t g0, size_t gStar)
+        void warnStreamKUniformityGridSnapOnce(size_t g0, size_t gStar)
         {
             static std::once_flag warnedFlag;
             std::call_once(warnedFlag, [g0, gStar]() {
@@ -161,7 +161,7 @@ namespace TensileLite
                           << g0 << " to " << gStar
                           << " (never upward) so the launch stays row-uniform; "
                              "skFixedGrid / skMaxCUs / skGridMultiplier act as hints under "
-                             "coherence mode.\n";
+                             "uniform summation order.\n";
             });
         }
     }
@@ -4244,7 +4244,7 @@ namespace TensileLite
 
     namespace
     {
-        // Forward declaration: defined with the other coherence Stream-K
+        // Forward declaration: defined with the other uniform-summation-order Stream-K
         // helpers later in this file. getSKReduction consults it when deciding
         // whether parallel remains eligible under uniform summation order.
         std::string streamKUniformSummationOrderObstacle(
@@ -4961,7 +4961,7 @@ namespace TensileLite
                 skGrid = cuCount;
             }
 
-            // Under coherence + static two-tile packing, snap the chain output
+            // Under uniform-summation-order + static two-tile packing, snap the chain output
             // g0 onto an admissible uniform grid. F-star is never-upward
             // (g0 > tiles). When g0 < tiles, snap up to tiles (all-full): mixed
             // GridDividesTiles (tiles % g0 == 0) is two-tile DP+SK that gfx950
@@ -5021,7 +5021,7 @@ namespace TensileLite
                        && (pAMDGPU->skFixedGrid > 0 || pAMDGPU->skMaxCUs > 0
                            || pAMDGPU->skGridMultiplier > 1))
                     {
-                        warnStreamKCoherenceGridSnapOnce(g0, skGrid);
+                        warnStreamKUniformityGridSnapOnce(g0, skGrid);
                     }
                 }
             }

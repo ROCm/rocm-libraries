@@ -722,7 +722,7 @@ namespace TensileLite
             bool staggerU           = true;
             // Kernel distributes Stream-K extra iters within each tile when
             // skGrid % skTiles == 0. Older/custom kernels leave this false;
-            // newly generated StreamK 3 / SK5 set it true. Coherence-mode
+            // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
             bool useUniversalArgs   = true;
