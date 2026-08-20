@@ -335,6 +335,8 @@ inline std::string type_tag()
         return "CustomShort2";
     else if constexpr(std::is_same_v<T, common::custom_huge_type<1024, long long>>)
         return "CustomLarge";
+    else if constexpr(std::is_same_v<T, common::custom_huge_type<1024, int>>)
+        return "CustomHuge1024Int";
 #if ROCPRIM_HAS_INT128_SUPPORT
     else if constexpr(std::is_same_v<T, rocprim::uint128_t>) return "Uint128";
     else if constexpr(std::is_same_v<T, rocprim::int128_t>) return "Int128";
