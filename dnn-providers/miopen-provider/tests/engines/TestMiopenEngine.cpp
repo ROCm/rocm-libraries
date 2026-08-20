@@ -394,9 +394,24 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnob
 class TestMiopenEngineBenchmarking : public ::testing::Test
 {
 protected:
+    /// Gates every case on a device. HipdnnMiopenHandle's constructor calls
+    /// miopenCreate() and throws without one, so the handle cannot be a plain member:
+    /// gtest builds members before SetUp() runs, and the throw would escape as a
+    /// failure on a device-less runner instead of a skip.
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        _handle = std::make_unique<HipdnnMiopenHandle>();
+    }
+
+    /// Valid for the whole test body; SetUp() skipped the case otherwise.
+    HipdnnMiopenHandle& handle()
+    {
+        return *_handle;
+    }
+
     MiopenEngine _engine{1};
     MockGraph _graph;
-    HipdnnMiopenHandle _handle;
     MockHipdnnMiopenContext _context;
 
     /// Replaces the cleared default with an explicit HIPDNN_FORCE_BENCHMARKING value
@@ -436,7 +451,7 @@ protected:
 
     bool initializeAndReadBenchmarkingEnabled(const IEngineConfig& engineConfig)
     {
-        _engine.initializeExecutionContext(_handle, _graph, engineConfig, _context);
+        _engine.initializeExecutionContext(handle(), _graph, engineConfig, _context);
         return _context.executionSettings().benchmarkingEnabled();
     }
 
@@ -449,6 +464,7 @@ private:
         return *_config;
     }
 
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
     flatbuffers::FlatBufferBuilder _builder;
     std::optional<EngineConfigWrapper> _config;
     std::optional<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _guard{
@@ -459,23 +475,17 @@ private:
 
 TEST_F(TestMiopenEngineBenchmarking, InitializeExecutionContextSetsBenchmarkingEnabled)
 {
-    SKIP_IF_NO_DEVICES();
-
     EXPECT_TRUE(initializeAndReadBenchmarkingEnabled(configWithBenchmarkingKnob(1)));
 }
 
 TEST_F(TestMiopenEngineBenchmarking, InitializeExecutionContextSetsBenchmarkingDisabled)
 {
-    SKIP_IF_NO_DEVICES();
-
     EXPECT_FALSE(initializeAndReadBenchmarkingEnabled(configWithBenchmarkingKnob(0)));
 }
 
 TEST_F(TestMiopenEngineBenchmarking,
        InitializeExecutionContextDefaultsBenchmarkingDisabledWhenConfigInvalid)
 {
-    SKIP_IF_NO_DEVICES();
-
     const MockEngineConfig invalidConfig;
     EXPECT_CALL(invalidConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
@@ -485,8 +495,6 @@ TEST_F(TestMiopenEngineBenchmarking,
 TEST_F(TestMiopenEngineBenchmarking,
        InitializeExecutionContextDefaultsBenchmarkingDisabledWhenNoKnobs)
 {
-    SKIP_IF_NO_DEVICES();
-
     EXPECT_FALSE(initializeAndReadBenchmarkingEnabled(configWithNoKnobs()));
 }
 
@@ -495,7 +503,6 @@ TEST_F(TestMiopenEngineBenchmarking,
 
 TEST_F(TestMiopenEngineBenchmarking, ForceBenchmarkingOnSetsBenchmarkingEnabledWithNoKnob)
 {
-    SKIP_IF_NO_DEVICES();
     forceBenchmarking("1");
 
     EXPECT_TRUE(initializeAndReadBenchmarkingEnabled(configWithNoKnobs()));
@@ -504,7 +511,6 @@ TEST_F(TestMiopenEngineBenchmarking, ForceBenchmarkingOnSetsBenchmarkingEnabledW
 /// An invalid config is the plain-execute path, which the override must still reach.
 TEST_F(TestMiopenEngineBenchmarking, ForceBenchmarkingOnSetsBenchmarkingEnabledWithAnInvalidConfig)
 {
-    SKIP_IF_NO_DEVICES();
     forceBenchmarking("true");
 
     const MockEngineConfig invalidConfig;
@@ -517,7 +523,6 @@ TEST_F(TestMiopenEngineBenchmarking, ForceBenchmarkingOnSetsBenchmarkingEnabledW
 /// express.
 TEST_F(TestMiopenEngineBenchmarking, ForceBenchmarkingOffOverridesAKnobEnabledRun)
 {
-    SKIP_IF_NO_DEVICES();
     forceBenchmarking("0");
 
     EXPECT_FALSE(initializeAndReadBenchmarkingEnabled(configWithBenchmarkingKnob(1)));
