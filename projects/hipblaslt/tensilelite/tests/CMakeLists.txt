@@ -129,6 +129,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         # has no DESTINATION keyword for TARGETS mode. Use plain install()
         # here so tensilelite-tests lands in its own subdir alongside data/
         # and CTestTestfile.cmake (see TEST_DATA_DIR comment above).
+        #
+        # rocm_install_targets() would normally also set INSTALL_RPATH to
+        # $ORIGIN/../lib (+ $ORIGIN/../lib/${PROJECT_NAME}/lib) so the binary
+        # finds ROCm's shared libs one directory up from bin/. Since plain
+        # install() skips that, and tensilelite-tests sits one directory
+        # deeper than a normal bin/ install, set the same paths here with an
+        # extra ../ to compensate.
+        set_property(TARGET tensilelite-tests APPEND PROPERTY
+            INSTALL_RPATH "$ORIGIN/../../lib" "$ORIGIN/../../lib/${PROJECT_NAME}/lib"
+        )
         install(
             TARGETS tensilelite-tests
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
