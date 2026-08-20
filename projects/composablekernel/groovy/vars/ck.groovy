@@ -1620,7 +1620,9 @@ def runDispatcherTests(String arch, String compiler) {
     if (arch == "gfx950") {
         execute_cmd += """ && \
         python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
+        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py && \
+        python3 ../dispatcher/tests/test_rowcolquant_gpu_correctness.py --gfx ${arch} && \
+        python3 ../dispatcher/tests/test_tensorquant_gpu_correctness.py --gfx ${arch}"""
     }
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
