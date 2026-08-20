@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,25 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCFFT_RTC_TRANSPOSE_KERNEL_H
-#define ROCFFT_RTC_TRANSPOSE_KERNEL_H
+#ifndef ROCFFT_HIPRTC_EXCEPT_H
+#define ROCFFT_HIPRTC_EXCEPT_H
 
-#include "rtc_kernel.h"
+#include <hip/hiprtc.h>
+#include <stdexcept>
+#include <string>
 
-struct RTCKernelTranspose : public RTCKernel
+// errors specifically from hiprtc APIs
+struct hiprtc_runtime_error : public std::runtime_error
 {
-    RTCKernelTranspose(const std::string&                       kernel_name,
-                       std::shared_future<hipModule_wrapper_t>& module,
-                       dim3                                     gridDim,
-                       dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+    const hiprtcResult hiprtc_error;
+    hiprtc_runtime_error(const std::string& info, hiprtcResult hiprtc_status)
+        : std::runtime_error::runtime_error(info)
+        , hiprtc_error(hiprtc_status)
     {
     }
-
-    static RTCKernel::RTCGenerator
-        generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
-
-    virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
 };
 
 #endif
