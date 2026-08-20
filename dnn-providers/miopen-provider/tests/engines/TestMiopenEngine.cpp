@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <deque>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
@@ -424,16 +425,18 @@ protected:
     /// An EngineConfig carrying no knobs at all.
     const IEngineConfig& configWithNoKnobs()
     {
-        _builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(_builder, 1, 0));
-        return storeConfig();
+        auto& builder = newBuilder();
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, 0));
+        return storeConfig(builder);
     }
 
     /// An EngineConfig carrying "global.benchmarking" set to @p value.
     const IEngineConfig& configWithBenchmarkingKnob(int64_t value)
     {
-        auto knobIdOffset = _builder.CreateString(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
-        auto knobValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(_builder, value);
-        hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(_builder);
+        auto& builder = newBuilder();
+        auto knobIdOffset = builder.CreateString(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+        auto knobValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+        hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
         knobSettingBuilder.add_knob_id(knobIdOffset);
         knobSettingBuilder.add_value_type(
             hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
@@ -442,11 +445,10 @@ protected:
 
         const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>
             knobsVector{knobSetting};
-        auto knobs = _builder.CreateVector(knobsVector);
+        auto knobs = builder.CreateVector(knobsVector);
 
-        _builder.Finish(
-            hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(_builder, 1, knobs));
-        return storeConfig();
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs));
+        return storeConfig(builder);
     }
 
     bool initializeAndReadBenchmarkingEnabled(const IEngineConfig& engineConfig)
@@ -456,17 +458,25 @@ protected:
     }
 
 private:
-    /// Wraps the builder's own buffer rather than a released one: a DetachedBuffer local
-    /// to a helper would be freed before the wrapper is read.
-    const IEngineConfig& storeConfig()
+    /// A fresh builder per config. One builder cannot be Finish()ed twice (flatbuffers
+    /// asserts, and that assert compiles out under NDEBUG), and continuing to build
+    /// moves GetBufferPointer(), which would strand an already-returned wrapper.
+    flatbuffers::FlatBufferBuilder& newBuilder()
     {
-        _config.emplace(_builder.GetBufferPointer(), _builder.GetSize());
-        return *_config;
+        return _builders.emplace_back();
+    }
+
+    /// Wraps the builder's own buffer rather than a released one: a DetachedBuffer local
+    /// to a helper would be freed before the wrapper is read. Both deques only ever grow,
+    /// so every reference handed out stays valid for the fixture's life.
+    const IEngineConfig& storeConfig(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        return _configs.emplace_back(builder.GetBufferPointer(), builder.GetSize());
     }
 
     std::unique_ptr<HipdnnMiopenHandle> _handle;
-    flatbuffers::FlatBufferBuilder _builder;
-    std::optional<EngineConfigWrapper> _config;
+    std::deque<flatbuffers::FlatBufferBuilder> _builders;
+    std::deque<EngineConfigWrapper> _configs;
     std::optional<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _guard{
         std::in_place, hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
 };
