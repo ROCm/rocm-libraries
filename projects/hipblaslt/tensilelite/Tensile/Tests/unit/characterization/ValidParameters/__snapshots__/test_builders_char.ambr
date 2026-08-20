@@ -1376,7 +1376,7 @@
     'ClusterLocalRead',
     'CompactLoopStore',
     'ConvertAfterDS',
-    'CustomKernelName',
+    'CustomKernel',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1489,6 +1489,8 @@
     'SwapGlobalReadOrder',
     'TDMInst',
     'TDMIterateMode',
+    'TDMLoadWaveSync',
+    'TDMPlusLdsBuf',
     'TDMSplit',
     'TailloopInNll',
     'TemporalHint',
@@ -1600,7 +1602,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
@@ -1609,7 +1611,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertSummationElementMultiple': dict({
@@ -1679,7 +1681,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'CustomKernelName': dict({
+    'CustomKernel': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -2656,6 +2658,23 @@
         1,
       ]),
       'len': 5,
+      'type': 'list',
+    }),
+    'TDMLoadWaveSync': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMPlusLdsBuf': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'TDMSplit': dict({

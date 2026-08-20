@@ -23,6 +23,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <nlohmann/json.hpp>
@@ -425,17 +426,6 @@ protected:
         if(!fillResult.filled)
         {
             return fillResult;
-        }
-
-        auto missing = _inputFillRecipes.unfilled(leafInputUids);
-        if(!missing.empty())
-        {
-            std::string msg = "unfilled inputs:";
-            for(const int64_t uid : missing)
-            {
-                msg += " uid=" + std::to_string(uid);
-            }
-            return FillResult::unsupported(msg);
         }
 
         return FillResult::ok();
