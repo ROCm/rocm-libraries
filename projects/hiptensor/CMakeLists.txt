@@ -163,6 +163,10 @@ if(GPU_TARGETS)
 elseif(AMDGPU_TARGETS)
     set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
     message(DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
+elseif(DEFINED GPU_TARGETS OR DEFINED AMDGPU_TARGETS)
+    message(FATAL_ERROR
+    "GPU_TARGETS resolved to an empty list. hipTensor requires at least one "
+    "supported GPU target; set -DGPU_TARGETS=<target gfx> (e.g. -DGPU_TARGETS=gfx942).")
 else()
     set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 endif()
