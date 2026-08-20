@@ -106,6 +106,13 @@ class GdnStateScanSpec:
     #: rather than shipping a fix nobody can explain. See PERF_PLAN.md P5.
     PREFETCH: bool = False
 
+    #: Carry-order switch for the prefetch phis, kept only to reproduce the
+    #: backend miscompile (see repro_phi_order.py / PERF_PLAN.md §P5). True (the
+    #: default and committed layout) puts the ``<4 x float>`` gate phis before
+    #: the ``bfloat`` u phis, which the backend compiles correctly. False
+    #: reproduces the miscompiled scalar-first order. No effect unless PREFETCH.
+    PREFETCH_VEC_FIRST: bool = True
+
     #: Route global **loads** through bounds-checked buffer descriptors
     #: (``buffer_rsrc`` + ``buffer_load_*``) instead of raw pointers, letting
     #: hardware return 0 out of range so the explicit row clamps can go. The
