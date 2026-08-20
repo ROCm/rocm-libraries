@@ -52,14 +52,15 @@ GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
 
 // SymbolScope stand-ins: content-indifferent, and a pack's real functions are internal
 // to their native file and unreachable from here.
-bool acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
-                    hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/)
+std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
+    acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/)
 {
-    return true;
+    return hipdnn_plugin_sdk::ingestor::BoundTokens{};
 }
 
-double scoreNothing(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/,
-                    const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/)
+double scoreNothing(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+                    const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+                    const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
 {
     return 0.0;
 }
@@ -85,7 +86,7 @@ TEST(TestKernelIngestorEngine, RegisterNativeIngestorSymbolsIsIdempotentAcrossRe
 
 TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOthersAlone)
 {
-    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::GraphMatchRegistry;
     using hipdnn_plugin_sdk::ingestor::ScoreRegistry;
     using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
@@ -108,18 +109,18 @@ TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOther
         EXPECT_THROW(failing.add(contendedSymbol, &scoreNothing), std::runtime_error);
     }
 
-    EXPECT_THROW(GraphMatcherRegistry::resolve(firstSymbol), std::runtime_error);
+    EXPECT_THROW(GraphMatchRegistry::resolve(firstSymbol), std::runtime_error);
     // ...while the neighbour's survives: one pack failing must not affect others.
-    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(neighbourSymbol));
+    EXPECT_NO_THROW(GraphMatchRegistry::resolve(neighbourSymbol));
     EXPECT_NO_THROW(ScoreRegistry::resolve(contendedSymbol));
 
-    GraphMatcherRegistry::unregisterSymbol(neighbourSymbol);
+    GraphMatchRegistry::unregisterSymbol(neighbourSymbol);
     ScoreRegistry::unregisterSymbol(contendedSymbol);
 }
 
 TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
 {
-    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::GraphMatchRegistry;
     using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
     const std::string symbol = "test.committed.graph_match";
@@ -129,9 +130,9 @@ TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
         scope.commit();
     }
 
-    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(symbol));
+    EXPECT_NO_THROW(GraphMatchRegistry::resolve(symbol));
 
-    GraphMatcherRegistry::unregisterSymbol(symbol);
+    GraphMatchRegistry::unregisterSymbol(symbol);
 }
 
 // makePointwiseAddEngine(): a working GenericEngine, reached through Container
