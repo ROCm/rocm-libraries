@@ -3,6 +3,8 @@
 
 #include <miopen/conv/solvers.hpp>
 
+#include <miopen/batched_transpose_sol.hpp>
+#include <miopen/buffer_info.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/gemm_v2.hpp>
@@ -375,6 +377,17 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
         ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
     }
 
+    // Serving NHWC by transposing needs NCHW copies of dy, x and dw on top of the col buffer.
+    if(gemm::UseNhwcViaTranspose(problem))
+    {
+        const MultiBufferWorkspaceTraits wt{ws_size,
+                                            dyDesc.GetElementSize() * GetTypeSize(dyDesc.GetType()),
+                                            xDesc.GetElementSize() * GetTypeSize(xDesc.GetType()),
+                                            dwDesc.GetElementSize() *
+                                                GetTypeSize(dwDesc.GetType())};
+        ws_size = wt.GetSize();
+    }
+
     if(ws_size > handle.GetMaxMemoryAllocSize())
     {
         MIOPEN_LOG_I2("GemmWrwUniversal: " << ws_size << " > " << handle.GetMaxMemoryAllocSize());
@@ -432,9 +445,19 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
-    // Im2Col only reads NCHW memory. Checked before the "rest-of" logic below, which would
-    // otherwise claim every NHWC problem that the 1x1 solver does not handle.
-    if(!problem.IsLayoutDefault())
+    // Im2Col only reads NCHW memory, so NHWC is only possible by transposing around it. Checked
+    // before the "rest-of" logic below, which would otherwise claim every NHWC problem that the
+    // 1x1 solver does not handle.
+    if(!problem.IsLayoutDefault() && !gemm::UseNhwcViaTranspose(problem))
+        return false;
+    // The transposes are batched 2D transposes; they have their own type/size limits and 3D
+    // (NDHWC) is not wired up here.
+    if(gemm::UseNhwcViaTranspose(problem) &&
+       !(problem.Is2d() &&
+         BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
+                                                problem.GetIn().GetLengths()) &&
+         BatchedTransposeSolution::IsApplicable(problem.GetOutDataType(),
+                                                problem.GetOut().GetLengths())))
         return false;
 
     return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&
@@ -527,16 +550,91 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
     auto solution         = ConvSolution{miopenStatusSuccess};
     solution.workspace_sz = workspace_req;
 
-    solution.invoker_factory = [=](const std::vector<Kernel>&) {
+    // NHWC is served by transposing dy and x into NCHW scratch buffers, running the regular NCHW
+    // path into a third buffer, and transposing that back into dw. Note the output here is the
+    // weight tensor, so the closing transpose is KCYX -> KYXC.
+    const bool nhwc_transpose = gemm::UseNhwcViaTranspose(problem);
+    const auto dy_bytes       = dyDesc.GetElementSize() * GetTypeSize(dyDesc.GetType());
+    const auto x_bytes        = xDesc.GetElementSize() * GetTypeSize(xDesc.GetType());
+    const auto dw_bytes       = dwDesc.GetElementSize() * GetTypeSize(dwDesc.GetType());
+    std::size_t off_dy_nchw = 0, off_x_nchw = 0, off_dw_nchw = 0;
+    std::vector<OpKernelArg> dy_trans_args, x_trans_args, dw_trans_args;
+    if(nhwc_transpose)
+    {
+        const auto sp = [&](const TensorDescriptor& d, int i) {
+            return static_cast<uint32_t>(d.GetLengths()[2 + i]);
+        };
+        const auto trans_dy =
+            TransposeSolutionNhwc2Default{context,
+                                          dyDesc.GetType(),
+                                          static_cast<uint32_t>(dyDesc.GetLengths()[0]),
+                                          static_cast<uint32_t>(dyDesc.GetLengths()[1]),
+                                          sp(dyDesc, 0),
+                                          sp(dyDesc, 1)};
+        const auto trans_x =
+            TransposeSolutionNhwc2Default{context,
+                                          xDesc.GetType(),
+                                          static_cast<uint32_t>(xDesc.GetLengths()[0]),
+                                          static_cast<uint32_t>(xDesc.GetLengths()[1]),
+                                          sp(xDesc, 0),
+                                          sp(xDesc, 1)};
+        const auto trans_dw =
+            TransposeSolutionDefault2Nhwc{context,
+                                          dwDesc.GetType(),
+                                          static_cast<uint32_t>(dwDesc.GetLengths()[0]),
+                                          static_cast<uint32_t>(dwDesc.GetLengths()[1]),
+                                          sp(dwDesc, 0),
+                                          sp(dwDesc, 1)};
+        solution.construction_params.push_back(trans_dy.GetKernelInfo());
+        solution.construction_params.push_back(trans_x.GetKernelInfo());
+        solution.construction_params.push_back(trans_dw.GetKernelInfo());
+        dy_trans_args = trans_dy.GetKernelArg();
+        x_trans_args  = trans_x.GetKernelArg();
+        dw_trans_args = trans_dw.GetKernelArg();
+        const MultiBufferWorkspaceTraits wt{
+            workspace_req - dy_bytes - x_bytes - dw_bytes, dy_bytes, x_bytes, dw_bytes};
+        off_dy_nchw = wt.GetOffset(1);
+        off_x_nchw  = wt.GetOffset(2);
+        off_dw_nchw = wt.GetOffset(3);
+    }
+
+    solution.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
             const auto& conv_params    = primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
-            const auto& dy             = conv_params.tensors.dy;
+            const auto& dy_orig        = conv_params.tensors.dy;
             const auto& dyDesc_        = conv_params.tensors.dyDesc;
             const auto& dwDesc_        = conv_params.tensors.dwDesc;
-            const auto& dw             = conv_params.tensors.dw;
-            const auto& x              = conv_params.tensors.x;
+            const auto& dw_orig        = conv_params.tensors.dw;
+            const auto& x_orig         = conv_params.tensors.x;
             const auto& workspace      = conv_params.workSpace;
             const auto& workspace_size = conv_params.workSpaceSize;
+
+            auto dy_buf = nhwc_transpose ? handle.CreateSubBuffer(workspace, off_dy_nchw, dy_bytes)
+                                         : Allocator::ManageDataPtr{};
+            auto x_buf  = nhwc_transpose ? handle.CreateSubBuffer(workspace, off_x_nchw, x_bytes)
+                                         : Allocator::ManageDataPtr{};
+            auto dw_buf = nhwc_transpose ? handle.CreateSubBuffer(workspace, off_dw_nchw, dw_bytes)
+                                         : Allocator::ManageDataPtr{};
+            ConstData_t dy = nhwc_transpose ? dy_buf.get() : dy_orig;
+            ConstData_t x  = nhwc_transpose ? x_buf.get() : x_orig;
+            Data_t dw      = nhwc_transpose ? dw_buf.get() : dw_orig;
+
+            float time_transpose = 0;
+            if(nhwc_transpose)
+            {
+                auto a0 = dy_trans_args;
+                a0[0]   = dy_buf.get();
+                a0[1]   = dy_orig;
+                handle.Run(kernels[0])(a0);
+                if(handle.IsProfilingEnabled())
+                    time_transpose += handle.GetKernelTime();
+                auto a1 = x_trans_args;
+                a1[0]   = x_buf.get();
+                a1[1]   = x_orig;
+                handle.Run(kernels[1])(a1);
+                if(handle.IsProfilingEnabled())
+                    time_transpose += handle.GetKernelTime();
+            }
 
             if(group_count > 1)
             {
@@ -675,10 +773,20 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                     time += handle.GetKernelTime();
             }
 
+            if(nhwc_transpose)
+            {
+                auto a2 = dw_trans_args;
+                a2[0]   = dw_orig;
+                a2[1]   = dw_buf.get();
+                handle.Run(kernels[2])(a2);
+                if(handle.IsProfilingEnabled())
+                    time_transpose += handle.GetKernelTime();
+            }
+
             if(handle.IsProfilingEnabled())
             {
                 handle.ResetKernelTime();
-                handle.AccumKernelTime(time);
+                handle.AccumKernelTime(time + time_transpose);
             }
         };
     };

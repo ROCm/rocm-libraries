@@ -666,11 +666,10 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
     {
         const auto& dxDesc = problem.GetOut();
         // The weights need converting too: for a non-1x1 filter KYXC and KCYX differ.
-        const MultiBufferWorkspaceTraits wt{
-            gemm_size,
-            dyDesc.GetElementSize() * GetTypeSize(dyDesc.GetType()),
-            dxDesc.GetElementSize() * GetTypeSize(dxDesc.GetType()),
-            wDesc.GetElementSize() * GetTypeSize(wDesc.GetType())};
+        const MultiBufferWorkspaceTraits wt{gemm_size,
+                                            dyDesc.GetElementSize() * GetTypeSize(dyDesc.GetType()),
+                                            dxDesc.GetElementSize() * GetTypeSize(dxDesc.GetType()),
+                                            wDesc.GetElementSize() * GetTypeSize(wDesc.GetType())};
         gemm_size = wt.GetSize();
     }
 
@@ -752,8 +751,9 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
     // The transposes are batched 2D transposes over (C x H*W); they have their own type and size
     // limits, and 3D (NDHWC) is not wired up here.
     if(gemm::UseNhwcViaTranspose(problem) &&
-       !(problem.Is2d() && BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
-                                                                  problem.GetIn().GetLengths()) &&
+       !(problem.Is2d() &&
+         BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
+                                                problem.GetIn().GetLengths()) &&
          BatchedTransposeSolution::IsApplicable(problem.GetOutDataType(),
                                                 problem.GetOut().GetLengths())))
         return false;

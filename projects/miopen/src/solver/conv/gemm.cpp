@@ -4,6 +4,8 @@
 #include <miopen/conv/solvers.hpp>
 
 #include <miopen/algorithm.hpp>
+#include <miopen/batched_transpose_sol.hpp>
+#include <miopen/buffer_info.hpp>
 #include <miopen/gemm_v2.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/kernel.hpp>
@@ -918,7 +920,18 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
                                                 std::multiplies<std::size_t>()) *
                                 GetTypeSize(wDesc.GetType()) * conv.group_count;
 
-    const auto ws_sz = (wDesc.GetType() == miopenInt8 ? 2 * workspace_size : workspace_size);
+    auto ws_sz = (wDesc.GetType() == miopenInt8 ? 2 * workspace_size : workspace_size);
+
+    // Serving NHWC by transposing needs NCHW copies of x, w and y on top of the col buffer.
+    if(gemm::UseNhwcViaTranspose(problem))
+    {
+        decltype(auto) xDesc = problem.GetIn();
+        const MultiBufferWorkspaceTraits wt{ws_sz,
+                                            xDesc.GetElementSize() * GetTypeSize(xDesc.GetType()),
+                                            wDesc.GetElementSize() * GetTypeSize(wDesc.GetType()),
+                                            yDesc.GetElementSize() * GetTypeSize(yDesc.GetType())};
+        ws_sz = wt.GetSize();
+    }
 
     if(ws_sz > handle.GetMaxMemoryAllocSize())
     {
@@ -985,9 +998,19 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
     if(!GemmFwdBase::IsApplicable(context, problem))
         return false;
 
-    // Im2Col only reads NCHW memory. Checked before the "rest-of" logic below, which would
-    // otherwise claim every NHWC problem that the 1x1 solvers do not handle.
-    if(!problem.IsLayoutDefault())
+    // Im2Col only reads NCHW memory, so NHWC is only possible by transposing around it. Checked
+    // before the "rest-of" logic below, which would otherwise claim every NHWC problem that the
+    // 1x1 solvers do not handle.
+    if(!problem.IsLayoutDefault() && !gemm::UseNhwcViaTranspose(problem))
+        return false;
+    // The transposes are batched 2D transposes; they have their own type/size limits, 3D (NDHWC)
+    // is not wired up, and int8 uses extra packing kernels that assume NCHW.
+    if(gemm::UseNhwcViaTranspose(problem) &&
+       !(problem.Is2d() && problem.GetWeights().GetType() != miopenInt8 &&
+         BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
+                                                problem.GetIn().GetLengths()) &&
+         BatchedTransposeSolution::IsApplicable(problem.GetOutDataType(),
+                                                problem.GetOut().GetLengths())))
         return false;
 
     // Todo: This is a rest-of kind of logic. Should be revised later.
@@ -1091,7 +1114,55 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
         return solution;
     }
 
-    solution.invoker_factory = [=](const std::vector<Kernel>&) {
+    // NHWC is served by transposing x and the weights into NCHW scratch buffers, running the
+    // regular NCHW path into a third buffer, and transposing that back into y.
+    const bool nhwc_transpose = gemm::UseNhwcViaTranspose(problem);
+    const auto x_bytes        = xDesc.GetElementSize() * GetTypeSize(xDesc.GetType());
+    const auto w_bytes        = wDesc.GetElementSize() * GetTypeSize(wDesc.GetType());
+    const auto y_bytes        = yDesc.GetElementSize() * GetTypeSize(yDesc.GetType());
+    std::size_t off_x_nchw = 0, off_w_nchw = 0, off_y_nchw = 0;
+    std::vector<OpKernelArg> x_trans_args, w_trans_args, y_trans_args;
+    if(nhwc_transpose)
+    {
+        const auto sp = [&](const TensorDescriptor& d, int i) {
+            return static_cast<uint32_t>(d.GetLengths()[2 + i]);
+        };
+        const auto trans_x =
+            TransposeSolutionNhwc2Default{context,
+                                          xDesc.GetType(),
+                                          static_cast<uint32_t>(xDesc.GetLengths()[0]),
+                                          static_cast<uint32_t>(xDesc.GetLengths()[1]),
+                                          sp(xDesc, 0),
+                                          sp(xDesc, 1)};
+        // KYXC -> KCYX
+        const auto trans_w =
+            TransposeSolutionNhwc2Default{context,
+                                          wDesc.GetType(),
+                                          static_cast<uint32_t>(wDesc.GetLengths()[0]),
+                                          static_cast<uint32_t>(wDesc.GetLengths()[1]),
+                                          sp(wDesc, 0),
+                                          sp(wDesc, 1)};
+        const auto trans_y =
+            TransposeSolutionDefault2Nhwc{context,
+                                          yDesc.GetType(),
+                                          static_cast<uint32_t>(yDesc.GetLengths()[0]),
+                                          static_cast<uint32_t>(yDesc.GetLengths()[1]),
+                                          sp(yDesc, 0),
+                                          sp(yDesc, 1)};
+        solution.construction_params.push_back(trans_x.GetKernelInfo());
+        solution.construction_params.push_back(trans_w.GetKernelInfo());
+        solution.construction_params.push_back(trans_y.GetKernelInfo());
+        x_trans_args = trans_x.GetKernelArg();
+        w_trans_args = trans_w.GetKernelArg();
+        y_trans_args = trans_y.GetKernelArg();
+        const MultiBufferWorkspaceTraits wt{
+            workspace_req - x_bytes - w_bytes - y_bytes, x_bytes, w_bytes, y_bytes};
+        off_x_nchw = wt.GetOffset(1);
+        off_w_nchw = wt.GetOffset(2);
+        off_y_nchw = wt.GetOffset(3);
+    }
+
+    solution.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto tmp_gemm_desc = [&]() {
             auto tmp          = conv.group_count > 1
                                     ? CreateGemmDescriptorGroupConvFwd(wDesc, xDesc, yDesc, conv.group_count)
@@ -1134,9 +1205,35 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
             const auto& conv_params  = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
             const auto& workSpace    = conv_params.workSpace;
             const auto workSpaceSize = conv_params.workSpaceSize;
-            const auto x             = conv_params.tensors.in;
-            const auto w             = conv_params.tensors.w;
-            const auto y             = conv_params.tensors.out;
+            const auto x_orig        = conv_params.tensors.in;
+            const auto w_orig        = conv_params.tensors.w;
+            const auto y_orig        = conv_params.tensors.out;
+
+            auto x_buf    = nhwc_transpose ? handle.CreateSubBuffer(workSpace, off_x_nchw, x_bytes)
+                                           : Allocator::ManageDataPtr{};
+            auto w_buf    = nhwc_transpose ? handle.CreateSubBuffer(workSpace, off_w_nchw, w_bytes)
+                                           : Allocator::ManageDataPtr{};
+            auto y_buf    = nhwc_transpose ? handle.CreateSubBuffer(workSpace, off_y_nchw, y_bytes)
+                                           : Allocator::ManageDataPtr{};
+            ConstData_t x = nhwc_transpose ? x_buf.get() : x_orig;
+            ConstData_t w = nhwc_transpose ? w_buf.get() : w_orig;
+            Data_t y      = nhwc_transpose ? y_buf.get() : y_orig;
+
+            if(nhwc_transpose)
+            {
+                auto xa = x_trans_args;
+                xa[0]   = x_buf.get();
+                xa[1]   = x_orig;
+                handle.Run(kernels[0])(xa);
+                if(handle.IsProfilingEnabled())
+                    time_gemm += handle.GetKernelTime();
+                auto wa = w_trans_args;
+                wa[0]   = w_buf.get();
+                wa[1]   = w_orig;
+                handle.Run(kernels[1])(wa);
+                if(handle.IsProfilingEnabled())
+                    time_gemm += handle.GetKernelTime();
+            }
 
             const std::string name = conv.group_count > 1 ? "groupconv" : "convolution";
             MIOPEN_LOG_FUNCTION(name + ", non 1x1");
@@ -1232,6 +1329,16 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
 
                 CastTensor(handle, &conv.lowp_quant, true, ygemmDesc, y, yDesc, y, 0, 0);
 
+                if(handle.IsProfilingEnabled())
+                    time_gemm += handle.GetKernelTime();
+            }
+
+            if(nhwc_transpose)
+            {
+                auto ya = y_trans_args;
+                ya[0]   = y_orig;
+                ya[1]   = y_buf.get();
+                handle.Run(kernels[2])(ya);
                 if(handle.IsProfilingEnabled())
                     time_gemm += handle.GetKernelTime();
             }
