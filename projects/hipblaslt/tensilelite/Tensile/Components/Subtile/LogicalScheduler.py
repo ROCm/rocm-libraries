@@ -500,7 +500,7 @@ class WaitGRCounts:
     # When True, emit_wait_gr resolves the count as
     # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
     # — the exact number of batch-1 buffer_load instructions in flight.
-    # Used by the PGR=2 preloop GR reorder (TENSILE_PRELOOP_REORDER_GR).
+    # Used by the PGR=2 preloop GR reorder.
     use_num_gr_total: bool = False
 
     def __str__(self):
@@ -3721,8 +3721,7 @@ class LogicalScheduler:
                     gl2_preloop_ops.append(GL2PrefetchIncOp())
                     gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
-            from Tensile.Common.Utilities import preloopReorderGREnabled
-            _reorder = preloopReorderGREnabled()
+            _reorder = True
             if maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
