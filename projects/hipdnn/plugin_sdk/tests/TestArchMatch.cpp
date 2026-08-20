@@ -7,6 +7,7 @@
 
 using hipdnn_plugin_sdk::archMatches;
 using hipdnn_plugin_sdk::ArchMatchMode;
+using hipdnn_plugin_sdk::stripArchFeatures;
 
 // ---------------------------------------------------------------------------
 // PREFIX mode — exact base-arch gate.
@@ -64,6 +65,40 @@ TEST(TestPluginArchMatchPrefix, FamilyStemDoesNotMatchWiderArch)
     // with PREFIX. "gfx115" does NOT match "gfx1150" because the next char is
     // '0', not ':'. Family matching must use SUBSTRING (see below).
     EXPECT_FALSE(archMatches("gfx1150", "gfx115", ArchMatchMode::PREFIX));
+}
+
+TEST(TestPluginArchMatchPrefix, StripArchFeaturesStripsFeatureSuffix)
+{
+    EXPECT_EQ(stripArchFeatures("gfx942:sramecc+:xnack-"), "gfx942");
+}
+
+TEST(TestPluginArchMatchPrefix, StripArchFeaturesLeavesBareArchUnchanged)
+{
+    EXPECT_EQ(stripArchFeatures("gfx942"), "gfx942");
+}
+
+TEST(TestPluginArchMatchPrefix, StripArchFeaturesOnEmptyInputReturnsEmpty)
+{
+    EXPECT_EQ(stripArchFeatures(""), "");
+}
+
+TEST(TestPluginArchMatchPrefix, StripArchFeaturesOnTrailingColonYieldsBaseId)
+{
+    EXPECT_EQ(stripArchFeatures("gfx942:"), "gfx942");
+}
+
+TEST(TestPluginArchMatchPrefix, StripArchFeaturesLeavesLlvmGenericTargetUnchanged)
+{
+    // "gfx9-4-generic" is an LLVM generic target name, not a feature-suffixed
+    // arch: it contains no ':', so it survives untouched.
+    EXPECT_EQ(stripArchFeatures("gfx9-4-generic"), "gfx9-4-generic");
+}
+
+TEST(TestPluginArchMatchPrefix, StripArchFeaturesResultNeverContainsColon)
+{
+    // The result becomes a directory-path component; ':' is illegal in
+    // Windows filenames, so the extractor must never leave one behind.
+    EXPECT_EQ(stripArchFeatures("gfx942:sramecc+:xnack-").find(':'), std::string_view::npos);
 }
 
 // ---------------------------------------------------------------------------

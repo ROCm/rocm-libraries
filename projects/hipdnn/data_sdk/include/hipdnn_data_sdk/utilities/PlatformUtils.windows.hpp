@@ -55,6 +55,26 @@ inline void unsetEnv(const char* var)
     SetEnvironmentVariableA(var, nullptr);
 }
 
+/// Expands a **leading** `~` or a **leading** `%USERPROFILE%` in @p path to the current
+/// user's home directory, and returns everything else untouched.
+///
+/// hipDNN's own contract, not a general environment-variable expansion:
+///  - Only a `~` or `%USERPROFILE%` at the very start of @p path is eligible. Either
+///    token appearing anywhere else in the string is left exactly as written -- it is
+///    never treated as a home-directory reference.
+///  - `~user` (a leading `~` immediately followed by a username, not a path separator or
+///    end of string) is not expanded; only a bare leading `~` alone or followed by a path
+///    separator qualifies.
+///  - If `USERPROFILE` is unset or empty, @p path is returned unchanged -- this function
+///    never substitutes a temp directory or any other fallback location.
+///
+/// @param path The path string to expand, e.g. as read from a config value or env var.
+/// @return @p path with a qualifying leading `~` or `%USERPROFILE%` replaced by
+///     `%USERPROFILE%`'s value, or @p path unchanged if no leading token qualifies or
+///     `USERPROFILE` is unset/empty. Never throws.
+inline std::string expandUser(const std::string& path);
+// TODO(Stream A): implement in Phase 2
+
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {
     return toLower(a.string()) == toLower(b.string());
