@@ -3,8 +3,6 @@
 
 #pragma once
 
-#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -16,7 +14,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
-namespace hipdnn_plugin_sdk::ingestor
+namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
 {
 
 /// The graph half of a winner-cache key: content, never identity. Two graphs are equal
@@ -135,20 +133,19 @@ private:
     uint64_t _hash = 0;
 };
 
-} // namespace hipdnn_plugin_sdk::ingestor
+} // namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
 
 namespace std
 {
 
 template <>
-struct hash<hipdnn_plugin_sdk::ingestor::GraphContentKey>
+struct hash<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey>
 {
-    size_t operator()(const hipdnn_plugin_sdk::ingestor::GraphContentKey& key) const noexcept
+    size_t operator()(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey& key) const noexcept
     {
         return static_cast<size_t>(key.hash());
     }
 };
 
 } // namespace std
-
-#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
