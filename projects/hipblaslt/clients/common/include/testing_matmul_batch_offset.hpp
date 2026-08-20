@@ -31,6 +31,8 @@
 #include "utility.hpp"
 #include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/validation.hpp>
+#include <limits>
+#include <stdexcept>
 
 namespace
 {
@@ -43,17 +45,28 @@ namespace
 
         ptrdiff_t logicalStart() const
         {
-            return static_cast<ptrdiff_t>(padding) + static_cast<ptrdiff_t>(offset);
+            return offset < 0 ? 0 : static_cast<ptrdiff_t>(offset);
         }
     };
 
     inline OffsetMatrixPlan offsetMatrixPlan(size_t matrixElements, int64_t offset)
     {
-        const size_t padding = offset < 0 ? static_cast<size_t>(-offset) : 0;
+        const uint64_t magnitude = offset < 0 ? uint64_t(-(offset + 1)) + 1 : uint64_t(offset);
+        if(magnitude > uint64_t(std::numeric_limits<ptrdiff_t>::max()))
+            throw std::overflow_error("Batch offset exceeds ptrdiff_t.");
+
+        const size_t offsetElements = static_cast<size_t>(magnitude);
+        const size_t padding        = offset < 0 ? offsetElements : 0;
+        const size_t trailing       = offset > 0 ? offsetElements : 0;
+        if(matrixElements > size_t(std::numeric_limits<ptrdiff_t>::max()) - padding
+           || matrixElements + padding
+                  > size_t(std::numeric_limits<ptrdiff_t>::max()) - trailing)
+            throw std::overflow_error("Batch-offset allocation size exceeds ptrdiff_t.");
+
         return {
             matrixElements,
             padding,
-            padding + matrixElements + (offset > 0 ? static_cast<size_t>(offset) : 0),
+            padding + matrixElements + trailing,
             offset,
         };
     }

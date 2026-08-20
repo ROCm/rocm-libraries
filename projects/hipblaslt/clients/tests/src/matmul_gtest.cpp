@@ -56,6 +56,89 @@ TEST(HostValidationTypeBridge, ValidatesComputeInputTypeBWhenAIsUnset)
     EXPECT_THROW(derive_unset_compute_input_type(arguments), std::invalid_argument);
 }
 
+TEST(MatmulOrchestration, MapsScaleModes)
+{
+    const std::array mappings{
+        std::pair{hipblaslt_scaling_format::none,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F},
+        std::pair{hipblaslt_scaling_format::Scalar,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F},
+        std::pair{hipblaslt_scaling_format::Vector,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F},
+        std::pair{hipblaslt_scaling_format::Block_32_UE8M0,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0},
+        std::pair{hipblaslt_scaling_format::Block_16_UE8M0,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT},
+        std::pair{hipblaslt_scaling_format::Block_32_UE4M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT},
+        std::pair{hipblaslt_scaling_format::Block_16_UE4M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3},
+        std::pair{hipblaslt_scaling_format::Block_32_UE5M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT},
+        std::pair{hipblaslt_scaling_format::Block_16_UE5M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT},
+        std::pair{hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT},
+    };
+
+    for(const auto& [format, expected] : mappings)
+        EXPECT_EQ(matmulScaleMode(format), expected);
+}
+
+TEST(MatmulOrchestration, MapsEpiloguePolicy)
+{
+    Arguments arguments;
+    arguments.activation_type = hipblaslt_activation_type::none;
+    arguments.bias_vector     = false;
+    arguments.use_e           = false;
+    arguments.gradient        = false;
+    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DEFAULT);
+
+    arguments.activation_type = hipblaslt_activation_type::relu;
+    arguments.bias_vector     = true;
+    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_BIAS);
+
+    arguments.use_e = true;
+    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
+
+    arguments.activation_type = hipblaslt_activation_type::gelu;
+    arguments.gradient        = true;
+    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DGELU_BGRAD);
+
+    arguments.activation_type = hipblaslt_activation_type::none;
+    arguments.use_e           = false;
+    arguments.bias_source     = hipblaslt_bias_source::a;
+    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADA);
+    arguments.bias_source = hipblaslt_bias_source::b;
+    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADB);
+
+    arguments                  = Arguments{};
+    arguments.activation_type  = hipblaslt_activation_type::none;
+    arguments.bias_vector      = false;
+    arguments.use_e            = true;
+    arguments.gradient         = false;
+    EXPECT_THROW(matmulEpilogue(arguments), std::invalid_argument);
+}
+
+TEST(MatmulBatchOffsetPlan, ValidatesOffsetArithmetic)
+{
+    const auto negative = offsetMatrixPlan(4, -3);
+    EXPECT_EQ(negative.padding, 3);
+    EXPECT_EQ(negative.allocationElements, 7);
+    EXPECT_EQ(negative.logicalStart(), 0);
+
+    const auto positive = offsetMatrixPlan(4, 3);
+    EXPECT_EQ(positive.padding, 0);
+    EXPECT_EQ(positive.allocationElements, 7);
+    EXPECT_EQ(positive.logicalStart(), 3);
+
+    EXPECT_THROW(offsetMatrixPlan(1, std::numeric_limits<int64_t>::min()),
+                 std::overflow_error);
+    EXPECT_THROW(
+        offsetMatrixPlan(size_t(std::numeric_limits<ptrdiff_t>::max()), 1),
+        std::overflow_error);
+}
+
 TEST(HostValidationDataInitializationBridge, RuntimeRangeUsesTensorLayoutOffset)
 {
     std::array<float, 6> values{1, 2, 3, 4, 5, 6};
