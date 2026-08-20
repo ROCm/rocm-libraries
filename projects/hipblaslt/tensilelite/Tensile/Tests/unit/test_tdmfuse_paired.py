@@ -548,7 +548,16 @@ def test_rejects_without_mx_scales_on_both(_gp_gfx1250, gfx1250_iim, assembler, 
     assert "TDMFuse=5 names MXSA and MXSB as the odd-wave member" in out
 
 
+@pytest.mark.xfail(
+    reason="TDMSplit is currently disabled upstream (PR #10911)", strict=False)
 def test_rejects_tdmsplit(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """Row 5's own TDMSplit refusal, which upstream now preempts.
+
+    97e1223a3f9 (PR #10911) rejects TDMSplit at function scope in Solution.py,
+    above this row's guard, so the message below is unreachable rather than
+    wrong. strict=False so this revives by itself once that temporary reject is
+    lifted; the guard it covers is left in place for the same reason.
+    """
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMSplit=True)
     assert sol.get("Valid") is False
     assert "TDMFuse=5 is not available with TDMSplit" in out

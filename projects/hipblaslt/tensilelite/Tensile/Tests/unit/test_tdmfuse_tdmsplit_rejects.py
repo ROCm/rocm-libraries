@@ -63,12 +63,17 @@ descriptor is exactly what TDMSplit's multi-wave increment recomputes. The
 asymmetry is the content: a guard copied to row 4 by mistake, or dropped from
 row 4's neighbours, is a silent change of the selectable space.
 
-REVISIT AFTER THE NEXT REBASE. Upstream disables TDMSplit outright in a commit
-68 commits past this branch's rebase target, so it is still selectable here and
-will not be afterwards. Once that lands, every test taking the TDMSplit=True
-branch below becomes unreachable rather than wrong: the cross-product test, the
-three per-row TDMSplit rejects, the guard-order test, and the pair-spelling
-test. The TDMFuse rejects that do not mention TDMSplit are unaffected.
+THAT REBASE HAS LANDED, and TDMSplit is no longer selectable. Upstream
+97e1223a3f9 (PR #10911) rejects it unconditionally at function scope in
+Solution.py -- arch-independent, and above every per-row guard this file
+exercises -- as a temporary measure for unresolved read-token/tensorcnt races.
+So the ten cases below that set TDMSplit=True are unreachable rather than
+wrong, and they carry xfail(strict=False): non-strict because the day the
+blanket reject lifts they go green by themselves, which is the signal wanted.
+Nothing is deleted. The asymmetry table above is the content -- it is what the
+per-row guards will have to keep satisfying when TDMSplit returns, and it is
+not recoverable from a tree in which nothing exercises it. The TDMFuse rejects
+that do not mention TDMSplit are unaffected and still run.
 """
 import copy
 
@@ -79,6 +84,13 @@ from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
+
+# Upstream's blanket TDMSplit reject (97e1223a3f9, PR #10911) preempts every
+# guard below that needs TDMSplit=True to be reachable. strict=False is the
+# whole point: these revive on their own when the reject is lifted, so nobody
+# has to remember to come back and unmark them.
+_TDMSPLIT_DISABLED_UPSTREAM = pytest.mark.xfail(
+    reason="TDMSplit is currently disabled upstream (PR #10911)", strict=False)
 
 # Sibling unit tests mutate the process-global defaultSolution in place, which
 # makes Solution.__init__'s `for key in defaultSolution` loop order-dependent.
@@ -259,6 +271,7 @@ _TDMSPLIT_MECHANISM = {
 
 
 @pytest.mark.parametrize("fuse", [0, 2, 4, 5, 6])
+@_TDMSPLIT_DISABLED_UPSTREAM
 def test_tdmsplit_across_every_grouping(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     """The cross-product, stated as one table rather than five separate facts.
@@ -285,6 +298,7 @@ def test_tdmsplit_across_every_grouping(
         assert mechanism in out
 
 
+@_TDMSPLIT_DISABLED_UPSTREAM
 def test_row_four_is_the_only_fused_grouping_that_keeps_tdmsplit(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
     """Stated on its own because it is the easiest thing here to get wrong.
@@ -307,6 +321,7 @@ def test_row_four_is_the_only_fused_grouping_that_keeps_tdmsplit(
         ({"_remove": ("PrefetchGlobalReadA", "PrefetchGlobalReadB")}, "legacy"),
     ],
 )
+@_TDMSPLIT_DISABLED_UPSTREAM
 def test_tdmsplit_is_refused_whatever_the_pair_spelling(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, pair, label):
     """TDMSplit is a descriptor-grouping objection, so no pair spelling escapes.
@@ -322,6 +337,10 @@ def test_tdmsplit_is_refused_whatever_the_pair_spelling(
     assert "TDMFuse=6 is not available with TDMSplit" in out
 
 
+@pytest.mark.xfail(
+    reason="premise preempted: upstream's blanket TDMSplit reject (PR #10911) "
+           "fires above both row-2 guards whose order this pins",
+    strict=False)
 def test_tdmsplit_is_refused_before_the_equal_pair_guard(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
     """Two of row 2's guards apply at once here, and the order decides the text.
@@ -331,6 +350,18 @@ def test_tdmsplit_is_refused_before_the_equal_pair_guard(
     is the message, and a test asserting only that the solution was refused
     could not tell the two apart. Reordering the block would flip this without
     changing any kernel that builds.
+
+    ITS PREMISE IS PREEMPTED, not just its expected text -- which is why this
+    one is marked separately from the other nine. Upstream's blanket reject
+    sits at function scope above BOTH guards being ordered, so neither is
+    consulted and the precedence this test exists to pin is currently
+    unobservable rather than false. Note what that does to the second
+    assertion: "requires an equal decoupled pair" is indeed absent from the
+    output, but for a new reason, so it would keep passing while proving
+    nothing. Rewriting the first assertion against the blanket message would
+    turn this green at the cost of deleting the ordering fact, so it is parked
+    instead: when the blanket reject lifts, both guards become reachable again
+    in the same order and this test resumes protecting it unchanged.
     """
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=2, TDMSplit=True,
                        PrefetchGlobalReadA=1, PrefetchGlobalReadB=2)
