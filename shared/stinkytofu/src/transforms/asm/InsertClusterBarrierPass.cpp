@@ -1298,10 +1298,12 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // and a loop whose segments disagree is no harder to balance than one where
                 // they all hoist.
                 StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                const int maxSegmentHops =
+                    cluster_barrier::kRule3CrossLoop ? kMaxSegmentHops : 0;
                 Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
                     trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
                     kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
-                    kMaxSegmentHops, head);
+                    maxSegmentHops, head);
                 // Read the exit label and climb the preheader now: once the handshakes go
                 // in, the body is full of this pass's own skip branches and barriers, and
                 // neither the loop's real exit nor an unspoken-for stretch of preheader is

@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
 #include <climits>
@@ -287,11 +288,13 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
             // between the compare and the branch that reads it. Hold it back to within
             // kLiveOutSccDefLeadCycles of the region end instead, so it lands next to its
             // reader. The floor is only a preference: see DAGNode::earliestClock.
-            first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
-            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-out chain"
-                                 << " (dagId=" << first->id << ") held back to clock >= "
-                                 << first->earliestClock << " (region " << regionCycles
-                                 << " cycles)\n");
+            if (cluster_barrier::kRule3CrossLoop) {
+                first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
+                PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-out chain"
+                                     << " (dagId=" << first->id << ") held back to clock >= "
+                                     << first->earliestClock << " (region " << regionCycles
+                                     << " cycles)\n");
+            }
             continue;
         }
 
