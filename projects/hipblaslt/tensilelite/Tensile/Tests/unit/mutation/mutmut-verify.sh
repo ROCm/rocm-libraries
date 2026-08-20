@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # mutmut-verify.sh — GENERIC, manifest-driven, STRICTLY SERIAL survivor kill-proof.
 #
 # This runner is generic over ANY mutmut survivor:
@@ -7,7 +10,7 @@
 # KILL (test PASSES clean, FAILS mutated), reverting the source after each.
 #
 # Run only one instance at a time and never apply mutants concurrently: apply/run/
-# revert touches the shared worktree. A trap reverts every target file on exit.
+# revert touches the shared worktree. A trap reverts the active target on exit.
 #
 # Usage:
 #   mutmut-verify.sh --container tl-mut --manifest <rows.tsv> --out <dir> \
@@ -15,7 +18,7 @@
 #
 # Manifest: TSV with a header line, then one row per mutant:
 #   mutant_id <TAB> file <TAB> apply_method <TAB> test_node <TAB> \
-#       expect_clean_rc <TAB> expect_mutant_rc_nonzero <TAB> revert_assert
+#       expect_clean_rc <TAB> expect_mutant_rc_nonzero
 #     file          : path relative to --src, e.g. Tensile/Common/Utilities.py
 #     apply_method  : "mutmut_apply"  -> docker exec ... mutmut apply <mutant_id>
 #                     "diff:<abspath>" -> git -C <src> apply <abspath>   (host side)
@@ -25,7 +28,6 @@
 #     expect_mutant_rc_nonzero : true|false. true (normal kill): mutant node must
 #                                FAIL with pytest ASSERTION-FAILURE rc==1. false:
 #                                node must still pass rc==0.
-#     revert_assert            : true|false (assert file clean after revert)
 #
 # Output: <out>/kill_matrix.tsv  (one row per manifest row) + <out>/verify-report.txt
 # Verdict KILLED iff base_rc == expect_clean_rc AND revert == ok
@@ -100,21 +102,66 @@ done
 # Derive worktree root from git if not given (so the script is location-independent).
 if [[ -z "$ROOT" ]]; then ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; fi
 [[ -n "$ROOT" ]] || { echo "could not determine --root (not in a git worktree?)" >&2; exit 2; }
+ROOT="$(readlink -f -- "$ROOT")"
 SRC="$ROOT/$SRC_REL"             # host-side source dir (git target)
 PROJ="/work/$SRC_REL"            # in-container project dir (bind-mounted == SRC)
 [[ -d "$SRC" ]] || { echo "src dir not found: $SRC" >&2; exit 2; }
 docker inspect "$CON" >/dev/null 2>&1 || { echo "container not found: $CON" >&2; exit 2; }
 
+# Applying and restoring a mutant must operate on the same tree. In particular,
+# --root must not select one worktree while the container's /work bind mount
+# points at another one.
+IFS=$'\t' read -r CONTAINER_ROOT CONTAINER_ROOT_RW < <(
+  docker inspect "$CON" \
+    --format '{{range .Mounts}}{{if eq .Destination "/work"}}{{printf "%s\t%t" .Source .RW}}{{end}}{{end}}'
+)
+[[ -n "$CONTAINER_ROOT" ]] || {
+  echo "container $CON has no bind mount at /work; recreate it with --mount type=bind,source=$ROOT,target=/work" >&2
+  exit 2
+}
+CONTAINER_ROOT="$(readlink -f -- "$CONTAINER_ROOT")"
+[[ "$CONTAINER_ROOT" == "$ROOT" ]] || {
+  echo "container /work mount mismatch: container uses $CONTAINER_ROOT, but --root resolves to $ROOT" >&2
+  exit 2
+}
+[[ "$CONTAINER_ROOT_RW" == "true" ]] || {
+  echo "container /work mount is read-only; mutation verification requires a read-write bind mount" >&2
+  exit 2
+}
+
 mkdir -p "$OUT"
 KM="$OUT/kill_matrix.tsv"
 REPORT="$OUT/verify-report.txt"
 
-# ----------------------------------------------------------------- trap revert
-# Collect every target file from the manifest so the trap can restore them all,
-# even on crash/ctrl-C. Skip the header row (col1 == "mutant_id").
-mapfile -t TARGETS < <(awk -F'\t' 'NR>1 && $1!="mutant_id" && $2!="" {print $2}' "$MANIFEST" | sort -u)
-revert_all() { for f in "${TARGETS[@]:-}"; do [[ -n "$f" ]] && git -C "$SRC" checkout -- "$f" 2>/dev/null; done; }
-trap 'revert_all' EXIT
+# ----------------------------------------------------------------- manifest safety
+EXPECTED_HEADER=$'mutant_id\tfile\tapply_method\ttest_node\texpect_clean_rc\texpect_mutant_rc_nonzero'
+IFS= read -r MANIFEST_HEADER < "$MANIFEST"
+[[ "$MANIFEST_HEADER" == "$EXPECTED_HEADER" ]] || {
+  echo "invalid manifest header; expected: $EXPECTED_HEADER" >&2
+  exit 2
+}
+
+# Reject every unsafe target before installing the cleanup trap. The trap only
+# restores the file currently being mutated, which was proven clean beforehand;
+# it can therefore never discard a pre-existing edit from another manifest row.
+mapfile -t TARGETS < <(awk -F'\t' 'NR>1 && $2!="" {print $2}' "$MANIFEST" | sort -u)
+for f in "${TARGETS[@]}"; do
+  case "$f" in
+    /*|..|../*|*/../*|*/..) echo "unsafe manifest file path: $f" >&2; exit 2 ;;
+  esac
+  git -C "$SRC" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
+    echo "manifest file is not tracked under $SRC: $f" >&2; exit 2; }
+  git -C "$SRC" diff --quiet HEAD -- "$f" || {
+    echo "manifest target is dirty before verification: $f" >&2; exit 2; }
+done
+
+ACTIVE_FILE=""
+revert_active() {
+  [[ -z "$ACTIVE_FILE" ]] && return 0
+  git -C "$SRC" checkout -- "$ACTIVE_FILE" 2>/dev/null || return 1
+  ACTIVE_FILE=""
+}
+trap 'revert_active' EXIT
 
 # ----------------------------------------------------------------- helpers
 run_node() { # $1=test_node -> echoes rc
@@ -145,12 +192,23 @@ overall_ok=1
 # Read manifest, skipping header. IFS=tab.
 {
   read -r _hdr   # discard header
-  while IFS=$'\t' read -r mid file method node exp_clean exp_mut_nz rev_assert; do
+  while IFS=$'\t' read -r mid file method node exp_clean exp_mut_nz extra; do
     [[ -z "${mid:-}" ]] && continue
     detail=""; base_rc=-1; mut_rc=-1; revert="-"; verdict="BAD"
 
+    if [[ -n "${extra:-}" ]]; then
+      detail="unexpected-extra-manifest-column"; verdict="BAD"; overall_ok=0
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$mid" "$file" "$base_rc" "$mut_rc" "$revert" "$verdict" "$detail" >> "$KM"
+      printf "%-28s %-8s %s\n" "$mid" "$verdict" "$detail" | tee -a "$REPORT"; continue
+    fi
+    if [[ "${exp_mut_nz:-true}" != "true" && "${exp_mut_nz:-true}" != "false" ]]; then
+      detail="expect_mutant_rc_nonzero-must-be-true-or-false"; verdict="BAD"; overall_ok=0
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$mid" "$file" "$base_rc" "$mut_rc" "$revert" "$verdict" "$detail" >> "$KM"
+      printf "%-28s %-8s %s\n" "$mid" "$verdict" "$detail" | tee -a "$REPORT"; continue
+    fi
+
     # 0) assert clean before
-    if ! git -C "$SRC" diff --quiet -- "$file"; then
+    if ! git -C "$SRC" diff --quiet HEAD -- "$file"; then
       detail="dirty-before-apply"; verdict="BAD"; overall_ok=0
       printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$mid" "$file" "$base_rc" "$mut_rc" "$revert" "$verdict" "$detail" >> "$KM"
       printf "%-28s %-8s %s\n" "$mid" "$verdict" "$detail" | tee -a "$REPORT"; continue
@@ -160,8 +218,9 @@ overall_ok=1
     base_rc=$(run_node "$node")
 
     # 2) materialize mutant
+    ACTIVE_FILE="$file"
     if ! apply_mutant "$method" "$mid" "$file"; then
-      git -C "$SRC" checkout -- "$file" 2>/dev/null
+      revert_active || true
       detail="apply-failed ($method)"; verdict="BAD"; overall_ok=0
       printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$mid" "$file" "$base_rc" "$mut_rc" "$revert" "$verdict" "$detail" >> "$KM"
       printf "%-28s %-8s %s\n" "$mid" "$verdict" "$detail" | tee -a "$REPORT"; continue
@@ -171,8 +230,8 @@ overall_ok=1
     mut_rc=$(run_node "$node")
 
     # 4) revert + assert clean
-    git -C "$SRC" checkout -- "$file" 2>/dev/null
-    if git -C "$SRC" diff --quiet -- "$file"; then revert="ok"; else revert="LEAK"; overall_ok=0; fi
+    revert_active || true
+    if git -C "$SRC" diff --quiet HEAD -- "$file"; then revert="ok"; else revert="LEAK"; overall_ok=0; fi
 
     # 5) classify (STRICT: KILLED requires assertion-failure rc==1, not any non-zero)
     IFS=$'\t' read -r verdict detail < <(classify_verdict "$base_rc" "${exp_clean:-0}" "$mut_rc" "${exp_mut_nz:-true}" "$revert")

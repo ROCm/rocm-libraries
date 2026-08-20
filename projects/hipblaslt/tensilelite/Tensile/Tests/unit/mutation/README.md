@@ -28,9 +28,32 @@ request to use WSL and relies on `fork`, Unix resource limits, and Unix signals.
 These Bash helpers therefore do not reduce the supported platform set for the
 actual mutation run. Native PowerShell execution is not supported.
 
-Run all examples from the `rocm-libraries` repository root. The examples assume
-an already-created container named `tl-mut` with the repository mounted at
-`/work`. Replace that name when using a different container.
+Run all examples from the `rocm-libraries` repository root. The repository does
+not publish a prebuilt `tl-mut` image: `tl-mut` is a user-provisioned ROCm
+development container. Build the starting image from the hipBLASLt Dockerfile,
+mount the current worktree at `/work`, and provision the mutation tox environment
+as follows:
+
+```bash
+docker build -t hipblaslt-dev projects/hipblaslt/docker
+
+docker run -d --name tl-mut \
+  --mount type=bind,source="$(pwd -P)",target=/work \
+  --workdir /work/projects/hipblaslt/tensilelite \
+  --env PATH=/work/projects/hipblaslt/tensilelite/.tox/mutation-unit/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  hipblaslt-dev sleep infinity
+
+docker exec tl-mut python3 -m pip install tox
+docker exec -w /work/projects/hipblaslt/tensilelite tl-mut \
+  tox -e mutation-unit --notest
+docker exec -w /work/projects/hipblaslt/tensilelite tl-mut \
+  .tox/mutation-unit/bin/pip install ./rocisa
+```
+
+The `/work` mount must point to the same worktree passed through `--root` (or the
+current worktree when `--root` is omitted). `mutmut-verify.sh` rejects a missing,
+read-only, or mismatched mount so it cannot apply a mutant in one tree and report
+that a different tree was restored. Replace `tl-mut` when using another container.
 
 ## 1. Record preflight state
 
@@ -97,6 +120,12 @@ Do not restore the backup yet. Run and inspect the slice first.
 Run the configured slice in the container. Always bound worker count; the
 committed timeout multiplier assumes no more than 32 concurrent children.
 
+The supported tox entry point applies the same cap by default:
+
+```bash
+tox -e mutation-unit
+```
+
 ```bash
 docker exec \
   -w /work/projects/hipblaslt/tensilelite \
@@ -134,14 +163,14 @@ docker exec \
 ## 4. Verify survivor-killing tests
 
 `mutmut-verify.sh` changes tracked source while each mutant is active. Run only
-one verifier at a time. The exit trap restores every manifest target, including
-after interruption.
+one verifier at a time. The exit trap restores the active manifest target after
+interruption.
 
 Create a tab-separated manifest. The header and column order are required:
 
 ```text
-mutant_id	file	apply_method	test_node	expect_clean_rc	expect_mutant_rc_nonzero	revert_assert
-Tensile.Common.Utilities.x__mutmut_1	Tensile/Common/Utilities.py	mutmut_apply	Tensile/Tests/unit/characterization/CommonUtilities/test_example.py::test_example	0	true	true
+mutant_id	file	apply_method	test_node	expect_clean_rc	expect_mutant_rc_nonzero
+Tensile.Common.Utilities.x__mutmut_1	Tensile/Common/Utilities.py	mutmut_apply	Tensile/Tests/unit/characterization/CommonUtilities/test_example.py::test_example	0	true
 ```
 
 Then run the verifier:

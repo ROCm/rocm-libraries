@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # pyproject-mutmut.sh — back up / rewrite / restore / gate the
 # [tool.mutmut] slice config in projects/hipblaslt/tensilelite/pyproject.toml.
 #

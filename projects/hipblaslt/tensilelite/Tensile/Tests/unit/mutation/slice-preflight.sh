@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # slice-preflight.sh — per-slice environment / base-pin verification.
 #
 # Records the reproducibility state required BEFORE a mutation slice starts and
