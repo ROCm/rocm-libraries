@@ -25,19 +25,10 @@
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
-/// A graph fake that actually carries content, for the tests that must prove
-/// `GraphContentKey` discriminates on it.
-///
-/// `TestGraph` (KernelIngestorTestFixtures.hpp) cannot serve here: it reports
-/// `nodeCount() == 0`, throws from every node accessor, and hands back an empty tensor
-/// map, so every instance is structurally identical and "changing a field changes the
-/// key" is unassertable against it. It stays exactly as it is -- the matcher and
-/// state-manager tests depend on that emptiness, and widening a shared fixture for one
-/// story's needs would put new content in front of all of them.
-///
-/// Every field the key compares is independently settable through `Spec`, so a test can
-/// vary exactly one and hold the rest fixed. That one-field-at-a-time property is what
-/// makes the mutation tests a real pin rather than a smoke test.
+/// A graph fake that actually carries content, for tests proving `GraphContentKey`
+/// discriminates on it. `TestGraph` is content-empty by construction (D12) and cannot
+/// serve here. Every field the key compares is independently settable through `Spec`,
+/// so a test can vary exactly one field and hold the rest fixed.
 class ContentCarryingTestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
@@ -77,18 +68,15 @@ public:
         std::optional<int64_t> preferredEngineId;
         bool isOverrideShapeEnabled = false;
         /// The backend derives this from isOverrideShapeEnabled and three tensor facts
-        /// (PluginVersionConstants.hpp:58-93), and the generated operator== compares it,
-        /// so a fixture that cannot set it cannot reproduce what production does. Two
-        /// graphs differing only in the flag really do carry different versions.
+        /// (PluginVersionConstants.hpp:58-93); the fixture must be able to set it to
+        /// reproduce what production does.
         std::optional<hipdnn_data_sdk::utilities::Version> minRequiredApiVersion;
         std::vector<TensorSpec> tensors{TensorSpec{1}, TensorSpec{2}};
         std::vector<NodeSpec> nodes{NodeSpec{}};
     };
 
-    /// Two constructors rather than one with a `Spec{}` default argument: a default
-    /// argument is not a complete-class context, so naming `Spec{}` there while
-    /// `ContentCarryingTestGraph`'s own body is still open cannot see `Spec`'s default
-    /// member initializers.
+    /// Two constructors, not a `Spec{}` default argument: a default argument is not a
+    /// complete-class context, so it cannot see `Spec`'s default member initializers.
     ContentCarryingTestGraph()
         : ContentCarryingTestGraph(Spec{})
     {

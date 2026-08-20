@@ -175,28 +175,20 @@ public:
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
 
-        // Check 2. Check 1 already offered `catalog` a measured order if a record covered
-        // the whole of it; this asks the same coverage question of the knob-filtered
-        // candidates, which is a different and usually smaller set. The two are
-        // independent: Check 1 can fail on a partial record and Check 2 still pass, when
-        // the filter happens to narrow the candidates down to kernels the record carries.
+        // Check 2 asks the same coverage question as Check 1, but of the knob-filtered
+        // candidates; the two are independent, so Check 1 can fail while Check 2 passes.
         const WinnerKey winnerKey{GraphContentKey{opGraph}, DeviceKey{context.deviceProperties}};
         if(const auto record = _stateManager.winnerFor(winnerKey); record.has_value())
         {
             const bool covered = recordCovers(*record, filtered);
             if(covered || !settings.benchmarkingEnabled)
             {
-                // Uncovered with benchmarking off still serves: those entries were
-                // genuinely measured, so they beat the heuristic front, and the flag is
-                // per-execution-context so this run cannot re-benchmark anyway. Declining
-                // would discard real measurements for a guess on every unflagged run.
-                // Walk the ranked list rather than committing to its front: constructing
-                // a GenericPlan runs provider code -- workspaceBytes() and prepare() --
-                // and throws when prepare() returns null (GenericPlan.hpp:33-41). The
-                // benchmarking branch below already treats that as a per-candidate loss
-                // rather than a plan-level failure, and a cache hit must not be stricter:
-                // without this, a record whose winner cannot prepare would fail a
-                // buildPlan that an empty cache would have satisfied from filtered.front().
+                // Uncovered with benchmarking off still serves: those entries are genuine
+                // measurements and the flag is per-execution-context, so this run cannot
+                // re-benchmark. Walks the ranked list instead of committing to its front:
+                // constructing a GenericPlan runs prepare()/workspaceBytes() and throws on
+                // a null prepare (GenericPlan.hpp:33-41), and a cache hit must not be
+                // stricter than an empty cache.
                 const auto ranked = orderByRecord(*record, filtered);
                 for(size_t rank = 0; rank < ranked.size(); ++rank)
                 {
@@ -232,9 +224,8 @@ public:
                     }
                 }
 
-                // Every ranked entry is stale, absent, or unbuildable. Not an error: fall
-                // through to today's behaviour rather than serve a kernel the record no
-                // longer describes.
+                // Every ranked entry is stale, absent, or unbuildable; not an error, fall
+                // back to normal selection.
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                        << _engine.name
                                        << "' found a benchmarked record whose entries no longer "
@@ -242,10 +233,9 @@ public:
             }
             else
             {
-                // Uncovered with benchmarking on: ignore the record entirely and measure
-                // all of `filtered` afresh. Sampling only the uncovered candidates and
-                // merging by time is precisely what must not happen -- it would order
-                // entries by timings taken in different runs under different load.
+                // Uncovered with benchmarking on: ignore the record and re-measure all of
+                // `filtered` -- merging timings from different runs under different load is
+                // forbidden.
                 HIPDNN_PLUGIN_LOG_INFO(
                     "ingestor: engine '"
                     << _engine.name << "' has a benchmarked record covering only part of "
@@ -308,18 +298,9 @@ public:
     }
 
 protected:
-    /// Constructs the sampling plan. Virtual purely as a **test seam**, mirroring
-    /// BenchmarkPlan::sampleCandidate's: production always gets a BenchmarkPlan, and this
-    /// changes no behaviour.
-    ///
-    /// It exists because the write-back path is otherwise untestable without a device.
-    /// The seam on sampleCandidate lets a subclass return deterministic times, but a test
-    /// cannot reach it through this builder while the concrete type is hardcoded here --
-    /// and executing the real plan on a device-less runner scores every candidate
-    /// unusable, so the callback is correctly never invoked and the assertions would be
-    /// green while proving nothing. Overriding this lets a test supply a deterministic
-    /// plan built from the *same* arguments, so the real captured callback and the real
-    /// winner key are what run.
+    /// Virtual purely as a **test seam**: a device-less runner scores every real
+    /// candidate unusable, so the write-back path never fires and its assertions would
+    /// be green while proving nothing.
     virtual std::unique_ptr<IPlan<THandle>>
         makeBenchmarkPlan(std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates,
                           const THandle& handle,
@@ -384,12 +365,9 @@ public:
     }
 
 private:
-    /// A plan built for a device that was never identified cannot be correct: an
-    /// arch-independent pack (empty `arch` list, itself legal) is admitted by
-    /// `archSupports` regardless of device identity, so the catalog can come back
-    /// non-empty even though no device was actually resolved. Rejecting here, at the
-    /// one `MatchContext` construction site every entry point shares, closes that gap
-    /// once instead of at each caller.
+    /// An arch-independent pack (empty `arch` list, itself legal) passes `archSupports`
+    /// regardless of device identity, so the catalog can be non-empty with no device
+    /// resolved.
     MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
         const auto deviceId = _deviceResolver.deviceId(handle);

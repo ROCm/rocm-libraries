@@ -18,30 +18,18 @@ namespace
 using Spec = ContentCarryingTestGraph::Spec;
 
 /// The relation under test: two graphs are equal when a kernel measurement taken on one
-/// is a valid measurement for the other. Every case below is an instance of that
-/// question -- the "equal" ones are facts a benchmark result survives, the "not equal"
-/// ones are facts it does not.
+/// is a valid measurement for the other.
 ///
 /// MAINTENANCE: this file is the field-set pin for the graph half of the key. The
-/// traversal itself is generated from `graph.fbs` (cachekey_generated.h), so a new field
-/// is hashed and compared without anyone wiring it up -- what codegen cannot decide is
-/// whether that participation is *correct*. A new field that changes what a kernel does
-/// needs a discriminates-on case here; one that does not needs `(cache_ignore)` in the
-/// schema and an ignores case here.
-///
-/// What is pinned here: every `Graph` field the fixture can express (name, all three
-/// data types, tensors, nodes, id, preferred engine, override-shape, api version), plus
-/// the tensor fields the traversal reads (uid, dtype, dims, strides) and the node fields
-/// it reads (name, compute dtype, attribute discriminant, and two payload fields). The
-/// excluded ones -- graph name, node name, id, preferred engine, override-shape, api
-/// version -- are pinned as *equal*, so deleting an annotation fails a test rather than
-/// silently narrowing the cache. Tensor name is excluded too but has no case: `TensorSpec`
-/// cannot express it, and widening the fixture for one field is not worth it while the
-/// two names above cover the same annotation.
-///
-/// What is deliberately NOT pinned here: the interiors of `TensorAttributesT` and each
-/// `NodeAttributes` union member. Those are walked by the generated traversal, which is
-/// regenerated from the schema, so a new sub-field is covered automatically.
+/// traversal is generated from `graph.fbs`, so a new field is hashed automatically --
+/// what it cannot decide is whether that participation is *correct*. A field that
+/// changes kernel behaviour needs a discriminates-on case here; one that does not needs
+/// `(cache_ignore)` in the schema and an equals-case here. Pinned: every `Graph` field
+/// the fixture can express, the tensor fields the traversal reads (uid, dtype, dims,
+/// strides), and the node fields it reads (name, compute dtype, attribute discriminant,
+/// two payload fields). Not pinned: the interiors of `TensorAttributesT` and each
+/// `NodeAttributes` union member -- walked by the generated traversal and covered
+/// automatically when the schema regenerates.
 GraphContentKey keyFor(const ContentCarryingTestGraph& graph)
 {
     return GraphContentKey{graph};
@@ -56,9 +44,8 @@ TEST(TestIngestorGraphContentKey, IdenticalContentComparesEqual)
     EXPECT_EQ(keyFor(first).hash(), keyFor(second).hash());
 }
 
-// The story's premise: Graph.id is minted per finalize, so two runs of the same program
-// produce different ids for the same computation. If the key saw it, every lookup would
-// miss and the cache would never serve anything.
+// Graph.id is minted per finalize, so two runs of the same computation produce
+// different ids. If the key saw it, every lookup would miss.
 TEST(TestIngestorGraphContentKey, ADifferentGraphIdStillComparesEqual)
 {
     Spec first;
@@ -69,8 +56,8 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphIdStillComparesEqual)
     EXPECT_EQ(keyFor(ContentCarryingTestGraph{first}), keyFor(ContentCarryingTestGraph{second}));
 }
 
-// Which engine the caller would prefer selects who runs the computation, never what is
-// computed, so a measurement transfers across it.
+// The preferred engine selects who runs the computation, never what is computed, so a
+// measurement transfers across it.
 TEST(TestIngestorGraphContentKey, ADifferentPreferredEngineIdStillComparesEqual)
 {
     Spec first;
@@ -82,8 +69,7 @@ TEST(TestIngestorGraphContentKey, ADifferentPreferredEngineIdStillComparesEqual)
 }
 
 // The flag permits shapes to be overridden; it does not change them. The dims and
-// strides that will actually run are in this same graph and are compared in full, so the
-// geometry a kernel was timed against is identical either way.
+// strides that will actually run are compared in full either way.
 TEST(TestIngestorGraphContentKey, ADifferentOverrideShapeFlagStillComparesEqual)
 {
     Spec enabled;
@@ -94,12 +80,11 @@ TEST(TestIngestorGraphContentKey, ADifferentOverrideShapeFlagStillComparesEqual)
               keyFor(ContentCarryingTestGraph{disabled}));
 }
 
-/// The production shape of the case above, which the fixture could not express until
-/// `Spec::minRequiredApiVersion` existed. The backend derives the stamped version from
+/// The production shape of the case above: the backend derives the stamped version from
 /// `is_override_shape_enabled` (PluginVersionConstants.hpp:58-93), so two real graphs
-/// differing only in that flag carry *different* versions -- and the generated
-/// operator== compares the version. Without clearing it, the exclusion above is defeated
-/// in production while its test still passes. This is the test that would have caught it.
+/// differing only in that flag carry *different* versions, and the generated operator==
+/// compares it. Without clearing it, the exclusion above is defeated in production while
+/// its own test still passes.
 TEST(TestIngestorGraphContentKey, TheDerivedApiVersionDoesNotDefeatTheOverrideShapeExclusion)
 {
     Spec withOverride;
@@ -116,9 +101,8 @@ TEST(TestIngestorGraphContentKey, TheDerivedApiVersionDoesNotDefeatTheOverrideSh
            "stamps must not split the key";
 }
 
-/// The version is excluded because it is *derived*, not because versions are
-/// unimportant: its content-bearing inputs (pass-by-value, ragged offsets, alignment)
-/// are each compared directly on the tensors that carry them.
+/// The version is excluded because it is *derived*: its content-bearing inputs are each
+/// compared directly on the tensors that carry them.
 TEST(TestIngestorGraphContentKey, ADifferentApiVersionAloneDoesNotSplitTheKey)
 {
     Spec early;
@@ -210,10 +194,9 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphComputeDataTypeComparesUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
 }
 
-// TestGraph is the degenerate case by construction: no nodes, no tensors. fnv1aHash
-// collapses null and empty input to sentinel 0, so a key of 0 would alias every
-// contentless graph onto one bucket -- the version tag and node count emitted ahead of
-// any content are what prevent it.
+// fnv1aHash collapses null and empty input to sentinel 0, so a key of 0 would alias
+// every contentless graph onto one bucket -- the version tag and node count emitted
+// ahead of any content are what prevent it.
 TEST(TestIngestorGraphContentKey, AnEmptyGraphKeysToANonZeroHash)
 {
     const TestGraph empty(makeGraphId(0xC3));
@@ -229,14 +212,9 @@ TEST(TestIngestorGraphContentKey, AnEmptyGraphStillComparesEqualToAnotherEmptyGr
     EXPECT_EQ(GraphContentKey{first}, GraphContentKey{second});
 }
 
-/// Names are labels a caller chose, not geometry a kernel was timed against: two
-/// identically-shaped graphs run the same kernels whatever they are called, so a
-/// measurement transfers and the names are excluded. Marked `(cache_ignore)` in
-/// graph.fbs, which is what this pins -- dropping the annotation fails here.
-///
-/// The cost of excluding them is that two graphs a caller distinguishes by name share
-/// one entry and one benchmark sweep. That is the intended trade: the sweep is what the
-/// cache exists to avoid, and the names do not change its result.
+/// Names are excluded, marked `(cache_ignore)` in graph.fbs, which is what this pins:
+/// two identically-shaped graphs run the same kernels whatever they are called, so a
+/// measurement transfers regardless of name.
 TEST(TestIngestorGraphContentKey, ADifferentGraphNameComparesEqual)
 {
     const Spec named;
@@ -264,9 +242,8 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphIntermediateDataTypeComparesUne
     EXPECT_NE(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
 }
 
-/// Same reasoning as the graph name above, one level down. The node's *attributes* are
-/// compared in full -- see the operand-uid case below -- so excluding the label does not
-/// weaken what the key discriminates.
+/// Same reasoning as the graph name above, one level down: the node's *attributes* are
+/// compared in full, so excluding the label does not weaken discrimination.
 TEST(TestIngestorGraphContentKey, ADifferentNodeNameComparesEqual)
 {
     const Spec named;
@@ -276,8 +253,8 @@ TEST(TestIngestorGraphContentKey, ADifferentNodeNameComparesEqual)
     EXPECT_EQ(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
 }
 
-/// Inside the union payload again, on a field the discriminant and operation cannot
-/// distinguish: two adds wired to different tensors are different computations.
+/// Inside the union payload again, on a field the discriminant cannot distinguish: two
+/// adds wired to different tensors are different computations.
 TEST(TestIngestorGraphContentKey, ADifferentPointwiseOperandUidComparesUnequal)
 {
     const Spec wired;
@@ -295,13 +272,9 @@ TEST(TestIngestorGraphContentKey, AnEmptyGraphDoesNotMatchAContentCarryingOne)
     EXPECT_NE(GraphContentKey{empty}, keyFor(populated));
 }
 
-/// An IGraph that does **not** override `bytes()`, which is the whole point: it stands in
-/// for an out-of-tree implementor written before the method existed. That it compiles at
-/// all is the non-breaking guarantee; that its key is unusable is the safety guarantee.
-///
-/// Such a key must match nothing, including another one like it: two graphs we cannot
-/// identify are not known to be the same computation, and treating them as equal would
-/// serve one's measured ranking for the other.
+/// An IGraph that does **not** override `bytes()`: stands in for an out-of-tree
+/// implementor written before the method existed. It must compile (non-breaking) and
+/// its key must be unusable and match nothing, including another unkeyable graph.
 class UnkeyableGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
@@ -373,10 +346,8 @@ TEST(TestIngestorGraphContentKey, AnUnkeyableGraphDoesNotMatchARealOne)
     EXPECT_NE(GraphContentKey{unkeyable}, keyFor(real));
 }
 
-/// The hash narrows; the content decides. The hashes are forced to agree so the
-/// structural comparison is actually reached: `operator==` short-circuits on a hash
-/// mismatch, so asserting only that two different graphs compare unequal would hold
-/// even with the content comparison deleted.
+/// The hash narrows; the content decides. Hashes are forced to agree so the structural
+/// comparison is actually reached -- `operator==` short-circuits on a hash mismatch.
 TEST(TestIngestorGraphContentKey, EqualHashesWithDifferentContentStillCompareUnequal)
 {
     struct CollidingKey : GraphContentKey
@@ -409,8 +380,7 @@ TEST(TestIngestorGraphContentKey, EqualHashesWithDifferentContentStillCompareUne
 }
 
 /// The same forcing, in the direction that must still match: equal content plus equal
-/// hashes is a genuine hit. Without this, the test above could be satisfied by an
-/// operator== that simply always returned false.
+/// hashes is a genuine hit.
 TEST(TestIngestorGraphContentKey, EqualHashesWithEqualContentStillCompareEqual)
 {
     struct CollidingKey : GraphContentKey

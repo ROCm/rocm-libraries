@@ -38,16 +38,12 @@ public:
         getTensorMap() const
         = 0;
 
-    /// The verified buffer this graph is a view over, for callers that need to
-    /// retain the graph beyond the caller's storage. Copying these bytes is a
-    /// single contiguous memcpy and yields a buffer that GetRoot() reads
-    /// directly -- unlike UnPack(), which deep-copies into a GraphT whose nodes,
-    /// strings and attribute unions each heap-allocate.
+    /// The verified buffer this graph is a view over; the caller does not own it and
+    /// may copy it to outlive the caller's storage.
     ///
-    /// Empty when the graph is not valid, or when an implementation does not supply the
-    /// bytes. Callers must treat empty as "cannot identify this graph" and degrade --
-    /// never as an empty graph that matches other empty ones. `GraphContentKey` declines
-    /// to cache under such a graph and never matches one against another.
+    /// Empty when invalid or unsupplied by an implementation. Callers must treat empty
+    /// as "cannot identify this graph" -- `GraphContentKey` declines to cache or match
+    /// under one, never as an empty graph matching others.
     virtual SerializedBlobView bytes() const
     {
         return {};
@@ -221,8 +217,7 @@ private:
     // as were just reading from the buffer passed during construction.
     const hipdnn_flatbuffers_sdk::data_objects::Graph* _shallowGraph = nullptr;
 
-    // The same non-owned buffer, kept as a view so callers that must outlive it
-    // can copy it wholesale rather than reconstructing the graph.
+    // Non-owned view backing bytes(); see IGraph::bytes() for the contract.
     SerializedBlobView _bytes;
 
     //lazy init state;

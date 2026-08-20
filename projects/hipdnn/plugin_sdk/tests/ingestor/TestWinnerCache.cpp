@@ -52,9 +52,8 @@ TEST(TestIngestorWinnerCache, ARecordMissingACandidateIsNotCovered)
     EXPECT_FALSE(recordCovers(record, {first, second}));
 }
 
-// The asymmetry is the point: a record wider than the current candidate set still covers
-// it. Treating extra entries as a coverage failure would re-benchmark on every narrowed
-// knob filter and destroy the reuse the ranked list exists for.
+// The asymmetry is the point: a wider record still covers the candidate set. Treating
+// extra entries as a failure would re-benchmark on every narrowed knob filter.
 TEST(TestIngestorWinnerCache, ARecordWiderThanTheCandidateSetStillCoversIt)
 {
     const auto first = definitionFor(0x01);
@@ -178,10 +177,9 @@ WinnerKey keyForIndex(const ContentCarryingTestGraph& graph, int index)
     return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
 }
 
-/// THE NO-EVICTION REGRESSION GUARD. The winner cache sits beside an LruCache in the same
-/// class, so "tidying" it into that neighbour is a live temptation. It must not be:
-/// evicting a catalog costs a rematch, but evicting a winner costs a GPU sweep or a
-/// silent fall back to the heuristic front.
+/// THE NO-EVICTION REGRESSION GUARD: the winner cache sits beside an LruCache in the
+/// same class, so "tidying" it into that neighbour is a live temptation. Evicting a
+/// winner costs a GPU sweep, not a rematch.
 TEST(TestIngestorWinnerCacheStateManager, TheEarliestEntrySurvivesFarPastAnyPlausibleLruCapacity)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -243,9 +241,8 @@ TEST(TestIngestorWinnerCacheStateManager, AMissReturnsNulloptRatherThanAnEmptyRe
     EXPECT_FALSE(manager->winnerFor(keyForIndex(graph, 99)).has_value());
 }
 
-/// D8's soft threshold has no observable effect other than its log line -- the cache
-/// deliberately does not evict, cap, or change behaviour past it -- so the log assertion
-/// is the only possible test of it.
+/// D8's soft threshold has no observable effect other than its log line, so the log
+/// assertion is the only possible test of it.
 TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTheThreshold)
 {
     auto recorder
@@ -279,9 +276,8 @@ TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTh
         << "the growth warning is reported once, not per insertion";
 }
 
-/// Check 1: a record covering the WHOLE catalog orders it, and rank() is never consulted.
-/// The heuristic is rigged to invert the order, so serving measured order is observable
-/// rather than merely asserted.
+/// Check 1: a record covering the WHOLE catalog orders it, and rank() is never
+/// consulted. The heuristic is rigged to invert the order to make this observable.
 TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithoutTheHeuristic)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -312,11 +308,8 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
 }
 
 /// The production sequence, on ONE manager: sort (heuristic, memoized), then record,
-/// then sort again. A benchmark sweep always writes its record *after* the buildPlan
-/// that already sorted and cached the catalog, so a memoized heuristic order must still
-/// yield to a measurement that arrives later -- which is what
-/// `Catalog::orderedFromRecord` distinguishes. A fresh manager would skip this ordering
-/// entirely and prove only the mechanism.
+/// then sort again. A benchmark sweep always writes after buildPlan already sorted and
+/// cached the catalog, so a memoized heuristic order must yield to a later measurement.
 TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlreadySorted)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -417,13 +410,9 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEn
     }
 }
 
-/// Readers and writers contend on ONE key. Disjoint keys would make this a crash canary
-/// rather than a lock test: no reader would ever look up an entry a writer was mutating,
-/// and it would pass with the mutex deleted.
-///
-/// The assertion is that a reader never observes a torn record: `winnerFor` returns a
-/// copy taken under the lock, so every read must be one of the whole records written,
-/// never a mixture of two.
+/// Readers and writers contend on ONE key -- disjoint keys would make this a crash
+/// canary rather than a lock test. `winnerFor` returns a copy taken under the lock, so
+/// every read must be one whole record, never a mixture of two.
 TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRecord)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
