@@ -32,6 +32,7 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_memory_check.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -917,7 +918,21 @@ using RocprimDeviceUniqueByKeyTestParams
                        DeviceUniqueByKeyParams<int, int, int, int, false, true>,
                        DeviceUniqueByKeyParams<common::custom_huge_type<1024, int>, uint8_t>>;
 
-TYPED_TEST_SUITE(RocprimDeviceUniqueByKeyTests, RocprimDeviceUniqueByKeyTestParams);
+struct RocprimDeviceUniqueByKeyTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::key_type>() + "_"
+                        + type_tag<typename Params::value_type>();
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceUniqueByKeyTests,
+                 RocprimDeviceUniqueByKeyTestParams,
+                 RocprimDeviceUniqueByKeyTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
 {
