@@ -42,6 +42,10 @@ them are worth the trouble on their own:
   - decoupledOneBlockBoth guards a kernel that builds, fits, and computes wrong
     results from K = 2*DepthU. There is no assertion downstream to catch it, so
     this reject is the only thing standing between that kernel and a library.
+    The threshold is derived from the loop trip count and is sourced, together
+    with the FFM sweep that independently lands on it, at the reject itself in
+    Solution.depthUIteration. It is not one of the empirical SIA4 thresholds,
+    which were withdrawn as intermittent.
 
 Three of the rejects in this block cannot be reached on gfx1250 and are
 deliberately not tested, because a test that cannot fail is worse than no test:
@@ -116,7 +120,13 @@ def _gp_gfx1250(gfx1250_iim):
 
 
 def _derive(gfx1250_iim, assembler, capsys, **overrides):
-    """The F8F4 TN MT64x512 DepthU256 hero pair: PrefetchGlobalReadA/B = (1,2).
+    """The F8F4 TN MT64x512 DepthU256 divergent pair (PGRA=1, PGRB=2).
+
+    Spelled as the numeric pair throughout. The nickname for this pair is
+    "hero" in this tree and in the 2026-08-20 ATT campaign, and "mirror" in the
+    two scratch classifiers on node 10.96.34.190 -- stbarrier/classify.py and
+    sia4_divergent/parity.py both map (2,1) to "hero" instead. A bare nickname
+    therefore does not identify an arm across artifacts; the pair does.
 
     TDMFuse is 0 here, unlike the two TDMFuse files, so no descriptor-grouping
     guard can fire first and shadow the reject under test.
@@ -201,8 +211,9 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
 # The control comes first: every reject below is vacuous if the pair it starts
 # from is itself refused. Both orientations, since the single-buffered tensor
 # being A rather than B is a different cadence in the emitter.
-@pytest.mark.parametrize("pgrA, pgrB, label", [(1, 2, "hero"), (2, 1, "mirror")])
-def test_the_hero_pair_is_accepted(
+@pytest.mark.parametrize("pgrA, pgrB, label",
+                         [(1, 2, "PGRA1_PGRB2"), (2, 1, "PGRA2_PGRB1")])
+def test_the_divergent_pairs_are_accepted(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, label):
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
@@ -265,6 +276,8 @@ def test_rejects_both_tensors_on_one_lds_block(
     and fits; nothing downstream asserts. The K = 2*DepthU threshold is in the
     message because it is the mechanism: two full trips through the unrolled
     loop is what it takes for a fill to overwrite a block still being read.
+    The reject in Solution.depthUIteration carries that argument and the FFM
+    sweep that agrees with it, so nothing here is asking to be taken on trust.
     """
     sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchGlobalRead=1,
                        PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)

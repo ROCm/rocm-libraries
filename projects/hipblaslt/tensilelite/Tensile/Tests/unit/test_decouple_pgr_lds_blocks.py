@@ -265,6 +265,13 @@ def test_legacy_solution_does_not_degenerate():
 # cell here was measured on the emitter: below LoopIters it builds, at or above
 # it asserted. LoopIters is DepthU / LocalSplitU / InnerUnroll / MatrixInstK,
 # which for MatrixInstK 128 is 4, 2 and 1 at DepthU 512, 256 and 128.
+#
+# That emitter sweep is the one 7e111ce49c2 landed the guard on -- its message
+# records the table rejecting cleanly in all 34 cells with no assertions, and
+# each of the two guards shown to bite on its own by reverting the other. The
+# sweep's own log was not kept, so the commit is the record; the rows below
+# were re-checked against divergentPairUnsupportedReason on 2026-08-20 and are
+# what the helper returns today, which is the half this file can pin.
 @pytest.mark.parametrize(
     "depthU, prefetchLocalRead, rejected",
     [
@@ -339,7 +346,13 @@ def test_more_lds_blocks_masks_the_loop_iters_guard():
 # Both tensors on one LDS block computes wrong results from K = 2*DepthU, so
 # every spelling of it has to be rejected. A level of 0 and a level of 1 are
 # both one block, which makes (0,1) and (1,0) the same kernel as (1,1) rather
-# than near neighbours of it -- they emit byte-identical assembly.
+# than near neighbours of it -- they emit byte-identical assembly. Confirmed on
+# node 10.96.34.190 on 2026-08-20: with only the reject silenced and the
+# one-block layout left live, all three spellings derive to the same 88576
+# bytes at MacroTile 64x512 DepthU 256, against 219648 for legacy
+# PrefetchGlobalRead=1. The K comes from the two-trip argument at the reject in
+# Solution.depthUIteration, which also cites the FFM sweep that agrees with it;
+# it is not one of the withdrawn empirical SIA4 thresholds.
 @pytest.mark.parametrize(
     "pgrA, pgrB, oneBlockBoth",
     [

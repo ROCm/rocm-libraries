@@ -405,7 +405,14 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
 
     DepthU 256 rather than the 512 the feature exists for: at 512 the equal pair
     is over the 320 KiB cap for every TDMFuse value alike, so the accept tests
-    below could not cover it.
+    below could not cover it. Re-derived on node 10.96.34.190 on 2026-08-20 at
+    this commit: at MacroTile 64x512 DepthU 512 the equal pair asks for 351232
+    bytes against MaxLDS 327680 and is refused with "Kernel Uses 351232 >
+    327680 bytes of LDS" at TDMFuse 0, 2, 5 and 6 alike, and identically for
+    the legacy PrefetchGlobalRead=2 spelling it resolves to. The divergent
+    pairs do fit there -- 316928 for (PGRA=1,PGRB=2) and 209920 for
+    (PGRA=2,PGRB=1) -- so it is the equal pair specifically that the cap
+    excludes.
     """
     from Tensile.Common.Architectures import gfxToIsa
     from Tensile.SolutionStructs.Validators.MatrixInstruction import (

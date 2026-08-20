@@ -120,9 +120,14 @@ def divergentPairUnsupportedReason(ks):
     K = 2*DepthU, or does not build at all. That threshold is derived rather
     than sampled: two trips through the unrolled loop are needed before a fill
     can overwrite a block a previous trip is still reading, so it is
-    deterministic by construction. Do not read it as the same kind of claim as
-    the SIA4 StinkyTofu barrier defect, which is a race and has no K threshold
-    at all.
+    deterministic by construction. It is also the threshold an independent
+    measurement lands on -- the one-block-both FFM sweep cited at the reject in
+    Solution.depthUIteration is clean at K=992 and wrong at K=1024 with
+    DepthU 512, exactly 2*DepthU -- so prediction and measurement agree here.
+    Do not read it as the same kind of claim as the SIA4 StinkyTofu barrier
+    defect, which is a race, has no K threshold at all, and whose empirical
+    thresholds were withdrawn because the same tree failed then passed at the
+    same K.
 
     Assumes the pair is divergent and both tensors are on the TDM, which the
     caller has already established. Returns the clause its reject frames, so the
@@ -205,6 +210,13 @@ def tdmDealiasAB(ks):
     none of this is alignment padding: the other 2 are the pool high-water
     moving 3 once those twelve fill the holes the shared layout left free for
     the tail temporaries, less the 1 tdmABIncs the shared set no longer needs.
+
+    Re-measured on node 10.96.34.190 on 2026-08-20 at this commit. Ten kernels
+    from one F8F4 TN MacroTile 64x512 fork over DepthU 256 and 512, TDMFuse 0
+    and 6, and the pairs (PGRA=1,PGRB=2), (PGRA=2,PGRB=1) and the equal pair:
+    every TDMFuse=0 kernel reports .amdhsa_next_free_sgpr 88 and every
+    TDMFuse=6 kernel reports 102, at both DepthU values and at all three
+    pairs, so the +14 is not shape-specific across this fork.
 
     The 2 make the total config-dependent rather than a constant 14: a
     high-water mark answers to whatever else the allocation holds.

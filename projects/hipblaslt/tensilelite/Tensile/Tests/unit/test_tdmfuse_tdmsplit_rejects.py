@@ -578,6 +578,38 @@ def test_row_six_at_sia_four_with_a_divergent_pair_is_admitted(
     same repair, so refusing row 6 while admitting row 0 would be arbitrary
     rather than protective.
 
+    That table is two generated corpora on node 10.96.34.190, classified by
+    /data3/andysu/agent-workspace/stbarrier/classify.py, which counts an
+    s_barrier_signal as parity-guarded when an s_bitcmp1_b32 s[sgprWaveIdx]
+    branch over it is still open:
+
+      before  /data3/andysu/agent-workspace/stbarrier/before_sia4
+      after   /data3/andysu/agent-workspace/stbarrier/fix_sia4_f6
+
+    Re-run over both on 2026-08-20 and still reading, per arm:
+
+      (PGRA=1,PGRB=2) TDMFuse=0   3 -> 0      of 10 barriers
+      (PGRA=2,PGRB=1) TDMFuse=0   3 -> 0      of 10
+      (PGRA=1,PGRB=2) TDMFuse=6   3 -> 0      of 10
+      (PGRA=2,PGRB=1) TDMFuse=6   3 -> 0      of 10
+      (PGRA=1,PGRB=2) TDMFuse=5   0 -> 0      of 12
+      (PGRA=2,PGRB=1) TDMFuse=5   0 -> 0      of 12
+      equal pair, TDMFuse=6       1 -> 0      of 8
+      equal pair, TDMFuse=0/2/5   0 -> 0      of 7
+
+    Quote the (PGRA,PGRB) spelling and not a nickname. classify.py and
+    /data3/andysu/agent-workspace/sia4_divergent/parity.py both name (2,1)
+    "hero" and (1,2) "mirror", which is the OPPOSITE of the convention this
+    file and the 2026-08-20 ATT campaign use. The divergent rows above are
+    symmetric so the inversion cannot change this table, but it would change
+    any table that is not.
+
+    One corpus that must NOT be read as the "after" side: none of the four
+    trees under /data3/andysu/agent-workspace/sia4_divergent/ contains the
+    whole-tree rebuild at all, so all four -- tl_base, tl_flip, tl_probe and
+    tl_fix, whose "fix" is a different prototype -- report 3 for the divergent
+    arms. Reading tl_fix as post-rebuild would say the repair does nothing.
+
     What this does not claim is that the kernel is right. Row 6 divergent at
     SIA=4 is exactly as un-silicon-validated after the barrier fix as the other
     five arms the guard now returns -- no better, no worse. The failure that
@@ -615,7 +647,12 @@ def test_row_six_at_sia_four_with_a_divergent_pair_is_admitted(
 # them can host the relocated fill. 3 is the sharp one -- with the clause taken
 # out it emits the relocation wrapping four empty `.header` modules and both
 # early-return guards pass spuriously, so the kernel builds, fits and computes
-# wrong results from K = 2*DepthU instead of coming back refused.
+# wrong results from K = 2*DepthU instead of coming back refused. That K is
+# derived, not sampled -- two trips through the unrolled loop is what it takes
+# for a fill to overwrite a block still being read, and the reject in
+# Solution.depthUIteration carries the argument and the FFM sweep that agrees
+# with it. It is not one of the empirical SIA4 thresholds, which were
+# withdrawn.
 #
 # The clause differs at 2 because SIA=2 derives 1LDSBuffer=1, and that
 # contradiction with a (1,2) pair is caught before the divergent guard is

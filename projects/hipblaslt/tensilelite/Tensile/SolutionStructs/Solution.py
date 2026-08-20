@@ -1791,11 +1791,23 @@ class Solution(collections.abc.Mapping):
     #
     # (1,1) is excluded and stays on the decoupled path. Its only byte-identical
     # legacy spelling is PrefetchGlobalRead=1 with 1LDSBuffer=1 -- plain legacy 1
-    # under the TDM holds two LDS blocks, 219392 bytes against (1,1)'s 88320,
+    # under the TDM holds two LDS blocks, 219648 bytes against (1,1)'s 88576,
     # because the block-count derivation never consults the load mechanism. So
     # degenerating it would mean setting 1LDSBuffer implicitly, which this path is
     # required to stay clear of, and would give up ScheduleIterAlg 0, where
     # 1LDSBuffer=1 is rejected.
+    #
+    # Both figures are MacroTile 64x512 DepthU 256, gfx1250, MaxLDS 327680, and
+    # were re-derived on node 10.96.34.190 on 2026-08-20 at this commit; legacy
+    # PrefetchGlobalRead=1 with 1LDSBuffer=1 needs ScheduleIterAlg 2 or 3 to
+    # derive at all and lands on the same 88576, which is what makes it the
+    # byte-identical spelling. They replace 219392 and 88320, written by
+    # 0438201eccf, which are each 256 low and do not reproduce here. 88320 was
+    # already inconsistent with the 42496 round-up the same commit recorded in
+    # setLdsOffsetsDecoupled -- 131072 - 88320 is 42752, while 131072 - 88576 is
+    # 42496 exactly -- so the corrected pair is the one the rest of the file was
+    # always consistent with. Take a number out of this comment only after
+    # re-deriving it; two of them were stale for four commits.
     #
     # An explicit 1LDSBuffer=1 holds the pair back too: see
     # equalPairDegeneratesToScalar. Deleting the keys here would take the only
@@ -5549,11 +5561,19 @@ class Solution(collections.abc.Mapping):
       state["PrefetchGlobalReadB"] = pgrB
       if not tdmBothTensors(state):
         # The whole feature requires the TDM, not just the shapes that misbuild
-        # without it. Off the TDM, (0,0) and (2,2) do measure byte-identical to
-        # legacy PrefetchGlobalRead=0 and =2, but coincidentally: legacy
-        # PrefetchGlobalRead=2 with 1LDSBuffer=1 is a third kernel there and no
-        # single block count spells it, so the block-count reading is undefined
-        # off the TDM rather than merely awkward at level 1.
+        # without it. Off the TDM, (0,0) and (2,2) do come out identical to
+        # legacy PrefetchGlobalRead=0 and =2 -- but by construction rather than
+        # by luck. equalPairDegeneratesToScalar resolves an equal pair to its
+        # scalar and deletes both keys before this reject is ever reached, so
+        # the two are the same solution and could not differ. Re-measured on
+        # node 10.96.34.190 on 2026-08-20 at this commit, on an F8F8 TN
+        # MacroTile 64x512 DepthU 256 shape with TDMInst=0: both spellings
+        # derive with PrefetchGlobalReadA/B absent and the same 148480 and
+        # 296960 bytes as the scalars, while (1,2) is refused right here.
+        # What that identity does not buy is a block-count reading off the TDM:
+        # legacy PrefetchGlobalRead=2 with 1LDSBuffer=1 is a third kernel there
+        # and no single block count spells it, so the reading is undefined off
+        # the TDM rather than merely awkward at level 1.
         reject(state, printRejectionReason,
                "PrefetchGlobalReadA/B: PrefetchGlobalReadA=%u and PrefetchGlobalReadB=%u "
                "require both tensors to move data with the TDM (TDMInst == 3); this "
@@ -5620,7 +5640,11 @@ class Solution(collections.abc.Mapping):
         # wrong results from K = 2*DepthU, or would not build at all. That K is a
         # trip-count consequence rather than an observed sample -- see
         # divergentPairUnsupportedReason -- so it does not carry the intermittency
-        # of the SIA4 barrier defect above.
+        # of the SIA4 barrier defect above. It is not unsourced either: the same
+        # two-trip argument is what the one-block-both FFM sweep below lands on
+        # independently, clean at K=992 and wrong at K=1024 with DepthU 512. A
+        # prediction and a measurement agreeing is the reason this K survives
+        # while the SIA4 one was withdrawn; do not fold the two together.
         dcpUnsupported = divergentPairUnsupportedReason(state)
         if dcpUnsupported:
           reject(state, printRejectionReason,
@@ -5630,15 +5654,36 @@ class Solution(collections.abc.Mapping):
                  % (numLdsBlkA, numLdsBlkB, dcpUnsupported))
           return
       # Both tensors on a single LDS block builds and fits, then computes wrong
-      # results from K = 2*DepthU: 12 of 24 rows wrong on an FFM sweep, the
-      # boundary sitting between K=992 and K=1024 at DepthU 512, and on silicon
-      # every OAI K at DepthU 256 and 512 wrong in almost every element.
+      # results from K = 2*DepthU. Measured on the FFM emulator on node
+      # 10.96.34.190, MacroTile 64x512 DepthU 512, the (PGRA=1,PGRB=1) pair:
+      #   10.96.34.190:/data3/andysu/andysu12/pgrsem2/yaml/f_a1b1_sia0.yaml
+      #   10.96.34.190:/data3/andysu/andysu12/pgrsem2/logs/ffm_pat_a1b1_sia0.log
+      # Clean at K = 32, 480, 512, 544 and 992; wrong at K = 1024 and at every
+      # larger K in the sweep, through 1056, 1536, 2048 and 4096.
+      #
+      # Re-tallied out of that log on 2026-08-20, and the count is 12 of 22
+      # rather than the 12 of 24 recorded before. 12 sizes x 2 solutions is 24
+      # attempted, but both solutions skip (255,513,1,1024) on
+      # Free0SizeMultiple, so the log carries 22 verdicts: 12 FAILED, 10
+      # PASSED. Which K values fail is unchanged, and that is the part the
+      # threshold argument rests on.
       #
       # This K really is a threshold, unlike the SIA4 barrier defect's: the FFM
       # boundary lands exactly where the trip-count argument below predicts
-      # (2*512 = 1024), FFM is a deterministic emulator, and silicon reports
-      # almost every element wrong rather than a marginal miss. Deliberately
-      # NOT withdrawn with the intermittent barrier claim.
+      # (2*512 = 1024) and FFM is a deterministic emulator. That is a derived
+      # threshold and a measured one agreeing, which is why this claim stands
+      # while the SIA4 one was withdrawn. Deliberately NOT withdrawn with the
+      # intermittent barrier claim.
+      #
+      # UNSOURCED, and left in only because saying so is more useful than
+      # deleting it: a companion silicon result -- every OAI K at DepthU 256
+      # and 512 wrong in almost every element -- was recorded alongside the FFM
+      # sweep, and no artifact for it has been found. Searched 2026-08-20: no
+      # .log, .csv, .txt or .ini under b8-3:~ names a PGRA1_PGRB1 kernel, and
+      # the OAI campaign kept on 190 at _oaicb/ is entirely (PGRA=1,PGRB=2).
+      # That is a bounded search, not a proof of absence, but it is the state
+      # of the evidence: do not cite this result as if it could be checked, and
+      # do not let it carry weight the FFM sweep above is not already carrying.
       #
       # The mechanism that makes the divergent case correct does not carry over:
       # _dcpScheduleSingleBufferedFillLate relocates the single-buffered tensor's
@@ -5754,7 +5799,11 @@ class Solution(collections.abc.Mapping):
       # that the legacy layout cannot hold: legacy interleaves all four tensors
       # into one block and rounds that block up so the swap can be an inlined xor
       # constant, and at MacroTile 64x512 DepthU 256 the rounding alone is 42496 of
-      # the 219648 bytes it emits.
+      # the 219648 bytes it emits. Re-derived on node 10.96.34.190 on 2026-08-20
+      # at this commit: the aligned segments sum to 88576 per block, the legacy
+      # stride rounds to 131072, and 131072 + 88576 is the 219648 it emits, so
+      # 42496 of that is padding. The decoupled layout for the same shape at
+      # (PGRA=2,PGRB=1) is 105984.
       nBlkA = numLdsBlkA
       nBlkB = numLdsBlkB
       spanA = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"] + state["LdsNumElementsAlignedMXSA"]
