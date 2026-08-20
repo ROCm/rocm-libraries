@@ -238,6 +238,9 @@ def tdmDealiasAB(ks):
         return False
     if not tdmBothTensors(ks):
         return False
+    # Unreachable while upstream's temporary blanket TDMSplit reject stands
+    # (97e1223a3f9, PR #10911): no solution carrying TDMSplit=True now reaches
+    # any writer predicate. Kept so this row's exclusion outlives that reject.
     if ks.get("TDMSplit"):
         return False
     return ks.get("NumWaves", 1) > 1 and not ks.get("UseSubtileImpl")
@@ -265,6 +268,9 @@ def tdmFuseAMx(ks):
         return False
     if not tdmBothTensors(ks):
         return False
+    # Unreachable while upstream's temporary blanket TDMSplit reject stands
+    # (97e1223a3f9, PR #10911): no solution carrying TDMSplit=True now reaches
+    # any writer predicate. Kept so this row's exclusion outlives that reject.
     if ks.get("TDMSplit"):
         return False
     if not (ks["ProblemType"].get("MXBlockA") and ks["ProblemType"].get("MXBlockB")):
@@ -296,6 +302,9 @@ def tdmFusePaired(ks):
         return False
     if not tdmBothTensors(ks):
         return False
+    # Unreachable while upstream's temporary blanket TDMSplit reject stands
+    # (97e1223a3f9, PR #10911): no solution carrying TDMSplit=True now reaches
+    # any writer predicate. Kept so this row's exclusion outlives that reject.
     if ks.get("TDMSplit"):
         return False
     if not (ks["ProblemType"].get("MXBlockA") and ks["ProblemType"].get("MXBlockB")):

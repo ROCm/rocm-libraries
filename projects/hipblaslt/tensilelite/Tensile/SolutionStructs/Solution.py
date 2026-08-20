@@ -2949,6 +2949,10 @@ class Solution(collections.abc.Mapping):
                  "group, so it requires MX scales on both tensors; without them the group is "
                  "just {A} and this is TDMFuse=6 with the scales moved")
           return
+        # Unreachable while upstream's temporary blanket TDMSplit reject stands
+        # (97e1223a3f9, PR #10911) at function scope above this block. Kept: it
+        # carries this row's own reason, which the blanket reject does not
+        # record, and it revives the moment TDMSplit is re-enabled.
         if state.get("TDMSplit"):
           reject(state, printRejectionReason,
                  "TDMFuse=2 is not available with TDMSplit, whose multi-wave increment recomputes "
@@ -3040,6 +3044,10 @@ class Solution(collections.abc.Mapping):
                  "requires MX scales on both tensors; without them both sets hold a single "
                  "tensor and this is TDMFuse=6 without its third set")
           return
+        # Unreachable while upstream's temporary blanket TDMSplit reject stands
+        # (97e1223a3f9, PR #10911) at function scope above this block. Kept: it
+        # carries this row's own reason, which the blanket reject does not
+        # record, and it revives the moment TDMSplit is re-enabled.
         if state.get("TDMSplit"):
           reject(state, printRejectionReason,
                  "TDMFuse=5 is not available with TDMSplit, whose multi-wave increment recomputes "
@@ -3100,6 +3108,10 @@ class Solution(collections.abc.Mapping):
                  "under UseSubtileImpl each tensor already owns its descriptor"
                  % state["NumWaves"])
           return
+        # Unreachable while upstream's temporary blanket TDMSplit reject stands
+        # (97e1223a3f9, PR #10911) at function scope above this block. Kept: it
+        # carries this row's own reason, which the blanket reject does not
+        # record, and it revives the moment TDMSplit is re-enabled.
         if state.get("TDMSplit"):
           reject(state, printRejectionReason,
                  "TDMFuse=6 is not available with TDMSplit, whose multi-wave increment recomputes "
