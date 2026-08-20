@@ -117,11 +117,10 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable twiddles{"twiddles", "const scalar_type", true, true};
 
     // rank/dimension of transform
-    Variable dim{"dim", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
+    Variable dim{"dim", "const " + std::string(rtc_index_type(IndexType::U32))};
 
     // transform lengths
-    Variable lengths{
-        "lengths", "const " + std::string(rtc_index_type(IndexType::_32BIT)), true, true};
+    Variable lengths{"lengths", "const " + std::string(rtc_index_type(IndexType::U32)), true, true};
 
     // input/output array strides
     Variable stride{"stride", "const index_type", true, true};
@@ -150,33 +149,33 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // lds storage buffer
     Variable lds_real{"lds_real", "real_type_t<scalar_type>", true, true};
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
-    Variable lds_row_padding{"lds_row_padding", rtc_index_type(IndexType::_32BIT)};
+    Variable lds_row_padding{"lds_row_padding", rtc_index_type(IndexType::U32)};
 
     // hip thread grid dim
-    Variable grid_dim{"gridDim.x", rtc_index_type(IndexType::_32BIT)};
+    Variable grid_dim{"gridDim.x", rtc_index_type(IndexType::U32)};
 
     // hip thread block id
-    Variable block_id{"blockIdx.x", rtc_index_type(IndexType::_32BIT)};
+    Variable block_id{"blockIdx.x", rtc_index_type(IndexType::U32)};
 
     // hip thread id
-    Variable thread_id{"threadIdx.x", rtc_index_type(IndexType::_32BIT)};
+    Variable thread_id{"threadIdx.x", rtc_index_type(IndexType::U32)};
 
     // thread within transform, bounded by the workgroup size
-    Variable thread{"thread", rtc_index_type(IndexType::_32BIT)};
+    Variable thread{"thread", rtc_index_type(IndexType::U32)};
 
     // The "pre-cal" thread that we're passing into device function,
     // Since it is calculated either mod or div (depends on linear/nonlinear)
     // So we'd like to do that expensive mod or div once and for all
-    Variable thread_in_device{"thread_in_device", rtc_index_type(IndexType::_32BIT)};
-    Variable thread_in_device_pp{"thread_in_device_pp", rtc_index_type(IndexType::_32BIT)};
+    Variable thread_in_device{"thread_in_device", rtc_index_type(IndexType::U32)};
+    Variable thread_in_device_pp{"thread_in_device_pp", rtc_index_type(IndexType::U32)};
     Variable thread_in_device_pp_twiddles{"thread_in_device_pp_twiddles",
-                                          rtc_index_type(IndexType::_32BIT)};
+                                          rtc_index_type(IndexType::U32)};
 
     // global input/output buffer offset to current transform
     Variable offset{"offset", "index_type"};
 
     // lds buffer offset to current transform, bounded by the LDS size
-    Variable offset_lds{"offset_lds", rtc_index_type(IndexType::_32BIT)};
+    Variable offset_lds{"offset_lds", rtc_index_type(IndexType::U32)};
 
     // current batch
     Variable batch{"batch", "index_type"};
@@ -198,14 +197,14 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable stride0{"stride0", "const index_type"};
 
     // stride between consecutive indexes in lds
-    Variable stride_lds{"stride_lds", rtc_index_type(IndexType::_32BIT)};
+    Variable stride_lds{"stride_lds", rtc_index_type(IndexType::U32)};
 
     // usually in device: const index_type lstride = (sb == SB_UNIT) ? 1 : stride_lds;
     // with this definition, the compiler knows that "index * lstride" is trivial under SB_UNIT
-    Variable lstride{"lstride", "const " + std::string(rtc_index_type(IndexType::_32BIT))};
+    Variable lstride{"lstride", "const " + std::string(rtc_index_type(IndexType::U32))};
 
     // local temp variable in device function
-    Variable l_offset{"l_offset", rtc_index_type(IndexType::_32BIT)};
+    Variable l_offset{"l_offset", rtc_index_type(IndexType::U32)};
 
     // twiddle value during twiddle application
     Variable W{"W", "scalar_type"};

@@ -90,7 +90,7 @@ private:
     }
 
     gpubuf    buf;
-    IndexType itype = IndexType::_32BIT;
+    IndexType itype = IndexType::U32;
 };
 
 #endif // defined( KARGS_H )

@@ -32,8 +32,8 @@
 // generated kernels. Kernels declare such arguments as "index_type".
 enum class IndexType
 {
-    _32BIT,
-    _64BIT,
+    U32,
+    U64,
 };
 
 // Size of one "index_type" element, for packing arrays that kernels
@@ -42,9 +42,9 @@ static inline size_t rtc_index_type_size(IndexType itype)
 {
     switch(itype)
     {
-    case IndexType::_32BIT:
+    case IndexType::U32:
         return sizeof(unsigned int);
-    case IndexType::_64BIT:
+    case IndexType::U64:
         return sizeof(unsigned long long);
     }
 

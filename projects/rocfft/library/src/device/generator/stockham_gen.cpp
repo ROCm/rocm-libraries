@@ -854,7 +854,7 @@ int main()
             if(direct_to_from_reg.size() != 2)
                 throw std::runtime_error("CS_3D_PP requires two direct_to_from_reg configuration");
 
-            StockhamGeneratorSpecs specs1(IndexType::_32BIT,
+            StockhamGeneratorSpecs specs1(IndexType::U32,
                                           factors1,
                                           {},
                                           precision,
@@ -866,7 +866,7 @@ int main()
             specs1.threads_per_transform = threads_per_transform[0];
             specs1.wgs_is_derived        = true;
 
-            StockhamGeneratorSpecs specs2(IndexType::_32BIT,
+            StockhamGeneratorSpecs specs2(IndexType::U32,
                                           factors2,
                                           {},
                                           precision,
@@ -912,7 +912,7 @@ int main()
             ++arg;
             factors = parse_uints_csv(*arg);
 
-            StockhamGeneratorSpecs specs(IndexType::_32BIT,
+            StockhamGeneratorSpecs specs(IndexType::U32,
                                          factors,
                                          factors2d,
                                          precision,
@@ -928,7 +928,7 @@ int main()
             specs.threads_per_transform = threads_per_transform.front();
 
             // second dimension for 2D_SINGLE
-            StockhamGeneratorSpecs specs2d(IndexType::_32BIT,
+            StockhamGeneratorSpecs specs2d(IndexType::U32,
                                            factors2d,
                                            factors,
                                            precision,

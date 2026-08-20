@@ -259,8 +259,7 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     Variable input{"input", "scalar_type", true, true};
     Variable output{"output", "scalar_type", true, true};
     Variable dim{"dim", "const size_t"};
-    Variable lengths{
-        "lengths", "const " + std::string(rtc_index_type(IndexType::_32BIT)), true, true};
+    Variable lengths{"lengths", "const " + std::string(rtc_index_type(IndexType::U32)), true, true};
     Variable stride_in{"stride_in", "const index_type", true, true};
     Variable stride_out{"stride_out", "const index_type", true, true};
     Variable scale_factor{"scale_factor", "const real_type_t<scalar_type>"};

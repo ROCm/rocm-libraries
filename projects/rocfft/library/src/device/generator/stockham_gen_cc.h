@@ -42,27 +42,26 @@ struct StockhamKernelCC : public StockhamKernel
     //
     Variable intrinsic_mode{"intrinsic_mode", "IntrinsicAccessType"};
     Variable apply_large_twiddle{"apply_large_twiddle", "bool"};
-    Variable large_twiddle_steps{"large_twiddle_steps", rtc_index_type(IndexType::_32BIT)};
-    Variable large_twiddle_base{"large_twiddle_base", rtc_index_type(IndexType::_32BIT)};
+    Variable large_twiddle_steps{"large_twiddle_steps", rtc_index_type(IndexType::U32)};
+    Variable large_twiddle_base{"large_twiddle_base", rtc_index_type(IndexType::U32)};
 
     //
     // arguments
     //
     Variable large_twiddles{"large_twiddles", "const scalar_type", true};
-    Variable trans_local{"trans_local", rtc_index_type(IndexType::_32BIT)};
+    Variable trans_local{"trans_local", rtc_index_type(IndexType::U32)};
 
     //
     // locals
     //
-    Variable tile_index{"tile_index", rtc_index_type(IndexType::_32BIT)};
-    Variable num_of_tiles{"num_of_tiles", rtc_index_type(IndexType::_32BIT)};
+    Variable tile_index{"tile_index", rtc_index_type(IndexType::U32)};
+    Variable num_of_tiles{"num_of_tiles", rtc_index_type(IndexType::U32)};
     Variable in_bound{"in_bound", "bool"};
-    Variable thread{"thread", rtc_index_type(IndexType::_32BIT)}; // replacing tid_ver
-    Variable tid_hor{"tid_hor", rtc_index_type(IndexType::_32BIT)}; // id along row
+    Variable thread{"thread", rtc_index_type(IndexType::U32)}; // replacing tid_ver
+    Variable tid_hor{"tid_hor", rtc_index_type(IndexType::U32)}; // id along row
     Variable stride_in{"stride_in", "const index_type", true};
     Variable stride_out{"stride_out", "const index_type", true};
-    Variable length_M_blue{"length_M_blue",
-                           "const " + std::string(rtc_index_type(IndexType::_32BIT))};
+    Variable length_M_blue{"length_M_blue", "const " + std::string(rtc_index_type(IndexType::U32))};
 
     // large twiddle support
     Multiply ltwd_entries{Parens{ShiftLeft{1, large_twiddle_base}}, 3};
@@ -194,10 +193,10 @@ struct StockhamKernelCC : public StockhamKernel
 
     StatementList calculate_offsets() override
     {
-        Variable d{"d", rtc_index_type(IndexType::_32BIT)};
-        Variable index_along_d{"index_along_d", rtc_index_type(IndexType::_32BIT)};
-        Variable remaining{"remaining", rtc_index_type(IndexType::_32BIT)};
-        Variable plength{"plength", rtc_index_type(IndexType::_32BIT)};
+        Variable d{"d", rtc_index_type(IndexType::U32)};
+        Variable index_along_d{"index_along_d", rtc_index_type(IndexType::U32)};
+        Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
+        Variable plength{"plength", rtc_index_type(IndexType::U32)};
         Variable global_stride_in{"global_stride_in", "const index_type"};
         Variable global_stride_out{"global_stride_out", "const index_type"};
 
@@ -540,7 +539,7 @@ struct StockhamKernelCC : public StockhamKernel
 
     StatementList large_twiddles_load() override
     {
-        Variable ltwd_id{"ltwd_id", rtc_index_type(IndexType::_32BIT)};
+        Variable ltwd_id{"ltwd_id", rtc_index_type(IndexType::U32)};
 
         StatementList stmts;
         stmts += CommentLines{

@@ -260,7 +260,7 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
        || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         kargs.append_ptr(data.node->twiddles_large);
     if(!hardcoded_dim)
-        kargs.append_index(data.node->length.size(), IndexType::_32BIT);
+        kargs.append_index(data.node->length.size(), IndexType::U32);
     // lengths
     kargs.append_ptr(data.node->devKernArg.lengths());
     // stride in/out

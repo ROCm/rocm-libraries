@@ -158,7 +158,7 @@ std::string test_kernel_src(const std::string&               kernel_name,
                             bool                             half_lds,
                             bool                             direct_to_from_reg)
 {
-    StockhamGeneratorSpecs specs{IndexType::_32BIT,
+    StockhamGeneratorSpecs specs{IndexType::U32,
                                  factorization,
                                  {},
                                  static_cast<unsigned int>(rocfft_precision_single),
@@ -501,7 +501,7 @@ int main(int argc, char** argv)
                                 module_promise.set_value(std::move(module));
 
                                 RTCKernelStockham kernel(
-                                    kernel_name, IndexType::_32BIT, module_future);
+                                    kernel_name, IndexType::U32, module_future);
 
                                 float time = launch_kernel(
                                     kernel,
@@ -624,7 +624,7 @@ int main(int argc, char** argv)
             std::promise<hipModule_wrapper_t>       module_promise;
             std::shared_future<hipModule_wrapper_t> module_future = module_promise.get_future();
             module_promise.set_value(std::move(module));
-            RTCKernelStockham kernel(kernel_name, IndexType::_32BIT, module_future);
+            RTCKernelStockham kernel(kernel_name, IndexType::U32, module_future);
 
             float time
                 = launch_kernel(kernel,

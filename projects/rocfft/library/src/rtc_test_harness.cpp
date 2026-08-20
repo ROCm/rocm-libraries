@@ -23,7 +23,6 @@
 #include "device/generator/generator.h"
 #include "device/kernel-generator-embed.h"
 #include "rtc_kernel.h"
-#include "rtc_kernel.h"
 
 #if __has_include(<filesystem>)
 #include <filesystem>
