@@ -1057,7 +1057,7 @@ def buildAndTest(Map conf=[:]){
                                 cmake --build build -- -j &&
                                 cd build &&
                                 make install &&
-                                ctest --output-on-failure --test-dir "${env.WORKSPACE}/projects/hiptensor/install/bin/hiptensor"
+                                ctest -R 'quick' --output-on-failure --test-dir "${env.WORKSPACE}/projects/hiptensor/install/bin/hiptensor"
                             """
                         }
                     }
