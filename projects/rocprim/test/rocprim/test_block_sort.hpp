@@ -45,7 +45,7 @@
 
 block_sort_test_suite_type_def(suite_name, name_suffix);
 
-typed_test_suite_def(suite_name, name_suffix, block_params);
+typed_test_suite_def(suite_name, name_suffix, block_params, block_params_name_generator);
 
 // using header guards for these test functions because this file is included multiple times:
 // once for the integrals test suite and once for the floating point test suite.
