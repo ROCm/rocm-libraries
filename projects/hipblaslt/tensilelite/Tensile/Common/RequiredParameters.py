@@ -162,6 +162,7 @@ def getRequiredParametersMin() -> set:
         'WorkGroup',
         'WorkGroupMappingXCC',
         'DtlPlusLdsBuf',
+        'TDMPlusLdsBuf',
         'MinGRIncPerMfma',
         'UsePLRPack',
         'UseSubtileImpl',
