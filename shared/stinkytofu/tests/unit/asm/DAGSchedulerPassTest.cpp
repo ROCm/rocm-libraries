@@ -1153,6 +1153,11 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
 // ds_read interleave pattern.
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
     auto runCase = [&](int drainLatency) {
+        // Reusing `am` across a new Function: without clearing, cached analysis
+        // results (e.g. loop info) from the previous (now-destroyed) Function can
+        // be reused if the allocator hands the new Function the same address —
+        // undetectable in isolation, but corrupts scheduling amid a full suite run.
+        am.clear();
         func = std::make_unique<Function>("dag_sched_test_ds_throttle_drain_split");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("loop_body");
@@ -1180,6 +1185,9 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
 // under the same queue depth.
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) {
     auto runCase = [&](int throttleLatency) {
+        // See the am.clear() comment in DsReadThrottle_QueuePacingIgnoresDrainLatency
+        // above — same reused-`am`-across-a-new-Function hazard.
+        am.clear();
         func = std::make_unique<Function>("dag_sched_test_ds_throttle_interval");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("loop_body");

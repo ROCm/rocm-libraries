@@ -323,8 +323,7 @@ namespace rocsparse
 
     // Segmented block reduction kernel
     template <unsigned int BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void segmented_blockreduce(const I* __restrict__ rows,
-                                                    T* __restrict__ vals)
+    ROCSPARSE_DEVICE_ILF void segmented_blockreduce(const I* rows, T* vals)
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");

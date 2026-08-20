@@ -80,7 +80,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_fwd_xdl_cshuffle_v3(typename GridwiseGemm::Argument karg,
                                             const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
@@ -199,7 +199,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_fwd_xdl_cshuffle_v3_2lds(
         typename GridwiseGemm::Argument karg,
@@ -250,7 +250,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         if constexpr(GridwiseGemm::DirectLoadEnabled)
         {
-#if defined(__gfx950__)
+#if defined(__gfx950__) || defined(__gfx125__)
             GridwiseGemm::template Run_2Lds<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
                 karg.p_a_grid + a_group_offset + a_n_offset,
                 karg.p_b_grid + b_group_offset,
@@ -591,65 +591,40 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             : BBlockTransferSrcScalarPerVector;
 
     // Use appropriate gridwise gemm
+#define GridwiseGemmV3TemplateParams                                                              \
+    tensor_layout::gemm::RowMajor, tensor_layout::gemm::ColumnMajor, DsLayout,                    \
+        tensor_layout::gemm::RowMajor, ADataType, BDataType, AccDataType, CShuffleDataType,       \
+        DsDataType, EDataType, AElementwiseOperation, BElementwiseOperation,                      \
+        CDEElementwiseOperation, GemmSpec, BlockSize, MPerBlock, NPerBlock, KPerBlock, AK1, BK1,  \
+        MPerXDL_, NPerXDL_, MXdlPerWave_, NXdlPerWave*(NPerXDL / NPerXDL_),                       \
+        ABlockTransferThreadClusterLengths_AK0_M_AK1, ABlockTransferThreadClusterArrangeOrder,    \
+        ABlockTransferSrcAccessOrder, ABlockTransferSrcVectorDim,                                 \
+        DirectLoad ? ABlockTransferSrcScalarPerVectorAligned : ABlockTransferSrcScalarPerVector,  \
+        ABlockTransferDstScalarPerVector_AK1, false, ABlockLdsExtraM,                             \
+        BBlockTransferThreadClusterLengths_BK0_N_BK1, BBlockTransferThreadClusterArrangeOrder,    \
+        BBlockTransferSrcAccessOrder, BBlockTransferSrcVectorDim,                                 \
+        DirectLoad ? BBlockTransferSrcScalarPerVectorAligned : BBlockTransferSrcScalarPerVector,  \
+        BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN,                             \
+        CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle*(NPerXDL / NPerXDL_),        \
+        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                         \
+        CDEBlockTransferScalarPerVectors, BlkGemmPipeSched, BlkGemmPipelineVer, AComputeDataType, \
+        BComputeDataType, ADataType, BDataType, DoElementwiseBeforeCShuffle, DirectLoad,          \
+        LargeTensors
+
     template <index_t MXdlPerWave_, index_t MPerXDL_, index_t NPerXDL_>
     using GridwiseGemmBase = GridwiseGemmMultiD_xdl_cshuffle_v3<
-        tensor_layout::gemm::RowMajor,
-        tensor_layout::gemm::ColumnMajor,
-        DsLayout,
-        tensor_layout::gemm::RowMajor,
-        ADataType,
-        BDataType,
-        AccDataType,
-        CShuffleDataType,
-        DsDataType,
-        EDataType,
-        AElementwiseOperation,
-        BElementwiseOperation,
-        CDEElementwiseOperation,
-        GemmSpec,
-        BlockSize,
-        MPerBlock,
-        NPerBlock,
-        KPerBlock,
-        AK1,
-        BK1,
-        MPerXDL_,
-        NPerXDL_,
-        MXdlPerWave_,
-        NXdlPerWave*(NPerXDL / NPerXDL_),
-        ABlockTransferThreadClusterLengths_AK0_M_AK1,
-        ABlockTransferThreadClusterArrangeOrder,
-        ABlockTransferSrcAccessOrder,
-        ABlockTransferSrcVectorDim,
-        DirectLoad ? ABlockTransferSrcScalarPerVectorAligned : ABlockTransferSrcScalarPerVector,
-        ABlockTransferDstScalarPerVector_AK1,
-        false,
-        ABlockLdsExtraM,
-        BBlockTransferThreadClusterLengths_BK0_N_BK1,
-        BBlockTransferThreadClusterArrangeOrder,
-        BBlockTransferSrcAccessOrder,
-        BBlockTransferSrcVectorDim,
-        DirectLoad ? BBlockTransferSrcScalarPerVectorAligned : BBlockTransferSrcScalarPerVector,
-        BBlockTransferDstScalarPerVector_BK1,
-        false,
-        BBlockLdsExtraN,
-        CShuffleMXdlPerWavePerShuffle,
-        CShuffleNXdlPerWavePerShuffle*(NPerXDL / NPerXDL_),
-        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
-        CDEBlockTransferScalarPerVectors,
-        BlkGemmPipeSched,
-        BlkGemmPipelineVer,
-        AComputeDataType,
-        BComputeDataType,
-        ADataType,
-        BDataType,
-        DoElementwiseBeforeCShuffle,
-        DirectLoad,
-        LargeTensors>;
+        GridwiseGemmV3TemplateParams,
+        // Skip the logical M*K/N*K/M*N <= 2GB check in GridwiseGemm::CheckValidity for the
+        // convolution path: the implicit-GEMM (im2col) matrix size vastly exceeds the real
+        // tensor footprint, and actual memory is validated separately via
+        // conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB(). Leaving it on wrongly
+        // rejects the fast int32 instances (incl. the v4 pipeline) for shapes whose real
+        // memory fits int32 (ROCM-27526 perf regression).
+        /*SkipGemmSizeCheck=*/true>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(MXdlPerWave64, 1), MPerXDL, NPerXDL>;
     using GridwiseGemm32 = GridwiseGemmBase<MXdlPerWave32, Wave32MaxMNPerXDL, Wave32MaxMNPerXDL>;
 
-    // #undef GridwiseGemmV3TemplateParams
+#undef GridwiseGemmV3TemplateParams
 
     using Block2TileMapElementwise =
         BlockToCTileMap_M00_N0_M01Adapt<NPerBlock, NPerBlock, void, IndexType>;
@@ -1479,6 +1454,16 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        // Memory access runtime error on gfx1250 (inconsistent across runs)
+        // TODO: need fix
+        if constexpr(LargeTensors)
+        {
+            if(is_gfx125_supported())
+            {
+                return false;
+            }
+        }
+
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
@@ -1503,12 +1488,12 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         // with Conv Multiple D instances
         if constexpr(isMultiABD)
         {
-            return false;
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
                 std::cout << "The MultiABD is not supported!" << " In " << __FILE__ << ":"
                           << __LINE__ << ", in function: " << __func__ << std::endl;
             }
+            return false;
         }
 
         // check device

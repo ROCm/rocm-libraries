@@ -72,7 +72,7 @@ class TestAttentionDispatch(unittest.TestCase):
     def test_path_candidates_are_mutually_exclusive(self):
         # Exactly one of (2d, 3d) supports any given problem.
         req = _attn(batch=1, nhead_q=16, nhead_k=16, seqlen_q=1, seqlen_k=8192)
-        supported = [c for c in attention_candidates() if c.supports(req)[0]]
+        supported = [c for c in attention_candidates() if c.admits(req)[0]]
         self.assertEqual(len(supported), 1)
 
     def test_spec_records_dims(self):

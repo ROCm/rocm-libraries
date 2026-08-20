@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -67,18 +67,26 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
+#include "device/device_spmv.hpp"
 #include "device/device_transform.hpp"
 
 // Grid
 #include <cub/grid/grid_even_share.cuh> // IWYU pragma: export
 #include <cub/grid/grid_mapping.cuh> // IWYU pragma: export
 #include <cub/grid/grid_queue.cuh> // IWYU pragma: export
+// These functions must be wrapped so they return
+// hipError_t instead of cudaError_t
+#include "grid/grid_barrier.hpp"
 
 // Iterator
 #include <cub/iterator/arg_index_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/cache_modified_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/cache_modified_output_iterator.cuh> // IWYU pragma: export
+#include <cub/iterator/constant_input_iterator.cuh> // IWYU pragma: export
+#include <cub/iterator/counting_input_iterator.cuh> // IWYU pragma: export
+#include <cub/iterator/discard_output_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/tex_obj_input_iterator.cuh> // IWYU pragma: export
+#include <cub/iterator/transform_input_iterator.cuh> // IWYU pragma: export
 
 // Thread
 #include <cub/thread/thread_load.cuh> // IWYU pragma: export

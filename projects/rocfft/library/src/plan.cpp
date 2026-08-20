@@ -3798,13 +3798,8 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
 
         // include the device active at plan creation so it always
         // participates in the communicator
-        int current_device = 0;
-        if(hipGetDevice(&current_device) != hipSuccess || current_device == hipInvalidDeviceId)
-            throw std::runtime_error("hipGetDevice failed");
-        device_set.insert(current_device);
-
-        if(device_set.size() > 1)
-            rccl = rocfft_rccl_comm_t::create(device_set);
+        device_set.insert(rocfft_scoped_device::current_device());
+        rccl = rocfft_rccl_comm_t::create(device_set);
     }
     catch(const std::exception& e)
     {
@@ -5986,9 +5981,11 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
     TreeNode* store_node            = nullptr;
     std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
 
-    // callbacks are only possible on plans that don't use planar format for input or output
+    // callbacks are only possible on plans that don't use planar format for input or output.
+    // gfx1250 hotswap fails with function pointer callbacks, so they can't work there.
     bool need_callbacks = !array_type_is_planar(load_node->inArrayType)
-                          && !array_type_is_planar(store_node->outArrayType);
+                          && !array_type_is_planar(store_node->outArrayType)
+                          && strncmp(execPlan.deviceProp.gcnArchName, "gfx1250", 7) != 0;
 
     // don't spend time compiling callback
     if(need_callbacks && !is_tuning)
