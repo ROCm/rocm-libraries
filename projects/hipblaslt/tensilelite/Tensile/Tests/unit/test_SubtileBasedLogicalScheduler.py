@@ -3503,7 +3503,8 @@ class TestPreloopReorderGR:
             "Partial-path wait_gr must use force_drain=True (vmcnt 0)"
 
     def test_reorder_multi_du_skip_nll_after_lr(self):
-        """maxUnroll>1: SkipToNLL must follow LR (StreamK-safe, same as maxUnroll=1)."""
+        """maxUnroll>1: SkipToNLL follows LR and two-wait structure is preserved."""
+        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=2)
         assert cfg.numUnroll.get('A', 1) > 1 or cfg.numUnroll.get('B', 1) > 1, \
             "Prerequisite: cfg must be multi-DU"
@@ -3520,6 +3521,16 @@ class TestPreloopReorderGR:
         assert lr_idx is not None and skip_nll_idx is not None
         assert lr_idx < skip_nll_idx, \
             "Multi-DU reorder (StreamK-safe): SkipToNLL must follow LR"
+
+        # Also verify the two-wait structure on multi-DU (same as maxUnroll=1)
+        wait_gr_sources = [s for t, s in seq if t == 'wait_gr']
+        assert len(wait_gr_sources) == 2, \
+            "Multi-DU reorder must also emit two wait_gr ops (full + partial paths)"
+        full_wgop, partial_wgop = wait_gr_sources[0], wait_gr_sources[1]
+        assert isinstance(full_wgop, WaitGROp) and full_wgop.wait_gr_counts.use_num_gr_total, \
+            "Multi-DU full-path wait_gr must use use_num_gr_total=True"
+        assert isinstance(partial_wgop, WaitGROp) and partial_wgop.force_drain, \
+            "Multi-DU partial-path wait_gr must use force_drain=True"
 
 
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.

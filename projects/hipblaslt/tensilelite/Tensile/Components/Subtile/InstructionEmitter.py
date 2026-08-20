@@ -303,6 +303,11 @@ class InstructionEmitter:
             nSA = sa_info.numGRTotal if sa_info else 0
             nSB = sb_info.numGRTotal if sb_info else 0
             grCnt = nA + nB + nSA + nSB
+            assert grCnt > 0, (
+                f"use_num_gr_total=True but numGRTotal sums to 0 "
+                f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB}); "
+                f"loadRatioGR may be 0 — check PGR=2 DTL preconditions at call site"
+            )
             label = f"per-subIterK: A={nA} B={nB} SA={nSA} SB={nSB}"
         else:
             grCnt = (counts.A * grMap['A'] +
