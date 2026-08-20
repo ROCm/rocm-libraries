@@ -346,7 +346,7 @@ void generate_kernel(EngineState* states,
 
     EngineState  state = states[state_id];
     unsigned int index = state_id * f.n;
-    __syncthreads();
+    __syncthreads(); // Barrier allows better compiler optimizations
     while(index < size)
     {
         f(&state, data + index);
@@ -598,7 +598,7 @@ void generate_sobol_kernel(EngineState* states,
     EngineState  state  = states[gridDim.x * blockDim.x * dimension + state_id];
     const size_t offset = dimension * size;
     unsigned int index  = state_id;
-    __syncthreads();
+    __syncthreads(); // Barrier allows better compiler optimizations
     while(index < size)
     {
         f(&state, data + offset + index);
