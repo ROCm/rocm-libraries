@@ -148,7 +148,16 @@ Accuracy tests should be run, unless otherwise specified by the developer, on al
 are supported by the rocFFT library.  Currently, TheRock only tests on a subset of the supported
 architectures.
 
-One should not re-run accuracy tests until the desired result is achieved.
+One should not re-run accuracy tests until the desired result is achieved; an error is an error, and
+would prefer to catch intermittent failures in our testing infrastructure.
+
+
+#### Downstream dependency tests
+
+rocFFT is used by a variety of down-stream projects, and verifying that infrastructure changes to
+not negatively impact these projects is important.  These tests should not be necessary for most
+pre-submit checks, but should be run in a targeted fashion and on a slower (eg monthly) cadence.
+
 
 ### ASAN / TSAN / Sanitizer Coverage
 
@@ -181,6 +190,12 @@ cases.  There is a gap in TheRock CI in this aspect due to infrastructure issues
 
 
 ### Benchmarking and Performance Validation
+
+The goal of pre-commit testing is to determine how a commit will impact performance in the target
+branch after the commit is merged.  Therefore, pre-commit performance testing must test the
+difference in performance between the target branch with and without the commit applied.
+
+TODO: downstream integration testing
 
 Performance tests focus on a different parameter space than the accuracy tests.  For example, while
 it's important that the length-1 transforms perform correctly (accuracy), the transform is actually
