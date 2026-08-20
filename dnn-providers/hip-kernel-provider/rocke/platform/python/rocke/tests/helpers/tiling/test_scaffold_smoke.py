@@ -18,7 +18,7 @@ _SUBPACKAGES = [
     "rocke.helpers.tiling.traits",
     "rocke.helpers.tiling.layouts",
     "rocke.helpers.tiling.mma",
-    "rocke.helpers.tiling.reflection",
+    "rocke.helpers.tiling.visualization",
 ]
 
 

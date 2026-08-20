@@ -40,8 +40,8 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
 | `make_fragment(tile_desc, dtype)` | realized per-lane registers | no (value filled by verbs) | dtype from the operand |
 | `fill_fragment(b, frag, 0)` | element-wise materialize | yes (b-first) | -- |
-| `load_fragment(b, ptr, window, desc, lane, *, pad=0)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0) |
-| `store_fragment(b, ptr, window, frag, lane)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype |
+| `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c) |
+| `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c) |
 | `TileMma(shape, a,b,c, target, tiling=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits |
 | `Tiling(atom_shape=, order=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK" |
 | `TilingGemmSpec(tile, atom, order, dtypes)` | instance knobs (spec->builder) | no | atom=None, order="MNK", f16->f32 |
@@ -274,6 +274,36 @@ Proven bit-exact on gfx90a: ragged 255^3 (OOB edge), 256x256x250 (K-only), and 2
 256-allocated tensor (clip INSIDE a valid space via leading dims -- masked cells hold real data yet
 are excluded, and the C tail stays untouched). The reserved efficient lowering (C2) uses the
 buffer-descriptor `num_records` path for wide vectorized tail loads.
+
+---
+
+## 5c. LDS bank-swizzle policy (Part C, BUILT)
+
+`load_fragment`/`store_fragment` take `lds_swizzle`, a **customizable bank-swizzle POLICY** for LDS accesses
+(no effect on a global `ptr`). It is `bool | Callable`:
+
+- `False` (default) — no swizzle; the natural contiguous vector width is used.
+- `True` — the built-in block-preserving swizzle (`_swizzle_lds_positions`).
+- a **callable policy** `(builder, positions) -> positions` that remaps the LDS index. It declares its
+  granularity via a `vw_elems` attribute (the block width, in elements, it keeps contiguous); the emit
+  resolves the access width to `min(vw_elems, natural_run)` and **range-checks it to `[1, natural_run]`**
+  (`_swizzle_vw`) — so a policy can only relocate whole blocks of its own granularity, never widen past what
+  the layout is contiguous for. Store and read MUST use the same policy (a bijection → bit-exact).
+
+Provided policies (`kernels/tiling_gemm_interleaved_demo.py`, built by `_bank_swizzle(width_elems)`):
+`b32_swizzle` (b32-granular), `b64_swizzle` (b64-granular); alias `full_perm_swizzle = b32_swizzle`. These
+de-alias the K-aliased interleaved coop store; narrower granularity → fewer bank conflicts but more
+instructions.
+
+```python
+from ...kernels.tiling_gemm_interleaved_demo import b32_swizzle
+store_fragment(b, lds_a, win, fa, tid, lds_swizzle=b32_swizzle)          # store with the policy...
+fa = load_fragment(b, lds_a, win, a_desc, tid, lds_swizzle=b32_swizzle)  # ...SAME policy on read (bijection)
+```
+
+**Whether / which policy to apply is a decision, not a default** — a bank-conflict vs bandwidth vs
+instruction-issue tradeoff. The model, the width ladder, and the binding-stage decision live in
+`lds_banks.md` (measure; do not pick blind).
 
 ---
 

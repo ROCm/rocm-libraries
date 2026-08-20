@@ -127,10 +127,10 @@ def test_mma_exposes_per_operand_tiledescs() -> None:
         (32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )
-    assert mma_op.a_desc.shape == (32, 16)          # (wave M, wave K)
-    assert mma_op.b_desc.shape == (32, 16)          # (wave N, wave K)
-    assert mma_op.c_desc.shape == (32, 32)          # (wave M, wave N)
-    assert mma_op.a_desc.layout == mma_op.a_layout  # desc bundles the resolved layout
+    assert mma_op.a_desc().shape == (32, 16)          # (wave M, wave K)
+    assert mma_op.b_desc().shape == (32, 16)          # (wave N, wave K)
+    assert mma_op.c_desc.shape == (32, 32)            # (wave M, wave N)
+    assert mma_op.a_desc().layout == mma_op.a_layout  # desc bundles the resolved layout
     assert mma_op.c_desc.layout == mma_op.c_layout
 
 

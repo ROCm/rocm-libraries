@@ -25,6 +25,7 @@ from typing import Optional
 from ..encoding import WarpDistributionEncoding
 from ..fragments import Fragment, TileDesc, fragment_length
 from ..traits import MmaTraits, MmaTraitsCatalog, load_mma_traits
+from ..transforms import validate_operands
 from .warp_encoding import a_warp_encoding, b_warp_encoding, c_warp_encoding
 
 __all__ = ["Tiling", "TileMma"]
@@ -244,19 +245,28 @@ class TileMma:
             self._traits, m_iter=self._m_subtiles, n_iter=self._n_subtiles
         )
 
-    @property
-    def a_desc(self):
-        """A operand `TileDesc` -- wave (M, K) shape + `a_layout`, ready for `load_fragment`."""
-        return TileDesc((self._shape[0], self._shape[2]), self.a_layout)
+    def a_desc(self, *, interleaved: bool = False):
+        """A operand `TileDesc` -- wave (M, K) shape + canonical `a_layout`, ready for `load_fragment`.
 
-    @property
-    def b_desc(self):
-        """B operand `TileDesc` -- wave (N, K) shape + `b_layout`."""
-        return TileDesc((self._shape[1], self._shape[2]), self.b_layout)
+        ``interleaved=True`` is BROKEN and raises: it does NOT produce a proper interleaved layout.
+        Build interleaved layouts as custom static tile distributions (`make_tile_desc`)."""
+        layout = a_warp_encoding(
+            self._traits, m_iter=self._m_subtiles, k_iter=self._k_subtiles, interleaved=interleaved
+        )
+        return TileDesc((self._shape[0], self._shape[2]), layout)
+
+    def b_desc(self, *, interleaved: bool = False):
+        """B operand `TileDesc` -- wave (N, K) shape + canonical `b_layout`.
+
+        ``interleaved=True`` is BROKEN and raises (see :meth:`a_desc`)."""
+        layout = b_warp_encoding(
+            self._traits, n_iter=self._n_subtiles, k_iter=self._k_subtiles, interleaved=interleaved
+        )
+        return TileDesc((self._shape[1], self._shape[2]), layout)
 
     @property
     def c_desc(self):
-        """C accumulator `TileDesc` -- wave (M, N) shape + `c_layout`."""
+        """C accumulator `TileDesc` -- wave (M, N) shape + `c_layout` (no interleaved variant)."""
         return TileDesc((self._shape[0], self._shape[1]), self.c_layout)
 
     # SOT dtype token -> arch-catalog token (naming-convention alias only).
@@ -339,7 +349,7 @@ class TileMma:
         """Walk the M x N x K atom grid for the wave tile (in ``tiling.order``), issuing one
         ``b.mma`` per atom and accumulating each C subtile. The fragments are
         subtile-contiguous (from the wave layouts), so every atom is a register slice.
-        Validates operand dtypes first."""
+        Validates operand dtypes AND K-alignment first."""
         for name, fragment in (("A", a_fragment), ("B", b_fragment), ("C", accumulator)):
             want = self._ir_type({"A": self._a_dtype, "B": self._b_dtype,
                                   "C": self._c_dtype}[name])
@@ -348,6 +358,19 @@ class TileMma:
                     f"MMA operand dtype mismatch -- operand={name}, "
                     f"fragment={fragment.dtype.name!r}, expected {want.name!r}"
                 )
+
+        # MMA safety: the hardware pairs A-slot-s with B-slot-s and sums over K, so A and B must
+        # share the same positional K-distribution (M/N register order is free; K order need not be
+        # canonical). A mismatched pair is rejected with a fix hint.
+        # Validate K PER ATOM: the driver pairs (mi,ki)*(nj,ki), so A's m_sub M-atoms and B's n_sub
+        # N-atoms each only need their atom-K to match -- comparing the whole (multi-atom) fragments
+        # would falsely reject rectangular wave tiles where m_sub != n_sub (register counts differ).
+        ok, why = validate_operands(
+            a_fragment.tile_desc.layout, b_fragment.tile_desc.layout,
+            a_free_atoms=self._m_subtiles, b_free_atoms=self._n_subtiles,
+        )
+        if not ok:
+            raise ValueError(f"MMA operands not K-aligned for {self.op_id!r} -- {why}")
 
         op = self.emit_op()
         m_sub, n_sub, k_sub = self._m_subtiles, self._n_subtiles, self._k_subtiles
@@ -368,23 +391,32 @@ class TileMma:
                 acc_value = b.mma(op, a_sub, b_sub, acc_value)
             return Fragment(accumulator.tile_desc, accumulator.dtype, acc_value)
 
-        # Subtiled M/N grid: read-accumulate-write each (mi, nj) C subtile per atom. Any
-        # loop-nest order is correct (C accumulation is commutative).
+        # Subtiled M/N grid. Carry a PER-ATOM accumulator SSA for each (mi, nj) C subtile so
+        # that across K every C subtile is touched ONLY by `b.mma` (an MFMA def->use chain) --
+        # no `vec_extract`/`vec_insert` on C inside the K-loop. LLVM then keeps each atom's
+        # accumulator in an AGPR (the MFMA writes acc natively and reads Cin from acc), instead
+        # of spilling the whole C tile into arch VGPRs (which a monolithic extract/insert-per-K
+        # forces). The incoming C is split into per-atom SSAs ONCE (prologue) and packed back
+        # ONCE (epilogue), off the K-loop. Any loop-nest order is correct (C accum is commutative).
         a_atom = fragment_length(a_fragment.tile_desc.layout) // (m_sub * k_sub)
         b_atom = fragment_length(b_fragment.tile_desc.layout) // (n_sub * k_sub)
         c_atom = fragment_length(accumulator.tile_desc.layout) // (m_sub * n_sub)
-        result = accumulator.value
+        accs = [
+            self._read_subvector(b, accumulator.value, idx * c_atom, c_atom, accumulator.dtype)
+            for idx in range(m_sub * n_sub)
+        ]
         for mi, nj, ki in self._subtile_triples():
-            c_off = (mi * n_sub + nj) * c_atom
-            c_sub = self._read_subvector(b, result, c_off, c_atom, accumulator.dtype)
+            idx = mi * n_sub + nj
             a_sub = self._read_subvector(
                 b, a_fragment.value, (mi * k_sub + ki) * a_atom, a_atom, a_fragment.dtype
             )
             b_sub = self._read_subvector(
                 b, b_fragment.value, (nj * k_sub + ki) * b_atom, b_atom, b_fragment.dtype
             )
-            c_sub = b.mma(op, a_sub, b_sub, c_sub)
-            result = self._write_subvector(b, result, c_sub, c_off, c_atom)
+            accs[idx] = b.mma(op, a_sub, b_sub, accs[idx])
+        result = accumulator.value
+        for idx in range(m_sub * n_sub):
+            result = self._write_subvector(b, result, accs[idx], idx * c_atom, c_atom)
         return Fragment(accumulator.tile_desc, accumulator.dtype, result)
 
     def __repr__(self) -> str:
