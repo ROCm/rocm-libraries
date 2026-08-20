@@ -53,6 +53,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
         return tol::batchnorm::getToleranceBackward<T>();
     case NA::MatmulAttributes:
         return tol::matmul::getTolerance<T>();
+    case NA::MoeGroupedMatmulAttributes:
+        return tol::moe::getToleranceFwd<T>();
     case NA::ReductionAttributes:
         return tol::reduction::getTolerance<T>();
     case NA::RMSNormAttributes:

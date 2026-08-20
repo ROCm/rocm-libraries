@@ -10,6 +10,7 @@
   "dispatch": "93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8",
   "kernelDescriptors": [
     {
+      "version": "1.0",
       "id": "3acc760d-6286-438a-9e51-40561a127aab",
       "name": "pointwise_mul.f32_block64",
       "kernel_source": {
@@ -25,6 +26,7 @@
       "priority": 0
     },
     {
+      "version": "1.0",
       "id": "f8e91362-ebe9-4d58-9a47-c51345c89ead",
       "name": "pointwise_mul.f32_block256",
       "kernel_source": {
@@ -40,6 +42,7 @@
       "priority": 0
     },
     {
+      "version": "1.0",
       "id": "02045f2e-f42b-47f3-a44c-a9abed808ea6",
       "name": "pointwise_mul.f16_block64",
       "kernel_source": {
