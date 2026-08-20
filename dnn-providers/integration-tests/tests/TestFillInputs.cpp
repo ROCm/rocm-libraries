@@ -228,7 +228,7 @@ float scalarValue(const InputTensorMap& inputs, int64_t uid)
     return *static_cast<const float*>(inputs.at(uid)->rawHostData());
 }
 
-// ── SDPA forward (no structured optionals) ──────────────────────────────────
+// ── SDPA forward (minimal inputs) ───────────────────────────────────────────
 
 GraphResult buildSdpaFwdGraph()
 {
@@ -255,9 +255,9 @@ GraphResult buildSdpaFwdGraph()
     return r;
 }
 
-// ── SDPA forward with structured seq_len_q ──────────────────────────────────
+// ── SDPA forward with optional seq_len_q ────────────────────────────────────
 
-GraphResult buildSdpaFwdWithStructuredGraph()
+GraphResult buildSdpaFwdWithSeqLenQGraph()
 {
     GraphResult r;
     auto& b = r.builder;
@@ -292,7 +292,7 @@ GraphResult buildSdpaFwdWithStructuredGraph()
 }
 
 // ── SDPA backward standalone ────────────────────────────────────────────────
-// O and stats are leaf inputs (not virtual) → DERIVED → refuses
+// O and stats are leaf inputs (not virtual) — filled as free(0, 1)
 
 GraphResult buildSdpaBwdStandaloneGraph()
 {
@@ -394,23 +394,7 @@ FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
-
-    fillInputs(*gr.graph, inputs, leafUids, recipes);
-
-    auto missing = recipes.unfilled(leafUids);
-    if(!missing.empty())
-    {
-        std::string msg = "cannot fill:";
-        for(const int64_t uid : missing)
-        {
-            const auto init = recipes.fill(uid);
-            const char* kind = init.kind == FillRecipe::Kind::STRUCTURED ? "structured" : "derived";
-            msg += " uid=" + std::to_string(uid) + " (" + kind + ")";
-        }
-        return FillResult::unsupported(msg);
-    }
-
-    return FillResult::ok();
+    return fillInputs(*gr.graph, inputs, leafUids, recipes);
 }
 
 } // namespace
@@ -465,7 +449,7 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
     EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
 }
 
-TEST(TestFillInputs, SdpaFwdNoStructuredOptionals)
+TEST(TestFillInputs, SdpaFwdMinimalInputs)
 {
     const auto gr = buildSdpaFwdGraph();
     const auto result = runFill(gr, {4});
@@ -473,23 +457,20 @@ TEST(TestFillInputs, SdpaFwdNoStructuredOptionals)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-TEST(TestFillInputs, SdpaFwdWithStructuredInputRefuses)
+TEST(TestFillInputs, SdpaFwdWithSeqLenQFills)
 {
-    const auto gr = buildSdpaFwdWithStructuredGraph();
+    const auto gr = buildSdpaFwdWithSeqLenQGraph();
     const auto result = runFill(gr, {4});
 
-    EXPECT_FALSE(result.filled);
-    EXPECT_NE(result.reason.find("uid=5"), std::string::npos);
-    EXPECT_NE(result.reason.find("structured"), std::string::npos);
+    EXPECT_TRUE(result.filled) << result.reason;
 }
 
-TEST(TestFillInputs, SdpaBwdStandaloneRefusesDerived)
+TEST(TestFillInputs, SdpaBwdStandaloneFills)
 {
     const auto gr = buildSdpaBwdStandaloneGraph();
     const auto result = runFill(gr, {7, 8, 9});
 
-    EXPECT_FALSE(result.filled);
-    EXPECT_NE(result.reason.find("derived"), std::string::npos);
+    EXPECT_TRUE(result.filled) << result.reason;
 }
 
 TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)

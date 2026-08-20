@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -11,10 +12,13 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
@@ -48,14 +52,15 @@ GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
 
 // SymbolScope stand-ins: content-indifferent, and a pack's real functions are internal
 // to their native file and unreachable from here.
-bool acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
-                    hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/)
+std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
+    acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/)
 {
-    return true;
+    return hipdnn_plugin_sdk::ingestor::BoundTokens{};
 }
 
-double scoreNothing(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/,
-                    const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/)
+double scoreNothing(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+                    const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+                    const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
 {
     return 0.0;
 }
@@ -81,7 +86,7 @@ TEST(TestKernelIngestorEngine, RegisterNativeIngestorSymbolsIsIdempotentAcrossRe
 
 TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOthersAlone)
 {
-    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::GraphMatchRegistry;
     using hipdnn_plugin_sdk::ingestor::ScoreRegistry;
     using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
@@ -104,18 +109,18 @@ TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOther
         EXPECT_THROW(failing.add(contendedSymbol, &scoreNothing), std::runtime_error);
     }
 
-    EXPECT_THROW(GraphMatcherRegistry::resolve(firstSymbol), std::runtime_error);
+    EXPECT_THROW(GraphMatchRegistry::resolve(firstSymbol), std::runtime_error);
     // ...while the neighbour's survives: one pack failing must not affect others.
-    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(neighbourSymbol));
+    EXPECT_NO_THROW(GraphMatchRegistry::resolve(neighbourSymbol));
     EXPECT_NO_THROW(ScoreRegistry::resolve(contendedSymbol));
 
-    GraphMatcherRegistry::unregisterSymbol(neighbourSymbol);
+    GraphMatchRegistry::unregisterSymbol(neighbourSymbol);
     ScoreRegistry::unregisterSymbol(contendedSymbol);
 }
 
 TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
 {
-    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::GraphMatchRegistry;
     using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
     const std::string symbol = "test.committed.graph_match";
@@ -125,9 +130,9 @@ TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
         scope.commit();
     }
 
-    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(symbol));
+    EXPECT_NO_THROW(GraphMatchRegistry::resolve(symbol));
 
-    GraphMatcherRegistry::unregisterSymbol(symbol);
+    GraphMatchRegistry::unregisterSymbol(symbol);
 }
 
 // makePointwiseAddEngine(): a working GenericEngine, reached through Container
@@ -224,22 +229,166 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     EXPECT_EQ(plan.kernel().getIntMetadata(std::string(BLOCK_SIZE_FIELD)), 256);
 }
 
-// Unhappy path: a graph none of this pack's kernels serve
+// ---------------------------------------------------------------------------
+// Three packs under one engine, end to end
+// ---------------------------------------------------------------------------
 
-TEST(TestKernelIngestorEngine, DeclinesAGraphThisPacksMatchersRefuse)
+TEST(TestKernelIngestorEngine, ServesAllItsPacksOperationsUnderOneEngineId)
 {
+    // Matchers decline outright with no device resolved, so an accept is only
+    // meaningful where there is one.
+    SKIP_IF_NO_DEVICES();
+
     Container container;
     auto& engineManager = container.getEngineManager();
     Handle handle;
 
+    // The whole point of the multi-pack topology: one engine id answers for every
+    // operation, reached through a shared graph matcher and three different kernels.
+    const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName);
+
+    for(const auto operation : {hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
+                                hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL,
+                                hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB})
+    {
+        const auto graph = buildPointwiseGraph(operation);
+        const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));
+
+        EXPECT_NE(std::find(applicable.begin(), applicable.end(), engineId), applicable.end())
+            << "engine did not claim operation " << static_cast<int>(operation);
+    }
+}
+
+TEST(TestKernelIngestorEngine, DeclinesAGraphNoPackOfItsClaims)
+{
+    // Matchers decline outright with no device resolved, so a decline here would be
+    // vacuous rather than proof the operation matchers refused DIV.
+    SKIP_IF_NO_DEVICES();
+
+    Container container;
+    auto& engineManager = container.getEngineManager();
+    Handle handle;
+
+    // DIV passes the shared shape matcher, but every pack's operation matcher declines
+    // it -- distinguishing "no pack claims this op" from "the matcher rejected the
+    // shape" outright. Not SUB: that's now one of the three claimed operations.
     const auto graph
-        = buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL);
+        = buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV);
     const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));
 
     EXPECT_EQ(std::find(applicable.begin(),
                         applicable.end(),
                         hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)),
               applicable.end());
+}
+
+// ---------------------------------------------------------------------------
+// descriptorSearchDirectory(): which of the three sources answers
+// ---------------------------------------------------------------------------
+
+/// The env override is what every test and every run-from-build-dir depends on, so a real
+/// directory there has to beat both the module-relative path and the configure-time one.
+TEST(TestKernelIngestorEngine, PrefersHipdnnDescriptorDirOverEverything)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory existing(
+        std::filesystem::temp_directory_path() / "hip_kernel_provider_descriptor_env");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
+        "HIPDNN_DESCRIPTOR_DIR", existing.path().string());
+
+    EXPECT_EQ(descriptorSearchDirectory(), existing.path());
+}
+
+/// A stale override must be ignored, not obeyed: the install-tree CTestTestfile.cmake
+/// bakes in this build's absolute staging path via ENVIRONMENT, which won't exist on
+/// another machine -- without this guard the installed suite would silently load zero
+/// descriptor sets.
+TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorDirThatDoesNotExist)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter stale(
+        "HIPDNN_DESCRIPTOR_DIR", "/nowhere/in/particular");
+
+    const auto resolved = descriptorSearchDirectory();
+
+    EXPECT_NE(resolved, std::filesystem::path("/nowhere/in/particular"));
+    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
+        << "resolved to " << resolved;
+}
+
+/// With the env unset, resolution falls through to step 2 or 3, both ending in the same
+/// fixed suffix. Pinning that suffix catches a silent fallthrough to an empty path,
+/// which would otherwise be indistinguishable from a real resolved directory.
+TEST(TestKernelIngestorEngine, FallsBackToAModuleRelativeOrInstalledPath)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset("HIPDNN_DESCRIPTOR_DIR",
+                                                                            "");
+
+    const auto resolved = descriptorSearchDirectory();
+
+    ASSERT_FALSE(resolved.empty());
+    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
+        << "resolved to " << resolved << ", which does not end in " << HIPDNN_DESCRIPTOR_SUBDIR;
+}
+
+/// Asserts the mechanism step 2 rests on: an address resolves to the module containing
+/// it. Keyed on address rather than symbol name because every provider exports the same
+/// plugin entry points, so a name lookup could answer for the wrong module.
+TEST(TestKernelIngestorEngine, ResolvesAModuleDirectoryFromAnAddressWithinIt)
+{
+    const auto directory = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
+        reinterpret_cast<const void*>(&descriptorSearchDirectory));
+
+    std::error_code exists;
+    EXPECT_TRUE(std::filesystem::is_directory(directory, exists)) << directory;
+}
+
+// ---------------------------------------------------------------------------
+// descriptorSearchDirectories(): appending the runtime drop-in root
+// ---------------------------------------------------------------------------
+
+/// With no runtime dir set, the provider's own tree is the only root -- no phantom
+/// second entry. HIPDNN_DESCRIPTOR_RUNTIME_DIR may already be set from an outer shell,
+/// so it's cleared here the same way FallsBackToAModuleRelativeOrInstalledPath clears
+/// HIPDNN_DESCRIPTOR_DIR: an explicit empty value, which the empty() check treats as
+/// absent.
+TEST(TestKernelIngestorEngine, ReturnsOnlyTheProviderTreeWhenRuntimeDirIsUnset)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "");
+
+    const auto roots = descriptorSearchDirectories();
+
+    ASSERT_EQ(roots.size(), 1U);
+    EXPECT_EQ(roots.front(), descriptorSearchDirectory());
+}
+
+/// A real runtime dir is additive, not a replacement: the provider's own tree still
+/// leads, the runtime dir lands second. Order matters to the loader's incumbent-wins
+/// duplicate rule, so it's asserted position by position rather than as a set.
+TEST(TestKernelIngestorEngine, AppendsHipdnnDescriptorRuntimeDirAfterTheProviderTree)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory runtimeDir(
+        std::filesystem::temp_directory_path() / "hip_kernel_provider_descriptor_runtime");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR", runtimeDir.path().string());
+
+    const auto roots = descriptorSearchDirectories();
+
+    ASSERT_EQ(roots.size(), 2U);
+    EXPECT_EQ(roots[0], descriptorSearchDirectory());
+    EXPECT_EQ(roots[1], runtimeDir.path());
+}
+
+/// A stale runtime dir must not add a root at all: the loader treats a missing root as
+/// "nothing to add", so a typo would otherwise silently vanish instead of failing loud.
+TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorRuntimeDirThatDoesNotExist)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter stale(
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "/nowhere/in/particular");
+
+    const auto roots = descriptorSearchDirectories();
+
+    ASSERT_EQ(roots.size(), 1U);
+    EXPECT_EQ(roots.front(), descriptorSearchDirectory());
 }
 
 } // namespace
