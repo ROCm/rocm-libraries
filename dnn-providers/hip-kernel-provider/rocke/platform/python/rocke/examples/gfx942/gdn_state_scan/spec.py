@@ -24,7 +24,7 @@ The compute, for one chunk of ``BT`` tokens, with state ``h`` of shape
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
 
 from rocke.core.arch.target import ArchTarget
 
@@ -80,6 +80,47 @@ class GdnStateScanSpec:
 
     # -- wave widening --
     NR_SPLIT: int = 1
+
+    #: Group-major + XOR swizzle for every LDS buffer, matching the FlyDSL
+    #: parent. A logical ``[R, C]`` tile is stored as ``[R][C/4][4]`` and the
+    #: 4-element group index is XORed by ``(row ^ (row >> 3)) & (ng - 1)``.
+    #:
+    #: When off, the buffers are row-major with :data:`LDS_PAD` trailing
+    #: elements instead — always correct, but it costs LDS *and* leaves bank
+    #: conflicts on the fragment reads. Padding does not fit the fused
+    #: configuration, so this is a fit requirement there, not just a tuning
+    #: knob. Default-on because the parent does it and the comparison is
+    #: supposed to isolate the DSL, not the algorithm.
+    LDS_SWIZZLE: bool = True
+
+    #: Loop-carried prefetch: issue chunk i+1's ``w`` / ``u`` / gate reads at
+    #: the end of chunk i and carry the raw values across the loop back edge.
+    #: The FlyDSL parent does this, so matching it matters for a like-for-like
+    #: comparison.
+    #:
+    #: **Default-off pending root cause.** With prefetch on *and* the LDS
+    #: swizzle on, ``BV=64, NR_SPLIT=2, USE_GK`` produces wrong results —
+    #: deterministically, and only when both ``u`` and the gate are prefetched.
+    #: Reordering the carry list makes all 14 verify configs pass, but the
+    #: reason the original order fails is not understood, so the flag stays off
+    #: rather than shipping a fix nobody can explain. See PERF_PLAN.md P5.
+    PREFETCH: bool = False
+
+    #: Route global **loads** through bounds-checked buffer descriptors
+    #: (``buffer_rsrc`` + ``buffer_load_*``) instead of raw pointers, letting
+    #: hardware return 0 out of range so the explicit row clamps can go. The
+    #: FlyDSL parent does this via ``make_buffer_tensor(max_size=False)``.
+    #:
+    #: **Default-off: implemented but NOT yet verified on hardware.**
+    BUFFER_DESC: bool = False
+
+    #: Chiplet (XCD) remap of the flat block id, so a head's whole run of
+    #: ``GRID_V`` V-tiles lands on one XCD and shares its L2 copy of the
+    #: V-independent ``w`` / ``k`` / gate slices. Ported from the parent,
+    #: including its tail guard. ``NXCD = 8`` on this part.
+    #:
+    #: **Default-off: implemented but NOT yet verified on hardware.**
+    XCD_REMAP: bool = False
 
     #: Force VGPR-form MFMA by pinning ``amdgpu-agpr-alloc`` to 0.
     #:
@@ -217,21 +258,28 @@ class GdnStateScanSpec:
         return not self.COMPUTE_OUTPUT
 
     # -- LDS, in elements (bf16) --
+    #: Trailing pad per row when the XOR swizzle is off. Swizzle needs none.
+    LDS_PAD: ClassVar[int] = 8
+
+    @property
+    def _pad(self) -> int:
+        return 0 if self.LDS_SWIZZLE else self.LDS_PAD
+
     @property
     def lds_w_elems(self) -> int:
-        return self.BT * self.K
+        return self.BT * (self.K + self._pad)
 
     @property
     def lds_kt_elems(self) -> int:
-        return self.K * self.BT
+        return self.K * (self.BT + self._pad)
 
     @property
     def lds_vnt_elems(self) -> int:
-        return self.BV * self.BT
+        return self.BV * (self.BT + self._pad)
 
     @property
     def lds_h_elems(self) -> int:
-        return self.BV * self.K
+        return self.BV * (self.K + self._pad)
 
     @property
     def lds_a_elems(self) -> int:
