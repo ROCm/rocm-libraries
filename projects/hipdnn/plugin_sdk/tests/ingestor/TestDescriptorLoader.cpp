@@ -57,17 +57,21 @@ const std::string KERNEL_SYMBOL = "descriptorloader.kernel_match";
 const std::string SCORE_SYMBOL = "descriptorloader.score";
 const std::string DISPATCH_SYMBOL = "descriptorloader.dispatch";
 
-bool matchGraph(const MatchContext& /*context*/, BoundTokens& /*bound*/)
+bool matchGraph(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
 {
     return true;
 }
 
-bool matchKernel(const MatchContext& /*context*/, const KernelDefinition& /*kernel*/)
+bool matchKernel(const MatchContext& /*context*/,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& /*kernel*/)
 {
     return true;
 }
 
-double score(const KernelDefinition& /*kernel*/, const MatchContext& /*context*/)
+double score(const MatchContext& /*context*/,
+             const BoundTokens& /*bound*/,
+             const KernelDefinition& /*kernel*/)
 {
     return 0.0;
 }
@@ -106,7 +110,7 @@ class ScopedSymbols
 public:
     ScopedSymbols()
     {
-        GraphMatcherRegistry::registerSymbol(GRAPH_SYMBOL, &matchGraph);
+        GraphCriterionRegistry::registerSymbol(GRAPH_SYMBOL, &matchGraph);
         KernelMatcherRegistry::registerSymbol(KERNEL_SYMBOL, &matchKernel);
         ScoreRegistry::registerSymbol(SCORE_SYMBOL, &score);
         DispatchRegistry<LoaderHandle>::registerSymbol(DISPATCH_SYMBOL, &_handler);
@@ -114,7 +118,7 @@ public:
 
     ~ScopedSymbols()
     {
-        GraphMatcherRegistry::unregisterSymbol(GRAPH_SYMBOL);
+        GraphCriterionRegistry::unregisterSymbol(GRAPH_SYMBOL);
         KernelMatcherRegistry::unregisterSymbol(KERNEL_SYMBOL);
         ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
         DispatchRegistry<LoaderHandle>::unregisterSymbol(DISPATCH_SYMBOL);
@@ -1422,6 +1426,27 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:symbol_check_sibling");
+}
+
+/// The graph_match arm of the same pre-flight. An engine naming a graph match this build
+/// does not ship is dropped while it is read, rather than constructing and then throwing
+/// from the state manager after its id has been advertised.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredGraphMatchSymbol)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("unregistered_graph_match"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:graph_match_sibling"));
+
+    auto unregistered = makeSetDocuments('2', "test:unregistered_graph_match");
+    documentOfType(unregistered, ".ued.json")["graph_match"]
+        = nlohmann::json{{"native", "descriptorloader.absent_graph_match"}};
+    writeDocuments(dir.path(), unregistered);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:graph_match_sibling");
 }
 
 /// The kernel-scope arm of the match-symbol pre-flight: the test above only corrupts the

@@ -72,12 +72,16 @@
  * completed metadata tuples collide on the catalog key.
  *
  * The UED follows RFC 0020 (source of truth); the other six follow RFC 0017 §4 until
- * their own follow-ups land. Five deliberate divergences, pending an amendment:
+ * their own follow-ups land. Six deliberate divergences, pending an amendment:
  *
  *  - RFC 0020 §4.2: no `schema` member -- the filename already carries that fact, and a
  *    file whose name and body disagree has no correct reading.
  *  - RFC 0020 §4.2: `version` required on every type, not just the UED -- a type with no
  *    version can't be gated by §11.1 at all.
+ *  - RFC 0020 §4.2 lists no `graph_match`: an object naming the graph-topology pattern
+ *    this engine matches, with one inner key today, `native`, a symbol resolved through
+ *    GraphMatchRegistry. Its amendment lands with the finalized declarative pattern this
+ *    key is the escape hatch for.
  *  - RFC 0020 §10.2.1 makes the id the unit of collision; packs and standalone kernels
  *    are keyed by (id, arch), because a per-arch shard ships one id per arch with content
  *    built against that arch. The other five types stay keyed by id alone.
@@ -699,7 +703,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                       "metadata",
                       "knobs",
                       "behavior_notes",
-                      "numerical_notes"},
+                      "numerical_notes",
+                      "graph_match"},
                      where);
 
     EngineDescriptor engine;
@@ -746,6 +751,18 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
         {
             fail("key 'sdk_version' in " + where + " is not a version: " + error.what());
         }
+    }
+
+    // The graph-topology match this engine declares. Absent leaves the symbol empty,
+    // meaning this engine binds no tokens and is admitted or declined by its UMDs
+    // alone. The only inner key today is the native escape hatch; a declarative
+    // `nodes`/`criteria` pattern is a future sibling of `native`, not a replacement.
+    if(const auto it = root.find("graph_match"); it != root.end())
+    {
+        const std::string graphMatchWhere = where + " graph_match";
+        requireObject(*it, graphMatchWhere);
+        requireKnownKeys(*it, {"native"}, graphMatchWhere);
+        engine.graphMatchNativeSymbol = requireString(*it, "native", graphMatchWhere);
     }
     return engine;
 }
@@ -1910,7 +1927,7 @@ inline std::vector<DescriptorSet>
         for(const auto& matcher : set.matchers)
         {
             const bool registered = matcher.scope == MatchScope::GRAPH
-                                        ? GraphMatcherRegistry::isRegistered(matcher.matchSymbol)
+                                        ? GraphCriterionRegistry::isRegistered(matcher.matchSymbol)
                                         : KernelMatcherRegistry::isRegistered(matcher.matchSymbol);
             if(!registered)
             {
@@ -1919,6 +1936,15 @@ inline std::vector<DescriptorSet>
                                         << matcher.matchSymbol << "'; dropping it");
                 resolvable = false;
             }
+        }
+        if(!set.engine.graphMatchNativeSymbol.empty()
+           && !GraphMatchRegistry::isRegistered(set.engine.graphMatchNativeSymbol))
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                    << set.engine.name
+                                    << "' names unregistered graph_match symbol '"
+                                    << set.engine.graphMatchNativeSymbol << "'; dropping it");
+            resolvable = false;
         }
         for(const auto& dispatch : set.dispatches)
         {
@@ -1985,7 +2011,7 @@ inline std::vector<DescriptorSet>
             // construct. Extracting validateAndIndexPacks() into a shared predicate would
             // remove this discarded second walk, and with it the duplicate warning an
             // engine shipping no heuristic gets: once here, once at real construction.
-            auto probe = makeStateManager<THandle>(set);
+            auto probe = makeStateManager<THandle>(set, set.engine.graphMatchNativeSymbol);
             static_cast<void>(probe);
         }
         catch(const std::exception& error)
