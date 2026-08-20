@@ -242,15 +242,36 @@ public:
 
         if(!settings.benchmarkingEnabled)
         {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                   << _engine.name << "' selected kernel "
-                                   << toString(filtered.front().kernelId) << " from "
-                                   << filtered.size() << " candidate(s) (" << catalog.entries.size()
-                                   << " before knob filtering)");
+            // Constructing a GenericPlan runs prepare()/workspaceBytes(), so a kernel whose
+            // code object cannot be loaded must cost only itself while a sibling that loads
+            // still serves the graph. Same reason the ranked walk above walks.
+            for(size_t rank = 0; rank < filtered.size(); ++rank)
+            {
+                try
+                {
+                    auto plan = std::make_unique<GenericPlan<THandle>>(
+                        _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
 
-            executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
-                _stateManager.getDispatchDetails(filtered.front()), context, catalog.bound));
-            return;
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "ingestor: engine '"
+                        << _engine.name << "' selected kernel " << toString(filtered[rank].kernelId)
+                        << " at rank " << rank << " from " << filtered.size() << " candidate(s) ("
+                        << catalog.entries.size() << " before knob filtering)");
+
+                    executionContext.setPlan(std::move(plan));
+                    return;
+                }
+                catch(const std::exception& error)
+                {
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                           << _engine.name << "' could not build a plan for "
+                                           << toString(filtered[rank].kernelId) << " at rank "
+                                           << rank << ": " << error.what()
+                                           << "; trying the next candidate");
+                }
+            }
+
+            throwNoBuildableKernel(filtered.size());
         }
 
         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' will benchmark "
@@ -462,6 +483,14 @@ private:
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                     "engine '" + _engine.name
                                         + "' accepted this graph but has no applicable kernel");
+    }
+
+    [[noreturn]] void throwNoBuildableKernel(size_t candidates) const
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                    "engine '" + _engine.name + "' could not build a plan for any "
+                                        + "of its " + std::to_string(candidates)
+                                        + " applicable kernel(s)");
     }
 
     [[noreturn]] void throwUnsatisfiableKnobFilter(const KnobFilter& filter,

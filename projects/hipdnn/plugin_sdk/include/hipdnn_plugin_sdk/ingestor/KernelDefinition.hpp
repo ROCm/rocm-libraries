@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,12 @@ struct KernelDefinition
     /// kernel of an unrestricted pack gets. Read at match time, so one pack can hold an
     /// implementation per capability -- an MFMA build beside a portable one.
     std::vector<std::string> arch;
+    /// Copied from KernelDescriptor::originDirectory; `source.library` is relative to it,
+    /// so an adapter needs both to name a file.
+    std::filesystem::path originDirectory;
+    /// The kernel's authored name, carried so a dispatch-time diagnostic can name the
+    /// descriptor the way the loader does.
+    std::string name;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {

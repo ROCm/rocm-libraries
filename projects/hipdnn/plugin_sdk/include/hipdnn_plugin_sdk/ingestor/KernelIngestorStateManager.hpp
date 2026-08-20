@@ -393,12 +393,17 @@ private:
             packDefinitions.reserve(pack.kernels.size());
             for(const auto& kernel : pack.kernels)
             {
-                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE)
+                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE
+                   && kernel.source.kind != KernelSourceKind::KPACK)
                 {
-                    throw std::invalid_argument(
-                        describeDescriptor("kernel", kernel.name, kernel.id)
-                        + " declares a source kind this build has no adapter for; only "
-                          "EMBEDDED_SOURCE is implemented");
+                    // Dropped, not thrown: an unadaptable kernel costs only itself, so its
+                    // pack keeps serving whichever siblings this build can dispatch.
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                     << " declares a source kind this build has no adapter for;"
+                                        " only EMBEDDED_SOURCE and KPACK are implemented,"
+                                        " dropping it");
+                    continue;
                 }
 
                 auto key = completeMetadata(kernel);
@@ -432,8 +437,13 @@ private:
                                                            kernel.source,
                                                            std::move(key),
                                                            kernel.priority,
-                                                           std::move(kernelArch)});
+                                                           std::move(kernelArch),
+                                                           kernel.originDirectory,
+                                                           kernel.name});
             }
+            // Pushed even when every kernel was dropped: _definitions is indexed by pack
+            // position, so skipping one entry would bind every later pack's definitions to
+            // the wrong pack and run the last index out of range.
             _definitions.push_back(std::move(packDefinitions));
         }
     }
