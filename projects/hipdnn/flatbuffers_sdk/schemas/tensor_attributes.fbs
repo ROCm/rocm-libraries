@@ -3,8 +3,10 @@
 
 include "data_types.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_ignore";
+attribute "cache_uid";
+attribute "cache_uid_key";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -55,7 +57,9 @@ union TensorValue {
 }
 
 table TensorAttributes {
-    uid: long;
+    // The uid every (cache_uid) reference resolves against, via this tensor's position
+    // in Graph.tensors. Not folded: its ordinal is its own position.
+    uid: long (cache_uid_key);
     name: string (cache_ignore);
     data_type: DataType;
     strides: [long];
@@ -63,6 +67,6 @@ table TensorAttributes {
     virtual: bool;
     value: TensorValue;
     is_runtime_pass_by_value: bool = false;
-    ragged_offset_tensor_uid: long = null;
+    ragged_offset_tensor_uid: long = null (cache_uid);
     alignment: long = 16;
 }

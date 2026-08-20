@@ -21,36 +21,38 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// The graph half of a winner-cache key: content, never identity.
 ///
-/// Two graphs are equal when a kernel measurement taken on one is valid for the other;
-/// any future change to the excluded field set must answer that question.
+/// Two graphs are equal when a kernel measurement taken on one is valid for the other.
 ///
-/// `hash` narrows the lookup to a bucket and may be lossy; `logicallyEqual` decides the
-/// match. Both come from `cachekey_generated.h`, generated from `graph.fbs`, so a new
-/// schema field is hashed and compared automatically. Both read the buffer in place: no
-/// `UnPack`, no allocation, no reflection.
+/// `hash` narrows the lookup and may be lossy; `logicallyEqual` decides the match. Both
+/// are generated from `graph.fbs` into `cachekey_generated.h`, so a new schema field
+/// participates automatically. Both read the buffer in place: no `UnPack`, no
+/// allocation, no reflection.
 ///
-/// Exclusion lives on the field in `graph.fbs` as `(cache_ignore)`; nothing here
-/// re-states the list.
+/// Field policy lives in `graph.fbs`: `(cache_ignore)` drops a field, `(cache_uid)`
+/// marks a tensor reference.
 ///
-/// Tensors and nodes are compared in vector order, which `IGraph`'s topological-order
-/// precondition already fixes: the frontend's sort is deterministic, so the same graph
-/// built the same way keys the same. Two different construction orders of one logical
-/// DAG miss rather than mismatch.
+/// A `(cache_uid)` reference folds as the referenced tensor's ordinal in
+/// `Graph.tensors`, not the uid, which is a caller-assigned label. Renumbering keys the
+/// same; rewiring an operand or aliasing two operands onto one tensor does not.
+/// Identically described tensors are therefore interchangeable: swapping which feeds
+/// which operand keys the same, since the described content is the same work.
 ///
-/// One contiguous copy of the serialized graph per key, since a cached record outlives
-/// the caller's buffer.
+/// Tensors and nodes compare in vector order, fixed by `IGraph`'s topological-order
+/// precondition. Two construction orders of one logical DAG miss rather than mismatch.
 class GraphContentKey
 {
 public:
-    /// The serialized graph this key matched on, kept as wire bytes. Shared because a
-    /// record outlives the plan that produced it; copies of the key must not re-copy it.
+    /// Wire bytes of the graph this key matched on. Shared because a record outlives the
+    /// plan that produced it.
     using Content = std::shared_ptr<const std::vector<uint8_t>>;
 
     GraphContentKey() = default;
 
+    /// `_content` is retained before `fold()` reads it: the hash and the comparison must
+    /// walk the same bytes.
     explicit GraphContentKey(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
         : _content(retain(graph))
-        , _hash(fold(graph))
+        , _hash(fold())
     {
     }
 
@@ -129,16 +131,19 @@ private:
             _content->data());
     }
 
-    /// The same generated walk the comparison uses, so hash and comparison can never
-    /// disagree about which fields matter.
-    static uint64_t fold(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
+    /// Walks the retained copy with the generated traversal, so the hash and the
+    /// comparison always read the same bytes.
+    ///
+    /// Hash 0 means unkeyable, agreeing with `isUsable()` and `operator==`.
+    uint64_t fold() const
     {
-        if(!graph.isValid())
+        const auto* graph = root();
+        if(graph == nullptr)
         {
             return 0;
         }
         hipdnn_flatbuffers_sdk::data_objects::cachekey::Hasher hasher;
-        hipdnn_flatbuffers_sdk::data_objects::cachekey::hashAppend(hasher, &graph.getGraph());
+        hipdnn_flatbuffers_sdk::data_objects::cachekey::hashAppend(hasher, graph);
         return hasher.value();
     }
 

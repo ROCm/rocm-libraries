@@ -26,6 +26,24 @@ _HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Opt-out: an unannotated field always participates in the hash and comparison.
 IGNORE_ATTRIBUTE = "cache_ignore"
 
+# A field holding a tensor uid. Folded as the referenced element's ordinal in the domain
+# vector rather than the uid, so renumbering does not change the key while rewiring does.
+UID_ATTRIBUTE = "cache_uid"
+
+# The vector whose element order defines those ordinals. Its element table must carry
+# exactly one `cache_uid_key`.
+UID_DOMAIN_ATTRIBUTE = "cache_uid_domain"
+
+# The uid a `cache_uid` reference resolves against. Not folded: its ordinal is its own
+# position in the domain vector.
+UID_KEY_ATTRIBUTE = "cache_uid_key"
+
+# Reflection base types a uid may take. `UidCanon` compares against the domain element's
+# key, so anything wider or narrower cannot resolve.
+INTEGER_BASE_TYPES = frozenset(
+    ["Byte", "UByte", "Short", "UShort", "Int", "UInt", "Long", "ULong"]
+)
+
 # Roots to generate for, as (schema file, fully-qualified root table, output header).
 TARGETS = [
     (
@@ -181,6 +199,29 @@ def short_name(fully_qualified):
 class Emitter:
     """Walks the reflection schema and emits the header."""
 
+    # Threaded through every emitted signature so the mapping reaches each nested table.
+    # A table that neither references a uid nor descends leaves it unnamed; the project
+    # builds with -Wunused-parameter as an error.
+    HASH_TAIL = ", const UidCanon& canon"
+    HASH_TAIL_UNUSED = ", const UidCanon&"
+    EQUAL_TAIL = ", const UidCanon& aCanon, const UidCanon& bCanon"
+    EQUAL_TAIL_UNUSED = ", const UidCanon&, const UidCanon&"
+
+    def uses_canon(self, name):
+        """Whether the body emitted for @p name names the mapping.
+
+        Immediate fields decide it: descending passes the mapping on regardless of what
+        the nested table does with it.
+        """
+        for field in self.fields_of(self.objects[name]):
+            ftype = field["type"]
+            base = ftype["base_type"]
+            if self.is_uid(field) or base in ("Obj", "Union"):
+                return True
+            if base == "Vector" and ftype.get("element") == "Obj":
+                return True
+        return False
+
     def __init__(self, schema, root_name):
         self.schema = schema
         self.root_name = root_name
@@ -188,13 +229,113 @@ class Emitter:
         self.enums = {e["name"]: e for e in schema["enums"]}
         self.lines = []
         self.unions = set()
+        self.domain = self._resolve_domain()
+        self._validate_uid_fields()
+
+    @staticmethod
+    def has_attribute(field, key):
+        return any(a["key"] == key for a in field.get("attributes", []))
+
+    def is_uid(self, field):
+        return self.has_attribute(field, UID_ATTRIBUTE)
+
+    def is_uid_key(self, field):
+        return self.has_attribute(field, UID_KEY_ATTRIBUTE)
+
+    def _resolve_domain(self):
+        """The (accessor, element type, uid accessor) the ordinals are drawn from.
+
+        None when the schema declares no domain, in which case no field may be a
+        `cache_uid` reference and `UidCanon` is the identity.
+        """
+        root = self.objects.get(self.root_name)
+        if root is None:
+            return None
+        domains = [
+            f
+            for f in self.fields_of(root)
+            if self.has_attribute(f, UID_DOMAIN_ATTRIBUTE)
+        ]
+        if not domains:
+            return None
+        if len(domains) > 1:
+            names = ", ".join(f"'{f['name']}'" for f in domains)
+            raise SystemExit(
+                f"ERROR: {UID_DOMAIN_ATTRIBUTE} is declared on {len(domains)} fields "
+                f"({names}); ordinals need exactly one"
+            )
+        field = domains[0]
+        ftype = field["type"]
+        if ftype["base_type"] != "Vector" or ftype.get("element") != "Obj":
+            raise SystemExit(
+                f"ERROR: {UID_DOMAIN_ATTRIBUTE} on '{field['name']}' requires a vector "
+                "of tables"
+            )
+        element = self.schema["objects"][ftype.get("index", -1)]
+        keys = [f for f in element["fields"] if self.is_uid_key(f)]
+        if len(keys) != 1:
+            raise SystemExit(
+                f"ERROR: the {UID_DOMAIN_ATTRIBUTE} element "
+                f"'{short_name(element['name'])}' must carry exactly one "
+                f"{UID_KEY_ATTRIBUTE} field, found {len(keys)}"
+            )
+        if not self._is_integer_scalar(keys[0]["type"]):
+            raise SystemExit(
+                f"ERROR: {UID_KEY_ATTRIBUTE} on "
+                f"'{short_name(element['name'])}.{keys[0]['name']}' requires an integer "
+                "scalar"
+            )
+        return (
+            accessor(field["name"]),
+            short_name(element["name"]),
+            accessor(keys[0]["name"]),
+        )
+
+    @staticmethod
+    def _is_integer_scalar(ftype):
+        # Enum-typed scalars carry an index into the enum table; a uid is a plain integer.
+        return ftype["base_type"] in INTEGER_BASE_TYPES and ftype.get("index", -1) < 0
+
+    def _validate_uid_fields(self):
+        """A `cache_uid` field must be an integer the domain can resolve.
+
+        Rejected rather than emitted: canonicalizing a shape `UidCanon` cannot resolve
+        would silently fold every value alike, matching graphs that differ.
+        """
+        for name in self.reachable():
+            for field in self.fields_of(self.objects[name]):
+                if not self.is_uid(field):
+                    continue
+                where = f"'{short_name(name)}.{field['name']}'"
+                if self.domain is None:
+                    raise SystemExit(
+                        f"ERROR: {UID_ATTRIBUTE} on {where} needs a "
+                        f"{UID_DOMAIN_ATTRIBUTE} field to resolve against"
+                    )
+                ftype = field["type"]
+                if ftype["base_type"] == "Vector":
+                    element = {
+                        "base_type": ftype.get("element"),
+                        "index": ftype.get("index", -1),
+                    }
+                    if not self._is_integer_scalar(element):
+                        raise SystemExit(
+                            f"ERROR: {UID_ATTRIBUTE} on {where} requires a vector of "
+                            "integers"
+                        )
+                elif not self._is_integer_scalar(ftype):
+                    raise SystemExit(
+                        f"ERROR: {UID_ATTRIBUTE} on {where} requires an integer scalar "
+                        "or a vector of integers"
+                    )
 
     def keep(self, field):
         if field.get("deprecated"):
             return False
-        return not any(
-            a["key"] == IGNORE_ATTRIBUTE for a in field.get("attributes", [])
-        )
+        if self.is_uid_key(field):
+            # Folded as its own index, which the element's position already carries.
+            return False
+        return not self.has_attribute(field, IGNORE_ATTRIBUTE)
 
     def fields_of(self, obj):
         # The binary schema sorts fields alphabetically; restore declaration
@@ -236,25 +377,61 @@ class Emitter:
         order = self.reachable()
         namespace = self.root_name.rsplit(".", 1)[0].replace(".", "::")
         self.emit_prologue(namespace)
+        root = short_name(self.root_name)
+        self.w(f"inline void hashAppend(Hasher& hasher, const {root}* value);")
+        self.w(f"inline bool logicallyEqual(const {root}* a, const {root}* b);")
         for name in order:
             short = short_name(name)
-            self.w(f"inline void hashAppend(Hasher& hasher, const {short}* value);")
-            self.w(f"inline bool logicallyEqual(const {short}* a, const {short}* b);")
+            used = self.uses_canon(name)
+            self.w(
+                f"inline void hashAppend(Hasher& hasher, const {short}* value"
+                f"{self.HASH_TAIL if used else self.HASH_TAIL_UNUSED});"
+            )
+            self.w(
+                f"inline bool logicallyEqual(const {short}* a, const {short}* b"
+                f"{self.EQUAL_TAIL if used else self.EQUAL_TAIL_UNUSED});"
+            )
         for union in sorted(self.unions):
             short = short_name(union)
             self.w(
-                f"inline void hashAppend(Hasher& hasher, {short} type, const void* value);"
+                f"inline void hashAppend(Hasher& hasher, {short} type, const void* value"
+                f"{self.HASH_TAIL});"
             )
             self.w(
-                f"inline bool logicallyEqual({short} aType, const void* a, {short} bType, const void* b);"
+                f"inline bool logicallyEqual({short} aType, const void* a, {short} bType, "
+                f"const void* b{self.EQUAL_TAIL});"
             )
         self.w()
         for union in sorted(self.unions):
             self.emit_union(union)
         for name in order:
             self.emit_table(name)
+        self.emit_root_entry_points(root)
         self.w(f"}} // namespace {namespace}::cachekey")
         return "\n".join(self.lines) + "\n"
+
+    def emit_root_entry_points(self, root):
+        """Overloads taking only the root: build the canon and delegate.
+
+        Callers cannot key against the wrong domain or omit one.
+        """
+        if self.domain is None:
+            one = a = b = "UidCanon{}"
+        else:
+            field = self.domain[0]
+            one = f"UidCanon{{value == nullptr ? nullptr : value->{field}()}}"
+            a = f"UidCanon{{a == nullptr ? nullptr : a->{field}()}}"
+            b = f"UidCanon{{b == nullptr ? nullptr : b->{field}()}}"
+        self.w(f"inline void hashAppend(Hasher& hasher, const {root}* value)")
+        self.w("{")
+        self.w(f"    hashAppend(hasher, value, {one});")
+        self.w("}")
+        self.w("")
+        self.w(f"inline bool logicallyEqual(const {root}* a, const {root}* b)")
+        self.w("{")
+        self.w(f"    return logicallyEqual(a, b, {a}, {b});")
+        self.w("}")
+        self.w("")
 
     def emit_prologue(self, namespace):
         self.w("// Automatically generated by scripts/gen_cache_key.py, do not modify.")
@@ -263,9 +440,10 @@ class Emitter:
             "// Hash and logical-equality over the FlatBuffers accessors, with the field"
         )
         self.w(
-            f"// policy taken from the '{IGNORE_ATTRIBUTE}' schema annotation. Reads the"
+            f"// policy taken from the '{IGNORE_ATTRIBUTE}' and '{UID_ATTRIBUTE}' schema"
         )
-        self.w("// caller's buffer in place: no UnPack, no allocation, no reflection.")
+        self.w("// annotations. Reads the caller's buffer in place: no UnPack, no")
+        self.w("// allocation, no reflection.")
         self.w("")
         self.w("#pragma once")
         self.w("")
@@ -316,6 +494,70 @@ class Emitter:
         self.w("    uint64_t _state = OFFSET_BASIS;")
         self.w("};")
         self.w("")
+        self.emit_uid_canon()
+
+    def emit_uid_canon(self):
+        """Emits the uid -> ordinal mapping the generated traversal folds through."""
+        uid_accessor = "" if self.domain is None else self.domain[2]
+        self.w(
+            "/// Resolves a tensor uid to its ordinal in the domain vector, so the key"
+        )
+        self.w("/// folds structure rather than caller-assigned labels.")
+        self.w("///")
+        self.w("/// Holds the vector, never a copy: the caller owns the buffer and the")
+        self.w("/// traversal outlives neither.")
+        self.w("class UidCanon")
+        self.w("{")
+        self.w("public:")
+        self.w("    UidCanon() = default;")
+        self.w("")
+        if self.domain is None:
+            # No domain, and therefore no `cache_uid` fields to resolve; emitted so the
+            # traversal's signatures stay uniform across schemas.
+            self.w("    int64_t operator()(int64_t uid) const")
+            self.w("    {")
+            self.w("        return uid;")
+            self.w("    }")
+            self.w("};")
+            self.w("")
+            return
+        element = self.domain[1]
+        self.w(
+            f"    using Domain = ::flatbuffers::Vector<::flatbuffers::Offset<{element}>>;"
+        )
+        self.w("")
+        self.w("    explicit UidCanon(const Domain* domain)")
+        self.w("        : _domain(domain)")
+        self.w("    {")
+        self.w("    }")
+        self.w("")
+        self.w("    /// Linear scan: the vector is small and this keeps the traversal")
+        self.w(
+            "    /// allocation-free. An unresolvable uid folds to a sentinel outside the"
+        )
+        self.w("    /// ordinal range, so it never aliases a real tensor.")
+        self.w("    int64_t operator()(int64_t uid) const")
+        self.w("    {")
+        self.w("        if(_domain == nullptr)")
+        self.w("        {")
+        self.w("            return UNRESOLVED;")
+        self.w("        }")
+        self.w("        for(uint32_t index = 0; index < _domain->size(); ++index)")
+        self.w("        {")
+        self.w(f"            if(_domain->Get(index)->{uid_accessor}() == uid)")
+        self.w("            {")
+        self.w("                return static_cast<int64_t>(index);")
+        self.w("            }")
+        self.w("        }")
+        self.w("        return UNRESOLVED;")
+        self.w("    }")
+        self.w("")
+        self.w("private:")
+        self.w("    static constexpr int64_t UNRESOLVED = -1;")
+        self.w("")
+        self.w("    const Domain* _domain = nullptr;")
+        self.w("};")
+        self.w("")
 
     def emit_union(self, union_name):
         enum = self.enums[union_name]
@@ -329,7 +571,8 @@ class Emitter:
             if v.get("union_type") and v["union_type"].get("index", -1) >= 0
         ]
         self.w(
-            f"inline void hashAppend(Hasher& hasher, {short} type, const void* value)"
+            f"inline void hashAppend(Hasher& hasher, {short} type, const void* value"
+            f"{self.HASH_TAIL})"
         )
         self.w("{")
         self.w("    hasher.raw(static_cast<uint8_t>(type));")
@@ -337,7 +580,9 @@ class Emitter:
         self.w("    {")
         for tag, member in members:
             self.w(f"    case {short}::{tag}:")
-            self.w(f"        hashAppend(hasher, static_cast<const {member}*>(value));")
+            self.w(
+                f"        hashAppend(hasher, static_cast<const {member}*>(value), canon);"
+            )
             self.w("        break;")
         self.w("    default:")
         self.w("        break;")
@@ -345,7 +590,8 @@ class Emitter:
         self.w("}")
         self.w("")
         self.w(
-            f"inline bool logicallyEqual({short} aType, const void* a, {short} bType, const void* b)"
+            f"inline bool logicallyEqual({short} aType, const void* a, {short} bType, "
+            f"const void* b{self.EQUAL_TAIL})"
         )
         self.w("{")
         self.w("    if(aType != bType)")
@@ -357,7 +603,8 @@ class Emitter:
         for tag, member in members:
             self.w(f"    case {short}::{tag}:")
             self.w(
-                f"        return logicallyEqual(static_cast<const {member}*>(a), static_cast<const {member}*>(b));"
+                f"        return logicallyEqual(static_cast<const {member}*>(a), "
+                f"static_cast<const {member}*>(b), aCanon, bCanon);"
             )
         self.w("    default:")
         self.w("        return true;")
@@ -369,8 +616,14 @@ class Emitter:
         obj = self.objects[name]
         short = short_name(name)
         fields = self.fields_of(obj)
+        used = self.uses_canon(name)
+        hash_tail = self.HASH_TAIL if used else self.HASH_TAIL_UNUSED
+        equal_tail = self.EQUAL_TAIL if used else self.EQUAL_TAIL_UNUSED
 
-        self.w(f"inline void hashAppend(Hasher& hasher, const {short}* value)")
+        self.w(
+            f"inline void hashAppend(Hasher& hasher, const {short}* value"
+            f"{hash_tail})"
+        )
         self.w("{")
         self.w("    if(value == nullptr)")
         self.w("    {")
@@ -383,7 +636,10 @@ class Emitter:
         self.w("}")
         self.w("")
 
-        self.w(f"inline bool logicallyEqual(const {short}* a, const {short}* b)")
+        self.w(
+            f"inline bool logicallyEqual(const {short}* a, const {short}* b"
+            f"{equal_tail})"
+        )
         self.w("{")
         self.w("    if(a == b)")
         self.w("    {")
@@ -404,6 +660,7 @@ class Emitter:
         base = ftype["base_type"]
         name = accessor(field["name"])
         get = f"value->{name}()"
+        uid = self.is_uid(field)
 
         if base == "UType":
             # Emitted alongside its union payload.
@@ -420,7 +677,7 @@ class Emitter:
             self.w("        for(uint32_t index = 0; index < count; ++index)")
             self.w("        {")
             if element == "Obj":
-                self.w("            hashAppend(hasher, items->Get(index));")
+                self.w("            hashAppend(hasher, items->Get(index), canon);")
             elif element == "String":
                 self.w("            const auto* item = items->Get(index);")
                 self.w(
@@ -435,6 +692,8 @@ class Emitter:
                 )
                 self.w("                }")
                 self.w("            }")
+            elif uid:
+                self.w("            hasher.raw(canon(items->Get(index)));")
             else:
                 self.w("            hasher.raw(items->Get(index));")
             self.w("        }")
@@ -454,9 +713,9 @@ class Emitter:
             self.w("        }")
             self.w("    }")
         elif base == "Union":
-            self.w(f"    hashAppend(hasher, value->{name}_type(), {get});")
+            self.w(f"    hashAppend(hasher, value->{name}_type(), {get}, canon);")
         elif base == "Obj":
-            self.w(f"    hashAppend(hasher, {get});")
+            self.w(f"    hashAppend(hasher, {get}, canon);")
         elif field.get("optional"):
             # An absent optional and a present one holding the same value are
             # different content, so the presence tag is folded either way.
@@ -465,13 +724,18 @@ class Emitter:
             self.w("        hasher.tag(optional ? 1 : 0);")
             self.w("        if(optional)")
             self.w("        {")
-            self.w("            hasher.raw(*optional);")
+            self.w(
+                f"            hasher.raw({'canon(*optional)' if uid else '*optional'});"
+            )
             self.w("        }")
             self.w("    }")
         elif ftype.get("index", -1) >= 0:
             # Enum-typed scalar: widen so the underlying type's width cannot
             # change the fold when a schema switches byte -> short.
             self.w(f"    hasher.raw(static_cast<int64_t>({get}));")
+        elif uid:
+            # Folded as the structural position it refers to, not the label.
+            self.w(f"    hasher.raw(canon({get}));")
         else:
             self.w(f"    hasher.raw({get});")
 
@@ -480,6 +744,7 @@ class Emitter:
         base = ftype["base_type"]
         name = accessor(field["name"])
         left, right = f"a->{name}()", f"b->{name}()"
+        uid = self.is_uid(field)
 
         if base == "UType":
             return
@@ -502,7 +767,8 @@ class Emitter:
             self.w("        {")
             if element == "Obj":
                 self.w(
-                    "            if(!logicallyEqual(aItems->Get(index), bItems->Get(index)))"
+                    "            if(!logicallyEqual(aItems->Get(index), "
+                    "bItems->Get(index), aCanon, bCanon))"
                 )
                 self.w("            {")
                 self.w("                return false;")
@@ -521,7 +787,13 @@ class Emitter:
                 self.w("                return false;")
                 self.w("            }")
             else:
-                self.w("            if(aItems->Get(index) != bItems->Get(index))")
+                if uid:
+                    self.w(
+                        "            if(aCanon(aItems->Get(index)) "
+                        "!= bCanon(bItems->Get(index)))"
+                    )
+                else:
+                    self.w("            if(aItems->Get(index) != bItems->Get(index))")
                 self.w("            {")
                 self.w("                return false;")
                 self.w("            }")
@@ -544,13 +816,33 @@ class Emitter:
             self.w("    }")
         elif base == "Union":
             self.w(
-                f"    if(!logicallyEqual(a->{name}_type(), {left}, b->{name}_type(), {right}))"
+                f"    if(!logicallyEqual(a->{name}_type(), {left}, b->{name}_type(), "
+                f"{right}, aCanon, bCanon))"
             )
             self.w("    {")
             self.w("        return false;")
             self.w("    }")
         elif base == "Obj":
-            self.w(f"    if(!logicallyEqual({left}, {right}))")
+            self.w(f"    if(!logicallyEqual({left}, {right}, aCanon, bCanon))")
+            self.w("    {")
+            self.w("        return false;")
+            self.w("    }")
+        elif uid and field.get("optional"):
+            # Presence is content; only the label behind it resolves.
+            self.w("    {")
+            self.w(f"        const auto aUid = {left};")
+            self.w(f"        const auto bUid = {right};")
+            self.w("        if(aUid.has_value() != bUid.has_value())")
+            self.w("        {")
+            self.w("            return false;")
+            self.w("        }")
+            self.w("        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))")
+            self.w("        {")
+            self.w("            return false;")
+            self.w("        }")
+            self.w("    }")
+        elif uid:
+            self.w(f"    if(aCanon({left}) != bCanon({right}))")
             self.w("    {")
             self.w("        return false;")
             self.w("    }")

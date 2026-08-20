@@ -910,34 +910,27 @@ private:
 
 using BenchmarkPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, BenchmarkContext>;
 
-/// Supplies deterministic sample times through BenchmarkPlan's D11 seam, mirroring
-/// TestBenchmarkPlan.cpp's subclass on the stream-capable handle the builder tests use.
-class DeterministicStreamBenchmarkPlan : public BenchmarkPlan<StreamCapableHandle>
+/// Deterministic sample times, injected through `BenchmarkPlan`'s Timer seam so
+/// selection is provable without a device. Times are consumed by candidate index, which
+/// the timer recovers by identity from the candidate list it was built against.
+inline BenchmarkPlan<TestHandle>::Timer
+    makeIndexedTimer(const std::vector<const hipdnn_plugin_sdk::IPlan<TestHandle>*>& order,
+                     std::vector<std::optional<double>> times)
 {
-public:
-    DeterministicStreamBenchmarkPlan(std::vector<Candidate> candidates,
-                                     const StreamCapableHandle& handle,
-                                     std::vector<std::optional<double>> times,
-                                     RecordRankingFn recordRanking)
-        : BenchmarkPlan<StreamCapableHandle>(
-              std::move(candidates), handle, std::move(recordRanking))
-        , _times(std::move(times))
-    {
-    }
-
-protected:
-    std::optional<double> sampleCandidate(size_t index,
-                                          const StreamCapableHandle& /*handle*/,
-                                          const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
-                                          uint32_t /*numDeviceBuffers*/,
-                                          void* /*workspace*/) const override
-    {
-        return index < _times.size() ? _times[index] : std::nullopt;
-    }
-
-private:
-    std::vector<std::optional<double>> _times;
-};
+    return [order, times = std::move(times)](const hipdnn_plugin_sdk::IPlan<TestHandle>& plan,
+                                             const TestHandle&,
+                                             const hipdnnPluginDeviceBuffer_t*,
+                                             uint32_t,
+                                             void*) -> std::optional<double> {
+        const auto found = std::find(order.begin(), order.end(), &plan);
+        if(found == order.end())
+        {
+            return std::nullopt;
+        }
+        const auto index = static_cast<size_t>(std::distance(order.begin(), found));
+        return index < times.size() ? times[index] : std::nullopt;
+    };
+}
 
 /// With benchmarking on, the plan the context receives reports the workspace max over
 /// all three knob-filtered candidates (256, kernel_256's), not the ranked front's own
@@ -1036,7 +1029,7 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     const ScopedConstantScore constantScore;
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
@@ -1082,7 +1075,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
-    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
@@ -1125,7 +1118,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     const ScopedConstantScore constantScore;
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
@@ -1171,7 +1164,7 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffStillServe
     const ScopedConstantScore constantScore;
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
@@ -1212,7 +1205,7 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
     const ScopedConstantScore constantScore;
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
@@ -1251,7 +1244,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
     const ScopedConstantScore constantScore;
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
@@ -1294,16 +1287,16 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
-    const StreamWorkspaceEqualsBlockSizeHandler handler;
-    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const StreamDeviceResolver resolver;
-    const StreamPlanBuilder builder(engine, *manager, resolver);
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0xD6));
     const auto properties = testDeviceProperties();
-    const StreamCapableHandle handle;
+    const TestHandle handle;
 
     // A prior narrow run measured ONLY kernel_128.
     const auto catalog = manager->sortedDefinitions(MatchContext{graph, 0, properties});
@@ -1323,11 +1316,11 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
     const auto engineConfig
         = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
 
-    StreamSettings settings;
+    KnobFilterSettings settings;
     builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
     ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 
-    StreamContext context;
+    BenchmarkContext context;
     context.setExecutionSettings(settings);
     builder.buildPlan(handle, graph, engineConfig, context);
 
@@ -1343,16 +1336,16 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
-    const StreamWorkspaceEqualsBlockSizeHandler handler;
-    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const StreamDeviceResolver resolver;
-    const StreamPlanBuilder builder(engine, *manager, resolver);
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0xD7));
     const auto properties = testDeviceProperties();
-    const StreamCapableHandle handle;
+    const TestHandle handle;
 
     // Stand in for the priming sweep's write-back: a ranking naming kernel_256, which
     // the heuristic (tied scores, priority order) would never choose.
@@ -1376,15 +1369,15 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     const auto engineConfig
         = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
 
-    StreamSettings settings;
+    KnobFilterSettings settings;
     builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
     ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 
-    StreamContext context;
+    BenchmarkContext context;
     context.setExecutionSettings(settings);
     builder.buildPlan(handle, graph, engineConfig, context);
 
-    // Workspace is the whole discriminator here: StreamContext exposes only IPlan, which
+    // Workspace is the whole discriminator here: BenchmarkContext exposes only IPlan, which
     // has no kernel accessor, and 128-vs-256 already separates the two paths cleanly.
     EXPECT_EQ(context.plan().getWorkspaceSize(handle), 128U)
         << "a served hit sizes for the one chosen kernel; 256 would mean a BenchmarkPlan "
@@ -1589,27 +1582,33 @@ TEST(TestIngestorGenericPlanBuilderOverride, TheOverrideIsReReadOnEveryCallNotCa
 /// Substitutes a deterministic sampling plan through the builder's own seam, so the
 /// callback and key under test are the ones `buildPlan` actually captured. The real
 /// sampler needs hipEvents, which a device-less runner never provides.
-class DeterministicStreamPlanBuilder : public StreamPlanBuilder
+class DeterministicStreamPlanBuilder : public BenchmarkPlanBuilder
 {
 public:
-    using StreamPlanBuilder::StreamPlanBuilder;
+    using BenchmarkPlanBuilder::BenchmarkPlanBuilder;
 
 protected:
-    std::unique_ptr<hipdnn_plugin_sdk::IPlan<StreamCapableHandle>> makeBenchmarkPlan(
-        std::vector<BenchmarkPlan<StreamCapableHandle>::Candidate> candidates,
-        const StreamCapableHandle& handle,
-        BenchmarkPlan<StreamCapableHandle>::RecordRankingFn recordRanking) const override
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>>
+        makeBenchmarkPlan(std::vector<BenchmarkPlan<TestHandle>::Candidate> candidates,
+                          const TestHandle& handle,
+                          BenchmarkPlan<TestHandle>::RecordRankingFn recordRanking) const override
     {
         // Time descending by index, so the LAST candidate wins -- the opposite of the
         // heuristic front, making a served record observable.
+        std::vector<const hipdnn_plugin_sdk::IPlan<TestHandle>*> order;
         std::vector<std::optional<double>> times;
+        order.reserve(candidates.size());
         times.reserve(candidates.size());
         for(size_t index = 0; index < candidates.size(); ++index)
         {
+            order.push_back(candidates[index].plan.get());
             times.emplace_back(static_cast<double>(candidates.size() - index));
         }
-        return std::make_unique<DeterministicStreamBenchmarkPlan>(
-            std::move(candidates), handle, std::move(times), std::move(recordRanking));
+        return std::make_unique<BenchmarkPlan<TestHandle>>(
+            std::move(candidates),
+            handle,
+            makeIndexedTimer(order, std::move(times)),
+            std::move(recordRanking));
     }
 };
 
@@ -1617,26 +1616,26 @@ TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuild
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
-    const StreamWorkspaceEqualsBlockSizeHandler handler;
-    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const StreamDeviceResolver resolver;
+    const TestDeviceResolver resolver;
     const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0xD8));
     const auto properties = testDeviceProperties();
-    const StreamCapableHandle handle;
+    const TestHandle handle;
 
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig
         = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
 
-    StreamSettings settings;
+    KnobFilterSettings settings;
     builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
     ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 
-    StreamContext context;
+    BenchmarkContext context;
     context.setExecutionSettings(settings);
     builder.buildPlan(handle, graph, engineConfig, context);
 
@@ -1669,16 +1668,16 @@ TEST(TestIngestorGenericPlanBuilder,
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
-    const StreamWorkspaceEqualsBlockSizeHandler handler;
-    const ScopedDispatchRegistration<StreamCapableHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<StreamCapableHandle>();
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const StreamDeviceResolver resolver;
+    const TestDeviceResolver resolver;
     const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0xD9));
     const auto properties = testDeviceProperties();
-    const StreamCapableHandle handle;
+    const TestHandle handle;
 
     // A prior narrow run measured ONLY kernel_128, exactly as the sibling narrow test.
     const auto catalog = catalogFor(*manager, graph, properties);
@@ -1700,11 +1699,11 @@ TEST(TestIngestorGenericPlanBuilder,
     const auto engineConfig
         = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
 
-    StreamSettings settings;
+    KnobFilterSettings settings;
     builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
     ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 
-    StreamContext context;
+    BenchmarkContext context;
     context.setExecutionSettings(settings);
     builder.buildPlan(handle, graph, engineConfig, context);
 
