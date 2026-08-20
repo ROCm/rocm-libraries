@@ -103,19 +103,7 @@ struct DAGNode {
     unsigned sccChainId = 0;
     unsigned sccChainReaders = 0;  // def node only: how many readers close the chain
     bool sccChainDef = false;
-    // Set by applyClusterBarrierSccRule on a live-out SCC def -- in a loop body region,
-    // the compare the latch branch reads. The rule's edges pin that def after every
-    // barrier, which says how early it may go but not how late; without a ceiling it
-    // issues the moment it is free and leaves its value sitting live over the whole tail
-    // of the region. This is the other half: the earliest clock_ at which the queue may
-    // pick it while it still has other work to do, computed so that the def lands within
-    // a fixed cycle lead of the region end (where its reader is). Compared against the
-    // live clock_ for the same reason hazardDeadline is -- clock_ only advances on cycles
-    // actually issued, so it tracks the schedule being built rather than a node's
-    // structural readiness. A floor, not a lock: when nothing else can issue, the
-    // fallback path ignores it rather than stall (see CDNA5ReadyQueue::pickOne Phase G),
-    // so an estimate that runs long can only cost the lead, never progress.
-    // INT_MIN (the default) means the node may go as soon as it is free.
+    // Earliest issue cycle. kRule3CrossLoop false: INT_MIN (no hold). true: live-out SCC def.
     int earliestClock = INT_MIN;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
