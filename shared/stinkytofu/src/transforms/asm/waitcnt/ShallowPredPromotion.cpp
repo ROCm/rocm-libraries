@@ -82,6 +82,9 @@ void setCounter(WaitCountSpec& spec, CounterKind c, int w) {
         case CK_Tensor:
             spec.tensorCount = w;
             break;
+        case CK_Async:
+            spec.asyncCount = w;
+            break;
         default:
             break;
     }
@@ -97,6 +100,8 @@ int getCounter(const WaitCountSpec& spec, CounterKind c) {
             return spec.kmCount;
         case CK_Tensor:
             return spec.tensorCount;
+        case CK_Async:
+            return spec.asyncCount;
         default:
             return WaitCountSpec::kUnused;
     }
@@ -114,7 +119,7 @@ int perPredRequiredWait(const DataflowResult& dfr, BasicBlock* pred, CounterKind
         for (StinkyInstruction* d : deps) {
             int n = q.countFrom(d);
             if (n > 0) {
-                int w = n - 1;
+                int w = waitToDrain(c, n);
                 if (best < 0 || w < best) best = w;  // strictest dep on this path
             }
         }

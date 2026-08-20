@@ -14,7 +14,7 @@ Swept dimensions:
   tile_k         : 16, 32, 64, 128
   warp_m, warp_n : 1, 2, 4, 8
   warp_tile_m == warp_tile_n : 16, 32
-  pipeline       : mem, compv3, compv4
+  pipeline       : mem, compv3, compv4, wavelet
   epilogue       : default, cshuffle
 
 warp_tile_k is chosen as the largest valid K for the target MFMA atom
@@ -64,7 +64,7 @@ _TILE_K = (16, 32, 64)
 _WARP_MN = (1, 2, 4, 8)
 _WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
-_PIPELINES = ("mem", "compv3", "compv4", "basic")
+_PIPELINES = ("mem", "compv3", "compv4", "wavelet", "basic")
 _EPILOGUES = ("default", "cshuffle")
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -142,6 +142,7 @@ def _verify_kernel(
     dump_fail: "str | None",
     extra_tensors: "dict | None" = None,
     u8,
+    arch: str,
 ) -> bool:
     """Launch a kernel, compare against reference, optionally dump on failure.
 
@@ -176,9 +177,14 @@ def _verify_kernel(
     out_cpu = torch.empty_like(out_t)
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
 
-    out_f32 = out_cpu.float().cuda()
-    abs_diff = out_f32.sub(ref_out).abs()
-    ref_scale = ref_out.abs().max().clamp(min=1.0)
+    if arch == "gfx1250":
+        out_f32 = out_cpu.float()
+        abs_diff = out_f32.sub(ref_out.cpu()).abs()
+        ref_scale = ref_out.cpu().abs().max().clamp(min=1.0)
+    else:
+        out_f32 = out_cpu.float().cuda()
+        abs_diff = out_f32.sub(ref_out).abs()
+        ref_scale = ref_out.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
     # Peak-normalised relative error: max|out-ref| / max|ref|.
     # Caveat: a large relative error on a small-magnitude weight can be masked
@@ -834,6 +840,13 @@ def main() -> int:
         help='Only run JSON entries whose "priority" field matches PRIORITY '
         '(e.g. "P0", "P1").',
     )
+    json_grp.add_argument(
+        "--start-from-case",
+        default=None,
+        metavar="CASE_ID",
+        help='Skip all JSON entries before the one whose "case_id" matches CASE_ID '
+        '(e.g. "G0028"). The matching entry and all following entries are run.',
+    )
 
     conv = parser.add_argument_group("ConvProblem", "convolution shape parameters")
     conv.add_argument("--N", type=int, default=8, help="batch size")
@@ -916,8 +929,15 @@ def main() -> int:
             print(f"error: {path}: expected a JSON array at top level", file=sys.stderr)
             return 2
         cases = []
+        start_from = args.start_from_case
+        reached_start = start_from is None
         for idx, entry in enumerate(entries):
             case_id = entry.get("case_id", f"#{idx + 1}")
+            if not reached_start:
+                if case_id == start_from:
+                    reached_start = True
+                else:
+                    continue
             if args.json_filter_suite is not None:
                 if entry.get("suite") != args.json_filter_suite:
                     continue
@@ -977,7 +997,15 @@ def main() -> int:
         cases = [(problem, args.dtype)]
 
     _csv_fields = [
+        "rank",
         "shape",
+        "sH",
+        "sW",
+        "pH",
+        "pW",
+        "dH",
+        "dW",
+        "groups",
         "dtype",
         "direction",
         "tile_m",
@@ -1014,9 +1042,37 @@ def main() -> int:
         _csv_writer.writeheader()
         _csv_file.flush()
 
+    _INT32_MAX = 2**31 - 1
+
     n_csv_rows = 0
     try:
         for case_idx, (problem, dtype) in enumerate(cases):
+            _elem_bytes = 4 if dtype == "fp32" else 2
+            _A_bytes = (
+                problem.N
+                * (problem.Di or 1)
+                * problem.Hi
+                * problem.Wi
+                * problem.C
+                * _elem_bytes
+            )
+            _B_bytes = (
+                problem.K
+                * (problem.Z or 1)
+                * problem.Y
+                * problem.X
+                * problem.C
+                * _elem_bytes
+            )
+            _D_bytes = problem.M * problem.K * _elem_bytes
+            if max(_A_bytes, _B_bytes, _D_bytes) > _INT32_MAX:
+                print(
+                    f"[skip] {problem.short()}: tensor byte sizes "
+                    f"(A={_A_bytes}, B={_B_bytes}, D={_D_bytes}) "
+                    f"exceed int32 range — kernel buffer args would overflow",
+                    flush=True,
+                )
+                continue
             if len(cases) > 1:
                 print(f"\n{'#'*72}", flush=True)
                 print(
@@ -1059,6 +1115,7 @@ def main() -> int:
                 KernelLauncher=KernelLauncher,
                 LaunchConfig=LaunchConfig,
                 u8=_u8,
+                case_idx=case_idx,
             )
 
             if args.direction == "wgrad":
@@ -1089,38 +1146,46 @@ def main() -> int:
                 _shape = problem.short()
                 _key = (_shape, dtype, args.direction)
                 _ck = ck_best.get(_key)
-                r = rocke_results[0]  # already sorted by tflops desc; [0] is best
-                speedup = (r.tflops / _ck["tflops"]) if _ck else None
-                _csv_writer.writerow(
-                    {
-                        "shape": _shape,
-                        "dtype": dtype,
-                        "direction": args.direction,
-                        "tile_m": r.tile_m,
-                        "tile_n": r.tile_n,
-                        "tile_k": r.tile_k,
-                        "warp_m": r.warp_m,
-                        "warp_n": r.warp_n,
-                        "warp_tile_mn": r.warp_tile_mn,
-                        "warp_tile_k": r.warp_tile_k,
-                        "pipeline": r.pipeline,
-                        "epilogue": r.epilogue,
-                        "split_k": r.split_k,
-                        "rocke_ms": r.ms,
-                        "rocke_tflops": r.tflops,
-                        "rocke_gbps": r.gbps,
-                        "passed": r.passed,
-                        "kernel_name": r.kernel_name,
-                        "ck_tflops": _ck["tflops"] if _ck else "",
-                        "ck_ms": _ck["ms"] if _ck else "",
-                        "ck_gbps": _ck["gbps"] if _ck else "",
-                        "speedup_rocke_vs_ck": (
-                            f"{speedup:.4f}" if speedup is not None else ""
-                        ),
-                    }
-                )
+                for rank, r in enumerate(rocke_results[:5], 1):
+                    speedup = (r.tflops / _ck["tflops"]) if _ck else None
+                    _csv_writer.writerow(
+                        {
+                            "rank": rank,
+                            "shape": _shape,
+                            "sH": problem.sH,
+                            "sW": problem.sW,
+                            "pH": problem.pH,
+                            "pW": problem.pW,
+                            "dH": problem.dH,
+                            "dW": problem.dW,
+                            "groups": problem.groups,
+                            "dtype": dtype,
+                            "direction": args.direction,
+                            "tile_m": r.tile_m,
+                            "tile_n": r.tile_n,
+                            "tile_k": r.tile_k,
+                            "warp_m": r.warp_m,
+                            "warp_n": r.warp_n,
+                            "warp_tile_mn": r.warp_tile_mn,
+                            "warp_tile_k": r.warp_tile_k,
+                            "pipeline": r.pipeline,
+                            "epilogue": r.epilogue,
+                            "split_k": r.split_k,
+                            "rocke_ms": r.ms,
+                            "rocke_tflops": r.tflops,
+                            "rocke_gbps": r.gbps,
+                            "passed": r.passed,
+                            "kernel_name": r.kernel_name,
+                            "ck_tflops": _ck["tflops"] if _ck else "",
+                            "ck_ms": _ck["ms"] if _ck else "",
+                            "ck_gbps": _ck["gbps"] if _ck else "",
+                            "speedup_rocke_vs_ck": (
+                                f"{speedup:.4f}" if speedup is not None else ""
+                            ),
+                        }
+                    )
+                    n_csv_rows += 1
                 _csv_file.flush()
-                n_csv_rows += 1
     finally:
         if _csv_file is not None:
             _csv_file.close()
@@ -1141,6 +1206,192 @@ def _compile_one(args_tuple):
 
     artifact = _compile_kernel(kernel, arch=arch)
     return kernel.name, artifact
+
+
+def _build_fwd_one(args_tuple):
+    """Top-level picklable worker: validate + build IR for one fwd combo.
+
+    Returns ``(combo, spec, kernel)`` on success, or ``None`` if the combo is
+    invalid/unsupported.  Must live at module level for pickle.
+    """
+    combo, problem, dtype, arch, mma_family, wave_size = args_tuple
+    tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
+
+    from rocke.core.arch import ArchTarget
+    from rocke.instances.common.conv_implicit_gemm import (
+        ConvDataSpec,
+        ImplicitGemmConvSpec,
+        build_implicit_gemm_conv,
+        is_valid_spec_for_problem,
+    )
+
+    target = ArchTarget.from_gfx(arch)
+    atom = target.mma.select_largest_k(
+        family=mma_family,
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=warp_tile_mn,
+        n=warp_tile_mn,
+        k_max=tile_k,
+    )
+    if atom is None:
+        return None
+
+    warp_tile_k = atom.k
+    spec = ImplicitGemmConvSpec(
+        problem=problem,
+        name="rocke_bench_igemm_conv",
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        warp_tile_k=warp_tile_k,
+        wave_size=wave_size,
+        pipeline=pipeline,
+        epilogue=epilogue,
+        groups=problem.groups,
+    )
+    ok, _ = is_valid_spec_for_problem(spec, problem, arch)
+    if not ok:
+        return None
+    try:
+        kernel = build_implicit_gemm_conv(spec, arch=arch)
+    except ValueError:
+        return None
+    return combo, spec, kernel
+
+
+def _build_wgrad_one(args_tuple):
+    """Top-level picklable worker: validate + build IR for one wgrad combo.
+
+    Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
+    Must live at module level for pickle.
+    """
+    combo, problem, dtype, arch = args_tuple
+    (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+        split_k,
+    ) = combo
+
+    if split_k > 1 and epilogue == "cshuffle":
+        return None
+
+    from rocke.core.arch import ArchTarget
+    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        build_implicit_gemm_conv_wgrad,
+        is_valid_wgrad_spec,
+    )
+
+    target = ArchTarget.from_gfx(arch)
+    atom = target.mma.select_largest_k(
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=warp_tile_mn,
+        n=warp_tile_mn,
+        k_max=tile_k,
+    )
+    if atom is None:
+        return None
+
+    warp_tile_k = atom.k
+    if split_k == -1:
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        resolved_split_k = select_split_k_wgrad(
+            wg_M=problem.kpg,
+            wg_N=problem.Y * problem.X * problem.cpg,
+            wg_K=problem.N * problem.Ho * problem.Wo,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            arch=arch,
+        ).split_k
+    else:
+        resolved_split_k = split_k
+
+    spec = WgradConvSpec(
+        problem=problem,
+        name="rocke_bench_igemm_wgrad",
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        warp_tile_k=warp_tile_k,
+        pipeline=pipeline,
+        epilogue=epilogue,
+        split_k=resolved_split_k,
+    )
+    ok, _ = is_valid_wgrad_spec(spec, arch)
+    if not ok:
+        return None
+    try:
+        kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
+    except ValueError:
+        return None
+    return combo, spec, resolved_split_k, kernel
+
+
+def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
+    """Run *worker_fn* over *work* items in parallel, returning non-None results.
+
+    When *jobs* == 1 runs serially to avoid subprocess overhead.
+    When *jobs* == 0 uses ``os.cpu_count()`` workers.
+    """
+    import os
+    from concurrent.futures import ProcessPoolExecutor, as_completed, BrokenExecutor
+
+    if jobs == 1:
+        return [r for item in work for r in [worker_fn(item)] if r is not None]
+
+    max_workers = os.cpu_count() if jobs == 0 else jobs
+    results = []
+    n_killed = 0
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(worker_fn, item): i for i, item in enumerate(work)}
+        done = 0
+        total = len(work)
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except BrokenExecutor:
+                # Worker process was killed (e.g. OOM); skip this item and keep going.
+                n_killed += 1
+                done += 1
+                continue
+            except Exception:
+                done += 1
+                continue
+            if r is not None:
+                results.append(r)
+            done += 1
+            if done % max(1, total // 10) == 0 or done == total:
+                print(f"  IR built {done}/{total} ({len(results)} valid)", flush=True)
+    if n_killed:
+        print(
+            f"  Warning: {n_killed} IR build worker(s) were killed (OOM?); "
+            "results may be incomplete.",
+            flush=True,
+        )
+    return results
 
 
 def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> dict:
@@ -1210,6 +1461,7 @@ def _run_sweep(
     KernelLauncher,
     LaunchConfig,
     u8,
+    case_idx: int = 0,
     **_ignored,  # absorbs keys from _common not used by this sweep
 ) -> int:
     import torch
@@ -1233,13 +1485,18 @@ def _run_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
+    # Weight is per-group: its channel extent is cpg = C / groups (== C when
+    # groups == 1), matching make_b_descriptor (KYXC/KZYXC with C = cpg), the
+    # grouped NumPy oracle, and torch's F.conv2d weight shape
+    # [K, C/groups, Y, X]. Allocating full C here silently mismatched the kernel
+    # and broke the grouped --verify reference.
     if p.is_3d:
         _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.C)
+        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
         D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
         _A_f32 = _make(p.N, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Y, p.X, p.C)
+        _B_f32 = _make(p.K, p.Y, p.X, p.cpg)
         D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     A_t = _A_f32.to(_torch_dtype)
     B_t = _B_f32.to(_torch_dtype)
@@ -1290,10 +1547,11 @@ def _run_sweep(
 
     if args.sample is not None:
         total = len(combos)
-        combos = _sample_combos(combos, args.sample, args.seed)
+        effective_seed = args.seed + case_idx
+        combos = _sample_combos(combos, args.sample, effective_seed)
         print(
             f"Sampling {len(combos)}/{total} combinations "
-            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            f"({args.sample*100:.0f}%, seed={effective_seed}).",
             flush=True,
         )
 
@@ -1303,59 +1561,15 @@ def _run_sweep(
     )
 
     # ---------------------------------------------------------------------------
-    # Phase 1 – filter: validate every combo and build KernelDef IR (CPU only).
+    # Phase 1 – filter + IR build: validate every combo and build KernelDef IR.
     # ---------------------------------------------------------------------------
-    n_skipped = 0
-    # pending: list of (combo_tuple, spec, kernel) for every combo that passes
-    # validation.  Ordering is preserved so the GPU run phase matches combos.
-    pending = []
-
-    for combo in combos:
-        tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
-        atom = target.mma.select_largest_k(
-            family=_mma_family,
-            a_dtype=dtype,
-            b_dtype=dtype,
-            c_dtype="fp32",
-            m=warp_tile_mn,
-            n=warp_tile_mn,
-            k_max=tile_k,
-        )
-        if atom is None:
-            n_skipped += 1
-            continue
-
-        warp_tile_k = atom.k
-        spec = ImplicitGemmConvSpec(
-            problem=problem,
-            name="rocke_bench_igemm_conv",
-            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-            tile_m=tile_m,
-            tile_n=tile_n,
-            tile_k=tile_k,
-            warp_m=warp_m,
-            warp_n=warp_n,
-            warp_tile_m=warp_tile_mn,
-            warp_tile_n=warp_tile_mn,
-            warp_tile_k=warp_tile_k,
-            wave_size=target.wave_size,
-            pipeline=pipeline,
-            epilogue=epilogue,
-            groups=p.groups,
-        )
-
-        ok, _ = is_valid_spec_for_problem(spec, problem, arch)
-        if not ok:
-            n_skipped += 1
-            continue
-
-        try:
-            kernel = build_implicit_gemm_conv(spec, arch=arch)
-        except ValueError:
-            n_skipped += 1
-            continue
-
-        pending.append((combo, spec, kernel))
+    if jobs != 1:
+        print(f"Building IR for {len(combos)} combos in parallel ...", flush=True)
+    work = [
+        (combo, problem, dtype, arch, _mma_family, target.wave_size) for combo in combos
+    ]
+    pending = _build_ir_parallel(work, _build_fwd_one, jobs)
+    n_skipped = len(combos) - len(pending)
 
     # ---------------------------------------------------------------------------
     # Phase 2 – compile: fan out compile_kernel across processes (or serial).
@@ -1428,7 +1642,7 @@ def _run_sweep(
             continue
 
         grid = _grid_for_spec(spec, p)
-        block = (spec.block_size, 1, 1)
+        block = (spec.launch_block_size, 1, 1)
         stream = 0
 
         values = {
@@ -1457,6 +1671,7 @@ def _run_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=_u8,
+                arch=arch,
             )
             if stopped:
                 rt.free(A_dev)
@@ -1582,6 +1797,7 @@ def _run_wgrad_sweep(
     KernelLauncher,
     LaunchConfig,
     u8,
+    case_idx: int = 0,
     **_ignored,
 ) -> int:
     """Sweep wgrad configurations and rank by TFLOPS.
@@ -1661,10 +1877,11 @@ def _run_wgrad_sweep(
 
     if args.sample is not None:
         total = len(combos)
-        combos = _sample_combos(combos, args.sample, args.seed)
+        effective_seed = args.seed + case_idx
+        combos = _sample_combos(combos, args.sample, effective_seed)
         print(
             f"Sampling {len(combos)}/{total} wgrad combinations "
-            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            f"({args.sample*100:.0f}%, seed={effective_seed}).",
             flush=True,
         )
 
@@ -1678,86 +1895,13 @@ def _run_wgrad_sweep(
         print("  (pointwise 1x1/s1/p0 — using explicit GEMM descriptors)", flush=True)
 
     # ---------------------------------------------------------------------------
-    # Phase 1 – filter: validate every combo and build KernelDef IR (CPU only).
+    # Phase 1 – filter + IR build: validate every combo and build KernelDef IR.
     # ---------------------------------------------------------------------------
-    n_skipped = 0
-    # pending: list of (combo_tuple, spec, resolved_split_k, kernel)
-    pending = []
-
-    for combo in combos:
-        (
-            tile_m,
-            tile_n,
-            tile_k,
-            warp_m,
-            warp_n,
-            warp_tile_mn,
-            pipeline,
-            epilogue,
-            split_k,
-        ) = combo
-
-        if split_k > 1 and epilogue == "cshuffle":
-            n_skipped += 1
-            continue
-
-        atom = target.mma.select_largest_k(
-            a_dtype=dtype,
-            b_dtype=dtype,
-            c_dtype="fp32",
-            m=warp_tile_mn,
-            n=warp_tile_mn,
-            k_max=tile_k,
-        )
-        if atom is None:
-            n_skipped += 1
-            continue
-
-        warp_tile_k = atom.k
-        if split_k == -1:
-            from rocke.helpers.split_k import select_split_k_wgrad
-
-            resolved_split_k = select_split_k_wgrad(
-                wg_M=problem.kpg,
-                wg_N=problem.Y * problem.X * problem.cpg,
-                wg_K=problem.N * problem.Ho * problem.Wo,
-                tile_m=tile_m,
-                tile_n=tile_n,
-                tile_k=tile_k,
-                arch=arch,
-            ).split_k
-        else:
-            resolved_split_k = split_k
-
-        spec = WgradConvSpec(
-            problem=problem,
-            name="rocke_bench_igemm_wgrad",
-            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-            tile_m=tile_m,
-            tile_n=tile_n,
-            tile_k=tile_k,
-            warp_m=warp_m,
-            warp_n=warp_n,
-            warp_tile_m=warp_tile_mn,
-            warp_tile_n=warp_tile_mn,
-            warp_tile_k=warp_tile_k,
-            pipeline=pipeline,
-            epilogue=epilogue,
-            split_k=resolved_split_k,
-        )
-
-        ok, _ = is_valid_wgrad_spec(spec, arch)
-        if not ok:
-            n_skipped += 1
-            continue
-
-        try:
-            kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
-        except ValueError:
-            n_skipped += 1
-            continue
-
-        pending.append((combo, spec, resolved_split_k, kernel))
+    if jobs != 1:
+        print(f"Building IR for {len(combos)} wgrad combos in parallel ...", flush=True)
+    work = [(combo, problem, dtype, arch) for combo in combos]
+    pending = _build_ir_parallel(work, _build_wgrad_one, jobs)
+    n_skipped = len(combos) - len(pending)
 
     # ---------------------------------------------------------------------------
     # Phase 2 – compile: fan out compile_kernel across processes (or serial).
@@ -1848,6 +1992,7 @@ def _run_wgrad_sweep(
                 dump_fail=args.dump_fail,
                 extra_tensors={"dY": dY_t, "X": X_t},
                 u8=_u8,
+                arch=arch,
             )
             if stopped:
                 rt.free(dY_dev)
