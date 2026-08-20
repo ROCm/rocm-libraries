@@ -119,6 +119,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemmreuse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_batched_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo.cpp"

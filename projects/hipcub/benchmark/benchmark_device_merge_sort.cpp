@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,299 +20,206 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
 
-// HIP API
 #include <hipcub/device/device_merge_sort.hpp>
 #include <hipcub/hipcub.hpp>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 32 << 20;
-#endif
-
-const unsigned int batch_size  = 10;
-const unsigned int warmup_size = 5;
-
-template<class key_type>
+template<class Key>
 struct CompareFunction
 {
     HIPCUB_DEVICE
-    inline constexpr bool
-        operator()(const key_type& a, const key_type& b)
+    inline constexpr bool operator()(const Key& a, const Key& b)
     {
         return a < b;
     }
 };
 
 template<class Key>
-void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+class sort_keys_benchmark : public primbench::benchmark_interface
 {
-    using key_type = Key;
-
-    CompareFunction<key_type> compare_function;
-
-    std::vector<key_type> keys_input = benchmark_utils::get_random_data<key_type>(
-        size,
-        benchmark_utils::generate_limits<key_type>::min(),
-        benchmark_utils::generate_limits<key_type>::max());
-
-    key_type* d_keys_input;
-    key_type* d_keys_output;
-    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-    HIP_CHECK(
-        hipMemcpy(d_keys_input, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
-
-    void*  d_temporary_storage     = nullptr;
-    size_t temporary_storage_bytes = 0;
-    HIP_CHECK(hipcub::DeviceMergeSort::SortKeysCopy(d_temporary_storage,
-                                                    temporary_storage_bytes,
-                                                    d_keys_input,
-                                                    d_keys_output,
-                                                    size,
-                                                    compare_function,
-                                                    stream));
-
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    primbench::json meta() const override
     {
-        HIP_CHECK(hipcub::DeviceMergeSort::SortKeysCopy(d_temporary_storage,
-                                                        temporary_storage_bytes,
-                                                        d_keys_input,
-                                                        d_keys_output,
-                                                        size,
-                                                        compare_function,
-                                                        stream));
+        return primbench::json{}
+            .add("algo", "device_merge_sort")
+            .add("subalgo", "sort_keys")
+            .add("lvl", "device")
+            .add("key_data_type", primbench::name<Key>());
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    for(auto _ : state)
+    void run(primbench::state& state) override
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        const size_t items  = state.size;
+        const auto&  stream = state.stream;
 
-        for(size_t i = 0; i < batch_size; i++)
+        CompareFunction<Key> compare_function;
+
+        std::vector<Key> keys_input
+            = benchmark_utils::get_random_data<Key>(items,
+                                                    benchmark_utils::generate_limits<Key>::min(),
+                                                    benchmark_utils::generate_limits<Key>::max());
+
+        Key* d_keys_input;
+        Key* d_keys_output;
+        HIP_CHECK(hipMalloc(&d_keys_input, items * sizeof(Key)));
+        HIP_CHECK(hipMalloc(&d_keys_output, items * sizeof(Key)));
+        HIP_CHECK(
+            hipMemcpy(d_keys_input, keys_input.data(), items * sizeof(Key), hipMemcpyHostToDevice));
+
+        void*  d_temp_storage = nullptr;
+        size_t temp_storage_bytes;
+
+        const auto launch = [&]
         {
-            HIP_CHECK(hipcub::DeviceMergeSort::SortKeysCopy(d_temporary_storage,
-                                                            temporary_storage_bytes,
+            HIP_CHECK(hipcub::DeviceMergeSort::SortKeysCopy(d_temp_storage,
+                                                            temp_storage_bytes,
                                                             d_keys_input,
                                                             d_keys_output,
-                                                            size,
+                                                            items,
                                                             compare_function,
                                                             stream));
-        }
+        };
+
+        launch();
+
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items(items);
+        state.add_writes<Key>(items);
 
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_keys_input));
-    HIP_CHECK(hipFree(d_keys_output));
-}
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_temp_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_keys_output));
+    }
+};
 
 template<class Key, class Value>
-void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+class sort_pairs_benchmark : public primbench::benchmark_interface
 {
-    using key_type   = Key;
-    using value_type = Value;
-
-    CompareFunction<key_type> compare_function;
-
-    std::vector<key_type> keys_input = benchmark_utils::get_random_data<key_type>(
-        size,
-        benchmark_utils::generate_limits<key_type>::min(),
-        benchmark_utils::generate_limits<key_type>::max());
-
-    std::vector<value_type> values_input(size);
-    for(size_t i = 0; i < size; i++)
+    primbench::json meta() const override
     {
-        values_input[i] = value_type(i);
+        return primbench::json{}
+            .add("algo", "device_merge_sort")
+            .add("subalgo", "sort_pairs")
+            .add("lvl", "device")
+            .add("key_data_type", primbench::name<Key>())
+            .add("value_data_type", primbench::name<Value>());
     }
 
-    key_type* d_keys_input;
-    key_type* d_keys_output;
-    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-    HIP_CHECK(
-        hipMemcpy(d_keys_input, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
-
-    value_type* d_values_input;
-    value_type* d_values_output;
-    HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
-    HIP_CHECK(hipMemcpy(d_values_input,
-                        values_input.data(),
-                        size * sizeof(value_type),
-                        hipMemcpyHostToDevice));
-
-    void*  d_temporary_storage     = nullptr;
-    size_t temporary_storage_bytes = 0;
-    HIP_CHECK(hipcub::DeviceMergeSort::SortPairsCopy(d_temporary_storage,
-                                                     temporary_storage_bytes,
-                                                     d_keys_input,
-                                                     d_values_input,
-                                                     d_keys_output,
-                                                     d_values_output,
-                                                     size,
-                                                     compare_function,
-                                                     stream));
-
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    void run(primbench::state& state) override
     {
-        HIP_CHECK(hipcub::DeviceMergeSort::SortPairsCopy(d_temporary_storage,
-                                                         temporary_storage_bytes,
-                                                         d_keys_input,
-                                                         d_values_input,
-                                                         d_keys_output,
-                                                         d_values_output,
-                                                         size,
-                                                         compare_function,
-                                                         stream));
-    }
-    HIP_CHECK(hipDeviceSynchronize());
+        const size_t items  = state.size;
+        const auto&  stream = state.stream;
 
-    for(auto _ : state)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
+        CompareFunction<Key> compare_function;
 
-        for(size_t i = 0; i < batch_size; i++)
+        std::vector<Key> keys_input
+            = benchmark_utils::get_random_data<Key>(items,
+                                                    benchmark_utils::generate_limits<Key>::min(),
+                                                    benchmark_utils::generate_limits<Key>::max());
+
+        std::vector<Value> values_input(items);
+        for(size_t i = 0; i < items; i++)
         {
-            HIP_CHECK(hipcub::DeviceMergeSort::SortPairsCopy(d_temporary_storage,
-                                                             temporary_storage_bytes,
+            values_input[i] = Value(i);
+        }
+
+        Key* d_keys_input;
+        Key* d_keys_output;
+        HIP_CHECK(hipMalloc(&d_keys_input, items * sizeof(Key)));
+        HIP_CHECK(hipMalloc(&d_keys_output, items * sizeof(Key)));
+        HIP_CHECK(
+            hipMemcpy(d_keys_input, keys_input.data(), items * sizeof(Key), hipMemcpyHostToDevice));
+
+        Value* d_values_input;
+        Value* d_values_output;
+        HIP_CHECK(hipMalloc(&d_values_input, items * sizeof(Value)));
+        HIP_CHECK(hipMalloc(&d_values_output, items * sizeof(Value)));
+        HIP_CHECK(hipMemcpy(d_values_input,
+                            values_input.data(),
+                            items * sizeof(Value),
+                            hipMemcpyHostToDevice));
+
+        void*  d_temp_storage = nullptr;
+        size_t temp_storage_bytes;
+
+        const auto launch = [&]
+        {
+            HIP_CHECK(hipcub::DeviceMergeSort::SortPairsCopy(d_temp_storage,
+                                                             temp_storage_bytes,
                                                              d_keys_input,
                                                              d_values_input,
                                                              d_keys_output,
                                                              d_values_output,
-                                                             size,
+                                                             items,
                                                              compare_function,
                                                              stream));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        };
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        launch();
+
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+
+        state.set_items(items);
+        state.add_writes<Key>(items);
+        state.add_writes<Value>(items);
+
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_temp_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_values_output));
     }
-    state.SetBytesProcessed(state.iterations() * batch_size * size
-                            * (sizeof(key_type) + sizeof(value_type)));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+};
 
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_keys_input));
-    HIP_CHECK(hipFree(d_keys_output));
-    HIP_CHECK(hipFree(d_values_input));
-    HIP_CHECK(hipFree(d_values_output));
+#define CREATE_SORT_KEYS_BENCHMARK(T) executor.queue<sort_keys_benchmark<T>>()
+
+#define CREATE_SORT_PAIRS_BENCHMARK(T, V) executor.queue<sort_pairs_benchmark<T, V>>()
+
+void add_sort_keys_benchmarks(primbench::executor& executor)
+{
+    CREATE_SORT_KEYS_BENCHMARK(int);
+    CREATE_SORT_KEYS_BENCHMARK(int64_t);
+    CREATE_SORT_KEYS_BENCHMARK(int8_t);
+    CREATE_SORT_KEYS_BENCHMARK(uint8_t);
+    CREATE_SORT_KEYS_BENCHMARK(short);
 }
 
-#define CREATE_SORT_KEYS_BENCHMARK(T)                  \
-    benchmarks.push_back(benchmark::RegisterBenchmark( \
-        std::string("device_merge_sort_sort_keys"      \
-                    "<key_data_type:" #T ">.")         \
-            .c_str(),                                  \
-        [=](benchmark::State& state) { run_sort_keys_benchmark<T>(state, stream, size); }));
-
-#define CREATE_SORT_PAIRS_BENCHMARK(T, V)                             \
-    benchmarks.push_back(benchmark::RegisterBenchmark(                \
-        std::string("device_merge_sort_sort_pairs<"                   \
-                    ",key_data_type:" #T ",value_data_type:" #V ">.") \
-            .c_str(),                                                 \
-        [=](benchmark::State& state) { run_sort_pairs_benchmark<T, V>(state, stream, size); }));
-
-void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                              hipStream_t                                   stream,
-                              size_t                                        size)
+void add_sort_pairs_benchmarks(primbench::executor& executor)
 {
-    CREATE_SORT_KEYS_BENCHMARK(int)
-    CREATE_SORT_KEYS_BENCHMARK(long long)
-    CREATE_SORT_KEYS_BENCHMARK(int8_t)
-    CREATE_SORT_KEYS_BENCHMARK(uint8_t)
-    CREATE_SORT_KEYS_BENCHMARK(short)
-}
+    CREATE_SORT_PAIRS_BENCHMARK(int, float);
+    CREATE_SORT_PAIRS_BENCHMARK(int, double);
+    CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2);
+    CREATE_SORT_PAIRS_BENCHMARK(int, custom_double2);
+    CREATE_SORT_PAIRS_BENCHMARK(int, custom_char_double);
+    CREATE_SORT_PAIRS_BENCHMARK(int, custom_double_char);
 
-void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                               hipStream_t                                   stream,
-                               size_t                                        size)
-{
-    using custom_float2      = benchmark_utils::custom_type<float, float>;
-    using custom_double2     = benchmark_utils::custom_type<double, double>;
-    using custom_char_double = benchmark_utils::custom_type<char, double>;
-    using custom_double_char = benchmark_utils::custom_type<double, char>;
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, float);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, double);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_float2);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_char_double);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_double_char);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_double2);
 
-    CREATE_SORT_PAIRS_BENCHMARK(int, float)
-    CREATE_SORT_PAIRS_BENCHMARK(int, double)
-    CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2)
-    CREATE_SORT_PAIRS_BENCHMARK(int, custom_double2)
-    CREATE_SORT_PAIRS_BENCHMARK(int, custom_char_double)
-    CREATE_SORT_PAIRS_BENCHMARK(int, custom_double_char)
-
-    CREATE_SORT_PAIRS_BENCHMARK(long long, float)
-    CREATE_SORT_PAIRS_BENCHMARK(long long, double)
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_float2)
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_char_double)
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double_char)
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2)
-
-    CREATE_SORT_PAIRS_BENCHMARK(int8_t, int8_t)
-    CREATE_SORT_PAIRS_BENCHMARK(uint8_t, uint8_t)
+    CREATE_SORT_PAIRS_BENCHMARK(int8_t, int8_t);
+    CREATE_SORT_PAIRS_BENCHMARK(uint8_t, uint8_t);
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                 = 32 * primbench::MiB; // In items
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
+    primbench::executor executor(argc, argv, settings);
 
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+    add_sort_keys_benchmarks(executor);
+    add_sort_pairs_benchmarks(executor);
 
-    std::cout << "benchmark_device_merge_sort" << std::endl;
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_sort_keys_benchmarks(benchmarks, stream, size);
-    add_sort_pairs_benchmarks(benchmarks, stream, size);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }
