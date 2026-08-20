@@ -187,38 +187,6 @@ std::string formatVerdictMessage(const SupportResult& result)
     return os.str();
 }
 
-SupportResult checkSupportClaim(hipdnn_frontend::ErrorCode errorCode,
-                                const std::vector<int64_t>& rankedIds,
-                                int64_t engineId,
-                                const std::filesystem::path& bundlePath,
-                                std::string_view queryMessage)
-{
-    const std::string engineName(TestConfig::get().getEngineName());
-    const std::string arch = baseArchToken(TestConfig::get().getCurrentArch());
-    const std::string platform = currentPlatform();
-
-    bool hasSidecar = false;
-    bool claimed = false;
-
-    if(!bundlePath.empty())
-    {
-        const auto claims = loadSupportClaims(bundlePath);
-        hasSidecar = claims.has_value();
-        claimed = hasSidecar && claims->isClaimed(engineName, arch, platform);
-    }
-
-    return evaluateSupport(errorCode,
-                           rankedIds,
-                           engineId,
-                           claimed,
-                           hasSidecar,
-                           bundlePath.string(),
-                           engineName,
-                           arch,
-                           platform,
-                           queryMessage);
-}
-
 namespace
 {
 

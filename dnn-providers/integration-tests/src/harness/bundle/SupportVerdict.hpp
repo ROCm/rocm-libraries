@@ -136,20 +136,6 @@ std::string baseArchToken(std::string_view fullArch);
 /// Human-readable message for a verdict — used in FAIL() / GTEST_SKIP() output.
 std::string formatVerdictMessage(const SupportResult& result);
 
-/// Shared enforcement gate called from both harnesses.
-///
-/// Loads the sidecar (if bundlePath is non-empty), reads engine/arch/platform
-/// from TestConfig, evaluates the verdict, and returns it. The caller handles
-/// the harness-specific fallback (EngineNotApplicableError vs GTEST_SKIP).
-///
-/// `bundlePath`   — path to the bundle JSON; empty for graph tests (→ no sidecar).
-/// `queryMessage` — the query's err_msg, forwarded to evaluateSupport.
-SupportResult checkSupportClaim(hipdnn_frontend::ErrorCode errorCode,
-                                const std::vector<int64_t>& rankedIds,
-                                int64_t engineId,
-                                const std::filesystem::path& bundlePath,
-                                std::string_view queryMessage = {});
-
 /// Multi-engine enforcement: evaluate every loaded engine's claim from a single
 /// query result. Loads the sidecar once and calls evaluateSupport per engine.
 /// Dispatches to single-graph or sweep-case claims based on locator.isSweep().

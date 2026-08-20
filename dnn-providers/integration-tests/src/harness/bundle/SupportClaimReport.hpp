@@ -131,9 +131,10 @@ public:
            << "  not-loaded: " << notLoaded << "  unclaimed: " << unc
            << "  not-enforced: " << notEnf << "\n";
 
-        if(broke + err > 0)
+        const size_t totalFailures = broke + err + notLoaded;
+        if(totalFailures > 0)
         {
-            os << "\n---- CLAIM FAILURES (" << (broke + err) << ") ----\n";
+            os << "\n---- CLAIM FAILURES (" << totalFailures << ") ----\n";
             for(const auto& r : records)
             {
                 if(!isFailure(r.verdict))
