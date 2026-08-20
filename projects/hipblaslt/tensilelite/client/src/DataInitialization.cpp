@@ -653,8 +653,8 @@ namespace TensileLite
             const auto m_n       = desc.sizes()[1];
             const auto b         = desc.sizes()[2];
             const auto swizzleK  = miK * packK;
-            const auto paddedM_N = DGen::roundUp(m_n, miM_N);
-            const auto paddedK   = DGen::roundUp(k, swizzleK);
+            const auto paddedM_N = RoundUpToMultiple(m_n, miM_N);
+            const auto paddedK   = RoundUpToMultiple(k, swizzleK);
             return paddedM_N * paddedK * b;
         }
 
