@@ -105,7 +105,16 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createAccumulateInstructionSizePassWithDebug(); }},
     {"StinkyBuildImplicitDependencyPass",
      [](const auto&) { return createStinkyBuildImplicitDependencyPass(); }},
-    {"StinkyRemoveWaitCntPass", [](const auto&) { return createStinkyRemoveWaitCntPass(); }},
+    // StinkyRemoveWaitCntPass accepts:
+    //   keepTensor   — leave s_wait_tensorcnt in place (default strips it)
+    //   removeXcnt   — also strip s_wait_xcnt (the O3 backend policy)
+    //   removeKmcnt  — also strip s_wait_kmcnt
+    {"StinkyRemoveWaitCntPass",
+     [](const std::vector<std::string>& args) {
+         bool removeTensor = !hasPassArg(args, "keepTensor");
+         return createStinkyRemoveWaitCntPass(removeTensor, hasPassArg(args, "removeXcnt"),
+                                              hasPassArg(args, "removeKmcnt"));
+     }},
     {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
     {"RemoveDscntPass", [](const auto&) { return createRemoveDscntPass(); }},
     {"StinkyWaitCntInsertionPass",
