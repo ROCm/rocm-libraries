@@ -46,6 +46,7 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -111,6 +112,64 @@ using HostArgs = ck_tile::
 using ADims = typename HostArgs::ADims;
 using BDims = typename HostArgs::BDims;
 using EDims = typename HostArgs::EDims;
+
+/// RAII owner for a hipMalloc'd buffer -- frees on scope exit, including the
+/// early-return and exception paths.
+struct HipDeleter
+{
+    void operator()(void* p) const noexcept
+    {
+        if(p)
+            (void)hipFree(p);
+    }
+};
+
+using DevicePtr = std::unique_ptr<void, HipDeleter>;
+
+/// Allocate `bytes` on the device, returning an owning pointer (null on failure).
+DevicePtr device_alloc(size_t bytes)
+{
+    void* raw = nullptr;
+    if(hipMalloc(&raw, bytes) != hipSuccess)
+        return DevicePtr{};
+    return DevicePtr{raw};
+}
+
+/**
+ * Number of elements spanned by a strided tensor, i.e. one past the largest
+ * addressable offset: 1 + sum_i (dim_i - 1) * stride_i.
+ *
+ * The kernel indexes each tensor through caller-supplied per-dimension strides,
+ * so the product of the logical dimensions understates the buffer for padded,
+ * transposed, or otherwise non-packed layouts. Sizing allocations and copies
+ * from this span keeps every offset the kernel can form inside the allocation.
+ * For a packed row-major tensor this equals the product of its dimensions.
+ *
+ * Returns -1 if any dimension is non-positive, any stride is negative, or the
+ * computation would overflow int64.
+ */
+int64_t strided_span(const int64_t* dims, const int64_t* strides, int rank)
+{
+    constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
+
+    int64_t span = 1;
+    for(int i = 0; i < rank; ++i)
+    {
+        if(dims[i] <= 0 || strides[i] < 0)
+            return -1;
+
+        // extent_i = (dim_i - 1) * stride_i, guarded against overflow
+        const int64_t extent_terms = dims[i] - 1;
+        if(strides[i] != 0 && extent_terms > kMax / strides[i])
+            return -1;
+        const int64_t extent = extent_terms * strides[i];
+
+        if(span > kMax - extent)
+            return -1;
+        span += extent;
+    }
+    return span;
+}
 
 bool g_initialized = false;
 
@@ -235,32 +294,6 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
         return -2;
     }
 
-    // Compute total element counts
-    int64_t G_total = 1, M_total = 1, N_total = 1, K_total = 1;
-    for(int i = 0; i < num_dim_g; ++i)
-        G_total *= g_dims[i];
-    for(int i = 0; i < num_dim_m; ++i)
-        M_total *= m_dims[i];
-    for(int i = 0; i < num_dim_n; ++i)
-        N_total *= n_dims[i];
-    for(int i = 0; i < num_dim_k; ++i)
-        K_total *= k_dims[i];
-
-    if(G_total <= 0 || M_total <= 0 || N_total <= 0 || K_total <= 0)
-        return -1;
-
-    const size_t a_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-                           static_cast<size_t>(K_total) * static_cast<size_t>(elem_a);
-    const size_t b_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(N_total) *
-                           static_cast<size_t>(K_total) * static_cast<size_t>(elem_b);
-    // d_bytes is only used when kNumD > 0; guard so elem_d=0 does not produce size_t overflow.
-    const size_t d_bytes = (kNumD > 0)
-                               ? (static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-                                  static_cast<size_t>(N_total) * static_cast<size_t>(elem_d))
-                               : 0u;
-    const size_t e_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-                           static_cast<size_t>(N_total) * static_cast<size_t>(elem_e);
-
     // Guard: every dimension and stride must fit in int32 (ck_tile::index_t).
     // Check all flat arrays before any allocation or cast to avoid silent truncation.
     {
@@ -295,57 +328,107 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
         }
     }
 
-    std::vector<void*> a_dev(kNumA, nullptr);
-    std::vector<void*> b_dev(kNumB, nullptr);
-    std::vector<void*> d_dev(kNumD, nullptr);
-    void* e_dev = nullptr;
-
-    auto cleanup = [&]() {
-        for(auto p : a_dev)
-            if(p)
-                (void)hipFree(p);
-        for(auto p : b_dev)
-            if(p)
-                (void)hipFree(p);
-        for(auto p : d_dev)
-            if(p)
-                (void)hipFree(p);
-        if(e_dev)
-            (void)hipFree(e_dev);
+    // Per-tensor logical dimensions, concatenated in the order the kernel indexes them.
+    //   A: [G..., M..., K...]   B: [G..., N..., K...]   D/E: [G..., M..., N...]
+    auto concat_dims = [](const int64_t* first,
+                          int n_first,
+                          const int64_t* second,
+                          int n_second,
+                          const int64_t* third,
+                          int n_third) {
+        std::vector<int64_t> out;
+        out.reserve(static_cast<size_t>(n_first + n_second + n_third));
+        out.insert(out.end(), first, first + n_first);
+        out.insert(out.end(), second, second + n_second);
+        out.insert(out.end(), third, third + n_third);
+        return out;
     };
+
+    const std::vector<int64_t> a_dims_cat =
+        concat_dims(g_dims, num_dim_g, m_dims, num_dim_m, k_dims, num_dim_k);
+    const std::vector<int64_t> b_dims_cat =
+        concat_dims(g_dims, num_dim_g, n_dims, num_dim_n, k_dims, num_dim_k);
+    const std::vector<int64_t> e_dims_cat =
+        concat_dims(g_dims, num_dim_g, m_dims, num_dim_m, n_dims, num_dim_n);
+
+    // Size every device buffer from the tensor's addressable span rather than the
+    // product of its dimensions: the kernel walks each tensor through the strides
+    // supplied by the caller, so a padded or transposed layout can reach past the
+    // dimension product. For packed layouts the two are equal.
+    //
+    // The caller must guarantee each host buffer holds at least this many elements;
+    // that is enforced Python-side (contiguity + element-count checks) before the
+    // pointers reach this ABI.
+    auto span_bytes = [](const std::vector<int64_t>& dims,
+                         const int64_t* strides,
+                         int elem_size,
+                         const char* name,
+                         size_t& out) -> bool {
+        const int64_t span =
+            strided_span(dims.data(), strides, static_cast<int>(dims.size()));
+        if(span < 0)
+        {
+            std::cerr << "dispatcher_run_batched_contraction_multi_abd: " << name
+                      << " has an invalid or overflowing dimension/stride combination.\n";
+            return false;
+        }
+        out = static_cast<size_t>(span) * static_cast<size_t>(elem_size);
+        return true;
+    };
+
+    std::vector<size_t> a_bytes(kNumA, 0);
+    std::vector<size_t> b_bytes(kNumB, 0);
+    std::vector<size_t> d_bytes(kNumD, 0);
+    size_t e_bytes = 0;
 
     for(int i = 0; i < num_a; ++i)
     {
-        if(hipMalloc(&a_dev[i], a_bytes) != hipSuccess ||
-           hipMemcpy(a_dev[i], as_hosts[i], a_bytes, hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
+        if(!span_bytes(a_dims_cat, a_strides_flat + i * kADimSize, elem_a, "A", a_bytes[i]))
             return -1;
-        }
     }
     for(int i = 0; i < num_b; ++i)
     {
-        if(hipMalloc(&b_dev[i], b_bytes) != hipSuccess ||
-           hipMemcpy(b_dev[i], bs_hosts[i], b_bytes, hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
+        if(!span_bytes(b_dims_cat, b_strides_flat + i * kBDimSize, elem_b, "B", b_bytes[i]))
             return -1;
-        }
     }
     for(int i = 0; i < num_d; ++i)
     {
-        if(hipMalloc(&d_dev[i], d_bytes) != hipSuccess ||
-           hipMemcpy(d_dev[i], ds_hosts[i], d_bytes, hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
+        if(!span_bytes(e_dims_cat, d_strides_flat + i * kEDimSize, elem_d, "D", d_bytes[i]))
             return -1;
-        }
     }
-    if(hipMalloc(&e_dev, e_bytes) != hipSuccess || hipMemset(e_dev, 0, e_bytes) != hipSuccess)
-    {
-        cleanup();
+    if(!span_bytes(e_dims_cat, e_strides, elem_e, "E", e_bytes))
         return -1;
+
+    // Owning device buffers -- freed automatically on every return path below.
+    std::vector<DevicePtr> a_dev(kNumA);
+    std::vector<DevicePtr> b_dev(kNumB);
+    std::vector<DevicePtr> d_dev(kNumD);
+    DevicePtr e_dev;
+
+    for(int i = 0; i < num_a; ++i)
+    {
+        a_dev[i] = device_alloc(a_bytes[i]);
+        if(!a_dev[i] ||
+           hipMemcpy(a_dev[i].get(), as_hosts[i], a_bytes[i], hipMemcpyHostToDevice) != hipSuccess)
+            return -1;
     }
+    for(int i = 0; i < num_b; ++i)
+    {
+        b_dev[i] = device_alloc(b_bytes[i]);
+        if(!b_dev[i] ||
+           hipMemcpy(b_dev[i].get(), bs_hosts[i], b_bytes[i], hipMemcpyHostToDevice) != hipSuccess)
+            return -1;
+    }
+    for(int i = 0; i < num_d; ++i)
+    {
+        d_dev[i] = device_alloc(d_bytes[i]);
+        if(!d_dev[i] ||
+           hipMemcpy(d_dev[i].get(), ds_hosts[i], d_bytes[i], hipMemcpyHostToDevice) != hipSuccess)
+            return -1;
+    }
+    e_dev = device_alloc(e_bytes);
+    if(!e_dev || hipMemset(e_dev.get(), 0, e_bytes) != hipSuccess)
+        return -1;
 
     // Build std::array<ADims, NumATensor> for as_ptr, As_dims, As_strides, etc.
     std::array<const void*, kNumA> as_dev{};
@@ -363,11 +446,11 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
     EDims E_strides_arr{};
 
     for(ck_tile::index_t i = 0; i < kNumA; ++i)
-        as_dev[i] = a_dev[i];
+        as_dev[i] = a_dev[i].get();
     for(ck_tile::index_t i = 0; i < kNumB; ++i)
-        bs_dev[i] = b_dev[i];
+        bs_dev[i] = b_dev[i].get();
     for(ck_tile::index_t i = 0; i < kNumD; ++i)
-        ds_dev[i] = d_dev[i];
+        ds_dev[i] = d_dev[i].get();
 
     // Fill dimension and stride arrays from flat caller arrays.
     // A dims layout: [G0,..., M0,..., K0,...]
@@ -458,7 +541,7 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
     HostArgs host_args{as_dev,
                        bs_dev,
                        ds_dev,
-                       e_dev,
+                       e_dev.get(),
                        As_dims,
                        Bs_dims,
                        Ds_dims,
@@ -477,7 +560,6 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
     catch(const std::exception& ex)
     {
         std::cerr << "batched_contraction_multi_abd launch failed: " << ex.what() << std::endl;
-        cleanup();
         if(time_ms)
             *time_ms = -1.0f;
         return -2;
@@ -486,19 +568,14 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
     if(exec_time < 0.0f)
     {
         // IsSupportedArguments returned false inside launch
-        cleanup();
         if(time_ms)
             *time_ms = -1.0f;
         return -2;
     }
 
-    if(hipMemcpy(e_host, e_dev, e_bytes, hipMemcpyDeviceToHost) != hipSuccess)
-    {
-        cleanup();
+    if(hipMemcpy(e_host, e_dev.get(), e_bytes, hipMemcpyDeviceToHost) != hipSuccess)
         return -1;
-    }
 
-    cleanup();
     if(time_ms)
         *time_ms = exec_time;
     return 0;

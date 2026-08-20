@@ -64,6 +64,31 @@ int main(int argc, char* argv[])
             return EXIT_FAILURE;
         }
 
+        // Every extent must be strictly positive. A zero or negative value parses
+        // fine but produces zero-sized (or, for a negative pair whose product is
+        // positive, undersized) buffers, and a zero K divides by zero when the
+        // reference inputs are initialized to 1/K.
+        auto check_positive = [](const auto& dims, const char* name) {
+            for(size_t i = 0; i < dims.size(); ++i)
+            {
+                if(dims[i] <= 0)
+                {
+                    std::cerr << name << "[" << i << "]=" << dims[i]
+                              << " is not strictly positive.\n";
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        if(!check_positive(problem.g_dims, "g_dims") ||
+           !check_positive(problem.m_dims, "m_dims") ||
+           !check_positive(problem.n_dims, "n_dims") ||
+           !check_positive(problem.k_dims, "k_dims"))
+        {
+            return EXIT_FAILURE;
+        }
+
         run_contraction_multi_abd_benchmark(problem,
                                             parser.get_int("warmup"),
                                             parser.get_int("repeat"),

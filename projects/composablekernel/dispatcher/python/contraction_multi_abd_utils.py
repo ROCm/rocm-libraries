@@ -60,8 +60,11 @@ if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
 from contraction_multi_abd_codegen import make_contraction_multi_abd_kernel_name  # noqa: E402
 
-_DEFAULT_HIPCC    = "hipcc"
-_DEFAULT_GFX_ARCH = "gfx942"
+_DEFAULT_HIPCC = "hipcc"
+
+# Archs this bridge is known to build for. Mirrors batched_contraction_utils;
+# there is deliberately no default -- see _detect_gpu_arch().
+_SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950")
 
 _HIPCC_BASE_FLAGS = [
     "-std=c++17",
@@ -117,9 +120,11 @@ class ContractionMultiABDKernelConfig:
 
     a_elementwise: str = "PassThrough"
     b_elementwise: str = "PassThrough"
-    cde_elementwise: str = "AddDs"
+    cde_elementwise: str = "MultiDAdd"
 
-    gfx_arch: str = _DEFAULT_GFX_ARCH
+    # Empty means "detect at build time"; there is deliberately no hard-coded
+    # default arch, so a wrong-GPU build fails loudly instead of silently.
+    gfx_arch: str = ""
 
     @property
     def name(self) -> str:
@@ -163,7 +168,15 @@ class ContractionMultiABDKernelConfig:
             "pipelines":  [self.pipeline],
             "epilogues":  [self.epilogue],
             "schedulers": [self.scheduler],
-            "pad_options": [{"pad_m": self.pad_m, "pad_n": self.pad_n, "pad_k": self.pad_k}],
+            # persistent is part of the kernel name, so it must be projected here
+            # too -- otherwise codegen defaults it to False and emits a header whose
+            # name does not match the one this spec reports.
+            "pad_options": [{
+                "pad_m": self.pad_m,
+                "pad_n": self.pad_n,
+                "pad_k": self.pad_k,
+                "persistent": self.persistent,
+            }],
             "tile_configs": [{
                 "tile_m": self.tile_m,
                 "tile_n": self.tile_n,
@@ -438,36 +451,40 @@ class ContractionMultiABDDispatcherLib:
         b_dim_size = num_dim_g + num_dim_n + num_dim_k
         e_dim_size = num_dim_g + num_dim_m + num_dim_n
 
-        # Build flat stride arrays from each tensor's numpy strides (in elements)
-        def _strides_in_elements(arr: np.ndarray) -> List[int]:
-            itemsize = arr.itemsize
-            return [s // itemsize for s in arr.strides]
+        # The C shim needs one stride per logical dimension of each tensor, in the
+        # order the kernel indexes it (A: G,M,K -- B: G,N,K -- D/E: G,M,N).
+        #
+        # Deriving these from arr.strides is not safe: a caller may hand us a flat
+        # (G*M*K,) buffer, whose numpy strides have length 1 rather than a_dim_size,
+        # which would leave the flat stride array short and make the C side read
+        # past its end. Every array reaching this point is already validated as
+        # C-contiguous with exactly product(dims) elements, so its layout is packed
+        # row-major over the logical dims -- compute the strides from the dims.
+        def _packed_strides(dims: List[int]) -> List[int]:
+            strides = [1] * len(dims)
+            for i in range(len(dims) - 2, -1, -1):
+                strides[i] = strides[i + 1] * int(dims[i + 1])
+            return strides
 
-        a_strides_list = []
-        for a in As:
-            st = _strides_in_elements(a)
-            a_strides_list.extend(st[:a_dim_size])
-        a_strides = np.array(a_strides_list, dtype=np.int64)
+        a_dims = list(problem.g_dims) + list(problem.m_dims) + list(problem.k_dims)
+        b_dims = list(problem.g_dims) + list(problem.n_dims) + list(problem.k_dims)
+        e_dims = list(problem.g_dims) + list(problem.m_dims) + list(problem.n_dims)
 
-        b_strides_list = []
-        for b in Bs:
-            st = _strides_in_elements(b)
-            b_strides_list.extend(st[:b_dim_size])
-        b_strides = np.array(b_strides_list, dtype=np.int64)
+        a_strides = np.array(_packed_strides(a_dims) * num_a, dtype=np.int64)
+        b_strides = np.array(_packed_strides(b_dims) * num_b, dtype=np.int64)
 
         if num_d > 0:
-            d_strides_list = []
-            for d in Ds:
-                st = _strides_in_elements(d)
-                d_strides_list.extend(st[:e_dim_size])
-            d_strides = np.array(d_strides_list, dtype=np.int64)
+            d_strides = np.array(_packed_strides(e_dims) * num_d, dtype=np.int64)
             d_strides_ptr = d_strides.ctypes.data_as(ctypes.POINTER(ctypes.c_int64))
         else:
             d_strides = np.array([], dtype=np.int64)
             d_strides_ptr = ctypes.cast(None, ctypes.POINTER(ctypes.c_int64))
 
-        e_strides_list = _strides_in_elements(E)[:e_dim_size]
-        e_strides = np.array(e_strides_list, dtype=np.int64)
+        e_strides = np.array(_packed_strides(e_dims), dtype=np.int64)
+
+        assert a_strides.size == num_a * a_dim_size
+        assert b_strides.size == num_b * b_dim_size
+        assert e_strides.size == e_dim_size
 
         elem_a = As[0].itemsize  if As  else 2
         elem_b = Bs[0].itemsize  if Bs  else 2
@@ -597,8 +614,23 @@ class ContractionMultiABDRunner:
 # =============================================================================
 
 
+def _validate_arch(arch: str) -> str:
+    """Validate an explicitly supplied arch against the supported set."""
+    if arch not in _SUPPORTED_ARCHS:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHS)}"
+        )
+    return arch
+
+
 def _detect_gpu_arch() -> str:
-    """Detect current GPU arch via rocm_agent_enumerator. Falls back to gfx942."""
+    """Detect the current GPU arch via rocm_agent_enumerator; raise on failure.
+
+    Never defaults: a wrong arch compiles silently and then mis-tunes (or fails
+    at load) on the actual device, which is far harder to diagnose than an
+    up-front error. Callers that know the target must pass gfx_arch explicitly.
+    """
+    arch = ""
     try:
         result = subprocess.run(
             ["rocm_agent_enumerator"],
@@ -607,10 +639,16 @@ def _detect_gpu_arch() -> str:
         for line in result.stdout.splitlines():
             line = line.strip()
             if line.startswith("gfx") and line != "gfx000":
-                return line
+                arch = line
+                break
     except Exception:
-        pass
-    return _DEFAULT_GFX_ARCH
+        arch = ""
+    if not arch:
+        raise RuntimeError(
+            "Could not detect GPU architecture from rocm_agent_enumerator; refusing "
+            "to default to a specific GPU. Pass gfx_arch explicitly."
+        )
+    return _validate_arch(arch)
 
 
 def _get_ck_include_dir() -> Optional[Path]:
@@ -751,7 +789,7 @@ def setup_multiple_contraction_multi_abd_dispatchers(
     if not configs:
         return []
 
-    arch     = gfx_arch or _detect_gpu_arch()
+    arch     = _validate_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
     base_dir = output_dir or Path(tempfile.mkdtemp(prefix="contraction_multi_abd_"))
     base_dir.mkdir(parents=True, exist_ok=True)
 

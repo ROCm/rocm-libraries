@@ -435,7 +435,13 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_multi_abd_ctypes_lib.c
             if(CMAKE_HIP_ARCHITECTURES)
                 list(GET CMAKE_HIP_ARCHITECTURES 0 _cma_gfx_arch)
             else()
-                set(_cma_gfx_arch "gfx942")
+                # Do not guess: a wrong arch compiles cleanly and then mis-tunes
+                # or fails to load on the real device.
+                message(FATAL_ERROR
+                    "Cannot resolve a GPU architecture for "
+                    "dispatcher_batched_contraction_multi_abd_lib: neither "
+                    "CK_TILE_CMA_GFX_ARCH nor CMAKE_HIP_ARCHITECTURES is set. "
+                    "Pass -DCK_TILE_CMA_GFX_ARCH=<gfxNNN>.")
             endif()
             set(CK_TILE_CMA_GFX_ARCH "${_cma_gfx_arch}" CACHE STRING
                 "GPU architecture for dispatcher_batched_contraction_multi_abd_lib (CMake path)")

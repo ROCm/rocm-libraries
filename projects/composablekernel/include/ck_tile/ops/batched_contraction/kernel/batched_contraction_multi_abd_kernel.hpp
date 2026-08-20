@@ -43,9 +43,12 @@ struct BatchedContractionMultiABDProblem
     using DsDataType = remove_cvref_t<DsDataType_>;
     using EDataType  = remove_cvref_t<EDataType_>;
 
-    static constexpr index_t NumATensor = tuple_size_v<AsDataType>;
-    static constexpr index_t NumBTensor = tuple_size_v<BsDataType>;
-    static constexpr index_t NumDTensor = tuple_size_v<DsDataType>;
+    // ck_tile::tuple exposes its own static size(); std::tuple_size is only
+    // specialized for it to enable structured bindings and is documented as
+    // "don't use this" in tuple.hpp.
+    static constexpr index_t NumATensor = static_cast<index_t>(AsDataType::size());
+    static constexpr index_t NumBTensor = static_cast<index_t>(BsDataType::size());
+    static constexpr index_t NumDTensor = static_cast<index_t>(DsDataType::size());
 
     static constexpr index_t NumDimG = NumDimG_;
     static constexpr index_t NumDimM = NumDimM_;

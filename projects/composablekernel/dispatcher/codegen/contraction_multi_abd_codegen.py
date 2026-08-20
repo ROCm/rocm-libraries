@@ -82,6 +82,11 @@ _UNSUPPORTED_PIPELINE_SCHEDULER = frozenset({
     ("comp_async", "interwave"),
 })
 
+# The only epilogues this generator emits. Anything else must be rejected up front:
+# the emitter's if/else would otherwise silently fall through to default2d and
+# produce a kernel that does not match the name it is stored under.
+SUPPORTED_EPILOGUES = ("cshuffle", "default2d")
+
 
 # =============================================================================
 # Kernel name construction (byte-exact with Python utils side)
@@ -117,7 +122,7 @@ def make_contraction_multi_abd_kernel_name(
     num_dim_k: int,
     a_elementwise: str = "PassThrough",
     b_elementwise: str = "PassThrough",
-    cde_elementwise: str = "AddDs",
+    cde_elementwise: str = "MultiDAdd",
 ) -> str:
     """
     Construct the canonical kernel name.
@@ -188,7 +193,24 @@ class ContractionMultiABDKernelSpec:
 
     a_elementwise: str = "PassThrough"
     b_elementwise: str = "PassThrough"
-    cde_elementwise: str = "AddDs"
+    cde_elementwise: str = "MultiDAdd"
+
+    def __post_init__(self):
+        if self.epilogue not in SUPPORTED_EPILOGUES:
+            raise ValueError(
+                f"Unsupported epilogue: {self.epilogue!r}. "
+                f"Supported values are {list(SUPPORTED_EPILOGUES)}."
+            )
+        if self.persistent:
+            # batched_contraction_multi_abd_kernel.hpp exposes only GridSize() --
+            # there is no MaxOccupancyGridSize(), so a persistent variant cannot be
+            # emitted. Fail here rather than generating a header whose name says
+            # persistent=True while the kernel is not persistent.
+            raise ValueError(
+                "persistent=True is not supported by batched_contraction_multi_abd: "
+                "the kernel has no persistent (occupancy-limited grid) variant. "
+                "Set persistent to false in the config."
+            )
 
     @property
     def name(self) -> str:
@@ -289,7 +311,8 @@ class ContractionMultiABDHeaderGenerator:
         pad_k_str = "true"  if spec.pad_k      else "false"
         dbl_smem  = "true"  if spec.pipeline == "compv4" else "false"
 
-        # Epilogue block
+        # Epilogue block. Unknown values are rejected by the spec's __post_init__,
+        # so the else branch below is reached only for "default2d".
         if spec.epilogue == "cshuffle":
             epilogue_block = f"""\
     using CDEElementWise = ck_tile::element_wise::{spec.cde_elementwise};
@@ -469,19 +492,10 @@ struct SelectedKernel
             NumATensor, NumBTensor, NumDTensor>& args,
         const ck_tile::stream_config& stream)
     {{
-        auto kargs = Kernel::MakeKernelArgs(args);
-
-        if(!Kernel::IsSupportedArguments(kargs))
-        {{
-            return -1.0f;
-        }}
-
-        const dim3 grids  = Kernel::GridSize(kargs);
-        const dim3 blocks = Kernel::GetBlockSize();
-
-        constexpr int kBlockPerCu = 1;
-        return ck_tile::launch_kernel(
-            stream, ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+        // Delegate to the wrapper's own launch(): it iterates the (A, B) tensor
+        // pairs and dispatches the single-A/B inner kernel for each. The wrapper
+        // itself is not a device functor, so it must not be handed to make_kernel.
+        return Kernel::launch(args, stream);
     }}
 }};
 
@@ -567,13 +581,18 @@ def _expand_nested_config(config: dict) -> dict:
         if "pipeline"  in tr: flat["pipelines"]  = list(tr["pipeline"]["values"])
         if "scheduler" in tr: flat["schedulers"] = list(tr["scheduler"]["values"])
         if "epilogue"  in tr: flat["epilogues"]  = list(tr["epilogue"]["values"])
-        # pad and persistent options — zip into pad_options list of dicts
+        # pad and persistent options — zip into pad_options list of dicts.
+        # persistent belongs here because it is part of the kernel name and must
+        # reach the spec; leaving it out silently pinned every kernel to False
+        # regardless of what the config declared.
         pad_m_vals       = tr.get("pad_m",       {}).get("values", [False])
         pad_n_vals       = tr.get("pad_n",       {}).get("values", [False])
         pad_k_vals       = tr.get("pad_k",       {}).get("values", [False])
+        persistent_vals  = tr.get("persistent",  {}).get("values", [False])
         flat["pad_options"] = [
-            {"pad_m": pm, "pad_n": pn, "pad_k": pk}
-            for pm, pn, pk in itertools.product(pad_m_vals, pad_n_vals, pad_k_vals)
+            {"pad_m": pm, "pad_n": pn, "pad_k": pk, "persistent": pers}
+            for pm, pn, pk, pers in itertools.product(
+                pad_m_vals, pad_n_vals, pad_k_vals, persistent_vals)
         ]
 
     flat.pop("tile_config", None)
@@ -608,7 +627,7 @@ def build_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
 
     a_elementwise  = config.get("a_elementwise",  "PassThrough")
     b_elementwise  = config.get("b_elementwise",  "PassThrough")
-    cde_elementwise = config.get("cde_elementwise", "AddDs")
+    cde_elementwise = config.get("cde_elementwise", "MultiDAdd")
 
     specs = []
     for (dtype, layout, pipeline, epilogue, scheduler,
@@ -645,6 +664,7 @@ def build_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
             pad_m=pad_opt.get("pad_m", False),
             pad_n=pad_opt.get("pad_n", False),
             pad_k=pad_opt.get("pad_k", False),
+            persistent=pad_opt.get("persistent", False),
             num_a_tensor=na,
             num_b_tensor=nb,
             num_d_tensor=nd,
@@ -674,11 +694,13 @@ def generate_one(spec: ContractionMultiABDKernelSpec, output_dir: Path) -> Optio
     return out_path
 
 
-def generate_kernels(output_dir: Path, config: dict, *, max_workers: int = 8) -> List[Path]:
-    """Generate all kernel headers in parallel, return list of paths."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+def build_capped_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
+    """Enumerate specs and apply the ``max_instances`` cap, if one is configured.
 
+    Both the generator and ``--list-name`` go through here so the two always agree
+    on the kernel set. Listing the uncapped names while generating a capped subset
+    makes CMake expect headers that were never written.
+    """
     specs = build_specs(config)
 
     # Honor max_instances cap if set (from CONTRACTION_MULTI_ABD_MAX_INSTANCES CMake var).
@@ -686,19 +708,29 @@ def generate_kernels(output_dir: Path, config: dict, *, max_workers: int = 8) ->
     if max_instances:
         try:
             cap = int(max_instances)
-            if cap > 0 and len(specs) > cap:
-                log.info("Capping kernel instances from %d to %d (max_instances=%d)",
-                         len(specs), cap, cap)
-                specs = specs[:cap]
         except (ValueError, TypeError):
-            pass
+            log.warning("Ignoring non-integer max_instances=%r", max_instances)
+            return specs
+        if cap > 0 and len(specs) > cap:
+            log.info("Capping kernel instances from %d to %d (max_instances=%d)",
+                     len(specs), cap, cap)
+            specs = specs[:cap]
+    return specs
+
+
+def generate_kernels(output_dir: Path, config: dict, *, max_workers: int = 8) -> List[Path]:
+    """Generate all kernel headers in parallel, return list of paths."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    specs = build_capped_specs(config)
 
     log.info("Generating %d kernel headers in %s", len(specs), output_dir)
 
     def _gen(spec):
         return generate_one(spec, output_dir)
 
-    return parallel_generate(_gen, specs)
+    return parallel_generate(_gen, specs, max_workers=max_workers)
 
 
 # =============================================================================
@@ -726,7 +758,7 @@ _DEFAULT_CONFIG: dict = {
     ],
     "a_elementwise":   "PassThrough",
     "b_elementwise":   "PassThrough",
-    "cde_elementwise": "AddDs",
+    "cde_elementwise": "MultiDAdd",
 }
 
 
@@ -752,7 +784,9 @@ def main():
             config.update(json.load(f))
 
     if args.list_name:
-        specs = build_specs(config)
+        # Must use the same capped set the generator writes, otherwise CMake is
+        # told to expect headers that generate_kernels() never produces.
+        specs = build_capped_specs(config)
         for s in specs:
             print(s.name)
         return
