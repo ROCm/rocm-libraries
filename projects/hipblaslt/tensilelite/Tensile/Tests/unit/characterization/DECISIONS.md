@@ -471,3 +471,136 @@ stable and self-invalidating. Motivating context: ROCM-7144.
 and must be confirmed byte-identical via `--snapshot-update` in a build
 environment; the `-m unit` lane needs the compiled rocisa module, which is not
 available where this change was authored.
+
+## D21 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
+
+**ADR:** [`adr/0002-custom-kernels-embedded-yaml-parsing.md`](adr/0002-custom-kernels-embedded-yaml-parsing.md).
+
+**Context:** `test_custom_kernels_char.py` (added on `develop` by #7989) pinned
+`getCustomKernelConfigAndAssembly`, a raw `---`/`...` line-splitter returning
+`(config_text, assembly_text)`. The Gemm-From-Anywhere branch's rewrite of
+`CustomKernels.py` (proper `.amdgpu_metadata` YAML parsing for the external-
+kernel `custom.config` schema) dropped that function in favor of a private
+`_readEmbeddedYaml` returning a parsed dict — the two branches diverged before
+#7989 merged to `develop`, so this was never reconciled. The stale import
+caused a pytest **collection** error, which (per pytest's default behavior)
+aborted the entire `-m unit` run before any test executed — silently hiding
+every other test in the suite behind this one file, not just this module.
+
+**Decision:** Point the test at the real replacement (`_readEmbeddedYaml`,
+pinning its parsed-dict return) instead of restoring the removed function.
+Also gave `test_get_custom_kernel_config_ok` its own fixture with a minimal
+`amdhsa.kernels` entry (`_VALID_S_WITH_KERNEL_META`), matching the convention
+in `Tests/unit/test_CustomKernelMetadata.py::write_kernel`, since
+`getCustomKernelConfig`'s new no-explicit-`CustomKernel` auto-infer path
+requires one (real kernel `.s` files always have one; only the bare-minimum
+test fixture didn't).
+
+**Why:** Same-purpose replacement (pin how the module reads its embedded
+YAML), not a scope cut; add-only (no production code touched); private-helper
+characterization already has precedent in this same branch
+(`test_CustomKernelMetadata.py` imports `_parse_tensile_yaml`/`_read_asm_file`
+directly).
+
+**Rejected alternatives:**
+- *Restore `getCustomKernelConfigAndAssembly`* — rejected per explicit
+  direction: don't reintroduce what Gemm-From-Anywhere deliberately removed.
+- *Delete the test instead of replacing it* — rejected: loses real coverage of
+  the embedded-YAML parsing path with no offsetting gain.
+
+**Validation:** `test_custom_kernels_char.py` — 11 passed, byte-identical
+`.ambr` across two additional `--snapshot-update`-free re-runs.
+
+**Residual scope (not fixed here):** unblocking collection let the full
+`-m unit` suite actually run for the first time on this branch's diff, and it
+surfaced 12 pre-existing failures unrelated to this file. Triaged and closed
+in D22 below.
+
+## D22 — Triage of the 12 failures D21 unblocked: 2 real regressions fixed, 10 stale-fixture goldens/asserts updated
+
+**Context:** D21 fixed a pytest *collection* error that had aborted the entire
+`-m unit` run before any test executed, on this branch's diff, since it
+diverged from `develop`. With collection fixed, the suite ran for the first
+time and surfaced 12 failures across 6 files, all in code this branch itself
+touched. Each was triaged individually per the "did you intend to change this
+behavior?" protocol in `README.md` — no blanket `--snapshot-update`, no
+fixing-via-the-test of anything that was a real code bug.
+
+**Two were real regressions; fixed the source, not the tests/goldens:**
+
+- **`TensileLogic/HandleCustomKernel.hasCustomKernel`** — the line-scanner's
+  marker pattern was changed from `CustomKernelName:` (legacy flat key) to
+  `name:` (matching the new `CustomKernel:` mapping's nested name field), but
+  `handleCustomKernel()` itself still explicitly accepts *either* shape
+  (`sol["CustomKernel"]["name"]` or `sol.get("CustomKernelName", "")`). The
+  narrowed scanner is reachable from a live gating call site
+  (`TensileLogic/Run.py:105`, `if check.OnlyCustomKernels and
+  hasCustomKernel(file): ...`) that decides whether a logic file's solutions
+  get loaded at all under `--only-custom-kernels`-style checks — so a legacy
+  `CustomKernelName:`-keyed logic file would have its custom-kernel solutions
+  silently dropped from that check. Fixed by matching *both*
+  `CustomKernelName:` and `CustomKernel:` (the distinctive parent keys for
+  each schema — not the generic, collision-prone bare `name:`), restoring the
+  original (unchanged) golden's expectation. Added
+  `test_has_custom_kernel_true_new_style_mapping` since the new-style path had
+  zero prior coverage.
+- **`Toolchain.Component.Assembler._retargetAssemblySource`** — new,
+  unconditional preprocessing step on every single assembly compile (rewrites
+  a mismatched `.amdgcn_target`/`amdhsa.target` directive in the source to
+  match the actual build target — the mechanism the `CustomKernels/README.md`
+  Triton section describes). It called `path.read_text()` with no handling
+  for a missing/unreadable file (only `UnicodeDecodeError` was caught), so any
+  `srcPath` that doesn't exist yet crashes `Assembler.__call__` with a
+  confusing traceback instead of reaching the actual compiler invocation
+  right after, which would raise its own clear "no such file" error through
+  the already-exercised `_invoke`/`CalledProcessError` path. Widened the catch
+  to `(UnicodeDecodeError, OSError)`. Also added
+  `test_retarget_assembly_source_rewrites_mismatched_target` and
+  `..._leaves_matching_target_untouched` — the regex rewrite itself had zero
+  test coverage anywhere in the repo before this.
+
+**Everything else was a stale test double, not a code bug — production
+behavior is correct; the fixtures just don't auto-default new fields the way
+their real counterparts do:**
+
+- **`ValidParameters::test_valid_parameters_{key_roster,structure}`** — clean,
+  intentional, single-line-diff changes in `Common/ValidParameters.py`:
+  `CustomKernelName` renamed to `CustomKernel` (matches the mapping-typed
+  parameter everywhere else in this branch), and
+  `AssertFree0/1ElementMultiple` / `AssertSummationElementMultiple` extended
+  with `64`/`128`/`256` (larger custom-kernel tile sizes). Updated both
+  goldens; reviewed the diff line-by-line (see the `.ambr` diff in the PR).
+- **`TensileMain::test_arg_updated_global_parameters_*`** and
+  **`PublicInputSurface::test_platform_*_branch_*`** — two independently
+  hand-rolled fake-`args` builders (`_args()` / `_make_args()`, one using
+  `SimpleNamespace`, one using `argparse.Namespace` directly) both predate the
+  new `--validate-metadata` flag (`Tensile.py`'s `argUpdatedGlobalParameters`
+  now reads `args.ValidateMetadata`). A *real* `argparse` parser always
+  supplies a `store_true` flag's default (`False`), so this can't happen
+  outside a test; added `ValidateMetadata=False` to both builders. Extended
+  `TensileMain`'s "all overrides" test to actually cover
+  `ValidateMetadata=True` (previously untested) and added a explicit
+  default-omitted case; `PublicInputSurface`'s file is narrowly scoped to the
+  unrelated `platform` predicate per its own docstring, so left it at the
+  minimal fixture fix.
+- **`TensileCreateLibraryRun::test_pass_post_kernel_info_to_solution`** — same
+  shape of issue: `KernelCodeGenResult` gained a `customKernelDef:
+  Optional[dict] = None` field (a real instance always has it via the
+  `NamedTuple` default), but the test's `SimpleNamespace` stand-in doesn't
+  auto-default missing attributes the way a `NamedTuple` does. Added
+  `customKernelDef=None`/`=<a dict>` to the two cases and a new test,
+  `..._carries_custom_kernel_def`, pinning the previously-uncovered
+  `solution._state["CustomKernel"] = result.customKernelDef` assignment.
+
+**Validation:** every touched file re-run individually (all green) plus two
+full, `--snapshot-update`-free `-m unit` runs of the whole suite (see the PR
+description for the exact before/after counts).
+
+**Rejected alternatives:**
+- *Blanket `--snapshot-update` across the whole suite* — forbidden by this
+  file's own cardinal rule; would have silently accepted the two real
+  regressions above instead of fixing them.
+- *Leave `hasCustomKernel`/`_retargetAssemblySource` as-is and just fix the
+  two tests* — rejected: both are reachable from real call sites, and
+  "fixing" the test to assert the buggy behavior would have pinned a real
+  regression as if it were intended, exactly what this suite exists to catch.
