@@ -31,10 +31,17 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
+
+#define SKIP_UNLESS_RULE3_CROSS_LOOP()                                                   \
+    do {                                                                                 \
+        if (!cluster_barrier::kRule3CrossLoop)                                         \
+            GTEST_SKIP() << "requires cluster_barrier::kRule3CrossLoop == true";         \
+    } while (0)
 
 static int countStinkyInstructions(const BasicBlock& bb) {
     int count = 0;
@@ -1560,6 +1567,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinsLiveOutSccDefBelowLastBar
 constexpr int kSccDefLeadCycles = 50;
 
 TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBranch) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     BasicBlock* body = bb;
     body->addSuccessor(body);
 
@@ -1598,6 +1606,38 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBran
     EXPECT_LE(lead, kSccDefLeadCycles)
         << "the compare must also wait for the branch to come within " << kSccDefLeadCycles
         << " cycles instead of issuing the moment the barrier frees it:" << scheduleOrder(*body);
+}
+
+// With cluster barrier on and kRule3CrossLoop false, only the barrier pin applies.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_CrossLoopOffLeavesSccDefFarFromItsBranch) {
+    if (cluster_barrier::kRule3CrossLoop) GTEST_SKIP() << "requires kRule3CrossLoop == false";
+
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+
+    for (int i = 0; i < 12; i++) {
+        createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/320 + i, /*ldsToken=*/1);
+        createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/500 + i * 8,
+                                       /*src0Start=*/100 + i * 8);
+    }
+
+    StinkyInstruction* branch = createSCbranchReadingScc(body);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+
+    const int lead = cyclesBetween(*body, sccDef, branch);
+    ASSERT_GE(lead, 0);
+    EXPECT_GT(lead, kSccDefLeadCycles)
+        << "kRule3CrossLoop off keeps only the barrier pin:" << scheduleOrder(*body);
 }
 
 // The same region with the rule off, which is also what the pin alone used to give: the
