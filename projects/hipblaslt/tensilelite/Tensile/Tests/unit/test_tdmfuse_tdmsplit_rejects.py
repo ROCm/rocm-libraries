@@ -515,19 +515,40 @@ def test_row_six_requires_mx_scales_on_both_tensors(
         ({"_remove": ("PrefetchGlobalReadA", "PrefetchGlobalReadB")}, "legacy"),
     ],
 )
-def test_row_six_without_a_divergent_pair_requires_sia_zero(
+def test_row_six_without_a_divergent_pair_is_admitted_at_sia_four(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, pair, label):
-    """The clause is about the absence of a divergent pair, not its presence.
+    """This pinned the opposite until the refusal's premise was measured away.
 
-    ScheduleIterAlg=4 runs StinkyTofu at OptLevel 3, whose barrier rebuild
-    misplaces a barrier around de-aliased A/B descriptor sets. An equal pair
-    resolves away to its legacy scalar before this point, so both spellings
-    arrive here as the same solution and both have to be refused.
+    e9504db146a refused row 6 at SIA=4 without a divergent pair because the
+    equal pair computed wrong results there: at StinkyTofu OptLevel 3 the
+    barrier rebuild left the LDS0 barrier inside the wave-parity region around
+    the de-aliased fill, so half the workgroup skipped it. 4d9145fb2dc then
+    corrected the rebuild to walk the whole tree, and the refusal outlived the
+    defect it was written for -- self-sealingly, because the guard kept this
+    arm out of every corpus, so no post-fix corpus contained it to re-measure.
+
+    The premise changed, not the tolerance. Re-measured on the tree this test
+    ships with, on b8-3 (MI450 B0) at MT64x512, DepthU 256, PGRA=PGRB=2,
+    num-elements-to-validate=-1 and Random MX scales on BOTH tensors: 15 of 15
+    reps PASSED at K=384, 512, 1024 and 1152. The negative control ran in the
+    same session, on a build differing only in KernelWriter.py with 4d9145fb2dc
+    and its dependent follow-up 0e0b4c342fd backed out, and FAILED 15 of 15 at
+    K=1024 with 212638 of 262144 elements wrong and at K=1152 with 261736 --
+    the same two K values and the same element counts as the original report in
+    b8-3:~/_pgrval19/val.log. So the fix is what moves this arm, and the counts
+    say so twice. Logs b8-3:~/f6val/{head,ctl}_rep1..15.log.
+
+    What that does not license is a barrier COUNT as the regression check.
+    Both builds emit eight barriers and only placement differs; the
+    parity-guarded count is what separates them, reading 1 without the rebuild
+    against 0 with it.
+
+    An equal pair resolves away to its legacy scalar before this point, so both
+    spellings arrive here as the same solution, and both have to be admitted.
     """
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        TDMFuse=6, ScheduleIterAlg=4, **pair)
-    assert sol.get("Valid") is False, label
-    assert "TDMFuse=6 without a divergent decoupled pair requires ScheduleIterAlg=0" in out
+    assert sol.get("Valid") is True, f"{label} rejected with: {out!r}"
 
 
 def test_row_six_at_sia_four_with_a_divergent_pair_is_admitted(
@@ -560,9 +581,11 @@ def test_row_six_at_sia_four_with_a_divergent_pair_is_admitted(
     What this does not claim is that the kernel is right. Row 6 divergent at
     SIA=4 is exactly as un-silicon-validated after the barrier fix as the other
     five arms the guard now returns -- no better, no worse. The failure that
-    motivated row 6's own clause was measured on the EQUAL pair, which this row
-    still refuses. The one divergent row-6 failure on record predates the
-    barrier fix and is now sourced so nobody has to take it on trust:
+    motivated row 6's own clause was measured on the EQUAL pair, which has
+    since been re-measured against a tree carrying the fix and admitted in its
+    own right; that A/B validates the equal arm and says nothing about this
+    one. The one divergent row-6 failure on record predates the barrier fix
+    and is now sourced so nobody has to take it on trust:
     b8-3 (MI450 B0), the two-size ini campaign of 2026-08-19 that ran K=1536
     then K=2048 in one client process, harness and logs under
     b8-3:~/val_s4d/camp2/ with the hit in rep3_two_rand.log. The arm was
@@ -581,9 +604,7 @@ def test_row_six_at_sia_four_with_a_divergent_pair_is_admitted(
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=6, ScheduleIterAlg=4,
                        PrefetchGlobalReadA=1, PrefetchGlobalReadB=2)
     assert sol.get("Valid") is True, f"rejected with: {out!r}"
-    # The exemption did the admitting, so row 6's own clause stayed silent...
-    assert "TDMFuse=6 without a divergent decoupled pair" not in out
-    # ...and so did the guard that used to refuse this ahead of it.
+    # The guard that used to refuse this ahead of the exemption stays silent.
     assert "only ScheduleIterAlg=0 places the fill where it can be moved" not in out
 
 

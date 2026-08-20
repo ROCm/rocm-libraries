@@ -3102,70 +3102,32 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "TDMFuse=6 does not describe the sparse metadata tensor")
           return
-        # An equal pair is only correct here at ScheduleIterAlg=0. SIA=4 runs
-        # StinkyTofu at OptLevel 3, whose postMainLoopBarrierCheckAndReset
-        # discards every barrier and rebuilds placement from tensor_load/ds_read
-        # tokens; with A and B de-aliased into their own descriptor sets it
-        # MISPLACES one -- the rebuilt barrier lands inside the wave-parity guard
-        # around the de-aliased fill, so half the workgroup skips it -- and the
-        # kernel computes wrong results. Measured on gfx1250 silicon (MI450 B0)
-        # on the tree before the whole-tree barrier rebuild: FAILED at K=1024
-        # with 212638 of 262144 elements wrong, and at K=1152 with 261736, both
-        # at DepthU 256, in b8-3:~/_pgrval19/val.log.
+        # SIA=4 is admitted here, and is correct only while the whole-tree
+        # barrier rebuild stays in the tree. At StinkyTofu OptLevel 3, which
+        # only SIA=4 derives, postMainLoopBarrierCheckAndReset discards every
+        # barrier and rebuilds placement from tensor_load/ds_read tokens. With
+        # A and B de-aliased into their own descriptor sets, the rebuild that
+        # 4d9145fb2dc replaced left the LDS0 barrier inside the wave-parity
+        # region around the de-aliased fill, so only the waves that fell
+        # through executed it and the kernel computed wrong results. Weakening
+        # that pass silently un-fixes this row, and a barrier COUNT will not
+        # notice: the arm emits eight barriers either way and only placement
+        # moves. The parity-guarded count is the detector -- 1 before the
+        # rebuild against 0 with it.
         #
-        # Those are the K values it was OBSERVED at, not a threshold, and the
-        # distinction is the point: this defect is a race. The same defect class
-        # was seen FAILING and then PASSING at the SAME K on one unchanged tree,
-        # code object and client binary, both at num-elements-to-validate=-1
-        # (b8-3, 2026-08-19 morning vs evening). Reading these numbers as a
-        # threshold between K=1152 and K=1536 was withdrawn as one sample of
-        # that race. So a green run at any K is not evidence that a
-        # configuration is safe, and low K is NOT a safe region. SIA=0 is safe
-        # for a structural reason rather than a measured one:
-        # postMainLoopBarrierCheckAndReset is gated on _StinkyTofuOptLevel==3,
-        # which only SIA=4 derives, so at SIA=0 the rebuild never runs at all.
-        #
-        # The mechanism is not inferred from the silicon failure alone, it is
-        # visible at codegen. Generating this arm on two trees that differ only
-        # in KernelWriter.py -- HEAD, and HEAD with the whole-tree barrier
-        # rebuild 4d9145fb2dc and its follow-up 0e0b4c342fd backed out -- emits
-        # assembly that is NOT byte-identical. Both trees emit the same eight
-        # barriers, which is exactly why a count cannot see this; what moves is
-        # one of them. Before the rebuild the LDS0 barrier sits AFTER
-        # "s_cbranch_scc1 label_TdmDealiasedFillAEnd", inside the wave-parity
-        # region and immediately ahead of the tensor_load_to_lds it guards, so
-        # only the waves that fall through ever execute it. After the rebuild it
-        # is hoisted ahead of that branch, past the whole ds_read run, carrying
-        # the comment "(ahead of a wave-divergent branch)". Reproduced at
-        # MT64x512, DepthU 256, PGRA=PGRB=2, ScheduleIterAlg=4.
-        #
-        # A parity-guarded barrier count of 0 for "all equal arms" does NOT
-        # contradict that, and is not evidence the rebuild is irrelevant here.
-        # Such a count is read off a corpus generated with this very reject in
-        # place, so equal_f6 is absent from it; the equal arms that are present
-        # -- f0, f2 and f5 -- really are byte-identical across the two trees and
-        # really do read 0. Generate equal_f6 with the reject disabled and the
-        # same counter reports 1 on the pre-rebuild tree and 0 with the rebuild.
-        #
-        # A divergent pair is exempt on purpose: divergentPairUnsupportedReason
-        # admits ScheduleIterAlg=4, whose _ScheduleIterAlg is 0, so its unrolled
-        # loop and its relocated fill are scheduled exactly as they are at
-        # SIA=0. That equivalence covers scheduling only. SIA=4 still derives
-        # _StinkyTofuOptLevel=3, so the barrier rebuild does run for a divergent
-        # pair, and on the pre-rebuild tree each divergent f6 arm carries three
-        # parity-guarded barriers. Those arms are sound here because the
-        # whole-tree rebuild is in the tree, not because the pass skips them.
-        decoupled, blkA, blkB = decouplePgrBlocks(state)
-        if not (decoupled and blkA != blkB) and state["ScheduleIterAlg"] == 4:
-          reject(state, printRejectionReason,
-                 "TDMFuse=6 without a divergent decoupled pair requires ScheduleIterAlg=0: at "
-                 "ScheduleIterAlg=4 the StinkyTofu OptLevel-3 barrier rebuild misplaces a barrier "
-                 "inside the wave-parity guard around the de-aliased A/B descriptor sets, so half "
-                 "the workgroup skips it and the kernel computes wrong results. Measured wrong at "
-                 "K=1024 and K=1152 at DepthU 256; the failure is intermittent rather than "
-                 "threshold-gated, so a run that passes at a lower K does not make this "
-                 "configuration safe")
-          return
+        # Refused between e9504db146a and this commit on that pre-rebuild
+        # failure, which the rebuild had already repaired; the guard kept the
+        # arm out of every corpus, so nobody re-measured it. Settled by an A/B
+        # on two trees differing only in KernelWriter.py, at MT64x512, DepthU
+        # 256, PGRA=PGRB=2, num-elements-to-validate=-1 and Random MX scales on
+        # both tensors. With the rebuild, 15 of 15 reps PASSED at K=384, 512,
+        # 1024 and 1152. With 4d9145fb2dc and its dependent follow-up
+        # 0e0b4c342fd backed out, 15 of 15 FAILED at K=1024 with 212638 of
+        # 262144 elements wrong and at K=1152 with 261736, and passed at the
+        # two lower K -- the same K values and the same element counts as the
+        # original report in b8-3:~/_pgrval19/val.log. Logs
+        # b8-3:~/f6val/{head,ctl}_rep1..15.log, built on 10.96.34.190 under
+        # /data3/andysu/agent-workspace/f6val.
         # These guards must stay exactly tdmDealiasAB's preconditions; if they
         # drift, decline rather than accept a name the writer will not honour.
         if not tdmDealiasAB(state):
