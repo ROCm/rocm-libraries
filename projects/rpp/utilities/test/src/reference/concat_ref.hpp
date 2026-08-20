@@ -28,7 +28,6 @@ SOFTWARE.
 #include <rpp/rpp.h>
 
 #include <cstddef>
-#include <vector>
 
 #include "framework/generic_tensor_setup.hpp"
 

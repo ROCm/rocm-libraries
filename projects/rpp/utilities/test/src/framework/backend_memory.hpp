@@ -33,8 +33,6 @@ SOFTWARE.
 #include <stdexcept>
 #include <string>
 
-#include "framework/backend_param.hpp"
-
 #if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
 #include <hip/hip_runtime.h>
 #define RPP_TEST_CHECK_HIP(cmd)                                                          \

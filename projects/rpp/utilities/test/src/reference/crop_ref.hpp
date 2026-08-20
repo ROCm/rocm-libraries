@@ -29,7 +29,6 @@ SOFTWARE.
 
 #include <cstddef>
 
-#include "framework/config_param.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {

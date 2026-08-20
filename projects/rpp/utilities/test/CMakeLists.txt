@@ -58,13 +58,12 @@ if(NOT RPP_TEST_SOURCES)
     message(FATAL_ERROR "No test sources found under ${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 endif()
 
-add_executable(rpp_tests ${RPP_TEST_SOURCES})
+add_executable(rpp_tests ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${RPP_TEST_SOURCES})
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set_property(TARGET rpp_tests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-if(rpp_INCLUDE_DIR)
-    target_include_directories(rpp_tests PRIVATE ${rpp_INCLUDE_DIR}/rpp)
-endif()
-target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest_main)
+
+# src/main.cpp provides main() (it installs the suite's own reporter), so gtest_main is not used.
+target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
 
 if(rpp_BACKEND_TYPE STREQUAL "HIP" OR BACKEND STREQUAL "HIP")
     # GPU_SUPPORT exposes the HIP-only API symbols guarded behind it in the installed

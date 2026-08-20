@@ -31,9 +31,7 @@ SOFTWARE.
 #include <cstddef>
 #include <vector>
 
-#include "framework/config_param.hpp"
 #include "framework/reduction.hpp"
-#include "framework/tensor_setup.hpp"
 
 namespace rpptest {
 

@@ -48,13 +48,10 @@ struct Tolerance {
         return 0.0;
     }
 
-    // Copies with one field replaced, for the ops that differ from a named constant in a
-    // single dtype (C++17 has no designated initializers).
-    constexpr Tolerance with_u8(double v) const { return {v, i8, i16, f16, f32}; }
+    // A copy with one field replaced, for the ops that differ from a named constant in a
+    // single dtype (C++17 has no designated initializers). Sibling with_*() overloads are
+    // added when an op needs one.
     constexpr Tolerance with_i8(double v) const { return {u8, v, i16, f16, f32}; }
-    constexpr Tolerance with_i16(double v) const { return {u8, i8, v, f16, f32}; }
-    constexpr Tolerance with_f16(double v) const { return {u8, i8, i16, v, f32}; }
-    constexpr Tolerance with_f32(double v) const { return {u8, i8, i16, f16, v}; }
 };
 
 // The common shape: the integer dtypes share one bound, each float dtype has its own.

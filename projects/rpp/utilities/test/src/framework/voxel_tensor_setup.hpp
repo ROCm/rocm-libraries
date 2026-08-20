@@ -35,7 +35,6 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/config_param.hpp"
-#include "framework/generic_tensor_setup.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {

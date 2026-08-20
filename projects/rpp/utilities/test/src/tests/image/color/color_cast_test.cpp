@@ -54,7 +54,7 @@ struct ColorCastParams {
 
 // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (RPP truncates the
 // I8 result instead of rounding).
-constexpr Tolerance kColorCastTolerance = tolerance(1.0, 2e-3, 5e-3).with_i8(0.5);
+constexpr Tolerance kColorCastTolerance = kRoundingTolerance.with_i8(0.5);
 
 template <typename T>
 void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {

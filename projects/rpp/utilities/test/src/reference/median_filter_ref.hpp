@@ -28,11 +28,8 @@ SOFTWARE.
 #include <rpp/rpp.h>
 
 #include <algorithm>
-#include <cstddef>
-#include <vector>
 
 #include "framework/config_param.hpp"
-#include "framework/tensor_setup.hpp"
 #include "reference/filter_common.hpp"
 
 namespace rpptest {

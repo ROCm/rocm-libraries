@@ -28,7 +28,6 @@ SOFTWARE.
 #include <rpp/rpp.h>
 
 #include <cmath>
-#include <cstddef>
 
 #include "framework/generic_tensor_setup.hpp"
 
@@ -53,7 +52,9 @@ namespace rpptest {
 // -744.44. The expected value is therefore ambiguous, so the tests deliberately feed no zero
 // inputs rather than encoding a guess, and this model does not special-case zero.
 
-inline double log_scalar(double v) { return std::log(std::fabs(v)); }
+inline double log_scalar(double v) {
+    return std::log(std::fabs(v));
+}
 
 // src and dst have the same logical shape; only the dtype (and possibly the stride padding)
 // differs, so each is addressed through its own descriptor.

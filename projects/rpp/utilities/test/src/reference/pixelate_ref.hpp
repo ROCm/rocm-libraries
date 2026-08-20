@@ -28,7 +28,6 @@ SOFTWARE.
 #include <rpp/rpp.h>
 
 #include <algorithm>
-#include <cstddef>
 #include <vector>
 
 #include "framework/config_param.hpp"

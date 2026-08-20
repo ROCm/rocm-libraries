@@ -42,7 +42,7 @@ namespace {
 
 // I8 kept sub-LSB to surface a real kernel bug: the HIP I8 kernel truncates instead of
 // rounding (HOST rounds correctly).
-constexpr Tolerance kMagnitudeTolerance = tolerance(1.0, 2e-3, 5e-3).with_i8(0.5);
+constexpr Tolerance kMagnitudeTolerance = kRoundingTolerance.with_i8(0.5);
 
 template <typename T>
 void run_magnitude(const TestConfig& cfg) {

@@ -33,7 +33,6 @@ SOFTWARE.
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/skip_list.hpp"
-#include "framework/tensor_setup.hpp"
 #include "reference/bitwise_tensor_ref.hpp"
 
 using namespace rpptest;
