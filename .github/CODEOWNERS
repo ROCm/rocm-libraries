@@ -197,3 +197,58 @@
 /projects/hipthreads/**/*.rst                       @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
 /projects/hipthreads/**/.readthedocs.yaml           @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
 /projects/hipthreads/docs/                          @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
+
+# Composable Kernel sub-team review routing. Mirrors the file sets of the
+# `ck: convolution-legacy` and `ck: attention-moe` labels in .github/labeler.yml;
+# see .github/ck-labels.md before editing either file.
+
+# Legacy convolution.
+/projects/composablekernel/**/*conv_*                                                         @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv.*                                                         @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convnd*                                                        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv1d*                                                        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv2d*                                                        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv3d*                                                        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convolution*                                                   @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convscale*                                                     @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convinvscale*                                                  @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*im2col*                                                        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*img2col*                                                       @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*col2im*                                                        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*image_to_column*                                               @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*column_to_image*                                               @ROCm/ck-convolution @ROCm/ck-reviewers
+
+# The label scopes convolution to legacy roots, and last match wins, so the
+# ck_tile and post-ck_tile trees are handed back here rather than by repeating
+# the token list under each root. A new ck_tile root must be added here or it
+# inherits the owner above. These lines must stay below the block above.
+/projects/composablekernel/include/ck_tile/                                                   @ROCm/ck-reviewers
+/projects/composablekernel/example/ck_tile/                                                   @ROCm/ck-reviewers
+/projects/composablekernel/test/ck_tile/                                                      @ROCm/ck-reviewers
+/projects/composablekernel/experimental/                                                      @ROCm/ck-reviewers
+/projects/composablekernel/dispatcher/                                                        @ROCm/ck-reviewers
+/projects/composablekernel/tile_engine/                                                       @ROCm/ck-reviewers
+/projects/composablekernel/docs/                                                              @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+
+# The hand-backs above replace the owners set by the documentation rules earlier
+# in this file, which would otherwise drop @ROCm/ck-docs-reviewers from markdown
+# in those trees. Restore it. The attention rules below still win where they match.
+/projects/composablekernel/include/ck_tile/**/*.md                                            @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/example/ck_tile/**/*.md                                            @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/test/ck_tile/**/*.md                                               @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/experimental/**/*.md                                               @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/dispatcher/**/*.md                                                 @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/tile_engine/**/*.md                                                @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+
+# Attention and MoE.
+/projects/composablekernel/**/*mha*                                                           @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*attention*                                                     @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*attn*                                                          @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*softmax_gemm*                                                  @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*moe*                                                           @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*topk*                                                          @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/include/ck/tensor_operation/gpu/device/masking_specialization.hpp  @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/test/position_embedding/                                           @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/rocm_ck/tests/compile_fail/convert_dq_*                            @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/rocm_ck/tests/compile_fail/dqdkdv_*                                @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/rocm_ck/tests/compile_fail/ograd_dot_o_*                           @ROCm/ck-attention @ROCm/ck-reviewers
