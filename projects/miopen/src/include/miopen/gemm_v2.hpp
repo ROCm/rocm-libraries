@@ -223,6 +223,37 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
                                                                   const TensorDescriptor& xDesc,
                                                                   const TensorDescriptor& dwDesc);
 
+// The NHWC variants below describe the very same convolutions as the three functions above, but
+// for tensors whose channel dimension is the fastest-varying one (NHWC/NDHWC).
+//
+// For a 1x1 filter the activations of a single image form a plain row-major (spatial x C) matrix,
+// so no im2col and no transposition of the data is needed - only the leading dimensions and the
+// operand order differ from the NCHW case. Note that the output must be produced as a row-major
+// (spatial x K) matrix, which means the activation tensor becomes the "m-side" operand (A) and the
+// weights become the "n-side" operand (B). This is the opposite of the NCHW variants, so callers
+// must pass the buffers to CallGemm*() in the swapped order (Fwd/Bwd-Data only; for Bwd-Weight the
+// operand order happens to be unchanged).
+//
+// The weights need no special handling: for a 1x1 filter KCYX and KYXC describe the same memory,
+// i.e. a row-major (K x C) matrix in both layouts.
+
+// strided batched GEMM parameters for 1x1 NHWC Convolution Fwd
+// y[i] = x[i] * transpose(w), i is batch id
+GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1FwdNHWC(const TensorDescriptor& wDesc,
+                                                                const TensorDescriptor& xDesc,
+                                                                const TensorDescriptor& yDesc);
+
+// strided batched GEMM parameters for 1x1 NHWC Convolution Bwd-Data
+// dx[i] = dy[i] * w, i is batch id
+GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdDataNHWC(const TensorDescriptor& wDesc,
+                                                                    const TensorDescriptor& dyDesc,
+                                                                    const TensorDescriptor& dxDesc);
+
+// strided batched GEMM parameters for 1x1 NHWC Convolution Bwd-Weight
+// dw = sum_over_batch(transpose(dy[i]) * x[i]), i is batch id
+GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeightNHWC(
+    const TensorDescriptor& dyDesc, const TensorDescriptor& xDesc, const TensorDescriptor& dwDesc);
+
 // GEMM parameters for Group Convolution (using Im2Col) Fwd
 // y = w * Im2Col(x)
 GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,

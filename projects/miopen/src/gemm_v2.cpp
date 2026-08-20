@@ -2176,6 +2176,174 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
                           false};
 }
 
+// y[i] = x[i] * transpose(w), i is batch id
+GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1FwdNHWC(const TensorDescriptor& wDesc,
+                                                                const TensorDescriptor& xDesc,
+                                                                const TensorDescriptor& yDesc)
+{
+#ifndef NDEBUG
+    assert(wDesc.GetType() == xDesc.GetType());
+    assert(wDesc.GetType() == yDesc.GetType());
+#else
+    (void)yDesc;
+#endif
+
+    int in_n  = xDesc.GetLengths()[0];
+    int in_c  = xDesc.GetLengths()[1];
+    int wei_k = wDesc.GetLengths()[0];
+
+    auto in_spatial =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(xDesc.GetLengths().size() - 2);
+
+    // x[i] is a row-major (spatial x C) matrix, y[i] a row-major (spatial x K) one,
+    // and w a row-major (K x C) matrix that is used transposed.
+    bool isColMajor = false;
+    bool transA     = false;
+    bool transB     = true;
+    int m           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int n           = wei_k;
+    int k           = in_c;
+    int lda         = k;
+    int ldb         = k;
+    int ldc         = n;
+    int batch_count = in_n;
+    auto strideA    = static_cast<long long>(m) * k;
+    auto strideB    = static_cast<long long>(0);
+    auto strideC    = static_cast<long long>(m) * n;
+    float alpha     = 1.;
+    float beta      = 0.;
+
+    return GemmDescriptor{isColMajor,
+                          transA,
+                          transB,
+                          m,
+                          n,
+                          k,
+                          lda,
+                          ldb,
+                          ldc,
+                          batch_count,
+                          strideA,
+                          strideB,
+                          strideC,
+                          alpha,
+                          beta,
+                          xDesc.GetType(),
+                          false};
+}
+
+// dx[i] = dy[i] * w, i is batch id
+GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdDataNHWC(const TensorDescriptor& wDesc,
+                                                                    const TensorDescriptor& dyDesc,
+                                                                    const TensorDescriptor& dxDesc)
+{
+#ifndef NDEBUG
+    assert(wDesc.GetType() == dxDesc.GetType() && wDesc.GetType() == dyDesc.GetType());
+#else
+    (void)dyDesc;
+#endif
+
+    int in_n  = dxDesc.GetLengths()[0];
+    int in_c  = dxDesc.GetLengths()[1];
+    int wei_k = wDesc.GetLengths()[0];
+
+    auto in_spatial = dxDesc.GetLengths() | std::views::drop(2) |
+                      std::views::take(dxDesc.GetLengths().size() - 2);
+
+    // dy[i] is a row-major (spatial x K) matrix, dx[i] a row-major (spatial x C) one,
+    // and w a row-major (K x C) matrix that is used as-is.
+    bool isColMajor = false;
+    bool transA     = false;
+    bool transB     = false;
+    int m           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int n           = in_c;
+    int k           = wei_k;
+    int lda         = k;
+    int ldb         = n;
+    int ldc         = n;
+    int batch_count = in_n;
+    auto strideA    = static_cast<long long>(m) * k;
+    auto strideB    = static_cast<long long>(0);
+    auto strideC    = static_cast<long long>(m) * n;
+    float alpha     = 1.;
+    float beta      = 0;
+
+    return GemmDescriptor{isColMajor,
+                          transA,
+                          transB,
+                          m,
+                          n,
+                          k,
+                          lda,
+                          ldb,
+                          ldc,
+                          batch_count,
+                          strideA,
+                          strideB,
+                          strideC,
+                          alpha,
+                          beta,
+                          dxDesc.GetType(),
+                          false};
+}
+
+// dw = sum_over_batch(transpose(dy[i]) * x[i]), i is batch id
+GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeightNHWC(
+    const TensorDescriptor& dyDesc, const TensorDescriptor& xDesc, const TensorDescriptor& dwDesc)
+{
+#ifndef NDEBUG
+    assert(dwDesc.GetType() == xDesc.GetType() && dwDesc.GetType() == dyDesc.GetType());
+#else
+    (void)dyDesc;
+#endif
+
+    int in_n  = xDesc.GetLengths()[0];
+    int in_c  = xDesc.GetLengths()[1];
+    int wei_k = dwDesc.GetLengths()[0];
+
+    auto in_spatial =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(xDesc.GetLengths().size() - 2);
+
+    // dy[i] is a row-major (spatial x K) matrix that is used transposed, x[i] a row-major
+    // (spatial x C) one, and dw a row-major (K x C) matrix accumulated over the batch.
+    bool isColMajor = false;
+    bool transA     = true;
+    bool transB     = false;
+    int m           = wei_k;
+    int n           = in_c;
+    int k           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int lda         = m;
+    int ldb         = n;
+    int ldc         = n;
+    int batch_count = in_n;
+    auto strideA    = static_cast<long long>(k) * m;
+    auto strideB    = static_cast<long long>(k) * n;
+    auto strideC    = static_cast<long long>(0);
+    float alpha     = 1.;
+    float beta      = 1.;
+
+    return GemmDescriptor{isColMajor,
+                          transA,
+                          transB,
+                          m,
+                          n,
+                          k,
+                          lda,
+                          ldb,
+                          ldc,
+                          batch_count,
+                          strideA,
+                          strideB,
+                          strideC,
+                          alpha,
+                          beta,
+                          xDesc.GetType(),
+                          false};
+}
+
 // y = w * Im2Col(x)
 GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
                                                 const TensorDescriptor& xDesc,
