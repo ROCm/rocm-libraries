@@ -1140,13 +1140,6 @@ validParameters = { # we need to make sure this matches develop
     # 0  : disable CMS even if supported
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
-    # F32X (xf32/TF32) emulation Inf support: emit a v_cmp_class inf guard so that
-    # inf inputs produce inf instead of nan (the 3xBF16 split makes lo = inf - inf = nan).
-    # The guard adds VALU ops in the pack path and can regress perf (~10%+ on gfx950).
-    # -1 : arch default -> OFF for gfx950 (MFMA emulation), ON for gfx1250+
-    # 0  : force off
-    # 1  : force on
-    "UseF32XEmulationInfSupport" : [-1, 0, 1],
     # 0  : Generate original Store blocks: NonEdgeN, ThenN, and Then1 for StoreVectorWidth N
     # 1  : Generate adaptive Store blocks: NonEdgeN, ThenN, ThenN/2, ..., Then1 and select by runtime problem size
     "AdaptiveGemm": [0, 1],

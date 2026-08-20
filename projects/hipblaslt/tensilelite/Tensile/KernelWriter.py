@@ -9070,9 +9070,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #         Wider local read case, we need TransposeCode=True
       #   False: Does not use interleave layout
       #         ider local read + index transpose case, this needs to be False
-      # TF32/F32X Inf support: gated by UseF32XEmulationInfSupport (resolved in Solution.py
-      # to an arch-based default: off for gfx950, on for gfx1250+). Only meaningful under F32X emu.
-      self.states.useTF32EmuInfSupport = bool(kernel["UseF32XEmulation"]) and bool(kernel.get("UseF32XEmulationInfSupport", 0))
+      # TF32/F32X Inf support: gated by the F32XEmulationInfSupport hardware
+      # capability (on for gfx1250+, off for gfx950). Inf handling changes the
+      # numerical result, so it is a platform capability rather than a kernel
+      # parameter. Only meaningful under F32X emulation.
+      self.states.useTF32EmuInfSupport = bool(kernel["UseF32XEmulation"]) and bool(self.states.archCaps.get("F32XEmulationInfSupport", False))
 
       def initTF32Emu():
         # for UseF32XEmulation only

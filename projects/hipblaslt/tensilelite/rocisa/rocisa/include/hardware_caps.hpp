@@ -587,6 +587,14 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+    // F32X (xf32/TF32) emulation Inf handling. The 3xBF16 split makes an Inf
+    // input produce Inf - Inf = NaN in the low-bits residual, so an extra
+    // v_cmp_class Inf guard is required to keep Inf inputs producing Inf. This is
+    // a hardware/platform behavior decision (not a perf-tuning knob), so it lives
+    // in the arch caps: enabled only on archs that require correct Inf handling
+    // under emulation. gfx950's MFMA emulation path leaves it off (the guard adds
+    // VALU ops in the pack path and regresses perf ~10%+).
+    rv["F32XEmulationInfSupport"] = checkInList(isaVersion, {{12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
 
