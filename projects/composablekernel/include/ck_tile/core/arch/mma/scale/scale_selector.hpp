@@ -18,7 +18,7 @@ namespace ck_tile::core::arch::mma {
  *
  * @tparam MmaOp The scale MmaOp to find a dense fallback for.
  */
-template <typename MmaOp, typename = void>
+template <typename MmaOp>
 struct MmaOpDenseFallbackSelector
 {
     using DenseOp = typename MmaDefaultSelector<typename MmaOp::ADataType,
