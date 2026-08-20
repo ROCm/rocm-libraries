@@ -241,7 +241,13 @@ else()
     message(STATUS "rocKE features disabled")
 endif()
 
+# Both halves of kpack support ride the ingestor gate and nothing else. The
+# packer that writes archives and the runtime that reads them are one dependency
+# at one commit, so there is no state in which only one of them is wanted; a
+# separate switch could only ever advertise an ingestor that cannot dispatch.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    include(RocmKpack)
+    rocm_kpack_add_runtime()
     add_subdirectory(descriptor-packaging)
 endif()
 

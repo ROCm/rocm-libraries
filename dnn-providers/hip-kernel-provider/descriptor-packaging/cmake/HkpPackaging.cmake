@@ -16,29 +16,20 @@ set(HKP_PYTHON_ROOT "${HKP_PKG_DIR}/python")
 set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
 set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 
-# rocm-kpack source for the FetchContent tiers of hkp_resolve_kpack. The default
-# ref is pinned to a known-good SHA for reproducible builds (the tool depends on
-# rocm_kpack's prepare_kernel/get_kernel API). Override the ref to test a newer
-# kpack: set HIPKERNELPROVIDER_KPACK_GIT_REF to any SHA, tag, or branch (e.g.
-# "main"), and HIPKERNELPROVIDER_KPACK_GIT_REPO to fetch from a fork. A branch
-# ref is a moving target: FetchContent re-fetches it only on a clean populate
-# (a wiped _deps/rocm_kpack-* or build dir) — `cmake --fresh` is NOT sufficient,
-# as it clears the cache but leaves _deps/ intact. Pin to a specific newer SHA
-# for a deterministic re-fetch.
-set(HIPKERNELPROVIDER_KPACK_GIT_REPO "https://github.com/ROCm/rocm-kpack.git"
-    CACHE STRING "rocm-kpack git repository to fetch (override for a fork).")
-set(HIPKERNELPROVIDER_KPACK_GIT_REF "e3483286e751060b3a70b792792cc122632c66e8"
-    CACHE STRING "rocm-kpack git ref (SHA, tag, or branch) to fetch. Defaults \
-to a pinned SHA for reproducibility; set to a branch or newer SHA to test the \
-latest tool.")
+# The rocm-kpack repo/ref pin and the fetch itself live in RocmKpack.cmake, which
+# is shared with the runtime half of this provider. The packer written by this
+# module and the reader linked into the provider must come from one commit, so
+# there is exactly one place that names it.
+include(RocmKpack)
 
 # ---------------------------------------------------------------------------
 # hkp_resolve_kpack(<out_var>)
-#   3-tier resolution of the rocm-kpack 'python' directory:
+#   2-tier resolution of the rocm-kpack 'python' directory, matching the tiers
+#   rocm_kpack_add_runtime() uses for the reader:
 #   (1) -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR override,
-#   (2)/(3) FetchContent of a pinned rocm-kpack commit. Sets <out_var> to the
-#   resolved python dir. rocm_kpack is load-bearing (the tool cannot pack
-#   without it), so an unresolvable dependency is a hard error.
+#   (2) the shared pinned rocm-kpack tree. Sets <out_var> to the resolved python
+#   dir. rocm_kpack is load-bearing (the tool cannot pack without it), so an
+#   unresolvable dependency is a hard error.
 # ---------------------------------------------------------------------------
 function(hkp_resolve_kpack out_var)
     if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND EXISTS "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}")
@@ -47,30 +38,12 @@ function(hkp_resolve_kpack out_var)
         return()
     endif()
 
-    # Tiers 2/3: FetchContent of rocm-kpack at the repo/ref configured at the top
-    # of this module (HIPKERNELPROVIDER_KPACK_GIT_REPO/REF). Only the python/ tree
-    # is consumed (download-only, never configured), so a bare populate is used.
-    set(_kpack_repo "${HIPKERNELPROVIDER_KPACK_GIT_REPO}")
-    set(_kpack_tag "${HIPKERNELPROVIDER_KPACK_GIT_REF}")
-    message(STATUS "hkp: fetching rocm_kpack ${_kpack_repo}@${_kpack_tag}")
-    include(FetchContent)
-    FetchContent_Declare(
-        rocm_kpack
-        GIT_REPOSITORY "${_kpack_repo}"
-        GIT_TAG "${_kpack_tag}"
-    )
-    # CMP0169 (CMake >= 3.30) deprecates the single-arg FetchContent_Populate;
-    # keep it valid since only the source tree is needed, not a configured build.
-    if(POLICY CMP0169)
-        cmake_policy(SET CMP0169 OLD)
-    endif()
-    FetchContent_GetProperties(rocm_kpack)
-    if(NOT rocm_kpack_POPULATED)
-        FetchContent_Populate(rocm_kpack)
-    endif()
-    if(EXISTS "${rocm_kpack_SOURCE_DIR}/python/rocm_kpack/kpack.py")
-        set(${out_var} "${rocm_kpack_SOURCE_DIR}/python" PARENT_SCOPE)
-        message(STATUS "hkp: fetched rocm_kpack into ${rocm_kpack_SOURCE_DIR}/python")
+    # Tier 2: the shared tree at HIPKERNELPROVIDER_KPACK_GIT_REPO/REF, fetched
+    # once per build and reused by the runtime half. Only python/ is consumed here.
+    rocm_kpack_python_dir(_kpack_python)
+    if(EXISTS "${_kpack_python}/rocm_kpack/kpack.py")
+        set(${out_var} "${_kpack_python}" PARENT_SCOPE)
+        message(STATUS "hkp: using rocm_kpack from ${_kpack_python}")
         return()
     endif()
 
