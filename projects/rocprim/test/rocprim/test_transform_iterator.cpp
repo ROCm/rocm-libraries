@@ -28,7 +28,7 @@
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
-// #include "test_utils_types.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/config.hpp>
@@ -86,7 +86,17 @@ using RocprimTransformIteratorTestsParams
                        RocprimTransformIteratorParams<unsigned long>,
                        RocprimTransformIteratorParams<float, plus_ten<double>, double>>;
 
-TYPED_TEST_SUITE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsParams);
+struct RocprimTransformIteratorTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::input_type>();
+    }
+};
+TYPED_TEST_SUITE(RocprimTransformIteratorTests,
+                 RocprimTransformIteratorTestsParams,
+                 RocprimTransformIteratorTestsNameGenerator);
 
 TYPED_TEST(RocprimTransformIteratorTests, Basic)
 {

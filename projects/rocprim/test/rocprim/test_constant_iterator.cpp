@@ -58,7 +58,17 @@ using RocprimConstantIteratorTestsParams
                        RocprimConstantIteratorParams<unsigned long>,
                        RocprimConstantIteratorParams<float>>;
 
-TYPED_TEST_SUITE(RocprimConstantIteratorTests, RocprimConstantIteratorTestsParams);
+struct RocprimConstantIteratorTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::input_type>();
+    }
+};
+TYPED_TEST_SUITE(RocprimConstantIteratorTests,
+                 RocprimConstantIteratorTestsParams,
+                 RocprimConstantIteratorTestsNameGenerator);
 
 TYPED_TEST(RocprimConstantIteratorTests, Basic)
 {
