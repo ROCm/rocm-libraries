@@ -429,8 +429,10 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_multi_abd_ctypes_lib.c
         message(STATUS "Found batched-contraction-multi-abd kernel for ctypes lib: ${CMA_KERNEL_HEADER}")
 
         # Resolve the GPU architecture for the CMake-driven build path.
-        # The Python bridge always passes -DGFX_ARCH=... explicitly via hipcc;
-        # here we derive a sensible default from CMAKE_HIP_ARCHITECTURES.
+        # The Python bridge always passes -DGFX_ARCH=... explicitly via hipcc, so
+        # this only affects builds driven through CMake directly. Unlike the
+        # sibling libs, there is no hard-coded fallback arch: the arch must come
+        # from -DCK_TILE_CMA_GFX_ARCH or CMAKE_HIP_ARCHITECTURES, else we fail.
         if(NOT DEFINED CK_TILE_CMA_GFX_ARCH OR CK_TILE_CMA_GFX_ARCH STREQUAL "")
             if(CMAKE_HIP_ARCHITECTURES)
                 list(GET CMAKE_HIP_ARCHITECTURES 0 _cma_gfx_arch)

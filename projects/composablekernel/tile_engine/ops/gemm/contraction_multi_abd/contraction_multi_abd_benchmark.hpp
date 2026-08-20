@@ -267,10 +267,17 @@ inline void run_contraction_multi_abd_benchmark(const ContractionMultiABDProblem
     std::vector<EDataType> he_ref;
     if(verify)
     {
-        // Reference: E[g,m,n] = sum_k A[g,m,k] * B[g,n,k] * NumATensors * NumBTensors
-        // With ha = 1/K and hb = 1/K: each pair contributes 1.0; total = NumA * NumB.
-        // D tensors are zero so epilogue adds nothing extra.
-        const float expected = static_cast<float>(NumATensors) * static_cast<float>(NumBTensors);
+        // Reference: E[g,m,n] = sum over (A, B) pairs of sum_k A[g,m,k] * B[g,n,k].
+        // With ha = hb = 1/K, one pair contributes sum_k (1/K)*(1/K) = 1/K, so the
+        // total over all pairs is NumA * NumB / K. D tensors are zero, so the
+        // epilogue adds nothing.
+        //
+        // Note: for NumATensors > 1 or NumBTensors > 1 this comparison currently
+        // fails, because the kernel's (A, B) loop stores rather than accumulates and
+        // only the last pair survives. That is a real kernel defect, not a reference
+        // error -- verify is doing its job by reporting it.
+        const float expected = static_cast<float>(NumATensors) * static_cast<float>(NumBTensors) /
+                               static_cast<float>(K);
         he_ref.resize(G * M * N, static_cast<EDataType>(expected));
     }
 

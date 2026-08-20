@@ -26,7 +26,9 @@
 inline auto create_args(int argc, char* argv[])
 {
     ck_tile::ArgParser p;
-    p.insert("g_dims", "1,2", "G (batch) dimensions, comma-separated")
+    // Defaults must match the shipped kernel defaults (NUM_DIM_G=1, M=2, N=2, K=1),
+    // otherwise a no-argument run always aborts on the dimension-count check below.
+    p.insert("g_dims", "2", "G (batch) dimensions, comma-separated")
         .insert("m_dims", "4,256", "M dimensions, comma-separated")
         .insert("n_dims", "16,128", "N dimensions, comma-separated")
         .insert("k_dims", "64", "K dimensions, comma-separated")
@@ -81,10 +83,8 @@ int main(int argc, char* argv[])
             return true;
         };
 
-        if(!check_positive(problem.g_dims, "g_dims") ||
-           !check_positive(problem.m_dims, "m_dims") ||
-           !check_positive(problem.n_dims, "n_dims") ||
-           !check_positive(problem.k_dims, "k_dims"))
+        if(!check_positive(problem.g_dims, "g_dims") || !check_positive(problem.m_dims, "m_dims") ||
+           !check_positive(problem.n_dims, "n_dims") || !check_positive(problem.k_dims, "k_dims"))
         {
             return EXIT_FAILURE;
         }

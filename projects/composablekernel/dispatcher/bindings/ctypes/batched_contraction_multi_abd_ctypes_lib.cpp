@@ -364,8 +364,7 @@ int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
                          int elem_size,
                          const char* name,
                          size_t& out) -> bool {
-        const int64_t span =
-            strided_span(dims.data(), strides, static_cast<int>(dims.size()));
+        const int64_t span = strided_span(dims.data(), strides, static_cast<int>(dims.size()));
         if(span < 0)
         {
             std::cerr << "dispatcher_run_batched_contraction_multi_abd: " << name
