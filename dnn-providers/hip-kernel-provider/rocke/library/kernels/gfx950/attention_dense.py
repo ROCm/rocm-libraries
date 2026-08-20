@@ -135,9 +135,10 @@ class AttentionDenseSpec:
     #   key 0: it builds, it runs, and it is silently wrong. MaskType
     #   BOTTOM_RIGHT_CAUSAL (2) names exactly this case.
     #
-    #   SCOPE TODAY: statically-shaped, tile-aligned specs only. seqlen_q must be a
-    #   multiple of 256 and seqlen_kv a multiple of block_n, because the aligned path
-    #   requires it and the offset has to land on a tile boundary. The two paths that
+    #   SCOPE TODAY: statically-shaped specs only, because the non-ragged path already
+    #   requires seqlen_q to be a multiple of 256 and seqlen_kv a multiple of block_n.
+    #   The offset itself is unconstrained -- the KV-tile bound is a ceil, so it need not
+    #   land on a tile boundary. The two paths that
     #   take arbitrary lengths are both excluded -- `ragged` is self-attention only
     #   (seqlen_q == seqlen_kv, so the offset is always 0) and `varlen` needs a runtime
     #   per-sequence offset. A general chunked-prefill request from vLLM / SGLang, whose
@@ -367,15 +368,8 @@ class AttentionDenseSpec:
                     "causal_bottom_right requires seqlen_q <= seqlen_kv, got "
                     f"{self.seqlen_q} > {self.seqlen_kv}"
                 )
-            # The offset shifts the KV-tile prune by exactly (seqlen_kv - seqlen_q) //
-            # block_n tiles, so it must land on a tile boundary or the pruned bound
-            # would cut into a partially-valid tile.
-            if (self.seqlen_kv - self.seqlen_q) % self.block_n != 0:
-                raise ValueError(
-                    "causal_bottom_right requires (seqlen_kv - seqlen_q) to be a "
-                    f"multiple of block_n={self.block_n}, got "
-                    f"{self.seqlen_kv - self.seqlen_q}"
-                )
+            # No tile-alignment requirement on the offset itself: the KV-tile bound is a
+            # ceil, so an offset that lands mid-tile still visits the tile it falls in.
         if self.waves_per_eu < 1 or self.waves_per_eu > 8:
             raise ValueError(
                 f"waves_per_eu must be in [1, 8], got {self.waves_per_eu} "
@@ -1053,10 +1047,19 @@ def build_attention_dense(
         b.div(seqlen_kv_b, b.const_i32(BN)) if varlen else b.const_i32(n_ktiles)
     )
     if causal:
-        # Last KV tile this query block can reach. Bottom-right shifts the diagonal
-        # right by DIAG_OFF keys, i.e. DIAG_TILES whole tiles (validated to divide
-        # evenly), so the block reaches that many tiles further.
-        n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per + DIAG_TILES))
+        # Last KV tile this query block can reach. The block's final row sits at
+        # qb*BLOCK_M + BLOCK_M - 1 and reaches DIAG_OFF keys beyond its own index, so the
+        # span is a CEIL over (BLOCK_M - 1 + DIAG_OFF). The qb term stays outside the
+        # ceil because qb*BLOCK_M is a multiple of BN (BN divides the query tile).
+        #
+        # Ceil rather than floor is what lets DIAG_OFF be any value: a floor would need
+        # the offset to land on a tile boundary or it would cut the bound short of a
+        # partially-valid tile. For offsets that are tile multiples this is the same
+        # constant as n_per + DIAG_OFF//BN, so nothing about the emitted code changes.
+        n_upper = b.add(
+            b.mul(qb, b.const_i32(n_per)),
+            b.const_i32((BLOCK_M - 1 + DIAG_OFF) // BN + 1),
+        )
         n_upper = b.select(b.cmp_lt(n_upper, n_ktiles_val), n_upper, n_ktiles_val)
     else:
         n_upper = n_ktiles_val

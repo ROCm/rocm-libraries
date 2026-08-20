@@ -25,6 +25,7 @@ from __future__ import annotations
 import pytest
 
 from kernels.gfx950.attention_dense import (
+    _BLOCK_M,
     AttentionDenseSpec,
     build_attention_dense,
     supports_attention_dense,
@@ -87,13 +88,34 @@ def test_bottom_right_accepted_on_aligned_cross_shape():
         (dict(seqlen_q=256, seqlen_kv=512, varlen=True), "varlen"),
         # The diagonal only ever moves right.
         (dict(seqlen_q=512, seqlen_kv=256), "seqlen_q <= seqlen_kv"),
-        # A partial-tile offset would cut into the pruned KV bound.
-        (dict(seqlen_q=256, seqlen_kv=512 + 32), "multiple of block_n"),
     ],
 )
 def test_unsupported_combinations_are_rejected(over, needle):
     with pytest.raises(ValueError, match=needle):
         _spec(causal_bottom_right=True, **over)
+
+
+def test_the_removed_alignment_guard_was_unreachable():
+    """Records why there is no "(seqlen_kv - seqlen_q) must be a multiple of block_n"
+    check: under the current shape rules it could never fire.
+
+    seqlen_q must be a multiple of the 256-row query tile, seqlen_kv a multiple of
+    block_n, and every legal block_n divides 256 -- so seqlen_q is a multiple of block_n
+    too and the difference always is as well. Enumerated rather than argued, so this
+    starts failing if the shape rules change and the assumption quietly stops holding.
+
+    The KV-tile bound is a ceil independently of this, so an offset that DID land
+    mid-tile would still be covered. That is what the ragged/varlen follow-up needs,
+    where the lengths are arbitrary and no such alignment is available.
+    """
+    checked = 0
+    for block_n in (32, 64, 128, 256):
+        assert _BLOCK_M % block_n == 0, "a block_n that does not divide the query tile"
+        for seqlen_q in range(_BLOCK_M, 4 * _BLOCK_M + 1, _BLOCK_M):
+            for seqlen_kv in range(seqlen_q, seqlen_q + 16 * block_n + 1, block_n):
+                assert (seqlen_kv - seqlen_q) % block_n == 0
+                checked += 1
+    assert checked
 
 
 def test_gfx942_refuses_the_field_it_does_not_implement():
