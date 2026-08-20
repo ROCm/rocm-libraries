@@ -803,9 +803,12 @@ TEST(HipMxScaleTypeForDataGenerator, MapsE8AndNoneToHIP_R_8F_UE8M0)
 }
 TEST(HipMxScaleTypeForDataGenerator, ThrowsOnUnsupportedScaleType)
 {
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float4), std::runtime_error);
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::BFloat8), std::runtime_error);
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float), std::runtime_error);
+    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float4),
+                 std::invalid_argument);
+    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::BFloat8),
+                 std::invalid_argument);
+    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float),
+                 std::invalid_argument);
 }
 
 // -----------------------------------------------------------------------------
@@ -836,9 +839,10 @@ TEST(HipMxDataTypeForDataGenerator, MapsBFloat6ToHIP_R_6F_E3M2)
 }
 TEST(HipMxDataTypeForDataGenerator, ThrowsOnUnsupportedDataType)
 {
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float), std::runtime_error);
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Half), std::runtime_error);
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat16), std::runtime_error);
+    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float), std::invalid_argument);
+    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Half), std::invalid_argument);
+    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat16),
+                 std::invalid_argument);
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR

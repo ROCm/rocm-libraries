@@ -52,7 +52,7 @@ namespace TensileLite
                 case roc::host_validation::ScalarType::Float8E5M2:
                     return hipblaslt::host_validation::hipDataTypeForScalarType(scalarType);
                 default:
-                    throw std::runtime_error(
+                    throw std::invalid_argument(
                         "initializeMXData: unsupported MX data element type for generateMXInput");
                 }
             }
