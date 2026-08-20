@@ -1,0 +1,17 @@
+# serializer version: 1
+# name: test_s10_convertafterds_fp8_f16_wide_tile_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_F8H_HHS_BH_UserArgs_MT128x64x64_MbZGkPq6hUaAacn216ZGTNGCtmoITWUN6MO94DuC5HTo=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_F8H_HHS_BH_UserArgs_MT256x64x64_MsR4NE81xXNbzKurLn3-alHnMOiYfDikvhyu5uZpR7O4=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_F8H_HHS_BH_UserArgs_MT256x64x64_Mz6sxx809Wa1vtJQlcnpsAwU9Z7AvCvcax7bNETcJvi4=',
+      'err': 0,
+    }),
+  ])
+# ---

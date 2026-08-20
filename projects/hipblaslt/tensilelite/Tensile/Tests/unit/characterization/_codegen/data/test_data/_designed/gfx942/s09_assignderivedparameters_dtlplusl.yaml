@@ -1,0 +1,58 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S09 assignDerivedParameters: DtlPlusLdsBuf / numLdsBlk LDS-budget path.
+#
+# Target: Tensile/SolutionStructs/Solution.py assignDerivedParameters
+#   - 4939 : auto DtlPlusLdsBuf=1 when PGR>2 and DtlPlusLdsBuf==-1
+#   - 4945 : disable DtlPlusLdsBuf when not(DirectToLdsA & DirectToLdsB)
+#   - 4964 : numLdsBlk=PGR for PGR>=3
+#
+# Mechanism: bf16 TN MFMA on gfx942. Fork PrefetchGlobalRead:[2,3] with
+# DirectToLdsA/B enabled and large DepthU. PGR=3 auto-enables DtlPlusLdsBuf
+# (4939) and sets numLdsBlk=PGR (4964); the disable block (4945) runs whenever
+# DtlPlusLdsBuf is truthy at that point. The feature combination then rejects
+# during derivation, so 0 valid solutions survive (Category A reachable-invalid).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 0
+      Batched: True
+      Activation: False
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   4, 4,  1, 1 ]
+        - DepthU: [64, 128]
+        - GlobalSplitU: [1]
+        - PrefetchGlobalRead: [2, 3]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]

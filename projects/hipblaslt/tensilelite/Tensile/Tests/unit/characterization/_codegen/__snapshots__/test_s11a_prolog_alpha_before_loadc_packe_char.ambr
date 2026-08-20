@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s11a_prolog_alpha_before_loadc_packe_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_I8I8S_BH_UserArgs_MT32x16x64_MI16e797u_EkMz6VpIQZ0y4RJ5o32Pn2MZwBJcWqb7KATO4=',
+      'err': 0,
+    }),
+  ])
+# ---

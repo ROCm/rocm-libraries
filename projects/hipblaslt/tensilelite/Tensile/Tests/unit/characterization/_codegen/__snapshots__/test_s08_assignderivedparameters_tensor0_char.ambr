@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s08_assignderivedparameters_tensor0_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_HHS_BH_SPBML0_UserArgs_MT64x64x32mOceAztaAy9KUl3psvw4TTXn8Ih_jRKEkspMkzx_oqw=',
+      'err': 0,
+    }),
+  ])
+# ---

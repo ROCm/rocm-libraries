@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s09_assignderivedparameters_localspl_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bjlk_HHS_BH_UserArgs_MT16x8x64_SN_LDSBANG4BDzwuRe_B49k-5O60hh9FIcd-f24j4PrmtQETas=',
+      'err': 0,
+    }),
+  ])
+# ---
