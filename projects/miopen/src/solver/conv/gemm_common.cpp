@@ -27,10 +27,24 @@
 #include <miopen/env.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_GEMM_NHWC_TRANSPOSE)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_GEMM_NHWC_IM2COL)
+
 namespace miopen {
 namespace solver {
 namespace conv {
 namespace gemm {
+
+bool IsNhwcTransposeEnabled() { return env::enabled(MIOPEN_DEBUG_CONV_GEMM_NHWC_TRANSPOSE); }
+
+bool IsNhwcIm2colEnabled() { return env::enabled(MIOPEN_DEBUG_CONV_GEMM_NHWC_IM2COL); }
+
+bool UseNhwcViaTranspose(const miopen::conv::ProblemDescription& problem)
+{
+    // The native im2col path, when enabled, handles NHWC without any data movement, so there is
+    // no reason to transpose as well.
+    return problem.IsLayoutNHWC() && IsNhwcTransposeEnabled() && !IsNhwcIm2colEnabled();
+}
 
 bool IsAnyBufferBf16(const TensorDescriptor& xDesc,
                      const TensorDescriptor& yDesc,

@@ -49,6 +49,25 @@ bool IsAnyBufferFp16(const TensorDescriptor& xDesc,
 
 double SlowdownFactor(int n_oper, double oper_factor, double multiple_oper_factor);
 
+/// The im2col/col2im based GEMM solvers address memory as NCHW-contiguous, so they only accept
+/// NCHW problems. Two independent ways of lifting that restriction are available, each behind its
+/// own switch so they can be compared on real hardware:
+///
+///   MIOPEN_DEBUG_CONV_GEMM_NHWC_TRANSPOSE=1
+///       Transpose NHWC->NCHW on the way in and NCHW->NHWC on the way out, and run the existing
+///       NCHW path unchanged in between. Costs two extra kernels plus workspace.
+///
+///   MIOPEN_DEBUG_CONV_GEMM_NHWC_IM2COL=1
+///       Use NHWC-aware im2col/col2im kernels and feed the GEMM directly, with no data movement.
+///
+/// Both default to off, which keeps these solvers NCHW-only. If both are set, the native im2col
+/// path wins, since it is strictly cheaper than transposing.
+MIOPEN_INTERNALS_EXPORT bool IsNhwcTransposeEnabled();
+MIOPEN_INTERNALS_EXPORT bool IsNhwcIm2colEnabled();
+
+/// True when this problem is NHWC and should be served by transposing around the NCHW path.
+MIOPEN_INTERNALS_EXPORT bool UseNhwcViaTranspose(const miopen::conv::ProblemDescription& problem);
+
 } // namespace gemm
 } // namespace conv
 } // namespace solver
