@@ -100,6 +100,16 @@ function(_install_project build_dir install_dir label)
             "${_install_output}\n${_install_error}"
         )
     endif()
+
+    set(_private_include_dir
+        "${install_dir}/include/roc/host_validation/detail"
+    )
+    if(EXISTS "${_private_include_dir}" OR IS_SYMLINK "${_private_include_dir}")
+        message(FATAL_ERROR
+            "${label} installed the private header directory "
+            "${_private_include_dir}."
+        )
+    endif()
 endfunction()
 
 # Configure, build, and execute one explicit package-component consumer.

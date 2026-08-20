@@ -8,7 +8,7 @@ endif()
 set(core_headers
     "${CORE_INCLUDE_DIR}/index_order.hpp"
     "${CORE_INCLUDE_DIR}/scalar.hpp"
-    "${CORE_INCLUDE_DIR}/detail/scalar_codec.hpp"
+    "${CORE_INCLUDE_DIR}/scalar_codec.hpp"
     "${CORE_INCLUDE_DIR}/tensor.hpp"
 )
 set(core_contents)
@@ -45,16 +45,16 @@ foreach(
 endforeach()
 
 file(READ "${CORE_INCLUDE_DIR}/scalar.hpp" scalar_contents)
-file(READ "${CORE_INCLUDE_DIR}/detail/scalar_codec.hpp" codec_contents)
+file(READ "${CORE_INCLUDE_DIR}/scalar_codec.hpp" codec_contents)
 file(READ "${CORE_INCLUDE_DIR}/tensor.hpp" tensor_contents)
 
 string(FIND
     "${scalar_contents}"
-    "#include <roc/host_validation/detail/scalar_codec.hpp>"
+    "#include <roc/host_validation/scalar_codec.hpp>"
     scalar_codec_include_position
 )
 if(scalar_codec_include_position EQUAL -1)
-    message(FATAL_ERROR "scalar.hpp does not include its private header-only codec implementation.")
+    message(FATAL_ERROR "scalar.hpp does not include its codec template definitions.")
 endif()
 
 foreach(required_scalar_declaration
@@ -122,6 +122,6 @@ foreach(forbidden_codec_declaration
     string(FIND "${codec_contents}" "${forbidden_codec_declaration}" position)
     if(NOT position EQUAL -1)
         message(FATAL_ERROR
-            "The private scalar codec declares public object type: ${forbidden_codec_declaration}")
+            "The scalar codec declares public object type: ${forbidden_codec_declaration}")
     endif()
 endforeach()
