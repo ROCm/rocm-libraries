@@ -66,6 +66,23 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 // is compiled into its own .so, so there is no cross-kernel symbol aliasing.
 static std::atomic<int> g_ref_count{0};
 
+// Architectures this bridge is known to work on. These fp8/bf8 CompV3 kernels need
+// native FP8, so gfx90a is deliberately absent -- it compiles but produces NaN.
+// Enabling a new target is a one-line addition here plus a CMake arch entry.
+static constexpr const char* kSupportedArchs[] = {"gfx942", "gfx950"};
+
+// True if `arch` starts with any entry of kSupportedArchs. Prefix-matching, because
+// hipDeviceProp_t::gcnArchName carries feature suffixes (e.g. "gfx942:sramecc+:xnack-").
+static bool is_supported_arch(const std::string& arch)
+{
+    for(const char* supported : kSupportedArchs)
+    {
+        if(arch.rfind(supported, 0) == 0)
+            return true;
+    }
+    return false;
+}
+
 extern "C" {
 
 /**
@@ -82,10 +99,24 @@ int dispatcher_initialize()
         return -1;
     }
     // GFX_ARCH is injected at compile time by CMake (e.g. "gfx942" or "gfx950").
-    // Validate that the runtime device matches the compiled kernel architecture so
-    // that we don't attempt to launch a kernel image on a mismatched device.
     const std::string arch(props.gcnArchName);
     const std::string compiled_arch(GFX_ARCH);
+
+    // Two distinct checks. First: is the arch this .so was built for one we support at
+    // all? A typo or a newly added CMake target would otherwise only surface as a
+    // wrong-answer kernel at runtime.
+    if(!is_supported_arch(compiled_arch))
+    {
+        std::cerr << "dispatcher_initialize: compile-time GFX_ARCH '" << compiled_arch
+                  << "' is not a supported architecture (supported:";
+        for(const char* supported : kSupportedArchs)
+            std::cerr << " " << supported;
+        std::cerr << ")\n";
+        return -1;
+    }
+
+    // Second: does the device we are actually running on match that arch? A single-arch
+    // .so launched on a different device yields a no-kernel-image failure.
     if(arch.rfind(compiled_arch, 0) != 0)
     {
         std::cerr << "dispatcher_initialize: runtime device architecture '" << arch
@@ -247,26 +278,32 @@ int dispatcher_run_gemm(const void* A,
     HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGroupedGemmHostArgs for single-group launch.
-    // TensorQuant: QK_A=1 (one scale for whole A tensor), QK_B=1 (one scale for whole B tensor).
-    // stride_AQ=1 (single element), stride_BQ=1 (single element).
-    ck_tile::QuantGroupedGemmHostArgs args(
-        A_dev,
-        B_dev,
-        C_dev,
-        AQ_dev,
-        BQ_dev,
-        static_cast<ck_tile::index_t>(k_batch),
-        static_cast<ck_tile::index_t>(M),
-        static_cast<ck_tile::index_t>(N),
-        static_cast<ck_tile::index_t>(K),
-        static_cast<ck_tile::index_t>(1), // QK_A: tensor-wise = 1
-        static_cast<ck_tile::index_t>(1), // QK_B: tensor-wise = 1
-        static_cast<ck_tile::index_t>(stride_A),
-        static_cast<ck_tile::index_t>(stride_B),
-        static_cast<ck_tile::index_t>(stride_C),
-        static_cast<ck_tile::index_t>(1), // stride_AQ: tensor-wise
-        static_cast<ck_tile::index_t>(1)  // stride_BQ: tensor-wise
-    );
+    //
+    // The quantization semantics of TensorQuant are carried entirely by these four
+    // values, so name them rather than writing bare 1s at the call site:
+    //   - one scale covers the whole tensor, hence a quant-group count of 1;
+    //   - the scale buffer holds exactly one element, hence a scale stride of 1.
+    // Host-side validation above already rejected any QK_A/QK_B/stride_AQ/stride_BQ
+    // that disagrees, so these constants restate a checked invariant, not a guess.
+    constexpr auto kTensorWiseQuantGroups = static_cast<ck_tile::index_t>(1);
+    constexpr auto kTensorWiseScaleStride = static_cast<ck_tile::index_t>(1);
+
+    ck_tile::QuantGroupedGemmHostArgs args(A_dev,
+                                           B_dev,
+                                           C_dev,
+                                           AQ_dev,
+                                           BQ_dev,
+                                           static_cast<ck_tile::index_t>(k_batch),
+                                           static_cast<ck_tile::index_t>(M),
+                                           static_cast<ck_tile::index_t>(N),
+                                           static_cast<ck_tile::index_t>(K),
+                                           kTensorWiseQuantGroups, // QK_A
+                                           kTensorWiseQuantGroups, // QK_B
+                                           static_cast<ck_tile::index_t>(stride_A),
+                                           static_cast<ck_tile::index_t>(stride_B),
+                                           static_cast<ck_tile::index_t>(stride_C),
+                                           kTensorWiseScaleStride,  // stride_AQ
+                                           kTensorWiseScaleStride); // stride_BQ
 
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
@@ -324,10 +361,18 @@ int dispatcher_run_gemm(const void* A,
  */
 const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
 
+// This bridge is one-.so-per-kernel by construction: the build force-includes exactly
+// one generated header via `hipcc -include <kernel.hpp>`, giving one SelectedKernel.
+// Scaling to N kernels means N .so files (the pattern bquant/aquant/abquant follow),
+// not incrementing this constant. A generated header may override it via -D if needed.
+#ifndef CK_TILE_DISPATCHER_KERNEL_COUNT
+#define CK_TILE_DISPATCHER_KERNEL_COUNT 1
+#endif
+
 /**
- * Number of kernels in this .so (always 1: the force-included SelectedKernel).
+ * Number of kernels compiled into this .so.
  */
-int dispatcher_get_kernel_count() { return 1; }
+int dispatcher_get_kernel_count() { return CK_TILE_DISPATCHER_KERNEL_COUNT; }
 
 /**
  * Decrement the initialisation reference count. When it reaches zero the library

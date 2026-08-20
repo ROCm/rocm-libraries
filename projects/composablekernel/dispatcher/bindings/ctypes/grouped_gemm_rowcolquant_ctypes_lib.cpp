@@ -63,6 +63,23 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 // is compiled into its own .so, so there is no cross-kernel symbol aliasing.
 static std::atomic<int> g_ref_count{0};
 
+// Architectures this bridge is known to work on. These fp8/bf8 CompV3 kernels need
+// native FP8, so gfx90a is deliberately absent -- it compiles but produces NaN.
+// Enabling a new target is a one-line addition here plus a CMake arch entry.
+static constexpr const char* kSupportedArchs[] = {"gfx942", "gfx950"};
+
+// True if `arch` starts with any entry of kSupportedArchs. Prefix-matching, because
+// hipDeviceProp_t::gcnArchName carries feature suffixes (e.g. "gfx942:sramecc+:xnack-").
+static bool is_supported_arch(const std::string& arch)
+{
+    for(const char* supported : kSupportedArchs)
+    {
+        if(arch.rfind(supported, 0) == 0)
+            return true;
+    }
+    return false;
+}
+
 extern "C" {
 
 /**
@@ -79,10 +96,24 @@ int dispatcher_initialize()
         return -1;
     }
     // GFX_ARCH is injected at compile time by CMake (e.g. "gfx942" or "gfx950").
-    // Validate that the runtime device matches the compiled kernel architecture so
-    // that we don't attempt to launch a kernel image on a mismatched device.
     const std::string arch(props.gcnArchName);
     const std::string compiled_arch(GFX_ARCH);
+
+    // Two distinct checks. First: is the arch this .so was built for one we support at
+    // all? A typo or a newly added CMake target would otherwise only surface as a
+    // wrong-answer kernel at runtime.
+    if(!is_supported_arch(compiled_arch))
+    {
+        std::cerr << "dispatcher_initialize: compile-time GFX_ARCH '" << compiled_arch
+                  << "' is not a supported architecture (supported:";
+        for(const char* supported : kSupportedArchs)
+            std::cerr << " " << supported;
+        std::cerr << ")\n";
+        return -1;
+    }
+
+    // Second: does the device we are actually running on match that arch? A single-arch
+    // .so launched on a different device yields a no-kernel-image failure.
     if(arch.rfind(compiled_arch, 0) != 0)
     {
         std::cerr << "dispatcher_initialize: runtime device architecture '" << arch
@@ -244,28 +275,45 @@ int dispatcher_run_gemm(const void* A,
     HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGroupedGemmHostArgs for single-group launch.
-    // The RowColQuant kernel treats AQ as a 1-D per-row vector and BQ as a 1-D per-col
-    // vector. It uses broadcast strides (stride=0) to index them -- i.e. scale[0] is
-    // reused across all columns (AQ) / all rows (BQ). QK_A and QK_B are ignored by the
-    // kernel; M and N govern the loop bounds directly. Passing any non-zero stride causes
-    // the kernel to step past the end of the scale buffer, producing garbage output.
-    ck_tile::QuantGroupedGemmHostArgs args(
-        A_dev,
-        B_dev,
-        C_dev,
-        AQ_dev,
-        BQ_dev,
-        static_cast<ck_tile::index_t>(k_batch),
-        static_cast<ck_tile::index_t>(M),
-        static_cast<ck_tile::index_t>(N),
-        static_cast<ck_tile::index_t>(K),
-        static_cast<ck_tile::index_t>(1), // QK_A: unused
-        static_cast<ck_tile::index_t>(1), // QK_B: unused
-        static_cast<ck_tile::index_t>(stride_A),
-        static_cast<ck_tile::index_t>(stride_B),
-        static_cast<ck_tile::index_t>(stride_C),
-        static_cast<ck_tile::index_t>(0),  // stride_AQ: broadcast
-        static_cast<ck_tile::index_t>(0)); // stride_BQ: broadcast
+    //
+    // Load-bearing invariant, split across host and kernel:
+    //   host  - QK_A == M and QK_B == N were validated at the top of this function, and
+    //           the AQ/BQ device buffers were sized from them (M and N elements).
+    //   kernel- reads M per-row A scales and N per-col B scales, deriving the counts
+    //           from M/N directly. The QK_A/QK_B fields below are therefore ignored,
+    //           and the scale strides must be 0: the kernel broadcasts scale[row] across
+    //           the row (AQ) and scale[col] down the column (BQ). Any non-zero stride
+    //           makes it walk past the end of the scale buffer and return garbage.
+    //
+    // Naming the constants keeps the two halves legible; the assertion re-states the
+    // host half so a future kernel that starts honouring QK_A/QK_B cannot silently
+    // inherit a placeholder of 1 and read out of bounds.
+    constexpr auto kQuantGroupsIgnoredByKernel = static_cast<ck_tile::index_t>(1);
+    constexpr auto kBroadcastScaleStride       = static_cast<ck_tile::index_t>(0);
+
+    if(QK_A != M || QK_B != N)
+    {
+        std::cerr << "dispatcher_run_gemm: internal error, scale-count invariant violated\n";
+        cleanup();
+        return -1;
+    }
+
+    ck_tile::QuantGroupedGemmHostArgs args(A_dev,
+                                           B_dev,
+                                           C_dev,
+                                           AQ_dev,
+                                           BQ_dev,
+                                           static_cast<ck_tile::index_t>(k_batch),
+                                           static_cast<ck_tile::index_t>(M),
+                                           static_cast<ck_tile::index_t>(N),
+                                           static_cast<ck_tile::index_t>(K),
+                                           kQuantGroupsIgnoredByKernel, // QK_A
+                                           kQuantGroupsIgnoredByKernel, // QK_B
+                                           static_cast<ck_tile::index_t>(stride_A),
+                                           static_cast<ck_tile::index_t>(stride_B),
+                                           static_cast<ck_tile::index_t>(stride_C),
+                                           kBroadcastScaleStride,  // stride_AQ
+                                           kBroadcastScaleStride); // stride_BQ
 
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
@@ -323,10 +371,18 @@ int dispatcher_run_gemm(const void* A,
  */
 const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
 
+// This bridge is one-.so-per-kernel by construction: the build force-includes exactly
+// one generated header via `hipcc -include <kernel.hpp>`, giving one SelectedKernel.
+// Scaling to N kernels means N .so files (the pattern bquant/aquant/abquant follow),
+// not incrementing this constant. A generated header may override it via -D if needed.
+#ifndef CK_TILE_DISPATCHER_KERNEL_COUNT
+#define CK_TILE_DISPATCHER_KERNEL_COUNT 1
+#endif
+
 /**
- * Number of kernels in this .so (always 1: the force-included SelectedKernel).
+ * Number of kernels compiled into this .so.
  */
-int dispatcher_get_kernel_count() { return 1; }
+int dispatcher_get_kernel_count() { return CK_TILE_DISPATCHER_KERNEL_COUNT; }
 
 /**
  * Decrement the initialisation reference count. When it reaches zero the library
