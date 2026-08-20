@@ -366,10 +366,12 @@ void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
 IndexType TransposeNode::GetKernelIndexType() const
 {
+    auto idx_limit = GetKernelIndexLimit();
+
     // No scalar_type reinterpretation by this kernel (see rtc_transpose_gen.cpp).
     // INT32_MAX, not UINT32_MAX: the compiler may sign-extend 32-bit indices to 64-bit.
-    if(MaxKernelIndex(io_data_label::INPUT) > static_cast<size_t>(INT32_MAX)
-       || MaxKernelIndex(io_data_label::OUTPUT) > static_cast<size_t>(INT32_MAX))
+    if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
+       || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
     {
         return IndexType::U64;
     }

@@ -1039,6 +1039,13 @@ public:
     bool         CreateDeviceResources() override;
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
+
+    virtual size_t GetKernelIndexLimit() const
+    {
+        // NOTE: temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
+        return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
+                                                         : static_cast<size_t>(UINT32_MAX);
+    }
     // Return the index type for this node's kernel.
     // Overridden by nodes that use narrower index types
     virtual IndexType GetKernelIndexType() const
