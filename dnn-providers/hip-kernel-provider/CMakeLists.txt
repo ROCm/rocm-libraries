@@ -362,7 +362,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         conv_fwd/conv_fwd.uhd.json
         conv_fwd/conv_fwd_f16_block64.ukd.json
         conv_fwd/kernel_dtype_matches_graph.umd.json
-        conv_fwd/single_node_conv_fwd.umd.json
         pointwise/kernel_dtype_matches_graph.umd.json
         pointwise/operation_is_add.umd.json
         pointwise/operation_is_mul.umd.json
@@ -374,7 +373,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         pointwise/pointwise_add.kdp.json
         pointwise/pointwise_mul.kdp.json
         pointwise/pointwise_sub.kdp.json
-        pointwise/single_node_binary.umd.json
     )
 
     # Wiped once per configure, not once per build. copy_if_different below makes an

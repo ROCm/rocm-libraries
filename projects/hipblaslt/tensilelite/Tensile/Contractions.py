@@ -612,6 +612,33 @@ class ProblemPredicate(Properties.Predicate):
         predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPreds
         return cls.And(predicates)
 
+class CustomKernel:
+    StateKeys = ['name',
+                 'args',
+                 'macrotile',
+                 'threads',
+                 'grid',
+                 'workspaceType',
+                 'workspaceSizePerElemC',
+                 'workspaceSizePerElemBias',
+                 'generated']
+
+    @classmethod
+    def FromOriginalState(cls, d):
+        return cls(name=d['name'],
+                   args=d['args'],
+                   macrotile=d['macrotile'],
+                   threads=d['threads'],
+                   grid=d['grid'],
+                   workspaceType=d.get('workspaceType', 'None'),
+                   workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
+                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
+                   generated=d.get('generated', False))
+
+    def __init__(self, **kwargs):
+        for (key, value) in list(kwargs.items()):
+            setattr(self, key, value)
+
 class SizeMapping:
     StateKeys = ['waveNum',
                  'workGroup',
@@ -641,7 +668,6 @@ class SizeMapping:
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
                  'activationFused',
-                 'CustomKernelName',
                  'workGroupMappingXCC',
                  'workGroupMappingXCCGroup',
                  'globalSplitUCoalesced',
@@ -736,7 +762,6 @@ class SizeMapping:
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
                    activationFused          = d['ActivationFused'],
-                   CustomKernelName         = d['CustomKernelName'],
                    workGroupMappingXCC      = d['WorkGroupMappingXCC'],
                    workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
                    globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
@@ -764,7 +789,7 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
-                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
                    clusterDim               = d['ClusterDim']
                    )
     @classmethod
@@ -806,17 +831,18 @@ class InternalArgsSupport:
 class Solution:
     StateKeys = ['name',
                  'kernelName',
-                'problemType',
-                'hardwarePredicate',
-                'problemPredicate',
-                'taskPredicate',
-                'sizeMapping',
-                'internalArgsSupport',
-                'debugKernel',
-                'libraryLogicIndex',
-                'index',
-                'ideals',
-                'linearModel']
+                 'problemType',
+                 'hardwarePredicate',
+                 'problemPredicate',
+                 'taskPredicate',
+                 'sizeMapping',
+                 'customKernel',
+                 'internalArgsSupport',
+                 'debugKernel',
+                 'libraryLogicIndex',
+                 'index',
+                 'ideals',
+                 'linearModel']
     HiddenKeys = ['originalSolution']
 
     @classmethod
@@ -886,6 +912,10 @@ class Solution:
         rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))
 
         rv.sizeMapping = SizeMapping.FromOriginalState(d)
+        if 'CustomKernel' in d:
+            rv.customKernel = CustomKernel.FromOriginalState(d['CustomKernel'])
+        else:
+            rv.customKernel = {}
 
         rv.internalArgsSupport = InternalArgsSupport.FromOriginalState(d)
 
@@ -934,6 +964,7 @@ class Solution:
         self.problemPredicate = ProblemPredicate('TruePred')
         self.taskPredicate = TaskPredicate('TruePred')
         self.sizeMapping = None
+        self.customKernel = None
         self.debugKernel = False
         self.libraryLogicIndex = {}
         self.index = None

@@ -370,6 +370,20 @@ validParameters = { # we need to make sure this matches develop
     #   PGR==2: reject (use -1 or 0 in that case)
     # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
     "DtlPlusLdsBuf": [-1,0,1],
+    # Force allocating PGR+1 (i.e. 3) LDS buffers when PrefetchGlobalRead==2,
+    # if we have enough LDS memory size. It targets the TDM (datamover) PGR2 path
+    # (e.g. gfx1250). The extra LDS block lets the next-iteration global reads be
+    # scheduled over the barrier without colliding with the buffer currently
+    # being read.
+    # -1: auto (3 buffers if they fit in MaxLDS, otherwise fall back to 2)
+    #  0: disable
+    #  1: enable (forced; no MaxLDS fallback, so a kernel whose 3 buffers do not
+    #     fit is rejected by the usual LDS size check)
+    # Silently downgraded to 0 without TDM on both A and B, for
+    # PrefetchGlobalRead!=2, and for PrefetchAcrossPersistent=1.
+    # 1LDSBuffer never competes with this: TDM already resolves 1LDSBuffer==-1 to 0
+    # and rejects 1LDSBuffer==1 with PGR2.
+    "TDMPlusLdsBuf": [-1,0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.
@@ -616,7 +630,7 @@ validParameters = { # we need to make sure this matches develop
     #   (since C matrix is always coalesced in Free0 index direction and this assertion guarantees the index element multiple)
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[1] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[1] is usually letter "J"
@@ -624,7 +638,7 @@ validParameters = { # we need to make sure this matches develop
     # Optimizations enabled by AssertFree1ElementMultiple>1:
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1082,7 +1096,7 @@ validParameters = { # we need to make sure this matches develop
     #
     # Custom kernels can be included in a BenchmarkProblemSizeGroup by having their name (without file extension) listed under the "CustomKernels"
     # category alongside InitialSolutionParameters, BenchmarkCommonParameters, etc...
-    "CustomKernelName": -1,
+    "CustomKernel": -1,
     # Will allow a kernel to be accepted even when checks determine it's not viable.
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],
