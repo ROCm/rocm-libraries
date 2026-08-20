@@ -23,8 +23,8 @@
 block_reduce_test_suite_type_def(suite_name_single, name_suffix)
 block_reduce_test_suite_type_def(suite_name_array, name_suffix)
 
-typed_test_suite_def(suite_name_single, name_suffix, block_params);
-typed_test_suite_def(suite_name_array, name_suffix, block_params);
+typed_test_suite_def(suite_name_single, name_suffix, block_params, block_params_name_generator);
+typed_test_suite_def(suite_name_array, name_suffix, block_params, block_params_name_generator);
 
 typed_test_def(suite_name_single, name_suffix, Reduce)
 {

@@ -30,6 +30,8 @@
 
 #include <cstddef>
 #include <stdint.h>
+#include <string>
+#include <type_traits>
 
 template<
     class T,
@@ -275,12 +277,113 @@ static constexpr unsigned int items[n_items] = {
 
 #define block_sort_test_suite_type_def(name, suffix) block_sort_test_suite_type_def_helper(name, suffix)
 
-#define typed_test_suite_def_helper(name, suffix, params) TYPED_TEST_SUITE(name ## suffix, params)
+// Variadic so callers may pass an optional 4th name-generator argument that is
+// forwarded to TYPED_TEST_SUITE's 3rd parameter. Existing 3-argument callers
+// expand exactly as before.
+#define typed_test_suite_def_helper(name, suffix, ...) TYPED_TEST_SUITE(name ## suffix, __VA_ARGS__)
 
-#define typed_test_suite_def(name, suffix, params) typed_test_suite_def_helper(name, suffix, params)
+#define typed_test_suite_def(name, suffix, ...) typed_test_suite_def_helper(name, suffix, __VA_ARGS__)
 
 #define typed_test_def_helper(suite, suffix, name) TYPED_TEST(suite ## suffix, name)
 
 #define typed_test_def(suite, suffix, name) typed_test_def_helper(suite, suffix, name)
+
+// ------------------------------------------------------------------------
+// Name generators for index-free GTEST_FILTER targeting.
+//
+// Default TYPED_TEST_SUITE naming uses the positional index of a type in its
+// ::testing::Types list, so filters that reference "/N" silently point at a
+// different type whenever the list is reordered. The generators below build a
+// stable, [A-Za-z0-9_]-safe name from the parameter struct's own fields; pass
+// one as the optional 4th argument of typed_test_suite_def (or the 3rd of
+// TYPED_TEST_SUITE) to make a suite filterable by name.
+// ------------------------------------------------------------------------
+
+template<class>
+struct type_tag_dependent_false : std::false_type
+{};
+
+// Maps every concrete type used in the typed test parameter lists to a unique,
+// readable fragment. Uncovered types trip a static_assert so gaps fail to build.
+template<class T>
+inline std::string type_tag()
+{
+    if constexpr(std::is_same_v<T, int>) return "Int";
+    else if constexpr(std::is_same_v<T, unsigned int>) return "Uint";
+    else if constexpr(std::is_same_v<T, int8_t>) return "Int8";
+    else if constexpr(std::is_same_v<T, uint8_t>) return "Uint8";
+    else if constexpr(std::is_same_v<T, short>) return "Short";
+    else if constexpr(std::is_same_v<T, unsigned short>) return "Ushort";
+    else if constexpr(std::is_same_v<T, long>) return "Long";
+    else if constexpr(std::is_same_v<T, unsigned long long>) return "Uint64";
+    else if constexpr(std::is_same_v<T, bool>) return "Bool";
+    else if constexpr(std::is_same_v<T, float>) return "Float";
+    else if constexpr(std::is_same_v<T, double>) return "Double";
+    else if constexpr(std::is_same_v<T, rocprim::half>) return "Half";
+    else if constexpr(std::is_same_v<T, rocprim::bfloat16>) return "Bfloat16";
+    else if constexpr(std::is_same_v<T, common::custom_type<int, int, true>>) return "CustomInt2";
+    else if constexpr(std::is_same_v<T, common::custom_type<double, double, true>>)
+        return "CustomDouble2";
+    else if constexpr(std::is_same_v<T, common::custom_type<float, float, true>>)
+        return "CustomFloat2";
+    else if constexpr(std::is_same_v<T, common::custom_type<uint8_t, uint8_t, true>>)
+        return "CustomUint8_2";
+#if ROCPRIM_HAS_INT128_SUPPORT
+    else if constexpr(std::is_same_v<T, rocprim::uint128_t>) return "Uint128";
+    else if constexpr(std::is_same_v<T, rocprim::int128_t>) return "Int128";
+#endif
+    else
+        static_assert(type_tag_dependent_false<T>::value,
+                      "type_tag: add a case for this type");
+}
+
+// warp_params<T, WarpSize, ItemsPerThread> -> e.g. "Int_w32_i1".
+struct warp_params_name_generator
+{
+    template<class Params>
+    static std::string GetName(int)
+    {
+        return type_tag<typename Params::type>() + "_w" + std::to_string(Params::warp_size) + "_i"
+               + std::to_string(Params::items_per_thread);
+    }
+};
+
+// block_params<T, U, BlockSize> -> e.g. "Int_CustomInt2_b256".
+struct block_params_name_generator
+{
+    template<class Params>
+    static std::string GetName(int)
+    {
+        return type_tag<typename Params::input_type>() + "_"
+               + type_tag<typename Params::output_type>() + "_b"
+               + std::to_string(Params::block_size);
+    }
+};
+
+// vector_params<T, U, ItemsPerThread, Vectorized> -> e.g. "Int_Int_i4_vec".
+struct vector_params_name_generator
+{
+    template<class Params>
+    static std::string GetName(int)
+    {
+        return type_tag<typename Params::type>() + "_" + type_tag<typename Params::vector_type>()
+               + "_i" + std::to_string(Params::items_per_thread)
+               + (Params::should_be_vectorized ? "_vec" : "_novec");
+    }
+};
+
+// class_params<T, Load, Store, BlockSize, ItemsPerThread> -> e.g. "Int_l0_s0_b256_i4".
+struct class_params_name_generator
+{
+    template<class Params>
+    static std::string GetName(int)
+    {
+        return type_tag<typename Params::type>() + "_l"
+               + std::to_string(static_cast<int>(Params::load_method)) + "_s"
+               + std::to_string(static_cast<int>(Params::store_method)) + "_b"
+               + std::to_string(Params::block_size) + "_i"
+               + std::to_string(Params::items_per_thread);
+    }
+};
 
 #endif // TEST_TEST_UTILS_TYPES_HPP_
