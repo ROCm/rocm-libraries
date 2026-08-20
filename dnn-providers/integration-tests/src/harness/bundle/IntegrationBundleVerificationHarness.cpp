@@ -10,6 +10,7 @@
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
@@ -21,7 +22,9 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
+#include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
@@ -202,8 +205,65 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
+// Records raw SupportObservations (does this engine take the graph, yes or no)
+// rather than the SupportResults the claim path produces, so it reads the session's
+// ranked list itself instead of going through the claim observer.
+//
+// Mode B authors claims for every loaded engine off a single run, so this walks the
+// engine table rather than the one engine under test.
+void IntegrationBundleVerificationHarness::observeSupportOnly(const GraphSession& session)
+{
+    if(!session.buildError.empty())
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
+                                                                             << session.buildError);
+        return;
+    }
+
+    if(!isResolved(session.engines.status.get_code()))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for "
+                               << _bundlePath << ": " << session.engines.status.get_message());
+        return;
+    }
+
+    auto engines = LoadedEngineTable::get().all();
+    if(TestConfig::get().hasEngineName())
+    {
+        const std::string targetName(TestConfig::get().getEngineName());
+        engines.erase(std::remove_if(engines.begin(),
+                                     engines.end(),
+                                     [&](const LoadedEngine& e) { return e.name != targetName; }),
+                      engines.end());
+    }
+
+    const std::string arch = baseArchToken(_deps.policy.arch);
+    const auto& rankedIds = session.engines.rankedIds;
+
+    for(const auto& engine : engines)
+    {
+        const bool engineIsSupported
+            = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
+
+        SupportObservationLog::get().record(
+            {_claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported});
+    }
+}
+
 VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSession& session)
 {
+    // Authoring mode records what the engines actually take and stops: it has no
+    // verdict to give about the graph, so nothing below it may run. SKIPPED at
+    // NOT_REACHED is the honest outcome and keeps TestBody()'s "passed without
+    // reaching the required depth" guard quiet, which a PASSED here would trip.
+    if(TestConfig::get().writeSupportClaims())
+    {
+        observeSupportOnly(session);
+        return VerificationOutcome::skipped(VerificationDepth::NOT_REACHED,
+                                            "support-claim authoring run "
+                                            "(--write-support-claims)");
+    }
+
     // A graph that would not load is the engine's problem, at every level, and it is
     // the reason nothing below can run. Checked once, here, so the rungs and the
     // modes can all assume a usable session.

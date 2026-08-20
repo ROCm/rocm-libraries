@@ -174,6 +174,8 @@ public:
         return _inputFillRecipes;
     }
 
+    void observeSupportOnly();
+
 private:
     // The one place a graph is built and the ranked list is asked for.
     GraphSession openGraph();
