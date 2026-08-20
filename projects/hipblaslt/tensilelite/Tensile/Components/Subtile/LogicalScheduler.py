@@ -3418,7 +3418,6 @@ class LogicalScheduler:
                     gl2_preloop_ops.append(GL2PrefetchIncOp())
                     gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
-            _reorder = True
             if maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
@@ -3435,61 +3434,43 @@ class LogicalScheduler:
                 ]
                 mt1_ops = self._make_preloop_mt1_grs()
 
-            if _reorder:
-                # PGR=2 preloop GR reorder, made StreamK-safe.
-                #
-                # The goal is to hoist the MT1 GR batch ahead of the GR wait so
-                # MT1's load latency is deferred into the main loop: the wait then
-                # only drains MT0 (vmcnt = num_gr_total leaves MT1's loads in
-                # flight). On the data-parallel path every workgroup runs the full
-                # K loop, so this is unconditionally safe.
-                #
-                # Under StreamK a workgroup may own only a partial K range and hit
-                # loopCounter<=1, which routes it to the NLL (no-load-loop). Two
-                # things must hold for that path:
-                #   1. initC / WaitGR / Sync / LR must still run — the NLL body
-                #      assumes the accumulators are zeroed, MT0 is resident in LDS,
-                #      and the first LR is done. The original reorder branched to
-                #      NLL *before* this setup and corrupted the StreamK tail.
-                #   2. MT1 GR must NOT be issued — its SRD has been advanced past
-                #      this workgroup's K range and the buffer_load faults (illegal
-                #      access), so it is guarded out for partial tiles.
-                #
-                # Because MT1 is conditional, the drain count differs per path:
-                # full path has MT0+MT1 in flight (wait to num_gr_total leaves MT1),
-                # partial path has only MT0 (wait to 0). We emit both waits on
-                # mutually exclusive branches and rejoin before Sync/LR. The NLL and
-                # NGLL skips stay after the shared setup, exactly as the stock path.
-                emitted = self._to_emitted([
-                    *preloop_ops,
-                    initC_op,
-                    SkipOp(compare='LE', value=1,
-                           target='PreloopReorderPartial', rawLabel=True,
-                           branchComment='partial K tile: skip MT1 GR prefetch'),
-                    *mt1_ops,
-                    WaitGROp(wait_gr_counts=WaitGRCounts(use_num_gr_total=True)),
-                    self._make_reorder_branch_op('PreloopReorderJoin'),
-                    self._make_reorder_label_op('PreloopReorderPartial'),
-                    WaitGROp(wait_gr_counts=WaitGRCounts(), force_drain=True),
-                    self._make_reorder_label_op('PreloopReorderJoin'),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
-            else:
-                emitted = self._to_emitted([
-                    *preloop_ops,
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *mt1_ops,
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+            # PGR=2 preloop GR reorder — unconditional for all PGR=2 subtile kernels.
+            #
+            # Hoists the MT1 GR batch ahead of initC/wait/sync/LR so both MT0 and
+            # MT1 are in flight during the accumulator-zeroing window.  The wait then
+            # only drains MT0 (vmcnt = num_gr_total leaves MT1's loads in flight),
+            # deferring MT1 latency into the main k-loop for free.  Validated on
+            # SK0 (data-parallel) and SK3 (StreamK=3) MXFP4 kernels on gfx950.
+            #
+            # Under StreamK a workgroup may own only a partial K range and hit
+            # loopCounter<=1, routing it to the NLL (no-load-loop). Two invariants
+            # must hold for that path:
+            #   1. initC / WaitGR / Sync / LR must still run — the NLL body assumes
+            #      zeroed accumulators, MT0 resident in LDS, and the first LR done.
+            #   2. MT1 GR must NOT be issued — its SRD has been advanced past this
+            #      workgroup's K range; the buffer_load would fault.
+            #
+            # A two-branch structure handles this: full-tile path issues MT1 then
+            # waits vmcnt(num_gr_total); partial-tile path skips MT1 and drains
+            # vmcnt(0). Both paths rejoin before Sync/LR/SkipNLL, exactly as stock.
+            emitted = self._to_emitted([
+                *preloop_ops,
+                initC_op,
+                SkipOp(compare='LE', value=1,
+                       target='PreloopReorderPartial', rawLabel=True,
+                       branchComment='partial K tile: skip MT1 GR prefetch'),
+                *mt1_ops,
+                WaitGROp(wait_gr_counts=WaitGRCounts(use_num_gr_total=True)),
+                self._make_reorder_branch_op('PreloopReorderJoin'),
+                self._make_reorder_label_op('PreloopReorderPartial'),
+                WaitGROp(wait_gr_counts=WaitGRCounts(), force_drain=True),
+                self._make_reorder_label_op('PreloopReorderJoin'),
+                SyncOp(),
+                *self._make_lr_all_tensors(lr_tiles),
+                SkipOp(compare='LE', value=1, target='NLL'),
+                *gl2_preloop_ops,
+                SkipOp(compare='LE', value=2, target='NGLL'),
+            ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
