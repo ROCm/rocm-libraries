@@ -1266,8 +1266,24 @@ namespace TensileLite
                                 vec_rm.push_back(0);
                                 continue;
                             }
-                            size_t const bytes = multiplyElementSize(
-                                it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
+                            // Use this problem's own tensor size, not the YAML-wide
+                            // pristine.maxElements. The pristine pool is sized to the
+                            // largest problem; using it here makes every unit look
+                            // identical and leaves zero rotation headroom for smaller
+                            // problems, causing "Insufficient rotating buffer size".
+                            size_t elems        = problem.tensors()[i].totalAllocatedElements();
+                            float  dataTypeSize = DataTypeInfo::Get(dataType).elementSize;
+                            if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                            {
+                                elems += 1024;
+                            }
+                            else if(m_curBoundsCheck == BoundsCheckMode::GuardPageFront
+                                    || m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
+                            {
+                                size_t roundUpSize = divideElementSize(pageSize, dataTypeSize);
+                                elems              = RoundUpToMultiple<size_t>(elems, roundUpSize);
+                            }
+                            size_t const bytes = multiplyElementSize(elems, dataTypeSize);
                             vec_rm.push_back(bytes);
                         }
                         if(!isRMInitPost)
@@ -1300,8 +1316,19 @@ namespace TensileLite
                                     tmp_rm.push_back(0);
                                     continue;
                                 }
-                                size_t const bytes = multiplyElementSize(
-                                    it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
+                                size_t elems        = problem.tensors()[i].totalAllocatedElements();
+                                float  dataTypeSize = DataTypeInfo::Get(dataType).elementSize;
+                                if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                                {
+                                    elems += 1024;
+                                }
+                                else if(m_curBoundsCheck == BoundsCheckMode::GuardPageFront
+                                        || m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
+                                {
+                                    size_t roundUpSize = divideElementSize(pageSize, dataTypeSize);
+                                    elems              = RoundUpToMultiple<size_t>(elems, roundUpSize);
+                                }
+                                size_t const bytes = multiplyElementSize(elems, dataTypeSize);
                                 tmp_rm.push_back(bytes);
                             }
                             if(vec_rm.empty())
@@ -3300,19 +3327,24 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum
-                          << ". rotatingSize: " << rotatingSize << std::endl;
+                          << ". Rotating num: " << rotatingNum << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
-                                  << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        int32_t fittedRotatingNum = static_cast<int32_t>(
+                            rotatingSize ? rotatingAllocatedSize / rotatingSize : 0);
+                        fittedRotatingNum = std::max(0, std::min(rotatingNum, fittedRotatingNum));
+                        std::cout << "Warning: rotating buffer spare size: "
+                                  << rotatingAllocatedSize
+                                  << " is not enough for requested rotating buffer size: "
+                                  << rotatingSize << " * " << rotatingNum << " = "
+                                  << totalRotatingSizeNeeded << ". Reducing rotating num from "
+                                  << rotatingNum << " to " << fittedRotatingNum << "." << std::endl;
+                        rotatingNum             = fittedRotatingNum;
+                        totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
@@ -3363,19 +3395,24 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum
-                          << ". rotatingSize: " << rotatingSize << std::endl;
+                          << ". Rotating num: " << rotatingNum << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
-                                  << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        int32_t fittedRotatingNum = static_cast<int32_t>(
+                            rotatingSize ? rotatingAllocatedSize / rotatingSize : 0);
+                        fittedRotatingNum = std::max(0, std::min(rotatingNum, fittedRotatingNum));
+                        std::cout << "Warning: rotating buffer spare size: "
+                                  << rotatingAllocatedSize
+                                  << " is not enough for requested rotating buffer size: "
+                                  << rotatingSize << " * " << rotatingNum << " = "
+                                  << totalRotatingSizeNeeded << ". Reducing rotating num from "
+                                  << rotatingNum << " to " << fittedRotatingNum << "." << std::endl;
+                        rotatingNum             = fittedRotatingNum;
+                        totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
