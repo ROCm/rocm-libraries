@@ -1040,9 +1040,10 @@ public:
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
 
-    virtual size_t GetKernelIndexLimit() const
+    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
+    virtual size_t GetU32KernelIndexLimit() const
     {
-        // NOTE: temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
+
         return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
                                                          : static_cast<size_t>(UINT32_MAX);
     }

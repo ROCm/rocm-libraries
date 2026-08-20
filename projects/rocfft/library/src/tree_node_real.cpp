@@ -2053,7 +2053,7 @@ void Real3DPPNode::AssignParams_internal()
 // RealTransDataCopy: strides passed as individual unsigned int.
 IndexType RealTransDataCopyNode::GetKernelIndexType() const
 {
-    auto idx_limit = GetKernelIndexLimit();
+    auto idx_limit = GetU32KernelIndexLimit();
 
     // No complex-to-real reinterpretation: each I/O side indexes by its own
     // scalar_type (real or complex), with strides already in matching units.
@@ -2077,7 +2077,7 @@ IndexType RealTransDataCopyNode::GetKernelIndexType() const
 // reinterpretation: strides are in scalar_type units on each side.
 IndexType PrePostKernelNode::GetKernelIndexType() const
 {
-    auto idx_limit = GetKernelIndexLimit();
+    auto idx_limit = GetU32KernelIndexLimit();
 
     if(scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE || scheme == CS_KERNEL_TRANSPOSE_CMPLX_TO_R)
         return IndexType::U64;
