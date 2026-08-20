@@ -68,7 +68,9 @@ bool GemmWrwBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.HasNonPackedTensors())
         return false;
 
-    return problem.IsDirectionBackwardWrW() && problem.IsLayoutDefault() &&
+    // NHWC is only handled by the 1x1 solver; the other one rejects it individually.
+    return problem.IsDirectionBackwardWrW() &&
+           (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) &&
            !(gemm::IsAnyBufferBf16(xDesc, dyDesc, dwDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(xDesc, dyDesc, dwDesc) && !gemm::IsFp16Supported);
 #else
@@ -179,6 +181,10 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto& dwDesc = problem.GetWeights();
     const auto& conv   = problem.GetConv();
 
+    // Grouped NHWC would have to go through the NCHW-only group-conv descriptors below.
+    if(problem.IsLayoutNHWC() && conv.group_count > 1)
+        return false;
+
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
@@ -211,11 +217,16 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
         MIOPEN_LOG_FUNCTION("convolution, 1x1");
     }
 
-    // dw = sum_over_batch(dy[i] * transpose(x[i])), i is batch id
+    // NCHW: dw = sum_over_batch(dy[i] * transpose(x[i])), i is batch id
+    // NHWC: dw = sum_over_batch(transpose(dy[i]) * x[i]), i is batch id
+    // Both keep dy as the A operand and x as the B operand, so only the descriptor differs.
     const auto tmp_gemm_desc = [&]() {
-        auto tmp          = group_count > 1
-                                ? CreateGemmDescriptorGroupConvBwdWeight(dyDesc, xDesc, dwDesc, group_count)
-                                : CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(dyDesc, xDesc, dwDesc);
+        auto tmp =
+            group_count > 1
+                ? CreateGemmDescriptorGroupConvBwdWeight(dyDesc, xDesc, dwDesc, group_count)
+            : problem.IsLayoutNHWC()
+                ? CreateGemmStridedBatchedDescriptorConv1x1BwdWeightNHWC(dyDesc, xDesc, dwDesc)
+                : CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(dyDesc, xDesc, dwDesc);
         tmp.deterministic = problem.GetConv().attribute.deterministic;
         if(problem.IsTensorsCasted())
         {

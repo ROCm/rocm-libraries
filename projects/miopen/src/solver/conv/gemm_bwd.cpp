@@ -71,7 +71,9 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.HasNonPackedTensors())
         return false;
 
-    return problem.IsDirectionBackwardData() && problem.IsLayoutDefault() &&
+    // NHWC is only handled by the 1x1 solvers; the others reject it individually.
+    return problem.IsDirectionBackwardData() &&
+           (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);
 #else
@@ -472,6 +474,10 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto& conv  = problem.GetConv();
     const auto& wDesc = problem.GetWeights();
 
+    // Grouped NHWC would have to go through the NCHW-only group-conv descriptors below.
+    if(problem.IsLayoutNHWC() && conv.group_count > 1)
+        return false;
+
     const auto spatial_dim = conv.GetSpatialDimension();
     const auto wei_spatial =
         wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
@@ -508,20 +514,26 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
 
             const auto in_n = dxDesc.GetLengths()[0];
 
-            // dx = transpose(w) * dy
+            // NCHW: dx = transpose(w) * dy
+            // NHWC: dx = dy * w
+            const bool is_nhwc       = problem.IsLayoutNHWC();
             const auto tmp_gemm_desc = [&]() {
                 auto tmp =
                     group_count > 1
                         ? CreateGemmDescriptorGroupConvBwdData(wDesc, dyDesc, dxDesc, group_count)
+                    : is_nhwc
+                        ? CreateGemmStridedBatchedDescriptorConv1x1BwdDataNHWC(
+                              wDesc, dyDesc, dxDesc)
                         : CreateGemmStridedBatchedDescriptorConv1x1BwdData(wDesc, dyDesc, dxDesc);
                 tmp.deterministic = problem.GetConv().attribute.deterministic;
                 if(problem.IsTensorsCasted())
                 {
-                    // IsApplicable ensures that both are casted
+                    // IsApplicable ensures that both are casted.
+                    // The NHWC descriptor swaps the operands: A is dy, B is the weights.
                     if(dyDesc.GetCastType())
-                        tmp.a_cast_type = *wDesc.GetCastType();
+                        tmp.a_cast_type = is_nhwc ? *dyDesc.GetCastType() : *wDesc.GetCastType();
                     if(wDesc.GetCastType())
-                        tmp.b_cast_type = *dyDesc.GetCastType();
+                        tmp.b_cast_type = is_nhwc ? *wDesc.GetCastType() : *dyDesc.GetCastType();
                 }
                 tmp.conv_attributes = problem.GetConv().attribute;
                 return tmp;
@@ -592,8 +604,11 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
             }
             else
             {
-                gemm_status = CallGemmStridedBatched(
-                    handle, gemm_desc, w, 0, dy, 0, dx, 0, GemmBackend_t::rocblas);
+                gemm_status =
+                    is_nhwc ? CallGemmStridedBatched(
+                                  handle, gemm_desc, dy, 0, w, 0, dx, 0, GemmBackend_t::rocblas)
+                            : CallGemmStridedBatched(
+                                  handle, gemm_desc, w, 0, dy, 0, dx, 0, GemmBackend_t::rocblas);
             }
 
             if(gemm_status != miopenStatusSuccess)
