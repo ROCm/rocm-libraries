@@ -382,27 +382,26 @@ INSTANTIATE_GEMM_BATCHED_TEMPLATE(rocblas_double_complex)
 #error INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE already defined
 #endif
 
-#define INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(TI_, T_)       \
-    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status     \
-        rocblas_internal_gemm_grouped_batched_template<TI_, T_>( \
-            rocblas_handle           handle,                     \
-            const rocblas_operation* transa_array,               \
-            const rocblas_operation* transb_array,               \
-            const TI_*               m_array,                    \
-            const TI_*               n_array,                    \
-            const TI_*               k_array,                    \
-            const T_*                alpha_array,                \
-            const T_* const*         Aarray,                     \
-            const TI_*               lda_array,                  \
-            const T_* const*         Barray,                     \
-            const TI_*               ldb_array,                  \
-            const T_*                beta_array,                 \
-            T_* const*               Carray,                     \
-            const TI_*               ldc_array,                  \
-            TI_                      group_count,                \
-            const TI_*               group_size);
+#define INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(T_)                                             \
+    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status                                      \
+        rocblas_internal_gemm_grouped_batched_template<T_>(rocblas_handle           handle,       \
+                                                           const rocblas_operation* transa_array, \
+                                                           const rocblas_operation* transb_array, \
+                                                           const rocblas_int*       m_array,      \
+                                                           const rocblas_int*       n_array,      \
+                                                           const rocblas_int*       k_array,      \
+                                                           const T_*                alpha_array,  \
+                                                           const T_* const*         Aarray,       \
+                                                           const rocblas_int*       lda_array,    \
+                                                           const T_* const*         Barray,       \
+                                                           const rocblas_int*       ldb_array,    \
+                                                           const T_*                beta_array,   \
+                                                           T_* const*               Carray,       \
+                                                           const rocblas_int*       ldc_array,    \
+                                                           rocblas_int              group_count,  \
+                                                           const rocblas_int*       group_size);
 
-INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(rocblas_int, float)
-INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(rocblas_int, double)
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(float)
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(double)
 
 #undef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE

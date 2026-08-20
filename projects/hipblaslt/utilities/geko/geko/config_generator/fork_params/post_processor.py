@@ -3,7 +3,7 @@
 
 from typing import Any, Dict, List, Tuple
 
-from geko.config_generator.mi_designer import MIDesign
+from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.fork_params.optimization_param import BaseParamBuilder
 from geko.config_generator.shared_utils import (
     ForkParameter,
@@ -98,6 +98,5 @@ class BasePostProcessor(BaseParamBuilder):
 
 def _mi_matches_mt(entry: Dict[str, ForkParameter], fixed_MT0: int, fixed_MT1: int) -> bool:
     """Check if an MI group entry's macro tile matches the fixed MT."""
-    mi = entry["MatrixInstruction"].values
-    MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-    return MT0 == fixed_MT0 and MT1 == fixed_MT1
+    mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+    return mfma_params.MT0 == fixed_MT0 and mfma_params.MT1 == fixed_MT1

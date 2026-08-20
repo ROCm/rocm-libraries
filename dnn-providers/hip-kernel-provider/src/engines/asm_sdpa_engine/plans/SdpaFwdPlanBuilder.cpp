@@ -201,6 +201,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    != NodeAttributes::SdpaAttributes,
                                "Node attribute type is not SdpaAttributes");
 
+    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->computeDataType() != DataType::FLOAT,
+                               "Compute data type must be FLOAT");
+
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
@@ -230,6 +233,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     }
 
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
+
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
+                               "mma_core_mode must be unset");
 
     const auto& tensorMap = opGraph.getTensorMap();
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
-#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -99,17 +99,24 @@ std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCas
            + std::to_string(tc.vDims[3]) + "_" + maskStr;
 }
 
-GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
+GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config)
+{
+    return {config, getConfigDescription(config), config.arch};
+}
+
+std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase)
+
 {
     using namespace hipdnn_frontend;
     using namespace hipdnn_frontend::graph;
     using namespace hipdnn_data_sdk::utilities;
 
-    // Arbitrary dimensions for testing
-    const int64_t batch = 2;
-    const int64_t numHeads = 4;
-    const int64_t seqQ = 256;
-    const int64_t seqKv = 128;
+    const fmha_v3_fwdConfig& config = testCase.config;
+
+    const int64_t batch = testCase.batch;
+    const int64_t numHeads = testCase.numHeads;
+    const int64_t seqQ = testCase.seqQ;
+    const int64_t seqKv = testCase.seqKv;
 
     // Determine data type
     const DataType dataType = toDataType(config.dtype);
@@ -136,6 +143,11 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     // Configure SDPA attributes based on config
     SdpaAttributes attributes;
     attributes.set_name("SdpaFwdKernelConfigTest");
+
+    if(testCase.attnScale.has_value())
+    {
+        attributes.set_attn_scale(testCase.attnScale.value());
+    }
 
     // Configure mask type
     auto maskType = static_cast<MaskType>(config.mask);
@@ -191,7 +203,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     o->set_output(true);
     o->set_data_type(dataType);
 
-    return {graph, getConfigDescription(config), config.arch};
+    return graph;
 }
 
 } // namespace asm_sdpa_engine
