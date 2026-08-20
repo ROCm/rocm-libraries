@@ -174,6 +174,7 @@ class _SetupNewTilePapTdmWriter:
             asmCaps={"HasTDM": True},
             kernel={"TDMInst": 3, "TDMPlusLdsBuf": 0},
             waveIdxReleasedAfterStagger=False,
+            tdmParityPackedInArgType=False,
         )
         self.do = {"executeToInitEnd": False}
         self.dontAppendCode = False
@@ -235,6 +236,9 @@ class _SetupNewTilePapTdmWriter:
 
     def hoistWaveParityWrapUSel(self, kernel, tpa, tpb):
         return self._module("hoistWaveParityWrapUSel")
+
+    def packTdmParityIntoArgType(self, kernel):
+        return self._module("packTdmParityIntoArgType")
 
     def declareStaggerParms(self, kernel):
         return self._module("declareStaggerParms")
@@ -828,15 +832,19 @@ def test_setup_new_tile_releases_waveidx_after_stagger_for_wave_separated_tdm(mo
         assert "calculateStagger_A" in module_names
         assert "calculateStagger_B" in module_names
         # The release is not the plain undefineSgpr emitted on the non-stagger path;
-        # it goes through releaseWaveIdxAfterStagger, which also latches the state
-        # that flips every later parity site to the Serial recompute.
+        # it goes through releaseWaveIdxAfterStagger after packing parity into
+        # ArgType bit 8. Later sites use that packed bit, not a live WaveIdx.
         assert "undefineSgpr_WaveIdx" not in module_names
         assert "ReleaseWaveIdxAfterStagger" in module_names
         assert "hoistWaveParityWrapUSel" in module_names
+        assert "packTdmParityIntoArgType" in module_names
         assert module_names.index("calculateStagger_B") < module_names.index(
             "hoistWaveParityWrapUSel"
         )
         assert module_names.index("hoistWaveParityWrapUSel") < module_names.index(
+            "packTdmParityIntoArgType"
+        )
+        assert module_names.index("packTdmParityIntoArgType") < module_names.index(
             "ReleaseWaveIdxAfterStagger"
         )
         assert writer.states.waveIdxReleasedAfterStagger is True
