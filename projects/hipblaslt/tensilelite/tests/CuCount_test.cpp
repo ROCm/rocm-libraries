@@ -1008,7 +1008,7 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
 
 namespace
 {
-    void initSk3CoherenceSolution(ContractionSolution& solution)
+    void initSk3UniformitySolution(ContractionSolution& solution)
     {
         solution.sizeMapping.streamK               = 3;
         solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
@@ -1028,14 +1028,14 @@ namespace
     }
 } // namespace
 
-TEST(StreamKCoherenceGridSteeringTest, KeepParallelUnderUniformSummationOrderWhenEligible)
+TEST(StreamKUniformityGridSteeringTest, KeepParallelUnderUniformSummationOrderWhenEligible)
 {
     // Same window as SmCountTargetChangesReductionAndGrid: 512x512 => 16 tiles,
     // K=8192 => I=128, C=256 => tiles <= C/4 and I >= 64 => origami parallel.
     // Under USO that launch is admitted (SK3 static, non-atomic, obstacles
     // clear) rather than forced to tree.
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
     env.device.skFixedGrid   = 0;
 
@@ -1061,12 +1061,12 @@ TEST(StreamKCoherenceGridSteeringTest, KeepParallelUnderUniformSummationOrderWhe
         << " tiles=" << tiles << ")";
 }
 
-TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderWhenIneligible)
+TEST(StreamKUniformityGridSteeringTest, ForceTreeUnderUniformSummationOrderWhenIneligible)
 {
     // Atomic Stream-K is a static obstacle: origami may still pick parallel,
     // but USO must refuse it and force tree rather than keep an unaudited path.
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.solution.sizeMapping.streamKAtomic = 1;
     env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
     env.device.skFixedGrid   = 0;
@@ -1082,11 +1082,11 @@ TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderWhenIn
         << "must refuse parallel / force tree when StreamKAtomic=1";
 }
 
-TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderCustomKernel)
+TEST(StreamKUniformityGridSteeringTest, ForceTreeUnderUniformSummationOrderCustomKernel)
 {
     // Custom kernels always resolve to tree; USO must not invent parallel.
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.solution.customKernel.name      = "DummyCustomKernel";
     env.solution.customKernel.generated = false;
     env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
@@ -1100,10 +1100,10 @@ TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderCustom
     EXPECT_EQ(env.solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
 }
 
-TEST(StreamKCoherenceGridSteeringTest, NonDivisorGridBelowTilesSnapsToTiles)
+TEST(StreamKUniformityGridSteeringTest, NonDivisorGridBelowTilesSnapsToTiles)
 {
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.device.skDynamicGrid = 0;
     env.device.skFixedGrid   = 10; // does not divide tiles=16
 
@@ -1122,10 +1122,10 @@ TEST(StreamKCoherenceGridSteeringTest, NonDivisorGridBelowTilesSnapsToTiles)
     EXPECT_EQ(onGrid, tiles) << "g0 < T and g0 does not divide T must snap to T";
 }
 
-TEST(StreamKCoherenceGridSteeringTest, DivisorGridBelowTilesSnapsToTiles)
+TEST(StreamKUniformityGridSteeringTest, DivisorGridBelowTilesSnapsToTiles)
 {
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.device.skDynamicGrid = 0;
     env.device.skFixedGrid   = 8; // 8 | 16, mixed GridDividesTiles
 
@@ -1139,12 +1139,12 @@ TEST(StreamKCoherenceGridSteeringTest, DivisorGridBelowTilesSnapsToTiles)
         << "mixed GridDividesTiles (g0 | T, g0 < T) must snap up to all-full";
 }
 
-TEST(StreamKCoherenceGridSteeringTest, AllPartialNonDivisorFRequiresCapability)
+TEST(StreamKUniformityGridSteeringTest, AllPartialNonDivisorFRequiresCapability)
 {
     // T=4, I=17 (K=1088, DepthU=64), g0=8=T*F with F=2 and 2 does not divide 17.
     // Without perTileExtraIters: snap to T. With capability: keep T*F.
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.device.skDynamicGrid = 0;
     env.device.skFixedGrid   = 8;
 
@@ -1170,12 +1170,12 @@ TEST(StreamKCoherenceGridSteeringTest, AllPartialNonDivisorFRequiresCapability)
         << "With perTileExtraIters, F need not divide I; keep T*F when workspace fits";
 }
 
-TEST(StreamKCoherenceGridSteeringTest, ParallelSnapSkipsFIRequirement)
+TEST(StreamKUniformityGridSteeringTest, ParallelSnapSkipsFIRequirement)
 {
     // T=4, I=17 (K=1088, DepthU=64), g0=8=T*F with F=2 and 2 does not divide 17.
     // Tree snaps to T without perTileExtraIters; parallel keeps T*F.
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.device.skDynamicGrid = 0;
     env.device.skFixedGrid   = 8;
 
@@ -1197,10 +1197,10 @@ TEST(StreamKCoherenceGridSteeringTest, ParallelSnapSkipsFIRequirement)
         << "Parallel snap must skip F | I and keep T*F when workspace fits";
 }
 
-TEST(StreamKCoherenceGridSteeringTest, ModeOffLeavesNaturalGridAndReduction)
+TEST(StreamKUniformityGridSteeringTest, ModeOffLeavesNaturalGridAndReduction)
 {
     StreamK5AnalyticalEnv env;
-    initSk3CoherenceSolution(env.solution);
+    initSk3UniformitySolution(env.solution);
     env.device.skDynamicGrid    = static_cast<int>(origami::grid_selection_t::k_split_aware);
     env.device.skFixedGrid      = 0;
     env.device.skMaxCUs         = 0;
