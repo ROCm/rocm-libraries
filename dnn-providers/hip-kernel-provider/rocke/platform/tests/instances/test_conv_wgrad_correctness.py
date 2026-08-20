@@ -84,6 +84,7 @@ class _Shape:
     dH: int = 1
     dW: int = 1
     groups: int = 1
+    num_groups_to_merge: int = 1
 
 
 # Kept intentionally small (fast compile + run). C and K are multiples of 8 so
@@ -250,6 +251,7 @@ def _make_spec(
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=split_k,
+        num_groups_to_merge=shape.num_groups_to_merge,
     )
     return spec, problem, atom.k
 
@@ -302,7 +304,9 @@ def _run_one(
     dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
     X_t = X_f32.to(_torch_dtype)
     dY_t = dY_f32.to(_torch_dtype)
-    dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype)
+    # dW is the (grouped) weight gradient: packed KYXC with the per-group channel
+    # count cpg = C // groups (== C for groups=1).
+    dW_t = torch.empty(p.K, p.Y, p.X, p.C // p.groups, dtype=_torch_dtype)
 
     # float32 reference (KYXC layout), on the CPU (see _wgrad_reference_cpu).
     ref = _wgrad_reference_cpu(X_f32, dY_f32, p)
@@ -328,11 +332,14 @@ def _run_one(
         rt.free(dW_dev)
         return False, f"kernel load failed: {e}"
 
-    # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m), z = split_k.
-    # Use the spec's (possibly auto-resolved) degree so z is always concrete.
+    # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m),
+    # z = ceil(groups / num_groups_to_merge) * split_k (the group-batch axis rides
+    # on z alongside split-K; == split_k for groups=1).
     gx = (spec.wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (spec.wg_M + spec.tile_m - 1) // spec.tile_m
-    grid = (gx, gy, spec.split_k)
+    gm = spec.num_groups_to_merge
+    gz = ((p.groups + gm - 1) // gm) * spec.split_k
+    grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
     values = {
@@ -415,6 +422,136 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 for split_k in (4, -1):  # fixed degree + CK auto-select
                     with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
                         self._check(shape, dtype, "mem", "default", split_k)
+
+    def test_grouped(self):
+        # Grouped wgrad (grid-per-group, group index on block_id_z).  Includes the
+        # cardinality-grouped hero (g32/cpg8/kpg8) where each group fills only a
+        # fraction of the MMA atom.  Direct-store epilogue, split_k=1.
+        grouped = [
+            _Shape(
+                "g4_N2H14W14C64K64",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g8_N2H12W12C64K64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=8,
+            ),
+            _Shape(
+                "g4_asym_N2H14W14C64K128",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=128,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g32_hero_N2H14W14C256K256",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=256,
+                K=256,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=32,
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in grouped:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "default")
+
+    def test_grouped_merged(self):
+        # Group merging (num_groups_to_merge = Gm > 1): Gm groups fuse into one
+        # workgroup GEMM with a block-diagonal dW write.  Fills the MMA atom for
+        # cardinality-grouped shapes.  MFMA-only; direct-store; split_k=1.
+        merged = [
+            _Shape(
+                "g4_gm2_N2H12W12C64K64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+                num_groups_to_merge=2,
+            ),
+            _Shape(
+                "g4_gm4_N2H12W12C64K64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+                num_groups_to_merge=4,
+            ),
+            _Shape(
+                "g8_gm2_N2H12W12C64K64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=8,
+                num_groups_to_merge=2,
+            ),
+            _Shape(
+                "g32_gm4_hero_N2H14W14C256K256",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=256,
+                K=256,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=32,
+                num_groups_to_merge=4,
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in merged:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "default")
 
 
 # ---------------------------------------------------------------------------
