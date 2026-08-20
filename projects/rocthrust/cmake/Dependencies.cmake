@@ -9,6 +9,13 @@
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
+# NOTE: rocThrust and rocPRIM share CMake options for building tests, benchmarks
+#        and examples. Until that's not fixed, we have to save/restore them.
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  set(${SHARED_OPTION} OFF)
+endforeach()
+
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
 include(FetchContent)
@@ -270,7 +277,7 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
 endif()
 
 # Test dependencies
-if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
+if(USER_BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Test (https://github.com/google/googletest)
     find_package(GTest QUIET)
@@ -376,7 +383,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Benchmark dependencies
-if(BUILD_BENCHMARK)
+if(USER_BUILD_BENCHMARK)
   set(BENCHMARK_VERSION 1.9.5)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
@@ -466,3 +473,8 @@ if(BUILD_BENCHMARK)
     endif()
   endif()
 endif()
+
+# Restore user global state
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+endforeach()
