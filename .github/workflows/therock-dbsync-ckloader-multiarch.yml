@@ -135,7 +135,7 @@ jobs:
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j"$(nproc)"
 
-      - name: Run StaticFDBSync (${{ matrix.role }}: ${{ matrix.arch }} on ${{ matrix.rj_config }})
+      - name: "Run StaticFDBSync (${{ matrix.role }} - ${{ matrix.arch }} on ${{ matrix.rj_config }})"
         run: |
           set -uxo pipefail
           export ROCM_PATH="$(realpath ./build)"
