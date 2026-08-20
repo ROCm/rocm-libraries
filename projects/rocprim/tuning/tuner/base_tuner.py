@@ -295,8 +295,8 @@ class BaseTuner(ABC):
             (
                 c
                 for c in arch_config
-                if c["key_type"] == key_type
-                and c["value_type"] == (value_type or "empty_type")
+                if c[self._get_key_type()] == key_type
+                and (not self._get_value_type() in c or c[self._get_value_type()] == (value_type or "empty_type"))
             ),
             None,
         )
@@ -307,7 +307,7 @@ class BaseTuner(ABC):
             return
 
         default_tune_params = {
-            k: [v] for k, v in config.items() if k not in ["key_type", "value_type"]
+            k: [v] for k, v in config.items() if k not in [self._get_key_type(), self._get_value_type()]
         }
 
         # Get the base tuning archs and force set the range of the tune parameters
@@ -378,8 +378,8 @@ class BaseTuner(ABC):
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
             "config": config,
-            "key_type": key_type,
-            "value_type": value_type,
+            self._get_key_type(): key_type,
+            self._get_value_type(): value_type,
         }
 
         content = template.render(**context)
@@ -441,6 +441,12 @@ class BaseTuner(ABC):
         "Return the path of the cache file"
         return self.output_dir / self._get_cache_file_name(key_type, value_type)
 
+    def _get_key_type(self) -> str:
+        return "key_type"
+
+    def _get_value_type(self) -> str:
+        return "value_type"
+
     def _save_output(
         self,
         cache_file: str | pathlib.Path,
@@ -467,9 +473,10 @@ class BaseTuner(ABC):
             new_content = "{\n"
             new_content += f'"arch_name": "{self.arch_name}",\n'
             new_content += f'"algo_name": "{self.algo_full_name}",\n'
-            new_content += f'"key_type": "{key_type}",\n'
+            new_content += f'"{self._get_key_type()}": "{key_type}",'
             value_type_string = f"{value_type}" if value_type else "empty_type"
-            new_content += f'"value_type": "{value_type_string}",'
+            if self._get_value_type():
+                new_content += f'\n"{self._get_value_type()}": "{value_type_string}",'
             new_content += content.lstrip()[1:]
 
             with open(cache_file, "w") as f:
