@@ -18,8 +18,8 @@
 namespace roc::host_validation {
 // Scalar types define the runtime numeric vocabulary shared by every host-validation component.
 // This header owns type identity, metadata, native C++ mappings, runtime dispatch, conversion
-// policy, and the owning Scalar value. Encoding details live in detail/scalar_codec.hpp because
-// Scalar and Tensor templates require their definitions; callers address scalar.hpp as the API.
+// policy, and the owning Scalar value. Scalar and Tensor templates require the definitions in
+// scalar_codec.hpp; callers include scalar.hpp.
 enum class ScalarCategory : uint8_t {
     Boolean,
     SignedInteger,
@@ -464,6 +464,5 @@ class Scalar {
 };
 }  // namespace roc::host_validation
 
-// Scalar and Tensor are header-only. Install this implementation dependency with the public
-// headers, but keep it outside the public namespace and include surface.
-#include <roc/host_validation/detail/scalar_codec.hpp>
+// Scalar and Tensor are header-only.
+#include <roc/host_validation/scalar_codec.hpp>

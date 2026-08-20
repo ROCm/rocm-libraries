@@ -101,9 +101,9 @@ target_sources(host-validation-core
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/scalar_codec.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/index_order.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/scalar.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/scalar_codec.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/tensor.hpp"
 )
 
