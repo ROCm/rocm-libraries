@@ -1,0 +1,86 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass --print-output
+#
+# StinkyRemoveWaitCntPass at its default policy: strip every wait whose
+# placement the downstream insertion pass will re-derive, and keep the two the
+# insertion pass cannot re-derive on its own.
+#
+# The kept pair is not symmetric with the stripped set by accident:
+#   - s_wait_kmcnt survives because insertion is region-scoped, so an s_load in
+#     the kernel prologue (argument preload) never enters its dataflow and its
+#     in-region consumer would be left unguarded.
+#   - s_wait_xcnt survives outside O3, where no hazard pass owns xcnt placement
+#     yet, so hand-authored drains must be preserved.
+# The non-default policies live in remove_waitcnt_keep_tensor_test.stir,
+# remove_waitcnt_kmcnt_test.stir, and remove_waitcnt_xcnt_test.stir, since a
+# pass config is per-invocation and so cannot vary within one file.
+#
+# Not covered here: the pass's shouldProcessBasicBlock gate. stinkytofu-opt
+# always runs with a default PassContext, which approves every block, so no
+# .stir test can restrict the region.
+
+#--- Every opcode carrying IF_WaitCnt, plus s_wait_tensorcnt (IF_WaitTensorCnt,
+#--- a disjoint flag that needs the pass's second branch). The CHECK-NEXT from
+#--- s_nop straight onto v_add_f32 is what pins that nothing survived between
+#--- them.
+# CHECK-LABEL: @strips_every_waitcnt_opcode
+# CHECK: s_nop
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait
+
+st.func @strips_every_waitcnt_opcode() {
+^entry:
+  "st.s_nop"(0)
+  "st.s_waitcnt"(0)
+  "st.s_wait_dscnt"(0)
+  "st.s_wait_loadcnt"(0)
+  "st.s_wait_storecnt"(0)
+  "st.s_wait_asynccnt"(0)
+  "st.s_wait_loadcnt_dscnt"(0)
+  "st.s_wait_storecnt_dscnt"(0)
+  "st.s_wait_tensorcnt"(0)
+  v0 = "st.v_add_f32"(v1, v2)
+}
+
+#--- kmcnt and xcnt are kept while a dscnt drain between them is stripped, so
+#--- this pins the exemption rather than a blanket "keeps waits".
+# CHECK-LABEL: @preserves_kmcnt_and_xcnt
+# CHECK: s_wait_kmcnt
+# CHECK-NEXT: s_wait_xcnt
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait_dscnt
+
+st.func @preserves_kmcnt_and_xcnt() {
+^entry:
+  "st.s_wait_kmcnt"(0)
+  "st.s_wait_xcnt"(0)
+  "st.s_wait_dscnt"(0)
+  v0 = "st.v_add_f32"(v1, v2)
+}
+
+#--- The pass walks every block, not just the entry.
+# CHECK-LABEL: @strips_across_blocks
+# CHECK: s_nop
+# CHECK-NEXT: s_branch
+# CHECK: ^bb1:
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait
+
+st.func @strips_across_blocks() {
+^entry:
+  "st.s_wait_dscnt"(0)
+  "st.s_nop"(0)
+  "st.s_branch"("bb1")
+  Successors: ^bb1
+^bb1:
+  "st.s_wait_tensorcnt"(0)
+  v0 = "st.v_add_f32"(v1, v2)
+}
+
+#--- A block with nothing to strip is left alone.
+# CHECK-LABEL: @empty_function_is_noop
+# CHECK: ^entry:
+# CHECK-NOT: s_wait
+
+st.func @empty_function_is_noop() {
+^entry:
+}
