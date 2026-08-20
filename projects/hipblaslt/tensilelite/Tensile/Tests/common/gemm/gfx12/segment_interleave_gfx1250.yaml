@@ -8,7 +8,7 @@ TestParameters:
 # MatrixInstruction: [M, N, K, B, _, MIWT0, MIWT1, MIWG0, MIWG1]
 #
 # Problem groups:
-#   1) bf16 TN               - PGR 1/2, ClusterDim, VectorWidthB (coarse + fine).
+#   1) bf16 TN               - PGR 1/2, VectorWidthB (coarse + fine).
 #   2) mxf8 (MXFP8, block-32) - MX scales relocated after A/B; tight + aligned.
 
 GlobalParameters:
@@ -89,7 +89,6 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
-        - ClusterDim: [[2,4]]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
@@ -159,7 +158,6 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
-        - ClusterDim: [[4,4]]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]

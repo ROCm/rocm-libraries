@@ -188,12 +188,23 @@ def select_build_runner(platform: str) -> str:
 
 
 def retrieve_projects(args):
+    # by default, we select standard tests
+    test_type = "standard"
+
+    # Skip CI entirely for draft PRs so repeated work-in-progress pushes don't
+    # burn full Linux/Windows build/test capacity. Checked first (before
+    # diffing modified paths) so this stays cheap. The setup job itself still
+    # runs to completion and succeeds rather than being skipped, so the
+    # existing "{platform}_projects != '[]'" gate on the build/test jobs (and
+    # the required TheRock CI Summary check) don't need any extra
+    # skip-cascade handling.
+    if args.get("is_pull_request") and args.get("is_draft"):
+        logging.info("Pull request is a draft, skipping CI")
+        return [], test_type
+
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
-
-    # by default, we select standard tests
-    test_type = "standard"
 
     # Variables to track if labels override defaults
     label_projects = []
@@ -295,6 +306,7 @@ if __name__ == "__main__":
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
     args["is_nightly"] = github_event_name == "schedule"
+    args["is_draft"] = os.environ.get("IS_DRAFT", "false").lower() == "true"
 
     args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 

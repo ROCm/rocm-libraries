@@ -101,11 +101,12 @@ private:
 };
 
 /// Used when an engine ships no UHD: scores every kernel alike, so rank()'s tie-break
-/// decides. That chain is already `priority` descending, then descriptor id ascending,
-/// which is the declared order — this adds no ordering rule of its own, it just
-/// declines to reorder. Ranking stays total and stable, so the absence of a model
-/// costs selection quality, never determinism.
-class DeclaredOrderKernelHeuristic : public IKernelHeuristic
+/// decides. Named for what it does -- it adds no ordering rule of its own and just
+/// declines to rank. The tie-break it falls through to is `priority` descending then
+/// descriptor id ascending, which is not authoring order: an id is a UUID and sorts by
+/// its bytes. Ranking stays total and stable, so the absence of a model costs selection
+/// quality, never determinism.
+class UnrankedKernelHeuristic : public IKernelHeuristic
 {
 public:
     double score(const KernelDefinition& /*kernel*/, const MatchContext& /*context*/) const override
@@ -126,9 +127,9 @@ inline std::shared_ptr<IKernelHeuristic>
         // warning is the point -- it separates an engine that declares its order from
         // one still waiting on a UHD, which otherwise look identical from the outside.
         HIPDNN_PLUGIN_LOG_WARN("ingestor: " << (describedBy.empty() ? "engine" : describedBy)
-                                            << " ships no heuristic; ranking kernels by declared "
-                                               "order (priority, then descriptor id)");
-        return std::make_shared<DeclaredOrderKernelHeuristic>();
+                                            << " ships no heuristic; kernels rank by priority, "
+                                               "then descriptor id");
+        return std::make_shared<UnrankedKernelHeuristic>();
     }
 
     switch(descriptor->kind)

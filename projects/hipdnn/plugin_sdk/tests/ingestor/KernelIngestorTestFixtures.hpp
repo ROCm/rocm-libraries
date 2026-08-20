@@ -494,15 +494,18 @@ inline std::vector<DispatchDescriptor> makeTestDispatches()
     return {{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 }
 
-inline KernelDefinition
-    makeDefinition(const DescriptorId& id, int64_t blockSize, int64_t priority = 0)
+inline KernelDefinition makeDefinition(const DescriptorId& id,
+                                       int64_t blockSize,
+                                       int64_t priority = 0,
+                                       const std::vector<std::string>& arch = {})
 {
     return {id,
             PACK_ID,
             DISPATCH_ID,
             KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
             {{BLOCK_SIZE, MetadataValue{blockSize}}},
-            priority};
+            priority,
+            arch};
 }
 
 /// RAII: registers matchers under caller-supplied names; construct before any state
