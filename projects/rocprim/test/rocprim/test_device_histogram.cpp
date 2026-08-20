@@ -32,6 +32,7 @@
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/device/config_types.hpp>
@@ -172,7 +173,26 @@ using Params1
                        params1<int, 10, 0, 10, int, int, rocprim::default_config, true>,
                        params1<int, 10, 0, 10, int, int, rocprim::default_config, false, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1);
+inline std::string histogram_num(int v)
+{
+    return v < 0 ? "n" + std::to_string(-v) : std::to_string(v);
+}
+struct RocprimDeviceHistogramEvenNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::sample_type>() + "_"
+                        + std::to_string(Params::bins) + "_" + histogram_num(Params::lower_level)
+                        + "_" + histogram_num(Params::upper_level) + "_"
+                        + type_tag<typename Params::level_type>() + "_"
+                        + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_indirect_iterator) n += "_Indirect";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1, RocprimDeviceHistogramEvenNameGenerator);
 
 void testHistogramEvenIncorrectInput()
 {
@@ -386,7 +406,22 @@ using Params2 = ::testing::Types<
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>,
     params2<int, 10, 0, 1, 10, int, int, rocprim::default_config, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2);
+struct RocprimDeviceHistogramRangeNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::sample_type>() + "_"
+                        + std::to_string(Params::bins) + "_" + histogram_num(Params::start_level)
+                        + "_" + std::to_string(Params::min_bin_length) + "_"
+                        + std::to_string(Params::max_bin_length) + "_"
+                        + type_tag<typename Params::level_type>() + "_"
+                        + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2, RocprimDeviceHistogramRangeNameGenerator);
 
 void testHistogramRangeIncorrectInput()
 {
@@ -592,7 +627,25 @@ using Params3 = ::testing::Types<
     params3<double, 4, 3, 55, -123, +123, double, unsigned long long, custom_config3>,
     params3<int, 4, 3, 2000, 0, 2000, int, int, rocprim::default_config, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven, Params3);
+struct RocprimDeviceHistogramMultiEvenNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::sample_type>() + "_"
+                        + std::to_string(Params::channels) + "_"
+                        + std::to_string(Params::active_channels) + "_" + std::to_string(Params::bins)
+                        + "_" + histogram_num(Params::lower_level) + "_"
+                        + histogram_num(Params::upper_level) + "_"
+                        + type_tag<typename Params::level_type>() + "_"
+                        + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven,
+                 Params3,
+                 RocprimDeviceHistogramMultiEvenNameGenerator);
 
 TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 {
@@ -825,7 +878,26 @@ using Params4 = ::testing::Types<
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>,
     params4<int, 3, 2, 10, 0, 1, 10, int, int, rocprim::default_config, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange, Params4);
+struct RocprimDeviceHistogramMultiRangeNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::sample_type>() + "_"
+                        + std::to_string(Params::channels) + "_"
+                        + std::to_string(Params::active_channels) + "_" + std::to_string(Params::bins)
+                        + "_" + histogram_num(Params::start_level) + "_"
+                        + std::to_string(Params::min_bin_length) + "_"
+                        + std::to_string(Params::max_bin_length) + "_"
+                        + type_tag<typename Params::level_type>() + "_"
+                        + type_tag<typename Params::counter_type>();
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange,
+                 Params4,
+                 RocprimDeviceHistogramMultiRangeNameGenerator);
 
 TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 {
