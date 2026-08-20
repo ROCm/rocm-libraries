@@ -7,10 +7,26 @@
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
+#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
+#endif
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
@@ -20,6 +36,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <stdexcept>
+#include <utility>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -187,6 +204,112 @@ void graphBindings(nb::module_& m)
         .def("matmul", &graph::Graph::matmul)
         .def("conv_dgrad", &graph::Graph::conv_dgrad)
         .def("conv_wgrad", &graph::Graph::conv_wgrad)
+        .def("batchnorm_inference_variance_ext", &graph::Graph::batchnorm_inference_variance_ext)
+        .def("layernorm",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> x,
+                std::shared_ptr<graph::TensorAttributes> scale,
+                std::shared_ptr<graph::TensorAttributes> bias,
+                graph::LayernormAttributes attributes) {
+                 const auto outputs = graph.layernorm(
+                     std::move(x), std::move(scale), std::move(bias), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
+        .def("layernorm_backward",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> dy,
+                std::shared_ptr<graph::TensorAttributes> x,
+                std::shared_ptr<graph::TensorAttributes> scale,
+                graph::LayernormBackwardAttributes attributes) {
+                 const auto outputs = graph.layernorm_backward(
+                     std::move(dy), std::move(x), std::move(scale), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
+        .def("rmsnorm",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> x,
+                std::shared_ptr<graph::TensorAttributes> scale,
+                graph::RMSNormAttributes attributes) {
+                 const auto outputs
+                     = graph.rmsnorm(std::move(x), std::move(scale), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1]);
+             })
+        .def("rmsnorm_backward",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> dy,
+                std::shared_ptr<graph::TensorAttributes> x,
+                std::shared_ptr<graph::TensorAttributes> scale,
+                std::shared_ptr<graph::TensorAttributes> invRms,
+                graph::RMSNormBackwardAttributes attributes) {
+                 const auto outputs = graph.rmsnorm_backward(std::move(dy),
+                                                             std::move(x),
+                                                             std::move(scale),
+                                                             std::move(invRms),
+                                                             std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
+        .def("block_scale_dequantize", &graph::Graph::block_scale_dequantize)
+        .def("block_scale_quantize",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> x,
+                graph::BlockScaleQuantizeAttributes attributes) {
+                 const auto outputs
+                     = graph.block_scale_quantize(std::move(x), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1]);
+             })
+        .def(
+            "reduction",
+            nb::overload_cast<std::shared_ptr<graph::TensorAttributes>, graph::ReductionAttributes>(
+                &graph::Graph::reduction))
+        .def("reduction",
+             nb::overload_cast<std::shared_ptr<graph::TensorAttributes>,
+                               std::shared_ptr<graph::TensorAttributes>,
+                               graph::ReductionAttributes>(&graph::Graph::reduction))
+        .def("moe_grouped_matmul", &graph::Graph::moe_grouped_matmul)
+        .def("custom_op", &graph::Graph::custom_op)
+#ifdef HIPDNN_ENABLE_SDPA
+        .def("sdpa",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> q,
+                std::shared_ptr<graph::TensorAttributes> k,
+                std::shared_ptr<graph::TensorAttributes> v,
+                graph::SdpaAttributes attributes) {
+                 const auto outputs
+                     = graph.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1]);
+             })
+        .def("sdpa_backward",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> q,
+                std::shared_ptr<graph::TensorAttributes> k,
+                std::shared_ptr<graph::TensorAttributes> v,
+                std::shared_ptr<graph::TensorAttributes> o,
+                std::shared_ptr<graph::TensorAttributes> dO,
+                std::shared_ptr<graph::TensorAttributes> stats,
+                graph::SdpaBackwardAttributes attributes) {
+                 const auto outputs = graph.sdpa_backward(std::move(q),
+                                                          std::move(k),
+                                                          std::move(v),
+                                                          std::move(o),
+                                                          std::move(dO),
+                                                          std::move(stats),
+                                                          std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
+#endif
+        .def("resample",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> x,
+                graph::ResampleFwdAttributes attributes) {
+                 const auto outputs = graph.resample(std::move(x), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1]);
+             })
+        .def("resample_fwd", &graph::Graph::resample_fwd)
+        .def("resample_bwd",
+             &graph::Graph::resample_bwd,
+             nb::arg("dy"),
+             nb::arg("attributes"),
+             nb::arg("index") = nb::none())
         .def("set_preferred_engine_id_ext",
              nb::overload_cast<std::optional<int64_t>>(&graph::Graph::set_preferred_engine_id_ext),
              nb::arg("engineId") = std::nullopt,

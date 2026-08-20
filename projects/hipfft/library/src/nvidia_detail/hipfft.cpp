@@ -32,6 +32,7 @@
 
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
+#include <algorithm>
 #include <cuda_runtime_api.h>
 #include <iostream>
 

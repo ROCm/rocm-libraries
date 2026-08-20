@@ -32,7 +32,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.056694622039794924,
     "best_speedup_vs_triton": 0.8439287573033655,
     "best_speedup_vs_aoTriton": 0.5142208936052679,
@@ -76,7 +76,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.02754024028778076,
     "best_speedup_vs_triton": 3.319660080749954,
     "best_speedup_vs_aoTriton": 1.7218027473129665,
@@ -120,7 +120,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 60,
+    "best_cus": 60,
     "best_ms": 0.02780725955963135,
     "best_speedup_vs_triton": 3.2831122821247325,
     "best_speedup_vs_aoTriton": 3.2722987925279576,
@@ -164,7 +164,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.027448039054870605,
     "best_speedup_vs_triton": 3.3508519664901115,
     "best_speedup_vs_aoTriton": 6.80830419554604,
@@ -208,7 +208,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03371288061141968,
     "best_speedup_vs_triton": 2.7692649761067853,
     "best_speedup_vs_aoTriton": 10.945532551256145,
@@ -252,7 +252,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.05321944236755371,
     "best_speedup_vs_triton": 1.7361417860847748,
     "best_speedup_vs_aoTriton": 13.78782369849957,
@@ -296,7 +296,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.09175862312316894,
     "best_speedup_vs_triton": 1.0261943219565917,
     "best_speedup_vs_aoTriton": 17.300383959447863,
@@ -340,7 +340,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.13660998344421388,
     "best_speedup_vs_triton": 0.33102838160520415,
     "best_speedup_vs_aoTriton": 0.21380648109073935,
@@ -384,7 +384,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 60,
+    "best_cus": 60,
     "best_ms": 0.06348227977752685,
     "best_speedup_vs_triton": 3.130933444320933,
     "best_speedup_vs_aoTriton": 1.0640393041522178,
@@ -428,7 +428,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.05766808032989502,
     "best_speedup_vs_triton": 3.5107271260414263,
     "best_speedup_vs_aoTriton": 1.4957937792136564,
@@ -472,7 +472,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.05821653842926025,
     "best_speedup_vs_triton": 3.5289181418823152,
     "best_speedup_vs_aoTriton": 3.170254993634558,
@@ -516,7 +516,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03291264057159424,
     "best_speedup_vs_triton": 6.120643885695178,
     "best_speedup_vs_aoTriton": 11.024435545292926,
@@ -560,7 +560,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.05225639820098877,
     "best_speedup_vs_triton": 1.7552213207073188,
     "best_speedup_vs_aoTriton": 13.766535714471473,
@@ -604,7 +604,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.08985664367675782,
     "best_speedup_vs_triton": 1.0418205947006585,
     "best_speedup_vs_aoTriton": 17.77415095829488,
@@ -648,7 +648,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.12010233879089355,
     "best_speedup_vs_triton": 0.385373517416684,
     "best_speedup_vs_aoTriton": 0.24425485937627422,
@@ -692,7 +692,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03288857936859131,
     "best_speedup_vs_triton": 3.970304622069568,
     "best_speedup_vs_aoTriton": 1.4672813091043002,
@@ -736,7 +736,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 30,
+    "best_cus": 30,
     "best_ms": 0.03797950029373169,
     "best_speedup_vs_triton": 2.4511354441878805,
     "best_speedup_vs_aoTriton": 2.5367894814716885,
@@ -780,7 +780,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03334403991699219,
     "best_speedup_vs_triton": 7.470731980770947,
     "best_speedup_vs_aoTriton": 5.655562788441517,
@@ -824,7 +824,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.033093059062957765,
     "best_speedup_vs_triton": 2.861330517819043,
     "best_speedup_vs_aoTriton": 11.197957959645494,
@@ -868,7 +868,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.0622418212890625,
     "best_speedup_vs_triton": 1.4915521698520255,
     "best_speedup_vs_aoTriton": 12.908028280886866,
@@ -912,7 +912,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.0962818431854248,
     "best_speedup_vs_triton": 2.1868561670138216,
     "best_speedup_vs_aoTriton": 16.641676215938713,
@@ -956,7 +956,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 30,
+    "best_cus": 30,
     "best_ms": 0.0703508996963501,
     "best_speedup_vs_triton": 1.4953270217213324,
     "best_speedup_vs_aoTriton": 0.9507957791877034,
@@ -1000,7 +1000,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.031697840690612794,
     "best_speedup_vs_triton": 3.1424701456287676,
     "best_speedup_vs_aoTriton": 1.4336339617833358,
@@ -1044,7 +1044,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03236655950546265,
     "best_speedup_vs_triton": 2.8535135931083007,
     "best_speedup_vs_aoTriton": 2.9262492284825354,
@@ -1088,7 +1088,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 60,
+    "best_cus": 60,
     "best_ms": 0.037099080085754396,
     "best_speedup_vs_triton": 2.4581457052551454,
     "best_speedup_vs_aoTriton": 4.975208865637966,
@@ -1132,7 +1132,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.03304574012756348,
     "best_speedup_vs_triton": 3.6989414726340994,
     "best_speedup_vs_aoTriton": 11.017641353185784,
@@ -1176,7 +1176,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.06249917984008789,
     "best_speedup_vs_triton": 1.4952118817477158,
     "best_speedup_vs_aoTriton": 12.903193004546875,
@@ -1220,7 +1220,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.09452095985412598,
     "best_speedup_vs_triton": 2.2040129989776256,
     "best_speedup_vs_aoTriton": 17.040835148696313,
@@ -1264,7 +1264,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.0577915620803833,
     "best_speedup_vs_triton": 1.8300335592204768,
     "best_speedup_vs_aoTriton": 1.154579266321,
@@ -1308,7 +1308,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.031851780414581296,
     "best_speedup_vs_triton": 4.077337017074981,
     "best_speedup_vs_aoTriton": 1.611636122475178,
@@ -1352,7 +1352,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03240668058395386,
     "best_speedup_vs_triton": 2.847134494138503,
     "best_speedup_vs_aoTriton": 3.0066548477610233,
@@ -1396,7 +1396,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.03313796043395996,
     "best_speedup_vs_triton": 2.781933292217867,
     "best_speedup_vs_aoTriton": 5.7338779837612135,
@@ -1440,7 +1440,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.05210085868835449,
     "best_speedup_vs_triton": 1.7704380844018976,
     "best_speedup_vs_aoTriton": 7.855899073999331,
@@ -1484,7 +1484,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.08928892135620117,
     "best_speedup_vs_triton": 1.0572770106493672,
     "best_speedup_vs_aoTriton": 9.110846085637121,
@@ -1528,7 +1528,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.16580043792724608,
     "best_speedup_vs_triton": 0.5649202010234313,
     "best_speedup_vs_aoTriton": 9.779598970080475,
@@ -1572,7 +1572,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.06538745880126953,
     "best_speedup_vs_triton": 0.9208056389005731,
     "best_speedup_vs_aoTriton": 0.5800283663138464,
@@ -1616,7 +1616,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03361825942993164,
     "best_speedup_vs_triton": 2.7760817331559404,
     "best_speedup_vs_aoTriton": 1.503649510798183,
@@ -1660,7 +1660,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.027978858947753905,
     "best_speedup_vs_triton": 3.2606261648730857,
     "best_speedup_vs_aoTriton": 3.4296573449551366,
@@ -1704,7 +1704,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.036410279273986816,
     "best_speedup_vs_triton": 2.7558810229041164,
     "best_speedup_vs_aoTriton": 5.131212504693359,
@@ -1748,7 +1748,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.051990180015563964,
     "best_speedup_vs_triton": 3.5234014889851366,
     "best_speedup_vs_aoTriton": 7.938402280959479,
@@ -1792,7 +1792,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.08921998023986816,
     "best_speedup_vs_triton": 1.0352977154460534,
     "best_speedup_vs_aoTriton": 9.147741842592824,
@@ -1836,7 +1836,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.1640668487548828,
     "best_speedup_vs_triton": 0.5693156152389934,
     "best_speedup_vs_aoTriton": 9.919857035039529,
@@ -1880,7 +1880,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.057648019790649416,
     "best_speedup_vs_triton": 0.792305428454351,
     "best_speedup_vs_aoTriton": 0.5099870004680029,
@@ -1924,7 +1924,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 60,
+    "best_cus": 60,
     "best_ms": 0.02760279893875122,
     "best_speedup_vs_triton": 3.379909553508876,
     "best_speedup_vs_aoTriton": 1.719584955343805,
@@ -1968,7 +1968,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 60,
+    "best_cus": 60,
     "best_ms": 0.028407061100006105,
     "best_speedup_vs_triton": 3.2704989641021633,
     "best_speedup_vs_aoTriton": 3.201879345703678,
@@ -2012,7 +2012,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.05895423889160156,
     "best_speedup_vs_triton": 2.027243197774111,
     "best_speedup_vs_aoTriton": 3.1805697369698143,
@@ -2056,7 +2056,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03026171922683716,
     "best_speedup_vs_triton": 6.758640587078305,
     "best_speedup_vs_aoTriton": 12.229682214598409,
@@ -2100,7 +2100,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.03978368043899536,
     "best_speedup_vs_triton": 2.328287353507944,
     "best_speedup_vs_aoTriton": 18.44616934003776,
@@ -2144,7 +2144,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.05829671859741211,
     "best_speedup_vs_triton": 1.641995702825554,
     "best_speedup_vs_aoTriton": 27.217244187412295,
@@ -2188,7 +2188,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 30,
+    "best_cus": 30,
     "best_ms": 0.06511404037475586,
     "best_speedup_vs_triton": 1.5405949175872056,
     "best_speedup_vs_aoTriton": 0.966602892159031,
@@ -2232,7 +2232,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.02765412092208862,
     "best_speedup_vs_triton": 3.357718640580348,
     "best_speedup_vs_aoTriton": 1.6076606397856226,
@@ -2276,7 +2276,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.028200180530548097,
     "best_speedup_vs_triton": 3.315390674663614,
     "best_speedup_vs_aoTriton": 3.041769061295418,
@@ -2320,7 +2320,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.028605899810791015,
     "best_speedup_vs_triton": 3.245438809739874,
     "best_speedup_vs_aoTriton": 6.411495606335093,
@@ -2364,7 +2364,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.02889940023422241,
     "best_speedup_vs_triton": 3.211091693481064,
     "best_speedup_vs_aoTriton": 12.527756169786262,
@@ -2408,7 +2408,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.03939558029174805,
     "best_speedup_vs_triton": 2.3439572628509926,
     "best_speedup_vs_aoTriton": 18.26418967563205,
@@ -2452,7 +2452,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.05934234142303467,
     "best_speedup_vs_triton": 1.5531908379845352,
     "best_speedup_vs_aoTriton": 26.889317316501074,
@@ -2496,7 +2496,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.06317997932434082,
     "best_speedup_vs_triton": 1.6649068416267654,
     "best_speedup_vs_aoTriton": 0.9949996988634245,
@@ -2540,7 +2540,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.029443840980529785,
     "best_speedup_vs_triton": 3.294743928609429,
     "best_speedup_vs_aoTriton": 1.6350218087293542,
@@ -2584,7 +2584,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.02899482011795044,
     "best_speedup_vs_triton": 3.5093186103568295,
     "best_speedup_vs_aoTriton": 3.322979787784358,
@@ -2628,7 +2628,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.02817291975021362,
     "best_speedup_vs_triton": 3.2936954087980963,
     "best_speedup_vs_aoTriton": 6.671210000796339,
@@ -2672,7 +2672,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.03339456081390381,
     "best_speedup_vs_triton": 2.7850971828184434,
     "best_speedup_vs_aoTriton": 11.100961868660798,
@@ -2716,7 +2716,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.053624358177185055,
     "best_speedup_vs_triton": 1.760915744600027,
     "best_speedup_vs_aoTriton": 14.973638170122063,
@@ -2760,7 +2760,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.09044921875,
     "best_speedup_vs_triton": 1.325546630384906,
     "best_speedup_vs_aoTriton": 17.711339006154176,
@@ -2804,7 +2804,7 @@
         "path": "2d"
       }
     },
-    "best_sms": 30,
+    "best_cus": 30,
     "best_ms": 0.06552457809448242,
     "best_speedup_vs_triton": 0.7097422406578612,
     "best_speedup_vs_aoTriton": 0.44427697121857146,
@@ -2848,7 +2848,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.02801094055175781,
     "best_speedup_vs_triton": 3.3264251862343217,
     "best_speedup_vs_aoTriton": 1.6202733252529655,
@@ -2892,7 +2892,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.028397419452667237,
     "best_speedup_vs_triton": 3.2344221069033403,
     "best_speedup_vs_aoTriton": 3.3340971816950766,
@@ -2936,7 +2936,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 60,
+    "best_cus": 60,
     "best_ms": 0.029123098850250245,
     "best_speedup_vs_triton": 3.179433542694202,
     "best_speedup_vs_aoTriton": 6.341630732355894,
@@ -2980,7 +2980,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.032855699062347414,
     "best_speedup_vs_triton": 2.805052494147785,
     "best_speedup_vs_aoTriton": 11.069971806178781,
@@ -3024,7 +3024,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 80,
+    "best_cus": 80,
     "best_ms": 0.05181218147277832,
     "best_speedup_vs_triton": 1.795793996614332,
     "best_speedup_vs_aoTriton": 15.572149023146196,
@@ -3068,7 +3068,7 @@
         "path": "3d"
       }
     },
-    "best_sms": 120,
+    "best_cus": 120,
     "best_ms": 0.08848228454589843,
     "best_speedup_vs_triton": 1.0558482179425828,
     "best_speedup_vs_aoTriton": 18.18778793796966,

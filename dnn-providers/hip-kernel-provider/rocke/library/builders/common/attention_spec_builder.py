@@ -93,7 +93,14 @@ def _tiled_spec_from_problem(
             tile_size=_select_2d_tile_size(problem),
             block_m_per_warp=16,
         )
-    if _enable_gfx942_bf16_flash(problem):
+    # The gfx942 4-warp GQA cohort (D256 + D128 sliding-window, see _gfx942_4warp_fast)
+    # is built by build_gfx942_4warp_gqa with its own HD/BS-derived geometry, and needs
+    # the default branch's *discriminator* spec (num_warps=1, no mfma_32x32 / transposed_qk
+    # / single-buffer), NOT the flash spec. The prior PR opened the flash gate for D128-SW
+    # (kept as the fallback for SW edge cases the 4-warp excludes), so guard both flash
+    # branches against the 4-warp cohort here -- otherwise the flash fields (num_warps=2,
+    # single-buffer) build a spec the __post_init__ validator rejects for fp16 bs16/32.
+    if _enable_gfx942_bf16_flash(problem) and not _kau._gfx942_4warp_fast(problem):
         # gfx942 bf16 wide-K (32x32x8) transposed flash path. DEFAULT-ON for
         # eligible shapes (small_q_narrow excluded; see _enable_gfx942_bf16_flash).
         # Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom (the K=16 bf16 atom is
@@ -148,7 +155,7 @@ def _tiled_spec_from_problem(
             kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
             use_i64_kv_addr=_enable_i64_kv_addr(problem),
         )
-    if _enable_gfx942_fp16_flash(problem):
+    if _enable_gfx942_fp16_flash(problem) and not _kau._gfx942_4warp_fast(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
         use_cfvst = _gfx942_flash_use_cfvst(problem)
         use_single = _gfx942_flash_use_single_buffer(problem)

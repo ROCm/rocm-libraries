@@ -3162,6 +3162,104 @@ __device__ rocblas_int seq_solve_ext(const rocblas_int dd,
     return converged ? 0 : 1;
 }
 
+// -----------------------------
+// Initialize matrix
+// motivated by xLASET in LAPACK
+//
+// matrix A is m by n
+//
+// uplo == rocblas_fill_upper : assign to upper triangular matrix
+// uplo == rocblas_fill_lower : assign to lower triangular matrix
+// uplo == rocblas_fill_full : assign to entire matrix
+//
+// assign beta to diagonal
+// assign alpha to off-diagonal
+// -----------------------------
+
+template <typename T, typename I, typename UA>
+__global__ static void laset_kernel(const rocblas_fill uplo,
+                                    const I m,
+                                    const I n,
+                                    const T alpha,
+                                    const T beta,
+                                    UA AA,
+                                    const rocblas_stride shiftA,
+                                    const I lda,
+                                    const rocblas_stride strideA,
+                                    const I batch_count)
+{
+    I const bid_start = blockIdx.z;
+    I const bid_inc = gridDim.z;
+
+    I const i_start = threadIdx.x + blockIdx.x * blockDim.x;
+    I const i_inc = blockDim.x * gridDim.x;
+
+    I const j_start = threadIdx.y + blockIdx.y * blockDim.y;
+    I const j_inc = blockDim.y * gridDim.y;
+
+    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    {
+        T* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+
+        if(uplo == rocblas_fill_lower)
+        {
+            // ---------------------------------
+            // assign to lower triangular matrix
+            // ---------------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = j + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else if(uplo == rocblas_fill_upper)
+        {
+            // ---------------------------------
+            // assign to upper triangular matrix
+            // ---------------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < std::min(m, j + 1); i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else
+        {
+            // ------------------------
+            // assign to entire matrix
+            // ------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+
+        __syncthreads();
+    }
+}
+
 /** This local gemm adapts rocblas_gemm to multiply complex*real, and
     overwrite result: A = A*B **/
 template <bool BATCHED,
@@ -3770,6 +3868,175 @@ rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
         return rocblas_status_success;
         break;
     default: return rocblas_status_invalid_value; break;
+    }
+}
+
+// Trapezoidal matrix-vector multiply (no transpose)
+// Performs
+//    y := alpha * A * x + beta * y,
+// where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
+// (modified rocblas_trmvn_kernel from rocBLAS)
+// (grid = dim3(ceil(m / DIM_X), 1, batch_count), block = dim3(DIM_X, DIM_Y))
+template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T, typename V, typename U1, typename U2, typename U3>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
+    rocsolver_tzmvn_kernel(rocblas_int m,
+                           rocblas_int n,
+                           V alpha,
+                           U1 __restrict__ AA,
+                           const rocblas_int shiftA,
+                           const rocblas_int lda,
+                           const rocblas_stride strideA,
+                           U2 __restrict__ xx,
+                           const rocblas_stride shiftX,
+                           const rocblas_int incx,
+                           const rocblas_stride strideX,
+                           V beta,
+                           U3 __restrict__ yy,
+                           const rocblas_stride shiftY,
+                           const rocblas_int incy,
+                           const rocblas_stride strideY)
+{
+    rocblas_int bid = hipBlockIdx_z;
+    rocblas_int tid = threadIdx.x + threadIdx.y * blockDim.x;
+
+    // tx corresponds to row in block, good for memory coalescing
+    // ty corresponds to column
+    rocblas_int tx = threadIdx.x;
+    rocblas_int ty = threadIdx.y;
+
+    rocblas_int row = blockIdx.x * DIM_X + tx;
+
+    rocblas_int dim = std::min(m, n);
+
+    // select batch instance
+    T a = load_scalar(alpha, bid, 0);
+    T b = load_scalar(beta, bid, 0);
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* x = load_ptr_batch<T>(xx, bid, shiftX, strideX);
+    T* y = load_ptr_batch<T>(yy, bid, shiftY, strideY);
+
+    __shared__ T sdata[DIM_X * DIM_Y];
+    T res_A = 0;
+
+    // handle diagonal separately
+    if(ty == 0 && row < dim)
+    {
+        if constexpr(UNIT)
+            res_A = x[row * incx];
+        else
+            res_A = A[row + row * lda] * x[row * incx];
+    }
+
+    // multiply and sum across columns
+    for(rocblas_int col = ty; col < n; col += DIM_Y)
+    {
+        if(row < m && ((!LOWER && col > row) || (LOWER && col < row)))
+            res_A += A[row + col * lda] * x[col * incx];
+    }
+
+    // move partial sum to shared memory to sum further
+    sdata[tx + ty * DIM_X] = res_A;
+
+    __syncthreads();
+
+    if(tid < DIM_X)
+    {
+        // sum DIM_Y elements to get result
+        for(rocblas_int i = 1; i < DIM_Y; i++)
+            sdata[tid] += sdata[tid + DIM_X * i];
+
+        if(row < m)
+            y[row * incy] = a * sdata[tid] + b * y[row * incy];
+    }
+}
+
+// Trapezoidal matrix-vector multiply (transpose / conjugate transpose)
+// Performs
+//    y := alpha * A^T * x + beta * y, (CONJ = false) or
+//    y := alpha * A^H * x + beta * y, (CONJ = true)
+// where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
+// (grid = dim3(n, 1, batch_count), block = dim3(DIM_X))
+template <rocblas_int DIM_X, bool LOWER, bool UNIT, bool CONJ, typename T, typename V, typename U1, typename U2, typename U3>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(rocblas_int m,
+                                                                      rocblas_int n,
+                                                                      V alpha,
+                                                                      U1 __restrict__ AA,
+                                                                      const rocblas_int shiftA,
+                                                                      const rocblas_int lda,
+                                                                      const rocblas_stride strideA,
+                                                                      U2 __restrict__ xx,
+                                                                      const rocblas_stride shiftX,
+                                                                      const rocblas_int incx,
+                                                                      const rocblas_stride strideX,
+                                                                      V beta,
+                                                                      U3 __restrict__ yy,
+                                                                      const rocblas_stride shiftY,
+                                                                      const rocblas_int incy,
+                                                                      const rocblas_stride strideY)
+{
+    rocblas_int bid = blockIdx.z;
+    rocblas_int tx = threadIdx.x;
+
+    // col of A and element of y
+    rocblas_int col = blockIdx.x;
+
+    // select batch instance
+    T a = load_scalar(alpha, bid, 0);
+    T b = load_scalar(beta, bid, 0);
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* x = load_ptr_batch<T>(xx, bid, shiftX, strideX);
+    T* y = load_ptr_batch<T>(yy, bid, shiftY, strideY);
+
+    // shift thread block to working column
+    A += col * size_t(lda);
+
+    T res = 0;
+
+    int constexpr MAX_WARPS = 32;
+    __shared__ T sdata[MAX_WARPS];
+
+    for(rocblas_int row = tx; row < m; row += DIM_X)
+    {
+        if((!LOWER && col > row) || (LOWER && col < row))
+        {
+            if constexpr(CONJ)
+                res += conj(A[row]) * x[row * incx];
+            else
+                res += A[row] * x[row * incx];
+        }
+    }
+
+    // reduction of partial sums
+    res += shift_left(res, 1);
+    res += shift_left(res, 2);
+    res += shift_left(res, 4);
+    res += shift_left(res, 8);
+    res += shift_left(res, 16);
+    if(warpSize > 32)
+        res += shift_left(res, 32);
+    if(tx % warpSize == 0)
+        sdata[tx / warpSize] = res;
+    __syncthreads();
+    if(tx == 0)
+    {
+        for(rocblas_int k = 1; k < DIM_X / warpSize; k++)
+            res += sdata[k];
+    }
+
+    if(tx == 0)
+    {
+        if constexpr(UNIT)
+        {
+            y[col * incy] = a * (x[col * incx] + res) + b * y[col * incy];
+        }
+        else if constexpr(CONJ)
+        {
+            y[col * incy] = a * (conj(A[col]) * x[col * incx] + res) + b * y[col * incy];
+        }
+        else
+        {
+            y[col * incy] = a * (A[col] * x[col * incx] + res) + b * y[col * incy];
+        }
     }
 }
 

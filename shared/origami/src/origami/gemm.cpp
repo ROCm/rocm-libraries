@@ -64,6 +64,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
 
   auto [reduction, wgs, cus, timesteps, split] =
       compute_launch_parameters(problem, hardware, config, config.grid_selection);
+  tile_schedule      = streamk::select_hybrid_mode(problem, hardware, config, problem.num_cus);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;
@@ -122,6 +123,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("NumTimesteps: " << int(num_timesteps));
     OLOG_DEBUG("SplittingFactor: " << int(splitting_factor));
     OLOG_DEBUG("ReductionStrategy: " << int(reduction_strategy));
+    OLOG_DEBUG("TileSchedule: " << hybrid_mode_to_string(tile_schedule));
 
     OLOG_DEBUG("ActiveCUs: " << int(active_cus));
     OLOG_DEBUG("ReadMemBWFactor: " << mem_bw_limited);
