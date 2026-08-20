@@ -27,6 +27,15 @@
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+
+namespace cluster_barrier {
+
+/// When true, Rule 3 may hoist signals across loop segments. When false, signals stay
+/// inside their segment and the scheduler only pins live-out SCC compares after barriers.
+constexpr bool kRule3CrossLoop = false;
+
+}  // namespace cluster_barrier
+
 class Pass;
 
 /// \p streamKMulticast and \p pgrValue only enable the Rule 3 producer-side

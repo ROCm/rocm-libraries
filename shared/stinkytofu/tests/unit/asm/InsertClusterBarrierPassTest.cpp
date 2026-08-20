@@ -42,6 +42,12 @@
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 
+#define SKIP_UNLESS_RULE3_CROSS_LOOP()                                                   \
+    do {                                                                                 \
+        if (!cluster_barrier::kRule3CrossLoop)                                         \
+            GTEST_SKIP() << "requires cluster_barrier::kRule3CrossLoop == true";         \
+    } while (0)
+
 namespace {
 
 constexpr int kClusterBarrierId = -3;
@@ -588,6 +594,7 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
 // Take any one rule away and what is left either hangs or leaks. Run with STINKY_TEST_DUMP=1
 // to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, SingleHandshakeInALoopIsFedByRule1AndRule2) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     appendGsu1Preheader();
     openLoop();
     createWMMA(32, 0, 8);
@@ -790,6 +797,7 @@ TEST_F(InsertClusterBarrierPassTest, Wait3StopAnchorsAfterFollowingWorkgroupBarr
 // start of the segment it got to -- not the wait's own position, which would buy no lead at
 // all.
 TEST_F(InsertClusterBarrierPassTest, Rule3SegmentBoundaryFallbackAnchorsAtSegBegin) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     appendGsu1Preheader();
     openLoop();
     for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
@@ -1066,6 +1074,7 @@ TEST_F(InsertClusterBarrierPassTest, Rule3BoundaryForcedAnchorSinksOutOfLiveSccR
 // caught instead of being discarded together with a compensation the loop never needed.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, ClimbThatGivesUpIsNotBilledForCrossingTheBackEdge) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     createLabel(kGSU1LabelName);
     createWMMA(24, 0, 8);
     createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
@@ -1180,6 +1189,7 @@ TEST_F(InsertClusterBarrierPassTest, ClimbThatGivesUpIsNotBilledForCrossingTheBa
 // the loop.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, SignalStaysInLoopWhenThePreheaderHasNoSafeSccSpot) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     createLabel(kGSU1LabelName);
     createWMMA(24, 0, 8);
     createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
@@ -1274,6 +1284,7 @@ TEST_F(InsertClusterBarrierPassTest, SignalStaysInLoopWhenThePreheaderHasNoSafeS
 // between the two barriers is still ahead of it.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, PreheaderSignalSitsBehindTheBarrierClosestToTheLoop) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     createLabel(kGSU1LabelName);
     createWMMA(24, 0, 8);
     createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
@@ -1333,6 +1344,7 @@ TEST_F(InsertClusterBarrierPassTest, PreheaderSignalSitsBehindTheBarrierClosestT
 // loop, and the two are reached on exactly the same paths.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, PreheaderWithNoBarrierBringsOneBelowItsLastLabel) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     createLabel(kGSU1LabelName);
     createWMMA(24, 0, 8);
     createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
@@ -1422,6 +1434,7 @@ TEST_F(InsertClusterBarrierPassTest, PreheaderWithNoBarrierBringsOneBelowItsLast
 // the cluster the run-up is done while it is still fetching.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, PreheaderWithNoBarrierAndNoLabelSitsBelowItsLastLoad) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     createLabel(kGSU1LabelName);
     createWMMA(24, 0, 8);
     createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
@@ -1588,6 +1601,7 @@ TEST_F(InsertClusterBarrierPassTest, SegmentsLongEnoughToHoldTheLeadNeedNoLoopCo
 // straight over the branch above it.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, ExitBranchSkipsDrainWaitOnlyWithNoTokenInFlight) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     // Preheader: the compensating signal comes to rest behind this workgroup barrier.
     createLabel(kGSU1LabelName);
     createWMMA(24, 0, 8);
@@ -1698,6 +1712,7 @@ TEST_F(InsertClusterBarrierPassTest, ExitBranchSkipsDrainWaitOnlyWithNoTokenInFl
 // jump rather than have one rewritten.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, ShortTailSegmentDrainsItsExitAndSendsTheFallThroughPast) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     const auto fillSegment = [&] {
         for (int i = 0; i < 70; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
     };
@@ -1769,6 +1784,52 @@ TEST_F(InsertClusterBarrierPassTest, ShortTailSegmentDrainsItsExitAndSendsTheFal
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 }
 
+// With kRule3CrossLoop false, segments too short to hold the lead stay inside their segment.
+TEST_F(InsertClusterBarrierPassTest, CrossLoopOffKeepsSignalsInsideTheirSegments) {
+    if (cluster_barrier::kRule3CrossLoop) GTEST_SKIP() << "requires kRule3CrossLoop == false";
+
+    const auto fillSegment = [&] {
+        for (int i = 0; i < 70; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    };
+
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createWMMA(32, 8, 16);
+
+    createLabel("label_TestLoop");
+    fillSegment();
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/90, "label_TestLoopEnd");
+    fillSegment();
+    appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/91, "label_TestLoopEnd");
+    createWMMA(56, 24, 32);
+    appendHandshake(/*loadS0=*/16, /*loadS1=*/20);
+    createWMMA(64, 32, 40);
+    createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/92, "label_TestLoop");
+    createLabel("label_TestLoopEnd");
+    createWMMA(8, 0, 8);
+
+    runPass();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(inFlightAt(indexOf(loopHead)), 0)
+        << "kRule3CrossLoop off must not post a preheader signal:" << blockListing(*bb);
+
+    StinkyInstruction* exitLabel = findLabelNamed("label_TestLoopEnd");
+    ASSERT_NE(exitLabel, nullptr);
+    StinkyInstruction* afterExit = firstRealInstAfter(exitLabel);
+    ASSERT_NE(afterExit, nullptr);
+    EXPECT_FALSE(isClusterBarrierWithLiteral(*afterExit, /*wantSignal=*/false))
+        << "kRule3CrossLoop off must not drain at the exit:" << blockListing(*bb);
+    EXPECT_EQ(findLabelNamed("label_TestLoopEnd_skipCBWait"), nullptr)
+        << "kRule3CrossLoop off must not rewrite exits around a drain:" << blockListing(*bb);
+}
+
 // The same mixture, but with the *first* segment short instead of the last. Its signal has no
 // segment above it inside the body, so it climbs over the loop head and follows the latch,
 // landing near the tail where it feeds the next trip's wait. That is what asks for a signal in
@@ -1790,6 +1851,7 @@ TEST_F(InsertClusterBarrierPassTest, ShortTailSegmentDrainsItsExitAndSendsTheFal
 // while the drain answers to another, and this loop says yes to both for different segments.
 // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
 TEST_F(InsertClusterBarrierPassTest, PreheaderSignalFollowsOnlyTheSegmentCrossingTheBackEdge) {
+    SKIP_UNLESS_RULE3_CROSS_LOOP();
     const auto fillSegment = [&] {
         for (int i = 0; i < 70; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
     };
