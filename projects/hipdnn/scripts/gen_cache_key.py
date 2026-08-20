@@ -14,6 +14,7 @@ the custom target in flatbuffers_sdk/CMakeLists.txt, or through the ``cache-key-
 pre-commit hook.
 """
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -59,17 +60,21 @@ def _read_required_version():
         return f.read().strip()
 
 
-def _resolve_flatc():
-    """Locate flatc and gate on the pinned version, as run_flatc.py does."""
+def _resolve_flatc(flatc_path=None):
+    """Locate flatc and gate on the pinned version, as run_flatc.py does.
+
+    @p flatc_path names the binary explicitly, for a build that resolves flatc as a
+    CMake target rather than putting it on PATH.
+    """
     required = _read_required_version()
-    flatc_path = shutil.which("flatc")
+    flatc_path = flatc_path or shutil.which("flatc")
     current = ""
     if flatc_path:
         try:
             current = subprocess.check_output(
                 [flatc_path, "--version"], text=True
             ).strip()
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, OSError):
             pass
     if required not in current:
         print(
@@ -672,7 +677,14 @@ file_extension "bfbs";
 
 
 def main():
-    flatc_path = _resolve_flatc()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--flatc",
+        default=None,
+        help="flatc binary to use; defaults to the one on PATH. The build passes the "
+        "binary CMake already resolved, which need not be on PATH.",
+    )
+    flatc_path = _resolve_flatc(parser.parse_args().flatc)
     schemas_dir = os.path.join(_HIPDNN_DIR, SDK_DIR, "schemas")
     output_dir = os.path.join(
         _HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects"
