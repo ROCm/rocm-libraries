@@ -201,6 +201,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
     set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
+    set(HKP_PACK_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HKP_PACK_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
     set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
     if(EXISTS "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
@@ -260,6 +261,10 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")
+endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_subdirectory(descriptor-packaging)
 endif()
 
 add_subdirectory(src)
@@ -357,7 +362,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         conv_fwd/conv_fwd.uhd.json
         conv_fwd/conv_fwd_f16_block64.ukd.json
         conv_fwd/kernel_dtype_matches_graph.umd.json
-        conv_fwd/single_node_conv_fwd.umd.json
         pointwise/kernel_dtype_matches_graph.umd.json
         pointwise/operation_is_add.umd.json
         pointwise/operation_is_mul.umd.json
@@ -369,7 +373,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         pointwise/pointwise_add.kdp.json
         pointwise/pointwise_mul.kdp.json
         pointwise/pointwise_sub.kdp.json
-        pointwise/single_node_binary.umd.json
     )
 
     # Wiped once per configure, not once per build. copy_if_different below makes an

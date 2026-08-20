@@ -119,7 +119,7 @@ int perPredRequiredWait(const DataflowResult& dfr, BasicBlock* pred, CounterKind
         for (StinkyInstruction* d : deps) {
             int n = q.countFrom(d);
             if (n > 0) {
-                int w = n - 1;
+                int w = waitToDrain(c, n);
                 if (best < 0 || w < best) best = w;  // strictest dep on this path
             }
         }

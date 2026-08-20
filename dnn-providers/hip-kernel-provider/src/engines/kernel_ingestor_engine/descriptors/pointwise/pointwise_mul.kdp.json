@@ -3,7 +3,6 @@
   "id": "19373f40-1ee2-4f5d-97da-58d0447ef6a7",
   "name": "hipkernel:pointwise_mul",
   "matchers": [
-    "e5d38a04-9c71-4b2f-83a6-7f14b0d29e58",
     "91ecbb8a-475d-408e-9d0c-6364093877cd",
     "1a7f52c8-b036-4e91-95d2-6c83af407b14"
   ],
