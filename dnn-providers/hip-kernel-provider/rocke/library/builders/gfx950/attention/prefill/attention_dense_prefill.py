@@ -144,6 +144,10 @@ def run(
 
 
 def main():
+    print("Example print statement!")
+    print("Extra print statement!")
+    print("Extra print statement!")
+    print("Extra print statement!")
     ap = argparse.ArgumentParser()
     ap.add_argument("--bn", type=int, default=64, help="block_n (KV tile)")
     ap.add_argument("--wpe", type=int, default=2, help="waves_per_eu")
