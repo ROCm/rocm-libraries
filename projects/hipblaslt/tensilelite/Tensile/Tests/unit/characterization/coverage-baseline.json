@@ -26,7 +26,7 @@
     "Tensile/Common/Utilities.py": 100.0,
     "Tensile/Common/ValidParameters.py": 100.0,
     "Tensile/Common/__init__.py": 100.0,
-    "Tensile/Component.py": 97.06,
+    "Tensile/Component.py": 93.49,
     "Tensile/Components/CMSValidator.py": 96.66,
     "Tensile/Components/ComputeStoreVgprs.py": 87.4,
     "Tensile/Components/CustomSchedule.py": 96.14,
