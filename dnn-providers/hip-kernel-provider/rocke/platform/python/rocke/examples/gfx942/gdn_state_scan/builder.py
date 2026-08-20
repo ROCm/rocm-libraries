@@ -225,7 +225,7 @@ def _stage_tile_store(b, *, smem, regs, rows, cols, block_threads, tid, ng=None)
 
 
 def _stage_k_transposed(b, *, src, smem, spec, tid, nthreads, t_base, i_hg,
-                        T_val, Hg, ng=None, ldr=None):
+                        T_val, Hg, ng=None, ldr=None, bos=None):
     """Stage ``k[BT, K]`` from global into ``sKT[K, BT]`` — a real transpose.
 
     gfx942 has no ``ds_read_*_tr_*`` (CDNA4 only), so a transposed operand must
@@ -261,10 +261,13 @@ def _stage_k_transposed(b, *, src, smem, spec, tid, nthreads, t_base, i_hg,
         k0 = b.mul(b.mod(slot, c_cg), b.const_i32(KVW))     # first of KVW k-cols
         rows = []
         for r in range(4):
-            t_abs = b.add(b.add(t_base, bt0), b.const_i32(r))
-            t_safe = (t_abs if (ldr is not None and ldr.bounds_checked)
-                      else b.select(b.cmp_lt(t_abs, T_val), t_abs, b.const_i32(0)))
-            off = b.add(b.mul(b.add(b.mul(t_safe, b.const_i32(Hg)), i_hg),
+            t_loc = b.add(b.add(t_base, bt0), b.const_i32(r))   # within-sequence
+            in_range = b.cmp_lt(t_loc, T_val)
+            t_loc = (t_loc if (ldr is not None and ldr.bounds_checked)
+                     else b.select(in_range, t_loc, b.const_i32(0)))
+            # global (packed) token = bos + within-sequence token
+            t_glob = b.add(bos, t_loc) if bos is not None else t_loc
+            off = b.add(b.mul(b.add(b.mul(t_glob, b.const_i32(Hg)), i_hg),
                               b.const_i32(K)), k0)
             rows.append(ldr.vN(off, BF16, KVW) if ldr is not None
                         else b.global_load_vN(src, off, BF16, KVW))
@@ -276,7 +279,7 @@ def _stage_k_transposed(b, *, src, smem, spec, tid, nthreads, t_base, i_hg,
             b.smem_store_vN(smem, [row, _swz(b, row, bt0, ng)], col, 4)
 
 
-def _drain_h(b, *, sH, dst, spec, tid, nthreads, i_t, i_h, v_base, ng=None):
+def _drain_h(b, *, sH, dst, spec, tid, nthreads, chunk, i_h, v_base, ng=None):
     """Drain the ``[BV, K]`` state snapshot from LDS to ``Hout[NT, H, V, K]``.
 
     All threads cooperate; each handles ``STAGE_VEC`` contiguous K values, which
@@ -293,7 +296,7 @@ def _drain_h(b, *, sH, dst, spec, tid, nthreads, i_t, i_h, v_base, ng=None):
         row = b.div(slot, c_vpr)
         k0 = b.mul(b.mod(slot, c_vpr), b.const_i32(STAGE_VEC))
         v_abs = b.add(v_base, row)
-        base = b.add(b.mul(b.add(b.mul(b.add(b.mul(i_t, b.const_i32(H)), i_h),
+        base = b.add(b.mul(b.add(b.mul(b.add(b.mul(chunk, b.const_i32(H)), i_h),
                                        b.const_i32(V)), v_abs),
                            b.const_i32(K)), k0)
         # P4: one wide LDS read, then f32 stores in 4-wide groups. The values
@@ -460,8 +463,12 @@ def build_k5(spec: GdnStateScanSpec):
 
     Grid ``(ceil(V/BV), N*H, 1)``.
     """
-    if spec.STATE_DTYPE_BF16:
-        raise NotImplementedError("f32 state only in this milestone")
+    # STATE_DTYPE_BF16: the initial/final SSM state lives in bf16 in HBM to halve
+    # its bandwidth/footprint; the kernel still accumulates in f32 and converts
+    # only at the H0 load and the Ht store (matching the parent). The per-chunk
+    # snapshot ``Hout`` stays f32 — only h0/ht change dtype.
+    state_dt = BF16 if spec.STATE_DTYPE_BF16 else F32
+    state_bytes = 2 if spec.STATE_DTYPE_BF16 else 4
 
     atom = mfma_atom("bf16", 16, 16, spec.mfma_k)
     BT, K, BV, V, H, Hg = spec.BT, spec.K, spec.BV, spec.V, spec.H, spec.Hg
@@ -475,6 +482,20 @@ def build_k5(spec: GdnStateScanSpec):
 
     # P5 is gated: see PERF_PLAN.md for the unresolved ordering sensitivity.
     _PF_W = _PF_U = _PF_G = spec.PREFETCH
+
+    def _exp_gate(x):
+        """exp(x) for a gate value.
+
+        The gates arrive as natural-log cumsums, and the kernel wants exp(). We
+        route through the hardware ``exp2`` (``exp2_fast``, valid since gate
+        args are <= 0), so exp(x) = exp2(x * log2(e)). When the upstream stages
+        already emit gates in the **log2 domain** (``G_IS_LOG2_SCALED``), the
+        multiply is redundant and dropped — matching the parent's
+        ``_make_fast_exp``.
+        """
+        if spec.G_IS_LOG2_SCALED:
+            return b.exp2_fast(x)
+        return b.exp2_fast(b.fmul(x, b.const_f32(LOG2E)))
 
     b = IRBuilder(spec.kernel_name() + "_k5")
     b.kernel.attrs["max_workgroup_size"] = nthreads
@@ -490,13 +511,21 @@ def build_k5(spec: GdnStateScanSpec):
     # path, head-major [H, T] on the scalar path.
     Gate = b.param("Gate", PtrType(F32, "global"), noalias=True, readonly=True,
                    align=16)
-    H0 = b.param("H0", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
+    H0 = b.param("H0", PtrType(state_dt, "global"), noalias=True, readonly=True, align=16)
     Vn = b.param("Vnew", PtrType(F32, "global"), noalias=True, align=16)
     Ho = b.param("Hout", PtrType(F32, "global"), noalias=True, align=16)
-    Ht = b.param("Ht", PtrType(F32, "global"), noalias=True, align=16)
+    Ht = b.param("Ht", PtrType(state_dt, "global"), noalias=True, align=16)
     T_val = b.param("T_val", I32)
     NT_val = b.param("NT_val", I32)
     N_val = b.param("N_val", I32)          # sequences; grid.y == N_val * H
+    if spec.IS_VARLEN:
+        # cu_seqlens[i_n], cu_seqlens[i_n+1] bound this sequence; chunk_offsets
+        # gives its base chunk index in the packed [sum(NT), H, V, K] snapshot.
+        # T_flat is the packed token count (= cu_seqlens[-1]); w/u are addressed
+        # against it in the head-major (WU_CONTIGUOUS) layout.
+        CU = b.param("cu_seqlens", PtrType(I32, "global"), noalias=True, readonly=True)
+        CO = b.param("chunk_offsets", PtrType(I32, "global"), noalias=True, readonly=True)
+        T_flat = b.param("T_flat", I32)
 
     sW = b.smem_alloc(BF16, [BT, wcols], name_hint="sW")
     sH = b.smem_alloc(BF16, [BV, wcols], name_hint="sH")
@@ -539,6 +568,29 @@ def build_k5(spec: GdnStateScanSpec):
     i_hg = b.div(i_h, b.const_i32(spec.gqa_ratio))
     v_base = b.mul(i_v, b.const_i32(BV))
 
+    # ---- per-sequence prologue: bos / T_local / nt / chunk-snapshot base ----
+    # Non-varlen collapses to a single sequence of T_val tokens per i_n; varlen
+    # reads the sequence bounds from cu_seqlens and its snapshot base from
+    # chunk_offsets, matching the parent exactly.
+    if spec.IS_VARLEN:
+        bos = b.buffer_load(b.buffer_rsrc(CU, b.mul(b.add(N_val, b.const_i32(1)),
+                                                    b.const_i32(4))),
+                            b.mul(i_n, b.const_i32(4)), b.const_i32(0), I32)
+        eos = b.buffer_load(b.buffer_rsrc(CU, b.mul(b.add(N_val, b.const_i32(1)),
+                                                    b.const_i32(4))),
+                            b.mul(b.add(i_n, b.const_i32(1)), b.const_i32(4)),
+                            b.const_i32(0), I32)
+        T_local = b.sub(eos, bos)
+        nt_local = b.div(b.add(T_local, b.const_i32(BT - 1)), b.const_i32(BT))
+        chunk_base = b.buffer_load(
+            b.buffer_rsrc(CO, b.mul(N_val, b.const_i32(4))),
+            b.mul(i_n, b.const_i32(4)), b.const_i32(0), I32)
+    else:
+        bos = b.mul(i_n, T_val)
+        T_local = T_val
+        nt_local = NT_val
+        chunk_base = b.mul(i_n, NT_val)
+
     c16, c4, c64 = b.const_i32(16), b.const_i32(4), b.const_i32(64)
     wid, lane = b.div(tid, c64), b.mod(tid, c64)
     wid_m, wid_n = b.mod(wid, b.const_i32(MW)), b.div(wid, b.const_i32(MW))
@@ -552,6 +604,41 @@ def build_k5(spec: GdnStateScanSpec):
 
     # GEMM2 K tile owned by this wave: k = kb*64 + wid_m*16 + (lmb*4 + e)
     k_tile = [b.add(b.const_i32(kb * 64), b.mul(wid_m, c16)) for kb in range(NKB)]
+
+    # ---- w / u / k / gate base offsets and per-row strides -----------------
+    # Centralised so IS_VARLEN and WU_CONTIGUOUS live in one place. All are
+    # element offsets; `tok` is the token index WITHIN the sequence (0..T_local),
+    # so `bos + tok` is the packed/global token.
+    #   w  head-major  : (i_h*T_flat + bos + tok)*K + col     stride K
+    #      token-major : ((bos + tok)*H + i_h)*K + col        stride H*K
+    #   u  = w with V and the CTA's V-window folded into the base
+    #   k  always      : ((bos + tok)*Hg + i_hg)*K + col      stride Hg*K
+    #   gk head-major  : ((bos + tok)*H + i_h)*K + col        (per-channel gate)
+    #   g  head-major  : i_h*T_flat + bos + tok               (scalar gate)
+    # Head-major row-base offset (in *rows*), matching the parent's two cases:
+    #   varlen     : i_h*T_flat + bos        (one packed run per head)
+    #   non-varlen : (i_n*H + i_h)*T_val      (per-(seq, head))
+    # Token-major uses (bos + tok)*H + i_h and needs no flat length.
+    if spec.WU_CONTIGUOUS:
+        if spec.IS_VARLEN:
+            _wu_row = b.add(b.mul(i_h, T_flat), bos)
+        else:
+            _wu_row = b.mul(b.add(b.mul(i_n, cH), i_h), T_val)
+        w_stride, u_stride = K, V
+        _w_base = b.mul(_wu_row, cK)
+        _u_row_base = b.mul(_wu_row, cV)
+    else:
+        w_stride, u_stride = H * K, H * V
+        _w_base = b.mul(b.add(b.mul(bos, cH), i_h), cK)
+        _u_row_base = b.mul(b.add(b.mul(bos, cH), i_h), cV)
+    # u: fold this CTA's V window into the base
+    _u_base = b.add(_u_row_base, v_base)
+    # scalar-gate row base (head-major [H, T_flat] varlen; [H, T] non-varlen)
+    _g_base = b.add(b.mul(i_h, T_flat if spec.IS_VARLEN else T_val), bos)
+
+    def wu_row_off(base, tok, stride):
+        """Flat element offset of row `tok` (within-sequence) of a w/u tensor."""
+        return b.add(base, b.mul(tok, b.const_i32(stride)))
 
     def state_off(kb, nr, seq):
         """Flat offset of this lane's 4 state values in an [N, H, V, K] tensor."""
@@ -571,7 +658,7 @@ def build_k5(spec: GdnStateScanSpec):
     ld_g = _Loader(b, Gate, elem_bytes=4, use_desc=_bd,
                    n_elems=(lambda: b.mul(b.mul(T_val, cH), cK)) if spec.USE_GK
                            else (lambda: b.mul(cH, T_val)))
-    ld_h0 = _Loader(b, H0, elem_bytes=4, use_desc=_bd,
+    ld_h0 = _Loader(b, H0, elem_bytes=state_bytes, use_desc=_bd,
                     n_elems=lambda: b.mul(b.mul(b.mul(N_val, cH), cV), cK))
 
     # ---- P5: loop-carried prefetch -------------------------------------
@@ -588,40 +675,45 @@ def build_k5(spec: GdnStateScanSpec):
         """Raw reads for chunk ``i_t_n``. Returns a flat list of Values."""
         t_b = b.mul(i_t_n, b.const_i32(BT))
         out = [] if not _PF_W else list(_stage_tile_load(
-            b, src_ptr=Wt, rows=BT, cols=K, row_stride_src=H * K,
+            b, src_ptr=Wt, rows=BT, cols=K, row_stride_src=w_stride,
             src_row_base=t_b, block_threads=nthreads, tid=tid,
-            elem_off=b.mul(i_h, cK), clamp=T_val, ldr=ld_w))
+            elem_off=_w_base, clamp=T_local, ldr=ld_w))
         _U_MARK = len(out)
         # u, gathered in the MMA's C-fragment layout
         for nr in (range(NRL) if _PF_U else []):
             for e in range(atom.c_per_lane):
                 r_in, c_in = atom.lane_to_output(b, lane, e)
                 t_abs = b.add(t_b, b.add(b.mul(wid_m, c16), r_in))
-                t_safe = b.select(b.cmp_lt(t_abs, T_val), t_abs, b.const_i32(0))
-                v_abs = b.add(v_base, b.add(v_tile[nr], c_in))
+                t_safe = b.select(b.cmp_lt(t_abs, T_local), t_abs, b.const_i32(0))
+                col = b.add(b.add(v_tile[nr], c_in), b.const_i32(0))
                 out.append(ld_u.scalar(
-                    b.add(b.mul(b.add(b.mul(t_safe, cH), i_h), cV), v_abs), BF16))
+                    b.add(wu_row_off(_u_base, t_safe, u_stride), col), BF16))
         _G_MARK = len(out)
         # gate
-        t_last = b.sub(b.smin(b.add(t_b, b.const_i32(BT)), T_val), b.const_i32(1))
+        t_last = b.sub(b.smin(b.add(t_b, b.const_i32(BT)), T_local), b.const_i32(1))
         if not _PF_G:
             pass
         elif spec.USE_GK:
-            row = b.mul(b.add(b.mul(t_last, cH), i_h), cK)
+            row = b.mul(b.add(b.mul(b.add(bos, t_last), cH), i_h), cK)
             for kb in range(NKB):
                 out.append(ld_g.vN(b.add(row, b.add(k_tile[kb], k_lane)), F32, 4))
         elif True:
-            g_base = b.mul(i_h, T_val)
+            g_base = _g_base
             out.append(ld_g.scalar(b.add(g_base, t_last), F32))
             for e in range(atom.c_per_lane):
                 r_in, _c = atom.lane_to_output(b, lane, e)
                 t_abs = b.add(t_b, b.add(b.mul(wid_m, c16), r_in))
-                t_safe = b.select(b.cmp_lt(t_abs, T_val), t_abs, b.const_i32(0))
+                t_safe = b.select(b.cmp_lt(t_abs, T_local), t_abs, b.const_i32(0))
                 out.append(ld_g.scalar(b.add(g_base, t_safe), F32))
-        # swap: [w][u][gate] -> [w][gate][u]
+        # Carry order. `[w][gate][u]` (vector-group phis before the bfloat u
+        # phis) is the layout the AMDGPU backend compiles correctly; the
+        # scalar-first `[w][u][gate]` is miscompiled (PERF_PLAN.md §P5,
+        # repro_phi_order.py). The switch exists only to reproduce the bug.
         u_part = out[_U_MARK:_G_MARK]
         g_part = out[_G_MARK:]
-        return out[:_U_MARK] + g_part + u_part
+        if spec.PREFETCH_VEC_FIRST:
+            return out[:_U_MARK] + g_part + u_part
+        return out                                    # [w][u][gate] — miscompiled
 
     def _pf_unpack(vals):
         """Structural inverse of :func:`_pf_issue`."""
@@ -629,14 +721,23 @@ def build_k5(spec: GdnStateScanSpec):
         n_w = len(_tile_slots(b, rows=BT, cols=K,
                               block_threads=nthreads, tid=tid))
         w_regs = [next(it) for _ in range(n_w)] if _PF_W else None
-        if not _PF_G:
-            gate = None
-        elif spec.USE_GK:
-            gate = [next(it) for _ in range(NKB)]
+
+        def _rd_gate():
+            if not _PF_G:
+                return None
+            n = NKB if spec.USE_GK else (1 + atom.c_per_lane)
+            return [next(it) for _ in range(n)]
+
+        def _rd_u():
+            return ([[next(it) for _ in range(atom.c_per_lane)] for _ in range(NRL)]
+                    if _PF_U else None)
+
+        if spec.PREFETCH_VEC_FIRST:
+            gate = _rd_gate()
+            u_vals = _rd_u()
         else:
-            gate = [next(it) for _ in range(1 + atom.c_per_lane)]
-        u_vals = ([[next(it) for _ in range(atom.c_per_lane)] for _ in range(NRL)]
-                  if _PF_U else None)
+            u_vals = _rd_u()
+            gate = _rd_gate()
         assert next(it, None) is None, "prefetch unpack did not consume every value"
         return w_regs, u_vals, gate
 
@@ -646,15 +747,22 @@ def build_k5(spec: GdnStateScanSpec):
     inits = []
     for kb in range(NKB):
         for nr in range(NRL):
-            v = (ld_h0.vN(state_off(kb, nr, i_n), F32, 4)
-                 if spec.USE_INITIAL_STATE else atom.zero_acc(b))
+            if not spec.USE_INITIAL_STATE:
+                v = atom.zero_acc(b)
+            elif spec.STATE_DTYPE_BF16:
+                # load bf16 state, widen each lane to the f32 accumulator
+                bf = ld_h0.vN(state_off(kb, nr, i_n), BF16, 4)
+                v = _pack_f32x4(b, [b.cast_to_f32(b.vec_extract(bf, j))
+                                    for j in range(4)])
+            else:
+                v = ld_h0.vN(state_off(kb, nr, i_n), F32, 4)
             inits.append((f"h_{kb}_{nr}", v))
 
     n_acc = len(inits)
     inits = inits + [(f"pf_{i}", v) for i, v in enumerate(_pf0)]
 
     # ======================= chunk loop =================================
-    for_op = b.scf_for_iter(b.const_i32(0), NT_val, b.const_i32(1), inits,
+    for_op = b.scf_for_iter(b.const_i32(0), nt_local, b.const_i32(1), inits,
                             iv_name="i_t")
     with for_op as (i_t, carried):
         hacc, pf = carried[:n_acc], carried[n_acc:]
@@ -677,14 +785,14 @@ def build_k5(spec: GdnStateScanSpec):
                               block_threads=nthreads, tid=tid, ng=ng_k,
                               regs=_stage_tile_load(
                                   b, src_ptr=Wt, rows=BT, cols=K,
-                                  row_stride_src=H * K, src_row_base=t_base,
+                                  row_stride_src=w_stride, src_row_base=t_base,
                                   block_threads=nthreads, tid=tid,
-                                  elem_off=b.mul(i_h, cK), clamp=T_val, ldr=ld_w))
+                                  elem_off=_w_base, clamp=T_local, ldr=ld_w))
         b.sync()
 
         if spec.STORE_H:
             _drain_h(b, sH=sH, dst=Ho, spec=spec, tid=tid, nthreads=nthreads,
-                     i_t=i_t, i_h=i_h, v_base=v_base, ng=ng_k)
+                     chunk=b.add(chunk_base, i_t), i_h=i_h, v_base=v_base, ng=ng_k)
 
         # -- GEMM1: bv = w @ h^T ------------------------------------------
         bt_row = b.add(b.mul(wid_m, c16), lane_n)
@@ -716,20 +824,20 @@ def build_k5(spec: GdnStateScanSpec):
             t_abs = b.add(t_base, bt)
             frag_bt.append(bt)
             frag_t.append(t_abs)
-            frag_ok.append(b.cmp_lt(t_abs, T_val))
+            frag_ok.append(b.cmp_lt(t_abs, T_local))
 
         # -- scalar-gate factors (USE_G only) ------------------------------
         # gate[e] = exp(g_last - g[t_e]) applied to v_new; h decays by
         # exp(g_last). g is head-major [H, T].
         if spec.USE_G:
-            gb = b.mul(i_h, T_val)
+            gb = _g_base
             g_last = gate_pf[0] if _PF_G else ld_g.scalar(b.add(gb, t_last), F32)
             g_gate = []
             for e in range(atom.c_per_lane):
                 ge = (gate_pf[1+e] if _PF_G else ld_g.scalar(
                       b.add(gb, b.select(frag_ok[e], frag_t[e], b.const_i32(0))), F32))
-                g_gate.append(b.exp2_fast(b.fmul(b.fsub(g_last, ge), b.const_f32(LOG2E))))
-            h_decay = b.exp2_fast(b.fmul(g_last, b.const_f32(LOG2E)))
+                g_gate.append(_exp_gate(b.fsub(g_last, ge)))
+            h_decay = _exp_gate(g_last)
 
         # -- v_new = u - bv, with the tail-chunk row mask (N2) -------------
         # The mask is UNCONDITIONAL. On the scalar-gate path the gate happens to
@@ -742,9 +850,9 @@ def build_k5(spec: GdnStateScanSpec):
             for e in range(atom.c_per_lane):
                 _r, c_in = atom.lane_to_output(b, lane, e)
                 ok, t_abs = frag_ok[e], frag_t[e]
-                v_abs = b.add(v_base, b.add(v_tile[nr], c_in))
+                col = b.add(b.add(v_tile[nr], c_in), b.const_i32(0))
                 t_safe = b.select(ok, t_abs, b.const_i32(0))
-                off = b.add(b.mul(b.add(b.mul(t_safe, cH), i_h), cV), v_abs)
+                off = b.add(wu_row_off(_u_base, t_safe, u_stride), col)
                 u_f = b.cast_to_f32(u_pf[nr][e] if _PF_U else ld_u.scalar(off, BF16))
                 val = b.select(ok, b.fsub(u_f, b.vec_extract(bv[nr], e)),
                                b.const_f32(0.0))
@@ -764,14 +872,21 @@ def build_k5(spec: GdnStateScanSpec):
                             _to_bf16_fast(b, packed, 4), 4)
         _stage_k_transposed(b, src=Kt, smem=sKT, spec=spec, tid=tid,
                             nthreads=nthreads, t_base=t_base, i_hg=i_hg,
-                            T_val=T_val, Hg=Hg, ng=ng_t, ldr=ld_k)
+                            T_val=T_local, Hg=Hg, ng=ng_t, ldr=ld_k, bos=bos)
         b.sync()
+
+        # P5/P8: issue chunk i+1's reads *before* GEMM2 — matching the parent's
+        # deliberate scheduling choice ("the whole MFMA chain sits between the
+        # loads and their consumption"). The loads are independent of GEMM2, so
+        # emitting them first lets the backend overlap their latency with the
+        # GEMM2 MFMA chain rather than exposing it at the next iteration's top.
+        nxt = _pf_issue(b.add(i_t, b.const_i32(1))) if spec.PREFETCH else []
 
         # -- state decay, then GEMM2 ---------------------------------------
         # USE_GK: h[v, k] *= exp(gk_last[k]) — per channel. Slot e is
         #         k = tile + lmb*4 + e, so the four factors are one f32x4 load.
         # USE_G : h *= exp(g_last)          — one scalar for the whole state.
-        gk_row = b.mul(b.add(b.mul(t_last, cH), i_h), cK)
+        gk_row = b.mul(b.add(b.mul(b.add(bos, t_last), cH), i_h), cK)
         out = []
         for kb in range(NKB):
             if spec.USE_GK:
@@ -781,8 +896,7 @@ def build_k5(spec: GdnStateScanSpec):
                 acc = hacc[kb * NRL + nr]
                 dec = atom.zero_acc(b)
                 for e in range(4):
-                    f = (b.exp2_fast(b.fmul(b.vec_extract(gk4, e),
-                                            b.const_f32(LOG2E)))
+                    f = (_exp_gate(b.vec_extract(gk4, e))
                          if spec.USE_GK else h_decay)
                     dec = b.vec_insert(dec, b.fmul(b.vec_extract(acc, e), f), e)
                 k_row = b.add(k_tile[kb], lane_n)
@@ -794,9 +908,6 @@ def build_k5(spec: GdnStateScanSpec):
                                         dtype=BF16, n=atom.b_per_lane)
                     dec = atom.emit(b, af, bf, dec)
                 out.append(dec)
-        # P5: issue chunk i+1's reads here, after GEMM2 has been emitted, so the
-        # MFMA chain sits between the load and its first use next iteration.
-        nxt = _pf_issue(b.add(i_t, b.const_i32(1)))
         # No third barrier here. The two hazards that cross the loop back edge
         # are both already ordered:
         #   GEMM2(i) reads sKT/sVN  vs  writes to sKT/sVN in i+1 — a thread can
@@ -812,6 +923,11 @@ def build_k5(spec: GdnStateScanSpec):
         res = for_op.results
         for kb in range(NKB):
             for nr in range(NRL):
-                b.global_store_vN(Ht, state_off(kb, nr, i_n), res[kb * NRL + nr], 4)
+                acc = res[kb * NRL + nr]
+                if spec.STATE_DTYPE_BF16:
+                    b.global_store_vN(Ht, state_off(kb, nr, i_n),
+                                      _to_bf16_fast(b, acc, 4), 4)
+                else:
+                    b.global_store_vN(Ht, state_off(kb, nr, i_n), acc, 4)
     b.ret()
     return b.kernel
