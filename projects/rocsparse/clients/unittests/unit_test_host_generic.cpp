@@ -35,7 +35,7 @@
 // memory guard is never triggered.
 //
 // The generic level-1 vector ops (rot/gather/scatter/axpby) are already covered
-// by unit_test_host_level1.cpp and are intentionally NOT duplicated here.
+// by unit_test_host_level1_generic.cpp and are intentionally NOT duplicated here.
 //
 #include "unit_test_utils.hpp"
 

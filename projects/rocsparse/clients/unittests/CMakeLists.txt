@@ -132,8 +132,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_unit_test_main or at the end of the level-2 group.
   unit_test_device_level1.cpp
   unit_test_primitives.cpp
-  unit_test_host_level1.cpp
-  unit_test_host_level1_classic.cpp
+  unit_test_host_level1_generic.cpp
+  unit_test_host_level1_legacy.cpp
   unit_test_host_auxiliary.cpp
   unit_test_host_info.cpp
   unit_test_host_generic.cpp

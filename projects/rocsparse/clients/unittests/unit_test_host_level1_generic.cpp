@@ -134,9 +134,15 @@ namespace
             {
                 return false;
             }
-            (void)hipMemcpy(d_ind, ind.data(), ind.size() * sizeof(I), hipMemcpyHostToDevice);
-            (void)hipMemcpy(d_xval, xval.data(), xval.size() * sizeof(T), hipMemcpyHostToDevice);
-            (void)hipMemcpy(d_y, yv.data(), yv.size() * sizeof(T), hipMemcpyHostToDevice);
+            if(hipMemcpy(d_ind, ind.data(), ind.size() * sizeof(I), hipMemcpyHostToDevice)
+                   != hipSuccess
+               || hipMemcpy(d_xval, xval.data(), xval.size() * sizeof(T), hipMemcpyHostToDevice)
+                      != hipSuccess
+               || hipMemcpy(d_y, yv.data(), yv.size() * sizeof(T), hipMemcpyHostToDevice)
+                      != hipSuccess)
+            {
+                return false;
+            }
             return rocsparse_create_spvec_descr(
                        &x, 5, 3, d_ind, d_xval, it, rocsparse_index_base_zero, x_dt)
                        == rocsparse_status_success
@@ -187,9 +193,12 @@ namespace
         ASSERT_EQ(hipMalloc(&d_ind, ind.size() * sizeof(I)), hipSuccess);
         ASSERT_EQ(hipMalloc(&d_xval, xval.size() * sizeof(T)), hipSuccess);
         ASSERT_EQ(hipMalloc(&d_y, yv.size() * sizeof(T)), hipSuccess);
-        (void)hipMemcpy(d_ind, ind.data(), ind.size() * sizeof(I), hipMemcpyHostToDevice);
-        (void)hipMemcpy(d_xval, xval.data(), xval.size() * sizeof(T), hipMemcpyHostToDevice);
-        (void)hipMemcpy(d_y, yv.data(), yv.size() * sizeof(T), hipMemcpyHostToDevice);
+        ASSERT_EQ(hipMemcpy(d_ind, ind.data(), ind.size() * sizeof(I), hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(d_xval, xval.data(), xval.size() * sizeof(T), hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(d_y, yv.data(), yv.size() * sizeof(T), hipMemcpyHostToDevice),
+                  hipSuccess);
 
         rocsparse_spvec_descr x = nullptr;
         rocsparse_dnvec_descr y = nullptr;
