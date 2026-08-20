@@ -180,6 +180,11 @@ jobs:
     outputs:
       external_repo: ${{ steps.flags.outputs.external_repo }}
       flags_active: ${{ steps.flags.outputs.flags_active }}
+      # Nothing downstream consumes these two yet. They are exposed anyway so
+      # that a job wanting to report which flags are in force can name them,
+      # rather than re-deriving the answer from the label set.
+      flags: ${{ steps.flags.outputs.flags }}
+      matched_labels: ${{ steps.flags.outputs.matched_labels }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -301,6 +306,11 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      # label_flags belongs here, not just upstream of setup. When a pre-setup job
+      # fails, setup and the build jobs resolve to "skipped", and the summary
+      # treats "skipped" as an acceptable result -- so without this entry the
+      # summary check reports green even though the run itself failed.
+      - label_flags
       - setup
       - linux_build_and_test
       - windows_build_and_test

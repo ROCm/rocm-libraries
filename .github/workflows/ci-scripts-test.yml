@@ -12,7 +12,8 @@
 # the relative path `TheRock/build_tools/github_actions`, and several modules
 # import `requests` / `pydantic`. Hence the TheRock checkout and the pip step,
 # mirroring the `configure` job in therock-ci.yml. Discovery runs from the
-# repository root so that relative path resolves.
+# repository root so that relative path resolves. `pyyaml` is on top of that
+# pair: the multi-arch guard tests read the workflow YAML they assert against.
 
 name: CI Scripts Test
 
@@ -70,7 +71,7 @@ jobs:
       - name: Install python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pydantic requests
+          pip install pydantic requests pyyaml
 
       # Each test module puts .github/scripts on sys.path itself, so no
       # --top-level-directory is needed (and passing one fails, as the tests
