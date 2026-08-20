@@ -1052,3 +1052,89 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
     assert tile_index < index_to_wg
     assert index_to_wg < wgm_remap
     assert writer.states.WGMTransformLevels == expected_transform_levels
+
+
+# papShiftLocalReadAddrAliases only reads self.states.rpla, so it can be driven
+# directly with a duck-typed writer instead of a full KernelWriterAssembly.
+def _shift_aliases(num_addr_regs, *, tc="A", shift=0x8000):
+    writer = SimpleNamespace(states=SimpleNamespace(rpla=1))
+    module = Module("papShiftLocalReadAddrAliases")
+    kwa_module.KernelWriterAssembly.papShiftLocalReadAddrAliases(
+        writer,
+        module,
+        tc,
+        SimpleNamespace(numVgprLocalReadAddr=num_addr_regs),
+        shift,
+        "PAP bank",
+    )
+    return _module_items(module)
+
+
+def _shift_adds(items):
+    return [item for item in items if isinstance(item, kwa_module.VAddU32)]
+
+
+def _shift_dsts(items):
+    return [str(item.dst) for item in _shift_adds(items)]
+
+
+@pytest.mark.parametrize(
+    "tc, num_addr_regs, expected_suffixes",
+    [
+        ("A", 1, [""]),
+        ("A", 2, ["", "+1"]),
+        ("MXSA", 2, ["", "+1"]),
+    ],
+)
+def test_pap_shift_patches_every_localreadaddr_alias(tc, num_addr_regs, expected_suffixes):
+    # A tensor whose LDS footprint exceeds maxLDSConstOffset gets extra
+    # "LocalReadAddr{tc}+N" aliases; every one indexes the same double-buffered
+    # region, so the shift has to reach all of them. Patching only the base
+    # register left the +1 alias reading the pre-swap bank on tile handoff.
+    #
+    # Assert the whole set in order -- "some dst carries +1" also passes an
+    # off-by-one that emits +1/+2 and never touches the base. The single-register
+    # case pins that the base is "LocalReadAddrA", not "LocalReadAddrA+0"; the
+    # MXSA case pins that the symbol is built from the caller's tensorChar
+    # rather than hardcoded to A/B.
+    dsts = _shift_dsts(_shift_aliases(num_addr_regs, tc=tc))
+
+    expected = [f"LocalReadAddr{tc}{suffix}" for suffix in expected_suffixes]
+    assert len(dsts) == len(expected)
+    for dst, name in zip(dsts, expected):
+        # Substring match so the assertions do not depend on rocisa's bracket
+        # formatting; the "+" count pins the suffix that match would let slide.
+        assert name in dst
+        assert dst.count("+") == name.count("+")
+
+
+@pytest.mark.parametrize("shift", [0x8000, "sgpr_operand"])
+def test_pap_shift_adds_the_bank_delta_in_place(shift):
+    # The point of the helper is the operands, not the register list: each add
+    # has to be a read-modify-write of its own alias by the caller's shift
+    # source, forwarded verbatim (TDM passes an immediate, DTL an SGPR). Losing
+    # either operand leaves the alias pointing into the pre-swap bank, which is
+    # the wrong-answer bug this whole path exists to prevent.
+    if shift == "sgpr_operand":
+        from rocisa.container import sgpr
+
+        shift = sgpr("PapBank")
+
+    adds = _shift_adds(_shift_aliases(2, shift=shift))
+
+    assert len(adds) == 2
+    for add in adds:
+        assert str(add.srcs[0]) == str(add.dst)
+        assert str(add.srcs[1]) == str(shift)
+
+
+@pytest.mark.parametrize("num_addr_regs", [0, -1])
+def test_pap_shift_skips_tensors_without_local_read_address(num_addr_regs):
+    # A non-positive count means RegSet never emitted a vgprLocalReadAddr{tc}
+    # symbol, so shifting anyway assembles to "error: expected absolute
+    # expression". Zero is the allocated-but-zeroed case (DirectToVgpr); -1 is
+    # the ABMatrixInfo default that survives when allocation never runs. No
+    # PAP-valid config reaches either today -- Solution.py rejects PAP with
+    # DirectToVgpr and DirectToVgprMXS{A,B} follow DirectToVgpr{A,B} -- so this
+    # pins the defensive contract, not an observed failure.
+    assert _shift_aliases(num_addr_regs) == []

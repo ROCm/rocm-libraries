@@ -19918,7 +19918,13 @@ class KernelWriterAssembly(KernelWriter):
     # select "LocalReadAddr{tc}+N" aliases by offset // maxLDSConstOffset.
     # All aliases point into the same double-buffered LDS region, so every
     # alias needs the same PAP bank shift, not just the base (+0) register.
-    numAddrRegs = max(1, tState.numVgprLocalReadAddr // self.states.rpla)
+    # Every tensor reaching this helper has a positive count today, since PAP
+    # rejects DirectToVgpr and DirectToVgprMXS{A,B} follow DirectToVgpr{A,B}.
+    # The zero-iteration case is a guard: numVgprLocalReadAddr is 0 for a
+    # tensor zeroed by DirectToVgpr and -1 before allocation runs, and RegSet
+    # emits vgprLocalReadAddr{tc} only for a positive count, so a non-positive
+    # count has to emit nothing rather than an add against a missing symbol.
+    numAddrRegs = tState.numVgprLocalReadAddr // self.states.rpla
     for i in range(numAddrRegs):
       regName = f"LocalReadAddr{tc}" if i == 0 else f"LocalReadAddr{tc}+{i}"
       mod.add(VAddU32(dst=vgpr(regName), src0=vgpr(regName),
