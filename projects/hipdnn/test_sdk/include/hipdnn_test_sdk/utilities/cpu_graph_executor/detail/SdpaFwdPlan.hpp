@@ -248,25 +248,13 @@ public:
               || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ
               || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2
               || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
-        const bool hasAllQkvDescales = nodeAttributes->descale_q_tensor_uid().has_value()
-                                       && nodeAttributes->descale_k_tensor_uid().has_value()
-                                       && nodeAttributes->descale_v_tensor_uid().has_value();
-        const bool hasAnyQkvDescale = nodeAttributes->descale_q_tensor_uid().has_value()
-                                      || nodeAttributes->descale_k_tensor_uid().has_value()
-                                      || nodeAttributes->descale_v_tensor_uid().has_value();
-        if constexpr(IS_FP8_INPUT)
+        const int numQkvDescales
+            = static_cast<int>(nodeAttributes->descale_q_tensor_uid().has_value())
+              + static_cast<int>(nodeAttributes->descale_k_tensor_uid().has_value())
+              + static_cast<int>(nodeAttributes->descale_v_tensor_uid().has_value());
+        if((IS_FP8_INPUT && numQkvDescales != 3) || (!IS_FP8_INPUT && numQkvDescales != 0))
         {
-            if(!hasAllQkvDescales)
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if(hasAnyQkvDescale)
-            {
-                return false;
-            }
+            return false;
         }
 
         // Unsupported regardless of dtype: softmax/output (de)quantization. The

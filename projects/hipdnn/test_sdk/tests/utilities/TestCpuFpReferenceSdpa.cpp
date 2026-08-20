@@ -2601,14 +2601,14 @@ TEST(TestCpuFpReferenceSdpaFp8, PerKvHeadDescaleMatchesDequantizedInputs)
     const std::array<float, 2> descaleQPerHead = {2.0f, 0.5f};
     const std::array<float, 2> descaleKPerHead = {1.0f, 4.0f};
     const std::array<float, 2> descaleVPerHead = {2.0f, 0.25f};
-    Tensor<float> descaleQ({batch, numHeads});
-    Tensor<float> descaleK({batch, numHeads});
-    Tensor<float> descaleV({batch, numHeads});
+    Tensor<float> descaleQ({batch, numHeads, 1, 1});
+    Tensor<float> descaleK({batch, numHeads, 1, 1});
+    Tensor<float> descaleV({batch, numHeads, 1, 1});
     for(int64_t h = 0; h < numHeads; ++h)
     {
-        descaleQ.setHostValue(descaleQPerHead[static_cast<size_t>(h)], 0, h);
-        descaleK.setHostValue(descaleKPerHead[static_cast<size_t>(h)], 0, h);
-        descaleV.setHostValue(descaleVPerHead[static_cast<size_t>(h)], 0, h);
+        descaleQ.setHostValue(descaleQPerHead[static_cast<size_t>(h)], 0, h, 0, 0);
+        descaleK.setHostValue(descaleKPerHead[static_cast<size_t>(h)], 0, h, 0, 0);
+        descaleV.setHostValue(descaleVPerHead[static_cast<size_t>(h)], 0, h, 0, 0);
     }
 
     const TensorBase<float>* noMask = nullptr;
@@ -2694,14 +2694,14 @@ TEST(TestCpuFpReferenceSdpaFp8, GqaPerKvHeadDescaleMatchesDequantizedInputs)
     const std::array<float, 2> dq = {2.0f, 0.5f}; // indexed by KV head
     const std::array<float, 2> dk = {1.0f, 4.0f};
     const std::array<float, 2> dv = {2.0f, 0.25f};
-    Tensor<float> descaleQ({batch, numHeadsKv});
-    Tensor<float> descaleK({batch, numHeadsKv});
-    Tensor<float> descaleV({batch, numHeadsKv});
+    Tensor<float> descaleQ({batch, numHeadsKv, 1, 1});
+    Tensor<float> descaleK({batch, numHeadsKv, 1, 1});
+    Tensor<float> descaleV({batch, numHeadsKv, 1, 1});
     for(int64_t hk = 0; hk < numHeadsKv; ++hk)
     {
-        descaleQ.setHostValue(dq[static_cast<size_t>(hk)], 0, hk);
-        descaleK.setHostValue(dk[static_cast<size_t>(hk)], 0, hk);
-        descaleV.setHostValue(dv[static_cast<size_t>(hk)], 0, hk);
+        descaleQ.setHostValue(dq[static_cast<size_t>(hk)], 0, hk, 0, 0);
+        descaleK.setHostValue(dk[static_cast<size_t>(hk)], 0, hk, 0, 0);
+        descaleV.setHostValue(dv[static_cast<size_t>(hk)], 0, hk, 0, 0);
     }
 
     const TensorBase<float>* noMask = nullptr;
@@ -2836,10 +2836,11 @@ TEST(TestCpuFpReferenceSdpaFp8, CausalMaskOverloadForwardsDescale)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaFp8, RejectsMismatchedRank2DescaleShape)
+TEST(TestCpuFpReferenceSdpaFp8, RejectsMismatchedRank4DescaleShape)
 {
-    // A rank-2 descale that is not exactly [B, H_kv] must be rejected up front rather
-    // than silently reading the wrong (or out-of-bounds) element in getDescaleFactor.
+    // A non-scalar descale must be rank-4 [B, H_kv, 1, 1]; a mismatched rank-4 shape (or a
+    // legacy rank-2 [B, H_kv]) must be rejected up front rather than silently reading the
+    // wrong (or out-of-bounds) element in getDescaleFactor.
     const int64_t batch = 1;
     const int64_t numHeads = 2;
     const int64_t seqQ = 2;
@@ -2854,26 +2855,21 @@ TEST(TestCpuFpReferenceSdpaFp8, RejectsMismatchedRank2DescaleShape)
     k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
     v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
 
-    // Rank-2 but shape [2, 3] != [batch=1, numHeadsK=2].
-    Tensor<float> descaleBad({2, 3});
-    descaleBad.fillWithValue(1.0f);
-
     const TensorBase<float>* noMask = nullptr;
-    EXPECT_THROW(
-        (CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(q,
-                                                                                    k,
-                                                                                    v,
-                                                                                    o,
-                                                                                    std::nullopt,
-                                                                                    noMask,
-                                                                                    -1,
-                                                                                    -1,
-                                                                                    true,
-                                                                                    nullptr,
-                                                                                    &descaleBad,
-                                                                                    nullptr,
-                                                                                    nullptr)),
-        std::invalid_argument);
+    auto runWith = [&](const TensorBase<float>* descaleQ) {
+        CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+            q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, descaleQ, nullptr, nullptr);
+    };
+
+    // Rank-4 but shape [2, 3, 1, 1] != [batch=1, numHeadsKv=2, 1, 1].
+    Tensor<float> descaleBadRank4({2, 3, 1, 1});
+    descaleBadRank4.fillWithValue(1.0f);
+    EXPECT_THROW(runWith(&descaleBadRank4), std::invalid_argument);
+
+    // Legacy rank-2 [B, H_kv] is no longer accepted (hipDNN uses equal-rank [B, H_kv, 1, 1]).
+    Tensor<float> descaleRank2({batch, numHeads});
+    descaleRank2.fillWithValue(1.0f);
+    EXPECT_THROW(runWith(&descaleRank2), std::invalid_argument);
 }
 
 TEST(TestCpuFpReferenceSdpaFp8, InvalidDescaleShapeThrows)
@@ -2892,7 +2888,7 @@ TEST(TestCpuFpReferenceSdpaFp8, InvalidDescaleShapeThrows)
     k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
     v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
 
-    // Rank-1 with more than one element is neither per-tensor nor [B, H_kv].
+    // Rank-1 with more than one element is neither per-tensor nor [B, H_kv, 1, 1].
     Tensor<float> descaleBad({2});
     descaleBad.fillWithValue(1.0f);
 

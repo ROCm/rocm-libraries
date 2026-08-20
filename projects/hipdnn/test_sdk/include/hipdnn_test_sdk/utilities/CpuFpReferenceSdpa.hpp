@@ -890,16 +890,18 @@ private:
         return numElements == 1;
     }
 
-    /// Validate an FP8 descale tensor's shape on the calling thread. Mirrors AITER's
-    /// fp8 forward descale contract: a descale tensor is either a per-tensor scalar
-    /// ([1]) or a per-(batch, KV-head) tensor shaped exactly [B, H_kv]. A null pointer
-    /// is a no-op. Throwing here (rather than inside the parallel region) keeps the
-    /// error catchable by the caller, and rejecting a mismatched rank-2 shape prevents
-    /// getDescaleFactor() from silently reading the wrong (or out-of-bounds) element.
+    /// Validate an FP8 descale tensor's shape on the calling thread. A descale tensor is
+    /// either a per-tensor scalar ([1] or [1, 1, 1, 1]) or a per-(batch, KV-head) tensor.
+    /// AITER's fp8 forward contract uses a 2-D [B, H_kv] descale, but hipDNN follows an
+    /// equal-rank convention for per-channel/broadcast scale operands (e.g. batchnorm's
+    /// [1, C, 1, 1]), so the per-head descale is shaped [B, H_kv, 1, 1]. A null pointer is
+    /// a no-op. Throwing here (rather than inside the parallel region) keeps the error
+    /// catchable by the caller, and rejecting a mismatched shape prevents getDescaleFactor()
+    /// from silently reading the wrong (or out-of-bounds) element.
     static void validateDescaleShape(const hipdnn_data_sdk::utilities::TensorBase<float>* descale,
                                      const char* name,
                                      int64_t batch,
-                                     int64_t numHeadsK)
+                                     int64_t numHeadsKv)
     {
         if(descale == nullptr)
         {
@@ -910,12 +912,13 @@ private:
             return;
         }
         const auto& dims = descale->dims();
-        if(dims.size() != 2 || dims[0] != batch || dims[1] != numHeadsK)
+        if(dims.size() != 4 || dims[0] != batch || dims[1] != numHeadsKv || dims[2] != 1
+           || dims[3] != 1)
         {
             throw std::invalid_argument(
                 std::string("CpuFpReferenceSdpa: ") + name
-                + " descale tensor must be a per-tensor scalar ([1]) or rank-2 [B, H_kv] = ["
-                + std::to_string(batch) + ", " + std::to_string(numHeadsK) + "]");
+                + " descale tensor must be a per-tensor scalar ([1]) or rank-4 [B, H_kv, 1, 1] = ["
+                + std::to_string(batch) + ", " + std::to_string(numHeadsKv) + ", 1, 1]");
         }
     }
 
@@ -924,7 +927,7 @@ private:
     /// yields a neutral factor of 1 (no dequantization), so the BF16/FP16 paths are
     /// unaffected.
     static float getDescaleFactor(const hipdnn_data_sdk::utilities::TensorBase<float>* descale,
-                                  int64_t b,
+                                  int64_t batch,
                                   int64_t kvHead)
     {
         if(descale == nullptr)
@@ -936,8 +939,8 @@ private:
         {
             return descale->getHostValue(std::vector<int64_t>(descale->dims().size(), 0));
         }
-        // Per-(batch, KV-head): [B, H_kv].
-        return descale->getHostValue(std::vector<int64_t>{b, kvHead});
+        // Per-(batch, KV-head): [B, H_kv, 1, 1].
+        return descale->getHostValue(std::vector<int64_t>{batch, kvHead, 0, 0});
     }
 
     /// Compute broadcastable mask indices by right-aligning mask dims to [b, h, sq, skv].
