@@ -45,6 +45,12 @@ Environment inputs:
 ``PREBUILT_STAGES`` / ``BASELINE_RUN_ID``
     Seeding a run from another run's artifacts can never be correct with a
     non-default cmake configuration, so that combination is a hard error.
+
+    This covers stage inputs passed explicitly to the workflow. It is not what
+    protects a labeled pull request: the release workflow seeds itself from a
+    ci-env baseline that these variables never see, and it drops that seeding
+    itself when a flag is active. Both mechanisms are needed, because they
+    guard different sources of the same mistake.
 """
 
 from __future__ import annotations
