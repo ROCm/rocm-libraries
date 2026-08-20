@@ -58,16 +58,21 @@ def computeSubtilePlsin(kernel):
     """
     isa = tuple(kernel["ISA"])
 
-    isFloat4 = kernel["ProblemType"]["DataTypeA"].isFloat4() or \
-               kernel["ProblemType"]["DataTypeB"].isFloat4()
+    problemType = kernel["ProblemType"]
+    mxBlockA = bool(problemType["MXBlockA"])
+    mxBlockB = bool(problemType["MXBlockB"])
+    isMxFloat4 = ((mxBlockA and problemType["DataTypeA"].isFloat4()) or
+                  (mxBlockB and problemType["DataTypeB"].isFloat4()))
     isgfx950 = isa[:2] == (9, 5)
-    destType = kernel["ProblemType"]["DestDataType"]
+    destType = problemType["DestDataType"]
+    depthU = kernel["DepthU"]
+    depthUPow2 = depthU > 0 and (depthU & (depthU - 1)) == 0
     # The fused store is _emit16bitSubtilePairedStore: it only exists for a
     # bf16/half dest with HPA on wave64, and not for the StreamK workspace
     # (MultipleBuffer*) accumulation paths.
     pairedStoreAvailable = (
         (destType.isBFloat16() or destType.isHalf()) and
-        kernel["ProblemType"]["HighPrecisionAccumulate"] and
+        problemType["HighPrecisionAccumulate"] and
         kernel["WavefrontSize"] != 32 and
         kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
     )
@@ -77,8 +82,9 @@ def computeSubtilePlsin(kernel):
     barrierFreeStore = (
         kernel["StoreRemapVectorWidth"] == 0
     )
-    # StreamK support: only the non-atomic reduction (SK3/4/5) is eligible.
-    streamKAtomicFree = not (kernel["StreamK"] and kernel["StreamKAtomic"])
+    # Production support is intentionally limited to non-atomic SK3/4/5. Keeping
+    # SK0 out of the gate avoids carrying an untested alternate control-flow path.
+    streamKSupported = kernel["StreamK"] in (3, 4, 5) and not kernel["StreamKAtomic"]
     # Spill tiles: MIWaveTile product > 64 spills accumulators into arch VGPRs
     # and overflows the occ-1 budget under the fused store. MIWaveTile is only
     # present for EnableMatrixInstruction solutions; guard the lookup.
@@ -96,20 +102,30 @@ def computeSubtilePlsin(kernel):
     weaveLA = PLSIN_WEAVE_LOOKAHEAD
     numStorePairs = (miwt[0] * miwt[1] // 2) if (bool(miwt) and len(miwt) == 2) else 0
     overlapPossible = numStorePairs > weaveLA
-    # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the gfx9 SGPR
-    # ceiling; auto-disable just those.
-    mxBlockScaled = bool(kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"])
+    # Two-wide MIWaveTile dimensions leave insufficient SGPR headroom for the
+    # MX-scale descriptors once the fused-store state is live (for example,
+    # [2,4] needs 103 SGPRs against gfx950's 102-SGPR cap).
+    mxBlockScaled = mxBlockA or mxBlockB
     mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
-                                min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
+                                min(miwt[0], miwt[1]) <= 2)
+    # These epilogues need transient SRDs/state that the in-NLL store does not yet
+    # reproduce completely. Fail safe to the normal post-loop store until each is
+    # implemented and hardware-verified on SK3/4/5.
+    epilogueSupported = (not problemType.get("UseE", False)
+                         and not problemType.get("UseGateResidual", False))
     # Hard structural: the fused store literally cannot be emitted. ALWAYS enforced.
-    structuralFail = ((not isFloat4)
+    structuralFail = ((not isMxFloat4)
                       or (not kernel["UseSubtileImpl"])
                       or (not isgfx950)
                       or (not kernel["EnableMatrixInstruction"])
                       or (kernel["PrefetchGlobalRead"] < 1)
                       or (not kernel["BufferStore"])
                       or (not pairedStoreAvailable)
-                      or (not streamKAtomicFree)
+                      or (not streamKSupported)
+                      or (not problemType["ComputeDataType"].isSingle())
+                      or (not depthUPow2)
+                      or kernel.get("TailloopInNll", False)
+                      or (not epilogueSupported)
                       or (not barrierFreeStore))
     # Register / spill budget: the fused store would overflow the arch-VGPR /
     # SGPR ceiling for this tile. ALWAYS enforced.

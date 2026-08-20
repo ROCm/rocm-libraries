@@ -14622,16 +14622,11 @@ class KernelWriterAssembly(KernelWriter):
     # (drove .sgpr_count to 105 -> overflow on MT>=256). Doing it first packs the block
     # into the low holes and keeps .sgpr_count within budget.
     fusedEpilogueArgs = []
-    # Scalar UseScaleAB also needs the epilogue kernargs loaded here: the scaleA*scaleB
-    # factor is folded into Alpha *inside* globalWriteElements (see the scale-read at
-    # ~L15655 and the Alpha fold at ~L15927), which SLoadB32s from AddressScaleA/B.
-    # Those Address* pointers are part of numStoreSgprNames that endSummation only
-    # loads AFTER the NLL, so without this the fold would read garbage. Include the
-    # scalar case so the fused store's applyAlpha=True path (below) scales correctly
-    # even for scalar-ScaleAB kernels that have no SAV/vector-ScaleAB/bias epilogue.
-    fusedNeedsEpilogue = (kernel["ProblemType"]["UseScaleAlphaVec"]
-                          or (kernel["ProblemType"]["UseScaleAB"] != 0)
-                          or self.states.useBias != DataDirection.NONE)
+    # Every numStoreSgprNames entry belongs to the post-loop epilogue block that
+    # endSummation normally loads after NLL. The fused arm can execute first, so
+    # load the complete block rather than trying to duplicate the growing set of
+    # features that consume it (bias, ScaleAB/SAV, activation arguments, ...).
+    fusedNeedsEpilogue = bool(self.states.numStoreSgprToLoad)
     if fusedNeedsEpilogue:
       _epMod, fusedEpilogueArgs = self.loadFusedEpilogueStoreSgprs(kernel)
       module.add(_epMod)
@@ -16260,20 +16255,19 @@ class KernelWriterAssembly(KernelWriter):
     assert (depthU & (depthU - 1)) == 0, \
       "PostLoopStoreInNll assumes DepthU is a power of two"
     # PLSIN guard-hoist: when the pre-loop scalar-eligibility flag exists (fp32 path,
-    # computePostLoopFusedStore) it already folds (no-tail) && (numIter>=PGR) &&
-    # (effective alpha==1) -- all loop-invariant, computed BEFORE the main loop so the
+    # computePostLoopFusedStore) it already folds no-tail and effective-alpha==1 --
+    # both loop-invariant and computed BEFORE the main loop so the
     # scalar work overlaps the prefetch/MFMA shadow instead of sitting on this NLL
-    # prologue critical path. Collapse those three sub-guards to one flag compare+branch.
-    # Otherwise (non-fp32 PLSIN: no alpha-skip flag) emit the transient no-tail + numIter
-    # checks inline as before. The alpha check that used to live here is folded into the
-    # flag, so no separate alpha branch is emitted on the eligible path.
+    # prologue critical path. numIter<PGR remains valid: buildSubtileFusedStore
+    # recomputes the store coordinates when the NGLL hoist was skipped.
+    # Collapse the hoisted guards to one flag compare+branch.
     if self._plsinAlphaSkipEligible(kernel):
-      # FULL fold: PostLoopFusedStore now encodes EVERY sub-guard (no-tail && numIter &&
+      # FULL fold: PostLoopFusedStore now encodes EVERY sub-guard (no-tail &&
       # eff-alpha==1 && beta==0 && full-tile(M,N) && StreamK-owner) -- see
       # computePostLoopFusedStore. So this site collapses to a single flag compare+branch
       # and emits NOTHING else (the inline beta/edge/owner blocks below are for the
       # non-fp32 fallback path only).
-      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && numIter && eff-alpha==1 && beta==0 && full-tile(M,N) && SK-owner) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
+      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && eff-alpha==1 && beta==0 && full-tile(M,N) && SK-owner) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
       module.add(SCmpEQU32(src0=sgpr("PostLoopFusedStore"), src1=1,
                            comment="fused guard: hoisted full eligibility == 1?"))
       if longBranch:

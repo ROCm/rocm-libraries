@@ -79,9 +79,6 @@ def _plsinStoreGate(name: str, default: bool = False) -> bool:
 #   MUBUF immediate offsets 0/64/128/192.  Pure reorder of address arithmetic; the
 #   store data path is unchanged.
 PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
-# Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
-#   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
-PLSIN_STORE_DIRECT_EPILOGUE = _plsinStoreGate("PLSIN_STORE_DIRECT_EPILOGUE")
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
@@ -1235,9 +1232,15 @@ class GlobalWriteBatchWriter:
     # that case _emitNonatomicAdd pops each element's read (with pair readiness) at
     # the top of the element loop and the store site skips its own pop/readiness.
     # The no-epilogue weave path (validated / out_weave4) is unchanged.
+    _inlineActivation = (
+      self.kernel.get("ActivationFused", False) and
+      self.kernel["ProblemType"].get("ActivationType", "none") != "none"
+    )
     self._weaveReadBeforeEpilogue = _weaveMode and (
       self.parentWriter.states.useBias == DataDirection.READ or
       self.kernel.get("ActivationFuncCall", False) or
+      _inlineActivation or
+      self.parentWriter.states.useGateResidual or
       self.applyAlpha or
       self.kernel["ProblemType"].get("UseScaleAlphaVec", 0) or
       self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or
