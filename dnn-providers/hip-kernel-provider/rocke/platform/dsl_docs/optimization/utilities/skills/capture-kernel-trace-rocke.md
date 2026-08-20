@@ -314,7 +314,7 @@ Open in WaveScope, or run /kernel-trace-analysis to analyze bottlenecks.
 not per-execution averages. Divide by `Hit` (col 6) for a per-execution figure. Reading them as
 averages inflates per-instruction cost by the hit count and yields stall figures larger than the
 kernel's whole wall-clock, which is the single easiest way to misread this file. `Latency` is
-inclusive of `Stall`, so a class's actual compute is `(latency - stall) * hits`.
+inclusive of `Stall`, so a class's actual compute is `latency - stall`.
 
 ---
 

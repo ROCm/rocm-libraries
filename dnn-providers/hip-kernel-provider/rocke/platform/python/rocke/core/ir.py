@@ -287,8 +287,56 @@ _CODE_POSITIONS: Dict[Any, List[Any]] = {}
 # Frames are joined innermost-first; each is "<abs path>:<line>:<column>:<func>".
 # Packing the whole chain into the existing ``Op.loc`` string keeps the IR schema
 # and the ``@loc`` serialization format unchanged, so it still round-trips to the
-# C++ engine untouched.
+# C++ engine untouched. Backslash and semicolon in a path are escaped so they
+# cannot be mistaken for the frame separator; see ``join_loc`` / ``split_loc``.
 LOC_FRAME_SEP = ";"
+
+
+def join_loc(frame_texts: Sequence[str]) -> str:
+    """Join unescaped ``path:line:col:func`` frames with ``;``.
+
+    ``\\`` and ``;`` in a path are escaped (``\\\\``, ``\\;``) so ``split_loc``
+    can recover them. A frame with neither character is stored unchanged.
+    """
+
+    return LOC_FRAME_SEP.join(
+        t.replace("\\", "\\\\").replace(";", "\\;") for t in frame_texts
+    )
+
+
+def split_loc(loc: str) -> List[str]:
+    """Split an ``Op.loc`` on unescaped ``;`` and unescape each frame.
+
+    A loc written without escaping (no ``;`` in any path) is unchanged, so
+    hand-assigned ``file:line`` strings and Windows ``C:\\...`` paths still
+    parse. ``\\\\`` and ``\\;`` are the only escapes; any other backslash is
+    kept as a literal.
+    """
+
+    parts: List[str] = []
+    buf: List[str] = []
+    i = 0
+    n = len(loc)
+    while i < n:
+        ch = loc[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = loc[i + 1]
+            if nxt in "\\;":
+                buf.append(nxt)
+            else:
+                buf.append(ch)
+                buf.append(nxt)
+            i += 2
+            continue
+        if ch == ";":
+            parts.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    parts.append("".join(buf))
+    return parts
 
 
 def loc_capture_default() -> bool:
@@ -305,6 +353,13 @@ def _abspath(filename: str) -> str:
     return cached
 
 
+def _path_has_dir_component(path: str, name: str) -> bool:
+    """True if ``name`` is a directory component of ``path``, not a substring."""
+
+    norm = path.replace("\\", "/")
+    return f"/{name}/" in f"/{norm}/"
+
+
 def _frame_role(filename: str) -> str:
     cached = _FRAME_ROLE.get(filename)
     if cached is None:
@@ -316,7 +371,11 @@ def _frame_role(filename: str) -> str:
                 cached = "core"
             elif path.startswith(_ROCKE_PREFIX):
                 cached = "user"
-            elif path.startswith(_STDLIB_DIR + os.sep) or "site-packages" in path:
+            elif (
+                path.startswith(_STDLIB_DIR + os.sep)
+                or _path_has_dir_component(path, "site-packages")
+                or _path_has_dir_component(path, "dist-packages")
+            ):
                 cached = "runner"
             else:
                 cached = "user"
@@ -375,7 +434,7 @@ def current_source_loc() -> Optional[str]:
                 f":{_frame_column(frame)}:{frame.f_code.co_name}"
             )
         frame = frame.f_back
-    return LOC_FRAME_SEP.join(frames) if frames else None
+    return join_loc(frames) if frames else None
 
 
 # ----------------------------- Builder -----------------------------------

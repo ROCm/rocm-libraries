@@ -40,7 +40,7 @@ from unittest import mock
 from rocke.core import ir as ir_mod
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import _escape_md_string, lower_kernel_to_llvm
 
 THIS_FILE = os.path.abspath(__file__)
 
@@ -141,7 +141,7 @@ class TestDefaultOff(unittest.TestCase):
 def frames(loc):
     """Split a captured loc into (path, line, col, func) tuples, innermost first."""
     out = []
-    for part in loc.split(ir_mod.LOC_FRAME_SEP):
+    for part in ir_mod.split_loc(loc):
         path, line, col, func = part.rsplit(":", 3)
         out.append((path, int(line), int(col), func))
     return out
@@ -332,6 +332,30 @@ class TestSingleFrameFallback(unittest.TestCase):
         self.assertIn('filename: "weird.py"', ll)
         self.assertIn('directory: "/tmp/od:d"', ll)
 
+    def test_a_path_containing_a_semicolon_still_parses(self):
+        kernel = build_flat(capture_loc=True)
+        kernel.body.ops[-1].loc = ir_mod.join_loc(["/tmp/a;b/kernel.py:7"])
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        self.assertIn('filename: "kernel.py"', ll)
+        self.assertIn('directory: "/tmp/a;b"', ll)
+
+
+class TestLocFrameEncoding(unittest.TestCase):
+    def test_a_semicolon_in_the_path_survives_join_and_split(self):
+        frame = "/tmp/a;b/kernel.py:7:0:emit"
+        self.assertEqual(ir_mod.split_loc(ir_mod.join_loc([frame])), [frame])
+
+    def test_two_frames_still_split(self):
+        a, b = "/a.py:1:0:f", "/b.py:2:0:g"
+        self.assertEqual(ir_mod.split_loc(ir_mod.join_loc([a, b])), [a, b])
+
+    def test_a_backslash_that_is_not_an_escape_is_kept(self):
+        frame = r"C:\proj\rocke\emit.py:42:0:f"
+        self.assertEqual(ir_mod.split_loc(frame), [frame])
+
+    def test_llvm_metadata_escapes_backslash_and_quote_as_hex(self):
+        self.assertEqual(_escape_md_string('a\\b"c'), "a\\5Cb\\22c")
+
 
 class TestInstalledLayout(unittest.TestCase):
     """An installed rocke authors kernels just like a checkout does.
@@ -393,6 +417,16 @@ class TestInstalledLayout(unittest.TestCase):
             )
         finally:
             (ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE) = saved
+
+    def test_a_directory_named_site_packages_experiments_is_user_code(self):
+        """The runner rule matches a path component, not a substring."""
+        saved = ir_mod._FRAME_ROLE
+        ir_mod._FRAME_ROLE = {}
+        try:
+            path = os.path.join("/work", "site-packages-experiments", "kernel.py")
+            self.assertEqual(ir_mod._frame_role(path), "user")
+        finally:
+            ir_mod._FRAME_ROLE = saved
 
     def test_capture_reaches_the_caller_through_a_package_helper(self):
         """The end-to-end shape of the bug: an op emitted by a rocke helper.
@@ -472,14 +506,30 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         kernel.body.ops[-1].loc = r"C:\proj\rocke\emit.py:42"
         cpp = self.lower_with("cpp", kernel)
         self.assertEqual(cpp, self.lower_with("python", kernel))
-        # Backslashes survive as escaped pairs in the metadata string.
+        # Backslashes survive as LLVM ``\5C`` hex escapes in the metadata string.
         directory, filename = os.path.split(r"C:\proj\rocke\emit.py")
         self.assertIn(
             'filename: "{}", directory: "{}"'.format(
-                filename.replace("\\", "\\\\"), directory.replace("\\", "\\\\")
+                _escape_md_string(filename), _escape_md_string(directory)
             ),
             cpp,
         )
+
+    def test_engines_agree_on_a_path_with_a_semicolon(self):
+        engine_or_skip()
+        kernel = build_flat(capture_loc=True)
+        kernel.body.ops[-1].loc = ir_mod.join_loc(["/tmp/a;b/kernel.py:7"])
+        cpp = self.lower_with("cpp", kernel)
+        self.assertEqual(cpp, self.lower_with("python", kernel))
+        self.assertIn('directory: "/tmp/a;b"', cpp)
+
+    def test_engines_agree_on_a_quote_in_the_filename(self):
+        engine_or_skip()
+        kernel = build_flat(capture_loc=True)
+        kernel.body.ops[-1].loc = '/tmp/weird"file.py:7'
+        cpp = self.lower_with("cpp", kernel)
+        self.assertEqual(cpp, self.lower_with("python", kernel))
+        self.assertIn('filename: "weird\\22file.py"', cpp)
 
 
 # Enough to pin the separator handling: absolute and relative paths on both
@@ -805,6 +855,16 @@ class TestSerializationRoundTrip(unittest.TestCase):
         self.assertIn("@loc ", text)
         reparsed = parse(text)
         self.assertEqual(serialize(reparsed), text)
+        self.assertEqual(
+            lower_kernel_to_llvm(reparsed, arch="gfx950"),
+            lower_kernel_to_llvm(kernel, arch="gfx950"),
+        )
+
+    def test_a_semicolon_in_the_path_survives_serialize(self):
+        kernel = build_flat(capture_loc=True)
+        kernel.body.ops[-1].loc = ir_mod.join_loc(["/tmp/a;b/kernel.py:7:0:emit"])
+        reparsed = parse(serialize(kernel))
+        self.assertEqual(reparsed.body.ops[-1].loc, kernel.body.ops[-1].loc)
         self.assertEqual(
             lower_kernel_to_llvm(reparsed, arch="gfx950"),
             lower_kernel_to_llvm(kernel, arch="gfx950"),

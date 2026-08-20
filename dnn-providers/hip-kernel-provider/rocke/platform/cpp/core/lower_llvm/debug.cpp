@@ -34,41 +34,16 @@ namespace ckc
 /* String helpers (Python _escape_md_string / _di_file)                    */
 /* ---------------------------------------------------------------------- */
 
-/* Escape for an LLVM metadata string literal: backslash first, then quote. */
+/* Escape for an LLVM metadata string literal. Same ``\XX`` encoding as
+ * ``rocke_ll_escape_asm_string`` / Python ``_escape_md_string``: printable
+ * ASCII verbatim, backslash / quote / non-printable as hex. */
 static const char* dbg_escape(rocke_lower_t* L, const char* text)
 {
     if(text == NULL)
     {
         return "";
     }
-    size_t extra = 0;
-    for(const char* p = text; *p; p++)
-    {
-        if(*p == '\\' || *p == '"')
-        {
-            extra++;
-        }
-    }
-    if(extra == 0)
-    {
-        return text;
-    }
-    char* out = (char*)rocke_arena_alloc(&L->arena, strlen(text) + extra + 1);
-    if(out == NULL)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_OOM, "debug escape");
-    }
-    char* w = out;
-    for(const char* p = text; *p; p++)
-    {
-        if(*p == '\\' || *p == '"')
-        {
-            *w++ = '\\';
-        }
-        *w++ = *p;
-    }
-    *w = '\0';
-    return out;
+    return rocke_ll_escape_asm_string(L, text);
 }
 
 /* "!DIFile(filename: ..., directory: ...)" -- split exactly as the Python
@@ -207,24 +182,59 @@ static bool
 
 /* Parse a whole Op.loc into frames, innermost first. Unparseable frames are
  * skipped, exactly as the Python does, so a hand-written location cannot make
- * the lowering fail. */
+ * the lowering fail. Splits on unescaped ';' and unescapes '\\' / '\;',
+ * matching Python split_loc. */
 static int dbg_parse_loc(rocke_lower_t* L, const char* loc, rocke_ll_dbg_frame_t* out, int cap)
 {
     int n = 0;
     const char* p = loc;
-    while(*p && n < cap)
+    for(;;)
     {
-        const char* sep = strchr(p, ';');
-        size_t len = sep ? (size_t)(sep - p) : strlen(p);
-        if(dbg_parse_frame(L, p, len, &out[n]))
-        {
-            n++;
-        }
-        if(!sep)
+        if(n >= cap)
         {
             break;
         }
-        p = sep + 1;
+        size_t cap_buf = strlen(p) + 1;
+        char* buf = (char*)rocke_arena_alloc(&L->arena, cap_buf);
+        if(buf == NULL)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "debug loc");
+        }
+        size_t w = 0;
+        const char* q = p;
+        while(*q)
+        {
+            if(q[0] == '\\' && q[1] != '\0')
+            {
+                char nxt = q[1];
+                if(nxt == '\\' || nxt == ';')
+                {
+                    buf[w++] = nxt;
+                }
+                else
+                {
+                    buf[w++] = '\\';
+                    buf[w++] = nxt;
+                }
+                q += 2;
+                continue;
+            }
+            if(*q == ';')
+            {
+                break;
+            }
+            buf[w++] = *q++;
+        }
+        buf[w] = '\0';
+        if(dbg_parse_frame(L, buf, w, &out[n]))
+        {
+            n++;
+        }
+        if(*q != ';')
+        {
+            break;
+        }
+        p = q + 1;
     }
     return n;
 }

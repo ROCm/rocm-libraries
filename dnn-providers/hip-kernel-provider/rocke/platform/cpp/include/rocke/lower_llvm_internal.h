@@ -421,6 +421,11 @@ struct rocke_lower
      * location capture (Python self._debug). */
     rocke_ll_debug_t* debug;
 
+    /* Scratch: per-op block-length marks, reused across ops (Python's marks
+     * dict). Nested lower_op calls append and restore len so they do not
+     * clobber the parent. */
+    ROCKE_VEC(rocke_ll_dbg_mark_t) dbg_marks;
+
     /* sticky error (the lowerer has no builder to carry it). */
     rocke_status_t status;
     char* err; /* arena-owned, ROCKE_ERR_MSG_CAP cap   */

@@ -39,7 +39,6 @@ from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .ir import (
-    LOC_FRAME_SEP,
     KernelDef,
     Op,
     Param,
@@ -49,6 +48,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    split_loc,
 )
 
 
@@ -1136,7 +1136,24 @@ _DEBUG_MD_BASE = 10
 
 
 def _escape_md_string(text: str) -> str:
-    return text.replace("\\", "\\\\").replace('"', '\\"')
+    r"""Escape ``text`` for an LLVM metadata string literal.
+
+    LLVM textual string literals keep printable ASCII verbatim and write every
+    other byte (and ``"`` / ``\``) as a ``\XX`` hex escape. Paths are encoded
+    as UTF-8 first so this matches the C++ walk over ``unsigned char``.
+    """
+
+    out = []
+    for b in text.encode("utf-8"):
+        if b == 0x5C:
+            out.append("\\5C")
+        elif b == 0x22:
+            out.append("\\22")
+        elif 0x20 <= b <= 0x7E:
+            out.append(chr(b))
+        else:
+            out.append(f"\\{b:02X}")
+    return "".join(out)
 
 
 def _di_file(path: str) -> str:
@@ -1186,11 +1203,12 @@ def _parse_loc(loc: str) -> List[_Frame]:
 
     Accepts both the single-frame form (``"file:line"``, which is what a
     hand-written or externally supplied location looks like) and the captured
-    chain form (``"file:line:col:func;..."``).
+    chain form (``"file:line:col:func;..."``). Frame separators are unescaped
+    ``;``; a semicolon in a path is stored as ``\\;``.
     """
 
     frames = []
-    for part in loc.split(LOC_FRAME_SEP):
+    for part in split_loc(loc):
         frame = _parse_frame(part)
         if frame is not None:
             frames.append(frame)

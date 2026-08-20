@@ -1954,15 +1954,14 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
      * Keyed on the block pointer, not the index, because the CFG builders
      * back-patch earlier blocks. */
     size_t n_before = L->blocks.len;
-    ROCKE_VEC(rocke_ll_dbg_mark_t) marks;
-    rocke_vec_init(&marks);
+    size_t marks_base = L->dbg_marks.len;
     for(size_t i = 0; i < n_before; i++)
     {
         rocke_ll_dbg_mark_t m;
         m.block = L->blocks.data[i];
         m.len = L->blocks.data[i]->lines.len;
         int rc;
-        rocke_vec_push(&L->arena, &marks, m, rc);
+        rocke_vec_push(&L->arena, &L->dbg_marks, m, rc);
         if(rc != 0)
         {
             rocke_ll_fail(L, ROCKE_ERR_OOM, "debug marks");
@@ -1973,16 +1972,17 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_block_t* blk = L->blocks.data[i];
         size_t start = 0;
-        for(size_t j = 0; j < marks.len; j++)
+        for(size_t j = marks_base; j < L->dbg_marks.len; j++)
         {
-            if(marks.data[j].block == blk)
+            if(L->dbg_marks.data[j].block == blk)
             {
-                start = marks.data[j].len;
+                start = L->dbg_marks.data[j].len;
                 break;
             }
         }
         rocke_ll_debug_annotate(L, blk, start, dbg);
     }
+    L->dbg_marks.len = marks_base;
 }
 
 void rocke_ll_lower_region(rocke_lower_t* L, const rocke_region_t* region)
@@ -2455,6 +2455,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
     rocke_vec_init(&L.yield_stack);
+    rocke_vec_init(&L.dbg_marks);
 
     /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
      * arena is always destroyed, then translate it into the legacy status code +
