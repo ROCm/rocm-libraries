@@ -46,7 +46,8 @@ public:
 
         void* data = nullptr;
         size_t size = 0;
-        const kpack_error_t err = kpack_get_kernel(archive, tocKey.c_str(), arch.c_str(), &data, &size);
+        const kpack_error_t err
+            = kpack_get_kernel(archive, tocKey.c_str(), arch.c_str(), &data, &size);
         if(err != KPACK_SUCCESS)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
