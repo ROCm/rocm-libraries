@@ -24,7 +24,6 @@ Covers:
 
 from __future__ import annotations
 
-import ast
 import itertools
 import ntpath
 import os
@@ -160,6 +159,27 @@ def native_abs(*parts: str) -> str:
     return root + os.sep.join(parts)
 
 
+def unescape_md_string(text):
+    r"""Decode an LLVM metadata string literal back to the path it names.
+
+    LLVM writes a non-printable byte, ``"`` or ``\`` as a ``\XX`` hex escape, so
+    this is not ``ast.literal_eval``: Python reads the ``\5C`` that stands for a
+    backslash as the octal escape ``\5`` followed by ``C``, which turns every
+    separator of a native Windows directory into a control character.
+    """
+
+    out = bytearray()
+    i = 0
+    while i < len(text):
+        if text[i] == "\\" and i + 2 < len(text):
+            out.append(int(text[i + 1 : i + 3], 16))
+            i += 3
+        else:
+            out.extend(text[i].encode("utf-8"))
+            i += 1
+    return out.decode("utf-8")
+
+
 def assert_difile(testcase, ll, path):
     """The DIFile node for ``path``, split and escaped the way this host does."""
 
@@ -270,14 +290,14 @@ class TestEmittedDebugMetadata(unittest.TestCase):
             self.assertEqual(line.count("!dbg"), 1, f"duplicate !dbg: {line.strip()}")
 
     def test_locations_point_at_this_test_file(self):
+        basename = _escape_md_string(os.path.basename(THIS_FILE))
         di_file = re.search(
-            rf'!DIFile\(filename: "{re.escape(os.path.basename(THIS_FILE))}", '
-            r'directory: (".*")\)',
+            rf'!DIFile\(filename: "{re.escape(basename)}", directory: "(.*?)"\)',
             self.ll,
         )
         self.assertIsNotNone(di_file)
         self.assertEqual(
-            Path(ast.literal_eval(di_file.group(1))), Path(THIS_FILE).parent
+            Path(unescape_md_string(di_file.group(1))), Path(THIS_FILE).parent
         )
         for line in re.findall(r"!DILocation\(line: (\d+)", self.ll):
             self.assertGreater(int(line), 0)
