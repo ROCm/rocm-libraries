@@ -41,6 +41,18 @@ def test_add_common_arguments_global_parameters_eval():
     assert ("Bar", "baz") in args.global_parameters
 
 
+def test_add_common_arguments_global_parameters_accumulate():
+    # Repeated --global-parameters must accumulate, not clobber.
+    p = argparse.ArgumentParser()
+    M.addCommonArguments(p)
+    args = p.parse_args([
+        "--global-parameters", "KeepBuildTmp=True",
+        "--global-parameters", "CheckASMCodeSize=True",
+    ])
+    assert ("KeepBuildTmp", True) in args.global_parameters
+    assert ("CheckASMCodeSize", True) in args.global_parameters
+
+
 # ---------------------------------------------------------------------------
 # argUpdatedGlobalParameters
 # ---------------------------------------------------------------------------
