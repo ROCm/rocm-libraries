@@ -79,6 +79,7 @@ jobs:
     name: Load CI Environment
     runs-on: ubuntu-24.04
     outputs:
+      therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
       baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
     steps:
       - name: Checkout ci-env action
@@ -93,6 +94,7 @@ jobs:
 
   configure:
     name: Configure Changed Projects
+    needs: resolve_therock_ref
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
@@ -109,7 +111,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: main
+          ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -128,11 +130,14 @@ jobs:
 
   resolve_therock_ref:
     name: Resolve TheRock ref
+    needs: ci-env
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
       therock_ref: ${{ steps.resolve.outputs.therock_ref }}
+      validated_baseline_run_id: ${{ steps.resolve.outputs.validated_baseline_run_id }}
+      baseline_compatible: ${{ steps.resolve.outputs.baseline_compatible }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -153,10 +158,12 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
+          BASELINE_THEROCK_REF: ${{ needs.ci-env.outputs.therock-ref }}
+          BASELINE_RUN_ID: ${{ needs.ci-env.outputs.baseline-run-id }}
         run: python .github/scripts/resolve_therock_ref.py
 
   setup:
-    needs: [ci-env, configure, resolve_therock_ref]
+    needs: [configure, resolve_therock_ref]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "release"
@@ -169,9 +176,9 @@ jobs:
       # rocm-libraries only affects math-libs and ml-libs source sets
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
       # When baseline-run-id is empty, clear prebuilt_stages to force full rebuild
-      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
-      # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
-      baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.resolve_therock_ref.outputs.validated_baseline_run_id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
+      # Use the ci-env baseline only after validating it against the resolved TheRock ref
+      baseline_run_id: ${{ inputs.baseline_run_id || needs.resolve_therock_ref.outputs.validated_baseline_run_id }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
