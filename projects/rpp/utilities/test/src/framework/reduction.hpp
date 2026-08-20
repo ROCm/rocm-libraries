@@ -31,6 +31,7 @@ SOFTWARE.
 #include <cstddef>
 #include <vector>
 
+#include "framework/intensity.hpp"
 #include "framework/tensor_setup.hpp"
 
 // Shared helpers for the statistical reduction ops (tensor_sum/min/max/mean/stddev). These ops

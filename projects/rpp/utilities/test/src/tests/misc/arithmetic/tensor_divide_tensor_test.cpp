@@ -31,10 +31,11 @@ SOFTWARE.
 #include "framework/backend_memory.hpp"
 #include "framework/compare.hpp"
 #include "framework/config_param.hpp"
-#include "framework/dtype_dispatch.hpp"
+#include "framework/dtype.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/intensity.hpp"
+#include "framework/nd_config_param.hpp"
 #include "framework/skip_list.hpp"
-#include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "reference/arithmetic_tensor_ref.hpp"
 

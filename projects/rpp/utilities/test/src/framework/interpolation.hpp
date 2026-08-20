@@ -31,6 +31,7 @@ SOFTWARE.
 #include <cmath>
 #include <cstddef>
 
+#include "framework/intensity.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {

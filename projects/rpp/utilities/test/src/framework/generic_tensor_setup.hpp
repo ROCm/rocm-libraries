@@ -33,6 +33,9 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
+#include "framework/dtype.hpp"
+#include "framework/intensity.hpp"
+#include "framework/nd_config_param.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {

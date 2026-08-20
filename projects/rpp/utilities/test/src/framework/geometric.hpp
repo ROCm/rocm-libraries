@@ -31,6 +31,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/config_param.hpp"
+#include "framework/intensity.hpp"
 #include "framework/interpolation.hpp"
 #include "framework/tensor_setup.hpp"
 

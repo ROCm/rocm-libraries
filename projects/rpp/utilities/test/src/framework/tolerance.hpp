@@ -25,9 +25,23 @@ SOFTWARE.
 #ifndef RPP_TEST_TOLERANCE_H
 #define RPP_TEST_TOLERANCE_H
 
+#include <cmath>
+
 #include "framework/config_param.hpp"
 
 namespace rpptest {
+
+// |actual - reference| must not exceed abs + rel * |reference|. Constructible from a bare double,
+// so an op that only needs an absolute bound (most of them) just passes one.
+struct Bound {
+    double abs = 0.0;
+    double rel = 0.0;
+
+    constexpr Bound(double absolute = 0.0, double relative = 0.0)
+        : abs(absolute), rel(relative) {}
+
+    double operator()(double reference) const { return abs + rel * std::fabs(reference); }
+};
 
 // A per-dtype absolute comparison bound. Plain data: an op names the numbers it needs and
 // hands the selected one to a comparator, so nothing here has to know about comparators,

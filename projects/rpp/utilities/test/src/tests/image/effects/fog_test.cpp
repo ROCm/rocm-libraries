@@ -31,7 +31,8 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
-#include "framework/dtype_dispatch.hpp"
+#include "framework/dtype.hpp"
+#include "framework/intensity.hpp"
 #include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 

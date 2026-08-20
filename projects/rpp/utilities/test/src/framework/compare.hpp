@@ -35,7 +35,11 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/intensity.hpp"
+#include "framework/nd_config_param.hpp"
 #include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
+#include "framework/voxel_config_param.hpp"
 #include "framework/voxel_tensor_setup.hpp"
 
 // Every comparison the suite makes goes through this header: the image ROI walk, the ND tensor
@@ -45,18 +49,6 @@ SOFTWARE.
 // reports the same way.
 
 namespace rpptest {
-
-// |actual - reference| must not exceed abs + rel * |reference|. Constructible from a bare double,
-// so an op that only needs an absolute bound (most of them) just passes one.
-struct Bound {
-    double abs = 0.0;
-    double rel = 0.0;
-
-    constexpr Bound(double absolute = 0.0, double relative = 0.0)
-        : abs(absolute), rel(relative) {}
-
-    double operator()(double reference) const { return abs + rel * std::fabs(reference); }
-};
 
 // Mismatches beyond this many are counted but not listed; the count is always exact.
 inline constexpr std::size_t kMaxReportedMismatches = 10;

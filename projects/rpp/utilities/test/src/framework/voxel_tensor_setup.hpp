@@ -33,6 +33,8 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/config_param.hpp"
+#include "framework/nd_config_param.hpp"
+#include "framework/voxel_config_param.hpp"
 
 namespace rpptest {
 

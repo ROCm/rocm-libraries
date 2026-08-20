@@ -22,16 +22,51 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef RPP_TEST_DTYPE_DISPATCH_H
-#define RPP_TEST_DTYPE_DISPATCH_H
+#ifndef RPP_TEST_DTYPE_H
+#define RPP_TEST_DTYPE_H
 
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
+#include <cstddef>
+
 #include "framework/config_param.hpp"
+
+// Everything that answers "what is this DType/Layout, concretely": the RPP enum it maps to, its
+// width in bytes, its channel count, the C++ storage type it is held in, and the dispatch that
+// turns the runtime value into that compile-time type.
 
 namespace rpptest {
 
+// ---- DType / Layout -> RPP ------------------------------------------------
+
+inline RpptDataType to_rpp_dtype(DType d) {
+    switch (d) {
+        case DType::U8: return U8;
+        case DType::F16: return F16;
+        case DType::F32: return F32;
+        case DType::I8: return I8;
+        case DType::I16: return I16;
+    }
+    return U8;
+}
+
+inline std::size_t dtype_size(DType d) {
+    switch (d) {
+        case DType::U8:
+        case DType::I8: return 1;
+        case DType::F16:
+        case DType::I16: return 2;
+        case DType::F32: return 4;
+    }
+    return 1;
+}
+
+inline int channels_of(Layout l) { return l == Layout::PLN1 ? 1 : 3; }
+
+inline RpptLayout to_rpp_layout(Layout l) { return l == Layout::PKD3 ? NHWC : NCHW; }
+
+// ---- DType -> C++ storage type --------------------------------------------
 // Maps a DType to the C++ storage type RPP uses for it.
 template <DType D>
 struct StorageType;
@@ -80,4 +115,4 @@ void dispatch_dtype(DType dtype, Fn&& fn) {
 
 }  // namespace rpptest
 
-#endif  // RPP_TEST_DTYPE_DISPATCH_H
+#endif  // RPP_TEST_DTYPE_H

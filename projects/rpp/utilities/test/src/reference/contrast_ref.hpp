@@ -30,6 +30,7 @@ SOFTWARE.
 #include <cmath>
 
 #include "framework/config_param.hpp"
+#include "framework/intensity.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {

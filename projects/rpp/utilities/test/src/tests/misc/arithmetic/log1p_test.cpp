@@ -31,6 +31,7 @@ SOFTWARE.
 #include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/nd_config_param.hpp"
 #include "framework/skip_list.hpp"
 #include "reference/log1p_ref.hpp"
 

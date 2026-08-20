@@ -31,7 +31,7 @@ SOFTWARE.
 
 #include "framework/config_param.hpp"
 #include "framework/geometric.hpp"
-#include "framework/tensor_setup.hpp"
+#include "framework/intensity.hpp"
 
 namespace rpptest {
 

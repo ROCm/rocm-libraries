@@ -34,6 +34,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/config_param.hpp"
+#include "framework/intensity.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/color_ycbcr.hpp"
 

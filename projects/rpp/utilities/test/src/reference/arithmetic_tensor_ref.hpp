@@ -33,6 +33,8 @@ SOFTWARE.
 #include <type_traits>
 
 #include "framework/generic_tensor_setup.hpp"
+#include "framework/intensity.hpp"
+#include "framework/nd_config_param.hpp"
 
 namespace rpptest {
 

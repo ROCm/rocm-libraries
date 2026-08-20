@@ -28,7 +28,7 @@ SOFTWARE.
 #include <algorithm>
 #include <cmath>
 
-#include "framework/tensor_setup.hpp"
+#include "framework/intensity.hpp"
 
 namespace rpptest {
 

@@ -30,7 +30,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/config_param.hpp"
-#include "framework/tensor_setup.hpp"
+#include "framework/intensity.hpp"
 #include "reference/filter_common.hpp"
 
 namespace rpptest {

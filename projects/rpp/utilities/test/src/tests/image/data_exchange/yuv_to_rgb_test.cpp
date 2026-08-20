@@ -33,8 +33,8 @@ SOFTWARE.
 
 #include "framework/backend_memory.hpp"
 #include "framework/config_param.hpp"
-#include "framework/skip_list.hpp"
 #include "framework/generic_tensor_setup.hpp"  // nd_slack_poison
+#include "framework/skip_list.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/yuv_to_rgb_ref.hpp"
 
