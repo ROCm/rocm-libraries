@@ -1,12 +1,11 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass=removeXcnt --print-output
 #
-# removeXcntWaitCnt=true is the O3 policy in Gfx1250Backend, where the hazard
-# pass owns xcnt placement and hand-authored drains should not survive.
+# removeXcnt is the O3 policy in Gfx1250Backend, where the hazard pass owns xcnt
+# placement and hand-authored drains should not survive.
 #
-# kmcnt is left kept here so the two exemptions are pinned as independent: only
-# the xcnt one is being waived.
+# kmcnt stays kept, pinning the two exemptions as independent.
 #
-# The default policy (xcnt kept) is in remove_waitcnt_test.stir.
+# Default policy: remove_waitcnt_test.stir.
 
 # CHECK-LABEL: @strips_xcnt_keeps_kmcnt
 # CHECK: s_wait_kmcnt

@@ -1,11 +1,10 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass=keepTensor --print-output
 #
-# removeTensorWaitCnt=false leaves s_wait_tensorcnt for a subsequent insertion
-# pass to reuse. s_wait_tensorcnt carries IF_WaitTensorCnt, a flag disjoint from
-# IF_WaitCnt, so it is gated by its own branch in the pass; the stripped dscnt
-# drain alongside it is what shows only that branch was disabled.
+# keepTensor leaves s_wait_tensorcnt for a later insertion pass to reuse. The
+# dscnt drains stripped alongside it show that only the tensor branch of the
+# pass was disabled.
 #
-# The default policy (tensor stripped) is in remove_waitcnt_test.stir.
+# Default policy: remove_waitcnt_test.stir.
 
 # CHECK-LABEL: @keeps_tensorcnt_still_strips_dscnt
 # CHECK: s_wait_tensorcnt
