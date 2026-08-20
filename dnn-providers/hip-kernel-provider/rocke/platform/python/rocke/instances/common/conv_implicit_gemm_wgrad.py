@@ -572,8 +572,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA wgrad supports only 16x16x16 (got {atom}) on {arch}"
+        # 16x16x16 is the RDNA WMMA hero (gfx1151/gfx1201); 16x16x32 is the
+        # gfx1250 hero (its only fp16/bf16 WMMA atom -- there is no 16x16x16 on
+        # gfx1250). Both feed the same emit_wmma_phase fragment machinery
+        # (a_frag_len 8 vs 16, assembled from 8-wide ds_read chunks).
+        if atom not in ((16, 16, 16), (16, 16, 32)):
+            return False, (
+                f"WMMA wgrad supports only 16x16x16 or 16x16x32 (got {atom}) on {arch}"
+            )
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA wgrad supports only the 'mem' pipeline "

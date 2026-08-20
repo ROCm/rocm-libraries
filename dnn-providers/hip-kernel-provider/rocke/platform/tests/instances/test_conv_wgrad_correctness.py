@@ -482,6 +482,35 @@ class TestConvWgradVectorLoad(unittest.TestCase):
             "on gfx1201/WMMA, but the lowered IR only has scalar buffer loads",
         )
 
+    def test_gfx1250_wgrad_vectorized_dual_engine(self):
+        # gfx1250 (MI400/MI450 gen, wave32 WMMA) uses the 16x16x32 hero atom.
+        # Lower through the backend dispatcher (not the python-only lowerer) so
+        # that under ROCKE_BACKEND=both this also asserts Python == C++ on the
+        # gfx1250 serialized-IR path -- the actual runtime cpp backend. No GPU /
+        # comgr needed (IR text only). Also confirms the 16x16x32 atom vectorises.
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+        )
+
+        spec, _p, _wtk = _make_spec("gfx1250", _SHAPES[0], "fp16", "mem", "default", 1)
+        self.assertIsNotNone(spec, "gfx1250 WMMA atom selection failed")
+        ok, reason = is_valid_wgrad_spec(spec, "gfx1250")
+        self.assertTrue(ok, f"gfx1250 wgrad spec unexpectedly invalid: {reason}")
+        kernel = build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx1250")
+        self.assertIn(
+            "wmma.f32.16x16x32",
+            ll,
+            "expected the gfx1250 16x16x32 WMMA intrinsic in the lowered IR",
+        )
+        self.assertGreater(
+            _count_vector_buffer_loads(ll),
+            0,
+            "expected vectorised dY/X loads for gfx1250 wgrad, got scalar only",
+        )
+
     def test_odd_channels_stay_scalar(self):
         # C=K=3 are not divisible by any vec > 1, so both operands fall back to the
         # scalar vector_axis="col" path -- no vectorised buffer load is emitted.
