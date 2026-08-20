@@ -28,6 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
@@ -331,9 +332,23 @@ TEST(TestIngestorBenchmarkPlan, TheReductionKeepsTheMinimumSampleNotTheMean)
     candidates.push_back({testId(0x01), std::move(descending)});
     candidates.push_back({testId(0x02), std::move(steady)});
 
-    // descending: 10, 9, ... down to 10 - (BENCHMARK_ITERATIONS - 1); steady: a constant
-    // strictly between that minimum and the descending mean, so min and mean disagree.
-    double nextSample = 10.0;
+    // The descending candidate samples DESCENDING_FIRST, then one less each iteration.
+    // The steady candidate returns a constant chosen strictly between the descending
+    // run's minimum and its mean, so the two reductions disagree about the winner: min
+    // picks descending, mean picks steady.
+    constexpr double DESCENDING_FIRST = 10.0;
+    constexpr double DESCENDING_MIN = DESCENDING_FIRST - (BENCHMARK_ITERATIONS - 1);
+    constexpr double DESCENDING_MEAN = DESCENDING_FIRST - (BENCHMARK_ITERATIONS - 1) / 2.0;
+    constexpr double STEADY_SAMPLE = (DESCENDING_MIN + DESCENDING_MEAN) / 2.0;
+
+    // Needs at least three iterations for the (min, mean) window to be non-empty, or the
+    // case silently stops discriminating the two reductions.
+    static_assert(BENCHMARK_ITERATIONS >= 3,
+                  "TheReductionKeepsTheMinimumSampleNotTheMean needs DESCENDING_MIN < "
+                  "STEADY_SAMPLE < DESCENDING_MEAN to tell min from mean");
+    static_assert(DESCENDING_MIN < STEADY_SAMPLE && STEADY_SAMPLE < DESCENDING_MEAN);
+
+    double nextSample = DESCENDING_FIRST;
     const TestBenchmarkPlan::Timer timer
         = [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
               const BenchmarkTestHandle& planHandle,
@@ -343,7 +358,7 @@ TEST(TestIngestorBenchmarkPlan, TheReductionKeepsTheMinimumSampleNotTheMean)
         plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
         if(&plan == steadyRaw)
         {
-            return 8.0;
+            return STEADY_SAMPLE;
         }
         return nextSample--;
     };
@@ -353,8 +368,8 @@ TEST(TestIngestorBenchmarkPlan, TheReductionKeepsTheMinimumSampleNotTheMean)
 
     plan.execute(handle, nullptr, 0, nullptr);
 
-    // descending's samples are 10..4 (min 4, mean 7); steady's are all 8. A mean
-    // reduction would pick steady.
+    // Descending wins on its minimum despite the worse mean. Were the reduction a mean,
+    // steady's constant would beat descending's average and the counts would swap.
     EXPECT_EQ(descendingRaw->launchCount(), SAMPLING_LAUNCHES + 1);
     EXPECT_EQ(steadyRaw->launchCount(), SAMPLING_LAUNCHES);
 }
@@ -382,6 +397,38 @@ TEST(TestIngestorBenchmarkPlan, AnUntimeableCandidateIsScoredUnusableAndLosesToA
     // without launching: the timer returns nullopt before forwarding execute().
     EXPECT_EQ(untimeableRaw->launchCount(), BENCHMARK_WARMUP_RUNS);
     EXPECT_EQ(timedRaw->launchCount(), SAMPLING_LAUNCHES + 1);
+}
+
+/// The only case exercising the DEFAULT timer: no timer argument, so makeHipEventTimer()
+/// runs for real against HIP. Every other case here injects a fake, which would let a
+/// regression in event creation, event reuse across samples, the record/synchronize
+/// pair, or the elapsed-time read pass unnoticed.
+///
+/// Asserting the exact count is what makes it meaningful: the timer must have returned a
+/// duration on all BENCHMARK_ITERATIONS samples. A single nullopt would score the
+/// candidate unusable and drop the count to BENCHMARK_WARMUP_RUNS.
+TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEvents)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto sub = std::make_unique<FakePlan>(64);
+    const auto* subRaw = sub.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(sub)});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle);
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 1)
+        << "the HIP-event timer failed a sample; the candidate was scored unusable";
+
+    // The event pair is created once and re-recorded, so a second sweep-free execute()
+    // still delegates exactly once.
+    plan.execute(handle, nullptr, 0, nullptr);
+    EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 2);
 }
 
 /// A one-candidate composite still samples before delegating to the only candidate.

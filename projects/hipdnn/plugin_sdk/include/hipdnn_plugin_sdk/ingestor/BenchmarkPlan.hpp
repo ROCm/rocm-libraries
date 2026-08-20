@@ -164,6 +164,12 @@ private:
             }
             if(!(*events)->isUsable())
             {
+                // Discard the unusable pair so the next sample retries creation. Caching
+                // it would turn one transient hipEventCreate failure into a permanently
+                // untimeable plan: every candidate's first timed iteration would return
+                // nullopt, no candidate would score usable, and selection would silently
+                // fall back to the ranked front for the plan's whole life.
+                events->reset();
                 return std::nullopt;
             }
 
@@ -284,6 +290,18 @@ private:
             HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                    << toString(candidate.kernelId)
                                    << "' threw and is scored unusable: " << error.what());
+            return std::nullopt;
+        }
+        catch(...)
+        {
+            // IKernelDispatchHandler::launch() and an injected Timer are both extension
+            // points with no exception-type contract. Letting a non-std::exception escape
+            // would leave _chosen unresolved, so every later execute() would re-run the
+            // whole sweep and re-hit this candidate. Score it unusable like any other
+            // failure instead.
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
+                                   << toString(candidate.kernelId)
+                                   << "' threw a non-standard exception and is scored unusable");
             return std::nullopt;
         }
     }

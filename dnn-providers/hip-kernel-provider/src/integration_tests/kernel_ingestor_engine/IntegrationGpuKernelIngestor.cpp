@@ -184,6 +184,65 @@ size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& rec
     }));
 }
 
+/// Captures plugin logs for one test and restores every piece of process-global state it
+/// touched. Both the global log level and the user callback registration outlive the
+/// test otherwise: a raised level changes what later tests emit, and a callback keyed on
+/// a destroyed fixture would stay registered. Manual teardown at the end of the body is
+/// not enough, because an early ASSERT return skips it.
+class ScopedPluginLogCapture
+{
+public:
+    explicit ScopedPluginLogCapture(void* userHandle)
+        : _userHandle(userHandle)
+    {
+        const auto levelRead = hipdnn_frontend::getGlobalLogLevel(_previousLevel);
+        EXPECT_EQ(levelRead.code, ErrorCode::OK) << levelRead.err_msg;
+
+        const auto registered = setCallback(HIPDNN_SEV_INFO);
+        EXPECT_EQ(registered.code, ErrorCode::OK) << registered.err_msg;
+        _registered = registered.code == ErrorCode::OK;
+
+        const auto levelSet = hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO);
+        EXPECT_EQ(levelSet.code, ErrorCode::OK) << levelSet.err_msg;
+    }
+
+    ~ScopedPluginLogCapture()
+    {
+        if(_registered)
+        {
+            static_cast<void>(setCallback(HIPDNN_SEV_OFF));
+        }
+        static_cast<void>(hipdnn_frontend::setGlobalLogLevel(_previousLevel));
+    }
+
+    ScopedPluginLogCapture(const ScopedPluginLogCapture&) = delete;
+    ScopedPluginLogCapture& operator=(const ScopedPluginLogCapture&) = delete;
+    ScopedPluginLogCapture(ScopedPluginLogCapture&&) = delete;
+    ScopedPluginLogCapture& operator=(ScopedPluginLogCapture&&) = delete;
+
+    hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder() const
+    {
+        return _recorder;
+    }
+
+private:
+    hipdnn_frontend::Error setCallback(hipdnnSeverity_t minLevel) const
+    {
+        return hipdnn_frontend::setUserLogCallback(
+            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+            minLevel,
+            hipdnn_frontend::LogCallbackMode::SYNC,
+            _userHandle);
+    }
+
+    // Declared before the recorder so the recorder's own saved-level restore runs first.
+    hipdnnSeverity_t _previousLevel = HIPDNN_SEV_OFF;
+    void* _userHandle;
+    bool _registered = false;
+    mutable hipdnn_test_sdk::utilities::IsolatedLogRecorder _recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+};
+
 } // namespace
 
 class IntegrationGpuKernelIngestor
@@ -447,17 +506,8 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 /// identically with the feature removed.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 {
-    auto recorder
-        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    ASSERT_EQ(
-        hipdnn_frontend::setUserLogCallback(
-            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-            HIPDNN_SEV_INFO,
-            hipdnn_frontend::LogCallbackMode::SYNC,
-            this)
-            .code,
-        ErrorCode::OK);
-    ASSERT_EQ(hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO).code, ErrorCode::OK);
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
 
     auto graph = buildPointwiseAddGraph();
 
@@ -501,11 +551,8 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
         << "the second execute() re-sampled instead of reusing the winner. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    static_cast<void>(hipdnn_frontend::setUserLogCallback(
-        hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-        HIPDNN_SEV_OFF,
-        hipdnn_frontend::LogCallbackMode::SYNC,
-        this));
+    // The capture guard restores the global log level and unregisters the callback,
+    // including on an early ASSERT return above.
 }
 
 TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)

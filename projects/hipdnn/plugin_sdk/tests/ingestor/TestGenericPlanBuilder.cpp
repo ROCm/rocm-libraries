@@ -94,19 +94,40 @@ struct KnobFilterContext
         return _settings;
     }
 
+    /// buildPlan() calls this with a GenericPlan on the benchmarking-off branch and a
+    /// BenchmarkPlan on the benchmarking-on one. Only the former may be narrowed below,
+    /// so record which arrived. RTTI is off in this build, so the type cannot be
+    /// recovered from the plan itself.
+    void setPlan(std::unique_ptr<GenericPlan<TestHandle>> plan)
+    {
+        _plan = std::move(plan);
+        _planIsGeneric = true;
+    }
+
     void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> plan)
     {
         _plan = std::move(plan);
+        _planIsGeneric = false;
     }
 
+    /// @throws if buildPlan() produced anything but a plain GenericPlan. Narrowing a
+    /// BenchmarkPlan here would be UB; a stray HIPDNN_FORCE_BENCHMARKING is the way that
+    /// happens, and it must fail the test rather than corrupt it.
     const GenericPlan<TestHandle>& plan() const
     {
+        if(!_planIsGeneric)
+        {
+            throw std::runtime_error(
+                "expected a plain GenericPlan; buildPlan() produced a different plan type "
+                "(benchmarking unexpectedly on?)");
+        }
         return static_cast<const GenericPlan<TestHandle>&>(*_plan);
     }
 
 private:
     KnobFilterSettings _settings;
     std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> _plan;
+    bool _planIsGeneric = false;
 };
 
 using TestPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, KnobFilterContext>;
