@@ -724,7 +724,8 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         spec.vector_size_c is not None
         and spec.vector_size_c > 1
         and spec.epilogue == "default"
-        and spec.split_k <= 1  # atomic epilogue (split_k>1) ignores vector_size_c
+        and spec.split_k <= 1  # atomic (split_k>1) ignores vector_size_c
+        and not spec.is_strided  # tilde non-atomic also uses scalar direct — vec_c ignored
     ):
         return False, (
             f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
@@ -794,9 +795,9 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
                 f"WMMA dgrad supports only the 'mem' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
-        if spec.epilogue != "default":
+        if spec.epilogue not in ("default", "cshuffle"):
             return False, (
-                f"WMMA dgrad supports only the 'default' epilogue "
+                f"WMMA dgrad supports 'default' and 'cshuffle' epilogues "
                 f"(got {spec.epilogue!r}) on {arch}"
             )
         for flag, label in (
@@ -1351,73 +1352,31 @@ def _build_tilde_dgrad(
     # ---- epilogue ----
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
 
-    if not spec.needs_atomic:
-        # stride=1 (single sub-GEMM, split_k=1): direct store, no atomics.
-        # NOTE: _emit_dgrad_cshuffle_epilogue exists but is not yet validated
-        # for the stride=1 path — always use direct here.
-        if op.family == "wmma":
-            _emit_dgrad_direct_epilogue_wmma(
-                b,
-                spec,
-                op,
-                final_accs,
-                warp_m_idx,
-                warp_n_idx,
-                lane,
-                block_m_off_v,
-                block_n_off_v,
-                dx_rsrc,
-                c0,
-            )
-        else:
-            _emit_dgrad_direct_epilogue(b, spec, final_accs, grid, dx_rsrc)
-    elif spec.split_k <= 1 and op.family != "wmma" and atom is not None:
-        # Multiple tilde sub-GEMMs, split_k=1: tilde decomposition guarantees
-        # disjoint writes — direct buffer_store is safe (no atomic_add needed).
-        # N (channel) is contiguous in dX for fixed m → cshuffle/vector stores work.
-        hw_tilde = b.mul(rec_h_tilde_slice, rec_w_tilde_slice)
-        if spec.epilogue == "cshuffle":
-            _emit_dgrad_tilde_cshuffle_epilogue(
-                b,
-                spec,
-                atom,
-                grid,
-                final_accs,
-                dx_rsrc,
-                bounds_m=rec_gemm_m,
-                bounds_n=c_dg_N,
-                hw_tilde=hw_tilde,
-                w_tilde_slice=rec_w_tilde_slice,
-                d_h_stride=rec_d_h_stride,
-                d_h_offset=rec_d_h_offset,
-                d_w_stride=rec_d_w_stride,
-                d_w_offset=rec_d_w_offset,
-                c_Hi=c_Hi,
-                c_Wi=c_Wi,
-                c_C=c_C,
-            )
-        else:
-            _emit_dgrad_tilde_direct_epilogue(
-                b,
-                spec,
-                atom,
-                grid,
-                final_accs,
-                dx_rsrc,
-                bounds_m=rec_gemm_m,
-                bounds_n=c_dg_N,
-                hw_tilde=hw_tilde,
-                w_tilde_slice=rec_w_tilde_slice,
-                d_h_stride=rec_d_h_stride,
-                d_h_offset=rec_d_h_offset,
-                d_w_stride=rec_d_w_stride,
-                d_w_offset=rec_d_w_offset,
-                c_Hi=c_Hi,
-                c_Wi=c_Wi,
-                c_C=c_C,
-            )
-    else:
-        # split_k>1 or WMMA tilde: overlapping writes require atomics.
+    # ---- epilogue dispatch ----
+    # Epilogue dispatch.  Two independent axes:
+    #   split_k:    >1 → atomic,  =1 → direct (tilde guarantees disjoint writes)
+    #   is_strided: False → stride-1 descriptor,  True → runtime tilde addr_fn
+    # Within each leaf: wmma vs mfma selects the accumulator-layout helper,
+    # and epilogue="cshuffle" vs "default" selects LDS-staged vs scalar stores.
+
+    _tilde_kwargs = dict(
+        bounds_m=rec_gemm_m,
+        bounds_n=c_dg_N,
+        hw_tilde=hw_tilde,  # SSA node from line ~1089, NOT recomputed here
+        w_tilde_slice=rec_w_tilde_slice,
+        d_h_stride=rec_d_h_stride,
+        d_h_offset=rec_d_h_offset,
+        d_w_stride=rec_d_w_stride,
+        d_w_offset=rec_d_w_offset,
+        c_Hi=c_Hi,
+        c_Wi=c_Wi,
+        c_C=c_C,
+    )
+    use_cshuffle = spec.epilogue == "cshuffle"
+    is_wmma = op.family == "wmma"
+
+    if spec.split_k > 1:
+        # Atomic: split-K CTAs each compute a partial and accumulate via atomic_add.
         _emit_dgrad_tilde_atomic_epilogue(
             b,
             spec,
@@ -1442,6 +1401,75 @@ def _build_tilde_dgrad(
             c_Wi,
             c_C,
         )
+    elif not spec.is_strided:
+        # stride=1, single sub-GEMM: compile-time stride-1 descriptor.
+        if is_wmma:
+            if use_cshuffle:
+                _emit_dgrad_cshuffle_epilogue_wmma(
+                    b,
+                    spec,
+                    op,
+                    final_accs,
+                    grid,
+                    dx_rsrc,
+                )
+            else:
+                _emit_dgrad_direct_epilogue_wmma(
+                    b,
+                    spec,
+                    op,
+                    final_accs,
+                    warp_m_idx,
+                    warp_n_idx,
+                    lane,
+                    block_m_off_v,
+                    block_n_off_v,
+                    dx_rsrc,
+                    c0,
+                )
+        elif use_cshuffle:
+            _emit_dgrad_cshuffle_epilogue(b, spec, final_accs, grid, dx_rsrc)
+        else:
+            _emit_dgrad_direct_epilogue(b, spec, final_accs, grid, dx_rsrc)
+    elif is_wmma:
+        # stride>1, WMMA: runtime tilde addr_fn.
+        if use_cshuffle:
+            _emit_dgrad_tilde_cshuffle_epilogue(
+                b,
+                spec,
+                atom,
+                grid,
+                final_accs,
+                dx_rsrc,
+                op=op,
+                **_tilde_kwargs,
+            )
+        else:
+            _emit_dgrad_tilde_direct_epilogue_wmma(
+                b,
+                spec,
+                op,
+                final_accs,
+                warp_m_idx,
+                warp_n_idx,
+                lane,
+                block_m_off_v,
+                block_n_off_v,
+                dx_rsrc,
+                c0,
+                **_tilde_kwargs,
+            )
+    else:
+        # stride>1, MFMA: runtime tilde addr_fn (like CK k_batch=1).
+        assert atom is not None
+        if use_cshuffle:
+            _emit_dgrad_tilde_cshuffle_epilogue(
+                b, spec, atom, grid, final_accs, dx_rsrc, **_tilde_kwargs
+            )
+        else:
+            _emit_dgrad_tilde_direct_epilogue(
+                b, spec, atom, grid, final_accs, dx_rsrc, **_tilde_kwargs
+            )
 
     return b.kernel
 
@@ -1669,6 +1697,97 @@ def _emit_dgrad_direct_epilogue_wmma(
                     b.buffer_store_f16(dx_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))
 
 
+def _emit_dgrad_tilde_direct_epilogue_wmma(
+    b: IRBuilder,
+    spec: DgradConvSpec,
+    op,
+    accs: Sequence[Value],
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+    dx_rsrc: Value,
+    c0: Value,
+    *,
+    bounds_m: Value,
+    bounds_n: Value,
+    hw_tilde: Value,
+    w_tilde_slice: Value,
+    d_h_stride: Value,
+    d_h_offset: Value,
+    d_w_stride: Value,
+    d_w_offset: Value,
+    c_Hi: Value,
+    c_Wi: Value,
+    c_C: Value,
+) -> None:
+    """Per-lane tilde store for WMMA (gfx1151) accumulator layout into dX.
+
+    Mirrors _emit_dgrad_direct_epilogue_wmma but uses the tilde address
+    mapping instead of the stride=1 descriptor.  Safe for split_k=1 because
+    the tilde decomposition guarantees disjoint writes.
+    """
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+
+    c_map = op.c_layout()
+    _fp32_out = spec.data.dtype_d == "fp32"
+    _bf16_out = spec.data.dtype_d == "bf16"
+    _elem_bytes = 4 if _fp32_out else 2
+
+    flat = 0
+    for mi in range(mfmas_m):
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_m_off = b.add(
+                b.add(block_m_off, warp_m_off), b.const_i32(mi * spec.warp_tile_m)
+            )
+            atom_n_off = b.add(
+                b.add(block_n_off, warp_n_off), b.const_i32(ni * spec.warp_tile_n)
+            )
+            for i in range(op.c_frag_len):
+                row_off, col_off = c_map.coord(b, lane, i)
+                m_val = b.add(atom_m_off, row_off)
+                n_val = b.add(atom_n_off, col_off)
+
+                # Tilde M decomposition: m_val → (n_batch, htl, wtl)
+                n_batch = b.div(m_val, hw_tilde)
+                m_rem = b.mod(m_val, hw_tilde)
+                htl = b.div(m_rem, w_tilde_slice)
+                wtl = b.mod(m_rem, w_tilde_slice)
+                hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
+                wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
+
+                m_ok = b.cmp_lt(m_val, bounds_m)
+                n_ok = b.cmp_lt(n_val, bounds_n)
+                hi_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, c_Hi))
+                wi_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, c_Wi))
+                ok = b.land(b.land(m_ok, n_ok), b.land(hi_ok, wi_ok))
+
+                # NHWC offset: ((n_batch*Hi + hi)*Wi + wi)*C + c
+                _o = b.add(
+                    b.mul(b.add(b.mul(b.add(b.mul(n_batch, c_Hi), hi), c_Wi), wi), c_C),
+                    n_val,
+                )
+                dx_off_bytes = b.mul(_o, b.const_i32(_elem_bytes))
+                safe_off = b.select(ok, dx_off_bytes, b.const_i32((1 << 31) - 1))
+
+                v_f32 = b.vec_extract(acc, i)
+                if _fp32_out:
+                    b.buffer_store_f32(dx_rsrc, safe_off, c0, v_f32)
+                elif _bf16_out:
+                    b.buffer_store_bf16(
+                        dx_rsrc, safe_off, c0, b.trunc_f32_to_bf16(v_f32)
+                    )
+                else:
+                    b.buffer_store_f16(dx_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))
+
+
 def _dgrad_store_vec(spec: DgradConvSpec) -> int:
     """Deduce max_store_vec for dX (last dim = C) mirroring default_vector_sizes."""
     if spec.vector_size_c is not None:
@@ -1679,6 +1798,39 @@ def _dgrad_store_vec(spec: DgradConvSpec) -> int:
     return vec_c
 
 
+def _dgrad_stride1_dx_addr(
+    b: IRBuilder,
+    spec: DgradConvSpec,
+) -> tuple:
+    """Return (addr_fn, bounds) for the stride-1 dX descriptor."""
+    p = spec.problem
+    dX_desc = make_dgrad_dx_descriptor(p, dtype=spec.data.dtype_d)
+
+    def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+        return dX_desc.offset(b_, m=m_val, c=n_val)
+
+    bounds = (b.const_i32(_dg_M(p)), b.const_i32(_dg_N(p)))
+    return dx_addr, bounds
+
+
+def _emit_dgrad_cshuffle_epilogue_wmma(
+    b: IRBuilder,
+    spec: DgradConvSpec,
+    op,
+    accs: Sequence[Value],
+    grid: WarpGrid,
+    dx_rsrc: Value,
+) -> None:
+    """WMMA cshuffle epilogue for stride=1 dX (uses from_grid_op)."""
+    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec)
+    CShuffleEpilogue.from_grid_op(
+        op=op,
+        grid=grid,
+        max_store_vec=_dgrad_store_vec(spec),
+        out_dtype=spec.data.dtype_d,
+    ).store(b, accs=accs, addr_fn=dx_addr, d_rsrc=dx_rsrc, bounds=bounds)
+
+
 def _emit_dgrad_cshuffle_epilogue(
     b: IRBuilder,
     spec: DgradConvSpec,
@@ -1686,13 +1838,8 @@ def _emit_dgrad_cshuffle_epilogue(
     grid: WarpGrid,
     dx_rsrc: Value,
 ) -> None:
-    """LDS-staged cshuffle epilogue writing to dX (NHWC layout, stride=1 path)."""
-    p = spec.problem
-    dX_desc = make_dgrad_dx_descriptor(p, dtype=spec.data.dtype_d)
-
-    def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return dX_desc.offset(b_, m=m_val, c=n_val)
-
+    """MFMA cshuffle epilogue for stride=1 dX."""
+    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec)
     CShuffleEpilogue.from_grid(
         atom=spec.atom,
         grid=grid,
@@ -1703,7 +1850,7 @@ def _emit_dgrad_cshuffle_epilogue(
         accs=accs,
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
-        bounds=(b.const_i32(_dg_M(p)), b.const_i32(_dg_N(p))),
+        bounds=bounds,
     )
 
 
@@ -1756,8 +1903,10 @@ def _tilde_dx_addr_fn(
     _o4 = b.mul(_o3, c_C)
     offset = b.add(_o4, n_global)
 
-    safe_offset = b.select(hw_ok, offset, b.const_i32(0x7FFFFFFF))
-    return safe_offset, hw_ok
+    # Return raw element offset (no sentinel select here).
+    # DirectEpilogue/CShuffleEpilogue apply the sentinel via hw_ok (the valid flag),
+    # matching stride-1 (dX_desc.offset) which also returns raw offset + valid.
+    return offset, hw_ok
 
 
 def _emit_dgrad_tilde_direct_epilogue(
@@ -1814,11 +1963,12 @@ def _emit_dgrad_tilde_direct_epilogue(
 def _emit_dgrad_tilde_cshuffle_epilogue(
     b: IRBuilder,
     spec: DgradConvSpec,
-    atom: MfmaAtom,
+    atom: Optional[MfmaAtom],
     grid: WarpGrid,
     accs: Sequence[Value],
     dx_rsrc: Value,
     *,
+    op=None,
     bounds_m: Value,
     bounds_n: Value,
     hw_tilde: Value,
@@ -1836,6 +1986,7 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     Mirrors _emit_dgrad_cshuffle_epilogue for the strided (tilde) case.
     The N dimension (channel index) is contiguous in dX for fixed m, so
     the cshuffle epilogue can issue vector_size_c-wide buffer stores along N.
+    Supports both MFMA (via atom) and WMMA (via op with from_grid_op).
     """
 
     def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
@@ -1855,12 +2006,16 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
         )
         return offset, hw_ok
 
-    CShuffleEpilogue.from_grid(
-        atom=atom,
-        grid=grid,
-        max_store_vec=_dgrad_store_vec(spec),
-        out_dtype=spec.data.dtype_d,
-    ).store(
+    _cshuffle_kwargs = {
+        "max_store_vec": _dgrad_store_vec(spec),
+        "out_dtype": spec.data.dtype_d,
+    }
+    is_wmma = op is not None and getattr(op, "family", None) == "wmma"
+    if is_wmma:
+        epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_cshuffle_kwargs)
+    else:
+        epi = CShuffleEpilogue.from_grid(atom=atom, grid=grid, **_cshuffle_kwargs)
+    epi.store(
         b,
         accs=accs,
         addr_fn=dx_addr,

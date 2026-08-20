@@ -148,9 +148,11 @@ class TestConvDgradDispatch(unittest.TestCase):
         r = dispatch_conv_dgrad(_dgrad("gfx942"))
         self.assertFalse(r.spec.needs_atomic)
 
-    def test_stride2_needs_atomic(self):
+    def test_stride2_no_atomic(self):
+        # stride>1 + split_k=1: tilde decomposition guarantees disjoint writes
+        # so direct buffer_store is used — no atomic needed.
         r = dispatch_conv_dgrad(_dgrad("gfx942", stride_h=2, stride_w=2))
-        self.assertTrue(r.spec.needs_atomic)
+        self.assertFalse(r.spec.needs_atomic)
 
     # ---- dispatch result fields ----------------------------------------------
 

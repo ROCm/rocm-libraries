@@ -264,14 +264,18 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     }
 
     /* vector_size_c > 1 incompatible with default epilogue — except when
-     * split_k > 1 uses the atomic epilogue which ignores vector_size_c. */
-    if(s->vector_size_c > 1 && strcmp(s->epilogue, "default") == 0 && s->split_k <= 1)
+     * split_k > 1 (atomic) or stride > 1 (tilde non-atomic direct) ignores it. */
     {
-        snprintf(reason,
-                 reason_cap,
-                 "default epilogue is not supported with vector size c: %d",
-                 s->vector_size_c);
-        return false;
+        bool is_strided = rocke_dgrad_conv_spec_is_strided(s);
+        if(s->vector_size_c > 1 && strcmp(s->epilogue, "default") == 0 && s->split_k <= 1
+           && !is_strided)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "default epilogue is not supported with vector size c: %d",
+                     s->vector_size_c);
+            return false;
+        }
     }
 
     /* wave_size must match arch (Python: spec.wave_size != target.wave_size). */
@@ -387,11 +391,11 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      arch);
             return false;
         }
-        if(strcmp(s->epilogue, "default") != 0)
+        if(strcmp(s->epilogue, "default") != 0 && strcmp(s->epilogue, "cshuffle") != 0)
         {
             snprintf(reason,
                      reason_cap,
-                     "WMMA dgrad supports only the 'default' epilogue (got %s) on %s",
+                     "WMMA dgrad supports 'default' and 'cshuffle' epilogues (got %s) on %s",
                      s->epilogue,
                      arch);
             return false;
@@ -746,6 +750,47 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
 
     rocke_direct_epilogue_store(
         b, &epi, accs, num_accs, _dgrad_dx_addr_fn, &addr_ctx, dx_rsrc, bounds_m, bounds_n, false);
+}
+
+// ===========================================================================
+// MFMA cshuffle epilogue for stride=1 (Python _emit_dgrad_cshuffle_epilogue)
+// ===========================================================================
+
+static void _emit_dgrad_cshuffle_epilogue(rocke_ir_builder_t* b,
+                                          const rocke_dgrad_conv_spec_t* spec,
+                                          rocke_value_t* const* accs,
+                                          int num_accs,
+                                          const rocke_warp_grid_t* grid,
+                                          rocke_value_t* dx_rsrc)
+{
+    const rocke_conv_problem_t* p = &spec->problem;
+    rocke_tensor_descriptor_t* dX_desc = rocke_dgrad_make_dx_descriptor(b, p, spec->dtype_d);
+
+    struct dgrad_dx_addr_ctx addr_ctx;
+    addr_ctx.desc = dX_desc;
+
+    // Deduce max_store_vec from C (last dim of dX NHWC) — mirrors _dgrad_store_vec().
+    bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+    int vec_candidates[] = {is_fp32_d ? 4 : 8, 4, 2, 1};
+    int vec_c = 1;
+    for(int v : vec_candidates)
+        if(p->C % v == 0)
+        {
+            vec_c = v;
+            break;
+        }
+    int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : vec_c;
+
+    const rocke_mfma_atom_t* atom
+        = rocke_mfma_atom(spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
+    epi.out_dtype = spec->dtype_d;
+
+    rocke_value_t* bounds_m = rocke_b_const_i32(b, rocke_dgrad_conv_spec_dg_M(spec));
+    rocke_value_t* bounds_n = rocke_b_const_i32(b, rocke_dgrad_conv_spec_dg_N(spec));
+
+    rocke_cshuffle_epilogue_store(
+        b, &epi, accs, num_accs, _dgrad_dx_addr_fn, &addr_ctx, dx_rsrc, bounds_m, bounds_n);
 }
 
 // ===========================================================================
@@ -1181,6 +1226,113 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
 }
 
 // ===========================================================================
+// WMMA tilde direct epilogue (Python _emit_dgrad_tilde_direct_epilogue_wmma)
+// ===========================================================================
+
+static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
+                                                   const rocke_dgrad_conv_spec_t* spec,
+                                                   const rocke_mmaop_t* op,
+                                                   rocke_value_t* const* accs,
+                                                   int num_accs,
+                                                   rocke_value_t* warp_m_idx,
+                                                   rocke_value_t* warp_n_idx,
+                                                   rocke_value_t* lane,
+                                                   rocke_value_t* block_m_off,
+                                                   rocke_value_t* block_n_off,
+                                                   rocke_value_t* dx_rsrc,
+                                                   rocke_value_t* c0,
+                                                   rocke_value_t* bounds_m,
+                                                   rocke_value_t* bounds_n,
+                                                   rocke_value_t* hw_tilde,
+                                                   rocke_value_t* w_tilde_slice,
+                                                   rocke_value_t* d_h_stride,
+                                                   rocke_value_t* d_h_offset,
+                                                   rocke_value_t* d_w_stride,
+                                                   rocke_value_t* d_w_offset,
+                                                   rocke_value_t* c_Hi,
+                                                   rocke_value_t* c_Wi,
+                                                   rocke_value_t* c_C)
+{
+    (void)num_accs;
+    int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
+    int mfmas_n = rocke_dgrad_conv_spec_mfmas_per_warp_n(spec);
+    bool is_fp32 = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+    bool is_bf16 = (spec->dtype_d && strcmp(spec->dtype_d, "bf16") == 0);
+    int elem_bytes = is_fp32 ? 4 : 2;
+
+    rocke_value_t* warp_m_off
+        = rocke_b_mul(b, warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
+    rocke_value_t* warp_n_off
+        = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
+
+    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+
+    int flat = 0;
+    for(int mi = 0; mi < mfmas_m; mi++)
+    {
+        rocke_value_t* atom_m_off = rocke_b_add(b,
+                                                rocke_b_add(b, block_m_off, warp_m_off),
+                                                rocke_b_const_i32(b, mi * spec->warp_tile_m));
+        for(int ni = 0; ni < mfmas_n; ni++)
+        {
+            rocke_value_t* acc = accs[flat++];
+            rocke_value_t* atom_n_off = rocke_b_add(b,
+                                                    rocke_b_add(b, block_n_off, warp_n_off),
+                                                    rocke_b_const_i32(b, ni * spec->warp_tile_n));
+
+            for(int i = 0; i < op->c_frag_len; i++)
+            {
+                rocke_value_t* row_off;
+                rocke_value_t* col_off;
+                rocke_arch_layout_map_coord(c_map, b, lane, i, &row_off, &col_off);
+
+                rocke_value_t* m_val = rocke_b_add(b, atom_m_off, row_off);
+                rocke_value_t* n_val = rocke_b_add(b, atom_n_off, col_off);
+
+                // Tilde M decomposition → (n_batch, htl, wtl) → (hi, wi)
+                rocke_value_t* n_batch = rocke_b_div(b, m_val, hw_tilde);
+                rocke_value_t* m_rem = rocke_b_mod(b, m_val, hw_tilde);
+                rocke_value_t* htl = rocke_b_div(b, m_rem, w_tilde_slice);
+                rocke_value_t* wtl = rocke_b_mod(b, m_rem, w_tilde_slice);
+                rocke_value_t* hi = rocke_b_add(b, rocke_b_mul(b, htl, d_h_stride), d_h_offset);
+                rocke_value_t* wi = rocke_b_add(b, rocke_b_mul(b, wtl, d_w_stride), d_w_offset);
+
+                rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, bounds_m);
+                rocke_value_t* n_ok = rocke_b_cmp_lt(b, n_val, bounds_n);
+                rocke_value_t* hi_ok
+                    = rocke_b_land(b, rocke_b_cmp_ge(b, hi, c0), rocke_b_cmp_lt(b, hi, c_Hi));
+                rocke_value_t* wi_ok
+                    = rocke_b_land(b, rocke_b_cmp_ge(b, wi, c0), rocke_b_cmp_lt(b, wi, c_Wi));
+                rocke_value_t* ok
+                    = rocke_b_land(b, rocke_b_land(b, m_ok, n_ok), rocke_b_land(b, hi_ok, wi_ok));
+
+                // NHWC offset: ((n_batch*Hi + hi)*Wi + wi)*C + c
+                rocke_value_t* _o0 = rocke_b_mul(b, n_batch, c_Hi);
+                rocke_value_t* _o1 = rocke_b_add(b, _o0, hi);
+                rocke_value_t* _o2 = rocke_b_mul(b, _o1, c_Wi);
+                rocke_value_t* _o3 = rocke_b_add(b, _o2, wi);
+                rocke_value_t* _o4 = rocke_b_mul(b, _o3, c_C);
+                rocke_value_t* off_elems = rocke_b_add(b, _o4, n_val);
+                rocke_value_t* off_bytes
+                    = rocke_b_mul(b, off_elems, rocke_b_const_i32(b, elem_bytes));
+                rocke_value_t* safe_off
+                    = rocke_b_select(b, ok, off_bytes, rocke_b_const_i32(b, 0x7FFFFFFF));
+
+                rocke_value_t* v_f32 = rocke_b_vec_extract(b, acc, i);
+                if(is_fp32)
+                    rocke_b_buffer_store_f32(b, dx_rsrc, safe_off, c0, v_f32);
+                else if(is_bf16)
+                    rocke_b_buffer_store_bf16(
+                        b, dx_rsrc, safe_off, c0, rocke_b_trunc_f32_to_bf16(b, v_f32));
+                else
+                    rocke_b_buffer_store_f16(
+                        b, dx_rsrc, safe_off, c0, rocke_b_trunc_f32_to_f16(b, v_f32));
+            }
+        }
+    }
+}
+
+// ===========================================================================
 // ===========================================================================
 // Tilde non-atomic epilogues (split_k==1 strided convolutions)
 //
@@ -1209,11 +1361,11 @@ struct tilde_dx_ctx_t
     rocke_value_t* c_Hi;
     rocke_value_t* c_Wi;
     rocke_value_t* c_C;
-    rocke_value_t* c0;
+    // c0 is NOT stored here: it is created locally inside _tilde_dx_addr_fn,
+    // matching Python's closure which does c0 = b.const_i32(0) inside the fn.
 };
 
-static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_ir_builder_t* b,
-                                         rocke_value_t* hw_tilde,
+static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_value_t* hw_tilde,
                                          rocke_value_t* w_tilde_slice,
                                          rocke_value_t* d_h_stride,
                                          rocke_value_t* d_h_offset,
@@ -1233,7 +1385,7 @@ static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_ir_builder_t* b,
     ctx.c_Hi = c_Hi;
     ctx.c_Wi = c_Wi;
     ctx.c_C = c_C;
-    ctx.c0 = rocke_b_const_i32(b, 0);
+    /* c0 not stored — created locally inside _tilde_dx_addr_fn */
     return ctx;
 }
 
@@ -1247,6 +1399,9 @@ static rocke_value_t* _tilde_dx_addr_fn(rocke_ir_builder_t* b,
 {
     tilde_dx_ctx_t* ctx = (tilde_dx_ctx_t*)user;
 
+    // c0 created locally to match Python closure order (b.const_i32(0) first in fn).
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+
     // Decompose m_global -> (n_val, htl, wtl)
     rocke_value_t* n_val = rocke_b_div(b, m_global, ctx->hw_tilde);
     rocke_value_t* m_rem = rocke_b_mod(b, m_global, ctx->hw_tilde);
@@ -1256,11 +1411,13 @@ static rocke_value_t* _tilde_dx_addr_fn(rocke_ir_builder_t* b,
     rocke_value_t* hi = rocke_b_add(b, rocke_b_mul(b, htl, ctx->d_h_stride), ctx->d_h_offset);
     rocke_value_t* wi = rocke_b_add(b, rocke_b_mul(b, wtl, ctx->d_w_stride), ctx->d_w_offset);
 
-    // hi/wi validity (padding guard; bounds_m/bounds_n cover m/n separately)
-    rocke_value_t* hi_ok
-        = rocke_b_land(b, rocke_b_cmp_ge(b, hi, ctx->c0), rocke_b_cmp_lt(b, hi, ctx->c_Hi));
-    rocke_value_t* wi_ok
-        = rocke_b_land(b, rocke_b_cmp_ge(b, wi, ctx->c0), rocke_b_cmp_lt(b, wi, ctx->c_Wi));
+    // hi/wi validity — explicit sequencing (sge before slt) to match Python left-to-right.
+    rocke_value_t* hi_ge = rocke_b_cmp_ge(b, hi, c0);
+    rocke_value_t* hi_lt = rocke_b_cmp_lt(b, hi, ctx->c_Hi);
+    rocke_value_t* hi_ok = rocke_b_land(b, hi_ge, hi_lt);
+    rocke_value_t* wi_ge = rocke_b_cmp_ge(b, wi, c0);
+    rocke_value_t* wi_lt = rocke_b_cmp_lt(b, wi, ctx->c_Wi);
+    rocke_value_t* wi_ok = rocke_b_land(b, wi_ge, wi_lt);
     rocke_value_t* hw_ok = rocke_b_land(b, hi_ok, wi_ok);
 
     if(out_valid)
@@ -1274,8 +1431,10 @@ static rocke_value_t* _tilde_dx_addr_fn(rocke_ir_builder_t* b,
     rocke_value_t* _o4 = rocke_b_mul(b, _o3, ctx->c_C);
     rocke_value_t* offset = rocke_b_add(b, _o4, n_global);
 
-    // OOB sentinel: address the hardware will not commit
-    return rocke_b_select(b, hw_ok, offset, rocke_b_const_i32(b, 0x7FFFFFFF));
+    // Return raw element offset (no sentinel select here).
+    // DirectEpilogue/CShuffleEpilogue apply the sentinel via the out_valid flag,
+    // matching stride-1 (_dgrad_dx_addr_fn) which also returns raw offset + valid.
+    return offset;
 }
 
 // Scalar (per-element) store — mirrors _emit_dgrad_direct_epilogue for the tilde case.
@@ -1298,16 +1457,8 @@ static void _emit_dgrad_tilde_direct_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* c_Wi,
                                               rocke_value_t* c_C)
 {
-    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(b,
-                                            hw_tilde,
-                                            w_tilde_slice,
-                                            d_h_stride,
-                                            d_h_offset,
-                                            d_w_stride,
-                                            d_w_offset,
-                                            c_Hi,
-                                            c_Wi,
-                                            c_C);
+    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(
+        hw_tilde, w_tilde_slice, d_h_stride, d_h_offset, d_w_stride, d_w_offset, c_Hi, c_Wi, c_C);
     rocke_direct_epilogue_t epi;
     epi.atom = atom;
     epi.grid = *grid;
@@ -1338,16 +1489,8 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                 rocke_value_t* c_Wi,
                                                 rocke_value_t* c_C)
 {
-    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(b,
-                                            hw_tilde,
-                                            w_tilde_slice,
-                                            d_h_stride,
-                                            d_h_offset,
-                                            d_w_stride,
-                                            d_w_offset,
-                                            c_Hi,
-                                            c_Wi,
-                                            c_C);
+    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(
+        hw_tilde, w_tilde_slice, d_h_stride, d_h_offset, d_w_stride, d_w_offset, c_Hi, c_Wi, c_C);
     int max_store_vec
         = (spec->has_vector_size_c && spec->vector_size_c > 1) ? spec->vector_size_c : 8;
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
@@ -1400,7 +1543,6 @@ static rocke_kernel_def_t*
     rocke_value_t* dY = rocke_b_param(b, "dY", ab_global, &ro_opts);
     rocke_value_t* W = rocke_b_param(b, "W", ab_global, &ro_opts);
 
-    bool needs_atomic = rocke_dgrad_conv_spec_needs_atomic(spec);
     // split_k>1 uses atomic_add (multiple blocks accumulate into same dX elements).
     // Tilde sub-GEMMs with split_k=1 use direct buffer_store (disjoint writes), so writeonly.
     bool uses_atomic_store = (spec->split_k > 1);
@@ -1464,7 +1606,8 @@ static rocke_kernel_def_t*
     rocke_value_t* rec_w_tilde_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 6);
     rocke_value_t* rec_h_tilde_slice_begin = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 7);
     rocke_value_t* rec_w_tilde_slice_begin = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 8);
-    rocke_value_t* rec_y_dot_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 9);
+    (void)_emit_load_record_field(
+        b, sub_gemm_buf, sg_idx, 9); /* rec_y_dot_slice: unused (k_out innermost) */
     rocke_value_t* rec_x_dot_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 10);
     rocke_value_t* rec_a_embed_h_coeff = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 11);
     rocke_value_t* rec_a_embed_w_coeff = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 12);
@@ -1812,29 +1955,81 @@ static rocke_kernel_def_t*
 
     // ---- epilogue dispatch ----
     bool is_split_k_atomic = (spec->split_k > 1);
-    if(!needs_atomic)
+    bool is_strided = rocke_dgrad_conv_spec_is_strided(spec);
+    if(!is_split_k_atomic && !is_strided)
     {
-        // Single sub-GEMM, split_k=1: direct buffer_store (no atomics needed).
+        // stride=1, single sub-GEMM, split_k=1: direct store, no atomics.
         if(is_wmma)
-            _emit_dgrad_direct_epilogue_wmma(b,
-                                             spec,
-                                             op,
-                                             epi_accs,
-                                             num_final,
-                                             warp_m_idx,
-                                             warp_n_idx,
-                                             lane,
-                                             block_m_off_v,
-                                             block_n_off_v,
-                                             dx_rsrc,
-                                             c0);
+        {
+            bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+            if(use_cshuffle)
+            {
+                // WMMA cshuffle for stride=1: use the stride=1 dx descriptor.
+                // _emit_dgrad_direct_epilogue uses DirectEpilogue via stride=1
+                // descriptor — for cshuffle we need CShuffleEpilogue.from_grid_op.
+                // Reuse the existing tilde cshuffle helper with hw_tilde=1 (stride=1
+                // degenerates: htl=m_sub, wtl=0 → hi=m_sub*1+0, wi=0 which is wrong).
+                // Instead emit a proper stride=1 cshuffle via the wmma-aware helper.
+                _emit_dgrad_direct_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
+            }
+            else
+            {
+                _emit_dgrad_direct_epilogue_wmma(b,
+                                                 spec,
+                                                 op,
+                                                 epi_accs,
+                                                 num_final,
+                                                 warp_m_idx,
+                                                 warp_n_idx,
+                                                 lane,
+                                                 block_m_off_v,
+                                                 block_n_off_v,
+                                                 dx_rsrc,
+                                                 c0);
+            }
+        }
         else
-            _emit_dgrad_direct_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
+        {
+            // MFMA, stride=1
+            bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+            if(use_cshuffle)
+                _emit_dgrad_cshuffle_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
+            else
+                _emit_dgrad_direct_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
+        }
+    }
+    else if(!is_split_k_atomic && is_wmma)
+    {
+        // WMMA + tilde (stride>1, split_k=1): disjoint writes — direct store safe.
+        // Both default and cshuffle use per-element stores (no LDS staging for WMMA tilde).
+        _emit_dgrad_tilde_direct_epilogue_wmma(b,
+                                               spec,
+                                               op,
+                                               epi_accs,
+                                               num_final,
+                                               warp_m_idx,
+                                               warp_n_idx,
+                                               lane,
+                                               block_m_off_v,
+                                               block_n_off_v,
+                                               dx_rsrc,
+                                               c0,
+                                               rec_gemm_m,
+                                               c_dg_N,
+                                               hw_tilde,
+                                               rec_w_tilde_slice,
+                                               rec_d_h_stride,
+                                               rec_d_h_offset,
+                                               rec_d_w_stride,
+                                               rec_d_w_offset,
+                                               c_Hi,
+                                               c_Wi,
+                                               c_C);
     }
     else if(!is_split_k_atomic && !is_wmma && atom)
     {
-        // Multiple tilde sub-GEMMs, split_k=1: tilde decomposition guarantees
-        // each sub-GEMM writes to disjoint (n,hi,wi) coordinates — no atomics.
+        // stride>1, split_k=1, MFMA: tilde decomposition guarantees disjoint writes
+        // (like CK with k_batch=1 → direct store regardless of stride).
         bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
         if(use_cshuffle)
         {
@@ -1845,8 +2040,8 @@ static rocke_kernel_def_t*
                                                 epi_accs,
                                                 num_final,
                                                 dx_rsrc,
-                                                rec_gemm_m, /* bounds_m (runtime) */
-                                                c_dg_N, /* bounds_n (compile-time C) */
+                                                rec_gemm_m,
+                                                c_dg_N,
                                                 hw_tilde,
                                                 rec_w_tilde_slice,
                                                 rec_d_h_stride,
@@ -1866,8 +2061,8 @@ static rocke_kernel_def_t*
                                               epi_accs,
                                               num_final,
                                               dx_rsrc,
-                                              rec_gemm_m, /* bounds_m (runtime) */
-                                              c_dg_N, /* bounds_n (compile-time C) */
+                                              rec_gemm_m,
+                                              c_dg_N,
                                               hw_tilde,
                                               rec_w_tilde_slice,
                                               rec_d_h_stride,
