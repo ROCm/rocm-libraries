@@ -29,6 +29,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
@@ -59,11 +60,7 @@ void fill_multiply_operand(T* buf, const RpptGenericDesc& d, DType dt, unsigned 
 
 // Integer multiplication is exact (only saturation is involved), so U8/I8 are bit-exact. The
 // float tolerances model legitimate fp rounding of a single multiply only.
-struct Tolerance {
-    double abs, rel;
-};
-
-Tolerance tolerance_for(DType dt) {
+Bound tolerance_for(DType dt) {
     switch (dt) {
         case DType::F32: return {1e-5, 1e-6};
         case DType::F16: return {2e-3, 2e-3};
@@ -122,8 +119,7 @@ void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
     dst.read(actual.data(), bytesOut);
 
     // (4) Compare the whole output tensor.
-    const Tolerance tol = tolerance_for(cfg.dtypeIn);
-    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, tol.abs, tol.rel));
+    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, tolerance_for(cfg.dtypeIn)));
 }
 
 }  // namespace

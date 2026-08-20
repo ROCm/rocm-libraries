@@ -29,6 +29,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/skip_list.hpp"
@@ -59,8 +60,9 @@ Rpp32f supplied_stddev(std::size_t i) { return 1.0f + 0.5f * static_cast<Rpp32f>
 // Tolerances reflect legitimate floating-point error only: the golden accumulates in double
 // while the kernel reduces in float (and stores half for F16), so the bound is dominated by
 // the relative term.
-double abs_tolerance(DType out) { return out == DType::F16 ? 2e-2 : 1e-4; }
-double rel_tolerance(DType out) { return out == DType::F16 ? 4e-3 : 1e-5; }
+Bound normalize_tolerance(DType out) {
+    return out == DType::F16 ? Bound{2e-2, 4e-3} : Bound{1e-4, 1e-5};
+}
 
 template <typename Tin, typename Tout>
 void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
@@ -110,8 +112,7 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     dst.read(actual.data(), dstBytes);
 
     // (3) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, abs_tolerance(cfg.dtypeOut),
-                                 rel_tolerance(cfg.dtypeOut)));
+    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, normalize_tolerance(cfg.dtypeOut)));
 }
 
 // Representative reduction masks per rank: innermost axis only, every axis, and one mixed

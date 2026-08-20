@@ -28,6 +28,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/reduction.hpp"
 #include "framework/skip_list.hpp"

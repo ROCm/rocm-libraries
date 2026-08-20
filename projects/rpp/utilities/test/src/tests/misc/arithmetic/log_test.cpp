@@ -28,6 +28,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/skip_list.hpp"
@@ -45,8 +46,9 @@ namespace {
 // non-zero float input is 1/255, whose log is about -5.5, and a half near 5.5 has an ulp of
 // 4/1024 = 3.9e-3. The 8e-3 absolute bound is therefore ~2 ulp of the stored result. Do not
 // loosen it further.
-double abs_tolerance(DType out) { return out == DType::F16 ? 8e-3 : 1e-5; }
-double rel_tolerance(DType out) { return out == DType::F16 ? 2e-3 : 1e-6; }
+Bound log_tolerance(DType out) {
+    return out == DType::F16 ? Bound{8e-3, 2e-3} : Bound{1e-5, 1e-6};
+}
 
 // Zero-free input fill.
 //
@@ -105,8 +107,7 @@ void run_log(const NdConfig& cfg) {
     dst.read(actual.data(), dstBytes);
 
     // (4) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, abs_tolerance(cfg.dtypeOut),
-                                 rel_tolerance(cfg.dtypeOut)));
+    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log_tolerance(cfg.dtypeOut)));
 }
 
 }  // namespace

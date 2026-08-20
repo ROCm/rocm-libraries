@@ -49,8 +49,10 @@ namespace rpptest {
 // At most this many failing case names are listed per suite in the final report; the rest are
 // counted. Every failure is still printed in full when it happens.
 inline constexpr std::size_t kMaxListedFailuresPerSuite = 5;
-// Failure detail is clipped to this many lines per assertion.
-inline constexpr std::size_t kMaxFailureDetailLines = 8;
+// Failure detail is clipped to this many lines per assertion. Sized to fit a whole comparator
+// verdict (see kMaxReportedMismatches in compare.hpp): the assertion's own two lines, the sampled
+// mismatches, and the "... (N more)" tail.
+inline constexpr std::size_t kMaxFailureDetailLines = 14;
 
 inline bool reporter_use_color() {
     static const bool enabled = [] {

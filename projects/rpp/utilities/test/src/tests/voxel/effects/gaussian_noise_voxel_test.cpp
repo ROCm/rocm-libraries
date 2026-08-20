@@ -29,6 +29,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/skip_list.hpp"

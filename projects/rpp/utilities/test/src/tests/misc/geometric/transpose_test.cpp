@@ -29,6 +29,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
@@ -108,7 +109,7 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
     dst.read(actual.data(), dstBytes);
 
     // (4) Compare the whole output tensor bit-exactly: transpose only moves elements.
-    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *dstDesc, 0.0, 0.0));
+    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *dstDesc, 0.0));
 }
 
 }  // namespace

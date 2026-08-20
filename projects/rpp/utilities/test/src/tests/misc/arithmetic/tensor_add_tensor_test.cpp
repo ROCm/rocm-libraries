@@ -28,6 +28,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
@@ -96,8 +97,8 @@ void run_tensor_add_tensor(const NdConfig& cfg, Broadcast broadcast) {
     dst.read(actual.data(), bytesOut);
 
     // (4) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, kAbsTolerance(cfg.dtypeIn),
-                              kRelTolerance(cfg.dtypeIn)));
+    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut,
+                              Bound{kAbsTolerance(cfg.dtypeIn), kRelTolerance(cfg.dtypeIn)}));
 }
 
 }  // namespace

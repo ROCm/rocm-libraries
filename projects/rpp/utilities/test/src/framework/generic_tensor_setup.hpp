@@ -25,12 +25,10 @@ SOFTWARE.
 #ifndef RPP_TEST_GENERIC_TENSOR_SETUP_H
 #define RPP_TEST_GENERIC_TENSOR_SETUP_H
 
-#include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <vector>
 
 #include "framework/backend_memory.hpp"
@@ -219,37 +217,6 @@ void fill_input_nd(T* buf, const RpptGenericDesc& d, DType dt, unsigned salt = 0
     fill_input<T>(pattern.data(), logical, dt, salt);
     std::size_t n = 0;
     for_each_nd_coord(d, [&](const NdDims& coord) { buf[nd_offset(d, coord)] = pattern[n++]; });
-}
-
-// ---- comparison -----------------------------------------------------------
-
-// Compares the logical elements only -- padding slack is not data. The bound is
-// absTolerance + relTolerance * |reference|; bit-exact ops pass 0 for both.
-template <typename T>
-::testing::AssertionResult compare_nd(const T* actual, const T* reference,
-                                      const RpptGenericDesc& d, double absTolerance,
-                                      double relTolerance = 0.0) {
-    bool failed = false;
-    std::string coords;
-    double got = 0.0, want = 0.0, diff = 0.0, tolerance = 0.0;
-    for_each_nd_coord(d, [&](const NdDims& coord) {
-        if (failed) return;  // report the first mismatch only
-        const std::size_t i = nd_offset(d, coord);
-        const double a = to_double(actual[i]);
-        const double r = to_double(reference[i]);
-        const double delta = std::fabs(a - r);
-        const double bound = absTolerance + relTolerance * std::fabs(r);
-        if (delta <= bound) return;
-        failed = true;
-        got = a, want = r, diff = delta, tolerance = bound;
-        for (std::size_t axis = 0; axis < coord.size(); ++axis)
-            coords += (axis ? "," : "") + std::to_string(coord[axis]);
-    });
-    if (failed)
-        return ::testing::AssertionFailure()
-               << "mismatch at [" << coords << "]: actual=" << got << " reference=" << want
-               << " diff=" << diff << " tolerance=" << tolerance;
-    return ::testing::AssertionSuccess();
 }
 
 }  // namespace rpptest

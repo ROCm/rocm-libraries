@@ -28,6 +28,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/skip_list.hpp"
@@ -40,8 +41,7 @@ namespace {
 // Tolerances reflect legitimate floating-point error only: the golden evaluates log1p in
 // double while the kernel works in float. Kept as helpers for consistency with the other ND
 // tests, even though log1p documents a single output dtype.
-double abs_tolerance(DType) { return 1e-5; }
-double rel_tolerance(DType) { return 1e-6; }
+Bound log1p_tolerance(DType) { return {1e-5, 1e-6}; }
 
 template <typename Tin, typename Tout>
 void run_log1p(const NdConfig& cfg) {
@@ -80,8 +80,7 @@ void run_log1p(const NdConfig& cfg) {
     dst.read(actual.data(), dstBytes);
 
     // (4) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, abs_tolerance(cfg.dtypeOut),
-                                 rel_tolerance(cfg.dtypeOut)));
+    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log1p_tolerance(cfg.dtypeOut)));
 }
 
 }  // namespace

@@ -29,6 +29,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/generic_tensor_setup.hpp"
@@ -135,7 +136,7 @@ void run_concat(const NdConfig& cfg, AxisKind kind) {
 
     // (4) Compare the whole output tensor. Concat only copies elements -- it performs no
     // arithmetic and no dtype conversion -- so every dtype is bit-exact and any diff is a defect.
-    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, 0.0, 0.0));
+    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, 0.0));
 }
 
 }  // namespace

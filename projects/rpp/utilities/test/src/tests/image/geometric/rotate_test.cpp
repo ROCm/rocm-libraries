@@ -29,7 +29,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
-#include "framework/compare_tensor.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype_dispatch.hpp"
 #include "framework/skip_list.hpp"

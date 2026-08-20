@@ -25,17 +25,14 @@ SOFTWARE.
 #ifndef RPP_TEST_VOXEL_TENSOR_SETUP_H
 #define RPP_TEST_VOXEL_TENSOR_SETUP_H
 
-#include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "framework/config_param.hpp"
-#include "framework/tensor_setup.hpp"
 
 namespace rpptest {
 
@@ -194,40 +191,6 @@ void for_each_voxel_roi_io(const RpptGenericDesc& desc, const RpptROI3D* roi, Ro
                            voxel_plane_index(desc, base, b.z0 + z, b.y0 + y, b.x0 + x),
                            voxel_plane_index(desc, base, z, y, x));
         });
-}
-
-// ---- comparison -------------------------------------------------------------
-
-// Compares the ROI box's output region only -- the destination-origin block the op fills. What
-// these ops leave outside it is not documented, so the suite does not assert it. The bound is
-// absTolerance + relTolerance * |reference|.
-template <typename T>
-::testing::AssertionResult compare_voxel_roi(const T* actual, const T* reference,
-                                             const RpptGenericDesc& desc, const RpptROI3D* roi,
-                                             Roi3D type, double absTolerance,
-                                             double relTolerance = 0.0) {
-    bool failed = false;
-    std::string coords;
-    double got = 0.0, want = 0.0, diff = 0.0, tolerance = 0.0;
-    for_each_voxel_roi_io(
-        desc, roi, type,
-        [&](Rpp32u n, Rpp32u c, Rpp32u z, Rpp32u y, Rpp32u x, std::size_t, std::size_t idx) {
-            if (failed) return;  // report the first mismatch only
-            const double a = to_double(actual[idx]);
-            const double r = to_double(reference[idx]);
-            const double delta = std::fabs(a - r);
-            const double bound = absTolerance + relTolerance * std::fabs(r);
-            if (delta <= bound) return;
-            failed = true;
-            got = a, want = r, diff = delta, tolerance = bound;
-            coords = std::to_string(n) + "," + std::to_string(c) + "," + std::to_string(z) + "," +
-                     std::to_string(y) + "," + std::to_string(x);
-        });
-    if (failed)
-        return ::testing::AssertionFailure()
-               << "mismatch at [n,c,z,y,x = " << coords << "]: actual=" << got
-               << " reference=" << want << " diff=" << diff << " tolerance=" << tolerance;
-    return ::testing::AssertionSuccess();
 }
 
 }  // namespace rpptest

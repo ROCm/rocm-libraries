@@ -29,6 +29,7 @@ SOFTWARE.
 #include <vector>
 
 #include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/generic_tensor_setup.hpp"
 #include "framework/skip_list.hpp"
@@ -46,9 +47,7 @@ struct SubtractScalarParams {
 
 // Subtraction is exact; the only per-element error is the golden accumulating in double and
 // storing float.
-double abs_tolerance(DType) { return 1e-5; }
-
-double rel_tolerance(DType) { return 1e-6; }
+Bound scalar_tolerance(DType) { return {1e-5, 1e-6}; }
 
 template <typename T>
 void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) {
@@ -94,8 +93,7 @@ void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) 
 
     // (3) Compare inside the ROI box.
     EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
-                                     cfg.roiType, abs_tolerance(cfg.dtype),
-                                     rel_tolerance(cfg.dtype)));
+                                     cfg.roiType, scalar_tolerance(cfg.dtype)));
 }
 
 }  // namespace
