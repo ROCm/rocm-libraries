@@ -32,6 +32,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_load.hpp>
@@ -107,7 +108,21 @@ using RocprimDevicePartitionTestsParams = ::testing::Types<
     DevicePartitionParams<int, int, unsigned int, rocprim::default_config, false, true>,
     DevicePartitionParams<common::custom_huge_type<1024, long long>>>;
 
-TYPED_TEST_SUITE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
+struct RocprimDevicePartitionTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::input_type>() + "_"
+                        + type_tag<typename Params::output_type>();
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDevicePartitionTests,
+                 RocprimDevicePartitionTestsParams,
+                 RocprimDevicePartitionTestsNameGenerator);
 
 TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 {
