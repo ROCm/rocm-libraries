@@ -28,6 +28,9 @@ def field(
     ignored=False,
     deprecated=False,
     optional=False,
+    uid=False,
+    uid_key=False,
+    uid_domain=False,
 ):
     entry = {
         "name": name,
@@ -39,6 +42,12 @@ def field(
         entry["type"]["element"] = element
     if ignored:
         entry["attributes"].append({"key": "cache_ignore"})
+    if uid:
+        entry["attributes"].append({"key": "cache_uid"})
+    if uid_key:
+        entry["attributes"].append({"key": "cache_uid_key"})
+    if uid_domain:
+        entry["attributes"].append({"key": "cache_uid_domain"})
     if deprecated:
         entry["deprecated"] = True
     if optional:
@@ -86,22 +95,162 @@ class TestFieldPolicy(unittest.TestCase):
             [f["name"] for f in emitter.fields_of(root)], ["alpha", "mike", "zulu"]
         )
 
+    def test_a_uid_key_field_is_dropped_from_the_fold(self):
+        # It is the identity ordinals resolve against, not content: folding it would
+        # only restate the position its element already occupies in the domain vector.
+        self.assertFalse(self.emitter.keep(field("uid", "Long", 0, uid_key=True)))
+
+    def test_a_uid_reference_still_participates(self):
+        # `cache_uid` changes how a field folds, never whether it folds. A reference
+        # that stopped participating would let two different wirings share a key.
+        self.assertTrue(self.emitter.keep(field("x_tensor_uid", "Long", 0, uid=True)))
+
+
+def uid_schema(operand_fields, *, domain_ignored=False):
+    """A root with a `Tensor` domain vector plus a node table holding @p operand_fields."""
+    tensor = table(
+        f"{NS}.Tensor",
+        [field("uid", "Long", 0, uid_key=True), field("dtype", "Int", 1)],
+    )
+    node = table(f"{NS}.Node", operand_fields)
+    root = table(
+        f"{NS}.Root",
+        [
+            field(
+                "tensors",
+                "Vector",
+                0,
+                index=0,
+                element="Obj",
+                uid_domain=not domain_ignored,
+            ),
+            field("nodes", "Vector", 1, index=1, element="Obj"),
+        ],
+    )
+    return schema([tensor, node, root])
+
+
+class TestUidCanonicalization(unittest.TestCase):
+    """`cache_uid`: a uid folds as its ordinal, never as the caller's label.
+
+    The relation this defends: two graphs whose tensors are numbered differently but
+    wired identically must key the same, while two graphs wired differently must not.
+    """
+
+    def emit(self, operand_fields, **kwargs):
+        return Emitter(uid_schema(operand_fields, **kwargs), f"{NS}.Root").emit()
+
+    def test_a_uid_reference_is_folded_through_the_canon(self):
+        bodies = function_bodies(
+            self.emit([field("x_tensor_uid", "Long", 0, uid=True)])
+        )
+        self.assertIn("canon(value->x_tensor_uid())", bodies[("hash", "Node")])
+        self.assertIn(
+            "aCanon(a->x_tensor_uid()) != bCanon(b->x_tensor_uid())",
+            bodies[("equal", "Node")],
+        )
+
+    def test_an_unannotated_scalar_is_folded_raw(self):
+        # The impostor case: `PointwiseAttributes.axis_tensor_uid` is an axis index, not
+        # a reference, so a name-driven sweep must not reach it.
+        bodies = function_bodies(self.emit([field("axis_tensor_uid", "Long", 0)]))
+        self.assertIn("hasher.raw(value->axis_tensor_uid())", bodies[("hash", "Node")])
+        self.assertNotIn("canon(", bodies[("hash", "Node")])
+
+    def test_an_optional_uid_keeps_its_presence_tag(self):
+        # Presence is content of its own -- a ragged tensor is not a dense one -- so
+        # canonicalizing the value must not collapse absent and present.
+        operand = field("ragged_uid", "Long", 0, uid=True, optional=True)
+        bodies = function_bodies(self.emit([operand]))
+        self.assertIn("hasher.tag(optional ? 1 : 0)", bodies[("hash", "Node")])
+        self.assertIn("canon(*optional)", bodies[("hash", "Node")])
+        self.assertIn("aUid.has_value() != bUid.has_value()", bodies[("equal", "Node")])
+
+    def test_a_uid_vector_is_folded_elementwise_through_the_canon(self):
+        operand = field("peer_uids", "Vector", 0, element="Long", uid=True)
+        bodies = function_bodies(self.emit([operand]))
+        self.assertIn("canon(items->Get(index))", bodies[("hash", "Node")])
+        self.assertIn(
+            "aCanon(aItems->Get(index)) != bCanon(bItems->Get(index))",
+            bodies[("equal", "Node")],
+        )
+
+    def test_the_root_entry_points_build_the_canon_from_the_domain(self):
+        # Callers pass a graph, never a canon, so it cannot be built against the wrong
+        # domain or omitted.
+        header = self.emit([field("x_tensor_uid", "Long", 0, uid=True)])
+        self.assertIn("UidCanon{value == nullptr ? nullptr : value->tensors()}", header)
+        self.assertIn("UidCanon{a == nullptr ? nullptr : a->tensors()}", header)
+
+    def test_a_uid_without_a_domain_is_rejected(self):
+        # Nothing to resolve against: every reference would fold to the same sentinel and
+        # graphs that differ would match.
+        with self.assertRaises(SystemExit):
+            self.emit([field("x_tensor_uid", "Long", 0, uid=True)], domain_ignored=True)
+
+    def test_a_domain_without_exactly_one_key_is_rejected(self):
+        broken = uid_schema([field("x_tensor_uid", "Long", 0, uid=True)])
+        broken["objects"][0]["fields"].append(
+            field("other_uid", "Long", 2, uid_key=True)
+        )
+        with self.assertRaises(SystemExit):
+            Emitter(broken, f"{NS}.Root")
+
+    def test_more_than_one_domain_is_rejected(self):
+        # Ordinals are positions in one vector; two candidates have no defined answer.
+        broken = uid_schema([field("x_tensor_uid", "Long", 0, uid=True)])
+        broken["objects"][2]["fields"].append(
+            field("more_tensors", "Vector", 2, index=0, element="Obj", uid_domain=True)
+        )
+        with self.assertRaises(SystemExit):
+            Emitter(broken, f"{NS}.Root")
+
+    def test_a_uid_on_a_non_integer_field_is_rejected(self):
+        # `UidCanon` compares against an integer key, so a string or table reference
+        # cannot resolve.
+        with self.assertRaises(SystemExit):
+            self.emit([field("x_tensor_uid", "String", 0, uid=True)])
+
+    def test_a_uid_on_an_enum_scalar_is_rejected(self):
+        # An enum is an index into the enum table, not a uid.
+        with self.assertRaises(SystemExit):
+            self.emit([field("x_tensor_uid", "Byte", 0, index=0, uid=True)])
+
+    def test_a_uid_on_a_vector_of_tables_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            self.emit(
+                [field("peer_uids", "Vector", 0, index=0, element="Obj", uid=True)]
+            )
+
+    def test_a_uid_key_on_a_non_integer_field_is_rejected(self):
+        broken = uid_schema([field("x_tensor_uid", "Long", 0, uid=True)])
+        broken["objects"][0]["fields"][0] = field("uid", "String", 0, uid_key=True)
+        with self.assertRaises(SystemExit):
+            Emitter(broken, f"{NS}.Root")
+
 
 def function_bodies(text):
     """Map each emitted definition to its body text.
 
     The header interleaves a `hashAppend`/`logicallyEqual` pair per type, so the two
     cannot be separated by splitting the file once. Keys are `("hash"|"equal", type)`;
-    forward declarations (which end in `;`) are skipped.
+    forward declarations (which end in `;`) are skipped, as are the root's two
+    convenience overloads, which take no `UidCanon` and only delegate to the real walk.
     """
     bodies, current, depth = {}, None, 0
     for line in text.splitlines():
         if current is None:
             if not line.startswith("inline ") or line.rstrip().endswith(";"):
                 continue
+            if "UidCanon&" not in line:
+                continue
             kind = "hash" if "hashAppend" in line else "equal"
             inside = line[line.index("(") + 1 : line.rindex(")")]
-            names = [w.strip("*&,") for w in inside.split() if w[:1].isupper()]
+            names = [
+                w.strip("*&,")
+                for w in inside.split()
+                if w[:1].isupper() and "UidCanon" not in w
+            ]
             current, bodies[(kind, names[-1])] = (kind, names[-1]), []
             continue
         bodies[current].append(line)

@@ -25,10 +25,9 @@
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
-/// A graph fake that actually carries content, for tests proving `GraphContentKey`
-/// discriminates on it. `TestGraph` is content-empty by construction (D12) and cannot
-/// serve here. Every field the key compares is independently settable through `Spec`,
-/// so a test can vary exactly one field and hold the rest fixed.
+/// A graph fake carrying real content, for tests proving `GraphContentKey` discriminates
+/// on it; `TestGraph` is content-empty by construction (D12). Every field the key
+/// compares is independently settable through `Spec`.
 class ContentCarryingTestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
@@ -39,22 +38,25 @@ public:
             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         std::vector<int64_t> dims{4, 8};
         std::vector<int64_t> strides{8, 1};
+        /// A nullable tensor reference.
+        std::optional<int64_t> raggedOffsetTensorUid = std::nullopt;
     };
     struct NodeSpec
     {
         std::string name = "pointwise";
         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
-        /// Two independently variable attribute fields, so a test can prove the key
-        /// discriminates inside the union payload and not merely on its discriminant.
+        /// Two independently variable attribute fields, so a test can discriminate
+        /// inside the union payload rather than only on its discriminant.
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation
             = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD;
         int64_t in0TensorUid = 1;
         int64_t out0TensorUid = 2;
+        /// Optional second operand, for moving one tensor between operand slots.
+        std::optional<int64_t> in1TensorUid = std::nullopt;
     };
 
-    /// Defaults describe one valid two-tensor, one-node graph. A test names only the
-    /// field it is varying.
+    /// Defaults describe one valid two-tensor, one-node graph.
     struct Spec
     {
         std::optional<GraphId> graphId;
@@ -75,8 +77,8 @@ public:
         std::vector<NodeSpec> nodes{NodeSpec{}};
     };
 
-    /// Two constructors, not a `Spec{}` default argument: a default argument is not a
-    /// complete-class context, so it cannot see `Spec`'s default member initializers.
+    /// Two constructors rather than a `Spec{}` default argument: a default argument is
+    /// not a complete-class context and cannot see `Spec`'s member initializers.
     ContentCarryingTestGraph()
         : ContentCarryingTestGraph(Spec{})
     {
@@ -160,6 +162,10 @@ private:
             tensorBuilder.add_data_type(tensor.dataType);
             tensorBuilder.add_dims(dims);
             tensorBuilder.add_strides(strides);
+            if(tensor.raggedOffsetTensorUid.has_value())
+            {
+                tensorBuilder.add_ragged_offset_tensor_uid(*tensor.raggedOffsetTensorUid);
+            }
             tensorOffsets.push_back(tensorBuilder.Finish());
         }
 
@@ -171,6 +177,10 @@ private:
             attributesBuilder.add_operation(node.operation);
             attributesBuilder.add_in_0_tensor_uid(node.in0TensorUid);
             attributesBuilder.add_out_0_tensor_uid(node.out0TensorUid);
+            if(node.in1TensorUid.has_value())
+            {
+                attributesBuilder.add_in_1_tensor_uid(*node.in1TensorUid);
+            }
             const auto attributes = attributesBuilder.Finish();
 
             auto nodeName = _builder.CreateString(node.name);

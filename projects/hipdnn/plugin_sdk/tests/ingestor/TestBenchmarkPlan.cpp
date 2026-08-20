@@ -530,34 +530,48 @@ TEST(TestIngestorBenchmarkPlan, BuffersAndWorkspaceArriveAtTheChosenSubPlanUnmod
 // Ranked capture and write-back (D6, D11)
 // ---------------------------------------------------------------------------
 
-/// Supplies deterministic times through the protected seam so ordering, omission and the
+/// Supplies deterministic times through the Timer seam so ordering, omission and the
 /// all-unusable case are decided by the code under test, not by GPU availability. The
 /// real hipEvent path is proven separately on gfx942.
-class DeterministicBenchmarkPlan : public TestBenchmarkPlan
+///
+/// Times are keyed by candidate identity, since the timer sees the plan rather than its
+/// index.
+inline TestBenchmarkPlan::Timer
+    makeDeterministicTimer(const std::vector<TestBenchmarkPlan::Candidate>& candidates,
+                           std::vector<std::optional<double>> times)
 {
-public:
-    DeterministicBenchmarkPlan(std::vector<Candidate> candidates,
-                               const BenchmarkTestHandle& handle,
-                               std::vector<std::optional<double>> times,
-                               RecordRankingFn recordRanking = {})
-        : TestBenchmarkPlan(std::move(candidates), handle, std::move(recordRanking))
-        , _times(std::move(times))
+    std::vector<const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>*> order;
+    order.reserve(candidates.size());
+    for(const auto& candidate : candidates)
     {
+        order.push_back(candidate.plan.get());
     }
+    return [order = std::move(order),
+            times = std::move(times)](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+                                      const BenchmarkTestHandle&,
+                                      const hipdnnPluginDeviceBuffer_t*,
+                                      uint32_t,
+                                      void*) -> std::optional<double> {
+        const auto found = std::find(order.begin(), order.end(), &plan);
+        if(found == order.end())
+        {
+            return std::nullopt;
+        }
+        const auto index = static_cast<size_t>(std::distance(order.begin(), found));
+        return index < times.size() ? times[index] : std::nullopt;
+    };
+}
 
-protected:
-    std::optional<double> sampleCandidate(size_t index,
-                                          const BenchmarkTestHandle& /*handle*/,
-                                          const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
-                                          uint32_t /*numDeviceBuffers*/,
-                                          void* /*workspace*/) const override
-    {
-        return index < _times.size() ? _times[index] : std::nullopt;
-    }
-
-private:
-    std::vector<std::optional<double>> _times;
-};
+/// Builds a plan whose sampling is driven by @p times, indexed by candidate order.
+inline TestBenchmarkPlan makeDeterministicPlan(std::vector<TestBenchmarkPlan::Candidate> candidates,
+                                               const BenchmarkTestHandle& handle,
+                                               std::vector<std::optional<double>> times,
+                                               TestBenchmarkPlan::RecordRankingFn recordRanking
+                                               = {})
+{
+    auto timer = makeDeterministicTimer(candidates, std::move(times));
+    return {std::move(candidates), handle, std::move(timer), std::move(recordRanking)};
+}
 
 std::vector<TestBenchmarkPlan::Candidate> threeCandidates()
 {
@@ -575,7 +589,7 @@ TEST(TestIngestorBenchmarkPlan, SamplingRecordsEveryUsableCandidateInMeasuredOrd
 {
     std::vector<RankedEntry> recorded;
     const BenchmarkTestHandle handle;
-    const DeterministicBenchmarkPlan plan(
+    const auto plan = makeDeterministicPlan(
         threeCandidates(), handle, {5.0, 1.0, 3.0}, [&recorded](std::vector<RankedEntry> ranking) {
             recorded = std::move(ranking);
         });
@@ -595,7 +609,7 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedSamplingNeverAppearsInTheRan
     std::vector<RankedEntry> recorded;
     const BenchmarkTestHandle handle;
     // Candidate 1 failed to time; it must be omitted, not ranked last.
-    const DeterministicBenchmarkPlan plan(
+    const auto plan = makeDeterministicPlan(
         threeCandidates(),
         handle,
         {5.0, std::nullopt, 3.0},
@@ -616,11 +630,11 @@ TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
 {
     bool invoked = false;
     const BenchmarkTestHandle handle;
-    const DeterministicBenchmarkPlan plan(
-        threeCandidates(),
-        handle,
-        {std::nullopt, std::nullopt, std::nullopt},
-        [&invoked](const std::vector<RankedEntry>&) { invoked = true; });
+    const auto plan
+        = makeDeterministicPlan(threeCandidates(),
+                                handle,
+                                {std::nullopt, std::nullopt, std::nullopt},
+                                [&invoked](const std::vector<RankedEntry>&) { invoked = true; });
 
     plan.execute(handle, nullptr, 0U, nullptr);
 
@@ -636,7 +650,7 @@ TEST(TestIngestorBenchmarkPlan, AnAbsentCallbackLeavesSelectionUnchanged)
     auto* const expectedWinner = static_cast<FakePlan*>(candidates[1].plan.get());
 
     const BenchmarkTestHandle handle;
-    const DeterministicBenchmarkPlan plan(std::move(candidates), handle, {5.0, 1.0, 3.0});
+    const auto plan = makeDeterministicPlan(std::move(candidates), handle, {5.0, 1.0, 3.0});
 
     plan.execute(handle, nullptr, 0U, nullptr);
     const int afterFirst = expectedWinner->launchCount();
@@ -654,7 +668,7 @@ TEST(TestIngestorBenchmarkPlan, EqualTimesKeepTheLowestCandidateIndexFirst)
 {
     std::vector<RankedEntry> recorded;
     const BenchmarkTestHandle handle;
-    const DeterministicBenchmarkPlan plan(
+    const auto plan = makeDeterministicPlan(
         threeCandidates(), handle, {2.0, 2.0, 2.0}, [&recorded](std::vector<RankedEntry> ranking) {
             recorded = std::move(ranking);
         });

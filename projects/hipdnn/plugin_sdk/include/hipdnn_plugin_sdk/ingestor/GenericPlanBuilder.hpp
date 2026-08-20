@@ -291,7 +291,6 @@ public:
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
-            typename BenchmarkPlan<THandle>::Timer{},
             [&stateManager = _stateManager, winnerKey](std::vector<RankedEntry> ranking) {
                 stateManager.recordWinner(winnerKey, std::move(ranking));
             }));
@@ -300,14 +299,16 @@ public:
 protected:
     /// Virtual purely as a **test seam**: a device-less runner scores every real
     /// candidate unusable, so the write-back path never fires and its assertions would
-    /// be green while proving nothing.
+    /// be green while proving nothing. An override injects a deterministic Timer.
     virtual std::unique_ptr<IPlan<THandle>>
         makeBenchmarkPlan(std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates,
                           const THandle& handle,
                           typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking) const
     {
-        return std::make_unique<BenchmarkPlan<THandle>>(
-            std::move(candidates), handle, std::move(recordRanking));
+        return std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates),
+                                                        handle,
+                                                        typename BenchmarkPlan<THandle>::Timer{},
+                                                        std::move(recordRanking));
     }
 
 public:
