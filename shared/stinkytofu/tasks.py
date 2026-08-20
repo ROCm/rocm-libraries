@@ -269,7 +269,8 @@ def build(
     if not no_python:
         cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
 
-    # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
+    # Locate ROCmCMakeBuildTools (version TWEAK git hash) and the SDK cmake prefix
+    # so find_package(amd_comgr CONFIG) can locate the devel package's config.
     _rocm_sdk = shutil.which("rocm-sdk")
     if _rocm_sdk:
         try:
@@ -286,6 +287,33 @@ def build(
                     cmake_opts.append(
                         f"-DROCmCMakeBuildTools_DIR={_rocm_cmake_dir.as_posix()}"
                     )
+        except subprocess.CalledProcessError:
+            pass
+        try:
+            _sdk_cmake = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake}")
+        except subprocess.CalledProcessError:
+            pass
+
+        # Point CMake's find_package(amd_comgr CONFIG) at the SDK's cmake configs
+        # (rocm-sdk pip installs don't populate ROCM_PATH/CMAKE_PREFIX_PATH themselves).
+        try:
+            _sdk_cmake_prefix = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake_prefix:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake_prefix}")
         except subprocess.CalledProcessError:
             pass
 

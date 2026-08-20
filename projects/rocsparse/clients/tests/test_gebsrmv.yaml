@@ -524,3 +524,91 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+
+#
+# Code coverage: exercise the per-col_block_dim WFSIZE=8 (blocks_per_row in [8,16))
+# and WFSIZE=16 (blocks_per_row in [16,32)) dispatch branches in
+# rocsparse_gebsrmv_template_row_block_dim_{1,2,3,4}.cpp. With tunedavg the block
+# density equals min(64, Nb) where Nb = ceil(N/col_block_dim), so varying N across
+# the col_block_dim list lands blocks_per_row in the [8,16) and [16,32) ranges.
+# col_block_dim 17/32 additionally exercise the general-kernel fall-through path.
+#
+# row_block_dim 1/2 stay in quick; row_block_dim 3/4 are labelled pre_checkin so
+# quick/gebsrmv stays within the ~5s per-routine quick budget. Each block still
+# independently sweeps the WFSIZE=8/16 dispatch via the N x col_block_dim grid.
+#
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_precision
+  M: [64]
+  N: [8, 10, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72, 120, 240, 400]
+  row_block_dimA: [1]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_precision
+  M: [128]
+  N: [8, 10, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72, 120, 240, 400]
+  row_block_dimA: [2]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_precision
+  M: [192]
+  N: [8, 10, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72, 120, 240, 400]
+  row_block_dimA: [3]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_precision
+  M: [256]
+  N: [8, 10, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72, 120, 240, 400]
+  row_block_dimA: [4]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+# Sparse (default init, large N) to exercise the low-density WFSIZE=4
+# (blocks_per_row < 8) dispatch branch for each col_block_dim.
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_precision
+  M: [128]
+  N: [4000]
+  row_block_dimA: [1, 2, 3, 4]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]

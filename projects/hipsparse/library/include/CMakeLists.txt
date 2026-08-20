@@ -7,6 +7,7 @@ include(GenerateExportHeader)
 # (build-time feature flags). Variables consumed by #cmakedefine in the .h.in
 # templates must be set (or unset) prior to the configure_file() calls.
 set(HIPSPARSE_WITH_SPMV_BSR ${HIPSPARSE_ENABLE_SPMV_BSR})
+set(HIPSPARSE_WITH_SPGEAM ${HIPSPARSE_ENABLE_SPGEAM})
 set(HIPSPARSE_WITH_CSC_TRSV ${BUILD_WITH_CSC_TRSV})
 set(HIPSPARSE_WITH_CSC_TRSM ${BUILD_WITH_CSC_TRSM})
 
@@ -112,6 +113,7 @@ set(HEADER_FILES
     internal/generic/hipsparse_scatter.h
     internal/generic/hipsparse_sddmm.h
     internal/generic/hipsparse_sparse2dense.h
+    internal/generic/hipsparse_spgeam.h
     internal/generic/hipsparse_spgemm_reuse.h
     internal/generic/hipsparse_spgemm.h
     internal/generic/hipsparse_spmm.h
