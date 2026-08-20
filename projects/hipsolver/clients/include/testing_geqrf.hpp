@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -302,7 +302,14 @@ void geqrf_getError(const hipsolverHandle_t   handle,
                     INTh&                     hInfoRes,
                     double*                   max_err)
 {
-    std::vector<T> hW(n);
+    using S = decltype(std::real(T{}));
+
+    const I min_mn = std::min(m, n);
+
+    // todo: query unmqr for workspace size; currently assume nb=64 is good enough.
+    const I        nb = 64;
+    std::vector<T> hW(n * nb);
+    std::vector<S> hrwork(m);
 
     // input data initialization
     geqrf_initData<true, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
@@ -326,33 +333,52 @@ void geqrf_getError(const hipsolverHandle_t   handle,
                                         dInfo.data(),
                                         bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
+    CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
-    // CPU lapack
-    for(int b = 0; b < bc; ++b)
-        cpu_geqrf(m, n, hA[b], lda, hIpiv[b], hW.data(), n, hInfo[b]);
-
-    // error is ||hA - hARes|| / ||hA|| (ideally ||QR - Qres Rres|| / ||QR||)
-    // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
-    // IT MIGHT BE REVISITED IN THE FUTURE)
-    // using frobenius norm
-    double err;
     *max_err = 0;
     for(int b = 0; b < bc; ++b)
     {
-        err      = norm_error('F', m, n, lda, hA[b], hARes[b]);
-        *max_err = err > *max_err ? err : *max_err;
-    }
+        // Copy R: upper trapezoid of A, zero elsewhere.
+        std::vector<T> hC(lda * n, T(0));
+        cpu_lacpy(HIPSOLVER_FILL_MODE_UPPER, min_mn, n, hARes[b], lda, hC.data(), lda);
 
-    // check info
-    err = 0;
-    for(int b = 0; b < bc; ++b)
-    {
-        EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
-        if(hInfo[b][0] != hInfoRes[b][0])
-            err++;
+        // Compute Q*R using unmqr.
+        int info = 0;
+        cpu_ormqr_unmqr(HIPSOLVER_SIDE_LEFT,
+                        HIPSOLVER_OP_N,
+                        m,
+                        n,
+                        min_mn,
+                        hARes[b],
+                        lda,
+                        hIpiv[b],
+                        hC.data(),
+                        lda,
+                        hW.data(),
+                        hW.size(),
+                        &info);
+        if(info != 0)
+        {
+            max_err[0] += 1;
+        }
+
+        // Compute Q*R - A.
+        for(I j = 0; j < n; ++j)
+            for(I i = 0; i < m; ++i)
+                hC[i + j * lda] -= hA[b][i + j * lda];
+
+        // Compute error = norm( Q*R - A ) / (m * norm( A ))
+        int    m_     = int(m);
+        int    n_     = int(n);
+        int    lda_   = int(lda);
+        double A_norm = xlange("1", &m_, &n_, hA[b], &lda_, hrwork.data());
+        double err    = xlange("1", &m_, &n_, hC.data(), &lda_, hrwork.data());
+        err /= m;
+        if(A_norm != 0)
+            err /= A_norm;
+        max_err[0] = hipsolver_max_nan(err, max_err[0]);
     }
-    *max_err += err;
 }
 
 template <testAPI_t API,
@@ -689,10 +715,10 @@ void testing_geqrf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using m * machine_precision as tolerance
-    // (for possibly singular of ill-conditioned matrices we could use m*min(m,n))
+    // using 15*machine_precision as tolerance (LAPACK uses 30 ulp/2).
+    // max_error is already normalized, e.g., by m.
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, m);
+        ROCSOLVER_TEST_CHECK(T, max_error, 15);
 
     // output results for rocsolver-bench
     if(argus.timing)

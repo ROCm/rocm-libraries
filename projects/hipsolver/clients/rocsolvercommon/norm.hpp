@@ -34,10 +34,30 @@ using rocblas_double_complex = hipsolverDoubleComplex;
 /* LAPACK fortran library functionality */
 
 extern "C" {
-float  slange_(char* norm_type, int* m, int* n, float* A, int* lda, float* work);
-double dlange_(char* norm_type, int* m, int* n, double* A, int* lda, double* work);
-float  clange_(char* norm_type, int* m, int* n, rocblas_float_complex* A, int* lda, float* work);
-double zlange_(char* norm_type, int* m, int* n, rocblas_double_complex* A, int* lda, double* work);
+float  slange_(const char*  norm_type,
+               const int*   m,
+               const int*   n,
+               const float* A,
+               const int*   lda,
+               float*       rwork);
+double dlange_(const char*   norm_type,
+               const int*    m,
+               const int*    n,
+               const double* A,
+               const int*    lda,
+               double*       rwork);
+float  clange_(const char*                  norm_type,
+               const int*                   m,
+               const int*                   n,
+               const rocblas_float_complex* A,
+               const int*                   lda,
+               float*                       rwork);
+double zlange_(const char*                   norm_type,
+               const int*                    m,
+               const int*                    n,
+               const rocblas_double_complex* A,
+               const int*                    lda,
+               double*                       rwork);
 
 void daxpy_(int* n, double* alpha, double* x, int* incx, double* y, int* incy);
 void zaxpy_(int*                    n,
@@ -48,26 +68,40 @@ void zaxpy_(int*                    n,
             int*                    incy);
 }
 
-inline float xlange(char* norm_type, int* m, int* n, float* A, int* lda, float* work)
+inline float xlange(
+    const char* norm_type, const int* m, const int* n, const float* A, const int* lda, float* rwork)
 {
-    return slange_(norm_type, m, n, A, lda, work);
+    return slange_(norm_type, m, n, A, lda, rwork);
 }
 
-inline double xlange(char* norm_type, int* m, int* n, double* A, int* lda, double* work)
+inline double xlange(const char*   norm_type,
+                     const int*    m,
+                     const int*    n,
+                     const double* A,
+                     const int*    lda,
+                     double*       rwork)
 {
-    return dlange_(norm_type, m, n, A, lda, work);
+    return dlange_(norm_type, m, n, A, lda, rwork);
 }
 
-inline float
-    xlange(char* norm_type, int* m, int* n, rocblas_float_complex* A, int* lda, float* work)
+inline float xlange(const char*                  norm_type,
+                    const int*                   m,
+                    const int*                   n,
+                    const rocblas_float_complex* A,
+                    const int*                   lda,
+                    float*                       rwork)
 {
-    return clange_(norm_type, m, n, A, lda, work);
+    return clange_(norm_type, m, n, A, lda, rwork);
 }
 
-inline double
-    xlange(char* norm_type, int* m, int* n, rocblas_double_complex* A, int* lda, double* work)
+inline double xlange(const char*                   norm_type,
+                     const int*                    m,
+                     const int*                    n,
+                     const rocblas_double_complex* A,
+                     const int*                    lda,
+                     double*                       rwork)
 {
-    return zlange_(norm_type, m, n, A, lda, work);
+    return zlange_(norm_type, m, n, A, lda, rwork);
 }
 
 inline void xaxpy(int* n, double* alpha, double* x, int* incx, double* y, int* incy)

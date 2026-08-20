@@ -132,6 +132,11 @@ try
             "                           Only applicable to functions with hybrid support.\n"
             "                           ")
 
+        ("matrix",
+         value<std::string>(&argus.matrix)->default_value("randint"),
+            "Test matrix to generate. Options depend on function; common options are randint (default), identity.\n"
+            "                           ")
+
         ("mem_query",
          value<rocblas_int>(&argus.mem_query)->default_value(0),
             "Calculate the required amount of device workspace memory? 0 = No, 1 = Yes.\n"
@@ -168,6 +173,11 @@ try
          value<rocblas_int>(&argus.singular)->default_value(0),
             "Test with degenerate matrices? 0 = No, 1 = Yes\n"
             "                           This will produce matrices that are singular, non positive-definite, etc.\n"
+            "                           ")
+
+        ("verbose",
+         value<rocblas_int>(&argus.verbose)->default_value(0),
+            "Verbosity level. 0 (default) is minimal output, 1 = matrix dimensions, 2 = matrix values.\n"
             "                           ")
 
         ("verify,v",

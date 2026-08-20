@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,38 +48,6 @@ inline __host__ rocblas_bfloat16 float_to_bfloat16_truncate(float val)
     if((u.int32 & 0x7fff0000) == 0x7f800000 && u.int32 & 0xffff)
         ret.data |= 1; // Preserve signaling NaN
     return ret;
-}
-
-/* ============================================================================================
- */
-/*! \brief  returns true if value is NaN */
-
-template <typename T, std::enable_if_t<std::is_integral<T>{}, int> = 0>
-inline bool rocblas_isnan(T)
-{
-    return false;
-}
-
-template <typename T, std::enable_if_t<!std::is_integral<T>{} && !rocblas_is_complex<T>, int> = 0>
-inline bool rocblas_isnan(T arg)
-{
-    return std::isnan(arg);
-}
-
-template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-inline bool rocblas_isnan(const T& arg)
-{
-    return rocblas_isnan(std::real(arg)) || rocblas_isnan(std::imag(arg));
-}
-
-inline bool rocblas_isnan(rocblas_half arg)
-{
-    union
-    {
-        rocblas_half fp;
-        uint16_t data;
-    } x = {arg};
-    return (~x.data & 0x7c00) == 0 && (x.data & 0x3ff) != 0;
 }
 
 /* ============================================================================================

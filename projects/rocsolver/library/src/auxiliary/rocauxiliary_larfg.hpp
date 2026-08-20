@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     November 2017
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,34 +38,71 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+// Used in larfg to set tau and beta to generate a Householder reflector.
+//
+// On entry:
+//      alpha is x[0]
+//      norms is norm( x[1:n-1] )^2
+// On exit:
+//      tau   is Householder scalar, tau = (beta - x[0]) / beta = 2 / v^H v.
+//      norms is scaling factor, 1 / (alpha - norm( x )), to normalize v[0] = 1.
+//      if beta is null:
+//          Like LAPACK, store beta in place over alpha.
+//          alpha is [+-] norm( x ), sign chosen to avoid cancellation.
+//      else:
+//          Store explicit 1 in alpha (which is x[0]), and store beta separately.
+//          alpha is 1.
+//          beta  is [+-] norm( x ).
+//
+// If norms == 0 and imag(alpha) == 0 on input, LAPACK sets tau = 0, so
+// Householder reflector H = I and triangular factor T is singular,
+// which causes issues in larft_inverse. Instead, we set tau = 2,
+// so H = -I and T is non-singular.
+//
 template <typename T, typename S, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 {
     const auto ignore_beta = (beta == nullptr);
     if(norms[0] > 0)
     {
-        T n = sqrt(norms[0] + alpha[0] * alpha[0]);
-        n = alpha[0] >= 0 ? -n : n;
+        T norm = sqrt(norms[0] + alpha[0] * alpha[0]);
+        norm = alpha[0] >= 0 ? -norm : norm;
 
         // scaling factor:
-        norms[0] = 1.0 / (alpha[0] - n);
+        norms[0] = 1.0 / (alpha[0] - norm);
 
         // tau:
-        tau[0] = (n - alpha[0]) / n;
+        tau[0] = (norm - alpha[0]) / norm;
 
         // beta:
         if(ignore_beta)
         {
-            alpha[0] = n;
+            alpha[0] = norm;
         }
         else
         {
-            beta[0] = n;
+            beta[0] = norm;
             alpha[0] = 1;
         }
     }
     else
     {
+#ifdef ROCSOLVER_ENABLE_LARFG_TAU2
+        // Let H = -I, tau = 2. Differs from LAPACK, which has H = I, tau = 0.
+        norms[0] = 1;
+        tau[0] = 2;
+
+        // beta:
+        if(ignore_beta)
+        {
+            alpha[0] = -alpha[0];
+        }
+        else
+        {
+            beta[0] = -alpha[0];
+            alpha[0] = 1;
+        }
+#else
         norms[0] = 1;
         tau[0] = 0;
 
@@ -75,6 +112,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
             beta[0] = alpha[0];
             alpha[0] = 1;
         }
+#endif
     }
 }
 
@@ -85,41 +123,55 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 
     ar = alpha[0].real();
     ai = alpha[0].imag();
-    S m = ai * ai;
 
     const auto ignore_beta = (beta == nullptr);
-    if(norms[0].real() > 0 || m > 0)
+    if(norms[0].real() > 0 || ai != 0)
     {
-        m += ar * ar;
-        S n = sqrt(norms[0].real() + m);
-        n = ar >= 0 ? -n : n;
+        S norm = sqrt(norms[0].real() + ai * ai + ar * ar);
+        norm = ar >= 0 ? -norm : norm;
 
         // scaling factor:
-        //    norms[0] = 1.0 / (alpha[0] - n);
-        r = (ar - n) * (ar - n) + ai * ai;
-        rr = (ar - n) / r;
+        //    norms[0] = 1.0 / (alpha[0] - norm);
+        r = (ar - norm) * (ar - norm) + ai * ai;
+        rr = (ar - norm) / r;
         ri = -ai / r;
         norms[0] = rocblas_complex_num<S>(rr, ri);
 
         // tau:
-        //    tau[0] = (n - alpha[0]) / n;
-        rr = (n - ar) / n;
-        ri = -ai / n;
+        //    tau[0] = (norm - alpha[0]) / norm;
+        rr = (norm - ar) / norm;
+        ri = -ai / norm;
         tau[0] = rocblas_complex_num<S>(rr, ri);
 
         // beta:
         if(ignore_beta)
         {
-            alpha[0] = n;
+            alpha[0] = norm;
         }
         else
         {
-            beta[0] = n;
+            beta[0] = norm;
             alpha[0] = 1;
         }
     }
     else
     {
+#ifdef ROCSOLVER_ENABLE_LARFG_TAU2
+        // Let H = -I, tau = 2. Differs from LAPACK, which has H = I, tau = 0.
+        norms[0] = 1;
+        tau[0] = 2;
+
+        // beta:
+        if(ignore_beta)
+        {
+            alpha[0] = -alpha[0];
+        }
+        else
+        {
+            beta[0] = -alpha[0].real();
+            alpha[0] = 1;
+        }
+#else
         norms[0] = 1;
         tau[0] = 0;
 
@@ -129,6 +181,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
             beta[0] = alpha[0].real();
             alpha[0] = 1;
         }
+#endif
     }
 }
 
@@ -282,7 +335,7 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     rocblasCall_dot<COMPLEX, T>(handle, n - 1, x, shiftx, incx, stridex, x, shiftx, incx, stridex,
                                 batch_count, norms, work);
 
-    // set value of tau and beta and scalling factor for vector x
+    // set value of tau and beta and scaling factor for vector x
     // alpha <- beta, norms <- scaling
     ROCSOLVER_LAUNCH_KERNEL((set_taubeta<T, I>), dim3(batch_count), dim3(1), 0, stream, tau,
                             strideP, norms, alpha, shifta, stridex, beta, shiftb, strideb);

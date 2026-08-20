@@ -482,6 +482,16 @@ void cpu_orgql_ungql(rocblas_int m,
                      rocblas_int sizeW);
 
 template <typename T>
+void cpu_orgrq_ungrq(rocblas_int m,
+                     rocblas_int n,
+                     rocblas_int k,
+                     T* A,
+                     rocblas_int lda,
+                     T* tau,
+                     T* work,
+                     rocblas_int sizeW);
+
+template <typename T>
 void cpu_orgbr_ungbr(rocblas_storev storev,
                      rocblas_int m,
                      rocblas_int n,
@@ -580,6 +590,20 @@ void cpu_ormql_unmql(rocblas_side side,
                      T* A,
                      rocblas_int lda,
                      T* Ipiv,
+                     T* C,
+                     rocblas_int ldc,
+                     T* work,
+                     rocblas_int sizeW);
+
+template <typename T>
+void cpu_ormrq_unmrq(rocblas_side side,
+                     rocblas_operation trans,
+                     rocblas_int m,
+                     rocblas_int n,
+                     rocblas_int k,
+                     T* A,
+                     rocblas_int lda,
+                     T* tau,
                      T* C,
                      rocblas_int ldc,
                      T* work,

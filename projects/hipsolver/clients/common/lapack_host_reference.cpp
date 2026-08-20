@@ -273,6 +273,35 @@ void ztrsm_(char*                   side,
 void clacgv_(int* n, hipsolverComplex* x, int* incx);
 void zlacgv_(int* n, hipsolverDoubleComplex* x, int* incx);
 
+void slacpy_(const char*  uplo,
+             const int*   m,
+             const int*   n,
+             const float* A,
+             const int*   lda,
+             float*       B,
+             const int*   ldb);
+void dlacpy_(const char*   uplo,
+             const int*    m,
+             const int*    n,
+             const double* A,
+             const int*    lda,
+             double*       B,
+             const int*    ldb);
+void clacpy_(const char*             uplo,
+             const int*              m,
+             const int*              n,
+             const hipsolverComplex* A,
+             const int*              lda,
+             hipsolverComplex*       B,
+             const int*              ldb);
+void zlacpy_(const char*                   uplo,
+             const int*                    m,
+             const int*                    n,
+             const hipsolverDoubleComplex* A,
+             const int*                    lda,
+             hipsolverDoubleComplex*       B,
+             const int*                    ldb);
+
 void slarf_(
     char* side, int* m, int* n, float* x, int* incx, float* alpha, float* A, int* lda, float* work);
 void dlarf_(char*   side,
@@ -1636,6 +1665,49 @@ template <>
 void cpu_lacgv<hipsolverDoubleComplex>(int n, hipsolverDoubleComplex* x, int incx)
 {
     zlacgv_(&n, x, &incx);
+}
+
+// lacpy
+template <>
+void cpu_lacpy<float>(
+    hipsolverFillMode_t uplo, int m, int n, const float* A, int lda, float* B, int ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    slacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<double>(
+    hipsolverFillMode_t uplo, int m, int n, const double* A, int lda, double* B, int ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    dlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<hipsolverComplex>(hipsolverFillMode_t     uplo,
+                                 int                     m,
+                                 int                     n,
+                                 const hipsolverComplex* A,
+                                 int                     lda,
+                                 hipsolverComplex*       B,
+                                 int                     ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    clacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<hipsolverDoubleComplex>(hipsolverFillMode_t           uplo,
+                                       int                           m,
+                                       int                           n,
+                                       const hipsolverDoubleComplex* A,
+                                       int                           lda,
+                                       hipsolverDoubleComplex*       B,
+                                       int                           ldb)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    zlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
 }
 
 // larf
