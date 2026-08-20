@@ -10980,18 +10980,24 @@ class KernelWriterAssembly(KernelWriter):
                     instOffsetInc += ldsInc
 
                 else: # Not buffer load, ie 'global' load
-                  # mask if current address if in bounds
-                  module.add(VCmpXLtU64(dst=VCC(), \
-                      src0=vgpr("GlobalReadAddr%s+%u"%(tP["tensorChar"], graIdx),2), \
-                      src1=vgpr(maxAddrVgpr,2), \
-                      comment="addr < maxAddr"))
                   if kernel["ProblemType"]["DataType%s"%tcDataType].isHalf() or kernel["ProblemType"]["DataType%s"%tcDataType].isBFloat16():
                     hi16 = loopCnt%2 if tP["glvw"]==1 else r%2
                   else:
                     hi16 = 0
                   destVgpr="G2L%s+%u+%u"%(tc, g2lIdx, regIdx)
+                  loadVgprDest = destVgprHi if (hi16 and destVgprHi != None) else destVgpr
+
+                  # Zero the destination register BEFORE masking exec to avoid garbage data in masked-out threads
+                  module.add(VMovB32(dst=vgpr(loadVgprDest), src=0, comment="init to zero for out-of-bounds threads"))
+
+                  # mask if current address if in bounds
+                  module.add(VCmpXLtU64(dst=VCC(), \
+                      src0=vgpr("GlobalReadAddr%s+%u"%(tP["tensorChar"], graIdx),2), \
+                      src1=vgpr(maxAddrVgpr,2), \
+                      comment="addr < maxAddr"))
+
                   module.add(self.chooseGlobalRead(False, \
-                            bpl, destVgpr=destVgprHi if (hi16 and destVgprHi != None) else destVgpr, \
+                            bpl, destVgpr=loadVgprDest, \
                             addr0=vgpr("GlobalReadAddr%s+%u"%(tc,graIdx),2), addr1="", \
                             soffset=0, offset=0, \
                             glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
@@ -11007,7 +11013,7 @@ class KernelWriterAssembly(KernelWriter):
                       dst=vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx)), \
                       dst1=VCC(), \
                       src0=vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx)),  \
-                      src1=bpl, comment="gra += %u element(s) (lower)"%(numElementsPerLoad)))
+                      src1=int(bpl), comment="gra += %u element(s) (lower)"%(numElementsPerLoad)))
                   module.add(VAddCCOU32(
                       dst=vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx)), \
                       dst1=VCC(), \
