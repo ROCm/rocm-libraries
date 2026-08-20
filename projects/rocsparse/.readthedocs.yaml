@@ -31,4 +31,4 @@ jobs:
    # customized requirements.txt is left untouched. The delimiter is @ (not #)
    # and the expression has no spaces, so RTD's shell runs it verbatim
    # regardless of quoting.
-   - sed -i s@https://raw.githubusercontent.com/ROCm/rocm-docs-common/main/env/sphinx/requirements.txt@../../rocm-docs-common/env/sphinx/requirements.txt@ docs/sphinx/requirements.txt
+   - sed -i s@https://raw.githubusercontent.com/ROCm/rocm-docs-common/main/env/sphinx/requirements.txt@../../../rocm-docs-common/env/sphinx/requirements.txt@ docs/sphinx/requirements.txt
