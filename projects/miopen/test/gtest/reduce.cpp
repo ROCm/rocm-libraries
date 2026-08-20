@@ -959,36 +959,36 @@ inline auto GetCasesReduceCustomTestSet2()
     return testing::ValuesIn(test_cases);
 }
 
-} // anonymous namespace
-
-template <class T>
-struct ReduceCommon : public testing::TestWithParam<TestCase>
+// ALMIOPEN-2150: numel > INT_MAX scale coverage (46342^2 = 2,147,580,964 > INT_MAX).
+// Targets the int32 index/workspace-size overflow path in ReduceTensor.
+// Disabled pending ALMIOPEN-2152 (ReduceTensor silently returns all-zero output
+// with miopenStatusSuccess when numel > INT_MAX).
+inline auto GetCasesReduceScaleLargeNumel()
 {
-    void SetUp() override
-    {
-        auto&& handle           = get_handle();
-        std::string device_name = handle.GetDeviceName();
+    static std::vector<float> alphabeta = {1.0f, 0.0f};
 
-        prng::reset_seed();
+    constexpr miopenNanPropagation_t nonan = MIOPEN_NOT_PROPAGATE_NAN;
+    constexpr miopenReduceTensorIndices_t noind = MIOPEN_REDUCE_TENSOR_NO_INDICES;
 
-        handle.EnableProfiling();
+    static std::vector<TestCase> test_cases = {
+        std::make_tuple(std::vector<size_t>{1, 1, 46342, 46342},
+                        std::vector<int>{0, 1, 2, 3},
+                        MIOPEN_REDUCE_TENSOR_ADD,
+                        nonan,
+                        noind,
+                        alphabeta),
+        std::make_tuple(std::vector<size_t>{1, 1, 46342, 46342},
+                        std::vector<int>{0, 1, 2, 3},
+                        MIOPEN_REDUCE_TENSOR_MAX,
+                        nonan,
+                        noind,
+                        alphabeta),
+    };
 
-        std::tie(inLengths, toReduceDims, reduceOp, nanOpt, indicesOpt, scales) = GetParam();
-    }
+    return testing::ValuesIn(test_cases);
+}
 
-    void Run()
-    {
-        using reduce::convert_type;
-
-        if(std::is_same<T, double>::value)
-            compTypeVal = miopenDouble;
-
-        if(std::is_same<T, half_float::half>::value)
-        {
-            if(reduceOp == MIOPEN_REDUCE_TENSOR_MIN || reduceOp == MIOPEN_REDUCE_TENSOR_MAX ||
-               reduceOp == MIOPEN_REDUCE_TENSOR_AMAX)
-            {
-                compTypeVal = miopenHalf; // let compType be same as the data type
+} // anonymous namespace
             }
             else
             {
@@ -1338,3 +1338,10 @@ TEST_P(GPU_reduce_custom_fp32_fp16_FP16, HalfTest_reduce_custom_fp32_fp16) { thi
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP32, GetCasesReduceCustomTestSet2());
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP16, GetCasesReduceCustomTestSet2());
+
+class GPU_reduce_scale_large_numel_FP32 : public ReduceCommon<float>
+{
+};
+
+TEST_P(GPU_reduce_scale_large_numel_FP32, DISABLED_Standard) { this->Run(); };
+INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_scale_large_numel_FP32, GetCasesReduceScaleLargeNumel());
