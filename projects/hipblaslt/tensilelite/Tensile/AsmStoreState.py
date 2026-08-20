@@ -102,7 +102,7 @@ class StoreState:
                 self.numElementsPerBatchLimitedBySgprs = 9999 # no limit
 
             if self.numElementsPerBatchLimitedBySgprs<=0:
-                kernelWriter.overflowedResources = 2
+                kernelWriter.states.overflowedResources = 2
                 self.numElementsPerBatchLimitedBySgprs = 1 # dummy value
                   #assert self.numElementsPerBatchLimitedBySgprs > 0, "numElementsPerBatchLimitedBySgprs=0 for %s"%self.kernelName
 

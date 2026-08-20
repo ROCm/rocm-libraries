@@ -29,6 +29,13 @@ The validator models, per counter:
   predecessor (not a single union), so a consumer at a join computes the
   strictest required wait as the `min` over paths. Queues are capped at the
   hardware in-flight window (64) so loops converge.
+- **Completion order.** DS / Buffer / Tensor complete in issue order and count
+  1 per op, so a wait of `N` drains everything but the `N` newest ops. `kmcnt`
+  completes **out of order** (and does not count instructions: +1 per
+  single-DWORD fetch, +2 per fetch of two or more DWORDs), so a nonzero
+  `s_wait_kmcnt` drains nothing identifiable and only `s_wait_kmcnt 0` proves a
+  given scalar load landed. A nonzero `s_wait_kmcnt` is therefore reported as
+  leaving its producers in flight.
 - **RAW** (consumer reads a register/LDS token still in flight),
   **WAR-on-LDS** and **barrier** ordering against the DS FIFO, plus the
   conservative fallbacks used by the reference pass for untagged memtokens.
@@ -88,7 +95,8 @@ per `s_wait_*` kind), each followed by a dump of the live queue state:
 
 - **`needs wait <op> N`** in the headline is per producer: the keep value
   that drains just the op named there (for an op at index `i` in a queue of
-  size `n`, that is `n - i - 1`).
+  size `n`, that is `n - i - 1` on an in-order counter, and always `0` on an
+  out-of-order one).
 - **`required: <op> N`** is the single wait that drains **every** undrained
   producer the consumer reads — the `min` of the per-producer values. This is
   the value the compiler should have emitted before the consumer.

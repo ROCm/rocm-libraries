@@ -336,7 +336,7 @@ def _install_blis(c, build_dir: Path):
         "gprof": "Enable GNU gprof profiling (requires --static).",
         "no_tensile": "Build without the Tensile GEMM backend.",
         "tensile_logic": "Path for HIPBLASLT_LIBLOGIC_PATH.",
-        "tensile_threads": "Parallel build threads for TensileLite (default: nproc).",
+        "tensile_threads": "Parallel build threads for TensileLite (default: --jobs, or nproc if --jobs is also unset).",
         "tensile_verbose": "TensileLite verbosity level.",
         "no_lazy_load": "Disable lazy library loading.",
         "no_msgpack": "Use YAML backend instead of msgpack.",
@@ -414,7 +414,7 @@ def build(
     rocm_s = rocm.as_posix()
 
     if tensile_threads is None:
-        tensile_threads = os.cpu_count()
+        tensile_threads = jobs
     jobs = jobs or os.cpu_count()
 
     # Determine build type
@@ -510,7 +510,7 @@ def build(
         if tensile_logic:
             logic_path = tensile_logic if Path(tensile_logic).is_absolute() else str(ROOT_PATH / tensile_logic)
             cmake_opts.append(f"-DHIPBLASLT_LIBLOGIC_PATH={logic_path}")
-        if tensile_threads != os.cpu_count():
+        if tensile_threads is not None:
             cmake_opts.append(f"-DTENSILELITE_BUILD_PARALLEL_LEVEL={tensile_threads}")
 
     cmake_opts.append(f"-DHIPBLASLT_ENABLE_YAML={'OFF' if not no_msgpack else 'ON'}")

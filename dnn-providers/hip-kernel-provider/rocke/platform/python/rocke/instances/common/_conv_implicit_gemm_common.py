@@ -178,6 +178,21 @@ class ConvProblem:
         return z * self.Y * self.X * self.cpg
 
     @property
+    def is_pointwise(self) -> bool:
+        """True when the conv reduces to an explicit GEMM (1x1 kernel, stride 1, no pad)."""
+        hw = (
+            self.Y == 1
+            and self.X == 1
+            and self.sH == 1
+            and self.sW == 1
+            and self.pH == 0
+            and self.pW == 0
+        )
+        if not self.is_3d:
+            return hw
+        return hw and self.Z == 1 and self.sD == 1 and self.pD == 0
+
+    @property
     def flops(self) -> int:
         return 2 * self.M * self.N_gemm * self.K_gemm * self.groups
 
@@ -235,6 +250,56 @@ class ConvAccumulatorEpilogue:
 # ---------------------------------------------------------------------
 # Descriptor builders
 # ---------------------------------------------------------------------
+
+
+def _a_channel_decode(p: ConvProblem, *, is_3d: bool) -> List:
+    """Channel-decode transforms for A's ``k_gemm`` unmerge.
+
+    For ``groups == 1`` this is the historical single ``unmerge`` of the
+    contraction index ``k`` into the spatial-filter coords plus the full input
+    channel ``c`` (``dims=[.., Y, X, C]``) — byte-identical to the pre-groups
+    kernel.
+
+    For ``groups > 1`` (grouped / cardinality-grouped conv) the contraction
+    index only spans the *per-group* channels ``cpg = C / groups``, so ``k``
+    unmerges into ``c_in_group`` (``dims=[.., Y, X, cpg]``) and an affine
+    ``embed`` recovers the absolute NHWC channel
+    ``c = group * cpg + c_in_group`` from the extra ``group`` upper coord
+    threaded in by the caller's block-z index. This mirrors CK Tile's
+    grouped-conv per-group ``C_`` slab: the descriptor stays NHWC
+    (``C = total``) and the group selects the ``[g*cpg, (g+1)*cpg)`` slab.
+    ``group`` is supplied at ``A_desc.offset(..., group=g)`` for the grouped
+    path only, so ``upper_names`` gains ``group`` exactly when ``groups > 1``.
+
+    ``embed`` (not ``merge``) is used deliberately: it is one of the transform
+    kinds already mirrored in the C++ engine, so the grouped descriptor lowers
+    byte-identically in both engines without adding a new C++ transform kind.
+    The ``0 <= c < C`` bound it emits is always true here (``group < groups`` and
+    ``c_in_group < cpg``) and costs only a redundant compare on the grouped path.
+    """
+    if p.groups > 1:
+        if is_3d:
+            unmerge_into = ["z", "y", "x", "c_in_group"]
+            unmerge_dims = [p.Z, p.Y, p.X, p.cpg]
+        else:
+            unmerge_into = ["y", "x", "c_in_group"]
+            unmerge_dims = [p.Y, p.X, p.cpg]
+        return [
+            unmerge_magic("k", into=unmerge_into, dims=unmerge_dims),
+            embed(
+                upper=["group", "c_in_group"],
+                into="c",
+                strides=[p.cpg, 1],
+                offset=0,
+                lo=0,
+                hi=p.C,
+            ),
+        ]
+    if is_3d:
+        return [
+            unmerge_magic("k", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C])
+        ]
+    return [unmerge_magic("k", into=["y", "x", "c"], dims=[p.Y, p.X, p.C])]
 
 
 def make_a_descriptor(
@@ -312,7 +377,7 @@ def make_a_descriptor(
                 lo=0,
                 hi=p.Wi,
             ),
-            unmerge_magic("k", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
+            *_a_channel_decode(p, is_3d=True),
             pad("z", lo=0, hi=p.Z),
             pad("y", lo=0, hi=p.Y),
             pad("x", lo=0, hi=p.X),
@@ -345,7 +410,7 @@ def make_a_descriptor(
                 lo=0,
                 hi=p.Wi,
             ),
-            unmerge_magic(upper="k", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
+            *_a_channel_decode(p, is_3d=False),
             # pad('y'/'x'): guard against partial K-tile overruns into adjacent weight rows.
             pad("y", lo=0, hi=p.Y),
             pad("x", lo=0, hi=p.X),

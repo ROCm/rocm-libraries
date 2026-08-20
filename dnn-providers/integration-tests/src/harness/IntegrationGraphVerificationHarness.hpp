@@ -23,6 +23,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <nlohmann/json.hpp>
@@ -427,17 +428,6 @@ protected:
             return fillResult;
         }
 
-        auto missing = _inputFillRecipes.unfilled(leafInputUids);
-        if(!missing.empty())
-        {
-            std::string msg = "unfilled inputs:";
-            for(const int64_t uid : missing)
-            {
-                msg += " uid=" + std::to_string(uid);
-            }
-            return FillResult::unsupported(msg);
-        }
-
         return FillResult::ok();
     }
 
@@ -579,10 +569,17 @@ public:
             return false;
         }
 
+        // The reference bundle keeps one element per byte for element-wise access;
+        // the GPU bundle uses the packed device layout for sub-byte types (e.g. FP4
+        // as two 4-bit values per byte) so the buffer can be consumed directly by
+        // the kernel. Both are filled from the same seed, so they hold identical
+        // logical values.
         refBundle.addTensor(*tensorAttr,
-                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(
+                                *tensorAttr, /*packSubByteElements=*/false));
         gpuBundle.addTensor(*tensorAttr,
-                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(
+                                *tensorAttr, /*packSubByteElements=*/true));
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;

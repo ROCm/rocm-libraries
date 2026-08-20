@@ -162,7 +162,7 @@ Controls graph structure logging. When set to a non-empty directory path, graphs
 | (unset)    | Graph logging disabled (default)                       |
 | `<path>`   | Write graph structures as JSON files to the given directory |
 
-Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<hash>.json` where `<hash>` is derived from the graph content, ensuring identical graphs are not duplicated.
+Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<id>.json` after the graph's own ID, so finalizing a graph again, or replaying a serialized one, reuses a single file. A graph rebuilt from scratch is a new graph with a new ID and is written separately; point the variable at a per-process directory if many processes share one output location.
 
 This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 

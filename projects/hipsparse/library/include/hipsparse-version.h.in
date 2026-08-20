@@ -22,7 +22,8 @@
  * ************************************************************************ */
 
 /*!\file
- * \brief hipsparse-version.h provides the configured version and settings
+ * \brief hipsparse-version.h provides the configured hipSPARSE version.
+ *  Build-time feature configuration lives in hipsparse-config.h.
  */
 
 #ifndef HIPSPARSE_VERSION_H
@@ -34,10 +35,5 @@
 #define hipsparseVersionPatch    @hipsparse_VERSION_PATCH@
 #define hipsparseVersionTweak    @hipsparse_VERSION_TWEAK@
 // clang-format on
-
-/* Feature flags baked in at build time. */
-#cmakedefine HIPSPARSE_WITH_SPMV_BSR
-#cmakedefine HIPSPARSE_WITH_CSC_TRSV
-#cmakedefine HIPSPARSE_WITH_CSC_TRSM
 
 #endif /* HIPSPARSE_VERSION_H */

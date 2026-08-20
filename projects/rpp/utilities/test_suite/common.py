@@ -179,6 +179,7 @@ imageAugmentationMap = {
     103: ["yuv_to_rgb", "HIP"],
     104: ["yuv_to_rgb_cubic_v", "HIP"],
     105: ["yuv_to_rgb_linear_v", "HIP"],
+    106: ["tone_map", "HOST"],
 }
 
 audioAugmentationMap = {
@@ -256,6 +257,7 @@ ImageAugmentationGroupMap = {
         "color_temperature",
         "color_jitter",
         "histogram_equalize",
+        "tone_map",
     ],
     "effects_augmentations": [
         "pixelate",

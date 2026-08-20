@@ -53,9 +53,10 @@ size_t rocsparse::indextype_sizeof(rocsparse_indextype that)
     {
         return sizeof(int64_t);
     }
-    case deprecated_rocsparse_indextype_u16:
-    {
-        return sizeof(uint16_t);
     }
-    }
+
+    // deprecated_rocsparse_indextype_u16 (value 1) and any unrecognized value.
+    // Handled here rather than as a case label because u16 may be absent from
+    // the public enum, which would otherwise trigger -Wswitch.
+    return sizeof(uint16_t);
 }

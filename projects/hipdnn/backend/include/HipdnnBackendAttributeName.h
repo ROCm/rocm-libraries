@@ -59,6 +59,8 @@
  * - 3400-3499: Shared resample descriptor attributes
  * - 3500-3599: RMSNorm backward operation attributes
  * - 3600-3699: Layernorm backward operation attributes
+ * - 3700-3799: MoE grouped matmul operation attributes
+ * - 3800-3899: MoE grouped matmul backward operation attributes
  * - 60000-60099: Knob info serialized value extension attributes
  * - 60100-60199: Knob choice serialized value extension attributes
  * - 60200-60299: Operation type extension attributes
@@ -1326,6 +1328,64 @@ typedef enum
 
     /** @brief Compute type for backward layernorm */
     HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT = 3610,
+
+    /** @} */
+
+    /**
+     * @name MoE Grouped Matmul Operation Attributes (3700-3799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Token tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC = 3700,
+
+    /** @brief Expert weight tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_WEIGHT_DESC = 3701,
+
+    /** @brief First-token offset tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_FIRST_TOKEN_OFFSET_DESC = 3702,
+
+    /** @brief Optional source-token index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC = 3703,
+
+    /** @brief Optional routed-token expert-index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC = 3704,
+
+    /** @brief Output tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC = 3705,
+
+    /** @brief Routing mode */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE = 3706,
+
+    /** @brief Number of routed experts per token */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K = 3707,
+
+    /** @brief Math precision */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC = 3708,
+
+    /** @} */
+
+    /**
+     * @name MoE Grouped Matmul Backward Operation Attributes (3800-3899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC = 3800,
+
+    /** @brief Token tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC = 3801,
+
+    /** @brief First-token offset tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC = 3802,
+
+    /** @brief Expert weight gradient tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC = 3803,
+
+    /** @brief Math precision */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC = 3804,
 
     /** @} */
 
