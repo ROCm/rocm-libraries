@@ -230,6 +230,10 @@ bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
     if(!GemmBwdBase::IsApplicable(context, problem))
         return false;
 
+    // The CNHW transposition kernels used by this solver assume NCHW memory.
+    if(!problem.IsLayoutDefault())
+        return false;
+
     const auto& conv  = problem.GetConv();
     const auto& wDesc = problem.GetWeights();
 
@@ -707,6 +711,11 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
 {
 #if MIOPEN_USE_GEMM
     if(!GemmBwdBase::IsApplicable(context, problem))
+        return false;
+
+    // Col2Im only writes NCHW memory. Checked before the "rest-of" logic below, which would
+    // otherwise claim every NHWC problem that the 1x1 solvers do not handle.
+    if(!problem.IsLayoutDefault())
         return false;
 
     return !GemmBwd1x1_stride2{}.IsApplicable(context, problem) &&

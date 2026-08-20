@@ -421,6 +421,11 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
+    // Im2Col only reads NCHW memory. Checked before the "rest-of" logic below, which would
+    // otherwise claim every NHWC problem that the 1x1 solver does not handle.
+    if(!problem.IsLayoutDefault())
+        return false;
+
     return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&
            GetWorkspaceSize(context, problem) != 0;
 #else

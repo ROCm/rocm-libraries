@@ -247,6 +247,10 @@ bool GemmFwd1x1_0_2::IsApplicable(const ExecutionContext& context,
     if(!GemmFwdBase::IsApplicable(context, problem))
         return false;
 
+    // The CNHW transposition kernels used by this solver assume NCHW memory.
+    if(!problem.IsLayoutDefault())
+        return false;
+
     decltype(auto) conv  = problem.GetConv();
     decltype(auto) wDesc = problem.GetWeights();
 
@@ -512,6 +516,10 @@ bool GemmFwd1x1_0_1_int8::IsApplicable(const ExecutionContext& context,
 {
 #if MIOPEN_USE_GEMM
     if(!GemmFwdBase::IsApplicable(context, problem))
+        return false;
+
+    // The int8 packing/transposition kernels used by this solver assume NCHW memory.
+    if(!problem.IsLayoutDefault())
         return false;
 
     decltype(auto) conv  = problem.GetConv();
@@ -963,6 +971,11 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
 {
 #if MIOPEN_USE_GEMM
     if(!GemmFwdBase::IsApplicable(context, problem))
+        return false;
+
+    // Im2Col only reads NCHW memory. Checked before the "rest-of" logic below, which would
+    // otherwise claim every NHWC problem that the 1x1 solvers do not handle.
+    if(!problem.IsLayoutDefault())
         return false;
 
     // Todo: This is a rest-of kind of logic. Should be revised later.
