@@ -3407,6 +3407,142 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
+class TestPreloopReorderGR:
+    """Tests for TENSILE_PRELOOP_REORDER_GR — the PGR=2 preloop GR reorder.
+
+    With the flag on, build_preloop() must emit:
+      batch-0 GR → SRD inc → SkipToNLL guard → batch-1 GR → initC → WaitGR → Sync → LR → SkipToNGLL
+    instead of the stock:
+      batch-0 GR → SRD inc → initC → WaitGR → Sync → LR → SkipToNLL guard → batch-1 GR → SkipToNGLL
+    """
+
+    def _build(self, cfg):
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.build_preloop()
+        return sched
+
+    def _op_sequence(self, sched):
+        """Flat list of (opType, source) from the preloop emitted schedule."""
+        return [(em.opType, em.source)
+                for partition in sched._preloop_emitted
+                for group in partition
+                for em in group]
+
+    def test_reorder_off_stock_order(self, monkeypatch):
+        """Flag off: SkipToNLL must follow LR (stock order)."""
+        monkeypatch.delenv("TENSILE_PRELOOP_REORDER_GR", raising=False)
+        cfg = make_cfg_256x256_fp4(pgr=2)
+        sched = self._build(cfg)
+        seq = self._op_sequence(sched)
+        op_types = [t for t, _ in seq]
+
+        # LR before SkipToNLL in stock order
+        lr_idx = next(i for i, t in enumerate(op_types) if t == 'lr')
+        skip_nll_idx = next(
+            (i for i, (t, s) in enumerate(seq)
+             if t == 'skip' and getattr(s, 'target', None) == 'NLL'),
+            None
+        )
+        assert skip_nll_idx is not None, "SkipToNLL not found in preloop"
+        assert lr_idx < skip_nll_idx, \
+            "Stock order: LR should precede SkipToNLL"
+
+    def test_reorder_on_structure(self, monkeypatch):
+        """Flag on (maxUnroll=1): StreamK-safe reorder structure.
+
+        The reorder emits a two-branch structure to guard MT1 GRs from partial
+        K-range workgroups (StreamK tail), then shares initC / WaitGR / Sync /
+        LR / SkipToNLL with the stock path:
+
+          preloop GRs (MT0)
+          initC
+          SkipToPreloopReorderPartial   ← routes partial tiles past MT1
+          MT1 GRs
+          WaitGR(use_num_gr_total=True) ← drains MT0+MT1
+          branch PreloopReorderJoin
+          label PreloopReorderPartial:
+          WaitGR(force_drain=True)       ← drains MT0 only (vmcnt 0)
+          label PreloopReorderJoin:
+          Sync / LR
+          SkipToNLL  ← NLL guard stays after setup (not before)
+          GL2 prefetch ops
+          SkipToNGLL
+        """
+        monkeypatch.setenv("TENSILE_PRELOOP_REORDER_GR", "1")
+        cfg = make_cfg_256x256_fp4(pgr=2)
+        sched = self._build(cfg)
+        seq = self._op_sequence(sched)
+        op_types = [t for t, _ in seq]
+
+        # initC (InlineModuleOp labelled 'initC_overlap') comes first
+        initc_idx = next(
+            (i for i, (t, s) in enumerate(seq)
+             if t == 'inline' and getattr(s, 'label', '') == 'initC_overlap'),
+            None
+        )
+        # First wait_gr is the full-path vmcnt(num_gr_total)
+        wait_gr_idx = next((i for i, t in enumerate(op_types) if t == 'wait_gr'), None)
+        # LR comes after both waits (after the rejoin label)
+        lr_idx = next((i for i, t in enumerate(op_types) if t == 'lr'), None)
+        # SkipToNLL must be after LR
+        skip_nll_idx = next(
+            (i for i, (t, s) in enumerate(seq)
+             if t == 'skip' and getattr(s, 'target', None) == 'NLL'),
+            None
+        )
+
+        assert initc_idx is not None, "initC (inline) not found in reordered preloop"
+        assert wait_gr_idx is not None, "wait_gr not found in reordered preloop"
+        assert lr_idx is not None, "LR not found in reordered preloop"
+        assert skip_nll_idx is not None, "SkipToNLL not found in reordered preloop"
+
+        assert initc_idx < wait_gr_idx, "Reorder: initC must precede first wait_gr"
+        assert wait_gr_idx < lr_idx, "Reorder: wait_gr must precede LR"
+        assert lr_idx < skip_nll_idx, \
+            "Reorder (StreamK-safe): SkipToNLL must follow LR, not precede initC"
+
+    def test_reorder_on_wait_gr_uses_num_gr_total(self, monkeypatch):
+        """Flag on: two WaitGROps — full-path uses num_gr_total, partial uses force_drain."""
+        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
+        monkeypatch.setenv("TENSILE_PRELOOP_REORDER_GR", "1")
+        cfg = make_cfg_256x256_fp4(pgr=2)
+        sched = self._build(cfg)
+        seq = self._op_sequence(sched)
+
+        wait_gr_sources = [s for t, s in seq if t == 'wait_gr']
+        assert len(wait_gr_sources) == 2, \
+            "Expected exactly two wait_gr ops in reordered preloop (full + partial paths)"
+        full_wgop, partial_wgop = wait_gr_sources[0], wait_gr_sources[1]
+        assert isinstance(full_wgop, WaitGROp)
+        assert full_wgop.wait_gr_counts is not None
+        assert full_wgop.wait_gr_counts.use_num_gr_total, \
+            "Full-path wait_gr must use use_num_gr_total=True"
+        assert isinstance(partial_wgop, WaitGROp)
+        assert partial_wgop.force_drain, \
+            "Partial-path wait_gr must use force_drain=True (vmcnt 0)"
+
+    def test_reorder_on_multi_du_skip_nll_after_lr(self, monkeypatch):
+        """Flag on (maxUnroll>1): SkipToNLL must follow LR (StreamK-safe, same as maxUnroll=1)."""
+        monkeypatch.setenv("TENSILE_PRELOOP_REORDER_GR", "1")
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=2)
+        assert cfg.numUnroll.get('A', 1) > 1 or cfg.numUnroll.get('B', 1) > 1, \
+            "Prerequisite: cfg must be multi-DU"
+        sched = self._build(cfg)
+        seq = self._op_sequence(sched)
+        op_types = [t for t, _ in seq]
+
+        lr_idx = next((i for i, t in enumerate(op_types) if t == 'lr'), None)
+        skip_nll_idx = next(
+            (i for i, (t, s) in enumerate(seq)
+             if t == 'skip' and getattr(s, 'target', None) == 'NLL'),
+            None
+        )
+        assert lr_idx is not None and skip_nll_idx is not None
+        assert lr_idx < skip_nll_idx, \
+            "Multi-DU reorder (StreamK-safe): SkipToNLL must follow LR"
+
+
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.
 # Also calls the instruction scheduler to verify the emitted modules are valid input and to show the final instruction counts.
 # Example usage:

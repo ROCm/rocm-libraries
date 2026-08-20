@@ -481,8 +481,15 @@ class WaitGRCounts:
     B: int = 0
     SA: int = 0
     SB: int = 0
+    # When True, emit_wait_gr resolves the count as
+    # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
+    # — the exact number of batch-1 buffer_load instructions in flight.
+    # Used by the PGR=2 preloop GR reorder (TENSILE_PRELOOP_REORDER_GR).
+    use_num_gr_total: bool = False
 
     def __str__(self):
+        if self.use_num_gr_total:
+            return "num_gr_total"
         parts = []
         for t in ('A', 'B', 'SA', 'SB'):
             v = getattr(self, t)
@@ -3288,6 +3295,333 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
+    @staticmethod
+    def _make_reorder_label_op(name: str) -> InlineModuleOp:
+        """InlineModuleOp that defines a local label (used by the StreamK-safe
+        PGR=2 preloop GR reorder to mark the partial-tile and rejoin points)."""
+        def _build_label(emitter):
+            from rocisa.code import Module, Label
+            m = Module(f"reorder_label_{name}")
+            m.add(Label(name, ""))
+            return m
+        return InlineModuleOp(build=_build_label, label=f"reorder_label_{name}")
+
+    @staticmethod
+    def _make_reorder_branch_op(target: str) -> InlineModuleOp:
+        """InlineModuleOp that emits an unconditional s_branch to a local label
+        (rejoin after the full-path MT1 wait in the reorder preloop)."""
+        def _build_branch(emitter):
+            from rocisa.code import Module, Label
+            from rocisa.instruction import SBranch
+            m = Module(f"reorder_branch_{target}")
+            m.add(SBranch(labelName=Label(target, "").getLabelName(),
+                          comment=f"full K tile: MT1 issued, skip partial wait"))
+            return m
+        return InlineModuleOp(build=_build_branch, label=f"reorder_branch_{target}")
+
+    def _mt0_preloop_gr_end(self, em_list) -> int:
+        """Index in em_list where MT0 prefetch GR placements end (before GRInc/initC/wait)."""
+        for i, em in enumerate(em_list):
+            if em.opType in ('gr_inc', 'wait_gr') or (
+                    em.opType == 'inline'
+                    and getattr(em.source, 'label', None) == 'initC_overlap'):
+                return i
+        return len(em_list)
+
+    @staticmethod
+    def _initC_inst_kind(inst) -> str:
+        """Classify one initC instruction for dependency-aware splitting."""
+        from rocisa.code import TextBlock
+        if isinstance(inst, TextBlock):
+            return 'comment'
+        name = type(inst).__name__
+        if name in ('VAccvgprWrite', 'VMovB32'):
+            return 'scalar'
+        if name == 'MFMAInstruction':
+            return 'mfma'
+        if name in ('SNop', 'SWaitAlu'):
+            return 'barrier'
+        return 'other'
+
+    @classmethod
+    def _split_initC_instructions(cls, instructions: list) -> list:
+        """Split populated initC into [after_GR_A, after_GR_B] instruction chunks.
+
+        Phase order: comments -> zero-src scalars -> barrier -> MFMAs -> remainder scalars.
+        The zero-src + barrier chunk must precede any MFMA; MFMAs are halved across slots.
+        """
+        if not instructions:
+            return [[], []]
+
+        preamble, zerosrc, barrier, mfmas, remainder = [], [], [], [], []
+        phase = 'preamble'
+        for inst in instructions:
+            kind = cls._initC_inst_kind(inst)
+            if phase == 'preamble':
+                if kind == 'comment':
+                    preamble.append(inst)
+                    continue
+                phase = 'zerosrc'
+            if phase == 'zerosrc':
+                if kind == 'mfma':
+                    mfmas.append(inst)
+                    phase = 'mfma'
+                elif kind == 'barrier':
+                    barrier.append(inst)
+                    phase = 'post_barrier'
+                elif kind == 'scalar':
+                    zerosrc.append(inst)
+                else:
+                    zerosrc.append(inst)
+            elif phase == 'post_barrier':
+                if kind == 'mfma':
+                    mfmas.append(inst)
+                    phase = 'mfma'
+                else:
+                    barrier.append(inst)
+            elif phase == 'mfma':
+                if kind == 'mfma':
+                    mfmas.append(inst)
+                else:
+                    remainder.append(inst)
+                    phase = 'remainder'
+            else:
+                remainder.append(inst)
+
+        if not mfmas:
+            mid = max(1, (len(zerosrc) + 1) // 2)
+            return [preamble + zerosrc[:mid] + barrier,
+                    zerosrc[mid:] + remainder]
+
+        mid = len(mfmas) // 2
+        chunk0 = preamble + zerosrc + barrier + mfmas[:mid]
+        chunk1 = mfmas[mid:] + remainder
+        return [chunk0, chunk1]
+
+    @staticmethod
+    def _make_initC_chunk_modules(chunks, init_source, start_id: int) -> list:
+        """Wrap initC instruction chunks as EmittedModules (first non-empty keeps initC_overlap)."""
+        modules = []
+        mid = start_id
+        first = True
+        for chunk in chunks:
+            if not chunk:
+                continue
+            modules.append(EmittedModule(
+                moduleId=mid,
+                instructions=list(chunk),
+                before=None,
+                source=init_source if first else None))
+            first = False
+            mid += 1
+        return modules
+
+    def _injectPreloopFineCover(self, em_list, cover_modules) -> bool:
+        """Path 4 fine: GR shadow fill with initC + cover interleaved between MT0 loads.
+
+        Reorders MT0 prefetch to:
+          GR(A) -> initC[0] -> GR(B) -> initC[1] -> cover(LRA,…) -> GR(SA,SB) -> GRInc -> wait
+
+        initC instructions (v_accvgpr_write / v_mfma_i32 / v_mov) split across the A/B
+        issue gap when populated; otherwise the whole initC block follows GR(A). Cover
+        and initC run while A/B buffer_loads are in flight. SkipPreloopGR stays on the
+        first initC chunk (initC_overlap label).
+        """
+        init_idx = next((i for i, em in enumerate(em_list)
+                         if em.opType == 'inline'
+                         and getattr(em.source, 'label', None) == 'initC_overlap'), None)
+        if init_idx is None:
+            return False
+
+        wait_idx = next((i for i, em in enumerate(em_list) if em.opType == 'wait_gr'), None)
+        if wait_idx is None:
+            return False
+
+        mt0_end = self._mt0_preloop_gr_end(em_list)
+        init_em = em_list.pop(init_idx)
+        if init_idx < wait_idx:
+            wait_idx -= 1
+        if init_idx < mt0_end:
+            mt0_end -= 1
+
+        head, tail = em_list[:wait_idx], em_list[wait_idx:]
+        prefix, mt0_gr, gr_incs = [], {}, []
+        for em in head:
+            if em.opType == 'gr' and em.source is not None:
+                mt0_gr[em.source.tensor] = em
+            elif em.opType == 'gr_inc':
+                gr_incs.append(em)
+            else:
+                prefix.append(em)
+
+        if 'A' not in mt0_gr or 'B' not in mt0_gr:
+            insert_at = min(mt0_end, len(head))
+            head.insert(insert_at, init_em)
+            em_list[:] = head + tail
+            return False
+
+        chunks = self._split_initC_instructions(init_em.instructions)
+
+        new_id = max((em.moduleId for em in em_list), default=-1) + 1
+
+        new_head = list(prefix)
+        new_head.append(mt0_gr['A'])
+        init_chunk_mods = (self._make_initC_chunk_modules(chunks, init_em.source, new_id)
+                           if init_em.instructions and any(chunks) else [])
+        if len(init_chunk_mods) > 1:
+            new_id += len(init_chunk_mods)
+            new_head.append(init_chunk_mods[0])
+            rest_init = init_chunk_mods[1:]
+            # The tail-only path branches over the prefetch loads, so it would run
+            # only the first chunk. Hand emitMainAndExitLoops the whole initC so it
+            # can emit a contiguous copy on that path (accumulators must be fully
+            # zeroed before the tail loop accumulates into them).
+            self._preloopSplitInitCInstructions = list(init_em.instructions)
+        else:
+            new_head.append(init_chunk_mods[0] if init_chunk_mods else init_em)
+            rest_init = []
+            self._preloopSplitInitCInstructions = None
+        new_head.append(mt0_gr['B'])
+        new_head.extend(rest_init)
+        new_head.append(EmittedModule(moduleId=new_id,
+                                      instructions=list(cover_modules),
+                                      before=None,
+                                      source=None))
+        for tensor in ('SA', 'SB'):
+            if tensor in mt0_gr:
+                new_head.append(mt0_gr[tensor])
+        new_head.extend(gr_incs)
+
+        em_list[:] = new_head + tail
+        return True
+
+    @staticmethod
+    def _atomize_load_instructions(instructions) -> list:
+        """Split a GR module's instructions into atoms that each end at a buffer_load.
+
+        Every DTL load is preceded by its own m0 setup (s_add_u32/s_mov_b32 m0), and
+        m0 must still hold that value when the load issues, so the setup and its load
+        travel together. Instructions trailing the last load form a final atom.
+        """
+        atoms, cur = [], []
+        for inst in instructions:
+            cur.append(inst)
+            if type(inst).__name__.startswith('BufferLoad'):
+                atoms.append(cur)
+                cur = []
+        if cur:
+            atoms.append(cur)
+        return atoms
+
+    @staticmethod
+    def _deal_filler_across_atoms(atoms, filler) -> list:
+        """Emit atoms with filler dealt out evenly into the gap after each atom.
+
+        Filler order is preserved, which is what keeps initC legal: its zero-source
+        writes still precede the MFMAs that read them.
+        """
+        if not atoms:
+            return list(filler)
+        out, taken, n = [], 0, len(atoms)
+        for i, atom in enumerate(atoms, start=1):
+            out.extend(atom)
+            target = (i * len(filler)) // n
+            out.extend(filler[taken:target])
+            taken = target
+        out.extend(filler[taken:])
+        return out
+
+    def _interleavePreloopInitCPerLoad(self, em_list, cover_modules) -> bool:
+        """Path 4 per-load: deal initC out one instruction group per buffer_load.
+
+        Fast path becomes
+          [m0;load A0] initC.. [m0;load A1] initC.. … [m0;load B7] initC..
+          -> cover(LRA,…) -> GR(SA,SB) -> GRInc -> wait_gr
+
+        Only initC feeds the interleave. The LRA cover masks and restores ``exec``
+        around its permlane swap, and a DTL buffer_load issued inside that window
+        would drop the inactive lanes, so cover stays after every load.
+
+        The K<DepthU guard branches over all of these loads, so it cannot reach the
+        dealt-out initC; the caller emits a contiguous copy out of line (see
+        ``_preloopSplitInitCInstructions`` / ``_preloopColdInitCOutOfLine``).
+        """
+        init_idx = next((i for i, em in enumerate(em_list)
+                         if em.opType == 'inline'
+                         and getattr(em.source, 'label', None) == 'initC_overlap'), None)
+        wait_idx = next((i for i, em in enumerate(em_list) if em.opType == 'wait_gr'), None)
+        if init_idx is None or wait_idx is None:
+            return False
+
+        init_em = em_list.pop(init_idx)
+        if init_idx < wait_idx:
+            wait_idx -= 1
+
+        head, tail = em_list[:wait_idx], em_list[wait_idx:]
+        prefix, mt0_gr, gr_incs = [], {}, []
+        for em in head:
+            if em.opType == 'gr' and em.source is not None:
+                mt0_gr[em.source.tensor] = em
+            elif em.opType == 'gr_inc':
+                gr_incs.append(em)
+            else:
+                prefix.append(em)
+
+        data_gr = [mt0_gr[t] for t in ('A', 'B') if t in mt0_gr]
+        atoms = [atom for em in data_gr
+                 for atom in self._atomize_load_instructions(em.instructions)]
+        if not atoms or not init_em.instructions:
+            head.insert(min(len(head), self._mt0_preloop_gr_end(head)), init_em)
+            em_list[:] = head + tail
+            return False
+
+        new_id = max((em.moduleId for em in em_list), default=-1) + 1
+        woven = EmittedModule(
+            moduleId=new_id,
+            instructions=self._deal_filler_across_atoms(atoms, init_em.instructions),
+            before=None,
+            source=init_em.source)
+        new_id += 1
+
+        new_head = list(prefix)
+        new_head.append(woven)
+        new_head.append(EmittedModule(moduleId=new_id,
+                                      instructions=list(cover_modules),
+                                      before=None,
+                                      source=None))
+        for tensor in ('SA', 'SB'):
+            if tensor in mt0_gr:
+                new_head.append(mt0_gr[tensor])
+        new_head.extend(gr_incs)
+
+        em_list[:] = new_head + tail
+        self._preloopSplitInitCInstructions = list(init_em.instructions)
+        self._preloopColdInitCOutOfLine = True
+        return True
+
+    def _injectPreloopPipelinedCover(self, em_list, cover_modules) -> bool:
+        """Legacy alias — Path 4b coarse split (cover only, initC after full GR batch)."""
+        return self._injectPreloopFineCover(em_list, cover_modules)
+
+    def _splicePreloopCoverModules(self, em_list, cover_modules, pipelined=False,
+                                   perLoad=False) -> bool:
+        """Insert deferred cover modules (LRA trio + extensions) into preloop."""
+        if not cover_modules:
+            return False
+        if perLoad and self._interleavePreloopInitCPerLoad(em_list, cover_modules):
+            return True
+        if pipelined:
+            return self._injectPreloopFineCover(em_list, cover_modules)
+        drain_idx = next((i for i, em in enumerate(em_list)
+                          if em.opType == 'wait_gr'), len(em_list))
+        new_id = max((em.moduleId for em in em_list), default=-1) + 1
+        em_list.insert(drain_idx,
+                       EmittedModule(moduleId=new_id,
+                                     instructions=list(cover_modules),
+                                     before=None,
+                                     source=None))
+        return True
+
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
@@ -3371,6 +3705,8 @@ class LogicalScheduler:
                     gl2_preloop_ops.append(GL2PrefetchIncOp())
                     gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+            from Tensile.Common.Utilities import preloopReorderGREnabled
+            _reorder = preloopReorderGREnabled()
             if maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
@@ -3380,6 +3716,57 @@ class LogicalScheduler:
                 for uid in range(maxUnroll):
                     mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
+            else:
+                preloop_ops = [
+                    *self._make_gr_all_tensors(0, all_tiles),
+                    *self._make_depops_all_tensors(GRIncOp),
+                ]
+                mt1_ops = self._make_preloop_mt1_grs()
+
+            if _reorder:
+                # PGR=2 preloop GR reorder, made StreamK-safe.
+                #
+                # The goal is to hoist the MT1 GR batch ahead of the GR wait so
+                # MT1's load latency is deferred into the main loop: the wait then
+                # only drains MT0 (vmcnt = num_gr_total leaves MT1's loads in
+                # flight). On the data-parallel path every workgroup runs the full
+                # K loop, so this is unconditionally safe.
+                #
+                # Under StreamK a workgroup may own only a partial K range and hit
+                # loopCounter<=1, which routes it to the NLL (no-load-loop). Two
+                # things must hold for that path:
+                #   1. initC / WaitGR / Sync / LR must still run — the NLL body
+                #      assumes the accumulators are zeroed, MT0 is resident in LDS,
+                #      and the first LR is done. The original reorder branched to
+                #      NLL *before* this setup and corrupted the StreamK tail.
+                #   2. MT1 GR must NOT be issued — its SRD has been advanced past
+                #      this workgroup's K range and the buffer_load faults (illegal
+                #      access), so it is guarded out for partial tiles.
+                #
+                # Because MT1 is conditional, the drain count differs per path:
+                # full path has MT0+MT1 in flight (wait to num_gr_total leaves MT1),
+                # partial path has only MT0 (wait to 0). We emit both waits on
+                # mutually exclusive branches and rejoin before Sync/LR. The NLL and
+                # NGLL skips stay after the shared setup, exactly as the stock path.
+                emitted = self._to_emitted([
+                    *preloop_ops,
+                    initC_op,
+                    SkipOp(compare='LE', value=1,
+                           target='PreloopReorderPartial', rawLabel=True,
+                           branchComment='partial K tile: skip MT1 GR prefetch'),
+                    *mt1_ops,
+                    WaitGROp(wait_gr_counts=WaitGRCounts(use_num_gr_total=True)),
+                    self._make_reorder_branch_op('PreloopReorderJoin'),
+                    self._make_reorder_label_op('PreloopReorderPartial'),
+                    WaitGROp(wait_gr_counts=WaitGRCounts(), force_drain=True),
+                    self._make_reorder_label_op('PreloopReorderJoin'),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                    *gl2_preloop_ops,
+                    SkipOp(compare='LE', value=2, target='NGLL'),
+                ])
+            else:
                 emitted = self._to_emitted([
                     *preloop_ops,
                     initC_op,
@@ -3388,19 +3775,6 @@ class LogicalScheduler:
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
                     *mt1_ops,
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
-            else:
-                emitted = self._to_emitted([
-                    *self._make_gr_all_tensors(0, all_tiles),
-                    *self._make_depops_all_tensors(GRIncOp),
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *self._make_preloop_mt1_grs(),
                     *gl2_preloop_ops,
                     SkipOp(compare='LE', value=2, target='NGLL'),
                 ])
