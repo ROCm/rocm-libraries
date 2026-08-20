@@ -250,16 +250,15 @@ int dispatcher_run_gemm(const void* A,
     // (int32_t). Without this check a >2^31 dimension would wrap to a negative extent and
     // the kernel would read out of bounds instead of reporting an error.
     {
-        constexpr int64_t kIndexMax = static_cast<int64_t>(
-            std::numeric_limits<ck_tile::index_t>::max());
+        constexpr int64_t kIndexMax =
+            static_cast<int64_t>(std::numeric_limits<ck_tile::index_t>::max());
         const int64_t to_narrow[] = {M, N, K, stride_A, stride_B, stride_C};
         for(int64_t v : to_narrow)
         {
             if(v > kIndexMax)
             {
-                std::cerr << "dispatcher_run_gemm: dimension or stride " << v
-                          << " exceeds the " << kIndexMax
-                          << " limit of ck_tile::index_t (int32)\n";
+                std::cerr << "dispatcher_run_gemm: dimension or stride " << v << " exceeds the "
+                          << kIndexMax << " limit of ck_tile::index_t (int32)\n";
                 return -1;
             }
         }
