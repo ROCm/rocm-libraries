@@ -15,11 +15,23 @@ namespace hipblaslt::host_validation
     namespace initialization
     {
         inline constexpr uint64_t sequenceSeedSalt = 0x484950424c41534cULL;
-        inline constexpr uint64_t integerExactMatrixBSequence = 1;
+
+        enum class OperandSequence : uint64_t
+        {
+            MatrixA = 0,
+            MatrixB = 1,
+            MatrixC = 2,
+            Bias    = 3,
+        };
 
         inline uint64_t seedForSequence(uint64_t seed, uint64_t sequence)
         {
             return roc::host_validation::counterRandom(seed, sequenceSeedSalt, sequence);
+        }
+
+        inline uint64_t seedForSequence(uint64_t seed, OperandSequence sequence)
+        {
+            return seedForSequence(seed, static_cast<uint64_t>(sequence));
         }
 
         // Device initialization uses index-based generators. These offsets

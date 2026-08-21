@@ -483,6 +483,7 @@ TEST(HostValidationTolerancePolicy, Gfx11ScalesComputeTypeEpsilon)
                      std::numeric_limits<hipblasLtHalf>::epsilon());
     EXPECT_DOUBLE_EQ(gfx11_low_precision_accumulation_tolerance_coefficient(HIP_R_32F, 8),
                      64.0 * std::numeric_limits<float>::epsilon());
+    EXPECT_DOUBLE_EQ(bfloat16_output_rounding_tolerance_coefficient(), 0x1p-8);
 }
 
 TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
@@ -642,7 +643,7 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
                 const float    value        = exactMatrix.loadAs<float>({row, column, batch});
                 const size_t   logicalIndex = row + 2 * (column + 3 * batch);
                 const uint64_t sequenceSeed = initialization::seedForSequence(
-                    defaultInitializationSeed, initialization::integerExactMatrixBSequence);
+                    defaultInitializationSeed, initialization::OperandSequence::MatrixB);
                 const int magnitude
                     = indexedUniformInteger(sequenceSeed,
                                             generation_random_domain_version_1::realComponent,
@@ -691,6 +692,51 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
             for(size_t row = 0; row < 4; ++row)
                 infinityCount += std::isinf(specialMatrix.loadAs<float>({row, column, batch}));
     EXPECT_EQ(infinityCount, 1);
+}
+
+TEST(HostValidationDataInitializationBridge, StochasticMatrixModesUseRoleSpecificSequences)
+{
+    using namespace hipblaslt::host_validation;
+
+    constexpr std::array modes{
+        hipblaslt_initialization::rand_int,
+        hipblaslt_initialization::hpl,
+        hipblaslt_initialization::uniform_low_precision,
+        hipblaslt_initialization::norm_dist,
+        hipblaslt_initialization::norm_dist_one_special,
+        hipblaslt_initialization::uniform_01,
+        hipblaslt_initialization::integer_exact,
+    };
+
+    const auto values = [](const Tensor& tensor) {
+        return std::vector<std::byte>(tensor.storage().begin(), tensor.storage().end());
+    };
+
+    for(const hipblaslt_initialization mode : modes)
+    {
+        MatrixInitialization initialization;
+        initialization.initialization   = mode;
+        initialization.type             = HIP_R_32F;
+        initialization.rows             = 8;
+        initialization.columns          = 8;
+        initialization.leadingDimension = 8;
+
+        initialization.role = MatrixRole::A;
+        const auto matrixA  = values(generateMatrix(initialization));
+        EXPECT_EQ(matrixA, values(generateMatrix(initialization)));
+
+        initialization.role = MatrixRole::B;
+        const auto matrixB  = values(generateMatrix(initialization));
+        EXPECT_EQ(matrixB, values(generateMatrix(initialization)));
+
+        initialization.role = MatrixRole::C;
+        const auto matrixC  = values(generateMatrix(initialization));
+        EXPECT_EQ(matrixC, values(generateMatrix(initialization)));
+
+        EXPECT_NE(matrixA, matrixB) << "initialization=" << static_cast<int>(mode);
+        EXPECT_NE(matrixA, matrixC) << "initialization=" << static_cast<int>(mode);
+        EXPECT_NE(matrixB, matrixC) << "initialization=" << static_cast<int>(mode);
+    }
 }
 
 TEST(HostValidationDataInitializationBridge, PositiveOnlyMatrixPolicyIsExplicit)

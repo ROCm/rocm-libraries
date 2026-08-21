@@ -207,8 +207,8 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     To* gpuOutput{nullptr};
     Ti* gpuInput{nullptr};
 
-    auto hipErr = hipMalloc(&gpuOutput, outNumBytes);
-    hipErr      = hipMalloc(&gpuInput, m * n * inNumBytes);
+    ASSERT_EQ(hipMalloc(&gpuOutput, outNumBytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&gpuInput, m * n * inNumBytes), hipSuccess);
 
     std::vector<To> cpuOutput(1, 0.f);
     std::vector<Ti> cpuInput(m * n, 0.f);
@@ -217,13 +217,16 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     hipblaslt::host_validation::initialize(
         cpuInput.data(), cpuInput.size(), hipblaslt_initialization::hpl);
 
-    hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * inNumBytes);
+    ASSERT_EQ(hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * inNumBytes), hipSuccess);
 
     hipStream_t stream{};
-    hipErr            = hipStreamCreate(&stream);
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
     auto hipblasltErr = hipblasltExtAMax(type, dtype, gpuOutput, gpuInput, m, n, stream);
-
-    hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes);
+    ASSERT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
+    // The call is asynchronous on stream, and the allocator may reuse the preceding parameter's
+    // output storage. Wait before copying the result to the host.
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes), hipSuccess);
 
     using namespace roc::host_validation;
     Tensor referenceOutput = hipblaslt::host_validation::tensorFromMutableStorage(
@@ -238,9 +241,9 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
 
     EXPECT_NEAR(float(refOutput[0]), float(cpuOutput[0]), 1e-5);
 
-    hipErr = hipStreamDestroy(stream);
-    hipErr = hipFree(gpuOutput);
-    hipErr = hipFree(gpuInput);
+    EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
+    EXPECT_EQ(hipFree(gpuOutput), hipSuccess);
+    EXPECT_EQ(hipFree(gpuInput), hipSuccess);
 }
 
 TEST_P(ExtOpAMaxTest, amaxSuccess)
