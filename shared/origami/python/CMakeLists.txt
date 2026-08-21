@@ -1,38 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.25.2)
-
-project(origami-python VERSION 0.1.0 LANGUAGES CXX)
-
-# Find Python
-find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
-
-option(ORIGAMI_BUILD_FROM_SOURCE "Build origami from source instead of finding installed version" ON)
-option(ORIGAMI_PYTHON_ENABLE_WARNINGS "Enable compiler warnings for Python extension build" OFF)
-
-set(ORIGAMI_TARGET "")
-if(TARGET roc::origami)
-    set(ORIGAMI_TARGET roc::origami)
-elseif(TARGET origami)
-    set(ORIGAMI_TARGET origami)
-endif()
-
-if(ORIGAMI_TARGET)
-    # Origami already exists in this CMake tree; reuse it to avoid duplicate targets.
-elseif(ORIGAMI_BUILD_FROM_SOURCE)
-    set(ORIGAMI_ENABLE_PYTHON OFF CACHE BOOL "Build origami python bindings" FORCE)
-    add_subdirectory("${PROJECT_SOURCE_DIR}/.." origami_build EXCLUDE_FROM_ALL)
-    set(ORIGAMI_TARGET roc::origami)
-else()
-    find_package(origami REQUIRED)
-    set(ORIGAMI_TARGET roc::origami)
-endif()
+find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
 
 find_package(hip REQUIRED)
 
 find_package(nanobind CONFIG QUIET)
-if(NOT nanobind_FOUND)
+if(NOT nanobind_FOUND AND ORIGAMI_ENABLE_FETCH)
     include(FetchContent)
     FetchContent_Declare(
         nanobind
@@ -63,11 +37,10 @@ set_target_properties(_pyorigami PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/origami"
 )
 
-# Link against origami library and HIP
-target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} hip::host)
+target_link_libraries(_pyorigami PRIVATE roc::origami hip::host)
 
 set_target_properties(_pyorigami PROPERTIES
-    CXX_STANDARD 17                    # We can make this optional too if we want to support newer standards
+    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     CXX_VISIBILITY_PRESET hidden
@@ -76,7 +49,6 @@ set_target_properties(_pyorigami PROPERTIES
 target_compile_definitions(_pyorigami PRIVATE
     __HIP_PLATFORM_AMD__
 )
-
 if(ORIGAMI_PYTHON_ENABLE_WARNINGS)
     target_compile_options(_pyorigami PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall>
@@ -102,9 +74,6 @@ install(FILES
 )
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
-    # Enable CTest so add_test() registers tests for ctest
-    enable_testing()
-
     # Run core origami binding tests (no torch required)
     add_test(
         NAME "Python: test_origami_bindings"
