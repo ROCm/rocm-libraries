@@ -4,10 +4,11 @@
 """Generate the cache-key header (cachekey_generated.h) from the FlatBuffers schemas.
 
 Emits hashAppend()/logicallyEqual() over the zero-copy FlatBuffers accessors, with no
-allocation and no runtime reflection dependency, honouring the ``cache_ignore`` schema
-annotation -- read from the binary schema, since flatc's C++ output doesn't expose it.
-Hash and comparison walk each type's fields from one traversal, so the two cannot
-disagree about which fields matter.
+allocation and no runtime reflection dependency, honouring the ``cache_ignore``,
+``cache_uid``, ``cache_uid_domain``, and ``cache_uid_key`` schema annotations -- read
+from the binary schema, since flatc's C++ output doesn't expose them. Hash and
+comparison walk each type's fields from one traversal, so the two cannot disagree about
+which fields matter.
 
 Takes no arguments: it re-derives the whole header. Run manually, from the build via
 the custom target in flatbuffers_sdk/CMakeLists.txt, or through the ``cache-key-hipdnn``
@@ -46,9 +47,9 @@ INTEGER_BASE_TYPES = frozenset(
 
 # Reflection base types with a plain-scalar accessor: the return value itself is the
 # content, safe for `Hasher::raw`'s memcpy and for direct `!=` comparison. `Array`
-# (a fixed-length struct member) is deliberately excluded: its accessor returns a
-# pointer, which would satisfy `raw`'s trivially-copyable check while hashing and
-# comparing the address rather than the value.
+# (a fixed-length struct member) is excluded: its accessor returns a pointer, which
+# would satisfy `raw`'s trivially-copyable check while hashing and comparing the
+# address rather than the value.
 SCALAR_BASE_TYPES = frozenset(
     [
         "Bool",
@@ -460,11 +461,11 @@ class Emitter:
         self.w(
             "// Hash and logical-equality over the FlatBuffers accessors, with the field"
         )
+        self.w(f"// policy taken from the '{IGNORE_ATTRIBUTE}', '{UID_ATTRIBUTE}',")
         self.w(
-            f"// policy taken from the '{IGNORE_ATTRIBUTE}' and '{UID_ATTRIBUTE}' schema"
+            f"// '{UID_DOMAIN_ATTRIBUTE}', and '{UID_KEY_ATTRIBUTE}' schema annotations. Reads the"
         )
-        self.w("// annotations. Reads the caller's buffer in place: no UnPack, no")
-        self.w("// allocation, no reflection.")
+        self.w("// caller's buffer in place: no UnPack, no allocation, no reflection.")
         self.w("")
         self.w("#pragma once")
         self.w("")
@@ -531,8 +532,8 @@ class Emitter:
         )
         self.w("/// folds structure rather than caller-assigned labels.")
         self.w("///")
-        self.w("/// Holds the vector, never a copy: the caller owns the buffer and the")
-        self.w("/// traversal outlives neither.")
+        self.w("/// Non-owning view over the caller's vector; the traversal must not")
+        self.w("/// outlive it.")
         self.w("class UidCanon")
         self.w("{")
         self.w("public:")
@@ -540,8 +541,8 @@ class Emitter:
         self.w("")
         self.w("    /// A resolved reference carries its ordinal; an unresolved one")
         self.w("    /// carries the raw uid instead. `resolved` is folded and compared")
-        self.w("    /// ahead of `value`, so the two can never alias each other no")
-        self.w("    /// matter the uid's value or the domain's size.")
+        self.w("    /// ahead of `value`, distinguishing a resolved ordinal from a")
+        self.w("    /// dangling reference to the same number.")
         self.w("    struct Fold")
         self.w("    {")
         self.w("        bool resolved;")

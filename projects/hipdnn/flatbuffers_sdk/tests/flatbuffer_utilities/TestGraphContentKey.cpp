@@ -18,12 +18,12 @@ using Spec = ContentCarryingTestGraph::Spec;
 
 /// Two graphs are equal when a kernel measurement taken on one is valid for the other.
 ///
-/// This file is the field-set pin for the graph half of the key. The traversal is
-/// generated from `graph.fbs`, so a new field participates automatically; what codegen
-/// cannot decide is whether that participation is correct. A field that changes kernel
-/// behaviour needs a discriminates-on case here; one that does not needs
-/// `(cache_ignore)` and an equals-case; a tensor reference needs `(cache_uid)` and both
-/// -- equal under renumbering, unequal under rewiring.
+/// This file exercises every field the graph half of the key compares, one test per
+/// field, following `graph.fbs`'s traversal: a field that changes kernel behaviour gets
+/// a discriminates-on case; one that does not gets `(cache_ignore)` and an equals-case;
+/// a tensor reference gets `(cache_uid)` and both -- equal under renumbering, unequal
+/// under rewiring. Unlike `TestDeviceKey.cpp`'s structured-binding pin, nothing here
+/// forces a new schema field to get a case: this coverage is maintained by hand.
 GraphContentKey keyFor(const ContentCarryingTestGraph& graph)
 {
     return GraphContentKey{graph};
@@ -344,8 +344,8 @@ TEST(TestGraphContentKey, ADifferentNodeComputeDataTypeComparesUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
 }
 
-// Inside the union payload, not merely its discriminant: an ADD and a MUL are the same
-// node type and would collide on any key that stopped at attributes_type.
+// Inside the union payload rather than only its discriminant: an ADD and a MUL are the
+// same node type and would collide on any key that stopped at attributes_type.
 TEST(TestGraphContentKey, ADifferentPointwiseOperationComparesUnequal)
 {
     const Spec addition;
@@ -636,6 +636,45 @@ TEST(TestGraphContentKey, StdHashAgreesWithTheKeysOwnHash)
     const auto key = keyFor(graph);
 
     EXPECT_EQ(std::hash<GraphContentKey>{}(key), static_cast<size_t>(key.hash()));
+}
+
+/// A uid the domain cannot resolve folds its own value, tagged as unresolved. Folding
+/// every dangling reference to one shared sentinel instead would make these two graphs
+/// -- which point at different absent tensors -- compare equal and share a kernel.
+/// The generator test pins the emitted source; this pins the compiled behaviour.
+TEST(TestGraphContentKey, DanglingReferencesToDifferentUidsCompareUnequal)
+{
+    Spec first;
+    first.tensors
+        = {ContentCarryingTestGraph::TensorSpec{1}, ContentCarryingTestGraph::TensorSpec{2}};
+    first.tensors[0].raggedOffsetTensorUid = 900;
+
+    Spec second = first;
+    second.tensors[0].raggedOffsetTensorUid = 901;
+
+    const ContentCarryingTestGraph firstGraph{first};
+    const ContentCarryingTestGraph secondGraph{second};
+
+    EXPECT_NE(keyFor(firstGraph), keyFor(secondGraph));
+}
+
+/// An unresolved fold carries the raw uid, a resolved one carries an ordinal, and the
+/// two spaces must not overlap: uid 1 resolves to ordinal 0 here, so a dangling uid 0
+/// would collide with it if the resolved tag were dropped.
+TEST(TestGraphContentKey, ADanglingReferenceDoesNotAliasAResolvedOrdinal)
+{
+    Spec resolved;
+    resolved.tensors
+        = {ContentCarryingTestGraph::TensorSpec{1}, ContentCarryingTestGraph::TensorSpec{2}};
+    resolved.tensors[1].raggedOffsetTensorUid = 1;
+
+    Spec dangling = resolved;
+    dangling.tensors[1].raggedOffsetTensorUid = 0;
+
+    const ContentCarryingTestGraph resolvedGraph{resolved};
+    const ContentCarryingTestGraph danglingGraph{dangling};
+
+    EXPECT_NE(keyFor(resolvedGraph), keyFor(danglingGraph));
 }
 
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

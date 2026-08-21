@@ -141,7 +141,7 @@ repos:
         name: cache key codegen (hipDNN)
         entry: python projects/hipdnn/scripts/gen_cache_key.py
         language: python
-        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
       - id: gtest-format-miopen

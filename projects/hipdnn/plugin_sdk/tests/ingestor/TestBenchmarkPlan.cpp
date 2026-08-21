@@ -527,7 +527,7 @@ TEST(TestIngestorBenchmarkPlan, BuffersAndWorkspaceArriveAtTheChosenSubPlanUnmod
 }
 
 // ---------------------------------------------------------------------------
-// Ranked capture and write-back (D6, D11)
+// Ranked capture and write-back
 // ---------------------------------------------------------------------------
 
 /// Supplies deterministic times through the Timer seam so ordering, omission and the
@@ -679,6 +679,40 @@ TEST(TestIngestorBenchmarkPlan, EqualTimesKeepTheLowestCandidateIndexFirst)
     EXPECT_EQ(recorded[0].kernelId, testId(0x01));
     EXPECT_EQ(recorded[1].kernelId, testId(0x02));
     EXPECT_EQ(recorded[2].kernelId, testId(0x03));
+}
+
+/// The tie-break above cannot distinguish `sort` from `stable_sort`: libstdc++ drops to
+/// insertion sort below its introsort threshold, and that fallback happens to be stable,
+/// so three tied candidates order the same either way. This runs enough of them to clear
+/// the threshold, where an unstable sort genuinely reorders equal elements.
+TEST(TestIngestorBenchmarkPlan, EqualTimesKeepCandidateOrderPastTheInsertionSortThreshold)
+{
+    constexpr size_t TIED_CANDIDATES = 32;
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.reserve(TIED_CANDIDATES);
+    for(size_t index = 0; index < TIED_CANDIDATES; ++index)
+    {
+        candidates.push_back(
+            {testId(static_cast<uint8_t>(index + 1)), std::make_unique<FakePlan>(64)});
+    }
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        std::move(candidates),
+        handle,
+        std::vector<std::optional<double>>(TIED_CANDIDATES, 2.0),
+        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), TIED_CANDIDATES);
+    for(size_t index = 0; index < TIED_CANDIDATES; ++index)
+    {
+        EXPECT_EQ(recorded[index].kernelId, testId(static_cast<uint8_t>(index + 1)))
+            << "candidate at index " << index << " moved; equal times must keep input order";
+    }
 }
 
 } // namespace

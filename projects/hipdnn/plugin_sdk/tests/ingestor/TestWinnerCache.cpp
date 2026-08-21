@@ -203,8 +203,8 @@ TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 }
 
 // ---------------------------------------------------------------------------
-// The cache inside KernelIngestorStateManager: no eviction, the soft threshold,
-// Check 1, and thread safety (D8, D13, D16)
+// The cache inside KernelIngestorStateManager: no eviction, the soft growth-warning
+// threshold, ordering a covering record, and thread safety
 // ---------------------------------------------------------------------------
 
 /// Builds a distinct key per index without needing a distinct graph: the device half is
@@ -273,6 +273,72 @@ TEST(TestIngestorWinnerCacheStateManager, AnEmptyRecordIsNotStored)
         << "an all-unusable sweep has no ranking; storing one would read as a covered hit";
 }
 
+/// A key whose graph yields no bytes matches nothing on lookup, so storing under one
+/// would strand an entry the cache can never serve or evict.
+TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotStored)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+
+    // Supplies no bytes(), taking IGraph's default: valid or not, it cannot be keyed.
+    class BytelessGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
+    {
+    public:
+        const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
+        {
+            throw std::logic_error("BytelessGraph carries no graph");
+        }
+        bool isValid() const override
+        {
+            return false;
+        }
+        uint32_t nodeCount() const override
+        {
+            return 0;
+        }
+        bool hasOnlySupportedAttributes(
+            std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes> /*supported*/)
+            const override
+        {
+            return false;
+        }
+        const hipdnn_flatbuffers_sdk::data_objects::Node& getNode(uint32_t /*index*/) const override
+        {
+            throw std::logic_error("BytelessGraph carries no nodes");
+        }
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper&
+            getNodeWrapper(uint32_t /*index*/) const override
+        {
+            throw std::logic_error("BytelessGraph carries no nodes");
+        }
+        const std::vector<
+            std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper>>&
+            nodeWrappers() const override
+        {
+            throw std::logic_error("BytelessGraph carries no nodes");
+        }
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            getTensorMap() const override
+        {
+            throw std::logic_error("BytelessGraph carries no tensors");
+        }
+    };
+
+    const BytelessGraph graph;
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942";
+    properties.warpSize = 64;
+    properties.multiProcessorCount = 304;
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    ASSERT_FALSE(key.graph.isUsable()) << "the fixture must actually be unkeyable";
+
+    manager->recordWinner(key, WinnerRecord{entryFor(definitionFor(0x01), 1.0)});
+
+    EXPECT_EQ(manager->winnerCacheSize(), 0U)
+        << "an unkeyable graph never matches on lookup, so the entry would be unreachable";
+}
+
 TEST(TestIngestorWinnerCacheStateManager, AMissReturnsNulloptRatherThanAnEmptyRecord)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -282,7 +348,7 @@ TEST(TestIngestorWinnerCacheStateManager, AMissReturnsNulloptRatherThanAnEmptyRe
     EXPECT_FALSE(manager->winnerFor(keyForIndex(graph, 99)).has_value());
 }
 
-/// D8's soft threshold has no observable effect other than its log line, so the log
+/// The soft threshold has no observable effect other than its log line, so the log
 /// assertion is the only possible test of it.
 TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTheThreshold)
 {
@@ -317,8 +383,8 @@ TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTh
         << "the growth warning is reported once, not per insertion";
 }
 
-/// Check 1: a record covering the WHOLE catalog orders it, and rank() is never
-/// consulted. The heuristic is rigged to invert the order to make this observable.
+/// A record covering the WHOLE catalog orders it, and rank() is never consulted. The
+/// heuristic is rigged to invert the order to make this observable.
 TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithoutTheHeuristic)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -385,8 +451,8 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlread
     EXPECT_EQ(thirdCall.front().kernelId, measuredOrder.front().kernelId);
 }
 
-/// Check 1 fails on a partial record: the heuristic still ranks, because interleaving
-/// measured entries with unmeasured ones would invent an order nobody took.
+/// A partial record leaves the heuristic order intact: interleaving measured entries
+/// with unmeasured ones would invent an order nobody took.
 TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderIntact)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -410,8 +476,8 @@ TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderI
         << "an uncovering record must not reorder anything";
 }
 
-/// D8 puts the cache under its own mutex. Concurrent readers and writers must neither
-/// race nor lose entries; this is the guard for someone removing the lock as "unneeded".
+/// The cache sits under its own mutex. Concurrent readers and writers must neither race
+/// nor lose entries; this is the guard for someone removing the lock as "unneeded".
 TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEntry)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);

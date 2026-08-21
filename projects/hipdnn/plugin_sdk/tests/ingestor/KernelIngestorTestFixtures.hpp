@@ -445,9 +445,9 @@ public:
 
 constexpr const char* NAN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.nan_score";
 
-/// Scores the largest block size NaN and everything else by block size, so a ranking
-/// that mishandles NaN misorders the *finite* kernels too -- the failure this models is
-/// one pack poisoning the order for the rest, not merely losing its own place.
+/// Scores the largest block size NaN and everything else by block size, modeling one
+/// pack poisoning the whole ranking: a comparator that mishandles NaN misorders the
+/// finite kernels too, not just the NaN-scored one.
 inline double scoreNanForLargestBlock(const MatchContext& /*context*/,
                                       const BoundTokens& /*bound*/,
                                       const KernelDefinition& kernel)
