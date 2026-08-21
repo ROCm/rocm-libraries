@@ -288,8 +288,8 @@ public:
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
-            [&stateManager = _stateManager, winnerKey](std::vector<RankedEntry> ranking) {
-                stateManager.recordWinner(winnerKey, std::move(ranking));
+            [&stateManager = _stateManager, winnerKey](const std::vector<RankedEntry>& ranking) {
+                stateManager.recordWinner(winnerKey, ranking);
             }));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
