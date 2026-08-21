@@ -834,6 +834,56 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
 /// HIPDNN_CACHE_DIR is supplied by the ctest registration, shared between the two
 /// invocations, so neither half sets it. Both are DISABLED_ by default so a plain
 /// developer run of the suite skips them; ctest passes --gtest_also_run_disabled_tests.
+/// Check 1 must reach the shard when this process has recorded nothing.
+///
+/// The guard in front of it is an optimisation -- building a WinnerKey folds the whole
+/// graph buffer -- but it cannot be "is the in-memory cache empty", because after this
+/// change an empty in-memory cache no longer means there is nothing to find: the record
+/// may be on disk and simply not read yet. Verified by mutation: reverting that guard to
+/// a winnerCacheSize() check makes only this test fail, and every other case in this
+/// suite still passes, because they all record in-process first.
+TEST(TestIngestorWinnerCacheStateManager, AColdManagerOrdersACatalogFromTheShardAlone)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("cold_order");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    // Record the heuristic's order reversed, covering the whole catalog, so a served
+    // record is distinguishable from a heuristic ranking.
+    std::vector<DescriptorId> reversedIds;
+    {
+        const auto writer = makeNamedStateManager("test:ColdOrder");
+        const auto catalog = writer->sortedDefinitions(context);
+        ASSERT_GE(catalog.size(), 2U) << "need at least two kernels for order to be observable";
+
+        WinnerRecord record;
+        double timeMs = 1.0;
+        for(auto kernel = catalog.rbegin(); kernel != catalog.rend(); ++kernel)
+        {
+            record.push_back(entryFor(*kernel, timeMs));
+            reversedIds.push_back(kernel->kernelId);
+            timeMs += 1.0;
+        }
+        writer->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}}, record);
+    }
+
+    // A manager that has recorded nothing: its in-memory cache is empty, so the only
+    // way to the measured order is through the shard.
+    const auto reader = makeNamedStateManager("test:ColdOrder");
+    ASSERT_EQ(reader->winnerCacheSize(), 0U) << "the reader must start cold";
+
+    const auto ordered = reader->sortedDefinitions(context);
+
+    ASSERT_EQ(ordered.size(), reversedIds.size());
+    for(size_t i = 0; i < reversedIds.size(); ++i)
+    {
+        EXPECT_EQ(ordered[i].kernelId, reversedIds[i])
+            << "entry " << i << " is not in the measured order the shard holds";
+    }
+}
+
 constexpr const char* CROSS_PROCESS_ENGINE = "test:CrossProcess";
 
 /// The fixed key both halves derive, so the reader looks for exactly what the writer laid
