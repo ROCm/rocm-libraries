@@ -50,9 +50,7 @@ struct DeviceKey
 
     bool operator==(const DeviceKey& other) const
     {
-        return _hash == other._hash && _properties.gcnArchName == other._properties.gcnArchName
-               && _properties.warpSize == other._properties.warpSize
-               && _properties.multiProcessorCount == other._properties.multiProcessorCount;
+        return _hash == other._hash && _properties.gcnArchName == other._properties.gcnArchName;
     }
 
     bool operator!=(const DeviceKey& other) const
