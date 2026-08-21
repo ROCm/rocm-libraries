@@ -31,12 +31,21 @@ option(
     "Build the temporary mxDataGenerator compatibility-target smoke test."
     OFF
 )
+option(
+    MXDATAGENERATOR_INSTALL
+    "Install the temporary mxDataGenerator compatibility package."
+    ${PROJECT_IS_TOP_LEVEL}
+)
 if(MXDATAGENERATOR_BUILD_TESTING)
     add_executable(
         mxDataGeneratorTests
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/compatibility_target_test.cpp"
     )
     target_link_libraries(mxDataGeneratorTests PRIVATE roc::mxDataGenerator)
+endif()
+
+if(NOT MXDATAGENERATOR_INSTALL)
+    return()
 endif()
 
 set(mxdatagenerator_install_cmakedir
