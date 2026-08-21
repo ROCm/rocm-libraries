@@ -28,6 +28,12 @@ namespace hipblaslt::host_validation
 
     struct MatmulValidationCase
     {
+        struct PointwiseTolerance
+        {
+            double absolute          = 0.0;
+            double symmetricRelative = 0.0;
+        };
+
         std::vector<HostComparisonRequest> outputs;
         struct SideOutput
         {
@@ -38,8 +44,7 @@ namespace hipblaslt::host_validation
         std::optional<SideOutput> maximum;
         std::optional<SideOutput> auxiliary;
         std::optional<SideOutput> bias;
-        double absoluteTolerance          = 0.0;
-        double symmetricRelativeTolerance = 0.0;
+        PointwiseTolerance pointwiseTolerance;
     };
 
     struct MatmulValidationMetrics
@@ -73,17 +78,17 @@ namespace hipblaslt::host_validation
 
         if(options.comparePointwise)
         {
-            if(testCase.symmetricRelativeTolerance != 0)
+            if(testCase.pointwiseTolerance.symmetricRelative != 0)
             {
                 request.pointwise                  = HostPointwiseComparison::SymmetricRelative;
-                request.symmetricRelativeTolerance = testCase.symmetricRelativeTolerance;
+                request.symmetricRelativeTolerance = testCase.pointwiseTolerance.symmetricRelative;
             }
             else
             {
-                request.pointwise = testCase.absoluteTolerance != 0
+                request.pointwise = testCase.pointwiseTolerance.absolute != 0
                                         ? HostPointwiseComparison::Near
                                         : HostPointwiseComparison::Unit;
-                request.absoluteTolerance = testCase.absoluteTolerance;
+                request.absoluteTolerance = testCase.pointwiseTolerance.absolute;
             }
         }
         return compareHost(request);

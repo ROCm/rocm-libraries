@@ -112,17 +112,37 @@ namespace hipblaslt::host_validation
                    || type == ScalarType::Float32 || type == ScalarType::Float64;
         }
 
+        initialization::OperandSequence operandSequence(MatrixRole role)
+        {
+            switch(role)
+            {
+            case MatrixRole::A:
+                return initialization::OperandSequence::MatrixA;
+            case MatrixRole::B:
+                return initialization::OperandSequence::MatrixB;
+            case MatrixRole::C:
+                return initialization::OperandSequence::MatrixC;
+            }
+            throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
+        }
+
+        uint64_t matrixSeed(uint64_t seed, MatrixRole role)
+        {
+            return initialization::seedForSequence(seed, operandSequence(role));
+        }
+
         GenerationRecipe matrixGenerationRecipe(const MatrixInitialization& initialization,
                                                 const Tensor&               destination)
         {
             const ScalarType type    = destination.type();
             const bool complexOutput = scalarTypeInfo(type).category == ScalarCategory::Complex;
+            const uint64_t seed      = matrixSeed(defaultInitializationSeed, initialization.role);
             if(initialization.forceNaN)
             {
                 if(!scalarTypeInfo(type).supportsNaN)
                     throw std::invalid_argument(
                         "hipBLASLt input type has no supported NaN initialization.");
-                return nanRecipe(type, ComplexGenerationPolicy::Replicated);
+                return nanRecipe(type, ComplexGenerationPolicy::Replicated, seed);
             }
 
             switch(initialization.initialization)
@@ -134,7 +154,7 @@ namespace hipblaslt::host_validation
                                                    && category != ScalarCategory::Boolean
                                                    && category != ScalarCategory::UnsignedInteger
                                                    && category != ScalarCategory::Scale;
-                return randomIntegerRecipe(type, {.alternating = alternating});
+                return randomIntegerRecipe(type, {.alternating = alternating, .seed = seed});
             }
             case hipblaslt_initialization::trig_float:
             {
@@ -144,9 +164,9 @@ namespace hipblaslt::host_validation
                 return trigonometricRecipe(type, realComponent, initialization.positiveOnly);
             }
             case hipblaslt_initialization::hpl:
-                return hplRecipe(type, {.positiveOnly = initialization.positiveOnly});
+                return hplRecipe(type, {.positiveOnly = initialization.positiveOnly, .seed = seed});
             case hipblaslt_initialization::uniform_low_precision:
-                return lowPrecisionRecipe(type);
+                return lowPrecisionRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
             case hipblaslt_initialization::special:
             {
                 if(initialization.role == MatrixRole::A)
@@ -156,35 +176,33 @@ namespace hipblaslt::host_validation
                     return GenerationRecipe::realOnly(
                         GenerationRecipe::constant({.value = specialInitializationBValue}));
                 return GenerationRecipe::realOnly(
-                    GenerationRecipe::uniformInteger({.lower = 1, .upper = 10}));
+                    GenerationRecipe::uniformInteger({.lower = 1, .upper = 10}), {.seed = seed});
             }
             case hipblaslt_initialization::zero:
                 return GenerationRecipe::realOnly(GenerationRecipe::zero());
             case hipblaslt_initialization::norm_dist:
-                return normalRecipe(type);
+                return normalRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
             case hipblaslt_initialization::norm_dist_one_special:
             {
                 if(!supportsExplicitFloatingSentinel(type))
                     throw std::invalid_argument("hipBLASLt one-special normal initialization "
                                                 "requires an ordinary floating type.");
-                return normalRecipe(
-                    type, ComplexGenerationPolicy::RealOnly, oneSpecialInitializationSeed);
+                return normalRecipe(type,
+                                    ComplexGenerationPolicy::RealOnly,
+                                    matrixSeed(oneSpecialInitializationSeed, initialization.role));
             }
             case hipblaslt_initialization::uniform_01:
-                return uniformZeroOneRecipe(type);
+                return uniformZeroOneRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
             case hipblaslt_initialization::integer_exact:
             {
                 GenerationRecipe::Component component
                     = GenerationRecipe::uniformInteger({.lower = 0, .upper = 2});
-                uint64_t recipeSeed = defaultInitializationSeed;
                 if(initialization.role == MatrixRole::B)
                 {
                     component = component.withAlternatingSign(
                         {.dimensions = {0, 1}, .negativeWhenOdd = false});
-                    recipeSeed = initialization::seedForSequence(
-                        defaultInitializationSeed, initialization::integerExactMatrixBSequence);
                 }
-                return GenerationRecipe::realOnly(std::move(component), {.seed = recipeSeed});
+                return GenerationRecipe::realOnly(std::move(component), {.seed = seed});
             }
             case hipblaslt_initialization::fp16_accumulator_probe:
             {
@@ -219,7 +237,7 @@ namespace hipblaslt::host_validation
                 if(!supportsExplicitFloatingSentinel(type))
                     throw std::invalid_argument(
                         "hipBLASLt NaN initialization requires an ordinary floating type.");
-                return nanRecipe(type);
+                return nanRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
             }
             throw std::invalid_argument("Unsupported hipBLASLt host matrix initialization mode.");
         }

@@ -16,14 +16,6 @@ namespace hipblaslt::host_validation
 {
     using namespace ::roc::host_validation;
 
-    enum class GroupedGemmSequence : uint64_t
-    {
-        MatrixA = 0,
-        MatrixB = 1,
-        MatrixC = 2,
-        Bias    = 3,
-    };
-
     template <typename InputA, typename InputB, typename Output>
     void initializeGroupedGemm(std::vector<InputA>&     a,
                                int64_t                  sizeA,
@@ -39,7 +31,7 @@ namespace hipblaslt::host_validation
         const auto fillValues = [&](auto&                              values,
                                     int64_t                            size,
                                     const GenerationRecipe::Component& component,
-                                    GroupedGemmSequence            sequence) {
+                                    initialization::OperandSequence    sequence) {
             if(size < 0)
                 throw std::invalid_argument("Grouped GEMM initialization size is negative.");
             if(static_cast<size_t>(size) > values.size())
@@ -53,10 +45,10 @@ namespace hipblaslt::host_validation
         };
 
         const auto fillAllOperands = [&](const GenerationRecipe::Component& component) {
-            fillValues(a, sizeA, component, GroupedGemmSequence::MatrixA);
-            fillValues(b, sizeB, component, GroupedGemmSequence::MatrixB);
-            fillValues(c, sizeC, component, GroupedGemmSequence::MatrixC);
-            fillValues(bias, sizeBias, component, GroupedGemmSequence::Bias);
+            fillValues(a, sizeA, component, initialization::OperandSequence::MatrixA);
+            fillValues(b, sizeB, component, initialization::OperandSequence::MatrixB);
+            fillValues(c, sizeC, component, initialization::OperandSequence::MatrixC);
+            fillValues(bias, sizeBias, component, initialization::OperandSequence::Bias);
         };
 
         // HPL means High-Performance Linpack style: uniform values in [-0.5, 0.5].
@@ -71,19 +63,19 @@ namespace hipblaslt::host_validation
             // 16-bit inputs; A, C, and bias retain positive integers.
             const GenerationRecipe::Component alternatingRandom
                 = randomInteger.withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = false});
-            fillValues(a, sizeA, randomInteger, GroupedGemmSequence::MatrixA);
-            fillValues(b, sizeB, alternatingRandom, GroupedGemmSequence::MatrixB);
-            fillValues(c, sizeC, randomInteger, GroupedGemmSequence::MatrixC);
-            fillValues(bias, sizeBias, randomInteger, GroupedGemmSequence::Bias);
+            fillValues(a, sizeA, randomInteger, initialization::OperandSequence::MatrixA);
+            fillValues(b, sizeB, alternatingRandom, initialization::OperandSequence::MatrixB);
+            fillValues(c, sizeC, randomInteger, initialization::OperandSequence::MatrixC);
+            fillValues(bias, sizeBias, randomInteger, initialization::OperandSequence::Bias);
         }
         else if(initialization == hipblaslt_initialization::trig_float)
         {
             const GenerationRecipe::Component sine   = GenerationRecipe::sine();
             const GenerationRecipe::Component cosine = GenerationRecipe::cosine();
-            fillValues(a, sizeA, sine, GroupedGemmSequence::MatrixA);
-            fillValues(b, sizeB, cosine, GroupedGemmSequence::MatrixB);
-            fillValues(c, sizeC, sine, GroupedGemmSequence::MatrixC);
-            fillValues(bias, sizeBias, sine, GroupedGemmSequence::Bias);
+            fillValues(a, sizeA, sine, initialization::OperandSequence::MatrixA);
+            fillValues(b, sizeB, cosine, initialization::OperandSequence::MatrixB);
+            fillValues(c, sizeC, sine, initialization::OperandSequence::MatrixC);
+            fillValues(bias, sizeBias, sine, initialization::OperandSequence::Bias);
         }
         else if(initialization == hipblaslt_initialization::hpl)
         {
@@ -103,13 +95,13 @@ namespace hipblaslt::host_validation
             fillValues(a,
                        sizeA,
                        GenerationRecipe::constant({.value = specialInitializationAValue}),
-                       GroupedGemmSequence::MatrixA);
+                       initialization::OperandSequence::MatrixA);
             fillValues(b,
                        sizeB,
                        GenerationRecipe::constant({.value = specialInitializationBValue}),
-                       GroupedGemmSequence::MatrixB);
-            fillValues(c, sizeC, hpl, GroupedGemmSequence::MatrixC);
-            fillValues(bias, sizeBias, hpl, GroupedGemmSequence::Bias);
+                       initialization::OperandSequence::MatrixB);
+            fillValues(c, sizeC, hpl, initialization::OperandSequence::MatrixC);
+            fillValues(bias, sizeBias, hpl, initialization::OperandSequence::Bias);
         }
         else
         {
