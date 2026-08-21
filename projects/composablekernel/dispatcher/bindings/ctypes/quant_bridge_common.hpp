@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 #include <string>
 
@@ -112,6 +113,80 @@ template <typename KernelT>
 inline float launch(const ck_tile::QuantGemmHostArgs& args, bool do_time)
 {
     return KernelT::launch(args, make_stream_config(do_time));
+}
+
+// The three guard helpers below replace the init / null-pointer / dimension
+// checks that every bridge's run() used to inline verbatim. Each prints the same
+// diagnostic as before and returns false so the caller can `return -1`. The
+// per-op argument lists differ (4 vs 5 pointers; MNK plus op-specific QK/QN
+// counts), so the pointer/dimension checks take an initializer_list.
+inline bool check_initialized(const char* fn, bool initialized)
+{
+    if(!initialized)
+    {
+        std::cerr << fn << ": not initialized\n";
+        return false;
+    }
+    return true;
+}
+
+inline bool check_non_null(const char* fn, std::initializer_list<const void*> ptrs)
+{
+    for(const void* p : ptrs)
+    {
+        if(!p)
+        {
+            std::cerr << fn << ": null pointer argument\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool check_positive_dims(const char* fn, std::initializer_list<int64_t> dims)
+{
+    for(int64_t d : dims)
+    {
+        if(d <= 0)
+        {
+            std::cerr << fn << ": invalid dimensions\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+// The identical tail every bridge's run() ended with: direct-launch the
+// force-included kernel (return -2 if it rejects the args), copy C back to the
+// host, publish the optional timing, return 0. C_dev is any type convertible to
+// const CT* (e.g. DeviceBuffer<CT>).
+template <typename KernelT, typename CT>
+inline int launch_and_copyback(const char* fn,
+                               const ck_tile::QuantGemmHostArgs& args,
+                               void* C_host,
+                               const CT* C_dev,
+                               std::size_t mn_elems,
+                               float* time_ms)
+{
+    const float exec_time = launch<KernelT>(args, time_ms != nullptr);
+    if(exec_time < 0.0f)
+    {
+        std::cerr << fn << ": kernel reported unsupported args\n";
+        return -2;
+    }
+
+    const hipError_t err =
+        hipMemcpy(C_host, C_dev, elements_to_bytes<CT>(mn_elems), hipMemcpyDeviceToHost);
+    if(err != hipSuccess)
+    {
+        std::cerr << fn << ": HIP error: " << hipGetErrorString(err) << " at " << __FILE__ << ":"
+                  << __LINE__ << "\n";
+        return -1;
+    }
+
+    if(time_ms)
+        *time_ms = exec_time;
+    return 0;
 }
 
 } // namespace quant_bridge

@@ -56,22 +56,8 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_rowcolquant_gemm";
 
-    if(!g_initialized)
-    {
-        std::cerr << kFn << ": not initialized\n";
-        return -1;
-    }
-    if(!A || !B || !AQ || !BQ || !C)
-    {
-        std::cerr << kFn << ": null pointer argument\n";
-        return -1;
-    }
-    if(M <= 0 || N <= 0 || K <= 0)
-    {
-        std::cerr << kFn << ": invalid dimensions\n";
-        return -1;
-    }
-    if(!validate_supported_arch(kFn))
+    if(!check_initialized(kFn, g_initialized) || !check_non_null(kFn, {A, B, AQ, BQ, C}) ||
+       !check_positive_dims(kFn, {M, N, K}) || !validate_supported_arch(kFn))
         return -1;
 
     // Only packed (contiguous) layouts are supported: buffers are M*K, K*N, M, N, M*N.
@@ -125,18 +111,8 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     args.stride_AQ = 1;
     args.stride_BQ = 1;
 
-    const float exec_time = launch<SelectedKernel>(args, time_ms != nullptr);
-    if(exec_time < 0.0f)
-    {
-        std::cerr << kFn << ": kernel reported unsupported args\n";
-        return -2;
-    }
-
-    BRIDGE_HIP_CHECK(
-        kFn, hipMemcpy(C, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
-    if(time_ms)
-        *time_ms = exec_time;
-    return 0;
+    return launch_and_copyback<SelectedKernel, CDataType>(
+        kFn, args, C, C_dev, static_cast<std::size_t>(M) * N, time_ms);
 }
 
 } // extern "C"

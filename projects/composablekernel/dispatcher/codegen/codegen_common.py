@@ -11,15 +11,20 @@ Both unified_gemm_codegen.py and unified_grouped_conv_codegen.py import from her
 to eliminate duplication.
 """
 
+import argparse
+import json
 import logging
 import concurrent.futures
 from dataclasses import dataclass
+from pathlib import Path
 from typing import (
+    Any,
     Callable,
     ClassVar,
     Dict,
     FrozenSet,
     List,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -804,6 +809,196 @@ def make_gemm_abquant_kernel_name(
     if eight_waves:
         parts.append("eightwaves")
     return "_".join(parts)
+
+
+# ============================================================================
+# Shared header emit + CLI driver for the block-scale quant codegen scripts
+# ============================================================================
+#
+# The five per-op codegen scripts (unified_gemm_{tensor_quant,rowcolquant,aquant,
+# abquant,bquant}_codegen.py) each emitted an identical .hpp preamble and an
+# identical CK_TILE_SINGLE_KERNEL_INCLUDE footer, and each carried a near-verbatim
+# copy of the generate_kernels / _generate_one / main() CLI driver. Those blocks
+# now live here so a fix happens once; the op-specific header body (pipeline /
+# epilogue / QuantType) and the per-op config sweep stay in the per-op scripts.
+
+
+def emit_generated_header_preamble(title: str, module_name: str, extra: str = "") -> str:
+    """Emit the shared auto-generated-header prologue: license, DO-NOT-EDIT line,
+    ``#pragma once`` and the four ck_tile includes every quant kernel header needs.
+
+    ``title`` is the human op label (e.g. ``"Gemm TensorQuant"``); ``module_name``
+    is the generator script that owns the file. ``extra`` is inserted between the
+    includes and the opening ``namespace`` (bquant uses it for its arch guard); it
+    should already carry its own surrounding newlines, and defaults to a single
+    blank line to match the no-extra layout.
+    """
+    tail = extra if extra else "\n"
+    return f"""\
+// SPDX-License-Identifier: MIT
+// Auto-generated {title} kernel header.
+// DO NOT EDIT -- regenerate via {module_name}
+#pragma once
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/gemm_quant.hpp"
+#include "ck_tile/ops/epilogue.hpp"
+{tail}"""
+
+
+def emit_single_kernel_include_footer(
+    *,
+    ns: str,
+    struct: str,
+    ck_a: str,
+    ck_b: str,
+    ck_c: str,
+    ck_q: str,
+    ck_acc: str,
+    extra_lines: str = "",
+) -> str:
+    """Emit the shared ``#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE`` footer.
+
+    Every op re-exports SelectedKernel, KERNEL_NAME and the A/B/C/Q/Acc type
+    aliases into the global namespace for the force-include (single-kernel) build.
+    Op-specific trailing exports (QuantGroupSize, layouts, GroupSizeK, ...) are
+    passed via ``extra_lines`` (each line terminated as the caller wants).
+    """
+    body = f"""\
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+using SelectedKernel = {ns}::{struct};
+constexpr const char* KERNEL_NAME = {ns}::KERNEL_NAME;
+using ADataType   = {ck_a};
+using BDataType   = {ck_b};
+using CDataType   = {ck_c};
+using QDataType   = {ck_q};
+using AccDataType = {ck_acc};
+"""
+    if extra_lines:
+        body += extra_lines if extra_lines.endswith("\n") else extra_lines + "\n"
+    body += "#endif // CK_TILE_SINGLE_KERNEL_INCLUDE\n"
+    return body
+
+
+def generate_kernels_generic(
+    *,
+    op_label: str,
+    generator: Any,
+    specs: Sequence[Any],
+    output_dir: Path,
+    parallel: bool = True,
+) -> List[Path]:
+    """Write one ``<spec.name>.hpp`` per spec via ``generator.generate(spec)``.
+
+    Shared body of every per-op ``generate_kernels`` / ``_generate_one``: make the
+    output dir, fan out over specs (threaded when parallel and >1 spec), log
+    per-file progress, and swallow+log per-spec failures exactly as before.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if not specs:
+        log.warning(
+            "No kernel specs produced from config -- check variant_keys and tile_configs"
+        )
+        return []
+
+    log.info("Generating %d %s kernel headers into %s", len(specs), op_label, output_dir)
+    generated: List[Path] = []
+
+    def _generate_one(spec: Any) -> Path:
+        header = generator.generate(spec)
+        out_path = output_dir / f"{spec.name}.hpp"
+        out_path.write_text(header)
+        log.info("  wrote %s", out_path.name)
+        return out_path
+
+    if parallel and len(specs) > 1:
+        with concurrent.futures.ThreadPoolExecutor() as ex:
+            futures = {ex.submit(_generate_one, s): s for s in specs}
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    generated.append(fut.result())
+                except Exception as e:  # noqa: BLE001
+                    log.error("Failed generating %s: %s", futures[fut].name, e)
+    else:
+        for spec in specs:
+            try:
+                generated.append(_generate_one(spec))
+            except Exception as e:  # noqa: BLE001
+                log.error("Failed generating %s: %s", spec.name, e)
+
+    log.info("Generated %d / %d headers", len(generated), len(specs))
+    return generated
+
+
+def run_codegen_cli(
+    *,
+    description: str,
+    op_label: str,
+    make_generator: Callable[[], Any],
+    build_specs: Callable[[dict], Sequence[Any]],
+    default_config: Callable[..., dict],
+    arch_aware: bool = False,
+    default_gfx_arch: str = "gfx950",
+) -> int:
+    """Shared argparse + config-load + list/generate driver for the quant codegen CLIs.
+
+    ``arch_aware`` adds ``--gfx-arch`` and mirrors the existing per-op behavior
+    exactly: generation always uses ``default_config()`` (no arch arg), while
+    ``--list-names`` uses ``default_config(gfx_arch)``.
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--output-dir", type=Path,
+        help="Directory to write generated .hpp files (required unless --list-names)")
+    parser.add_argument(
+        "--config", type=Path,
+        help="JSON config file (defaults to built-in sweep)")
+    parser.add_argument(
+        "--config-json", type=str,
+        help="Inline JSON config string")
+    parser.add_argument(
+        "--no-parallel", action="store_true",
+        help="Disable parallel generation")
+    parser.add_argument(
+        "--list-names", action="store_true",
+        help="Print kernel names that would be generated and exit")
+    if arch_aware:
+        parser.add_argument(
+            "--gfx-arch", type=str, default=default_gfx_arch,
+            help="Target GPU arch for the built-in default config's arch-derived "
+                 "WarpTileK. Ignored when --config/--config-json is given.")
+    args = parser.parse_args()
+
+    cfg: Optional[dict] = None
+    if args.config_json:
+        try:
+            cfg = json.loads(args.config_json)
+        except json.JSONDecodeError as e:
+            log.error("Invalid --config-json: %s", e)
+            return 1
+    elif args.config:
+        with open(args.config) as f:
+            cfg = json.load(f)
+
+    if args.list_names:
+        list_cfg = cfg or (default_config(args.gfx_arch) if arch_aware else default_config())
+        for s in build_specs(list_cfg):
+            print(s.name)
+        return 0
+
+    if args.output_dir is None:
+        parser.error("--output-dir is required unless --list-names is given")
+
+    specs = build_specs(cfg or default_config())
+    paths = generate_kernels_generic(
+        op_label=op_label,
+        generator=make_generator(),
+        specs=specs,
+        output_dir=args.output_dir,
+        parallel=not args.no_parallel,
+    )
+    return 0 if paths else 1
 
 
 # ============================================================================
