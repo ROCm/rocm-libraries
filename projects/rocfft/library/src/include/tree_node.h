@@ -1047,7 +1047,14 @@ public:
     // Overridden by nodes that use narrower index types
     virtual IndexType GetKernelIndexType() const
     {
-        return IndexType::U64;
+        auto idx_limit = GetU32KernelIndexLimit();
+
+        if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
+           || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
+        {
+            return IndexType::U64;
+        }
+        return IndexType::U32;
     }
     // Max element index the kernel would compute for a given I/O side.
     size_t       MaxKernelIndex(io_data_label io) const;
@@ -1074,8 +1081,6 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    IndexType GetKernelIndexType() const override;
-
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override
