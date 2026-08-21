@@ -417,8 +417,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     }
     else
     {
-        /* Mirror Python default_vector_sizes(kpg, ..., dtype_d)[2]: largest power-of-two
-         * dividing kpg (fp32: max 4, otherwise max 8). */
+        /* Mirror Python default_vector_sizes(cpg, kpg, dtype_d)[2] (depends only on kpg):
+         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8). */
         int kpg = rocke_conv_problem_kpg(p);
         bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
         if(is_fp32_d)
