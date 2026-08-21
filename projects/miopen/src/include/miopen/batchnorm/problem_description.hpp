@@ -72,7 +72,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        double epsilon_,
                        bool resultsave_,
                        bool resultrunning_,
-                       size_t min_workgroups_)
+                       size_t num_cu_,
+                       size_t wavefront_size_)
         : direction(Direction::ForwardTraining),
           bn_mode(bn_mode_),
           xDesc(xDesc_),
@@ -85,7 +86,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
           epsilon(epsilon_),
           resultsave(resultsave_),
           resultrunning(resultrunning_),
-          min_workgroups(min_workgroups_)
+          num_cu(num_cu_),
+          wavefront_size(wavefront_size_)
     {
         SetSpatialDims();
         in_layout  = ComputeInLayout();
@@ -104,7 +106,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        double epsilon_,
                        bool resultsave_,
                        bool resultrunning_,
-                       size_t min_workgroups_,
+                       size_t num_cu_,
+                       size_t wavefront_size_,
                        const ActivationDescriptor& activDesc_)
         : direction(Direction::ForwardTraining),
           bn_mode(bn_mode_),
@@ -118,7 +121,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
           epsilon(epsilon_),
           resultsave(resultsave_),
           resultrunning(resultrunning_),
-          min_workgroups(min_workgroups_),
+          num_cu(num_cu_),
+          wavefront_size(wavefront_size_),
           activDesc(activDesc_)
     {
         SetSpatialDims();
@@ -194,7 +198,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        const TensorDescriptor& sVarianceDesc_,
                        double epsilon_,
                        bool useSaved_,
-                       size_t min_workgroups_)
+                       size_t num_cu_,
+                       size_t wavefront_size_)
         : direction(Direction::Backward),
           bn_mode(bn_mode_),
           xDesc(xDesc_),
@@ -206,7 +211,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
           sVarianceDesc(sVarianceDesc_),
           epsilon(epsilon_),
           useSaved(useSaved_),
-          min_workgroups(min_workgroups_)
+          num_cu(num_cu_),
+          wavefront_size(wavefront_size_)
     {
         SetSpatialDims();
         in_layout  = ComputeInLayout();
@@ -225,7 +231,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        const TensorDescriptor& sVarianceDesc_,
                        double epsilon_,
                        bool useSaved_,
-                       size_t min_workgroups_,
+                       size_t num_cu_,
+                       size_t wavefront_size_,
                        const ActivationDescriptor& activDesc_)
         : direction(Direction::Backward),
           bn_mode(bn_mode_),
@@ -238,7 +245,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
           sVarianceDesc(sVarianceDesc_),
           epsilon(epsilon_),
           useSaved(useSaved_),
-          min_workgroups(min_workgroups_),
+          num_cu(num_cu_),
+          wavefront_size(wavefront_size_),
           activDesc(activDesc_)
     {
         SetSpatialDims();
@@ -303,8 +311,12 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
     std::size_t GetMinWorkgroups() const
     {
         assert(direction == Direction::ForwardTraining || direction == Direction::Backward);
-        return min_workgroups;
+        return std::max(std::size_t{1}, static_cast<std::size_t>(0.6f * num_cu));
     }
+
+    std::size_t GetNumCu() const { return num_cu; }
+
+    std::size_t GetWavefrontSize() const { return wavefront_size; }
 
     bool UseSaved() const
     {
@@ -426,7 +438,8 @@ private:
     std::string out_layout     = "NCHW";
     std::string din_layout     = "NCHW";
     std::size_t spatial_dim    = 2;
-    std::size_t min_workgroups = 1;
+    std::size_t num_cu         = 1;
+    std::size_t wavefront_size = 64;
 
     ActivationDescriptor activDesc;
 

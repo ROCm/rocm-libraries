@@ -41,6 +41,51 @@ namespace batchnorm {
 // adding a new vector width.
 inline constexpr size_t kMaxSupportedVectorSize = 8;
 
+// Threads resident per CU at full occupancy. This is 2048 on both CDNA
+// (32 wave64 slots per CU) and gfx125x (64 wave32 slots per CU).
+inline constexpr size_t kThreadsPerCu = 2048;
+
+// Fraction of the machine the default configuration aims to keep occupied,
+// expressed as a numerator over 8.
+inline constexpr size_t kMinOccupancyEighths = 3;
+
+// The NHWC spatial-multiple kernels launch (c / vectorsize) * h * w threads, so
+// every doubling of vectorsize halves the number of waves in flight. These
+// kernels are memory-latency bound, which means the widest applicable vector is
+// only a win once there are already enough waves resident to hide that latency.
+// On a 256 CU part the fixed default of 4 leaves small activations running at a
+// few waves per CU, and the machine idles waiting on memory.
+//
+// Narrow the vector until the launch covers at least kMinOccupancyEighths/8 of
+// the device. Divisibility of c by the resulting vectorsize is still checked by
+// the caller, which falls back to vectorsize 1 when it does not hold.
+//
+// Measured on gfx1250 (256 CU, wave32) across 1260 verified configurations
+// spanning 10 NHWC bf16 shapes in both directions. The improvement is flat for
+// any target between 5/16 and 7/16 of the machine, so 3/8 sits in the middle of
+// that plateau. Only wave32 hardware has been measured, so CDNA keeps the
+// historical default.
+inline size_t GetOccupancyLimitedVectorSize(const miopen::batchnorm::ProblemDescription& problem,
+                                            size_t vectorsize)
+{
+    if(problem.GetWavefrontSize() != 32)
+    {
+        return vectorsize;
+    }
+
+    int n, c, h, w;
+    std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
+
+    const size_t min_threads =
+        problem.GetNumCu() * kThreadsPerCu * kMinOccupancyEighths / size_t{8};
+
+    while(vectorsize > 1 && (static_cast<size_t>(c) / vectorsize) * h * w < min_threads)
+    {
+        vectorsize >>= 1;
+    }
+    return vectorsize;
+}
+
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
 // It supports only 2D workgroups
 inline void GetLocalConfigNHWC(const miopen::batchnorm::ProblemDescription& problem,
@@ -582,6 +627,10 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
     // Tuning instances: add the full parameter space
     if(problem.IsLayoutNHWC())
     {
+        // A wide vector trades waves in flight for work per thread, which only pays off
+        // once the launch already fills the device.
+        vectorsize_default = GetOccupancyLimitedVectorSize(problem, vectorsize_default);
+
         // First add the default instance, which should work well for a large range of problems
         {
             GetSpatialMultipleConfig(

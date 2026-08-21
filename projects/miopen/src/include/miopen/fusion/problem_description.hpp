@@ -189,7 +189,11 @@ struct FusionDescription : ProblemDescriptionBase
                 not_used,
                 true /* resultSave*/,
                 bn_op.runningMeanVar,
-                1 /* min number of workgroups */
+                // No handle is available here, so keep the historical unconstrained
+                // defaults: num_cu 1 yields a workgroup floor of 1, and a wave64 width
+                // leaves the occupancy-based vectorsize narrowing disabled.
+                1 /* num_cu */,
+                64 /* wavefront_size */
             };
         }
         else if(dir == miopen::batchnorm::Direction::Backward)
@@ -208,7 +212,9 @@ struct FusionDescription : ProblemDescriptionBase
                     {} /*bn_op.base_desc*/,
                     not_used,
                     bn_op.useBatchStats /*useSaved*/,
-                    1}; /*min number of workgroups */
+                    // See the ForwardTraining case above.
+                    1 /* num_cu */,
+                    64 /* wavefront_size */};
         }
         else
             MIOPEN_THROW(miopenStatusNotImplemented);
