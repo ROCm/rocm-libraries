@@ -561,6 +561,12 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
         }
     }
     int64_t align = vec * elem_bytes;
+    /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
+     * pass from substituting ds_load_tr16_b128 (transposed) for the plain
+     * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines
+     * 2726-2730: volatile = "volatile " if vec==8 and backend.blocks_ds_load_tr16. */
+    const char* volatile_kw
+        = (vec == 8 && L->backend && L->backend->blocks_ds_load_tr16) ? "volatile " : "";
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    base,
@@ -571,8 +577,9 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     {
         const char* scalar = rocke_ll_fresh(L, "smem.s");
         rocke_ll_emitf(L,
-                       "  %s = load %s, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s%s, ptr addrspace(3) %s, align %lld",
                        scalar,
+                       volatile_kw,
                        elem_ty,
                        base,
                        (long long)align);
@@ -586,8 +593,9 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     else
     {
         rocke_ll_emitf(L,
-                       "  %s = load <%lld x %s>, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s<%lld x %s>, ptr addrspace(3) %s, align %lld",
                        ll_res(op),
+                       volatile_kw,
                        (long long)vec,
                        elem_ty,
                        base,
