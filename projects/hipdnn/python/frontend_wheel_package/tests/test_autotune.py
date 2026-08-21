@@ -90,6 +90,34 @@ def test_autotune_enums():
     assert hipdnn.PrimingFailurePolicy.BENCHMARK_UNPRIMED.name == "BENCHMARK_UNPRIMED"
 
 
+def test_autotune_cache_write_outcome_enum():
+    """AutotuneCacheWriteOutcome exposes every C++ enumerator."""
+    names = {
+        hipdnn.AutotuneCacheWriteOutcome.WRITTEN.name,
+        hipdnn.AutotuneCacheWriteOutcome.DECLINED_DISABLED.name,
+        hipdnn.AutotuneCacheWriteOutcome.DECLINED_UNKEYABLE.name,
+        hipdnn.AutotuneCacheWriteOutcome.NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE.name,
+    }
+    assert names == {
+        "WRITTEN",
+        "DECLINED_DISABLED",
+        "DECLINED_UNKEYABLE",
+        "NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE",
+    }
+    assert (
+        hipdnn.AutotuneCacheWriteOutcome.WRITTEN
+        != hipdnn.AutotuneCacheWriteOutcome.DECLINED_DISABLED
+    )
+
+
+def test_autotune_oracle_best_is_bound():
+    """Graph exposes autotune_oracle_best, returning results and a write outcome."""
+    assert hasattr(hipdnn.Graph, "autotune_oracle_best")
+    doc = hipdnn.Graph.autotune_oracle_best.__doc__
+    assert "tuple[list[" in doc
+    assert "AutotuneCacheWriteOutcome" in doc
+
+
 def test_engine_config_info_defaults_and_assignment():
     """EngineConfigInfo mirrors the C++ defaults and its fields are writable."""
     cfg = hipdnn.EngineConfigInfo()

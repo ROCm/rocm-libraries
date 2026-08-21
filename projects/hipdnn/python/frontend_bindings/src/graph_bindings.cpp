@@ -34,6 +34,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unordered_map.h>
@@ -117,6 +118,61 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
         throw std::runtime_error("Autotune failed: " + err.get_message());
     }
     return results;
+}
+
+// Shared body for the autotune_oracle_best() binding. Forces exhaustive mode and
+// benchmarking, accepts no sweep/variant parameter, and returns both the per-engine
+// results and the exact-match cache write outcome as a tuple, since nanobind does not
+// expose C++ out-parameters to Python.
+//
+// Only a UID-keyed variant pack is bound, because Graph::autotuneOracleBest() itself
+// takes only that form.
+std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
+    autotuneOracleBestPy(graph::Graph& g,
+                         const nb::object& handle,
+                         const std::unordered_map<int64_t, uintptr_t>& variantPack,
+                         uintptr_t workspace,
+                         int64_t workspaceSize,
+                         AutotuneConfig config,
+                         const AutotuneStorageConfig& storageConfig)
+{
+    auto handlePtr = handle.attr("get")();
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+    std::unordered_map<int64_t, void*> cppVariantPack;
+    cppVariantPack.reserve(variantPack.size());
+    for(const auto& [key, value] : variantPack)
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        cppVariantPack[key] = reinterpret_cast<void*>(value);
+    }
+
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+
+    // Same rationale as autotunePy: benchmarking touches no Python object, so the GIL
+    // can be released for the duration of what may be a minutes-long call.
+    std::vector<AutotuneResult> results;
+    AutotuneCacheWriteOutcome outcome
+        = AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE;
+    Error err;
+    {
+        const nb::gil_scoped_release release;
+        err = g.autotuneOracleBest(rawHandle,
+                                   cppVariantPack,
+                                   workspacePtr,
+                                   workspaceSize,
+                                   config,
+                                   storageConfig,
+                                   &results,
+                                   &outcome);
+    }
+    if(err.is_bad())
+    {
+        throw std::runtime_error("autotune_oracle_best failed: " + err.get_message());
+    }
+    return {results, outcome};
 }
 
 } // namespace
@@ -475,6 +531,26 @@ void graphBindings(nb::module_& m)
              nb::arg("config") = AutotuneConfig{},
              nb::arg("storage_config") = AutotuneStorageConfig{},
              "autotune() overload taking a tensor-keyed variant pack.")
+        .def("autotune_oracle_best",
+             &autotuneOracleBestPy,
+             nb::arg("handle"),
+             nb::arg("variant_pack"),
+             nb::arg("workspace"),
+             nb::arg("workspace_size"),
+             nb::arg("config") = AutotuneConfig{},
+             nb::arg("storage_config") = AutotuneStorageConfig{},
+             "Restricted \"oracle best\" autotune: measures and caches the true best "
+             "engine order for this exact graph.\n"
+             "config.mode and the priming benchmarking knob are forced to "
+             "TuneMode.EXHAUSTIVE and are not caller-overridable. This method accepts no "
+             "sweep/variant parameter; populate candidates via "
+             "add_engine_configs()/add_all_engines()/add_engine() before calling.\n"
+             "On success, the succeeded engines' ranked order (fastest first) is written "
+             "to the exact-match autotune cache, keyed on this graph's serialized content "
+             "and the handle's device. Returns a (results, cache_write_outcome) tuple: "
+             "the per-engine AutotuneResult list and the AutotuneCacheWriteOutcome "
+             "reporting whether that write happened. Raises RuntimeError if autotuning "
+             "fails.")
         .def("set_name", &graph::Graph::set_name, nb::rv_policy::reference_internal)
         .def("set_compute_data_type",
              &graph::Graph::set_compute_data_type,
