@@ -10,7 +10,7 @@
 RAP keeps A (and its MX scales) resident in VGPRs for the whole K extent across
 persistent iterations. That is only sound when every tile a workgroup visits
 reads the same A. The solution-independent half of that contract is a guard in
-``Solution.depthUIteration``; the problem-size half is three runtime predicates
+``Solution.depthUIteration``; the problem-size half is the runtime predicates
 emitted from ``Contractions.ProblemPredicate.CompoundPredicates``. Both are
 covered here.
 
@@ -63,6 +63,67 @@ def test_rap_name_abbreviation_is_unique():
     for key in getRequiredParametersMin():
         abbreviations[getParameterNameAbbreviation(key)].append(key)
     assert abbreviations["RAP"] == ["ReuseAcrossPersistent"]
+
+
+# ---------------------------------------------------------------------------
+# Codegen gating. Emitters read kernel["ReuseAcrossPersistent"] directly, the
+# way they read kernel["HalfPLR"], so RAP has no codegen predicate. PAP keeps
+# one, and RAP has to appear in it.
+# ---------------------------------------------------------------------------
+def test_rap_has_no_codegen_predicate_to_disagree_with_derivation():
+    """Two places deciding whether RAP is on is one too many.
+
+    While codegen recomputed the preconditions, a solution could carry the flag
+    and still be emitted plain, so a guard missing from derivation showed up as a
+    kernel named RAP that behaved like RAP 0 -- and the benchmark, which ranks on
+    gflops alone, would rank it against a real one. Emitters now read the flag,
+    which makes assignDerivedParameters the only authority; this pins that there
+    is nothing left for it to drift against.
+    """
+    from Tensile.KernelWriter import KernelWriter
+
+    assert not hasattr(KernelWriter, "isReuseAcrossPersistentEnabled")
+
+
+def _codegenKernel(**overrides):
+    kernel = {
+        "ReuseAcrossPersistent": 1,
+        "PrefetchAcrossPersistent": 1,
+        "StreamK": 3,
+        "PrefetchGlobalRead": 2,
+        "UseCustomMainLoopSchedule": 0,
+        "SuppressNoLoadLoop": True,
+        "HalfPLR": 0,
+    }
+    kernel.update(overrides)
+    return kernel
+
+
+def _papEnabled(**overrides):
+    from Tensile.KernelWriter import KernelWriter
+
+    return KernelWriter.isPrefetchAcrossPersistentEnabled(
+        SimpleNamespace(), _codegenKernel(**overrides)
+    )
+
+
+def test_pap_survives_the_suppressed_nll_for_halfplr_and_rap():
+    """Suppressing the NLL removes where PAP's next-tile prefetch used to live.
+
+    Only the features that re-emit it elsewhere may keep PAP. RAP is one of them
+    -- derivation turns SuppressNoLoadLoop on for it -- so without RAP in this
+    predicate every RAP kernel would silently lose PAP at codegen.
+    """
+    assert _papEnabled()
+    assert _papEnabled(ReuseAcrossPersistent=0, HalfPLR=1)
+    assert not _papEnabled(ReuseAcrossPersistent=0, HalfPLR=0)
+    assert _papEnabled(ReuseAcrossPersistent=0, HalfPLR=0, SuppressNoLoadLoop=False)
+
+
+def test_pap_is_off_when_its_own_flag_is_off_whatever_rap_says():
+    # RAP 1 with PAP 0 is supported, so RAP must not switch PAP back on.
+    assert not _papEnabled(PrefetchAcrossPersistent=0)
+    assert not _papEnabled(PrefetchAcrossPersistent=0, ReuseAcrossPersistent=0)
 
 
 # ---------------------------------------------------------------------------
@@ -222,12 +283,44 @@ def test_rap_resident_ktiles_never_falls_below_the_section_floor(
     assert sol["_RAPNumResidentKTiles"] >= sol["PrefetchGlobalRead"] + 1
 
 
+def test_rap_flag_is_cleared_when_there_is_no_persistent_loop(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    """Without Stream-K there are no persistent iterations to reuse across.
+
+    Derivation clears the flag here rather than rejecting, which is the safe
+    direction now that codegen trusts it: the alternative is a kernel that
+    reaches the emitters claiming residency it cannot have.
+    """
+    # GlobalSplitU picks up the split Stream-K was providing; without one of the
+    # two the solution is rejected before RAP is looked at.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, StreamK=0, GlobalSplitU=1)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["ReuseAcrossPersistent"] == 0
+
+
 def test_rap_off_does_not_derive_a_resident_block(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
     sol, out = _derive(gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=0)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert "_RAPNumResidentKTiles" not in sol._state
+
+
+def test_rap_accepts_a_kernel_without_prefetch_across_persistent(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    """RAP rides on the persistent loop, not on PAP.
+
+    StreamK 3 with DP-only tiles is what gives a workgroup several tiles in a
+    row, which is the whole basis for holding A. PrefetchAcrossPersistent
+    overlaps the next tile's loads with this tile's compute on that same loop --
+    useful, but independent. RAP used to require it only because the two were
+    derived together.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=0)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["_RAPNumResidentKTiles"] >= sol["PrefetchGlobalRead"] + 1
 
 
 def test_rap_accepts_the_shallower_prefetch_base(
@@ -256,11 +349,12 @@ def test_rap_accepts_a_swept_ktile_count_above_the_section_floor(
 def test_rap_rejects_fewer_ktiles_than_the_section_count(
     _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch
 ):
-    """Below PrefetchGlobalRead + 1 the sections outnumber the k-tiles.
+    """Below PrefetchGlobalRead + 1 the loop is never entered.
 
-    max(1, k - PGR) body copies plus the PGR drain sections is never fewer than
-    PGR + 1, so a smaller k would leave two sections owning one k-tile while each
-    still consumed a k-tile of K -- more K than the SizeEqual(K) predicate claims.
+    The loop-entry guard skips straight to the pre-loop escapes when there are
+    fewer than PGR + 1 k-tiles to walk, and those escapes reload A over the
+    resident registers. RAP does not implement them, so rather than emit a kernel
+    whose only untested path is the wrong one, refuse to build.
     """
     monkeypatch.setenv("TENSILE_RAP_KTILES", "2")
     sol, out = _derive(gfx1250_iim, assembler, capsys)
@@ -268,17 +362,68 @@ def test_rap_rejects_fewer_ktiles_than_the_section_count(
     assert "at least PrefetchGlobalRead + 1 resident k-tiles" in out
 
 
+def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch
+):
+    """K spans a range, and both ends are one-off sensitive.
+
+    The kernel holds k k-tiles but the loop leaves as soon as the counter runs
+    out, so any whole number of k-tiles from one up to k works. Both bounds are
+    silent when wrong, and wrong in opposite directions: too high a ceiling admits
+    a K whose top k-tile was never filled and multiplies whatever the previous
+    tile left in those registers, while a floor of zero admits a K that skips the
+    loop, and with it the clone that zeroes C. Neither shows up as a build
+    failure.
+
+    The floor is one k-tile and not PrefetchGlobalRead + 1: the pre-loop prefetch
+    already skips its second stage at a counter of 1, so a single k-tile needs no
+    drain section to land in.
+
+    SizeGreaterThan and SizeLessThan are strict in the C++ evaluator
+    (ContractionProblemPredicates.hpp), which is why the bounds are emitted as
+    floor-1 and ceiling+1 rather than the bounds themselves.
+    """
+    import Tensile.Contractions as C
+
+    monkeypatch.setenv("TENSILE_RAP_KTILES", "4")
+    sol, out = _derive(gfx1250_iim, assembler, capsys)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+
+    depthU = sol["DepthU"]
+    kTiles = sol["_RAPNumResidentKTiles"]
+    floorTiles = 1
+    kIdx = sol["ProblemType"]["NumIndicesC"]
+    assert kTiles > floorTiles, "need a real range for the bounds to differ"
+
+    problemType = C.ProblemType.FromOriginalState(sol["ProblemType"])
+    preds = C.ProblemPredicate.CompoundPredicates(sol, problemType)
+    kPreds = {(p.tag, p.value) for p in preds if p.index == kIdx}
+
+    assert kPreds == {
+        ("SizeMultiple", depthU),
+        ("SizeGreaterThan", floorTiles * depthU - 1),
+        ("SizeLessThan", kTiles * depthU + 1),
+    }
+
+    # Spelled out as the accepted set, so a bound that drifts by one k-tile fails
+    # here even if someone rewrites the triple above to match.
+    accepted = {k for k in range(depthU, (kTiles + 2) * depthU + 1)
+                if k % depthU == 0
+                and k > floorTiles * depthU - 1
+                and k < kTiles * depthU + 1}
+    assert accepted == {t * depthU for t in range(floorTiles, kTiles + 1)}
+
+
 # ---------------------------------------------------------------------------
 # Negative: each precondition of "every tile reads the same A" is enforced.
+#
+# These are the whole contract, not a sample of it. Codegen reads the flag and
+# recomputes nothing, so a precondition that stops rejecting here reaches the
+# emitters rather than quietly turning RAP off.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "overrides, reason",
     [
-        pytest.param(
-            {"PrefetchAcrossPersistent": 0},
-            "ReuseAcrossPersistent requires PrefetchAcrossPersistent",
-            id="without_pap",
-        ),
         pytest.param(
             {"StreamKForceDPOnly": 0},
             "ReuseAcrossPersistent requires StreamK = 3 and StreamKForceDPOnly = 1",
@@ -295,6 +440,18 @@ def test_rap_rejects_fewer_ktiles_than_the_section_count(
             {"PrefetchGlobalRead": 1, "ExpandPointerSwap": True},
             "ReuseAcrossPersistent requires ExpandPointerSwap = 0",
             id="with_expand_pointer_swap",
+        ),
+        pytest.param(
+            {"InnerUnroll": 2},
+            "ReuseAcrossPersistent requires InnerUnroll = 1",
+            id="with_inner_unroll",
+        ),
+        pytest.param(
+            # Asked with PAP off, or the subtile path's own gfx950 audit gate
+            # rejects first and this guard is never reached.
+            {"UseSubtileImpl": True, "PrefetchAcrossPersistent": 0},
+            "ReuseAcrossPersistent is not implemented for the subtile path",
+            id="with_subtile",
         ),
     ],
 )

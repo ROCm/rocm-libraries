@@ -3801,6 +3801,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       rapIdxMXSA = self.rapResidentBufferIdx(kernel, "MXSA", u + pflr, plrIdx)
       doReadA = doReadA and rapIdxA is not None and not self.states.rapDropAResidentLoads
       doReadMXSA = doReadMXSA and rapIdxMXSA is not None and not self.states.rapDropAResidentLoads
+      rapPastBlock = self.rapLookaheadLeavesBlock(kernel, u + pflr)
+      doReadB = doReadB and not rapPastBlock
+      doReadMXSB = doReadMXSB and not rapPastBlock
       if ((hasLiveLdsData and doNext) or (self.states.numItersPLR == 0 and uIdx == 0)) and not self.states.lockLdsReadTokenSwap:
         # swap LR buffer token only when the LR buffer actually changes
         self.states.ldsReadTokenIdx = self._nextLdsToken(self.states.ldsReadTokenIdx)
@@ -4106,7 +4109,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # RAP: one resident k-tile per emit-once section. The unroll loop body owns
     # k-tile 0, the NGLLs own the middle ones (outermost NGLL has the largest
     # remainPgr and runs earliest), and the NLL owns the last.
-    if self.isReuseAcrossPersistentEnabled(kernel):
+    if kernel["ReuseAcrossPersistent"]:
       numKTiles = self.rapResidentKTiles(kernel)
       self.states.rapKTileIdx = numKTiles - 1 - remainPgr if isNGLL else numKTiles - 1
     LoopNameComment = "NoGlobalLoadLoop" if isNGLL else "NoLoadLoop"
@@ -4630,6 +4633,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       rapIdxMXSA = self.rapResidentBufferIdx(kernel, "MXSA", u + pflr, plrIdx)
       doReadA = doReadA and rapIdxA is not None and not self.states.rapDropAResidentLoads
       doReadMXSA = doReadMXSA and rapIdxMXSA is not None and not self.states.rapDropAResidentLoads
+      rapPastBlock = self.rapLookaheadLeavesBlock(kernel, u + pflr)
+      doReadB = doReadB and not rapPastBlock
+      doReadMXSB = doReadMXSB and not rapPastBlock
       # Prefetch reads for next loop target LDS1; current iteration reads target LDS0
       if hasLiveLdsData and doNext and not self.states.lockLdsReadTokenSwap:
         # swap LR buffer
@@ -5888,19 +5894,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # bodies: every copy but the last skips the close and gets a hand-written
         # decrement and exit test, so the shell still closes exactly once.
         loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-        endCounter = kernel["PrefetchGlobalRead"]
         for lc in range(0, rapKTileCopies):
           finalLoop = lc == rapKTileCopies - 1
           loop.add(self._loopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre,
                                   lc, rapKTileCopies, finalLoop, skipClose=not finalLoop,
                                   nta=nta, ntb=ntb, rapKTile=lc))
           if not finalLoop:
-            # Decrement only, with no exit test between copies: the K predicate
-            # pins ItersPerTile, so the counter walks a known path from it down to
-            # PrefetchGlobalRead and can never reach the exit early. The copies
-            # are an unrolling of one trip, not iterations of a real loop.
             loop.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1,
                              comment="dec counterL (RAP k-tile %u of %u)"%(lc + 1, rapKTileCopies)))
+            # Leave for the shared exit once this problem's K is used up, so one
+            # kernel can serve every K up to the resident count. While the size
+            # predicates still pin K to all of them this is never taken.
+            #
+            # Nothing of closeLoop's has to be repeated here: under RAP it emits
+            # only this decrement, the counter test, the back edge and the end
+            # label. The odd/even LDS pointer fixups all sit behind
+            # ExpandPointerSwap, which RAP rejects, and the HalfPLR prefetch call is
+            # empty with HalfPLR off.
+            loop.add(SCmpEQU32(src0=loopCounter, src1=0,
+                               comment="RAP: any resident k-tile left for this K?"))
+            # getFormatting, not the bare name: this names a label closeLoop
+            # defines, and rapLabel has already been applied by the helper.
+            loop.add(SCBranchSCC1(
+                labelName=Label.getFormatting(
+                    self.unrollLoopEndLabelName(kernel, self.states.unrollIdx, nta, ntb)),
+                comment="RAP k-tile %u of %u ends here, join the shared exit"
+                        % (lc + 1, rapKTileCopies)))
+        # Anything emitted after the sections -- the post-loop, the next copy's
+        # prologue -- must not be read as belonging to the last section, or the
+        # section-relative guards above would drop work those parts still need.
+        self.states.rapKTileIdx = 0
       elif needSecondLoop and kernel["PrefetchGlobalRead"] >= 2:
         # force to generate 2 loop bodies (PGR2 only)
         # TODO: unify 2 loop bodies code generation with else case
@@ -6065,7 +6088,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.ldsDirectToLDSTokenIdx = \
           self._nextLdsToken(self.states.ldsDirectToLDSTokenIdx)
 
-    for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1) if not kernel["SuppressNoLoadLoop"] else []:
+    # RAP owns every resident k-tile in the loop shell, so the drain sections would
+    # recompute the last two into the same accumulators. See rapUnrolledLoopCopies.
+    # That is why derivation turns SuppressNoLoadLoop on for RAP, which is what
+    # keeps the NGLL and NLL below from being emitted.
+    rapOwnsWholeRange = kernel["ReuseAcrossPersistent"]
+    if rapOwnsWholeRange:
+      # The last body copy reads one k-tile ahead, as every copy does, but there is
+      # no k-tile after it: A and its scales are dropped by rapResidentBufferIdx,
+      # while B's reads are issued and never consumed. Drain them here, because
+      # ValuB goes back to the pool below and the store writes those registers --
+      # a load still in flight would land on top of store data. The backend cannot
+      # be relied on for this: the store's use is a physical-register reuse, not a
+      # value dependence.
+      module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0,
+                            "RAP: drain the last copy's unused lookahead local reads"))
+      # PAP's next-tile prefetch used to live in the NLL, which RAP no longer emits.
+      # Its window is "after the last k-tile's compute", which is exactly here. The
+      # wait and sync mirror what noLoadLoop did for it, so skipBarrier holds.
+      if self.isPrefetchAcrossPersistentEnabled(kernel):
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1,
+                              "RAP: wait for tensor loads before the next-tile prefetch"))
+        module.add(self._syncThreads(kernel, "RAP: sync before next-tile prefetch"))
+        module.add(self.prefetchAcrossPersistent(kernel, tensorParametersA, tensorParametersB,
+                                                 skipBarrier=True))
+      # The NLL used to define this, after the prefetch, and the loop body branches
+      # to it to skip that prefetch on its last iteration. Keep that order.
+      module.add(Label(self.rapLabel("PrefetchGlobalLastIterEnd"), ""))
+
+    for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1) \
+        if not kernel["SuppressNoLoadLoop"] else []:
       # NGLL code generation for PGR>=2
       NGLLindex = 0
       NGLLnum = 2 if needSecondNGLL else 1
@@ -6180,7 +6232,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     loopComponent = Component.PersistentLoop.find(self)
 
     module.add(loopComponent.openPersistentLoop(self, kernel))
-    if self.isReuseAcrossPersistentEnabled(kernel):
+    if kernel["ReuseAcrossPersistent"]:
       # Peel the compute section in two: the first tile runs a copy that fills the
       # resident A registers, every later tile re-enters at the second copy and
       # reuses them. Only the compute half is duplicated -- the store is the bulk
@@ -6212,6 +6264,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
       with self.rapIterNLabels():
         pack = self._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
       module.add(storeJoin)
+      # Drain the local reads a small-K exit left in flight, before the store
+      # reuses their registers.
+      #
+      # A section reads one k-tile ahead. When K does not fill the block, the
+      # section that takes the early exit has already issued that lookahead for a
+      # successor this K never runs, so those ds_reads are still outstanding with
+      # nothing to consume them. The store then borrows the value registers as
+      # scratch -- the MX scale blocks sit at the bottom of the register file, so
+      # computeStoreVgprs writes v36/v37 while a pending read of ValuMXSB targets
+      # v34-v37 -- and a read landing late puts LDS data over the wave offset the
+      # store is about to compute with. It is a write-after-write, so a functional
+      # simulator retires the read at issue, always sees the VALU win, and cannot
+      # fail on it.
+      #
+      # Here rather than at the loop exit for two reasons. This is where every path
+      # into the store converges, so one wait covers both copies and every K. And
+      # it is late: the tile-mapping and store setup run in between, so the reads
+      # have long landed and the wait is normally already satisfied. Only the
+      # exit that skips the PAP block -- a workgroup's last tile -- actually needs
+      # it; the PAP block drains before its own LDS writes.
+      module.add(SWaitCnt(dscnt=0,
+                          comment="RAP: drain a small-K exit's unconsumed local reads"))
     else:
       pack = self._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
 
@@ -6226,7 +6300,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB")
     module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
         (reclaimStart, self.states.lastValuAB))
-    if self.isReuseAcrossPersistentEnabled(kernel):
+    if kernel["ReuseAcrossPersistent"]:
       module.addComment1("RAP: ValuA vgpr [%u...%u) held resident across persistent iterations" % \
           (self.states.a.startVgprValu, reclaimStart))
     if not self.isPrefetchAcrossPersistentEnabled(kernel):
@@ -6801,7 +6875,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB")
       module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
           (mxsStart, self.states.lastValuMXSAB))
-      if self.isReuseAcrossPersistentEnabled(kernel):
+      if kernel["ReuseAcrossPersistent"]:
         module.addComment1("RAP: ValuMXSA vgpr [%u...%u) held resident across persistent iterations" % \
             (self.states.mxsa.startVgprValu, mxsStart))
 
@@ -7006,7 +7080,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel.get("InitCIterWmma", 0) == 1:
         cloneList.append(rocisa.CloneSpec(name="InitCIterWmma",
                                           startLabel="label_LoopBeginL"))
-        if self.isReuseAcrossPersistentEnabled(kernel):
+        if kernel["ReuseAcrossPersistent"]:
           # The peeled copy has its own loop label and so needs its own clone job,
           # but the name must stay "InitCIterWmma": RegionClonePass keys the
           # rewrite that zeroes the WMMA C source on the name, not the label. A
@@ -8945,7 +9019,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # start to one operand width guarantees that, because 256 is a multiple of
       # it. Aligning to a fixed larger constant instead would waste registers the
       # store stage needs.
-      if self.isReuseAcrossPersistentEnabled(kernel):
+      if kernel["ReuseAcrossPersistent"]:
         operandVgprs = max(1, int(kernel["MIInputPerThreadA"] * tensorParametersA["bpe"] // self.states.bpr))
         vgprIdx = ((vgprIdx + operandVgprs - 1)//operandVgprs)*operandVgprs
 
@@ -11066,34 +11140,32 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def isPrefetchAcrossPersistentEnabled(self, kernel):
     """Return True when PAP is enabled for this kernel."""
+    # Suppressing the NLL normally takes PAP's out-of-line path with it, because
+    # that is where the next-tile prefetch lived. HalfPLR and RAP each re-emit it
+    # somewhere else, so they keep PAP.
     return (kernel["StreamK"] in (3, 4, 5)
             and kernel.get("PrefetchAcrossPersistent", 0)
             and (not kernel.get("SuppressNoLoadLoop", False)
-                 or kernel["HalfPLR"])
+                 or kernel["HalfPLR"]
+                 or kernel["ReuseAcrossPersistent"])
             and kernel["PrefetchGlobalRead"] >= 1
             and not kernel.get("UseCustomMainLoopSchedule", 0))
 
-  def isReuseAcrossPersistentEnabled(self, kernel):
-    """Return True when RAP is enabled for this kernel.
-
-    Recomputed here rather than trusting kernel["ReuseAcrossPersistent"] alone,
-    mirroring isPrefetchAcrossPersistentEnabled: RAP is layered on PAP's
-    persistent loop, and every emitter that changes behaviour under RAP gates on
-    this so a state flag that survived without its preconditions cannot silently
-    produce a half-applied kernel.
-    """
-    return bool(kernel.get("ReuseAcrossPersistent", 0)
-                and self.isPrefetchAcrossPersistentEnabled(kernel)
-                and kernel["StreamKForceDPOnly"] == 1
-                and kernel["InnerUnroll"] == 1
-                and kernel["NoTailLoop"]
-                and kernel["enableTDMA"] and kernel["enableTDMB"]
-                and kernel["NumWaves"] > 1
-                and not kernel.get("UseSubtileImpl", False))
+  # ReuseAcrossPersistent has no predicate of its own: emitters read
+  # kernel["ReuseAcrossPersistent"] the way they read kernel["HalfPLR"]. Every
+  # precondition RAP has is a reject in Solution.assignDerivedParameters -- or,
+  # when Stream-K is off, a clear of the flag itself -- so a solution that
+  # reaches codegen with the flag set has already been checked.
+  #
+  # RAP is deliberately independent of PrefetchAcrossPersistent. They share a
+  # persistent loop and nothing else: PAP overlaps the next tile's loads with
+  # this tile's compute, RAP holds A across tiles, and RAP 1 with PAP 0 is a
+  # supported combination. RAP is the narrower of the two -- it needs StreamK 3
+  # with DP-only tiles, where PAP also takes 4 and 5.
 
   def rapResidentKTiles(self, kernel):
     """How many k-tiles of A/MXSA are held resident; 1 (i.e. no residency) when RAP is off."""
-    if not self.isReuseAcrossPersistentEnabled(kernel):
+    if not kernel["ReuseAcrossPersistent"]:
       return 1
     return kernel["_RAPNumResidentKTiles"]
 
@@ -11123,6 +11195,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     """
     return name + self.rapLabelSuffix
 
+  def unrollLoopEndLabelName(self, kernel, loopIdx, nta=0, ntb=0):
+    """Name of the unroll loop's end label.
+
+    Built in one place because closeLoop defines it and anything leaving the loop
+    early has to name the same thing. Two independent constructions of one label
+    name is how the reuse copy's "do not enter LoopL" escape came to point at the
+    fill copy's end.
+    """
+    loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][loopIdx]]
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+    return self.rapLabel("LoopEnd%s%s%s"%(loopChar, strNta, strNtb))
+
   def rapGetName(self, name):
     """labels.getName with the reuse copy's suffix applied.
 
@@ -11138,7 +11223,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     With the compute section peeled, only the very first tile runs the copy that
     fills the resident A registers; every later tile re-enters at the second copy.
     """
-    return "RAP_IterN" if self.isReuseAcrossPersistentEnabled(kernel) else "PersistentLoopStart"
+    return "RAP_IterN" if kernel["ReuseAcrossPersistent"] else "PersistentLoopStart"
 
   # Per-tensor emitter state that advances as the compute section is emitted.
   # Cannot go through saveLocalPointers: these keys are created during emission,
@@ -11192,17 +11277,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.sgprs = savedSgprs
 
   def rapUnrolledLoopCopies(self, kernel):
-    """How many copies of the unroll loop body RAP needs inside the loop shell.
+    """How many copies of the unroll loop body RAP emits inside the loop shell.
 
-    Each resident k-tile must live in a section that is emitted once, because the
-    register set it addresses is a codegen-time constant. There are PrefetchGlobalRead
-    such sections after the loop (the NGLLs and the NLL), so the loop shell has to
-    supply the rest. The loop counter decrements once per copy, so the shell still
-    makes exactly one trip -- the copies are the unrolling, not the iteration.
+    One per resident k-tile: each must live in a section that is emitted once,
+    because the register set it addresses is a codegen-time constant, and under RAP
+    the loop shell owns all of them.
+
+    The NGLL and NLL sections used to own the last PrefetchGlobalRead of them, but
+    their k-tile indices are absolute (numKTiles-1-remainPgr and numKTiles-1), so
+    they only ever fit a K that uses every resident k-tile. Owning the whole range
+    here is what lets one kernel serve a range of K. What the drain sections did is
+    now done inside the body: not issuing global reads near the end is the
+    branchless TDM disable, and not issuing the lookahead local reads is replaced by
+    draining them at the exit.
     """
-    if not self.isReuseAcrossPersistentEnabled(kernel):
+    if not kernel["ReuseAcrossPersistent"]:
       return 1
-    return max(1, self.rapResidentKTiles(kernel) - kernel["PrefetchGlobalRead"])
+    return self.rapResidentKTiles(kernel)
 
   def rapStoreWithheldVgprs(self, kernel):
     """Registers RAP keeps out of the store's hands: the resident A plus its scales.
@@ -11210,7 +11301,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     Derived from the same ranges the reclaim sites use, so the guard and the
     reclaim cannot drift apart.
     """
-    if not self.isReuseAcrossPersistentEnabled(kernel):
+    if not kernel["ReuseAcrossPersistent"]:
       return 0
     abStart, _ = self.rapReclaimableValuABRange(kernel)
     mxsStart, _ = self.rapReclaimableValuMXSABRange(kernel)
@@ -11231,10 +11322,73 @@ class KernelWriter(metaclass=abc.ABCMeta):
     without the guard the index would wrap onto resident k-tile 0 and overwrite
     it.
     """
-    if tc not in ("A", "MXSA") or not self.isReuseAcrossPersistentEnabled(kernel):
+    if tc not in ("A", "MXSA") or not kernel["ReuseAcrossPersistent"]:
       return defaultIdx
+    if self.rapLookaheadLeavesBlock(kernel, unwrappedIdx):
+      return None
+    return self.states.rapKTileIdx * kernel["LoopIters"] + unwrappedIdx
+
+  def rapIsLastResidentSection(self, kernel):
+    """Is the section being emitted the last one of the resident block?
+
+    Work whose only consumer is the next section is dead here. Two things qualify:
+    the local-read address swaps, which select the buffer the next section would
+    read from, and the loop counter decrement, whose readers were the next
+    section's silencing gate and this section's own early exit -- and the last
+    section has no early exit, while after the loop the counter is written before
+    it is read again.
+
+    Leaving the addresses unswapped does not leak into the next persistent
+    iteration: every tile entry resets them with v_and 0xffff.
+    """
+    if not kernel["ReuseAcrossPersistent"]:
+      return False
+    return self.states.rapKTileIdx == self.rapResidentKTiles(kernel) - 1
+
+  def rapTdmPrefetchIsDead(self, kernel):
+    """Is this section's TDM prefetch silenced on every path that reaches it?
+
+    The runtime gate in globalReadDo zeroes the descriptor when the loop counter
+    has PrefetchGlobalRead or fewer k-tiles left. Section i (1-based) only runs
+    when K covers it, and it sees the counter at (K / DepthU) - (i - 1), so it is
+    silenced exactly when i >= K / DepthU - PrefetchGlobalRead + 1. K / DepthU
+    ranges up to the count the kernel holds, so the sections silenced for *every*
+    K it serves are the last PrefetchGlobalRead of the block, and only those: with
+    8 resident k-tiles and PGR 2, section 6 is live at K = 8 tiles and cannot go.
+
+    For those last sections the descriptor writes and the transfer are dead weight
+    rather than a runtime decision, so the load need not be issued at all. This is
+    what the NGLL/NLL drain used to achieve by not containing a prefetch.
+
+    Callers must also be in the unroll loop (mode 1). The pre-loop prologue issues
+    the first PrefetchGlobalRead transfers and has to keep them, and rapKTileIdx
+    does not describe a section there -- it still holds whatever the previous
+    section left.
+    """
+    if not kernel["ReuseAcrossPersistent"] or not kernel["PrefetchGlobalRead"]:
+      return False
+    return self.states.rapKTileIdx >= \
+        self.rapResidentKTiles(kernel) - kernel["PrefetchGlobalRead"]
+
+  def rapLookaheadLeavesBlock(self, kernel, unwrappedIdx):
+    """Does this access run past the last resident k-tile?
+
+    Local reads run an iteration ahead of the MFMAs, so on the last section the
+    lookahead addresses a k-tile that is not there. For A that would wrap onto
+    resident k-tile 0 and overwrite it, which is why rapResidentBufferIdx refuses
+    the access. B and its scales cannot wrap -- they are re-read every tile from
+    a PLR window, so their buffer index is unaffected -- but the read is still
+    pointless: nothing consumes it, because the section it was fetched for does
+    not exist. Skipping it saves the LDS traffic and, more importantly, stops
+    handing the exit path loads that are still in flight with no consumer.
+
+    Only the section's own position decides this, so B asks the same question
+    without going through the A-only buffer-index path.
+    """
+    if not kernel["ReuseAcrossPersistent"]:
+      return False
     idx = self.states.rapKTileIdx * kernel["LoopIters"] + unwrappedIdx
-    return idx if idx < self.rapResidentKTiles(kernel) * kernel["LoopIters"] else None
+    return idx >= self.rapResidentKTiles(kernel) * kernel["LoopIters"]
 
   def rapReclaimableValuABRange(self, kernel):
     """(start, size) of the ValuA/B block that may be lent out as scratch.
@@ -11243,7 +11397,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     is the feature -- so only the ValuB half is lendable. ValuA and ValuB are
     allocated contiguously, so the B half is [b.startVgprValu, lastValuAB).
     """
-    start = self.states.b.startVgprValu if self.isReuseAcrossPersistentEnabled(kernel) \
+    start = self.states.b.startVgprValu if kernel["ReuseAcrossPersistent"] \
             else self.states.a.startVgprValu
     return start, self.states.lastValuAB - start
 
@@ -11255,7 +11409,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     resident MXSA block is a prefix and the lendable part starts after it.
     """
     start = (self.states.mxsa.startVgprValu + self.states.mxsa.numVgprValu) \
-            if self.isReuseAcrossPersistentEnabled(kernel) else 0
+            if kernel["ReuseAcrossPersistent"] else 0
     return start, self.states.lastValuMXSAB - start
 
   ##############################################################################

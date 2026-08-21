@@ -7833,6 +7833,11 @@ class KernelWriterAssembly(KernelWriter):
     """Threshold T for the unrolled loop: the main (global-load) unrolled loop
     body -- and therefore the InitCIterWmma cloned iter0 that zeroes C -- runs
     iff LoopCounter > T."""
+    # RAP emits one body copy per resident k-tile and no drain, so the loop has to
+    # run while any k-tile is left rather than stopping PrefetchGlobalRead short of
+    # the end.
+    if kernel["ReuseAcrossPersistent"]:
+      return 0
     pgr = kernel["PrefetchGlobalRead"]
     if pgr == 1:
       return 0 if kernel["SuppressNoLoadLoop"] else 1
@@ -7873,7 +7878,7 @@ class KernelWriterAssembly(KernelWriter):
     bStrNta = "" if tailLoop else strNta
     bStrNtb = "" if tailLoop else strNtb
     loopLabelBegin = Label(self.rapLabel("%sLoopBegin%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb)), "", alignment=16 )
-    loopLabelEnd = Label("%sLoopEnd%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb), "" )
+    loopLabelEnd = Label(self.rapLabel("%sLoopEnd%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb)), "" )
 
     if beginLabelOnly:
       # generate only beginLabel, then, return
@@ -7894,7 +7899,14 @@ class KernelWriterAssembly(KernelWriter):
 
       if loopIdx == self.states.unrollIdx:
         # 1 loop check is necessary only when AssertSummationElementMultiple % (DepthU * 2) != 0
-        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0 and not kernel["SuppressNoLoadLoop"]:
+        # toPGR1 is defined inside the NLL, so SuppressNoLoadLoop leaves the escape
+        # without a target. Under RAP, which suppresses, it is not wanted either:
+        # the escape hands a single-k-tile problem to the drain, and a RAP section
+        # computes its own k-tile and then leaves through its early exit. The
+        # pre-loop prefetch still skips its second stage at a counter of 1 on its
+        # own, so falling through into the loop fetches nothing past K.
+        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0 \
+           and not kernel["SuppressNoLoadLoop"]:
           module.add(SCmpEQU32(
               src0=loopCounter, \
               src1=hex(1), \
@@ -7995,6 +8007,16 @@ class KernelWriterAssembly(KernelWriter):
     jumpNeeded = True
 
     tailLoop = loopIdx < 0
+    # RAP unrolls every resident k-tile into the shell and the predicates cap K at
+    # that many, so the trip count is always exactly one and the back edge is
+    # unreachable. With kTiles sections each decrementing the counter by one, and
+    # an early exit on counter==0 after all but the last, a K of j <= kTiles tiles
+    # leaves through section j's exit, and j == kTiles falls out of the bottom with
+    # the counter at zero. Emitting the branch anyway would cost nothing at runtime
+    # but would keep a back edge in the graph, which makes the last section's
+    # prefetch look live and forces the pipelined waits that go with it.
+    rapNoBackEdge = kernel["ReuseAcrossPersistent"] \
+        and not tailLoop and loopIdx == self.states.unrollIdx
     tailloopInNll = loopIdx == -2 # use -2 for tailloopInNll
     needTailEndCode = tailLoop and finalLoop and ((not tailloopInNll) or kernel["NoTailLoop"])
     if tailLoop:
@@ -8068,7 +8090,7 @@ class KernelWriterAssembly(KernelWriter):
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][loopIdx]]
       loopLabelBegin = Label(self.rapLabel("LoopBegin%s%s%s"%(loopChar, strNta, strNtb)), "" )
-      loopLabelEnd = Label(self.rapLabel("LoopEnd%s%s%s"%(loopChar, strNta, strNtb)), "" )
+      loopLabelEnd = Label(self.unrollLoopEndLabelName(kernel, loopIdx, nta, ntb), "" )
       loopLabelEndOddExit = Label(self.rapLabel("LoopEnd%s_oddexit%s%s"%(loopChar, strNta, strNtb)), "unroll loop odditer exit" )
       loopLabelEndEvenExit = Label(self.rapLabel("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb)), "unroll loop eveniter exit" )
       loopCounter = self.loopCounter(kernel, loopIdx)
@@ -8086,9 +8108,12 @@ class KernelWriterAssembly(KernelWriter):
       # So can do one more iteration (endCounter==0) in the main unroll loop, and adjust the pointer
       # increments appropriately.
       # Also sum idx other than unroll always compare against 0 (there is no PGR to account for)
-      if kernel["PrefetchGlobalRead"] >= 1 and not kernel["SuppressNoLoadLoop"] and loopIdx == self.states.unrollIdx:
+      if kernel["PrefetchGlobalRead"] >= 1 and not kernel["SuppressNoLoadLoop"] \
+         and loopIdx == self.states.unrollIdx:
         endCounter = kernel["PrefetchGlobalRead"]
       else:
+        # Suppressing means there is no drain to exit into, so the shell closes
+        # only once every k-tile has run. Under RAP that is every resident one.
         endCounter = 0
 
       if kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) == 0 and endCounter > 0 and \
@@ -8138,20 +8163,28 @@ class KernelWriterAssembly(KernelWriter):
         if decCode: module.add(decCode)
         if condCode: module.add(condCode)
       else:
-        module.add(SSubU32(
-            dst=loopCounter, src0=loopCounter, \
-            src1=1, \
-            comment="dec counter%s"%(loopChar) ))
+        # The last RAP section's decrement has no reader: its result fed the
+        # counter test for the back edge, which is gone, and the sections with an
+        # early exit are the ones before it. After the loop the counter is written
+        # before it is read again.
+        rapLastSectionDec = not tailLoop and loopIdx == self.states.unrollIdx \
+            and self.rapIsLastResidentSection(kernel)
+        if not rapLastSectionDec:
+          module.add(SSubU32(
+              dst=loopCounter, src0=loopCounter, \
+              src1=1, \
+              comment="dec counter%s"%(loopChar) ))
 
         # For multi-trip loops, prefetch after decrementing to one and return
         # here before entering the final trip.
         if loopIdx == self.states.unrollIdx and loopCopy >= 0:
           module.add(self.callHalfPlrPrefetchAcrossPersistent(kernel, loopCopy+1))
 
-        module.add(SCmpEQI32(
-            src0=loopCounter, \
-            src1=hex(endCounter), \
-            comment="counter%s==%d"%(loopChar,endCounter) ))
+        if not rapNoBackEdge:
+          module.add(SCmpEQI32(
+              src0=loopCounter, \
+              src1=hex(endCounter), \
+              comment="counter%s==%d"%(loopChar,endCounter) ))
 
     jumpLabel = loopLabelEnd
     if not tailLoop and not kernel["SuppressNoLoadLoop"] and kernel["ExpandPointerSwap"]:
@@ -8163,7 +8196,7 @@ class KernelWriterAssembly(KernelWriter):
         # just an exit check, else fall through to the next loop copy
         module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), comment="exit Loop%s"%loopChar ))
     else: #finalLoop:
-      if jumpNeeded:
+      if jumpNeeded and not rapNoBackEdge:
         module.add(finalJump(labelName=loopLabelBegin.getLabelName(), comment="restart Loop%s"%(loopChar)))
 
       if not tailLoop and loopIdx == self.states.unrollIdx:
@@ -11366,11 +11399,29 @@ class KernelWriterAssembly(KernelWriter):
       return imod
 
     loopIdx = self.states.unrollIdx # TODO - does this handle multiple summation indices?
-    if kernel["SuppressNoLoadLoop"]:
+    # The last PrefetchGlobalRead sections of the resident block have their TDM
+    # silenced on every path, so neither the transfer nor the descriptor zeroing
+    # that silences it needs to be there. Every A-side load below is skipped
+    # together, TDMSplit's included, so dropping the zeroing cannot leave one
+    # behind that would reach past the K this tile covers.
+    rapTdmDead = mode == 1 and self.rapTdmPrefetchIsDead(kernel)
+    if kernel["SuppressNoLoadLoop"] and not rapTdmDead:
       if mode==1 and tP["isA"]:
-        if kernel["HalfPLR"]: # only support TDM
+        # Without a drain there is nothing to stop the prefetch, so the last
+        # PrefetchGlobalRead iterations silence it in place instead: past that
+        # point the loads would reach beyond the K this tile covers. HalfPLR and
+        # RAP both move data with TDM and zero the descriptor's enable word; a
+        # buffer-load kernel zeroes the SRD limit instead. Branchless on purpose
+        # -- the load is issued in the densest part of the interleaved schedule,
+        # and a branch there would split the block the scheduler works in.
+        if kernel["HalfPLR"] or kernel["ReuseAcrossPersistent"]: # only support TDM
           if kernel["PrefetchGlobalRead"] > 0:
-            imod.header.addComment0("HalfPLR: disable TDM in last #PGR loops")
+            # Wave-separated TDM aliases one descriptor set, with even waves
+            # carrying A/MXSA and odd waves B/MXSB, so zeroing A's enable word
+            # silences whichever this wave holds and two writes cover all four
+            # tensors. Re-applied on every load because the descriptor is rebuilt
+            # each persistent iteration.
+            imod.header.addComment0("disable TDM in last %u loop(s)" % kernel["PrefetchGlobalRead"])
             imod.header.add(SCmpLeI32(
               src0=self.loopCounter(kernel, loopIdx), \
               src1=kernel["PrefetchGlobalRead"], \
@@ -11422,8 +11473,9 @@ class KernelWriterAssembly(KernelWriter):
         isIterA = isIterA or kernel.get("_TDMIterateModeB", False)
       tdmAGroup2 = "tdmAGroup2" if isIterA else None
       tdmAGroup3 = "tdmAGroup3" if isIterA else None
-      imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmAGroup0+0"))
-      imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+      if not rapTdmDead:
+        imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmAGroup0+0"))
+        imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
       # TODO: Embed metadata TDM issueLoad here (mirrors non-TDM pattern where globalReadBody(tP["tpsMetadata"])
       # is called after globalReadBody(tP) for the sparse tensor). This would allow _splitTdmLoad in SIA.py
       # to extract and defer both A and metadata TDM loads together, eliminating the separate globalReadMetadata
@@ -11484,14 +11536,16 @@ class KernelWriterAssembly(KernelWriter):
               self._emitTdmSplitIterCount(imod.middle, kernel, splitIterConsts, group2,
                                           h1, sIter)
             comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
-            imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+            if not rapTdmDead:
+              imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
             imod.middle.add(comp.setTensorDim1(group1, h0, self))
             if needIterCount:
               self._emitTdmSplitIterCount(imod.middle, kernel, splitIterConsts, group2,
                                           h0, sIter)
         else:
           comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
-          imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+          if not rapTdmDead:
+            imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
@@ -11507,8 +11561,9 @@ class KernelWriterAssembly(KernelWriter):
               imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
           else:
             imod.middle.add(self.tdmResetTailLdsBuffer(kernel, ldsAddrSgprName))
-        imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmMXSAGroup0+0"))
-        imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
+        if not rapTdmDead:
+          imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmMXSAGroup0+0"))
+          imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
       return imod
 
     if tc == "Metadata" and kernel["enableTDMMetadata"]:
@@ -13006,6 +13061,18 @@ class KernelWriterAssembly(KernelWriter):
       return Module("localReadSwapOffsets (no local read)")
     if kernel["1LDSBuffer"] or ((tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
       return Module("localReadSwapOffsets (Empty)")
+    if self.states.rapDropAResidentLoads and tc in ("A", "MXSA"):
+      # The reuse copy takes A and its scales from the resident registers and issues
+      # no local reads for them, so swapping their read addresses updates a value
+      # nothing goes on to read. Keyed on the tensor char, so B and its scales --
+      # still reloaded every tile, and out of their own address registers -- keep
+      # their swaps.
+      return Module("localReadSwapOffsets (RAP: %s is resident, nothing reads it)"%tc)
+    if self.rapIsLastResidentSection(kernel):
+      # A swap selects the buffer the next section reads from, and the last section
+      # has no next section: its own reads all precede the swap. See
+      # rapIsLastResidentSection for why nothing downstream sees the difference.
+      return Module("localReadSwapOffsets (RAP: last k-tile, no section reads this)")
     module = Module("localReadSwapOffsets")
 
     numLra = 0

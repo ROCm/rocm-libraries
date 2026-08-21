@@ -1924,9 +1924,11 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with multiple summation indices")
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
-        # HalfPLR sets SuppressNoLoadLoop after this guard runs. Its supported
-        # out-of-line PAP path is validated in the HalfPLR block below. Add a
-        # condition here for clarity.
+        # HalfPLR and RAP both set SuppressNoLoadLoop after this guard runs, and
+        # both re-emit the next-tile prefetch outside the NLL; their supported
+        # paths are validated in their own blocks. Only an explicitly requested
+        # SuppressNoLoadLoop is visible here, and HalfPLR is exempted so that
+        # asking for it twice is not an error.
         if state.get("SuppressNoLoadLoop", False) and not state["HalfPLR"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop if not using HalfPLR")
         if state["ProblemType"]["Sparse"]:
@@ -2975,6 +2977,12 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with UseSubtileImpl")
     if state.get("PrefetchAcrossPersistent", 0) and state["UseCustomMainLoopSchedule"] == 1:
       reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with custom main-loop scheduling")
+    # RAP unrolls the loop body by hand, one section per resident k-tile, which
+    # the custom scheduler would rebuild. Checked here rather than with RAP's
+    # other conditions because those run from depthUIteration, before the -1
+    # auto value above is resolved.
+    if state.get("ReuseAcrossPersistent", 0) and state["UseCustomMainLoopSchedule"] == 1:
+      reject(state, printRejectionReason, "ReuseAcrossPersistent not supported with custom main-loop scheduling")
 
     # additional setting for non CMS
     if state["UseCustomMainLoopSchedule"] == 0:
@@ -6247,12 +6255,26 @@ class Solution(collections.abc.Mapping):
     # checked here; the problem-size half (single M-tile, no N edge, exact K) is
     # enforced by the runtime predicates emitted in
     # Contractions.ProblemPredicate.CompoundPredicates.
+    #
+    # This block is the only place the solution-independent half is checked.
+    # Codegen reads kernel["ReuseAcrossPersistent"] directly, the way it reads
+    # kernel["HalfPLR"], so a precondition that is not rejected here reaches the
+    # emitters as a kernel that claims RAP without being able to honour it.
     if state["ReuseAcrossPersistent"]:
-      if not state.get("PrefetchAcrossPersistent", 0):
-        reject(state, printRejectionReason, "ReuseAcrossPersistent requires PrefetchAcrossPersistent")
-        return
+      # What RAP needs is the persistent loop, which StreamK 3 with DP-only tiles
+      # supplies on its own. PrefetchAcrossPersistent is an independent
+      # optimisation layered on the same loop, so RAP does not require it; the
+      # emitters that touch PAP state ask for it separately.
       if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires StreamK = 3 and StreamKForceDPOnly = 1")
+        return
+      # Held for RAP's own sake, but until now it arrived by way of the PAP
+      # requirement above: RAP needs a prefetch to silence in the trailing
+      # sections. Shadowed today -- RAP also requires TDM below, and Stream-K
+      # with TDMInst 3 already bounds PrefetchGlobalRead to 1 or 2 before this
+      # runs -- so it is insurance against that gate moving, not a live check.
+      if state["PrefetchGlobalRead"] < 1:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires PrefetchGlobalRead >= 1")
         return
       # Even waves move A/MXSA and odd waves move B/MXSB through one aliased
       # descriptor set, which is what lets RAP silence A's transfers per parity.
@@ -6280,6 +6302,12 @@ class Solution(collections.abc.Mapping):
       if not state["UnrollMajorLDSA"]:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires UnrollMajorLDSA (the A local-read pack path is not supported)")
         return
+      # The unrolled loop owns every resident k-tile, so the NGLL/NLL drain would
+      # recompute the last PrefetchGlobalRead of them into the same accumulators.
+      # Set here rather than with the other parameters because the guards that
+      # would undo it -- the PGR!=1 reset and the PAP rejection -- have already
+      # run by this point.
+      state["SuppressNoLoadLoop"] = True
       # Each resident k-tile needs its own statically numbered register set, so it
       # can only live in a code section that is emitted once. The NGLL and NLL
       # sections supply PrefetchGlobalRead of them and the unroll loop shell
