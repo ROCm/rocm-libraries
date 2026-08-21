@@ -172,6 +172,17 @@ namespace TensileLite
                                ClientProblemFactory const& problemFactory);
             ~DataInitialization();
 
+            // True when the CPU reference must be recomputed for this solution
+            // because DataInitialization refreshes MX inputs per solution
+            // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
+            // gfx1250, gfx942, non-MX) the per-problem reference is still valid
+            // and can be reused across all solutions.
+            bool referenceNeedsPerSolutionRecompute(ContractionProblemGemm const& problem,
+                                                    ContractionSolution const*    solution) const
+            {
+                return needsSolutionDependentMXPreswizzle(problem, solution);
+            }
+
             /**
              * Returns a ContractionInputs object with pointers to CPU memory,
              * suitable for using to calculate reference results.
@@ -2582,9 +2593,9 @@ namespace TensileLite
                 Float4x2 value;
             } x;
 
-            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
-            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
-            x.bits = (val1 << 4) | val0;
+            uint8_t val0 = static_cast<uint8_t>(rand() % 16);
+            uint8_t val1 = static_cast<uint8_t>(rand() % 16);
+            x.bits       = (val1 << 4) | val0;
             return x.value;
         }
         template <>

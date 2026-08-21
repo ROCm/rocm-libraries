@@ -348,6 +348,7 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
+globalParameters["ValidateMetadata"] = False  # Set to True to validate custom.config metadata at build time
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
@@ -564,7 +565,7 @@ defaultBenchmarkCommonParameters = [
     {"NonVolatileWS": [0]},
     {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
-    {"CustomKernelName": [""]},
+    # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
@@ -605,6 +606,7 @@ defaultBenchmarkCommonParameters = [
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
+    {"TDMPlusLdsBuf": [0]},
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
