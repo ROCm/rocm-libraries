@@ -11,7 +11,7 @@ include(dependencies)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
-option(ORIGAMI_BUILD_SHARED_LIBS "Build Origami libraries as shared vs static." ON)
+option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ON)
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
