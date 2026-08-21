@@ -43,7 +43,7 @@ inline const char* toString(EnforcementLevel level)
     case EnforcementLevel::FULL:
         return "full";
     default:
-        return "full";
+        return "<invalid-enforcement-level>";
     }
 }
 

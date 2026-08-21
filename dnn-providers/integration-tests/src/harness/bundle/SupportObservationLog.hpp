@@ -42,7 +42,7 @@ inline const char* toString(ObservedSupport support)
     case ObservedSupport::UNKNOWN:
         return "unknown";
     default:
-        return "unknown";
+        return "<invalid-observed-support>";
     }
 }
 
@@ -93,7 +93,7 @@ public:
     SupportObservationLog& operator=(SupportObservationLog&&) = delete;
 
     // Upsert: higher verdict wins (SUPPORTED > DECLINED > UNKNOWN).
-    void record(SupportObservation observation)
+    void record(const SupportObservation& observation)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         CellKey key{observation.claimLocator.sidecarPath,
