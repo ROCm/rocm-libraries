@@ -447,7 +447,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         )
 
     # Check global store vector size and disable default epilogue for
-    # vec_size_c > 1 — whether set explicitly or auto-derived from K.
+    # vec_size_c > 1 — whether set explicitly or auto-derived from kpg.
     _eff_vec_c = (
         spec.vector_size_c
         if spec.vector_size_c is not None

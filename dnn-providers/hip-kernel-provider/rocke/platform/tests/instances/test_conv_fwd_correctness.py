@@ -135,7 +135,7 @@ _SHAPES: List[_Shape] = [
         groups=2,
     ),
     # --- grouped conv where cpg/kpg is NOT a multiple of 8 even though C/K are.
-    # C=16, K=16, groups=4 → cpg=kpg=4: default_vector_sizes must use cpg/kpg
+    # C=16/32, K=16/32, groups=4 → cpg=kpg=4/8: default_vector_sizes must use cpg/kpg
     # (→ vec=4), not C/K (→ vec=8, which straddles group boundaries and corrupts
     # the load/store addressing). Regression guard for the cpg/kpg fix.
     _Shape(
@@ -143,8 +143,21 @@ _SHAPES: List[_Shape] = [
         N=2,
         Hi=8,
         Wi=8,
-        C=16,
+        C=32,
         K=16,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=4,
+    ),
+    _Shape(
+        "3x3_g4_N2H8W8C16K16",
+        N=2,
+        Hi=8,
+        Wi=8,
+        C=16,
+        K=32,
         Y=3,
         X=3,
         pH=1,
