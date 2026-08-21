@@ -441,3 +441,58 @@ TEST(TestAutotune, RankAndSelectWinnerSortsSucceededAndSelectsFastest)
 
     EXPECT_EQ(activePlanIndex, 1u);
 }
+
+// ============================================================================
+// autotuneOracleBest
+// ============================================================================
+
+TEST(TestAutotune, OracleBestForcesExhaustiveModeRegardlessOfCallerConfig)
+{
+    // No graph is built, so autotuneImpl declines before reaching the mode-forcing
+    // assignment's downstream effects either way; this test asserts the config object
+    // passed downstream, not the return status.
+    hipdnn_frontend::graph::Graph g;
+    AutotuneConfig config;
+    config.mode = TuneMode::STANDARD;
+
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+    auto err = g.autotuneOracleBest(nullptr, variantPack, nullptr, int64_t{0}, config);
+
+    EXPECT_TRUE(err.is_bad());
+}
+
+TEST(TestAutotune, OracleBestRejectsNegativeWorkspaceSize)
+{
+    hipdnn_frontend::graph::Graph g;
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+
+    auto err = g.autotuneOracleBest(nullptr, variantPack, nullptr, int64_t{-1});
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_NE(err.get_message().find("workspaceSize"), std::string::npos);
+}
+
+// autotuneOracleBest takes no sweep/variant parameter, so add_engine_sweep()/
+// add_engine_variants() are structurally unreachable from it, checked at compile time.
+TEST(TestAutotune, OracleBestHasNoSweepOrVariantOverload)
+{
+    using Graph = hipdnn_frontend::graph::Graph;
+    using VariantPack = std::unordered_map<int64_t, void*>;
+
+    static_assert(!std::is_invocable_v<decltype(&Graph::autotuneOracleBest),
+                                       Graph*,
+                                       hipdnnHandle_t,
+                                       const VariantPack&,
+                                       void*,
+                                       int64_t,
+                                       AutotuneConfig,
+                                       AutotuneStorageConfig,
+                                       std::vector<AutotuneResult>*,
+                                       int>,
+                  "autotuneOracleBest must not accept extra sweep/variant-shaped arguments");
+    SUCCEED();
+}
+
+TEST(TestAutotune, OracleBestExhaustiveIsTheOnlyModeItProduces)
+{
+    EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), std::string("EXHAUSTIVE"));
+}

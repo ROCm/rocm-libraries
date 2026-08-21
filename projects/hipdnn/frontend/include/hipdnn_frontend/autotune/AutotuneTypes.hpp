@@ -69,6 +69,46 @@ enum class PrimingFailurePolicy
     BENCHMARK_UNPRIMED ///< Continue and benchmark the engine unprimed
 };
 
+/**
+ * @enum AutotuneCacheWriteOutcome
+ * @brief Write-provenance of autotuneOracleBest()'s exact-match cache write-back
+ *
+ * Reports whether a given autotuneOracleBest() call's measured ranking reached the
+ * exact-match autotune cache, and if not, the specific reason.
+ */
+enum class AutotuneCacheWriteOutcome
+{
+    /// No engine succeeded benchmarking, so there was no ranking to write and the
+    /// write-back API was never called.
+    NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE,
+    /// The ranking was written to the exact-match cache.
+    WRITTEN,
+    /// The exact-match cache is disabled via HIPDNN_DISABLE_EXACT_ENGINE_CACHE; the
+    /// write-back API was called but declined without writing.
+    DECLINED_DISABLED,
+    /// The write-back API was called but declined: the graph descriptor was not
+    /// finalized, or the graph/device pair could not be reduced to a cache key.
+    DECLINED_UNKEYABLE
+};
+
+/// Get the string representation of an AutotuneCacheWriteOutcome
+inline const char* autotuneCacheWriteOutcomeToString(AutotuneCacheWriteOutcome outcome)
+{
+    switch(outcome)
+    {
+    case AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE:
+        return "NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE";
+    case AutotuneCacheWriteOutcome::WRITTEN:
+        return "WRITTEN";
+    case AutotuneCacheWriteOutcome::DECLINED_DISABLED:
+        return "DECLINED_DISABLED";
+    case AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE:
+        return "DECLINED_UNKEYABLE";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 /// Get the string representation of a TuneMode
 inline const char* tuneModeToString(TuneMode mode)
 {
