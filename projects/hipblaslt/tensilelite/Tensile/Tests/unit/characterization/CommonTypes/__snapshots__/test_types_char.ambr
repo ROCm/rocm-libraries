@@ -1,6 +1,7 @@
 # serializer version: 1
 # name: test_debug_config_defaults
   dict({
+    'asanInstrument': False,
     'debugKernel': False,
     'enableAsserts': False,
     'enableDebugA': False,
@@ -32,6 +33,7 @@
 # ---
 # name: test_make_debug_config_empty
   dict({
+    'asanInstrument': False,
     'debugKernel': False,
     'enableAsserts': False,
     'enableDebugA': False,
@@ -47,6 +49,7 @@
 # ---
 # name: test_make_debug_config_full
   dict({
+    'asanInstrument': True,
     'debugKernel': True,
     'enableAsserts': True,
     'enableDebugA': True,
@@ -62,6 +65,7 @@
 # ---
 # name: test_make_debug_config_unknown_key_ignored
   dict({
+    'asanInstrument': False,
     'debugKernel': False,
     'enableAsserts': False,
     'enableDebugA': False,

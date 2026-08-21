@@ -34,6 +34,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertInitialUnclausedVmemPass.cpp
     InsertClusterBarrierPass.cpp
     TDMLoadWaveSyncPass.cpp
+    InsertAsanCheckPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
     RemoveInstructionPass.cpp

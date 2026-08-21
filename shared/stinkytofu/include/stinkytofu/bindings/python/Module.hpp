@@ -49,6 +49,11 @@
  * @note SwInstructionPrefetchAbsBaseSgpr: low index of the reserved 3-SGPR abs-prefetch base
  *        (even-aligned pair s[base:base+1] + scratch s[base+2]), auto-allocated in Tensile
  *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K / non-gfx1250).
+ * @note AsanInstrument: debug-only. Enables InsertAsanCheckPass, which bounds-checks
+ *        A/B/C/D/bias global memory accesses against real ASan shadow memory and, on
+ *        violation, records {pc, addr, size, isStore} to the kernarg-supplied
+ *        AsanReportBuf then traps. Only meaningful when the launching client process
+ *        is itself built with -fsanitize=address; Tensile sources this from AsanBuild.
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -100,7 +105,8 @@
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
-    X(ArchName, std::string)
+    X(ArchName, std::string)                      \
+    X(AsanInstrument, bool)
 
 namespace stinkytofu {
 /**

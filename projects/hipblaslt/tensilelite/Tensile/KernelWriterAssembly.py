@@ -1600,6 +1600,10 @@ class KernelWriterAssembly(KernelWriter):
       if self.debugConfig.debugKernel:
         module.add(RegSet("v", "vgprAddressDbg", \
             self.states.startVgprAddressDbg))
+
+      if self.debugConfig.asanInstrument:
+        module.add(RegSet("v", "vgprAsanTmp", \
+            self.states.startVgprAsanTmp))
       #module.addComment0("Occu: %u waves/simd" % self.numWavesPerSimd )
       # module.addComment0("Num VGPR=%u"%self.vgprPool.size())
       # module.addComment0("Num AccVGPR=%u"%self.agprPool.size())
@@ -2226,6 +2230,8 @@ class KernelWriterAssembly(KernelWriter):
     kernelArgs.addComment1("Load Kernel Args")
     if self.debugConfig.debugKernel:
       kernelArgs.add(self.argLoader.loadKernArg("AddressDbg", "KernArgAddress", dword=2))
+    if self.debugConfig.asanInstrument:
+      kernelArgs.add(self.argLoader.loadKernArg("AsanReportBuf", "KernArgAddress", dword=2))
     self.argLoader.resetOffset()
     kernelArgs.addModuleAsFlatItems(self.argLoader.loadAllKernArg(sgprStartIdx, "KernArgAddress", numsOfLoad, preloadNum))
     if kernel["ProblemType"]["UseScaleAB"] == "Scalar":
