@@ -39,10 +39,12 @@ include_guard(GLOBAL)
 # The default ref is pinned to a known-good SHA for reproducible builds. Override
 # the ref to test a newer kpack: set HIPKERNELPROVIDER_KPACK_GIT_REF to any SHA,
 # tag, or branch (e.g. "main"), and HIPKERNELPROVIDER_KPACK_GIT_REPO to fetch from
-# a fork. A branch ref is a moving target: FetchContent re-fetches it only on a
-# clean populate (a wiped _deps/rocm_kpack-* or build dir) -- `cmake --fresh` is NOT
-# sufficient, as it clears the cache but leaves _deps/ intact. Pin to a specific
-# newer SHA for a deterministic re-fetch.
+# a fork. Changing the ref on an existing build tree takes `cmake --fresh`: a plain
+# reconfigure leaves ROCM_KPACK_SOURCE_DIR in the cache and rocm_kpack_populate()
+# returns early on it, never re-reading the ref. `--fresh` clears that entry, so the
+# populate runs again and FetchContent re-resolves the declared ref -- including a
+# branch, whose head it picks up on that populate. Pin to a specific SHA rather than
+# a branch when the fetched commit needs to be reproducible.
 set(HIPKERNELPROVIDER_KPACK_GIT_REPO "https://github.com/ROCm/rocm-kpack.git"
     CACHE STRING "rocm-kpack git repository to fetch (override for a fork).")
 set(HIPKERNELPROVIDER_KPACK_GIT_REF "e3483286e751060b3a70b792792cc122632c66e8"
@@ -104,6 +106,14 @@ endfunction()
 #   toolchain -- a bare configure of rocm-kpack dies on the msgpack-cxx lookup --
 #   so both are fetched and declared OVERRIDE_FIND_PACKAGE, which redirects those
 #   find_package() calls onto the fetched trees instead of failing.
+#
+#   OVERRIDE_FIND_PACKAGE is not directory-scoped: every later
+#   find_package(msgpack-cxx) or find_package(zstd) anywhere in the configure
+#   resolves to the versions pinned here. Nothing else is affected today only
+#   because add_subdirectory ordering happens to place hip-kernel-provider last and
+#   the other msgpack consumer, tensile, is FATAL_ERROR-blocked in the superbuild.
+#   Neither is enforced, so a reordering would silently substitute versions in
+#   another project.
 #
 #   Called only by rocm_kpack_add_runtime(); the versions here are the ones that
 #   build against the pinned rocm-kpack.

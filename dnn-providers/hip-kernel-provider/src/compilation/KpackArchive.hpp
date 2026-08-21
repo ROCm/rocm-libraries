@@ -101,11 +101,6 @@ public:
     /// FILE_NOT_FOUND is the authority, and a pre-check would race it.
     bool open(const std::filesystem::path& path, KpackError& error);
 
-    bool isOpen() const
-    {
-        return _archive != nullptr;
-    }
-
     /// Every architecture the archive holds a binary for. On failure returns false and
     /// fills `error` with stage ARCH_LOOKUP.
     bool architectures(std::vector<std::string>& arches, KpackError& error) const;

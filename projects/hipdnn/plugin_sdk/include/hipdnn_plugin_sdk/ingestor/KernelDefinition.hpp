@@ -105,6 +105,35 @@ struct KernelDefinition
     }
 };
 
+// KernelDefinition is built positionally, nine initializers at a time, so its field count
+// is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
+// implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
+// would otherwise compile and silently rebind every initializer after it. Only the count
+// -- two same-typed members swapped past each other still brace-initialize.
+static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
+                                               DescriptorId,
+                                               DescriptorId,
+                                               DescriptorId,
+                                               KernelSource,
+                                               MetadataValues,
+                                               int64_t,
+                                               std::vector<std::string>,
+                                               std::filesystem::path,
+                                               std::string>
+                  && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
+                                                       DescriptorId,
+                                                       DescriptorId,
+                                                       DescriptorId,
+                                                       KernelSource,
+                                                       MetadataValues,
+                                                       int64_t,
+                                                       std::vector<std::string>,
+                                                       std::filesystem::path,
+                                                       std::string,
+                                                       std::string>,
+              "KernelDefinition gained or lost a field; append only, then extend this "
+              "assertion and every positional construction of it.");
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

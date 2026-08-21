@@ -245,9 +245,10 @@ inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, A
 
 } // namespace detail
 
-// KernelSource's field count and order are pinned here: accepting exactly seven
-// initializers and no more makes an inserted field ill-formed at this assertion, rather
-// than silently rebinding every value after it at a positional initialization site.
+// KernelSource's field count is pinned here: accepting exactly seven initializers and no
+// more makes an inserted field ill-formed at this assertion, rather than silently
+// rebinding every value after it at a positional initialization site. Only the count --
+// two same-typed members swapped past each other still brace-initialize.
 static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                KernelSourceKind,
                                                std::string,
@@ -265,8 +266,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        std::string,
                                                        std::string,
                                                        std::string>,
-              "KernelSource gained, lost, or reordered a field; append only, then extend "
-              "this assertion.");
+              "KernelSource gained or lost a field; append only, then extend this "
+              "assertion.");
 
 /// UKD: one launchable kernel. Matchers, engine, and dispatch come from its pack.
 struct KernelDescriptor

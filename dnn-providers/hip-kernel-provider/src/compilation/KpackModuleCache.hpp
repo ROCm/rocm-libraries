@@ -21,12 +21,14 @@
 namespace hip_kernel_provider::compilation
 {
 
-/// A staged failure escaping the cache's load(). Carries the stage so the caller can
-/// tell "wrong GPU" from "wrong toc_key", and a message that already describes what
-/// went wrong -- but not *who asked*, because the cache is keyed on
-/// (archive, tocKey, arch) and deliberately never sees the descriptor or the symbol.
-/// KpackKernelLoader catches this and prefixes both, so every message names the
-/// descriptor and the symbol without either entering the key.
+/// A staged failure escaping the cache's load(). The message already describes what went
+/// wrong -- but not *who asked*, because the cache is keyed on (archive, tocKey, arch) and
+/// deliberately never sees the descriptor or the symbol. KpackKernelLoader catches this and
+/// prefixes both, so every message names the descriptor and the symbol without either
+/// entering the key.
+///
+/// stage() is carried alongside the message so a failure can be told apart by machine
+/// rather than by matching message text; KpackKernelLoader itself rewraps on the message.
 class KpackModuleLoadFailure : public std::runtime_error
 {
 public:

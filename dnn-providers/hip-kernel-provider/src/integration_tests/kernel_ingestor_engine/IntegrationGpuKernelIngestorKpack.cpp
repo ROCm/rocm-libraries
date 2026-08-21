@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <limits>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -24,12 +23,9 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
 
@@ -284,55 +280,6 @@ protected:
 
         result = graph.build_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    }
-
-    /// Executes on device and compares against CpuReferenceGraphExecutor. Routing alone
-    /// would pass on a kernel that ran the wrong archive member, or swapped its operands.
-    void executeAndVerify(Graph& graph, void* workspace, unsigned int seed)
-    {
-        GraphTensorBundle gpuBundle;
-        GraphTensorBundle cpuBundle;
-        graph.visit([&](const INode& node) {
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-            }
-            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-            {
-                if(gpuBundle.tensors.find(tensorAttr->get_uid()) == gpuBundle.tensors.end())
-                {
-                    gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                    cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                }
-            }
-        });
-
-        for(auto& [uid, tensor] : gpuBundle.tensors)
-        {
-            // Per-uid offset so the operands are never byte-identical: a+a and a+b are
-            // indistinguishable to allClose() when both operands hold the same bytes.
-            const auto tensorSeed = seed + static_cast<unsigned int>(uid);
-            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-        }
-
-        auto deviceVariantPack = gpuBundle.toDeviceVariantPack();
-        auto result = graph.execute(_handle, deviceVariantPack, workspace);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-
-        auto [serializedGraph, serErr] = graph.to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), cpuBundle.toHostVariantPack());
-
-        auto& gpuOut = gpuBundle.getTensor(3);
-        auto& cpuOut = cpuBundle.getTensor(3);
-        gpuOut.markDeviceModified();
-        // A one-term pointwise add is bit-exact on both sides.
-        const auto tolerance = std::numeric_limits<float>::epsilon();
-        EXPECT_TRUE(CpuFpReferenceValidation<float>(tolerance, tolerance).allClose(cpuOut, gpuOut));
     }
 
     std::vector<std::filesystem::path> _archives;
