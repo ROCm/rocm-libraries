@@ -1,12 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Code Coverage Test: StreamK with VGPR constant caching
-# Covers: KernelWriterAssembly.py line 3218, 19731
-# Target: gfx1250 StreamK constants moved to VGPRs, VGPR-kept constants
+# Code Coverage Test: Complex feature combinations for gfx1250
+# Covers: KernelWriter.py, Solution.py validation paths
+# Target: Combined features, edge cases, XF32, validation logic
 
 TestParameters:
-  marks: [skip-gfx1250, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -22,104 +22,11 @@ GlobalParameters:
   Architecture: gfx1250
 
 BenchmarkProblems:
-  # StreamK mode 3 (DP-Only) with VGPR pressure
+  # XF32 (extended precision FP32) - KernelWriter.py XF32 paths
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: h
-      DestDataType: h
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: False
-      UseBeta: True
-      Batched: True
-
-    - # BenchmarkProblemSizeGroup
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - WorkGroup: [[8, 8, 1], [8, 16, 1], [16, 8, 1]]  # For MacroTile [128,128], [128,256], [256,128]
-        - ScheduleIterAlg: [3]
-        - StreamK: [3]  # DP-Only mode
-        - StreamKForceDPOnly: [1]
-        - PrefetchAcrossPersistent: [1]
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 256]
-          - Exact: [512, 512, 1, 512]
-          - Exact: [1024, 1024, 1, 1024]
-
-  # StreamK mode 4 with VGPR constants
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: h
-      DestDataType: h
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: False
-      UseBeta: True
-      Batched: True
-
-    - # BenchmarkProblemSizeGroup
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - WorkGroup: [[8, 8, 1]]  # For MacroTile [128,128]
-        - ScheduleIterAlg: [3]
-        - StreamK: [4]
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 256]
-          - Exact: [512, 512, 1, 512]
-
-  # StreamK mode 5 with VGPR constants
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: h
-      DestDataType: h
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: False
-      UseBeta: True
-      Batched: True
-
-    - # BenchmarkProblemSizeGroup
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - WorkGroup: [[8, 8, 1]]  # For MacroTile [128,128]
-        - ScheduleIterAlg: [3]
-        - StreamK: [5]
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 256]
-          - Exact: [512, 512, 1, 512]
-
-  # StreamK with FP32 (different data type, VGPR pressure)
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: s
+      DataType: x
       DestDataType: s
       ComputeDataType: s
       TransposeA: False
@@ -136,15 +43,14 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - WorkGroup: [[8, 8, 1], [16, 16, 1]]  # For MacroTile [128,128], [256,256]
         - ScheduleIterAlg: [3]
-        - StreamK: [3, 4]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 512]
-          - Exact: [1024, 1024, 1, 1024]
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
 
-  # StreamK with HalfPLR variations (VGPR constants + prefetch)
+  # TDM + StreamK combination
   -
     - # ProblemType
       OperationType: GEMM
@@ -166,21 +72,147 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - WorkGroup: [[8, 8, 1]]  # For MacroTile [128,128]
         - ScheduleIterAlg: [3]
+        - TDMInst: [3]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
         - PrefetchAcrossPersistent: [1]
-        - HalfPLR: [0, 1, 2, 3]  # All HalfPLR modes
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]
 
-  # StreamK with FP8 (high VGPR usage data type)
+  # Bias + Activation + ScaleAlphaVec combination
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F8
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
+        - ActivationArgs:
+          - [Enum: relu]
+          - [Enum: gelu]
+
+  # ScheduleIterAlg=4 (SIA4) with various features
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64, 128]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]  # SIA4 on gfx1250
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]
+
+  # SwInstructionPrefetch=2 (only on gfx1250)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - SwInstructionPrefetch: [2]  # gfx1250-specific
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
+
+  # Mixed precision (different input/output types)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
+
+  # F8B8 mixed (FP8 A, BF8 B)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8B8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -198,15 +230,13 @@ BenchmarkProblems:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - WorkGroup: [[4, 4, 1]]  # For MacroTile [128,128] with MIWaveGroup=[2,2]
         - ScheduleIterAlg: [3]
-        - StreamK: [3, 4]
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]
-          - Exact: [512, 512, 1, 512]
 
-  # StreamK with transpose (different register allocation)
+  # CompactLoopStore with various features
   -
     - # ProblemType
       OperationType: GEMM
@@ -214,7 +244,7 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: True
+      TransposeA: False
       TransposeB: False
       UseBeta: True
       Batched: True
@@ -228,9 +258,66 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - WorkGroup: [[8, 8, 1]]  # For MacroTile [128,128]
         - ScheduleIterAlg: [3]
-        - StreamK: [3]
+        - CompactLoopStore: [True]
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+
+  # PreloadKernArgs with batching
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - PreloadKernArgs: [1, 2]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 4, 128]   # batch=4
+          - Exact: [128, 128, 8, 128]   # batch=8
+
+  # LDSTrInst (transpose load) with various transposes
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - LDSTrInst: [True, False]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]

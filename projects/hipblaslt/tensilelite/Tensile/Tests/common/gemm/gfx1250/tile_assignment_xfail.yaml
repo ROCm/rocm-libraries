@@ -1,12 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Code Coverage Test: MX (block float) types with TDM scales
-# Covers: KernelWriterAssembly.py lines 4596-4837, 8717-8723
-# Target: TDM-populated MX scales, NoSwizzle MX scales, scale-select paths
+# Code Coverage Test: Tile assignment variations for gfx1250
+# Covers: LraTileAssignment.py (31.54% coverage)
+# Target: Various WorkGroup, MacroTile, ThreadTile configurations
 
 TestParameters:
-  marks: [skip-gfx1250, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -22,12 +22,12 @@ GlobalParameters:
   Architecture: gfx1250
 
 BenchmarkProblems:
-  # MX FP4 with TDM (covers lines 4596-4837: TDM-populated scales)
+  # Various WorkGroup sizes
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
-      DestDataType: s
+      DataType: h
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
@@ -39,33 +39,23 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - LDSTrInst: [True]
-        - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - GlobalReadVectorWidthA: [16]
         - ScheduleIterAlg: [3]
-        - TDMInst: [3]  # Required for MX on gfx1250
-        - LDSSegmentInterleave: [0, 1]  # Both swizzle modes
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - 1LDSBuffer: [0]
+        - WorkGroup: [[16, 16, 1], [32, 8, 1], [8, 32, 1], [64, 4, 1], [4, 64, 1]]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 64]
-          - Exact: [128, 128, 1, 128]
-          - Exact: [64, 128, 2, 64]   # Batched
+          - Exact: [256, 256, 1, 256]
 
-  # MX FP4 with batching (targets batch-offset MX logic)
+  # Various MacroTile sizes
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
-      DestDataType: s
+      DataType: h
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
@@ -77,29 +67,107 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - LDSTrInst: [True]
-        - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - GlobalReadVectorWidthA: [16]
         - ScheduleIterAlg: [3]
-        - TDMInst: [3]
-        - LDSSegmentInterleave: [1]
+        - MacroTile: [[32, 32], [64, 64], [128, 64], [64, 128], [128, 128], [256, 128], [128, 256]]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 2, 64]    # batch=2
-          - Exact: [64, 64, 4, 64]    # batch=4
-          - Exact: [128, 128, 8, 128] # batch=8
+          - Exact: [256, 256, 1, 256]
 
-  # MX FP8 with TDM and scale-select (covers lines 8717-8723: local read MX scale select)
+  # Various ThreadTile sizes (via MacroTile / WorkGroup ratio)
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: mxf8
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - ThreadTile: [[2, 2], [4, 4], [8, 8], [2, 4], [4, 2], [8, 4], [4, 8]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+
+  # WorkGroup + MacroTile combinations (non-square)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - WorkGroup: [[32, 8, 1], [8, 32, 1]]
+        - MacroTile: [[128, 64], [64, 128]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+
+  # Tile assignment with FP32 (different MI size)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - MacroTile: [[64, 64], [128, 128], [128, 64], [64, 128]]
+        - WorkGroup: [[16, 16, 1], [32, 8, 1], [8, 32, 1]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+
+  # Tile assignment with FP8 (largest MI K)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -118,22 +186,18 @@ BenchmarkProblems:
         - DepthU: [64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
-        - TDMInst: [3]
-        - LDSSegmentInterleave: [0, 1]
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - 1LDSBuffer: [0]
+        - MacroTile: [[64, 64], [128, 128], [128, 64]]
+        - WorkGroup: [[16, 16, 1], [32, 8, 1]]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 64]
-          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
 
-  # MX FP8 with transpose (different scale paths)
+  # Tile assignment with transpose (different tile mapping)
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: mxf8
-      DestDataType: s
+      DataType: h
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: True
@@ -147,23 +211,22 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
-        - TDMInst: [3]
-        - LDSSegmentInterleave: [1]
+        - MacroTile: [[64, 64], [128, 128]]
+        - WorkGroup: [[16, 16, 1], [32, 8, 1]]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 64]
-          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
 
-  # MX with different vector widths (stress scale handling)
+  # Small WorkGroup sizes (edge cases)
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
-      DestDataType: s
+      DataType: h
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
@@ -175,55 +238,14 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - LDSTrInst: [True]
-        - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
-        - TDMInst: [3]
-        - LDSSegmentInterleave: [1]
-        - GlobalReadVectorWidthA: [16, 2]
-        - GlobalReadVectorWidthB: [-1, 2]
+        - WorkGroup: [[8, 8, 1], [16, 4, 1], [4, 16, 1]]
+        - MacroTile: [[64, 64]]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 64]
           - Exact: [128, 128, 1, 128]
-
-  # MX FP4 with odd problem sizes (NoSwizzle MX scale path)
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: s
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: False
-      UseBeta: True
-      Batched: True
-
-    - # BenchmarkProblemSizeGroup
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-        - LDSTrInst: [True]
-        - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - GlobalReadVectorWidthA: [16]
-        - ScheduleIterAlg: [3]
-        - TDMInst: [3]
-        - LDSSegmentInterleave: [0]  # NoSwizzle path
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [63, 65, 1, 64]    # Odd dimensions
-          - Exact: [127, 129, 1, 128] # Larger odd
-          - Exact: [17, 19, 1, 64]    # Small odd

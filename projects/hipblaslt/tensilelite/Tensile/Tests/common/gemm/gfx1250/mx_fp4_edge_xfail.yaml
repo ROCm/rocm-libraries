@@ -1,11 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Plan2: FP4 support with LDSSegmentInterleave
-# Note: A0 cannot use F4 32x16 WMMA, use 16x16x64 instead
+# A0-compatible test: MX FP4 microscaling format edge cases
+# Small problem sizes to test boundary conditions
 
 TestParameters:
-  marks: [skip-gfx1250, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -21,7 +21,7 @@ GlobalParameters:
   Architecture: gfx1250
 
 BenchmarkProblems:
-  # FP4 with LDSSegmentInterleave (16x16x64, not 32x16x128)
+  # MX FP4 edge cases
   -
     - # ProblemType
       OperationType: GEMM
@@ -43,15 +43,20 @@ BenchmarkProblems:
         - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]  # Use 16x16x64 for A0 (not 32x16x128)
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
         - GlobalReadVectorWidthA: [16]
-        - TDMInst: [3]
-        - LDSSegmentInterleave: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
         - ScheduleIterAlg: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [64, 64, 1, 64]
-          - Exact: [63, 127, 1, 65]    # Odd sizes
+          - Exact: [16, 16, 1, 64]    # Minimal MxN, K=DepthU
+          - Exact: [32, 32, 1, 64]    # Small tile
+          - Exact: [64, 64, 1, 64]    # Square small
+          - Exact: [17, 19, 1, 65]    # Odd dimensions
+          - Exact: [48, 48, 2, 128]   # Batched, K=2*DepthU

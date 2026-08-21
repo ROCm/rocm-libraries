@@ -1,34 +1,37 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Gap Coverage: UseScaleCD and OutputAmaxD parameters
-# Tests scaling for C/D tensors and amax output
+# A0-compatible test: Non-batched with all transpose combinations
+# Test if bug is transpose-dependent
 
 TestParameters:
-  marks: [skip-gfx1250, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
-  MinimumRequiredVersion: 5.0.0
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
+  PrintLevel: 1
   Architecture: gfx1250
 
 BenchmarkProblems:
-  # FP16 with UseScaleCD=True
+  # NN
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: h
-      DestDataType: h
+      DataType: s
+      DestDataType: s
       ComputeDataType: s
-      HighPrecisionAccumulate: True
       TransposeA: False
-      TransposeB: True
+      TransposeB: False
       UseBeta: True
-      Batched: True
-      UseScaleCD: True
+      Batched: False
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -36,29 +39,26 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - GlobalReadVectorWidthA: [8]
-        - GlobalReadVectorWidthB: [8]
+        - ScheduleIterAlg: [3]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [256, 256, 1, 256]
+          - Exact: [64, 64, 64]
+          - Exact: [63, 65, 67]  # Odd sizes
 
-  # FP16 with OutputAmaxD=True
+  # NT
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: h
-      DestDataType: h
+      DataType: s
+      DestDataType: s
       ComputeDataType: s
-      HighPrecisionAccumulate: True
       TransposeA: False
       TransposeB: True
       UseBeta: True
-      Batched: True
-      OutputAmaxD: True
+      Batched: False
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -66,28 +66,25 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [256, 256, 1, 256]
+          - Exact: [64, 64, 64]
 
-  # BF16 with UseScaleCD and OutputAmaxD combined
+  # TN
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: b
-      DestDataType: b
+      DataType: s
+      DestDataType: s
       ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: True
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
-      Batched: True
-      UseScaleCD: True
-      OutputAmaxD: True
+      Batched: False
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -95,28 +92,25 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [256, 256, 1, 256]
+          - Exact: [64, 64, 64]
 
-  # FP8 with UseScaleAB and UseScaleCD
+  # TT
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F8
-      DestDataType: h
+      DataType: s
+      DestDataType: s
       ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: False
+      TransposeA: True
       TransposeB: True
       UseBeta: True
-      Batched: True
-      UseScaleAB: True
-      UseScaleCD: True
+      Batched: False
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -124,10 +118,10 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [256, 256, 1, 256]
+          - Exact: [64, 64, 64]
