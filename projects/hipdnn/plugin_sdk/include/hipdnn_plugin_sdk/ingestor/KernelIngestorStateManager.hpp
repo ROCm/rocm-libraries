@@ -62,8 +62,22 @@ struct ResolvedDispatch
 /// (sortedDefinitions), getMaxWorkspaceSize (getDispatchDetails per survivor, max), and
 /// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
 ///
-/// Thread-safe: the cache is internally synchronized; matcher and scorer calls run
-/// outside the lock.
+/// Thread safety. Two independent caches, each guarding itself:
+///
+/// - `_catalogCache` (`LruCache`) synchronizes internally.
+/// - `_winnerCache` is guarded by `_winnerCacheMutex`, as is the one-shot growth warning.
+///
+/// Neither lock is ever held across a call that takes the other, so the two cannot
+/// deadlock. Matchers, the heuristic, and the accessors below all run outside both.
+///
+/// Everything between a lookup and a store is thread-local: `catalogFor` returns a
+/// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
+/// shared state. Returning a reference into `_catalogCache` instead would make those
+/// mutations a data race. `winnerFor` returns a copy for the same reason.
+///
+/// Concurrent callers can therefore duplicate work -- two threads may rank the same
+/// catalog, or record a ranking for the same key -- and the last store wins. Both
+/// stores are equally valid, so the cost is the redundant work, never a wrong answer.
 template <typename THandle>
 class KernelIngestorStateManager
 {
@@ -72,10 +86,9 @@ public:
     /// wrong answer.
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
 
-    /// Not an `LruCache`: evicting a winner costs a GPU benchmark sweep or a silent
-    /// quality regression, not a rematch. Unbounded is safe because entries are created
-    /// only by opt-in benchmarking, so this is a tripwire, not a cap -- passing it logs
-    /// once and changes nothing else.
+    /// A tripwire, not a cap: the winner cache never evicts, because discarding a
+    /// measured ranking costs a GPU sweep or a silent quality regression. Crossing this
+    /// logs once and changes nothing.
     static constexpr size_t WINNER_CACHE_WARNING_THRESHOLD = 4096;
 
     /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
@@ -179,21 +192,26 @@ public:
     /// The ordered catalog and the state matching bound, from one lookup.
     ///
     /// A benchmarked record covering the whole catalog supplies a measured order and
-    /// `rank()` is never called; otherwise the heuristic orders it (Check 1; Check 2 is
-    /// the knob-filtered counterpart at the lookup site).
+    /// `rank()` is never called; otherwise the heuristic orders it. This is Check 1;
+    /// Check 2 is the knob-filtered counterpart at the lookup site.
     Catalog sortedCatalog(const MatchContext& context) const
     {
         Catalog catalog = catalogFor(context);
 
-        // Already ordered from a record: final, nothing left to improve.
+        // A measured order is final; a heuristic one is provisional, so Check 1 runs
+        // again even when the catalog is already sorted -- a sweep can postdate the
+        // memoized sort.
         if(catalog.isSorted && catalog.orderedFromRecord)
         {
             return catalog;
         }
 
-        // Heuristic order is only provisional -- Check 1 must still run before falling
-        // back, since a benchmark sweep can postdate the memoized sort.
-        if(!orderFromWinnerRecord(catalog, context))
+        if(auto ordered = orderFromWinnerRecord(catalog.entries, context); ordered.has_value())
+        {
+            catalog.entries = std::move(*ordered);
+            catalog.orderedFromRecord = true;
+        }
+        else
         {
             if(catalog.isSorted)
             {
@@ -442,11 +460,9 @@ private:
 
     Catalog catalogFor(const MatchContext& context) const
     {
-        // Nothing below this line can be answered without a device: pack pruning reads
-        // the device's arch, matchers read its properties, and a kernel that somehow
-        // matched could not be launched. Answered once here rather than in every
-        // provider's matchers, where it is easy to leave out and impossible to see
-        // missing -- an empty catalog is what those matchers were producing anyway.
+        // Pack pruning and matchers both read the device, so nothing below can be
+        // answered without one. Checked here rather than in every provider's matchers,
+        // where an omission is invisible.
         if(context.deviceId == NO_DEVICE)
         {
             HIPDNN_PLUGIN_LOG_INFO("ingestor: no device resolved; no kernel applies");
@@ -636,45 +652,43 @@ private:
         return true;
     }
 
-    /// Check 1: reorders @p catalog by a covering record and returns true; false means
-    /// no measured order was available, and the caller ranks as it always has.
+    /// Check 1: the measured order for @p context's graph and device, or nullopt when no
+    /// record covers @p entries and the caller must rank as it always has.
     ///
-    /// Coverage is required: a partial record cannot order the rest, and interleaving
-    /// measured with unmeasured entries would not be a valid order.
-    bool orderFromWinnerRecord(Catalog& catalog, const MatchContext& context) const
+    /// Full coverage is required: a partial record cannot order the rest, and
+    /// interleaving measured with unmeasured entries would not be a valid order.
+    std::optional<std::vector<KernelDefinition>>
+        orderFromWinnerRecord(const std::vector<KernelDefinition>& entries,
+                              const MatchContext& context) const
     {
-        // Cheap rejection first: building a WinnerKey costs a full graph UnPack, so this
-        // avoids that cost on the default, never-benchmarked path.
-        if(catalog.entries.empty() || winnerCacheSize() == 0)
+        // Building a WinnerKey copies and folds the whole graph buffer, so reject on the
+        // never-benchmarked path before paying for one.
+        if(entries.empty() || winnerCacheSize() == 0)
         {
-            return false;
+            return std::nullopt;
         }
 
         const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
         if(!key.graph.isUsable())
         {
             // No bytes to key on; such graphs never match each other either.
-            return false;
+            return std::nullopt;
         }
 
         const auto record = winnerFor(key);
         if(!record.has_value())
         {
-            return false;
+            return std::nullopt;
         }
 
-        auto ordered = orderIfFullyCovered(*record, catalog.entries);
-        if(!ordered.has_value())
+        auto ordered = orderIfFullyCovered(*record, entries);
+        if(ordered.has_value())
         {
-            return false;
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
+                                                        << " catalog entries from a benchmarked "
+                                                           "record; heuristic ranking skipped");
         }
-
-        catalog.entries = std::move(*ordered);
-        catalog.orderedFromRecord = true;
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << catalog.entries.size()
-                                                    << " catalog entries from a benchmarked "
-                                                       "record; heuristic ranking skipped");
-        return true;
+        return ordered;
     }
 
     MetadataSchema _schema;
