@@ -45,8 +45,11 @@ struct RemoveWaitCntOptions {
 
     /// Also strip @c s_wait_xcnt. Off by default because only the O3 path has a
     /// hazard pass that re-places xcnt; elsewhere hand-authored drains must
-    /// survive. TODO: drop this knob once a dedicated hazard pass owns xcnt
-    /// placement.
+    /// survive. TensileLite emits @c s_wait_xcnt @c 0 ahead of a volatile/atomic
+    /// VMEM op, since XNACK-replay can reorder one past in-flight VMEM -- in
+    /// StreamK that is the release-side flag store, the acquire-side flag load,
+    /// and the work-queue atomic. TODO: drop this knob once a dedicated hazard
+    /// pass places those drains.
     bool removeXcnt = false;
 
     /// Also strip @c s_wait_kmcnt. Off by default because wait-count insertion
