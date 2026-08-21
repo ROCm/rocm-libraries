@@ -142,6 +142,12 @@ namespace TensileLite
                 // Match DataInitialization MX gate.
                 if(!isMXProblem(*gemm))
                     return;
+                // Only recompute when DataInitialization actually refreshes MX
+                // inputs for this solution (solution-dependent HostPreSwizzle).
+                // Otherwise the preProblem reference is unchanged, so reuse it
+                // instead of paying a full dense reference GEMM per solution.
+                if(!m_dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
+                    return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
                 SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
             }
@@ -517,11 +523,9 @@ namespace TensileLite
                     throw std::runtime_error("Unrecognized output tensor.");
                 }
 
-                TensorDescriptor const* validationTensor = &tensor;
-
                 if(Debug::Instance().printTensorInfo())
-                    std::cout << "Validating tensor " << validationTensor->getName()
-                              << ", cpu pointer " << refPtr << ", gpu pointer " << resPtr
+                    std::cout << "Validating tensor " << tensor.getName() << ", cpu pointer "
+                              << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
 
                 // Check if we should skip this tensor due to null pointers or zero elements
@@ -543,13 +547,8 @@ namespace TensileLite
                     throw std::runtime_error(ss.str());
                 }
 
-                rv &= checkResults(*validationTensor,
-                    refPtr,
-                    resPtr,
-                    result.maxElements[i],
-                    result.gpu,
-                    validationStride,
-                    threshold);
+                rv &= checkResults(
+                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
             }
             return rv;
         }
