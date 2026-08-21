@@ -28,9 +28,7 @@ else()
   )
 endif()
 
-nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings.cpp")
-
-set_target_properties(_pyorigami PROPERTIES OUTPUT_NAME "origami")
+nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/csrc/bindings.cpp")
 
 # Place the compiled module in the source package directory for development/testing
 set_target_properties(_pyorigami PROPERTIES
@@ -70,6 +68,7 @@ install(TARGETS _pyorigami LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}")
 install(FILES 
     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/selector.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.py"
     DESTINATION "${PYTHON_INSTALL_DIR}"
 )
 
