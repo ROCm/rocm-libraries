@@ -823,6 +823,16 @@ class TestLlvmToolDiscovery(unittest.TestCase):
     def fake_bin(self, tmp, name):
         return self.make_tool(os.path.join(tmp, "llvm", "bin"), name)
 
+    def assertSameTool(self, got, expected):
+        """Which file was found, not how the host happens to spell its name.
+
+        Discovery names the tool the way ``PATHEXT`` does, which is ``llc.EXE``,
+        and that is the ``llc.exe`` the fixture wrote -- the two differ only in
+        a case the filesystem does not distinguish.
+        """
+
+        self.assertEqual(os.path.normcase(got or ""), os.path.normcase(expected))
+
     def test_configured_rocm_wins_over_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             expected = self.fake_bin(tmp, "llc")
@@ -831,7 +841,7 @@ class TestLlvmToolDiscovery(unittest.TestCase):
                 # one set -- which is what the variable is for -- would answer
                 # from a route above the one under test.
                 env.pop(LLVM_BIN_ENV, None)
-                self.assertEqual(llvm_tool("llc"), expected)
+                self.assertSameTool(llvm_tool("llc"), expected)
 
     def test_explicit_llvm_bin_wins_over_rocm_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -841,7 +851,7 @@ class TestLlvmToolDiscovery(unittest.TestCase):
             with mock.patch.dict(
                 os.environ, {"ROCM_PATH": tmp, LLVM_BIN_ENV: override}
             ):
-                self.assertEqual(llvm_tool("llc"), expected)
+                self.assertSameTool(llvm_tool("llc"), expected)
 
     def test_path_answers_when_nothing_is_configured(self):
         """PATH stays the normal route for a deliberately arranged toolchain."""
@@ -864,7 +874,7 @@ class TestLlvmToolDiscovery(unittest.TestCase):
             with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}) as env:
                 env.pop(LLVM_BIN_ENV, None)
                 found = llvm_tool("llc")
-                self.assertNotIn(tmp, found or "")
+                self.assertNotIn(os.path.normcase(tmp), os.path.normcase(found or ""))
                 on_path = shutil.which("llc")
                 if on_path is not None:
                     self.assertEqual(found, on_path)
