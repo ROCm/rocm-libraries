@@ -410,10 +410,12 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* 
 {
     rocke_cshuffle_epilogue_t epi;
     epi.atom = atom;
+    epi.mma_op = NULL;
     epi.grid = *grid;
     epi.store_vec = 8; /* Python default */
     epi.smem_name_hint = "C_smem";
     epi.out_dtype = "f16";
+    epi.war_barriers = 1; /* Python default */
     epi.no_alias = false; /* Python default */
     return epi;
 }
@@ -430,6 +432,40 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_ato
                      && (epi.out_dtype[0] == 'f' && epi.out_dtype[1] == 'p'
                          && epi.out_dtype[2] == '3' && epi.out_dtype[3] == '2');
     int _max_sv = (_fp32_out && max_store_vec > 4) ? 4 : max_store_vec;
+    v = _max_sv;
+    while(v > 1)
+    {
+        bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size)
+                  && (((grid->tile_m * grid->tile_n) / v) % block_size == 0);
+        if(ok)
+            break;
+        v /= 2;
+    }
+    epi.store_vec = v;
+    return epi;
+}
+
+rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid_op(const rocke_mmaop_t* op,
+                                                               const rocke_warp_grid_t* grid,
+                                                               int max_store_vec)
+{
+    rocke_cshuffle_epilogue_t epi;
+    int v;
+    int block_size;
+    bool _fp32_out;
+    int _max_sv;
+    epi.atom = NULL;
+    epi.mma_op = op;
+    epi.grid = *grid;
+    epi.store_vec = 8;
+    epi.smem_name_hint = "C_smem";
+    epi.out_dtype = "f16";
+    epi.war_barriers = 1;
+    epi.no_alias = false;
+    block_size = rocke_warp_grid_block_size(grid);
+    /* fp32_out cap: caller sets epi.out_dtype after construction; default f16 */
+    _fp32_out = false;
+    _max_sv = (_fp32_out && max_store_vec > 4) ? 4 : max_store_vec;
     v = _max_sv;
     while(v > 1)
     {
@@ -520,61 +556,78 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     (void)rocke_b_const_i32(b, 0);
     (void)rocke_b_const_i32(b, 0);
 
-    /* ---- step 0: reuse barrier. ----
-     * The common-LDS packer aliases this C staging tile onto the A/B staging
-     * bytes (non-interfering in program order). Double-buffered / prefetched
-     * (compv4 / async_dma) mainloops end with the tail-tile MFMA reading A/B
-     * from LDS *after* their last drain barrier and emit no trailing barrier, so
-     * without a barrier here a fast wave's first C ds_write would clobber A/B
-     * bytes a slow wave is still reading for its tail MFMA -- a cross-wave WAR on
-     * the aliased pool. Mirrors the Python CShuffleEpilogue.store.
-     *
-     * With no_alias the C tile has its own exclusive LDS bytes that never
-     * overlap A/B, so this WAR cannot occur and the barrier is elided. The
-     * step-2 C-write->C-read barrier below is a genuine RAW and always stays. */
+    /* ---- step 0: reuse barrier(s).
+     * war_barriers controls how many: 1 (default single-role pipelines) or
+     * 2 (wavelet split-role). With no_alias all are elided. */
     if(!epi->no_alias)
-        rocke_b_sync(b);
+    {
+        int wb;
+        for(wb = 0; wb < epi->war_barriers; ++wb)
+            rocke_b_sync(b);
+    }
 
+    /* ---- step 1: publish accs to LDS. ----
+     * WMMA path: use op->c_layout().coord() for the scatter.
+     * MFMA path: use atom->lane_to_output(). */
     for(mi = 0; mi < mfmas_m; ++mi)
     {
         for(ni = 0; ni < mfmas_n; ++ni)
         {
             rocke_value_t* acc = accs[mi * mfmas_n + ni];
             rocke_value_t* acc_staged;
+            int c_per_lane;
+            int atom_m, atom_n;
             int i;
-            rocke_value_t* elems[16]; /* c_per_lane <= 16 (32x32 atom) */
+            rocke_value_t* elems[64]; /* c_per_lane up to 16 for 16x16x32 WMMA */
 
             if(_fp32_out)
-            {
                 acc_staged = acc;
-            }
             else if(_bf16_out)
-            {
                 acc_staged = rocke_b_vec_trunc_f32_to_bf16(b, acc);
+            else
+                acc_staged = rocke_b_vec_trunc_f32_to_f16(b, acc);
+
+            if(epi->mma_op != NULL)
+            {
+                c_per_lane = epi->mma_op->c_frag_len;
+                atom_m = epi->mma_op->m;
+                atom_n = epi->mma_op->n;
             }
             else
             {
-                acc_staged = rocke_b_vec_trunc_f32_to_f16(b, acc);
+                c_per_lane = atom->c_per_lane;
+                atom_m = atom->m;
+                atom_n = atom->n;
             }
 
-            for(i = 0; i < atom->c_per_lane; ++i)
+            for(i = 0; i < c_per_lane; ++i)
                 elems[i] = rocke_b_vec_extract(b, acc_staged, i);
 
             {
                 rocke_value_t* tile_m_base
-                    = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, (int64_t)mi * atom->m));
+                    = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, (int64_t)mi * atom_m));
                 rocke_value_t* tile_n_base
-                    = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, (int64_t)ni * atom->n));
-                for(i = 0; i < atom->c_per_lane; ++i)
+                    = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, (int64_t)ni * atom_n));
+                for(i = 0; i < c_per_lane; ++i)
                 {
-                    rocke_value_t* row_in_atom;
-                    rocke_value_t* col_in_atom;
+                    rocke_value_t* row_in_atom = NULL;
+                    rocke_value_t* col_in_atom = NULL;
                     rocke_value_t* ld_m;
                     rocke_value_t* ld_n;
                     rocke_value_t* idx[2];
-                    if(rocke_epi_lane_to_output(b, atom, grid->lane, i, &row_in_atom, &col_in_atom)
-                       != 0)
-                        return;
+                    if(epi->mma_op != NULL)
+                    {
+                        const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(epi->mma_op, b);
+                        rocke_arch_layout_map_coord(
+                            c_map, b, grid->lane, i, &row_in_atom, &col_in_atom);
+                    }
+                    else
+                    {
+                        if(rocke_epi_lane_to_output(
+                               b, atom, grid->lane, i, &row_in_atom, &col_in_atom)
+                           != 0)
+                            return;
+                    }
                     ld_m = rocke_b_add(b, tile_m_base, row_in_atom);
                     ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
                     idx[0] = ld_m;

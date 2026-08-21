@@ -1152,6 +1152,8 @@ int main(int argc, const char* argv[])
 
     std::shared_ptr<DataInitialization> dataInit;
     {
+        // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
+        srand(seed);
         ScopedTimer timer("data_init_setup");
         dataInit = std::make_shared<DataInitialization>(args, problemFactory);
     }
