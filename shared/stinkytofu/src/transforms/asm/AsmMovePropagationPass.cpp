@@ -74,18 +74,12 @@ enum class RegClass { Vgpr, Sgpr, Other };
 
 RegClass classifyReg(const StinkyRegister& reg) {
     if (!reg.isRegister()) return RegClass::Other;
+    if (isSpecialControlReg(reg)) return RegClass::Other;
 
     switch (reg.reg.type) {
         case RegType::V:
             return RegClass::Vgpr;
         case RegType::S:
-        case RegType::SCC:
-        case RegType::VCC:
-        case RegType::VCC_LO:
-        case RegType::VCC_HI:
-        case RegType::EXEC:
-        case RegType::EXEC_LO:
-        case RegType::EXEC_HI:
             return RegClass::Sgpr;
         default:
             return RegClass::Other;
