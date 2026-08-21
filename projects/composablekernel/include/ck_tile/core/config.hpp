@@ -203,6 +203,12 @@
 #define CK_TILE_EXPERIMENTAL_USE_MEMCPY_FOR_VECTOR_ACCESS 0
 #endif
 
+// Opt-in only: mirrors aiter's gfx1250 FMHA bwd prologue
+// s_setreg_imm32_b32 hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), 2.
+#ifndef CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE
+#define CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE 0
+#endif
+
 #ifndef CK_TILE_WORKAROUND_SWDEV_XXXXXX_INT8_DS_WRITE_ISSUE
 #define CK_TILE_WORKAROUND_SWDEV_XXXXXX_INT8_DS_WRITE_ISSUE 1
 #endif
@@ -317,6 +323,12 @@
 
 #ifndef CK_TILE_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM
 #define CK_TILE_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM 1
+#endif
+
+// Convert and store f32 -> bf16/fp16 tiles a pair at a time instead of
+// element-wise; see impl::cast_tile_pk_f32_to_16bit.
+#ifndef CK_TILE_USE_PK_F32_TO_16BIT_TILE_CAST
+#define CK_TILE_USE_PK_F32_TO_16BIT_TILE_CAST 1
 #endif
 
 #ifndef CK_TILE_USE_SUBDWORD_TILE_CAST
