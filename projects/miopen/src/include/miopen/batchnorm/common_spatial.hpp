@@ -106,16 +106,30 @@ inline void GetLocalConfigNHWC(const miopen::batchnorm::ProblemDescription& prob
     // shared memory size per workgroup is fixed
     unsigned int max_localsize = 1024 / vectorsize;
 
+    // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
+    // up to next power of 2.
+    const size_t nchannels = c / vectorsize;
+    size_t xlocalsize_pow2 =
+        std::min(size_t{1 << int(std::ceil(std::log2(nchannels)))}, size_t{xlocalsize_limit});
+
+    // Rounding up to a power of two can leave a large part of the x dimension masked off:
+    // with nchannels 48 an xlocalsize of 32 spans two workgroups covering 64 lanes, so a
+    // quarter of every workgroup idles. Halving xlocalsize while that strictly reduces the
+    // covered extent recovers those lanes. The extent never grows, so configurations that
+    // already divide evenly keep the largest xlocalsize.
+    const auto covered = [&](size_t xls) { return (nchannels + xls - 1) / xls * xls; };
+    while(xlocalsize_pow2 > 1 && covered(xlocalsize_pow2 / 2) < covered(xlocalsize_pow2))
+    {
+        xlocalsize_pow2 /= 2;
+    }
+
     size_t nworkgroups = 0;
     // decrease max_localsize until the number of workgroups is greater than 80%
     // of the available CUs
     while(nworkgroups < problem.GetMinWorkgroups() && max_localsize >= xlocalsize_limit &&
           max_localsize > 64)
     {
-        // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
-        // up to next power of 2.
-        xlocalsize  = std::min(size_t{1 << int(std::ceil(std::log2(c / vectorsize)))},
-                              size_t{xlocalsize_limit});
+        xlocalsize  = xlocalsize_pow2;
         ylocalsize  = max_localsize / xlocalsize;
         nworkgroups = ((c / vectorsize + xlocalsize - 1) / xlocalsize) *
                       ((h * w + ylocalsize - 1) / ylocalsize);
