@@ -721,6 +721,51 @@ class TestConvWgradVectorLoad(unittest.TestCase):
             "expected vectorised dY/X loads for gfx1250 wgrad, got scalar only",
         )
 
+    def test_gfx1250_grouped_wgrad_dual_engine(self):
+        # Grouped wgrad (grid-per-group, Gm=1) on gfx1250 (wave32 WMMA 16x16x32).
+        # Group merging is MFMA-only (is_valid_wgrad_spec rejects Gm>1 on WMMA), so
+        # this guards only the grouped Gm=1 WMMA path. Lower through the backend
+        # dispatcher so under ROCKE_BACKEND=both it also asserts Python == C++ on the
+        # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
+        # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+        )
+
+        shape = _Shape(
+            "g4_gfx1250_N2H14W14C64K64",
+            N=2,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=4,
+        )
+        spec, _p, _wtk = _make_spec("gfx1250", shape, "fp16", "mem", "default", 1)
+        self.assertIsNotNone(spec, "gfx1250 WMMA atom selection failed")
+        ok, reason = is_valid_wgrad_spec(spec, "gfx1250")
+        self.assertTrue(
+            ok, f"gfx1250 grouped wgrad spec unexpectedly invalid: {reason}"
+        )
+        kernel = build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx1250")
+        self.assertIn(
+            "wmma.f32.16x16x32",
+            ll,
+            "expected the gfx1250 16x16x32 WMMA intrinsic in the grouped lowered IR",
+        )
+        self.assertGreater(
+            _count_vector_buffer_loads(ll),
+            0,
+            "expected vectorised dY/X loads for gfx1250 grouped wgrad, got scalar only",
+        )
+
     def test_odd_channels_stay_scalar(self):
         # C=K=3 are not divisible by any vec > 1, so both operands fall back to the
         # scalar vector_axis="col" path -- no vectorised buffer load is emitted.

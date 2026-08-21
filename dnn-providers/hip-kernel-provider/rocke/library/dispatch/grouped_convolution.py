@@ -240,6 +240,10 @@ class ConvGroupedRequest(OperatorRequest):
     dilation_d: Optional[int] = None
     # optional vec_size_c override; None = let the candidate decide
     vec_size_c: Optional[int] = None
+    # wgrad only: NumGroupsToMerge (Gm). 1 = grid-per-group (one workgroup per
+    # group). >1 fuses Gm groups into one workgroup GEMM (block-diagonal dW);
+    # must be a power of two in {1,2,4,8,16,32,64} and divide G. MFMA-only.
+    num_groups_to_merge: int = 1
     op: str = "conv_grouped"
     algorithm: str = "auto"
     spec_id: str = "auto"
@@ -269,6 +273,7 @@ class ConvGroupedRequest(OperatorRequest):
                 "pad_w",
                 "dilation_h",
                 "dilation_w",
+                "num_groups_to_merge",
             )
         }
         if self.Di is not None:
@@ -399,6 +404,45 @@ def _epilogue_for(req: ConvGroupedRequest) -> str:
     return "cshuffle" if _vec_size_c(req) > 1 else "default"
 
 
+# NumGroupsToMerge (Gm) accepted values — mirrors WgradConvSpec.validate().
+_VALID_MERGE_FACTORS = (1, 2, 4, 8, 16, 32, 64)
+
+
+def _wgrad_merge_factor(req: ConvGroupedRequest) -> int:
+    """Resolve NumGroupsToMerge (Gm) for a wgrad request (always 1 when G<=1)."""
+    if int(req.G) <= 1:
+        return 1
+    return int(req.num_groups_to_merge)
+
+
+def _wgrad_merge_error(req: ConvGroupedRequest) -> Optional[str]:
+    """Return a rejection reason if the wgrad merge factor is invalid, else None."""
+    gm = int(req.num_groups_to_merge)
+    if gm not in _VALID_MERGE_FACTORS:
+        return (
+            f"num_groups_to_merge must be a power of two in "
+            f"{{1,2,4,8,16,32,64}}, got {gm}"
+        )
+    if gm > 1 and int(req.G) <= 1:
+        return "num_groups_to_merge>1 requires groups>1"
+    if int(req.G) % gm != 0:
+        return f"groups={req.G} must be divisible by num_groups_to_merge={gm}"
+    return None
+
+
+def _wgrad_grouped_overrides(req: ConvGroupedRequest) -> Tuple[str, int, int]:
+    """(epilogue, split_k, num_groups_to_merge) for a wgrad spec.
+
+    Grouped wgrad (G>1) is gated to the direct-store epilogue at split_k==1 (the
+    group-batch index rides on block_id_z; see is_valid_wgrad_spec), with an
+    optional NumGroupsToMerge>1.  Ungrouped keeps the vec-derived epilogue and the
+    auto split-K formula (split_k=-1), byte-identically to the pre-grouped path.
+    """
+    if int(req.G) > 1:
+        return "default", 1, _wgrad_merge_factor(req)
+    return _epilogue_for(req), -1, 1
+
+
 def _data_spec(req: ConvGroupedRequest) -> ConvDataSpec:
     return ConvDataSpec(
         dtype_a=req.dtype.lower(),
@@ -441,6 +485,7 @@ class ConvGroupedSpec:
     dtype: str
     arch: str
     split_k: int = 1  # wgrad only
+    num_groups_to_merge: int = 1  # wgrad only (NumGroupsToMerge / Gm)
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -457,6 +502,8 @@ class ConvGroupedSpec:
         ]
         if self.direction == "wgrad" and self.split_k != 1:
             parts.append(f"spk{self.split_k}")
+        if self.direction == "wgrad" and self.num_groups_to_merge != 1:
+            parts.append(f"gm{self.num_groups_to_merge}")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -497,15 +544,21 @@ class ConvGroupedSpec:
 
         target = ArchTarget.from_gfx(self.arch)
         p = problem
-        resolved_split_k = select_split_k_wgrad(
-            wg_M=p.K,
-            wg_N=(p.Z if p.is_3d else 1) * p.Y * p.X * p.C,
-            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
-            tile_m=self.tile_m,
-            tile_n=self.tile_n,
-            tile_k=self.tile_k,
-            arch=self.arch,
-        ).split_k
+        # Grouped wgrad requires split_k=1 (the group-batch index owns block_id_z;
+        # is_valid_wgrad_spec rejects split_k>1 for groups>1). Only auto-resolve
+        # split_k for the ungrouped path.
+        if p.groups > 1:
+            resolved_split_k = 1
+        else:
+            resolved_split_k = select_split_k_wgrad(
+                wg_M=p.K,
+                wg_N=(p.Z if p.is_3d else 1) * p.Y * p.X * p.C,
+                wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
+                tile_m=self.tile_m,
+                tile_n=self.tile_n,
+                tile_k=self.tile_k,
+                arch=self.arch,
+            ).split_k
         return WgradConvSpec(
             problem=problem,
             name=self.name,
@@ -526,6 +579,7 @@ class ConvGroupedSpec:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             split_k=resolved_split_k,
+            num_groups_to_merge=self.num_groups_to_merge,
         )
 
 
@@ -546,8 +600,14 @@ def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, in
 def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
-    wg_M = p.K  # output channels
-    wg_N = (p.Z if p.is_3d else 1) * p.Y * p.X * p.C  # filter spatial × input channel
+    spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
+    gm = spec.num_groups_to_merge
+    # Per-workgroup (merged) GEMM dims: Gm groups fuse on both M and N. For the
+    # ungrouped path G==1 (hence Gm==1) these reduce to wg_M=K, wg_N=spatial*C.
+    kpg = p.K // p.groups
+    cpg = p.C // p.groups
+    wg_M = gm * kpg  # merged output channels
+    wg_N = spatial * gm * cpg  # merged filter spatial × input channel
     wg_K = p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1)  # output spatial positions
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
@@ -565,7 +625,11 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
         ).split_k
     else:
         split_k = spec.split_k
-    return (gx, gy, split_k)
+    # The group-batch index rides on block_id_z alongside split-K: there are
+    # ceil(G/Gm) group-batches. Grouped specs are gated to split_k==1, so for
+    # groups>1 z is a pure group-batch axis; for G==1 this is (gx, gy, split_k).
+    group_batches = (p.groups + gm - 1) // gm
+    return (gx, gy, group_batches * split_k)
 
 
 def _block(spec: ConvGroupedSpec) -> Tuple[int, int, int]:
@@ -920,6 +984,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk, _gm = _wgrad_grouped_overrides(req)
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
@@ -934,8 +999,9 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             warp_tile_k=wtk,
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
-            split_k=-1,
+            epilogue=_ep,
+            split_k=_sk,
+            num_groups_to_merge=_gm,
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -947,6 +1013,9 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
+        merge_err = _wgrad_merge_error(req)
+        if merge_err is not None:
+            return False, merge_err
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -961,6 +1030,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk, _gm = _wgrad_grouped_overrides(req)
         return ConvGroupedSpec(
             direction="wgrad",
             tile_m=tm,
@@ -971,10 +1041,11 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             warp_tile_mn=wtmn,
             warp_tile_k=wtk,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
+            epilogue=_ep,
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=-1,
+            split_k=_sk,
+            num_groups_to_merge=_gm,
             name=name,
         )
 
@@ -1029,6 +1100,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk, _gm = _wgrad_grouped_overrides(req)
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
@@ -1043,8 +1115,9 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_tile_k=wtk,
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
-            split_k=-1,
+            epilogue=_ep,
+            split_k=_sk,
+            num_groups_to_merge=_gm,
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -1056,6 +1129,9 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
+        merge_err = _wgrad_merge_error(req)
+        if merge_err is not None:
+            return False, merge_err
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -1070,6 +1146,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk, _gm = _wgrad_grouped_overrides(req)
         return ConvGroupedSpec(
             direction="wgrad",
             tile_m=tm,
@@ -1080,10 +1157,11 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_tile_mn=wtmn,
             warp_tile_k=wtk,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
+            epilogue=_ep,
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=-1,
+            split_k=_sk,
+            num_groups_to_merge=_gm,
             name=name,
         )
 

@@ -113,11 +113,19 @@ def _grid_for_spec(spec, p):
 
 
 def _grid_for_wgrad_spec(spec, split_k: int):
-    """Derive launch grid from wgrad spec and split-K degree."""
+    """Derive launch grid from wgrad spec and split-K degree.
+
+    spec.wg_N/wg_M already fold in num_groups_to_merge (Gm), so gx/gy tile the
+    merged per-workgroup GEMM. The group-batch index rides on block_id_z: there
+    are ceil(groups/Gm) group-batches, giving z = ceil(groups/Gm) * split_k
+    (== split_k for the ungrouped groups==1 path).
+    """
     tile_m, tile_n = spec.tile_m, spec.tile_n
     gx = (spec.wg_N + tile_n - 1) // tile_n
     gy = (spec.wg_M + tile_m - 1) // tile_m
-    return (gx, gy, split_k)
+    gm = spec.num_groups_to_merge
+    group_batches = (spec.problem.groups + gm - 1) // gm
+    return (gx, gy, group_batches * split_k)
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
