@@ -113,6 +113,16 @@ public:
     {
         return setOutput(OutputNames::C, std::move(value));
     }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool logicallyEqualsImpl([[maybe_unused]] const MatmulAttributes& other) const
+    {
+        return true;
+    }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool strictEqualsImpl([[maybe_unused]] const MatmulAttributes& other) const
+    {
+        return true;
+    }
 };
 
 typedef MatmulAttributes Matmul_attributes; ///< @brief Compatibility alias

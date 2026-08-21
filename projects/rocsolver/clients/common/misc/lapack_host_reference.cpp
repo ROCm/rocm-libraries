@@ -42,6 +42,40 @@
 extern "C" {
 #endif
 
+void slacpy_(char* uplo, int* m, int* n, float* A, int* lda, float* B, int* ldb);
+void dlacpy_(char* uplo, int* m, int* n, double* A, int* lda, double* B, int* ldb);
+void clacpy_(char* uplo,
+             int* m,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* B,
+             int* ldb);
+void zlacpy_(char* uplo,
+             int* m,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* B,
+             int* ldb);
+
+void slaset_(char* uplo, int* m, int* n, float* alpha, float* beta, float* A, int* lda);
+void dlaset_(char* uplo, int* m, int* n, double* alpha, double* beta, double* A, int* lda);
+void claset_(char* uplo,
+             int* m,
+             int* n,
+             rocblas_float_complex* alpha,
+             rocblas_float_complex* beta,
+             rocblas_float_complex* A,
+             int* lda);
+void zlaset_(char* uplo,
+             int* m,
+             int* n,
+             rocblas_double_complex* alpha,
+             rocblas_double_complex* beta,
+             rocblas_double_complex* A,
+             int* lda);
+
 float slange_(char* norm, int* m, int* n, float* A, int* lda, float* work);
 double dlange_(char* norm, int* m, int* n, double* A, int* lda, double* work);
 float clange_(char* norm, int* m, int* n, rocblas_float_complex* A, int* lda, float* work);
@@ -868,6 +902,38 @@ void zlatrd_(char* uplo,
              rocblas_double_complex* W,
              int* ldw);
 
+void slahr2_(int* n, int* k, int* nb, float* A, int* lda, float* tau, float* T, int* ldt, float* Y, int* ldy);
+void dlahr2_(int* n,
+             int* k,
+             int* nb,
+             double* A,
+             int* lda,
+             double* tau,
+             double* T,
+             int* ldt,
+             double* Y,
+             int* ldy);
+void clahr2_(int* n,
+             int* k,
+             int* nb,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* tau,
+             rocblas_float_complex* T,
+             int* ldt,
+             rocblas_float_complex* Y,
+             int* ldy);
+void zlahr2_(int* n,
+             int* k,
+             int* nb,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* tau,
+             rocblas_double_complex* T,
+             int* ldt,
+             rocblas_double_complex* Y,
+             int* ldy);
+
 void slabrd_(int* m,
              int* n,
              int* nb,
@@ -1067,21 +1133,6 @@ void zgelqf_(int* m,
 
 void clacgv_(int* n, rocblas_float_complex* x, int* incx);
 void zlacgv_(int* n, rocblas_double_complex* x, int* incx);
-
-void clacpy_(char* uplo,
-             int* m,
-             int* n,
-             rocblas_float_complex* A,
-             int* lda,
-             rocblas_float_complex* B,
-             int* ldb);
-void zlacpy_(char* uplo,
-             int* m,
-             int* n,
-             rocblas_double_complex* A,
-             int* lda,
-             rocblas_double_complex* B,
-             int* ldb);
 
 void slaswp_(int* n, float* A, int* lda, int* k1, int* k2, int* ipiv, int* inc);
 void dlaswp_(int* n, double* A, int* lda, int* k1, int* k2, int* ipiv, int* inc);
@@ -1815,6 +1866,51 @@ void zhetrd_(char* uplo,
              rocblas_double_complex* work,
              int* size_w,
              int* info);
+
+void ssytrd_sy2sb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   float* A,
+                   int* lda,
+                   float* Aband,
+                   int* ldab,
+                   float* tau,
+                   float* work,
+                   int* lwork,
+                   int* info);
+void dsytrd_sy2sb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   double* A,
+                   int* lda,
+                   double* Aband,
+                   int* ldab,
+                   double* tau,
+                   double* work,
+                   int* lwork,
+                   int* info);
+void chetrd_he2hb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   rocblas_float_complex* A,
+                   int* lda,
+                   rocblas_float_complex* Aband,
+                   int* ldab,
+                   rocblas_float_complex* tau,
+                   rocblas_float_complex* work,
+                   int* lwork,
+                   int* info);
+void zhetrd_he2hb_(char* uplo,
+                   int* n,
+                   int* kd,
+                   rocblas_double_complex* A,
+                   int* lda,
+                   rocblas_double_complex* Aband,
+                   int* ldab,
+                   rocblas_double_complex* tau,
+                   rocblas_double_complex* work,
+                   int* lwork,
+                   int* info);
 
 void ssytd2_(char* uplo, int* n, float* A, int* lda, float* D, float* E, float* tau, int* info);
 void dsytd2_(char* uplo, int* n, double* A, int* lda, double* D, double* E, double* tau, int* info);
@@ -2710,6 +2806,106 @@ double cpu_lange<rocblas_double_complex, double>(char norm,
                                                  double* work)
 {
     return zlange_(&norm, &m, &n, A, &lda, work);
+}
+
+// laset
+
+template <>
+void cpu_laset<float>(char uplo,
+                      rocblas_int m,
+                      rocblas_int n,
+                      float alpha,
+                      float beta,
+                      float* A,
+                      rocblas_int lda)
+{
+    slaset_(&uplo, &m, &n, &alpha, &beta, A, &lda);
+}
+
+template <>
+void cpu_laset<double>(char uplo,
+                       rocblas_int m,
+                       rocblas_int n,
+                       double alpha,
+                       double beta,
+                       double* A,
+                       rocblas_int lda)
+{
+    dlaset_(&uplo, &m, &n, &alpha, &beta, A, &lda);
+}
+
+template <>
+void cpu_laset<rocblas_float_complex>(char uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_float_complex alpha,
+                                      rocblas_float_complex beta,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda)
+{
+    claset_(&uplo, &m, &n, &alpha, &beta, A, &lda);
+}
+
+template <>
+void cpu_laset<rocblas_double_complex>(char uplo,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       rocblas_double_complex alpha,
+                                       rocblas_double_complex beta,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda)
+{
+    zlaset_(&uplo, &m, &n, &alpha, &beta, A, &lda);
+}
+
+// lacpy
+
+template <>
+void cpu_lacpy<float>(char uplo,
+                      rocblas_int m,
+                      rocblas_int n,
+                      float* A,
+                      rocblas_int lda,
+                      float* B,
+                      rocblas_int ldb)
+{
+    slacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<double>(char uplo,
+                       rocblas_int m,
+                       rocblas_int n,
+                       double* A,
+                       rocblas_int lda,
+                       double* B,
+                       rocblas_int ldb)
+{
+    dlacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<rocblas_double_complex>(char uplo,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_double_complex* B,
+                                       rocblas_int ldb)
+{
+    zlacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<rocblas_float_complex>(char uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_float_complex* B,
+                                      rocblas_int ldb)
+{
+    clacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
 }
 
 // gecon
@@ -3699,6 +3895,67 @@ void cpu_labrd<rocblas_double_complex, double>(rocblas_int m,
                                                rocblas_int ldy)
 {
     zlabrd_(&m, &n, &nb, A, &lda, D, E, tauq, taup, X, &ldx, Y, &ldy);
+}
+
+// lahr2
+template <>
+void cpu_lahr2<float>(rocblas_int n,
+                      rocblas_int k,
+                      rocblas_int nb,
+                      float* A,
+                      rocblas_int lda,
+                      float* tau,
+                      float* T_,
+                      rocblas_int ldt,
+                      float* Y,
+                      rocblas_int ldy)
+{
+    slahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
+}
+
+template <>
+void cpu_lahr2<double>(rocblas_int n,
+                       rocblas_int k,
+                       rocblas_int nb,
+                       double* A,
+                       rocblas_int lda,
+                       double* tau,
+                       double* T_,
+                       rocblas_int ldt,
+                       double* Y,
+                       rocblas_int ldy)
+{
+    dlahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
+}
+
+template <>
+void cpu_lahr2<rocblas_float_complex>(rocblas_int n,
+                                      rocblas_int k,
+                                      rocblas_int nb,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_float_complex* tau,
+                                      rocblas_float_complex* T_,
+                                      rocblas_int ldt,
+                                      rocblas_float_complex* Y,
+                                      rocblas_int ldy)
+{
+    clahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
+}
+
+template <>
+void cpu_lahr2<rocblas_double_complex>(rocblas_int n,
+                                       rocblas_int k,
+                                       rocblas_int nb,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_double_complex* tau,
+                                       rocblas_double_complex* T_,
+                                       rocblas_int ldt,
+                                       rocblas_double_complex* Y,
+                                       rocblas_int ldy)
+{
+    zlahr2_(&n, &k, &nb, A, &lda, tau, T_, &ldt, Y, &ldy);
 }
 
 // orgqr & ungqr
@@ -6780,6 +7037,75 @@ void cpu_sytrd_hetrd<rocblas_double_complex, double>(rocblas_fill uplo,
     int info;
     char uploC = rocblas2char_fill(uplo);
     zhetrd_(&uploC, &n, A, &lda, D, E, tau, work, &size_w, &info);
+}
+
+// sy2sb & he2hb
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     float* A,
+                     rocblas_int lda,
+                     float* Aband,
+                     rocblas_int ldab,
+                     float* tau,
+                     float* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    ssytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     double* A,
+                     rocblas_int lda,
+                     double* Aband,
+                     rocblas_int ldab,
+                     double* tau,
+                     double* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    dsytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     rocblas_float_complex* A,
+                     rocblas_int lda,
+                     rocblas_float_complex* Aband,
+                     rocblas_int ldab,
+                     rocblas_float_complex* tau,
+                     rocblas_float_complex* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    chetrd_he2hb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
+}
+
+template <>
+void cpu_sy2sb_he2hb(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     rocblas_double_complex* A,
+                     rocblas_int lda,
+                     rocblas_double_complex* Aband,
+                     rocblas_int ldab,
+                     rocblas_double_complex* tau,
+                     rocblas_double_complex* work,
+                     rocblas_int size_w)
+{
+    int info;
+    char uploC = rocblas2char_fill(uplo);
+    zhetrd_he2hb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
 // sytd2 & hetd2
