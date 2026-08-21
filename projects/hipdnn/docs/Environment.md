@@ -132,6 +132,44 @@ export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOPEN_ENGINE,HIPBLASLT_ENGINE"
 export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="0x1A2B3C4D5E6F7080,MIOPEN_ENGINE"
 ```
 
+#### HIPDNN_DISABLE_EXACT_ENGINE_CACHE
+
+> [!NOTE]
+> This name is **provisional**. It may be renamed or superseded by a future shared
+> cache-configuration mechanism.
+
+Disables the exact-match autotune cache consulted by `SelectionHeuristic::Config`: a
+machine-written record, keyed on the full serialized graph plus device properties, that
+captures the engine order measured by a prior exhaustive-autotune run. When enabled (the
+default), a cache hit for the current graph wins outright and pre-empts the fuzzy
+`HIPDNN_HEUR_CONFIG_PATH` rules. This variable only toggles that lookup on or off — it does
+not select or move the cache's on-disk location, which remains `HIPDNN_CACHE_DIR`.
+
+| Value      | Description                                                |
+|------------|------------------------------------------------------------|
+| (unset)    | Exact-match cache enabled (default). |
+| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Disable the exact-match cache; the policy falls through directly to the fuzzy rules and static ordering. |
+| Anything else (including `0`, `false`, `off`) | Cache remains **enabled** — presence alone does not disable it, and an operator scripting `HIPDNN_DISABLE_EXACT_ENGINE_CACHE=0` gets the behavior that spelling implies. |
+
+Values are matched case-insensitively against the literal truthy set above after trimming
+surrounding whitespace; an unrecognized value is silently treated as unset rather than
+rejected. Read fresh on every `policyFinalize()` call, so a change takes effect without a
+process restart.
+
+**Example:**
+```bash
+# Disable the exact-match cache for this run; only fuzzy rules and static
+# ordering are consulted.
+export HIPDNN_DISABLE_EXACT_ENGINE_CACHE=1
+```
+
+**Notes:**
+- Disabling this cache does not disable the fuzzy `HIPDNN_HEUR_CONFIG_PATH` mechanism —
+  the two are independent policies within `SelectionHeuristic::Config`.
+- A cache entry that names a candidate engine never actually benchmarked is rejected
+  automatically regardless of this variable; this variable is the coarse-grained on/off
+  switch, not a way to tune that per-entry applicability check.
+
 ### Benchmarking
 
 #### HIPDNN_FORCE_BENCHMARKING

@@ -3915,6 +3915,112 @@ public:
             handle, variantPack, workspace, workspaceSize, config, storageConfig, results);
     }
 
+    // --- Autotune: restricted "oracle best" entry point ---
+
+    /**
+     * @brief Restricted "oracle best" autotune: measures and caches the true best engine
+     *        order for this exact graph.
+     *
+     * @c config.mode and the priming benchmarking knob are forced to
+     * TuneMode::EXHAUSTIVE and are not caller-overridable. This overload accepts no
+     * sweep/variant parameter; populate candidates via
+     * add_engine_configs()/add_all_engines()/add_engine() before calling.
+     *
+     * On success, the succeeded engines' ranked order (fastest first) is written to the
+     * exact-match autotune cache, keyed on this graph's serialized content and the
+     * handle's device. A cache-write failure is logged but does not fail this call.
+     *
+     * @param handle The hipDNN handle
+     * @param variantPack Map from tensor UID to device memory pointers
+     * @param workspace Pointer to workspace memory
+     * @param workspaceSize Maximum allowed workspace size in bytes
+     * @param config Autotuning configuration; @c mode is overridden to EXHAUSTIVE
+     * @param storageConfig File output parameters (empty filePath = no file output)
+     * @param[out] results Per-engine benchmarking results (optional)
+     * @param[out] cacheWriteOutcome This run's exact-match cache write outcome (optional)
+     * @return ErrorCode::OK on success
+     */
+    Error autotuneOracleBest(hipdnnHandle_t handle,
+                             const std::unordered_map<int64_t, void*>& variantPack,
+                             void* workspace,
+                             int64_t workspaceSize,
+                             AutotuneConfig config = {},
+                             const AutotuneStorageConfig& storageConfig = {},
+                             std::vector<AutotuneResult>* results = nullptr,
+                             AutotuneCacheWriteOutcome* cacheWriteOutcome = nullptr)
+    {
+        if(workspaceSize < 0)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "workspaceSize must be >= 0 for autotuneOracleBest()."};
+        }
+
+        config.mode = TuneMode::EXHAUSTIVE;
+
+        std::vector<AutotuneResult> localResults;
+        std::vector<AutotuneResult>& resultsOut = results != nullptr ? *results : localResults;
+
+        HIPDNN_CHECK_ERROR(autotuneImpl(
+            handle, variantPack, workspace, workspaceSize, config, storageConfig, &resultsOut));
+
+        std::vector<int64_t> order;
+        order.reserve(resultsOut.size());
+        for(const auto& result : resultsOut)
+        {
+            if(result.succeeded)
+            {
+                order.push_back(result.engineId);
+            }
+        }
+
+        AutotuneCacheWriteOutcome outcome
+            = AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE;
+
+        if(!order.empty())
+        {
+            if(hasValidGraphDesc())
+            {
+                hipdnnAutotuneCacheWriteOutcome_ext_t backendOutcome
+                    = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+                const auto status = detail::hipdnnBackend()->writeEngineRankingResultsExt(
+                    handle, _graphDesc->get(), order.data(), order.size(), &backendOutcome);
+                if(status != HIPDNN_STATUS_SUCCESS)
+                {
+                    HIPDNN_FE_LOG_WARN(
+                        "autotuneOracleBest: failed to write engine ranking to the exact-match "
+                        "cache (backend status "
+                        << static_cast<int>(status) << ")");
+                    outcome = AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE;
+                }
+                else if(backendOutcome == HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN)
+                {
+                    outcome = AutotuneCacheWriteOutcome::WRITTEN;
+                }
+                else if(backendOutcome == HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED)
+                {
+                    outcome = AutotuneCacheWriteOutcome::DECLINED_DISABLED;
+                }
+                else
+                {
+                    // Covers the UNKEYABLE_OR_UNFINALIZED and NO_ENGINES backend values,
+                    // plus any future value this frontend predates.
+                    outcome = AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE;
+                }
+            }
+            else
+            {
+                outcome = AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE;
+            }
+        }
+
+        if(cacheWriteOutcome != nullptr)
+        {
+            *cacheWriteOutcome = outcome;
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
     // --- Autotune: cuDNN-compatibility overloads ---
 
     /**
