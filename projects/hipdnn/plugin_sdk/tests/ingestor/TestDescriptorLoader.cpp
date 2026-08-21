@@ -2400,6 +2400,7 @@ TEST(TestDescriptorLoader, ParsesTheShapeTheDescriptorPackagerEmits)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["arch"] = nlohmann::json::array({"gfx942"});
     pack.at("kernelDescriptors")[0] = nlohmann::json{
+        {"version", "1.0"},
         {"id", testUuid('1', '8')},
         {"name", "pointwise_add"},
         {"kernel_source",

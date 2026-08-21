@@ -11,6 +11,7 @@
   "dispatch": "4e73b0d8-6a91-4c25-bf03-8d52e1904a76",
   "kernelDescriptors": [
     {
+      "version": "1.0",
       "id": "8b41c9d7-05f3-4e26-9c78-3a2e6b105f49",
       "name": "packed_pointwise_add.f32_block64",
       "kernel_source": {

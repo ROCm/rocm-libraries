@@ -1095,7 +1095,7 @@ TEST(TestIngestorGenericPlanBuilder, FallsBackWhenTheFrontCandidateCannotPrepare
     const ScopedConstantScore constantScore;
     const FailsToPrepareOneBlockSizeHandler handler(64);
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager<TestHandle>();
+    const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
