@@ -66,9 +66,8 @@ rocsparse_status rocsparse::gthrz_template(rocsparse_handle     handle,
 
 #define GTHRZ_DIM 512
     // Clamp grid.x to the device limit; the kernel's grid-stride loop covers the rest.
-    dim3 gthrz_blocks(rocsparse::min(
-        static_cast<int64_t>(nnz - 1) / GTHRZ_DIM + 1,
-        static_cast<int64_t>(handle->properties.maxGridSize[0])));
+    dim3 gthrz_blocks(rocsparse::min(static_cast<int64_t>(nnz - 1) / GTHRZ_DIM + 1,
+                                     static_cast<int64_t>(handle->properties.maxGridSize[0])));
     dim3 gthrz_threads(GTHRZ_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gthrz_kernel<GTHRZ_DIM>),
