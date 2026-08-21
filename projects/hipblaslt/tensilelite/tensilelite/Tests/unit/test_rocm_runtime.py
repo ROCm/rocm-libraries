@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import os
 import sys
 from pathlib import Path
 
@@ -58,7 +59,46 @@ def test_expected_rocm_version_rejects_unmatched_distribution(version):
     with pytest.raises(_rocm.TensileLiteRuntimeError):
         _rocm._expected_rocm_version("tensilelite", version)
 
+def test_validate_distribution_uses_therock_ci_before_other_installations(
+    tmp_path, monkeypatch
+):
+    graph_bin = tmp_path / "graph" / "bin"
+    llvm_bin = tmp_path / "graph" / "lib" / "llvm" / "bin"
+    graph_bin.mkdir(parents=True)
+    llvm_bin.mkdir(parents=True)
+    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", "10.1.0.dev0+abcdef")
+    monkeypatch.setenv("PATH", os.pathsep.join((str(graph_bin), str(llvm_bin))))
+    monkeypatch.setattr(
+        _rocm,
+        "_python_sdk_version",
+        lambda: (_ for _ in ()).throw(AssertionError("Python SDK discovery was used")),
+    )
+    monkeypatch.setattr(
+        _rocm,
+        "_resolve_system_rocm",
+        lambda: (_ for _ in ()).throw(AssertionError("prefix discovery was used")),
+    )
 
+    result = _rocm.validate_distribution(
+        "tensilelite", "5.0.0+devrocm10.1.0.dev0.abcdef"
+    )
+
+    assert isinstance(result, _rocm.TheRockCIRocm)
+    assert isinstance(result, _rocm.ValidatedRocm)
+    assert result.path == graph_bin.resolve()
+    assert result.version == "10.1.0.dev0.abcdef"
+    assert result.source == "TheRock CI build"
+    assert result.executable_search_paths == (graph_bin.resolve(), llvm_bin.resolve())
+
+@pytest.mark.parametrize("value", ["", "git"])
+def test_therock_ci_rejects_non_release_package_identity(monkeypatch, value):
+    monkeypatch.setenv("THEROCK_PACKAGE_VERSION", value)
+
+    with pytest.raises(
+        _rocm.TensileLiteRuntimeError,
+        match="TheRock CI requires a release THEROCK_PACKAGE_VERSION",
+    ):
+        _rocm.validate_distribution("tensilelite", "5.0.0+rocm10.1.0")
 def test_validate_distribution_uses_base_info_version_without_python_core(tmp_path, monkeypatch):
     root = _root(tmp_path, "10.1.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
