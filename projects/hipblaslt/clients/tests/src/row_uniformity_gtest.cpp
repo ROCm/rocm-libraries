@@ -33,10 +33,7 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
-
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/bf16.hpp>
-#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -57,7 +54,6 @@
 #include <filesystem>
 #include <memory>
 #include <random>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -304,7 +300,6 @@ namespace
             return bytes;
         }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
         auto* out = reinterpret_cast<uint16_t*>(bytes.data());
         for(size_t idx = 0; idx < values.size(); ++idx)
         {
@@ -316,9 +311,6 @@ namespace
             values[idx] = DGen::toFloat<DGen::bf16>(packedBytes, packedBytes, 0, 0);
         }
         return bytes;
-#else
-        throw std::logic_error("encodeOperand: HIP_R_16BF requires mxDataGenerator");
-#endif
     }
 
     // Owns every device and host resource for one problem size and can replay
@@ -362,14 +354,6 @@ namespace
             const int64_t m = m_problem.m;
             const int64_t n = m_problem.n;
             const int64_t k = m_problem.k;
-
-            if(m_problem.abType != HIP_R_32F)
-            {
-#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
-                skipReason = "bf16 operands require mxDataGenerator";
-                return false;
-#endif
-            }
 
             if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS
                || hipStreamCreate(&m_stream) != hipSuccess)
