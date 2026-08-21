@@ -74,7 +74,7 @@ public:
 
     /// When to start warning that the winner cache has grown unexpectedly large.
     ///
-    /// Not an `LruCache` (D8): evicting a winner costs a GPU benchmark sweep or a silent
+    /// Not an `LruCache`: evicting a winner costs a GPU benchmark sweep or a silent
     /// quality regression, not a rematch. Unbounded is safe because entries are created
     /// only by opt-in benchmarking, so this is a tripwire, not a cap -- passing it logs
     /// once and changes nothing else.
@@ -194,7 +194,7 @@ public:
         }
 
         // Heuristic order is only provisional -- Check 1 must still run before falling
-        // back, since a benchmark sweep can postdate the memoized sort (D22).
+        // back, since a benchmark sweep can postdate the memoized sort.
         if(!orderFromWinnerRecord(catalog, context))
         {
             if(catalog.isSorted)
@@ -660,20 +660,18 @@ private:
         }
 
         const auto record = winnerFor(key);
-        if(!record.has_value() || !recordCovers(*record, catalog.entries))
+        if(!record.has_value())
         {
             return false;
         }
 
-        auto ordered = orderByRecord(*record, catalog.entries);
-        if(ordered.size() != catalog.entries.size())
+        auto ordered = orderIfFullyCovered(*record, catalog.entries);
+        if(!ordered.has_value())
         {
-            // Covered by kernel id, but this entry's pack/dispatch has moved since
-            // measurement -- decline the whole record rather than order by stale data.
             return false;
         }
 
-        catalog.entries = std::move(ordered);
+        catalog.entries = std::move(*ordered);
         catalog.orderedFromRecord = true;
         HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << catalog.entries.size()
                                                     << " catalog entries from a benchmarked "

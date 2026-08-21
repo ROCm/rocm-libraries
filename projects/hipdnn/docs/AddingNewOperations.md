@@ -12,6 +12,7 @@ A contributor walkthrough for landing a new op across the hipDNN stack. The code
 
 **Supplementary Reference** *(read when you need it, not by default)*
 - [cuDNN Parity Rules](#cudnn-parity-rules)
+- [Cache-Key Annotations](#cache-key-annotations)
 - [File Map (PR Diff Template)](#file-map-pr-diff-template)
 - [Layer-by-Layer Reference](#layer-by-layer-reference)
 - [Testing Requirements](#testing-requirements)
@@ -97,6 +98,7 @@ Copy-paste this into your PR description.
 - [ ] Schema added to the `SCHEMAS` list in `flatbuffers_sdk/CMakeLists.txt`
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
+- [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not); `cachekey_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
 - [ ] (If new mode enum) `HipdnnBackendAttributeType.h` type tag added; `Hipdnn<Op>Mode.h` written; `hipdnn_backend.h` updated; `DataTypeConversion.{hpp,cpp}` and `DescriptorAttributeUtils.{hpp,cpp}` updated
@@ -150,6 +152,90 @@ The decision applies to four name surfaces: the descriptor type name, each per-t
 A `_EXT` suffix is itself the marker for "not in cuDNN". Add a short comment in the descriptor or schema for any non-obvious semantic difference.
 
 ---
+## Cache-Key Annotations
+
+A field holding a tensor uid that is not annotated `(cache_uid)` still participates in the
+cache key — the policy below is opt-out — but it folds the **literal uid value** instead of
+the referenced tensor's ordinal. Two graphs that are structurally identical but number their
+tensors differently then hash and compare unequal, so a kernel measurement taken on one never
+transfers to the other. Nothing catches this: not the generator, not the compiler, not CI.
+
+The four annotations (`cache_ignore`, `cache_uid`, `cache_uid_domain`, `cache_uid_key`) are
+declared in [`graph.fbs`](../flatbuffers_sdk/schemas/graph.fbs) and drive
+`scripts/gen_cache_key.py`, which generates `cachekey_generated.h` — the hash and
+logical-equality functions behind the in-process winner cache
+(`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/GraphContentKey.hpp`). They are the only
+custom FlatBuffers attributes in the repo.
+
+### The opt-out default
+
+A field participates in the cache key unless annotated otherwise. For each field, ask: would
+a kernel measurement taken on one graph still be valid for the other if only this field
+differed? If yes, leave it unannotated. If no, pick the annotation below that fits.
+
+### `(cache_ignore)`
+
+Excludes a field from the hash and equality functions. Use it for identity, naming, and
+routing fields — `Graph.name`, `Graph.id`, `Graph.preferred_engine_id` — never for anything
+that affects which kernel a graph needs.
+
+### `(cache_uid)`, `(cache_uid_domain)`, `(cache_uid_key)`
+
+A field holding a tensor uid needs `(cache_uid)`, not `(cache_ignore)` and not silence.
+Folding the raw uid would key on a caller-assigned label instead of graph structure:
+renumbering a graph's tensors would then change the key for the same computation, and
+rewiring which tensor an operand points at would keep the key for a different computation —
+both wrong. `(cache_uid)` instead folds the referenced tensor's ordinal position in the
+domain vector (`Graph.tensors`, marked `(cache_uid_domain)`), resolved against each tensor's
+own uid (`TensorAttributes.uid`, marked `(cache_uid_key)`). Renumbering then keys the same;
+rewiring or aliasing an operand does not.
+
+Both directions of mis-annotation are silent:
+- `(cache_uid)` on a field that is not actually a tensor reference corrupts the key by
+  folding the wrong thing as an ordinal. `PointwiseAttributes.axis_tensor_uid` is the live
+  example — it is an axis index despite the `_tensor_uid` name, called out directly in the
+  schema comment on `cache_uid`.
+- `(cache_ignore)` on a field that is load-bearing content makes two computationally
+  different graphs share a cache entry: the cache serves the wrong kernel, not just a miss.
+
+The generator only validates type compatibility (integer scalar or vector of integers on a
+`cache_uid` field), never intent, so neither direction fails a build.
+
+### Regenerating `cachekey_generated.h`
+
+`cachekey_generated.h` is not produced by the ordinary `flatc` generation step. A separate
+tool, `scripts/gen_cache_key.py`, reads the compiled schema back out and re-derives the
+header, because `flatc`'s C++ output does not expose custom attributes. The
+`cache-key-hipdnn` pre-commit hook regenerates it on any change under
+`flatbuffers_sdk/schemas/` or to the script itself. The [PR checklist](#pr-checklist)'s
+existing "generated headers committed" step covers the `flatc` output only —
+`cachekey_generated.h` needs its own regeneration and commit, and it is easy to follow that
+checklist verbatim and miss it.
+
+### Why the `attribute` declaration repeats per file
+
+Every `.fbs` file that applies `cache_uid` redeclares `attribute "cache_uid";`, with a
+one-line `// See graph.fbs for the semantics of this annotation.` pointer above it. `flatc`
+scopes `attribute` declarations to the schema file being compiled, not to files reached
+through `include` — unlike types and enums, which are shared transitively. A new `.fbs` file
+that applies any of these four annotations must declare it locally.
+
+### Testing a newly keyed field
+
+[`plugin_sdk/tests/ingestor/TestGraphContentKey.cpp`](../plugin_sdk/tests/ingestor/TestGraphContentKey.cpp)
+is the field-set pin for the graph half of the cache key. A field that changes kernel
+behavior needs a discriminates-on-difference case; a field that does not needs
+`(cache_ignore)` and an equal-despite-difference case; a tensor reference needs `(cache_uid)`
+and both an equal-under-renumbering and an unequal-under-rewiring case.
+
+### Forward note
+
+The winner cache is in-process only today; a process restart clears it, so adding or
+reannotating a field only affects the current run. A disk-backed cache is planned
+(ALMIOPEN-2451). Once it lands, changing which fields are folded, or how, changes the key for
+every graph and silently invalidates every persisted record.
+
+---
 
 ## File Map (PR Diff Template)
 
@@ -160,6 +246,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | FBS schema | `flatbuffers_sdk/schemas/matmul_attributes.fbs` |
 | FBS union entry | `flatbuffers_sdk/schemas/graph.fbs` (`NodeAttributes` union) |
 | FBS CMake list | `flatbuffers_sdk/CMakeLists.txt` (`SCHEMAS` variable) |
+| Cache-key annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`(cache_uid)` on tensor-uid fields — see [Cache-Key Annotations](#cache-key-annotations)) |
 | Backend descriptor type enum | `backend/include/HipdnnBackendDescriptorType.h` |
 | Backend attribute name enum | `backend/include/HipdnnBackendAttributeName.h` |
 | Backend attribute type enum | `backend/include/HipdnnBackendAttributeType.h` |

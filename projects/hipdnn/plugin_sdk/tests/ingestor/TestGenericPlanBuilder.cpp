@@ -10,6 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -77,6 +78,48 @@ public:
                 void* /*workspace*/) const override
     {
     }
+};
+
+/// prepare() returns nullptr for one specific block size, modeling a kernel whose
+/// launch state cannot be resolved this run; every other kernel prepares normally.
+/// Shares WorkspaceEqualsBlockSizeHandler's workspace-bytes contract so the served
+/// kernel is identifiable by workspace size alone.
+class NullPrepareForBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    explicit NullPrepareForBlockSizeHandler(int64_t blockSizeToFail)
+        : _blockSizeToFail(blockSizeToFail)
+    {
+    }
+
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == _blockSizeToFail)
+        {
+            return nullptr;
+        }
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+
+private:
+    int64_t _blockSizeToFail;
 };
 
 struct KnobFilterSettings
@@ -911,26 +954,23 @@ private:
 
 using BenchmarkPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, BenchmarkContext>;
 
-/// Deterministic sample times, injected through `BenchmarkPlan`'s Timer seam so
-/// selection is provable without a device. Times are consumed by candidate index, which
-/// the timer recovers by identity from the candidate list it was built against.
+/// Deterministic sample times keyed by workspace size rather than candidate identity:
+/// the constructor injects this Timer before `buildPlan` constructs any candidate, so
+/// the closure cannot capture their pointers in advance the way an override on the
+/// constructed candidate list could. WorkspaceEqualsBlockSizeHandler makes workspace
+/// size (== block_size) a stable, distinguishing proxy for which kernel is which.
 inline BenchmarkPlan<TestHandle>::Timer
-    makeIndexedTimer(const std::vector<const hipdnn_plugin_sdk::IPlan<TestHandle>*>& order,
-                     std::vector<std::optional<double>> times)
+    makeWorkspaceKeyedTimer(std::unordered_map<size_t, double> timesByWorkspaceSize)
 {
-    return [order, times = std::move(times)](const hipdnn_plugin_sdk::IPlan<TestHandle>& plan,
-                                             const TestHandle&,
-                                             const hipdnnPluginDeviceBuffer_t*,
-                                             uint32_t,
-                                             void*) -> std::optional<double> {
-        const auto found = std::find(order.begin(), order.end(), &plan);
-        if(found == order.end())
-        {
-            return std::nullopt;
-        }
-        const auto index = static_cast<size_t>(std::distance(order.begin(), found));
-        return index < times.size() ? times[index] : std::nullopt;
-    };
+    return
+        [times = std::move(timesByWorkspaceSize)](const hipdnn_plugin_sdk::IPlan<TestHandle>& plan,
+                                                  const TestHandle& handle,
+                                                  const hipdnnPluginDeviceBuffer_t*,
+                                                  uint32_t,
+                                                  void*) -> std::optional<double> {
+            const auto found = times.find(plan.getWorkspaceSize(handle));
+            return found != times.end() ? std::optional<double>(found->second) : std::nullopt;
+        };
 }
 
 /// With benchmarking on, the plan the context receives reports the workspace max over
@@ -1109,10 +1149,10 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
            "first entry), not the heuristic front (kernel_64)";
 }
 
-/// D7's mirror, half one: benchmark wide, then run narrow. The record is wider than the
-/// catalog -- it carries an extra entry for a kernel this engine does not admit -- while
-/// still covering all three live candidates, so it must be served (kernel_256), not the
-/// heuristic front (kernel_64).
+/// Benchmark wide, then run narrow. The record is wider than the catalog -- it carries
+/// an extra entry for a kernel this engine does not admit -- while still covering all
+/// three live candidates, so it must be served (kernel_256), not the heuristic front
+/// (kernel_64).
 TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1157,9 +1197,12 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
            "64 would mean the cache was skipped and the heuristic front used";
 }
 
-/// D7's mirror, half two: a partial record with benchmarking OFF must serve the best
-/// covered entry rather than decline -- those entries were genuinely measured.
-TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffStillServesWhatItCovers)
+/// A partial record with benchmarking OFF must fall back to the heuristic front rather
+/// than serve the entry it covers: those entries were measured only against each
+/// other, never against the candidates the record excludes, so a partial record can
+/// only ever reorder a fully-measured set, not override the heuristic with an
+/// unraced kernel.
+TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffFallsBackToTheHeuristic)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -1194,8 +1237,8 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffStillServe
     context.setExecutionSettings(settings);
     builder.buildPlan(0, graph, engineConfig, context);
 
-    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 256)
-        << "a real measurement beats the heuristic guess even under partial coverage";
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "256 would mean an unraced measurement overrode the heuristic's own pick";
 }
 
 /// A record whose entries no longer resolve is not an error: selection falls back to the
@@ -1235,6 +1278,117 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
         << "a stale record must degrade to today's behaviour, never throw or serve blind";
+}
+
+/// Regression for the bug where Check 2's coverage test (`recordCovers`, by `kernelId`
+/// alone) and its ordering (`orderByRecord`, by the full `(kernelId, packId,
+/// dispatchId)` triple) could disagree: a record covering every candidate by
+/// `kernelId`, but with one entry's `packId` stale, must trigger a re-benchmark
+/// (workspace sizes for the max across all three candidates) rather than serve the
+/// subset that still resolves. Benchmarking ON, unlike the sibling wholly-stale test,
+/// since a stale-with-benchmarking-off record already falls back correctly; this is the
+/// case where the two checks previously diverged.
+TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTriggersReBenchmarking)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xDB));
+    const auto properties = testDeviceProperties();
+    const TestHandle handle;
+
+    // Every kernelId is covered, but kernel_128's packId no longer agrees with the
+    // catalog's current one.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    WinnerRecord record;
+    for(const auto& kernel : catalog)
+    {
+        auto entry = rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0);
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        {
+            entry.packId = testId(0xEE);
+        }
+        record.push_back(entry);
+    }
+    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    manager->recordWinner(winnerKeyFor(graph, properties), record);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), 256U)
+        << "covered by kernelId with one stale packId must decline the whole record and "
+           "re-benchmark, not serve the ranked subset that still resolves by identity "
+           "alone";
+}
+
+/// Regression for the ranked walk existing to be skipped: constructing a GenericPlan
+/// throws when the dispatch handler's prepare() returns nullptr (GenericPlan.hpp), so a
+/// covering record whose rank-0 kernel can no longer be prepared must fall through to
+/// rank 1 rather than propagate that throw -- a warm cache must not be stricter than an
+/// empty one.
+TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFallsThroughToRankOne)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const NullPrepareForBlockSizeHandler handler(/*blockSizeToFail=*/64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xDC));
+    const auto properties = testDeviceProperties();
+
+    // A fully-covering record ranking kernel_64 (which cannot prepare) first and
+    // kernel_128 second.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    // Ranks kernel_64 (which cannot prepare) first, then kernel_128, then kernel_256.
+    const std::map<int64_t, double> timeByBlockSize{{64, 0.1}, {128, 0.2}, {256, 0.3}};
+    WinnerRecord record;
+    for(const auto& kernel : catalog)
+    {
+        record.push_back(
+            rankedEntryFor(kernel, timeByBlockSize.at(kernel.getIntMetadata(BLOCK_SIZE))));
+    }
+    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    manager->recordWinner(winnerKeyFor(graph, properties), record);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128)
+        << "rank 0 (kernel_64) cannot prepare; the plan must build from rank 1 instead "
+           "of throwing";
 }
 
 /// A record keyed on a different device must never be served here. This is why the key
@@ -1622,41 +1776,18 @@ TEST(TestIngestorGenericPlanBuilderOverride, TheOverrideIsReReadOnEveryCallNotCa
 }
 
 // ---------------------------------------------------------------------------
-// The real write-back path, end to end (D1 as revised by D6)
+// The real write-back path, end to end
 // ---------------------------------------------------------------------------
 
-/// Substitutes a deterministic sampling plan through the builder's own seam, so the
-/// callback and key under test are the ones `buildPlan` actually captured. The real
-/// sampler needs hipEvents, which a device-less runner never provides.
-class DeterministicStreamPlanBuilder : public BenchmarkPlanBuilder
+/// Times descending by block size (== workspace size in this fixture, unique per
+/// kernel): kernel_256 -- the LAST of the three in catalog order, the opposite of the
+/// heuristic front -- samples fastest, making a served record observable. Injected
+/// through the constructor's Timer parameter, so `buildPlan` runs the real write-back
+/// factory rather than a test double that re-implements it.
+inline BenchmarkPlan<TestHandle>::Timer makeThreeKernelDescendingTimer()
 {
-public:
-    using BenchmarkPlanBuilder::BenchmarkPlanBuilder;
-
-protected:
-    std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>>
-        makeBenchmarkPlan(std::vector<BenchmarkPlan<TestHandle>::Candidate> candidates,
-                          const TestHandle& handle,
-                          BenchmarkPlan<TestHandle>::RecordRankingFn recordRanking) const override
-    {
-        // Time descending by index, so the LAST candidate wins -- the opposite of the
-        // heuristic front, making a served record observable.
-        std::vector<const hipdnn_plugin_sdk::IPlan<TestHandle>*> order;
-        std::vector<std::optional<double>> times;
-        order.reserve(candidates.size());
-        times.reserve(candidates.size());
-        for(size_t index = 0; index < candidates.size(); ++index)
-        {
-            order.push_back(candidates[index].plan.get());
-            times.emplace_back(static_cast<double>(candidates.size() - index));
-        }
-        return std::make_unique<BenchmarkPlan<TestHandle>>(
-            std::move(candidates),
-            handle,
-            makeIndexedTimer(order, std::move(times)),
-            std::move(recordRanking));
-    }
-};
+    return makeWorkspaceKeyedTimer({{64, 3.0}, {128, 2.0}, {256, 1.0}});
+}
 
 TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuildersOwnCallback)
 {
@@ -1667,7 +1798,8 @@ TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuild
     const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
-    const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
 
     const TestGraph graph(makeGraphId(0xD8));
     const auto properties = testDeviceProperties();
@@ -1716,7 +1848,8 @@ TEST(TestIngestorGenericPlanBuilder, ARecordSampledUnderOneNumberingIsServedForA
     const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
-    const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
 
     using Spec = ContentCarryingTestGraph::Spec;
     Spec low;
@@ -1765,12 +1898,11 @@ TEST(TestIngestorGenericPlanBuilder, ARecordSampledUnderOneNumberingIsServedForA
         << "the renumbered graph must be ordered by the record it hit";
 }
 
-/// D7's narrow-then-wide half, the write-back side: `ANarrowRecordDoesNotCoverAWiderRunAndTriggersReBenchmarking`
-/// proves the wide run re-benchmarks (workspace sizes for the max), but never inspects
-/// the record afterward. D7 says the wide run must not just re-benchmark -- it must
-/// WRITE THE SUPERSET RANKING back, so the next run is fully covered. Driving that needs
-/// the deterministic seam: a device-less runner scores every real candidate unusable, so
-/// write-back never fires without it.
+/// The write-back side of the narrow-then-wide re-benchmark
+/// (`ANarrowRecordDoesNotCoverAWiderRunAndTriggersReBenchmarking` proves the
+/// re-benchmark itself but never inspects the record afterward): the wide run must not
+/// just re-benchmark, it must write the superset ranking back, so the next run is fully
+/// covered.
 TEST(TestIngestorGenericPlanBuilder,
      ANarrowRecordThatTriggersReBenchmarkingWritesBackASupersetRecord)
 {
@@ -1781,7 +1913,8 @@ TEST(TestIngestorGenericPlanBuilder,
     const auto manager = makeThreeKernelWorkspaceStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
-    const DeterministicStreamPlanBuilder builder(engine, *manager, resolver);
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
 
     const TestGraph graph(makeGraphId(0xD9));
     const auto properties = testDeviceProperties();
@@ -1801,8 +1934,8 @@ TEST(TestIngestorGenericPlanBuilder,
     ASSERT_EQ(narrow.size(), 1U);
     manager->recordWinner(winnerKeyFor(graph, properties), narrow);
 
-    // Now a WIDE run, unfiltered, with benchmarking on, through the deterministic seam
-    // so sampling produces real usable candidates and write-back actually fires.
+    // Now a WIDE run, unfiltered, with benchmarking on, so sampling produces real
+    // usable candidates and write-back actually fires.
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig
         = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);

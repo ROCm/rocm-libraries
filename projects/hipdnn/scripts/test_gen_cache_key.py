@@ -228,6 +228,70 @@ class TestUidCanonicalization(unittest.TestCase):
         with self.assertRaises(SystemExit):
             Emitter(broken, f"{NS}.Root")
 
+    def test_an_unresolved_uid_folds_the_original_value_not_a_shared_sentinel(self):
+        # Finding I5: two dangling references only fold alike if they carry the same
+        # uid -- the miss path returns the caller's value, never a shared constant.
+        header = self.emit([field("x_tensor_uid", "Long", 0, uid=True)])
+        self.assertIn("return Fold{false, uid};", header)
+
+    def test_a_resolved_uid_still_folds_to_exactly_its_ordinal(self):
+        # Fixing the dangling-uid alias must not perturb the renumbering-invariance
+        # the whole scheme exists for.
+        header = self.emit([field("x_tensor_uid", "Long", 0, uid=True)])
+        self.assertIn("return Fold{true, static_cast<int64_t>(index)};", header)
+
+    def test_resolved_and_unresolved_folds_cannot_collide_on_the_same_number(self):
+        # `resolved` is folded and compared ahead of `value`, so ordinal 3 and a
+        # dangling reference to uid 3 diverge on the tag regardless of magnitude.
+        header = self.emit([field("x_tensor_uid", "Long", 0, uid=True)])
+        self.assertIn("hasher.tag(fold.resolved ? 1 : 0);", header)
+        self.assertIn("hasher.raw(fold.value);", header)
+        self.assertIn("return a.resolved == b.resolved && a.value == b.value;", header)
+
+
+class TestHasherConstants(unittest.TestCase):
+    """B2: the emitted basis/prime must be the canonical FNV-1a-64 constants.
+
+    Pinned in hex against `StringUtil.hpp` so a reviewer can eyeball the digits
+    against the spec instead of counting a 20-digit decimal literal.
+    """
+
+    def test_the_offset_basis_matches_the_canonical_fnv_1a_64_constant(self):
+        root = table(f"{NS}.Root", [field("alpha", "Int", 0)])
+        header = Emitter(schema([root]), f"{NS}.Root").emit()
+        self.assertIn(
+            "static constexpr uint64_t OFFSET_BASIS = 0xcbf29ce484222325ULL;", header
+        )
+
+    def test_the_prime_matches_the_canonical_fnv_1a_64_constant(self):
+        root = table(f"{NS}.Root", [field("alpha", "Int", 0)])
+        header = Emitter(schema([root]), f"{NS}.Root").emit()
+        self.assertIn(
+            "static constexpr uint64_t PRIME        = 0x100000001b3ULL;", header
+        )
+
+
+class TestUnhandledBaseType(unittest.TestCase):
+    """I7: a base type the generator has no fold rule for must fail loudly.
+
+    `Array` is the concrete case that motivates this -- its accessor returns a
+    pointer, which would silently satisfy `Hasher::raw`'s trivially-copyable check
+    and hash/compare the address rather than the value.
+    """
+
+    def test_an_array_field_raises_naming_the_field_and_its_base_type(self):
+        root = table(f"{NS}.Root", [field("id", "Array", 0, element="UByte", index=0)])
+        with self.assertRaises(SystemExit) as ctx:
+            Emitter(schema([root]), f"{NS}.Root").emit()
+        message = str(ctx.exception)
+        self.assertIn("Root.id", message)
+        self.assertIn("Array", message)
+
+    def test_an_ordinary_scalar_field_does_not_raise(self):
+        # The whitelist must not regress the common case it wraps.
+        root = table(f"{NS}.Root", [field("alpha", "Int", 0)])
+        Emitter(schema([root]), f"{NS}.Root").emit()
+
 
 def function_bodies(text):
     """Map each emitted definition to its body text.

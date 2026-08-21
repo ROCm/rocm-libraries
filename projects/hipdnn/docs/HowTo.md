@@ -113,6 +113,7 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 - Graphs and operations are defined using `.fbs` schema files
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
 - Schema files are located in [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
+- See [Cache-Key Annotations](./AddingNewOperations.md#cache-key-annotations) for the `cache_ignore` / `cache_uid` schema attributes that key the kernel-ingestor winner cache
 
 ### Configuring Engine Knobs
 
