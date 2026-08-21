@@ -1210,12 +1210,20 @@ struct modulo_predicate
 struct RocprimDevicePartitionLargeInputTests : public ::testing::TestWithParam<std::pair<size_t, bool>>
 {};
 
-INSTANTIATE_TEST_SUITE_P(RocprimDevicePartitionLargeInputTest,
-                         RocprimDevicePartitionLargeInputTests,
-                         ::testing::Values(std::make_pair(2, false), // params: size, use_graphs
-                                           std::make_pair(2048, false),
-                                           std::make_pair(38713, false),
-                                           std::make_pair(38713, true)));
+INSTANTIATE_TEST_SUITE_P(
+    RocprimDevicePartitionLargeInputTest,
+    RocprimDevicePartitionLargeInputTests,
+    ::testing::Values(std::make_pair(2, false), // params: size, use_graphs
+                      std::make_pair(2048, false),
+                      std::make_pair(38713, false),
+                      std::make_pair(38713, true)),
+    [](const ::testing::TestParamInfo<RocprimDevicePartitionLargeInputTests::ParamType>& info)
+    {
+        std::string name = "Size" + std::to_string(std::get<0>(info.param));
+        if(std::get<1>(info.param))
+            name += "Graphs";
+        return name;
+    });
 
 TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
 {
