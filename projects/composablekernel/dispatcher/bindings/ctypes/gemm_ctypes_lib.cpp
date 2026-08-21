@@ -300,13 +300,16 @@ int dispatcher_initialize()
     key.algorithm.wave_shape      = {GEMM_KEY_WAVE_M, GEMM_KEY_WAVE_N, GEMM_KEY_WAVE_K};
     key.algorithm.warp_tile_shape = {
         GEMM_KEY_WARP_TILE_M, GEMM_KEY_WARP_TILE_N, GEMM_KEY_WARP_TILE_K};
-    key.algorithm.pipeline        = string_to_pipeline(GEMM_KEY_PIPELINE);
-    key.algorithm.scheduler       = string_to_scheduler(GEMM_KEY_SCHEDULER);
-    key.algorithm.epilogue        = string_to_epilogue(GEMM_KEY_EPILOGUE);
-    key.algorithm.block_size      = GEMM_KEY_BLOCK_SIZE;
-    key.algorithm.double_buffer   = (GEMM_KEY_DOUBLE_BUFFER != 0);
-    key.algorithm.persistent      = (GEMM_KEY_PERSISTENT != 0);
-    key.algorithm.preshuffle      = (GEMM_KEY_PRESHUFFLE != 0);
+    key.algorithm.pipeline      = string_to_pipeline(GEMM_KEY_PIPELINE);
+    key.algorithm.scheduler     = string_to_scheduler(GEMM_KEY_SCHEDULER);
+    key.algorithm.epilogue      = string_to_epilogue(GEMM_KEY_EPILOGUE);
+    key.algorithm.block_size    = GEMM_KEY_BLOCK_SIZE;
+    key.algorithm.double_buffer = (GEMM_KEY_DOUBLE_BUFFER != 0);
+    key.algorithm.persistent    = (GEMM_KEY_PERSISTENT != 0);
+    // Read the preshuffle capability from the kernel's own metadata trait rather
+    // than the GEMM_KEY_PRESHUFFLE macro -- same value (both emitted by codegen),
+    // but the capability lives with the kernel, consistent with the B-upload path.
+    key.algorithm.preshuffle      = SelectedKernel::Preshuffle;
     key.algorithm.transpose_c     = (GEMM_KEY_TRANSPOSE_C != 0);
     key.algorithm.num_wave_groups = GEMM_KEY_NUM_WAVE_GROUPS;
     // pad_m/n/k participate in both the key's hash/equality and the kernel
