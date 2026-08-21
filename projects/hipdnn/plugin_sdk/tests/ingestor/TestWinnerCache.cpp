@@ -3,9 +3,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <unistd.h>
-
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -517,23 +516,32 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
     EXPECT_EQ(reads.load(), 2000) << "the key exists throughout, so no read may miss";
 }
 
+/// A value no other live ScopedCacheDir shares, in this process or any other.
+///
+/// The suite runs from a shared temp directory, so two builds of this binary on one
+/// machine -- two CI jobs, or a developer beside one -- would otherwise pick the same
+/// path, and one process's remove_all() would delete a directory another was reading.
+/// A steady-clock reading separates concurrent processes; the counter separates two
+/// guards within one process, which a timestamp alone can collide on. Deliberately not
+/// getpid(): <unistd.h> does not exist on Windows, and this suite compiles there.
+inline std::string uniqueSuffix()
+{
+    static std::atomic<uint64_t> s_counter{0};
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::to_string(static_cast<uint64_t>(stamp)) + "_"
+           + std::to_string(s_counter.fetch_add(1));
+}
+
 /// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
 /// restores the caller's value after, so the on-disk cases never read or write a real user
 /// cache and never observe each other's shards.
-///
-/// The directory name carries the process id because the suite runs from a shared /tmp:
-/// two builds of this binary on one machine -- two CI jobs, or a developer alongside a CI
-/// job -- would otherwise pick the same path, and one process's remove_all() would delete
-/// the shard another was mid-way through reading. That is a narrow window, which is
-/// exactly what makes it worth closing: it would surface as a rare unreproducible failure
-/// rather than an obvious one.
 class ScopedCacheDir
 {
 public:
     explicit ScopedCacheDir(const std::string& name)
         : _previous(hipdnn_data_sdk::utilities::getEnv(CACHE_DIR_ENV))
         , _path(std::filesystem::temp_directory_path()
-                / ("hipdnn_winner_cache_test_" + std::to_string(::getpid()) + "_" + name))
+                / ("hipdnn_winner_cache_test_" + uniqueSuffix() + "_" + name))
     {
         std::filesystem::remove_all(_path);
         std::filesystem::create_directories(_path);
