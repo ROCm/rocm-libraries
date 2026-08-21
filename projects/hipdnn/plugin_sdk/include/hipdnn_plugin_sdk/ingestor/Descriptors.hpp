@@ -241,30 +241,30 @@ struct IsBraceInitializable<T, std::void_t<decltype(T{std::declval<Args>()...})>
 };
 
 template <typename T, typename... Args>
-inline constexpr bool isBraceInitializableV = IsBraceInitializable<T, void, Args...>::value;
+inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, Args...>::value;
 
 } // namespace detail
 
 // KernelSource's field count and order are pinned here: accepting exactly seven
 // initializers and no more makes an inserted field ill-formed at this assertion, rather
 // than silently rebinding every value after it at a positional initialization site.
-static_assert(detail::isBraceInitializableV<KernelSource,
-                                            KernelSourceKind,
-                                            std::string,
-                                            std::string,
-                                            std::string,
-                                            std::string,
-                                            std::string,
-                                            std::string>
-                  && !detail::isBraceInitializableV<KernelSource,
-                                                    KernelSourceKind,
-                                                    std::string,
-                                                    std::string,
-                                                    std::string,
-                                                    std::string,
-                                                    std::string,
-                                                    std::string,
-                                                    std::string>,
+static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
+                                               KernelSourceKind,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string>
+                  && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
+                                                       KernelSourceKind,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string>,
               "KernelSource gained, lost, or reordered a field; append only, then extend "
               "this assertion.");
 

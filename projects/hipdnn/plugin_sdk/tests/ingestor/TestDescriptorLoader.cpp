@@ -2540,7 +2540,7 @@ TEST(TestDescriptorLoader, JoinsARelativeLibraryAgainstThePackagerLayout)
     const auto archive = shard / "kpack" / "hip_kernel_provider_gfx942.kpack";
     std::filesystem::create_directories(archive.parent_path());
     {
-        std::ofstream file(archive, std::ios::binary);
+        const std::ofstream file(archive, std::ios::binary);
     }
     ASSERT_TRUE(std::filesystem::exists(archive));
 

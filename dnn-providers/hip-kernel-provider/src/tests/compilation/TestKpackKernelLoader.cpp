@@ -147,8 +147,8 @@ const std::string& descriptorLabel()
 class TestKpackKernelLoader : public ::testing::Test
 {
 protected:
-    KpackModuleCache cache;
-    KpackKernelLoader loader{cache};
+    KpackModuleCache _cache;
+    KpackKernelLoader _loader{_cache};
 };
 
 TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
@@ -159,7 +159,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
 
     try
     {
-        loader.load(absent, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
+        _loader.load(absent, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
         FAIL() << "expected a missing archive to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -186,7 +186,7 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 
     try
     {
-        loader.load(garbage, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
+        _loader.load(garbage, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
         FAIL() << "expected an unreadable archive to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -208,7 +208,7 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 
     try
     {
-        loader.load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx942", "PointwiseAdd", descriptorLabel());
+        _loader.load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx942", "PointwiseAdd", descriptorLabel());
         FAIL() << "expected an arch mismatch to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -231,7 +231,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
 
     try
     {
-        loader.load(
+        _loader.load(
             REAL_ARCHIVE, "no/such/entry#7", ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
         FAIL() << "expected a missing toc_key to be reported";
     }
@@ -271,7 +271,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingSymbol)
     // symbol, which is exactly why the cache key excludes it -- so the failure this case
     // is after is raised by KpackProgram::getKernel against a module HIP has accepted.
     const auto program
-        = loader.load(packed.archive, packed.tocKey, arch, ABSENT_SYMBOL, descriptorLabel());
+        = _loader.load(packed.archive, packed.tocKey, arch, ABSENT_SYMBOL, descriptorLabel());
     ASSERT_NE(program, nullptr);
 
     try
@@ -317,13 +317,13 @@ TEST_F(TestKpackKernelLoader, TwoSymbolsResolveAgainstOneModule)
     PackagedKernelSource packed;
     ASSERT_NO_FATAL_FAILURE(readPackagedKernelSource(packaged, PACKED_UKD_DESCRIPTOR, packed));
 
-    const size_t before = cache.size();
+    const size_t before = _cache.size();
 
     // Both symbols resolve...
     const auto first
-        = loader.load(packed.archive, packed.tocKey, arch, PACKED_SYMBOL, descriptorLabel());
-    const auto second
-        = loader.load(packed.archive, packed.tocKey, arch, PACKED_SECOND_SYMBOL, descriptorLabel());
+        = _loader.load(packed.archive, packed.tocKey, arch, PACKED_SYMBOL, descriptorLabel());
+    const auto second = _loader.load(
+        packed.archive, packed.tocKey, arch, PACKED_SECOND_SYMBOL, descriptorLabel());
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
     EXPECT_NE(first->getKernel(PACKED_SYMBOL), nullptr);
@@ -339,7 +339,7 @@ TEST_F(TestKpackKernelLoader, TwoSymbolsResolveAgainstOneModule)
     ASSERT_NE(secondKpack, nullptr);
     EXPECT_NE(firstKpack->module(), nullptr);
     EXPECT_EQ(firstKpack->module(), secondKpack->module());
-    EXPECT_EQ(cache.size(), before + 1);
+    EXPECT_EQ(_cache.size(), before + 1);
 }
 
 } // namespace

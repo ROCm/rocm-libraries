@@ -156,8 +156,7 @@ std::filesystem::path backupRootPath()
 std::vector<char> readWholeFile(const std::filesystem::path& path)
 {
     std::ifstream in(path, std::ios::binary);
-    return std::vector<char>((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
 [[nodiscard]] bool writeWholeFile(const std::filesystem::path& path, const std::vector<char>& bytes)

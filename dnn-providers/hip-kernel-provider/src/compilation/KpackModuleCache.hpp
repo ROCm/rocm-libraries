@@ -31,8 +31,8 @@ namespace hip_kernel_provider::compilation
 class KpackModuleLoadFailure : public std::runtime_error
 {
 public:
-    KpackModuleLoadFailure(KpackLoadStage stage, std::string message)
-        : std::runtime_error(std::move(message))
+    KpackModuleLoadFailure(KpackLoadStage stage, const std::string& message)
+        : std::runtime_error(message)
         , _stage(stage)
     {
     }
