@@ -587,8 +587,8 @@ bool isFirstLoopSegment(BasicBlock::iterator segBegin, StinkyInstruction* loopHe
 Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
-    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors,
-    int maxHops, StinkyInstruction* loopHead) {
+    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
+    StinkyInstruction* loopHead) {
     if (leadCycles <= 0) return {defaultAnchor, 0};
     auto refIt = cycleMap.find(referenceAnchor);
     if (refIt == cycleMap.end()) return {defaultAnchor, 0};
@@ -677,9 +677,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
 
         int64_t tailAccum = 0;
         auto latchCycleIt = cycleMap.find(latch);
-        int64_t tailPrevCycle =
-            (latchCycleIt != cycleMap.end()) ? static_cast<int64_t>(latchCycleIt->second)
-                                             : prevCycle;
+        int64_t tailPrevCycle = (latchCycleIt != cycleMap.end())
+                                    ? static_cast<int64_t>(latchCycleIt->second)
+                                    : prevCycle;
         bool tailSccLive = readsScc(*latch) || (sccLive && !writesScc(*latch));
         bool tailTargetMet = false;
         StinkyInstruction* tailLeadPoint = nullptr;
@@ -690,11 +690,11 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             auto* tailInst = dyn_cast<StinkyInstruction>(tailIt.getNodePtr());
             if (tailInst == nullptr) continue;
 
-            tailSccLive =
-                readsScc(*tailInst) || (tailSccLive && !writesScc(*tailInst));
+            tailSccLive = readsScc(*tailInst) || (tailSccLive && !writesScc(*tailInst));
 
             if (isClusterBarrierWait(*tailInst)) {
-                return report(clearScc(anchorAfterWorkgroupBarrierFollowing(tailInst, defaultAnchor)));
+                return report(
+                    clearScc(anchorAfterWorkgroupBarrierFollowing(tailInst, defaultAnchor)));
             }
             if (isSegmentBoundary(*tailInst)) {
                 if (isCall(*tailInst) || isUnconditionalBranch(*tailInst)) {
@@ -771,7 +771,8 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                 // loop condition has to be folded in by hand.
                 sccLive = readsScc(*latch) || (sccLive && !writesScc(*latch));
                 auto latchCycle = cycleMap.find(latch);
-                if (latchCycle != cycleMap.end()) prevCycle = static_cast<int64_t>(latchCycle->second);
+                if (latchCycle != cycleMap.end())
+                    prevCycle = static_cast<int64_t>(latchCycle->second);
                 crossedLoopHead = true;
             }
             ++hops;
@@ -1013,8 +1014,10 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                 if (inst == nullptr) continue;
                 if (countingStarted) {
-                    if (isClusterBarrierSignal(*inst)) inFlight = true;
-                    else if (isClusterBarrierWait(*inst)) inFlight = false;
+                    if (isClusterBarrierSignal(*inst))
+                        inFlight = true;
+                    else if (isClusterBarrierWait(*inst))
+                        inFlight = false;
                 }
                 if (inst == exitLabelInst && prevReal != nullptr &&
                     !isUnconditionalBranch(*prevReal) && !isCall(*prevReal)) {
@@ -1026,8 +1029,10 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
                 // that actually ran before it.
                 if (!isPseudoInst(inst)) prevReal = inst;
                 if (!isBranch(*inst) || getBranchTarget(*inst) != exitLabelName) continue;
-                if (inFlight) anyEdgeCarriesToken = true;
-                else bypassBranches.push_back(inst);
+                if (inFlight)
+                    anyEdgeCarriesToken = true;
+                else
+                    bypassBranches.push_back(inst);
             }
         }
     }
@@ -1207,12 +1212,10 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // they all hoist.
                 StinkyInstruction* head = findEnclosingLoopHead(trigger);
                 // kRule3CrossLoop false: maxHops=0, climb stays in-segment. true: one hop.
-                const int maxSegmentHops =
-                    cluster_barrier::kRule3CrossLoop ? kMaxSegmentHops : 0;
+                const int maxSegmentHops = cluster_barrier::kRule3CrossLoop ? kMaxSegmentHops : 0;
                 Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
-                    trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
-                    kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
-                    maxSegmentHops, head);
+                    trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap, kRule3SignalLeadCycles,
+                    kRule3SignalMaxLeadCycles, priorWaitAnchors, maxSegmentHops, head);
                 // Read the exit label and climb the preheader now: once the handshakes go
                 // in, the body is full of this pass's own skip branches and barriers, and
                 // neither the loop's real exit nor an unspoken-for stretch of preheader is
@@ -1235,8 +1238,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                         if (comp.preLoopSignal.anchor == nullptr) {
                             found = findRule3SignalAnchorByCycleLead(
                                 trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
-                                kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles,
-                                priorWaitAnchors, /*maxHops=*/0, head);
+                                kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
+                                /*maxHops=*/0, head);
                         }
                     }
                 }
