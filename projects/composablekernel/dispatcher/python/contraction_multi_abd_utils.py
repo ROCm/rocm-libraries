@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
-_CODEGEN_SCRIPT = Path(__file__).parent.parent / "codegen" / "contraction_multi_abd_codegen.py"
+_CODEGEN_SCRIPT = Path(__file__).parent.parent / "codegen" / "unified_contraction_multi_abd_codegen.py"
 _CTYPES_LIB_SRC = (
     Path(__file__).parent.parent
     / "bindings" / "ctypes"
@@ -58,7 +58,7 @@ _CTYPES_LIB_SRC = (
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from contraction_multi_abd_codegen import (  # noqa: E402
+from unified_contraction_multi_abd_codegen import (  # noqa: E402
     make_contraction_multi_abd_kernel_name,
     validate_contraction_multi_abd_params,
 )
@@ -88,7 +88,7 @@ class ContractionMultiABDKernelConfig:
     """
     Complete description of one batched_contraction_multi_abd kernel.
 
-    The .name property produces the exact string that contraction_multi_abd_codegen.py
+    The .name property produces the exact string that unified_contraction_multi_abd_codegen.py
     emits as KERNEL_NAME, ensuring the Python side and compiled .so always agree.
     """
 
@@ -176,7 +176,7 @@ class ContractionMultiABDKernelConfig:
         )
 
     def to_codegen_config(self) -> dict:
-        """Produce the config dict for contraction_multi_abd_codegen.py."""
+        """Produce the config dict for unified_contraction_multi_abd_codegen.py."""
         return {
             "dtypes":     [self.dtype],
             "layouts":    [self.layout],
@@ -680,7 +680,7 @@ def _generate_kernel_header(
     config: ContractionMultiABDKernelConfig,
     output_dir: Path,
 ) -> Optional[Path]:
-    """Run contraction_multi_abd_codegen.py for one config; return .hpp path or None."""
+    """Run unified_contraction_multi_abd_codegen.py for one config; return .hpp path or None."""
     config_dict = config.to_codegen_config()
     config_json = json.dumps(config_dict)
 

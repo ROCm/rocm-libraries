@@ -45,7 +45,7 @@ from contraction_multi_abd_utils import (  # noqa: E402
     ContractionMultiABDDispatcherLib,
     ContractionMultiABDRunner,
 )
-from contraction_multi_abd_codegen import (  # noqa: E402
+from unified_contraction_multi_abd_codegen import (  # noqa: E402
     SUPPORTED_EPILOGUES,
     ContractionMultiABDKernelSpec,
     make_contraction_multi_abd_kernel_name,
@@ -641,6 +641,39 @@ class TestExpandNestedConfig(unittest.TestCase):
         result = _expand_nested_config(cfg)
         self.assertNotIn("tile_config",  result)
         self.assertNotIn("trait_config", result)
+
+    def test_trait_config_dtype_and_layout_are_expanded(self):
+        """dtype/layout in trait_config must reach build_specs.
+
+        They used to be the only traits _expand_nested_config ignored, so a
+        config spelling them the way it spells its "pipeline" sibling was
+        dropped without a word and the fp16/rcr defaults swept instead.
+        """
+        cfg = {
+            "trait_config": {
+                "dtype":  {"values": ["bf16", "fp8"]},
+                "layout": {"values": ["rcr"]},
+            },
+        }
+        result = _expand_nested_config(cfg)
+        self.assertEqual(result["dtypes"],  ["bf16", "fp8"])
+        self.assertEqual(result["layouts"], ["rcr"])
+        self.assertEqual({s.dtype for s in build_specs(cfg)}, {"bf16", "fp8"})
+
+    def test_unknown_trait_config_key_raises(self):
+        """A misspelled trait must fail loudly, not silently sweep the defaults."""
+        cfg = {"trait_config": {"dtypes": {"values": ["bf16"]}}}  # plural: wrong here
+        with self.assertRaises(ValueError) as ctx:
+            _expand_nested_config(cfg)
+        self.assertIn("dtypes", str(ctx.exception))
+        self.assertIn("trait_config", str(ctx.exception))
+
+    def test_shipped_configs_use_only_known_trait_keys(self):
+        """Guards the whitelist against drifting away from the configs we ship."""
+        for path in sorted(_CONFIG_DIR.glob("*.json")):
+            with self.subTest(config=path.name):
+                with open(path) as f:
+                    _expand_nested_config(json.load(f))  # must not raise
 
     def test_shipped_smoke_config_expands_to_one_spec(self):
         smoke = _CONFIG_DIR / "smoke_ci_config.json"
