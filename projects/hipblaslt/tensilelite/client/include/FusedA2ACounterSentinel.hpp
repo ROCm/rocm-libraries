@@ -8,15 +8,16 @@
 //
 //   +0    cursors   MAX_RANKS * 2 * u64   SDMA cursor pair per queue
 //   +128  counter2  MAX_RANKS * u32       counter2[dst_rank]
-//   +160  counter3  1 * u32
-//   +164  counter1  W * tokenTiles * u32  counter1[dst_rank*tokenTiles + j]
+//   +192  counter3  1 * u32
+//   +256  counter1  W * tokenTiles * u32  counter1[dst_rank*tokenTiles + j]
 //   ...   guard tail
 //
-// The three leading regions are sized by FUSED_A2A_MAX_RANKS rather than the
-// runtime world size. The guard tail catches an overrun of counter1 -- the one
-// region whose index is computed at runtime -- by absorbing the write inside
-// the allocation instead of letting it reach whatever hipMalloc handed back
-// next.
+// Each region starts on a 64-byte line; the trailing variable-size region gets
+// no tail padding. The three leading regions are sized by FUSED_A2A_MAX_RANKS
+// rather than the runtime world size. The guard tail catches an overrun of
+// counter1 -- the one region whose index is computed at runtime -- by absorbing
+// the write inside the allocation instead of letting it reach whatever
+// hipMalloc handed back next.
 
 #include <cstddef>
 #include <cstdint>
@@ -37,13 +38,21 @@ namespace TensileLite
         // reaches both from one base and never needs W.
         constexpr size_t FUSED_A2A_CURSORS_PER_QUEUE = 2;
 
+        constexpr size_t FUSED_A2A_LINE_BYTES = 64;
+
+        constexpr size_t fusedA2AAlignLine(size_t nbytes)
+        {
+            return (nbytes + FUSED_A2A_LINE_BYTES - 1) / FUSED_A2A_LINE_BYTES
+                   * FUSED_A2A_LINE_BYTES;
+        }
+
         // Twinned with FUSED_A2A_COUNTER*_OFFSET in Tensile/Components/Signature.py.
-        constexpr size_t FUSED_A2A_COUNTER2_OFFSET
-            = (size_t)FUSED_A2A_MAX_RANKS * FUSED_A2A_CURSORS_PER_QUEUE * sizeof(uint64_t);
-        constexpr size_t FUSED_A2A_COUNTER3_OFFSET
-            = FUSED_A2A_COUNTER2_OFFSET + (size_t)FUSED_A2A_MAX_RANKS * sizeof(uint32_t);
+        constexpr size_t FUSED_A2A_COUNTER2_OFFSET = fusedA2AAlignLine(
+            (size_t)FUSED_A2A_MAX_RANKS * FUSED_A2A_CURSORS_PER_QUEUE * sizeof(uint64_t));
+        constexpr size_t FUSED_A2A_COUNTER3_OFFSET = fusedA2AAlignLine(
+            FUSED_A2A_COUNTER2_OFFSET + (size_t)FUSED_A2A_MAX_RANKS * sizeof(uint32_t));
         constexpr size_t FUSED_A2A_COUNTER1_OFFSET
-            = FUSED_A2A_COUNTER3_OFFSET + sizeof(uint32_t);
+            = fusedA2AAlignLine(FUSED_A2A_COUNTER3_OFFSET + sizeof(uint32_t));
 
         // Live counter bytes. size_t (not uint32) so a large W*tokenTiles cannot
         // wrap and under-allocate. The cursors are inside the per-launch memset
