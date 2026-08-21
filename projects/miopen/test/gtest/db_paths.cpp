@@ -455,3 +455,29 @@ TEST_F(CPU_DbPaths_NONE, UserDbDisabled_SuppressesWrites)
     EXPECT_FALSE(db.FindRecord(std::string{"key"}).has_value())
         << "Lookup should miss when user db I/O is disabled";
 }
+
+TEST_F(CPU_DbPaths_NONE, UserDbDisabled_LatchedAtConstruction)
+{
+    if(static_cast<bool>(MIOPEN_DISABLE_USERDB))
+        GTEST_SKIP() << "User db file I/O is disabled at build time";
+
+    // Flipping the switch must never take effect part-way through a live database object: the
+    // answer is fixed when the object is constructed, so the constructor and every later operation
+    // agree. An instance built while the switch was off keeps writing.
+    const auto db_file = fs::temp_directory_path() / "miopen_user_db_latch_test.db.txt";
+    fs::remove(db_file);
+
+    miopen::PlainTextDb db{miopen::DbKinds::PerfDb, db_file};
+    const miopen::DbRecord record{miopen::DbKinds::PerfDb, std::string{"key"}};
+
+    {
+        ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+
+        EXPECT_TRUE(miopen::IsUserDbDisabled());
+        EXPECT_TRUE(db.StoreRecord(record));
+        EXPECT_TRUE(fs::exists(db_file))
+            << "An already constructed db must keep the file I/O it was built with";
+    }
+
+    fs::remove(db_file);
+}

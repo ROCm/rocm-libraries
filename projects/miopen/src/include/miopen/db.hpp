@@ -139,6 +139,11 @@ public:
 protected:
     const DbKinds db_kind;
 
+    /// Whether file I/O against this database is suppressed. Latched at construction, so that
+    /// every operation on a given instance sees one consistent answer even if the debug override
+    /// behind IsUserDbDisabled() is flipped between constructions.
+    const bool disable_file_io;
+
     LockFile& GetLockFile() { return lock_file; }
     const fs::path& GetFileName() const { return filename; }
     bool IsWarningIfUnreadable() const { return warning_if_unreadable; }

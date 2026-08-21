@@ -25,4 +25,9 @@ MIOPEN_INTERNALS_EXPORT bool IsSystemDbDisabled();
 /// The system databases and the kernel cache are unaffected.
 MIOPEN_INTERNALS_EXPORT bool IsUserDbDisabled();
 
+/// \note Both predicates are process-wide switches: env::enabled() samples the environment once,
+/// on first use, and only the debug override (miopen::debug::env::UpdateEnvVariable) can change
+/// the answer afterwards. Database objects latch it in their constructors rather than calling
+/// these per operation, so no single instance can straddle a change.
+
 } // namespace miopen
