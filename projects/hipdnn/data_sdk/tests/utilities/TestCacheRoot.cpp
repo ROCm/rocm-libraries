@@ -63,7 +63,6 @@ TEST_F(TestCacheRoot, UnsetEnvResolvesToPlatformDefaultAndDirectoryExists)
 
     ASSERT_FALSE(root.empty());
     EXPECT_TRUE(std::filesystem::is_directory(root));
-    // The default is rooted under the fake home directory expandUser() resolved to.
     EXPECT_EQ(root.string().rfind(fakeHome.string(), 0), 0u);
 }
 
@@ -84,10 +83,7 @@ TEST_F(TestCacheRoot, CustomWritableDirIsUsedAndCreated)
 #if defined(__linux__)
 TEST_F(TestCacheRoot, UnwritableLocationDegradesInsteadOfThrowing)
 {
-    // Root bypasses directory permission bits, so an unwritable directory is still
-    // writable and cacheRoot() correctly returns a usable path. CI containers run as
-    // root; skipping there is honest, where asserting would pin behaviour that only
-    // holds for unprivileged users.
+    // Root ignores directory permission bits, so this case only holds for unprivileged users.
     if(::geteuid() == 0)
     {
         GTEST_SKIP() << "runs as root, which ignores the directory permissions this case "
@@ -108,7 +104,6 @@ TEST_F(TestCacheRoot, UnwritableLocationDegradesInsteadOfThrowing)
 
     EXPECT_TRUE(root.empty());
 
-    // Restore write permission so TearDown() can remove the directory.
     ::chmod(parentDir.c_str(), 0700);
 }
 #endif // defined(__linux__)

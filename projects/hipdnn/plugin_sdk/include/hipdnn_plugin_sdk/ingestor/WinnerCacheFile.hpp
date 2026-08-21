@@ -5,18 +5,13 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-// WinnerCacheFile is layer 3's on-disk record format for the winner cache: the JSON
-// envelope one shard line holds, the version line every shard is stamped with and
-// checked against, and the path one (engine, arch) shard lives at. It is the only
-// header in this directory that depends on all three lower layers at once -- layer 1's
-// LineStore/CacheRoot/PathSanitizer, layer 2's GraphContentKey JSON codec, and layer 3's
-// own WinnerKey/WinnerRecord/DeviceKey -- which is exactly why it, not layer 1 or 2,
-// owns the on-disk envelope (D29).
+// WinnerCacheFile is the on-disk record format for the winner cache: the JSON envelope
+// one shard line holds, the version line every shard is stamped with, and the path an
+// (engine, arch) shard lives at.
 //
-// Every decode here is fail-soft: a missing field, a wrong type, or content that fails
-// to reverify returns std::nullopt, never a throw. LineStore's skip-malformed-line
-// contract depends on that -- one bad line must cost only itself, not the read of an
-// otherwise-good shard.
+// Every decode here is fail-soft: a missing field, wrong type, or content that fails to
+// reverify returns std::nullopt rather than throwing, so LineStore can skip one bad line
+// without losing the rest of the shard.
 
 #include <filesystem>
 #include <optional>
@@ -57,27 +52,18 @@ constexpr const char* WINNER_LINE_TIME_MS_FIELD = "time_ms";
 
 } // namespace detail
 
-/// The bare version string every winner-cache shard is stamped with and checked
-/// against -- D24/D30's "one component, named once". Layer 1 (data_sdk) owns the write
-/// path (LineStore) and has no other component's version reachable without a new link
-/// edge, so its version stamps every shard regardless of which engine or arch it holds.
+/// The version string every winner-cache shard is stamped with and checked against;
+/// sourced from data_sdk, which owns the LineStore write path.
 inline std::string_view winnerCacheVersion()
 {
     return HIPDNN_DATA_SDK_VERSION_STRING;
 }
 
 /// Where @p engineName's shard for @p gcnArchName lives:
-/// `cacheRoot() / "ingestor-winners" / <sdk-version-string> / sanitizeForPath(engineName)
-/// / stripArchFeatures(gcnArchName) / "winners.jsonl"`.
+/// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<arch-base>/winners.jsonl`.
 ///
-/// The version-string component is written verbatim, not sanitized: it is
-/// build-produced (`MAJOR.MINOR.PATCH.TWEAK`, `HIPDNN_DATA_SDK_VERSION_STRING`), never
-/// user- or engine-supplied, and contains no character `sanitizeForPath` would need to
-/// touch.
-///
-/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory right
-///     now (e.g. a filesystem error) -- callers must treat that as "no on-disk cache is
-///     available" and fall back to in-memory-only behavior. Never throws.
+/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory;
+///     callers must fall back to in-memory-only behavior. Never throws.
 inline std::filesystem::path winnerCacheShardPath(std::string_view engineName,
                                                   std::string_view gcnArchName)
 {
@@ -93,10 +79,8 @@ inline std::filesystem::path winnerCacheShardPath(std::string_view engineName,
 }
 
 /// Opens (creating if absent) the shard for @p engineName / @p gcnArchName, creating its
-/// parent directory tree first -- `openLineStore()` assumes the parent directory already
-/// exists, so this is the one place in layer 3 that creates it. Fails soft throughout:
-/// an empty `winnerCacheShardPath()` (cacheRoot() unusable) or a directory-creation
-/// error both report `LineStoreStatus::OPEN_FAILED` rather than throwing.
+/// parent directory tree first. Fails soft: an unusable cache root or a
+/// directory-creation error both report `LineStoreStatus::OPEN_FAILED` rather than throwing.
 inline std::pair<std::optional<hipdnn_data_sdk::utilities::LineStoreShard>,
                  hipdnn_data_sdk::utilities::LineStoreStatus>
     openWinnerCacheShard(std::string_view engineName, std::string_view gcnArchName)
@@ -117,12 +101,10 @@ inline std::pair<std::optional<hipdnn_data_sdk::utilities::LineStoreShard>,
     return hipdnn_data_sdk::utilities::openLineStore(path, winnerCacheVersion());
 }
 
-/// Encodes @p key and @p record as one JSON-Lines record: `key.graph` under layer 2's
-/// own codec (`GraphContentKey::toJson()`), `key.device`'s fields folded in directly as
-/// plain JSON (`DeviceKey` has no codec of its own), and @p record as an array of ranked
-/// entries. `DescriptorId`s use the same UUID text format `DescriptorLoader.hpp` already
-/// reads and writes (`hipdnn_flatbuffers_sdk::utilities::formatUuid`/`parseUuid`, reached
-/// here via `toString()`) -- no second id format.
+/// Encodes @p key and @p record as one JSON-Lines record: `key.graph` via
+/// `GraphContentKey::toJson()`, `key.device` folded in as plain JSON, and @p record as an
+/// array of ranked entries. `DescriptorId`s use the same UUID text format as
+/// `DescriptorLoader.hpp` (`formatUuid`/`parseUuid`).
 inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerRecord& record)
 {
     nlohmann::json device;
@@ -149,11 +131,9 @@ inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerReco
     return line.dump();
 }
 
-/// Decodes one line written by encodeWinnerRecordLine(). Fail-soft throughout: a missing
-/// or mistyped field, a graph payload `GraphContentKey::fromJson()` declines, or a
-/// `DescriptorId` that does not parse as a UUID all return std::nullopt -- matching
-/// LineStore's skip-malformed-line contract, never a throw. std::nullopt means "skip
-/// this line", not "this shard is corrupt".
+/// Decodes one line written by `encodeWinnerRecordLine()`. A missing/mistyped field, a
+/// graph payload `GraphContentKey::fromJson()` declines, or an unparsable `DescriptorId`
+/// all return std::nullopt (never throw), matching LineStore's skip-malformed-line contract.
 inline std::optional<std::pair<WinnerKey, WinnerRecord>>
     decodeWinnerRecordLine(std::string_view line) noexcept
 {

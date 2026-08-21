@@ -49,18 +49,13 @@ inline void unsetEnv(const char* var)
     unsetenv(var);
 }
 
-/// Expands a **leading** `~` in @p path to the current user's home directory
-/// (from the `HOME` environment variable), and returns everything else untouched.
+/// Expands a **leading** `~` in @p path to the current user's home directory (from
+/// `HOME`); everything else is left untouched.
 ///
-/// hipDNN's own contract, not a general tilde-expansion:
-///  - Only a `~` at the very start of @p path is eligible. `~` appearing anywhere else in
-///    the string (e.g. `/tmp/a~b`) is left exactly as written -- it is never treated as a
-///    home-directory reference.
-///  - `~user` (a leading `~` immediately followed by a username, not a path separator or
-///    end of string) is not expanded; only a bare leading `~` alone or followed by a path
-///    separator qualifies.
-///  - If `HOME` is unset or empty, @p path is returned unchanged -- this function never
-///    substitutes a temp directory or any other fallback location.
+/// Not general tilde-expansion: a `~` anywhere but the very start is left as written, and
+/// `~user` (a leading `~` followed by a username rather than a path separator or end of
+/// string) is never expanded. If `HOME` is unset or empty, @p path is returned unchanged
+/// -- no fallback location is substituted.
 ///
 /// @param path The path string to expand, e.g. as read from a config value or env var.
 /// @return @p path with a qualifying leading `~` replaced by `$HOME`, or @p path
@@ -72,8 +67,6 @@ inline std::string expandUser(const std::string& path)
         return path;
     }
 
-    // A leading '~' qualifies only alone or followed by a path separator; '~user' is left
-    // untouched.
     if(path.size() > 1 && path[1] != '/')
     {
         return path;

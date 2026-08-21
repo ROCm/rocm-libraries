@@ -108,14 +108,11 @@ public:
     ///        is the only one of the three that has no descriptor of its own to name:
     ///        the symbol lives on the UED, so without this the diagnostic would carry
     ///        the symbol string alone.
-    /// @param engineName The engine's own scoped name (`EngineDescriptor::name`), used
-    ///        only to compose the on-disk winner-cache shard path
-    ///        (`WinnerCacheFile.hpp`'s `winnerCacheShardPath()`) -- NOT `describedBy`,
-    ///        which is a diagnostic string ("engine 'name' (uuid)"), not a path
-    ///        component. Defaulted to empty so every existing direct-construction call
-    ///        site (the SDK's own tests) keeps compiling; an empty name disables the
-    ///        disk cache for this manager rather than writing every unnamed test
-    ///        instance into one shared shard -- see recordWinner()/winnerFor().
+    /// @param engineName The engine's own scoped name (`EngineDescriptor::name`), used to
+    ///        compose the on-disk winner-cache shard path -- not `describedBy`, which is
+    ///        a diagnostic string, not a path component. Defaults to empty so existing
+    ///        direct-construction call sites keep compiling; an empty name disables the
+    ///        disk cache rather than sharing one shard across every unnamed instance.
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
@@ -248,16 +245,13 @@ public:
     /// Records @p record under @p key, replacing any earlier ranking for it: a later
     /// sweep measured the current candidate set, and the coverage gate only widens.
     ///
-    /// Write-back (D3): if this manager has an engine name, the record is additionally
-    /// appended to the on-disk shard. The re-read-then-append-if-absent sequence runs as
-    /// ONE critical section under the shard's own LineStore lock -- not merely under
-    /// `_winnerCacheMutex`, which a second process sharing the file cannot see at all.
-    /// If another writer's line for this exact key is already on disk by the time this
-    /// call takes the lock, the local `record` is dropped in favor of the on-disk one:
-    /// two processes racing the same benchmark must not leave two lines for one key.
-    /// Every disk failure (open/lock/read/append) degrades to "keep the local record,
-    /// in-memory-only" rather than throwing; each distinct failure kind is logged once
-    /// per manager, not once per call.
+    /// Write-back: if this manager has an engine name, the record is also appended to
+    /// the on-disk shard. Unlike the in-memory-only read-through path below, this holds
+    /// the shard's own file lock across the whole read-then-append sequence as one
+    /// critical section -- `_winnerCacheMutex` alone cannot serialize against a second
+    /// process sharing the file. If another writer's line for this key is already on
+    /// disk by the time the lock is taken, the local `record` is dropped in favor of the
+    /// on-disk one. Any disk failure degrades to in-memory-only, logged once per manager.
     void recordWinner(const WinnerKey& key, const WinnerRecord& record) const
     {
         if(record.empty())
@@ -295,11 +289,10 @@ public:
     /// The ranking recorded for @p key, or nullopt. Returns a copy: the caller walks it
     /// outside the lock, and a reference would outlive the guard.
     ///
-    /// Read-through (C9): an in-memory miss triggers loading @p key's on-disk shard --
-    /// once per shard, via a per-shard "already loaded" flag, never once per lookup.
-    /// Every entry the shard's lines successfully decode to is folded into
-    /// `_winnerCache` before this re-checks it, so a hit that only exists on disk is
-    /// still served from this same call.
+    /// Read-through: an in-memory miss loads @p key's on-disk shard once per shard (a
+    /// per-shard "already loaded" flag), taking only `_winnerCacheMutex` to merge
+    /// decoded entries into `_winnerCache` -- unlike write-back, this never holds a file
+    /// lock across the read.
     std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
     {
         {
@@ -706,11 +699,8 @@ private:
         orderFromWinnerRecord(const std::vector<KernelDefinition>& entries,
                               const MatchContext& context) const
     {
-        // Cheap rejection first: building a WinnerKey copies and folds the whole graph
-        // buffer, so avoid that on the default, never-benchmarked path.
-        // mightHaveWinnerFor() rather than a bare winnerCacheSize() check: once an
-        // on-disk shard exists, an empty in-memory cache no longer proves there is
-        // nothing to find, only that this process has not read this arch's shard yet.
+        // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
+        // process has not read yet, unlike a bare winnerCacheSize() check.
         if(entries.empty() || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
         {
             return std::nullopt;
@@ -741,11 +731,8 @@ private:
         return ordered;
     }
 
-    /// Is it worth building a WinnerKey and calling winnerFor() for @p gcnArchName? True
-    /// whenever the in-memory cache already holds something (any arch), or this arch's
-    /// on-disk shard has not been attempted yet -- in which case winnerFor()'s
-    /// read-through still might populate it. False only once both are exhausted: the
-    /// cache is empty and this arch's shard load has already run (successfully or not).
+    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
+    /// holds anything, or this arch's shard has not been attempted yet.
     bool mightHaveWinnerFor(const std::string& gcnArchName) const
     {
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
@@ -753,27 +740,15 @@ private:
                || _loadedWinnerShards.find(gcnArchName) == _loadedWinnerShards.end();
     }
 
-    /// Read-through (C9): loads @p gcnArchName's on-disk shard into `_winnerCache`
-    /// exactly once per shard, tracked by `_loadedWinnerShards`. A no-op once the flag
-    /// is set, whether the earlier attempt found the shard, found nothing, or failed --
-    /// this is "have we looked", not "did we find anything".
-    ///
-    /// File I/O runs with `_winnerCacheMutex` UNHELD: only the flag check and the final
-    /// merge into `_winnerCache` take the lock, each independently. A slow or stalled
-    /// disk read this way can never block an unrelated `recordWinner()`/`winnerFor()`
-    /// call on another key, and never contends with the LineStore lock a concurrent
-    /// writer might be holding on the very shard being read. The tradeoff is a narrow
-    /// window where two threads racing the first lookup for one arch can both decide
-    /// "not yet loaded" and both read the shard; the second merge is a harmless no-op
-    /// once the flag is set, so this costs at most one redundant read, never a wrong
-    /// answer or a duplicate in `_winnerCache`.
+    /// Loads @p gcnArchName's on-disk shard into `_winnerCache` once per shard, tracked
+    /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow
+    /// disk read never blocks an unrelated call.
     void loadShardIfAbsent(const std::string& gcnArchName) const
     {
         if(_engineName.empty())
         {
-            // No engine name means no path to a shard (see the constructor's
-            // @param engineName note) -- mark it loaded so every later lookup for this
-            // arch takes the fast in-memory-only path instead of re-deciding this.
+            // No engine name means no shard path; mark it loaded so later lookups take
+            // the fast in-memory-only path.
             const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
             _loadedWinnerShards.insert(gcnArchName);
             return;
@@ -814,30 +789,24 @@ private:
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
         if(!_loadedWinnerShards.insert(gcnArchName).second)
         {
-            // Another thread's read-through raced this one and already merged; the
-            // narrow window mightHaveWinnerFor()/loadShardIfAbsent() document above.
+            // Another thread's read-through raced this one and already merged.
             return;
         }
-        // Last-line-wins (D3): decoded is already in file order, so a plain insertion
-        // in that order lets a later line's assignment overwrite an earlier one.
+        // decoded is in file order, so later lines overwrite earlier ones on insertion.
         for(auto& [decodedKey, decodedRecord] : decoded)
         {
             _winnerCache[decodedKey] = std::move(decodedRecord);
         }
     }
 
-    /// Write-back (D3): re-reads @p key's shard under its LineStore lock and appends
-    /// @p record only if @p key is still absent -- read, decide, and append are ONE
-    /// critical section under the shard's own lock, not merely under
-    /// `_winnerCacheMutex`, because the race this defends against is between two
-    /// PROCESSES, which `_winnerCacheMutex` cannot see at all. Mirrors
-    /// `LineStoreLockHelper.cpp`'s lock/read/append-if-absent shape, the same shape
-    /// `TestLineStore.TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce` proved
-    /// correct.
+    /// Write-back: re-reads @p key's shard under its LineStore lock and appends
+    /// @p record only if @p key is still absent, as one critical section under the
+    /// shard's own lock (mirrors `LineStoreLockHelper.cpp`). The file lock rather than
+    /// `_winnerCacheMutex`, because the racing writer may be another process.
     ///
-    /// @return @p record unchanged on success (or on any disk failure -- write-back is
-    ///     best-effort, and every failure degrades to in-memory-only); the on-disk
-    ///     record instead, if a concurrent writer's line for @p key was already present.
+    /// @return @p record unchanged on success or on any disk failure (write-back is
+    ///     best-effort); the on-disk record instead, if a concurrent writer's line for
+    ///     @p key was already present.
     WinnerRecord writeBackToShard(const WinnerKey& key, WinnerRecord record) const
     {
         if(_engineName.empty())
@@ -878,9 +847,8 @@ private:
         {
             if(existingKey == key)
             {
-                // A concurrent writer (another process, or another call in this one)
-                // already landed this exact key while we were computing `record`; adopt
-                // it rather than writing a duplicate line for one key.
+                // A concurrent writer already landed this exact key; adopt it rather
+                // than writing a duplicate line.
                 hipdnn_data_sdk::utilities::unlockLineStore(*shard);
                 return existingRecord;
             }
@@ -904,11 +872,9 @@ private:
         VERSION_MISMATCH,
     };
 
-    /// Logs @p kind once per manager instance, never per call -- a persistently
-    /// unusable shard (e.g. an unwritable cache directory) must not spam one line per
-    /// `recordWinner()`/`winnerFor()` invocation. Every kind here is a disk-level
-    /// decline, never a throw; the caller has already fallen back to in-memory-only
-    /// behavior by the time this runs.
+    /// Logs @p kind once per manager instance, never per call. Every kind here is a
+    /// disk-level decline, never a throw; the caller has already fallen back to
+    /// in-memory-only behavior by the time this runs.
     void logShardFailureOnce(WinnerShardFailureKind kind, const std::string& gcnArchName) const
     {
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
@@ -950,8 +916,7 @@ private:
                                       "behavior continues");
             break;
         default:
-            // Unreachable: every enumerator above is handled. Present because the
-            // project's clang-tidy configuration requires an explicit default.
+            // Unreachable; present because clang-tidy requires an explicit default.
             break;
         }
     }
@@ -967,10 +932,8 @@ private:
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
 
-    /// The engine's own scoped name, used only to locate its on-disk winner-cache shard
-    /// (see the constructor's @param engineName note). Empty disables the disk cache for
-    /// this manager entirely -- every direct-construction call site in the SDK's own
-    /// tests leaves this at its default and stays in-memory-only, doing zero disk I/O.
+    /// The engine's own scoped name, used to locate its on-disk winner-cache shard.
+    /// Empty disables the disk cache for this manager entirely.
     std::string _engineName;
 
     /// Unbounded, never evicted, own mutex (see WINNER_CACHE_WARNING_THRESHOLD). Separate
@@ -979,9 +942,8 @@ private:
     mutable std::unordered_map<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
     mutable std::mutex _winnerCacheMutex;
     mutable bool _winnerCacheGrowthWarned = false;
-    /// Arches (gcnArchName) whose on-disk shard has already been attempted, guarding
-    /// C9's read-once-per-shard contract; see loadShardIfAbsent(). Guarded by
-    /// _winnerCacheMutex, same as _winnerCache itself.
+    /// Arches (gcnArchName) whose on-disk shard has already been attempted; see
+    /// loadShardIfAbsent(). Guarded by _winnerCacheMutex.
     mutable std::unordered_set<std::string> _loadedWinnerShards;
     /// Failure kinds already logged once (see logShardFailureOnce()); guarded by
     /// _winnerCacheMutex.
