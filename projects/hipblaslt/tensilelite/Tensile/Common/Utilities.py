@@ -58,6 +58,31 @@ def isSubtileMultiDU(kernel) -> bool:
     du = kernel["DepthU"]
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
+
+def _parsePlsinDebugEnv():
+    """Parse the single TENSILE_PLSIN_DEBUG umbrella into a {name: value} map."""
+    raw = os.environ.get("TENSILE_PLSIN_DEBUG", "")
+    parsed = {}
+    for pair in raw.split(";"):
+        if not pair.strip():
+            continue
+        key, sep, value = pair.partition("=")
+        if sep:
+            parsed[key.strip()] = value
+    return parsed
+
+
+def plsinDebugEnv(name: str, default=None):
+    """Read one PLSIN weave TEST-ONLY override from TENSILE_PLSIN_DEBUG umbrella.
+
+    All PLSIN/weave overrides are folded under a SINGLE umbrella variable,
+    ``TENSILE_PLSIN_DEBUG``, a ';'-separated list of NAME=value pairs. This is
+    for development and testing ONLY; a released library never depends on it.
+    Returns the raw string value for ``name``, or ``default`` when unset.
+    """
+    return _parsePlsinDebugEnv().get(name, default)
+
+
 # Global
 _global_ti = rocIsa.getInstance()
 
