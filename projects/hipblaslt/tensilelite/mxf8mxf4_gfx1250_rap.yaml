@@ -14,8 +14,8 @@ GlobalParameters:
   DataInitTypeD: 2
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
-  DataInitTypeAlpha: 1
-  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 2
   PrintLevel: 2
   PrintSolutionRejectionReason: True
   # ForceGenerateKernel: True
@@ -51,8 +51,8 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          # - [16, 16, 128, 1,  1,  2, 8,  2, 2] # 64x256
-          - [16, 16, 128, 1,  1,  2, 16,  2, 2] # 64x512
+          - [16, 16, 128, 1,  1,  2, 8,  2, 2] # 64x256
+          # - [16, 16, 128, 1,  1,  2, 16,  2, 2] # 64x512
         # - HalfPLR: [1] # HalfPLR doesn't support PAP
         - DepthU: [256]
         - AssertSummationElementMultiple: [256]
@@ -94,7 +94,7 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
-        - PrefetchAcrossPersistent: [1]
+        - PrefetchAcrossPersistent: [0,1]
         - ReuseAcrossPersistent: [0,1]
       BenchmarkForkParameters:
       JoinParameters:
@@ -103,9 +103,16 @@ BenchmarkProblems:
         - ProblemSizes:
           # - Exact: [5120*128, 64, 1, 1024]
           # - Exact: [5120, 64, 128, 1024]
-          - Exact: [64, 5120, 16, 768]
+          # - Exact: [64, 5120, 16, 768]
           # - Exact: [64, 32768, 4, 768]
-          # - Exact: [64, 12288, 4, 2048]
+          - Exact: [64, 12288, 4, 256]
+          - Exact: [64, 12288, 4, 512]
+          - Exact: [64, 12288, 4, 768]
+          - Exact: [64, 12288, 4, 1024]
+          - Exact: [64, 12288, 4, 1280]
+          - Exact: [64, 12288, 4, 1536]
+          - Exact: [64, 12288, 4, 1792]
+          - Exact: [64, 12288, 4, 2048]
           # - Exact: [64, 655360, 1, 758] # 1280 tiles, 5 tiles/WG
           # - Exact: [64, 5120, 1, 1024]
           # - Exact: [64, 5120, 1, 1536]
