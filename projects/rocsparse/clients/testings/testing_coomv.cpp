@@ -264,8 +264,7 @@ void testing_coomv_extra(const Arguments& arg)
     CHECK_HIP_ERROR(
         hipMemcpy(static_cast<T*>(dval) + probe_idx, &probe_val, sizeof(T), hipMemcpyHostToDevice));
 
-    rocsparse_local_spmat mat(
-        m, n, nnz, drow_ind, dcol_ind, dval, get_indextype<I>(), base, ttype);
+    rocsparse_local_spmat mat(m, n, nnz, drow_ind, dcol_ind, dval, get_indextype<I>(), base, ttype);
     rocsparse_local_dnvec x(n, dx, ttype);
     rocsparse_local_dnvec y(m, dy, ttype);
 

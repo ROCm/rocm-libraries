@@ -507,8 +507,7 @@ namespace rocsparse
                         }
                         else if(prevrow >= 0)
                         {
-                            rocsparse::atomic_add(
-                                y, prevrow, m, alpha * shared_val[BLOCKSIZE - 1]);
+                            rocsparse::atomic_add(y, prevrow, m, alpha * shared_val[BLOCKSIZE - 1]);
                         }
                     }
 

@@ -350,8 +350,7 @@ namespace rocsparse
         {
             if(max_nnz_per_row <= 10 * 256)
             {
-                const int64_t nblocks
-                    = rocsparse::min((nnz - 1) / (1 * 256) + 1, max_grid);
+                const int64_t nblocks = rocsparse::min((nnz - 1) / (1 * 256) + 1, max_grid);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coomvn_atomic_loops<256, 1>),
                     dim3(nblocks),
@@ -371,8 +370,7 @@ namespace rocsparse
             }
             else
             {
-                const int64_t nblocks
-                    = rocsparse::min((nnz - 1) / (2 * 256) + 1, max_grid);
+                const int64_t nblocks = rocsparse::min((nnz - 1) / (2 * 256) + 1, max_grid);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coomvn_atomic_loops<256, 2>),
                     dim3(nblocks),
