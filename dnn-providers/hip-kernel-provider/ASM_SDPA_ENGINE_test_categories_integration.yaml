@@ -68,10 +68,20 @@ test_categories:
   #     - "full"
   #     - "all"
 
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: Smoke SDPA cases"
+    test_patterns:
+      - "Smoke/*Sdpa*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
     standard: 2700
+    ffm-quick: 7200  # 2 hours
     # comprehensive: 25200
     # full: 28800
