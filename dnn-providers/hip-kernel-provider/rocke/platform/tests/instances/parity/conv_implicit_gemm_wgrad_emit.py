@@ -26,8 +26,11 @@
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
-#   101 -- groups=2 (must raise ValueError)
+#   101 -- num_groups_to_merge=3 (not a power of two, must raise ValueError)
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
+# (These illustrate the validator contract. The C emitter defines only cases
+# 0-10, so run_diff.py stops at the shared END before reaching 100+; these
+# configs are not exercised by the differential gate.)
 from rocke.instances.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
@@ -40,7 +43,9 @@ def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
     For negative cases (idx >= 100) the spec is expected to raise ValueError
-    on build; the harness checks that the exception is raised.
+    when built (run this file with that index to confirm it raises). These are
+    illustrative of the validator contract; no differential harness consumes
+    them (see the module header).
     """
     if idx == 0:
         # Baseline: 3x3 conv, mem pipeline, default epilogue, gfx950.
@@ -291,8 +296,10 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 101:
-        # groups=2 -- must raise (wgrad does not support grouped conv).
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, groups=2)
+        # num_groups_to_merge=3 -- must raise (Gm must be a power of two in
+        # {1,2,4,8,16,32,64}).  Grouped wgrad and group-merging ARE supported now;
+        # this exercises the merge-factor validator instead.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, groups=8)
         return (
             WgradConvSpec(
                 problem=p,
@@ -306,6 +313,7 @@ def _spec(idx: int):
                 warp_tile_k=16,
                 pipeline="mem",
                 epilogue="default",
+                num_groups_to_merge=3,
             ),
             "gfx950",
         )
