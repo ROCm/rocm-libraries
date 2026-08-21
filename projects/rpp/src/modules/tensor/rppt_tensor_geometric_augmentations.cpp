@@ -2123,9 +2123,7 @@ RppStatus rppt_concat(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptGenericDescPtr src
         return RPP_ERROR_INVALID_SRC_DIMS;
     if (srcPtr1GenericDescPtr->layout != dstGenericDescPtr->layout)
         return RPP_ERROR_LAYOUT_MISMATCH;
-    if (axisMask >= srcPtr1GenericDescPtr->numDims) return RPP_ERROR_INVALID_AXIS;
-    // dims[] is batch-inclusive (index 0 = batch size) while axisMask is 0-based over the
-    // per-sample axes only, so the concat axis in dims[] coordinates is axisMask + 1.
+    if (axisMask >= tensorDim) return RPP_ERROR_INVALID_AXIS;
     for (int i = 1; i < srcPtr1GenericDescPtr->numDims; i++)
         if ((i != axisMask + 1) &&
             (srcPtr1GenericDescPtr->dims[i] != srcPtr2GenericDescPtr->dims[i]))
