@@ -704,7 +704,10 @@ class TestPythonPathSplitMirror(unittest.TestCase):
         """``(ntpath, posixpath)`` splits of each path, as the C++ mirror cuts them."""
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "driver.cpp")
-            exe = os.path.join(tmp, "driver")
+            # The suffix is not cosmetic on Windows: CreateProcess appends
+            # ``.exe`` to an extensionless name, so a compiler that honours
+            # ``-o driver`` verbatim writes a binary the run below cannot find.
+            exe = os.path.join(tmp, "driver" + (".exe" if os.name == "nt" else ""))
             with open(src, "w") as fh:
                 fh.write(_SPLIT_DRIVER)
             subprocess.run(
@@ -769,6 +772,13 @@ def llvm_tool(name):
     reports none of the inlining, which reads as this test failing rather than
     as the wrong ``llc`` having answered. PATH stays the route when nothing is
     configured, so a hand-arranged toolchain still wins.
+
+    A configured directory is searched with ``shutil.which`` rather than tested
+    with ``os.path.isfile``, because the tool a host really holds is named
+    ``llc.exe`` on Windows and has to be executable on either platform. An
+    ``isfile`` on the bare name says no to the first and yes to a stray
+    unrunnable file, so the route this prefers was skipped on Windows and the
+    system tool answered in its place -- the exact substitution above.
     """
     configured = []
     if os.environ.get(LLVM_BIN_ENV):
@@ -776,14 +786,13 @@ def llvm_tool(name):
     if os.environ.get("ROCM_PATH"):
         configured.append(os.path.join(os.environ["ROCM_PATH"], "llvm", "bin"))
     for directory in configured:
-        candidate = os.path.join(directory, name)
-        if os.path.isfile(candidate):
+        candidate = shutil.which(name, path=directory)
+        if candidate:
             return candidate
     found = shutil.which(name)
     if found:
         return found
-    candidate = os.path.join("/opt/rocm", "llvm", "bin", name)
-    return candidate if os.path.isfile(candidate) else None
+    return shutil.which(name, path=os.path.join("/opt/rocm", "llvm", "bin"))
 
 
 class TestLlvmToolDiscovery(unittest.TestCase):
@@ -796,13 +805,23 @@ class TestLlvmToolDiscovery(unittest.TestCase):
     the toolchain.
     """
 
-    def fake_bin(self, tmp, name):
-        directory = os.path.join(tmp, "llvm", "bin")
+    def make_tool(self, directory, name):
+        """A runnable stand-in for ``name``, spelled the way this host spells one.
+
+        Discovery asks whether the directory holds something it could execute,
+        so a fixture that is merely a file of the right name answers no -- on
+        Windows for the extension, everywhere for the permission bits.
+        """
+
         os.makedirs(directory, exist_ok=True)
-        path = os.path.join(directory, name)
+        path = os.path.join(directory, name + (".exe" if os.name == "nt" else ""))
         with open(path, "w"):
             pass
+        os.chmod(path, 0o755)
         return path
+
+    def fake_bin(self, tmp, name):
+        return self.make_tool(os.path.join(tmp, "llvm", "bin"), name)
 
     def test_configured_rocm_wins_over_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -817,10 +836,7 @@ class TestLlvmToolDiscovery(unittest.TestCase):
     def test_explicit_llvm_bin_wins_over_rocm_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             override = os.path.join(tmp, "override")
-            os.makedirs(override)
-            expected = os.path.join(override, "llc")
-            with open(expected, "w"):
-                pass
+            expected = self.make_tool(override, "llc")
             self.fake_bin(tmp, "llc")
             with mock.patch.dict(
                 os.environ, {"ROCM_PATH": tmp, LLVM_BIN_ENV: override}
