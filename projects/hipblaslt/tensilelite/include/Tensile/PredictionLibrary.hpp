@@ -29,8 +29,10 @@
 #include <atomic>
 #include <iostream>
 #include <set>
+#include <type_traits>
 #include <vector>
 
+#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/UtilsOrigami.hpp>
@@ -170,6 +172,26 @@ namespace TensileLite
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+                if constexpr(std::is_same_v<MyProblem, ContractionProblemGemm>)
+                {
+                    if(problem.batchMode()
+                           == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+                       && pAMDGPU
+                       && pAMDGPU->processor == AMDGPU::Processor::gfx1250
+                       && solution->sizeMapping.streamK != 0
+                       && solution->sizeMapping.streamKForceDPOnly == 0)
+                    {
+                        if(debug)
+                        {
+                            std::cout << "Prediction: skipping " << solution->name()
+                                      << " - Stream-K without ForceDPOnly unsupported for "
+                                         "POINTER_ARRAY on gfx1250"
+                                      << std::endl;
+                        }
+                        return;
+                    }
+                }
+
                 const bool hwMatch   = (*(solution->hardwarePredicate))(hardware);
                 const bool probMatch = (*(solution->problemPredicate))(problem);
                 const bool predicateMatch = hwMatch && probMatch;
