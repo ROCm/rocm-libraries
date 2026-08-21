@@ -40,9 +40,13 @@ elseif(WIN32)
         "the ROCm llvm/bin directory) to embed version info.")
 endif()
 
-set(BUILD_SHARED_LIBS "${ORIGAMI_BUILD_SHARED_LIBS}")
-add_library(origami)
-if(WIN32 AND BUILD_SHARED_LIBS AND _origami_have_version_rc)
+if(ORIGAMI_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
+    set(ORIGAMI_LIBRARY_TYPE SHARED)
+else()
+    set(ORIGAMI_LIBRARY_TYPE STATIC)
+endif()
+add_library(origami ${ORIGAMI_LIBRARY_TYPE})
+if(WIN32 AND ORIGAMI_LIBRARY_TYPE STREQUAL "SHARED" AND _origami_have_version_rc)
     target_sources(origami PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/version.rc")
 endif()
 
@@ -62,11 +66,7 @@ generate_export_header(origami
     BASE_NAME ORIGAMI
     EXPORT_MACRO_NAME ORIGAMI_EXPORT
     EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/include/origami/origami_export.h"
-    STATIC_DEFINE ORIGAMI_STATIC
 )
-if(NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
-endif()
 
 add_library(origami-headers INTERFACE)
 add_library(roc::origami-headers ALIAS origami-headers)
