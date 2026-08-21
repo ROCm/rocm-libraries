@@ -1,6 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+import collections
 import logging
+import random
 import unittest
 
 from ck4inductor.universal_gemm.gen_instances import (
@@ -28,6 +30,7 @@ from ck4inductor.ck_tile_universal_gemm.gen_instances import (
     ops as gen_ck_tile_gemm_ops_library,
 )
 from ck4inductor import check_headers, include_roots
+from ck4inductor.util import sorted_instances
 
 log = logging.getLogger(__name__)
 
@@ -176,6 +179,80 @@ class TestGenInstances(unittest.TestCase):
         for op in instances:
             self.assertFalse(op.is_wmma)
         self.assertIn("_xdl_", instances[0].name())
+
+
+class TestDeterministicOrder(unittest.TestCase):
+    """Enumeration order must not depend on the filesystem.
+
+    The enumerators build their lists from `grep -R`, which walks directories in
+    readdir order: it differs per machine and changes on reinstall. Consumers that
+    sample a subset under a fixed seed (PyTorch Inductor draws
+    `ck_max_profiling_configs`) then pick the same *positions* out of
+    differently-ordered lists, i.e. different instances per machine from the same
+    wheel. Asserting only `sorted(names) == names` on a live enumerator would pass
+    vacuously if grep happened to return sorted output, so the round-trip below
+    feeds in a deliberately shuffled list."""
+
+    # Every grep-based enumerator. `ck_tile_universal_gemm` is intentionally absent:
+    # it enumerates from an itertools product and is already deterministic.
+    ENUMERATORS = (
+        ("conv", gen_conv_ops_library),
+        ("conv_wmma", gen_conv_ops_library_wmma),
+        ("gemm", gen_gemm_ops_library),
+        ("gemm_wmma", gen_gemm_ops_library_wmma),
+        ("batched_gemm", gen_batched_gemm_ops_library),
+        ("batched_gemm_wmma", gen_batched_gemm_ops_library_wmma),
+    )
+
+    def test_sorted_instances_is_order_independent(self):
+        # The property that matters: whatever order grep returns, the helper maps it
+        # to one canonical order.
+        instances = gen_conv_ops_library()
+        self.assertTrue(instances)
+
+        forward = [op.name() for op in sorted_instances(instances)]
+        reverse = [op.name() for op in sorted_instances(list(reversed(instances)))]
+        shuffled = list(instances)
+        random.Random(0xC0FFEE).shuffle(shuffled)
+        shuffled_names = [op.name() for op in sorted_instances(shuffled)]
+
+        self.assertEqual(forward, reverse)
+        self.assertEqual(forward, shuffled_names)
+        self.assertEqual(forward, sorted(forward))
+
+    def test_sorted_instances_preserves_every_instance(self):
+        # Sorting must reorder, never drop. Deduping here would shrink the pool and
+        # change which instances a fixed seed selects; the conv pool contains exact
+        # duplicates and they are kept deliberately.
+        instances = gen_conv_ops_library()
+        self.assertTrue(instances)
+
+        result = sorted_instances(instances)
+        self.assertEqual(len(result), len(instances))
+        self.assertEqual(
+            collections.Counter(op.name() for op in result),
+            collections.Counter(op.name() for op in instances),
+        )
+
+    def test_every_grep_based_enumerator_is_sorted(self):
+        # Guards the wiring: the helper existing is not the same as each enumerator
+        # calling it. A new enumerator that forgets the sort fails here.
+        for label, fn in self.ENUMERATORS:
+            with self.subTest(enumerator=label):
+                names = [op.name() for op in fn()]
+                self.assertTrue(names, f"{label} enumerated nothing")
+                self.assertEqual(
+                    names, sorted(names), f"{label} enumeration is not sorted"
+                )
+
+    def test_enumeration_is_repeatable(self):
+        # Two calls in one process must agree -- catches a future enumerator that
+        # sorts by something unstable (e.g. object identity or a set iteration).
+        for label, fn in self.ENUMERATORS:
+            with self.subTest(enumerator=label):
+                self.assertEqual(
+                    [op.name() for op in fn()], [op.name() for op in fn()]
+                )
 
 
 class TestCheckHeaders(unittest.TestCase):
