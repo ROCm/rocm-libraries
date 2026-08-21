@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 
 RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&    node,
                                                                const std::string& gpu_arch,
-                                                               bool               enable_callbacks)
+                                                               CallbackType       cbtype)
 {
     const auto& length = node.length;
 
@@ -106,7 +106,7 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
                          node.direction,
                          diagonal,
                          tileAligned,
-                         node.GetCallbackType(enable_callbacks),
+                         cbtype,
                          node.loadOps,
                          node.storeOps,
                          grid3D};
