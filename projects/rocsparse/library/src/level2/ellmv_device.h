@@ -47,8 +47,7 @@ namespace rocsparse
         // grid is clamped to handle->properties.maxGridSize[0].
         const I stride = static_cast<I>(BLOCKSIZE) * hipGridDim_x;
 
-        for(I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x; ai < m;
-            ai += stride)
+        for(I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x; ai < m; ai += stride)
         {
             T sum = static_cast<T>(0);
             for(I p = 0; p < ell_width; ++p)
@@ -98,8 +97,7 @@ namespace rocsparse
         // grid is clamped to handle->properties.maxGridSize[0].
         const I stride = static_cast<I>(BLOCKSIZE) * hipGridDim_x;
 
-        for(I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x; ai < m;
-            ai += stride)
+        for(I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x; ai < m; ai += stride)
         {
             const T row_val = alpha * rocsparse::ldg(x + ai);
 
