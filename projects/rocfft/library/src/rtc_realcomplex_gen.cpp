@@ -646,7 +646,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     src += rtc_precision_type_decl(specs.precision);
     src += rtc_index_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
-    src += callback_h;    
+    src += callback_h;
 
     // function arguments
     Variable dim{"dim", "size_t"};

@@ -33,7 +33,7 @@ struct RTCKernelStockham : public RTCKernel
         , hardcoded_dim(kernel_name.find("_dim") != std::string::npos)
     {
     }
-    IndexType                      itype;
+    IndexType itype;
     static RTCKernel::RTCGenerator
         generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
 

@@ -75,12 +75,12 @@ std::string bluestein_single_rtc(const std::string& kernel_name, const Bluestein
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
+    src += rtc_index_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
     src += butterfly_constant_h;
     append_radix_h(src, specs.factors);
-    src += rtc_index_type_decl(specs.itype);
 
     src += "static const unsigned int dim = " + std::to_string(specs.dim) + ";\n";
 
@@ -239,10 +239,9 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
+    src += rtc_index_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
-    src += rtc_index_type_decl(specs.itype);
-
 
     // chirp looks different from the other kernels
     if(specs.scheme == CS_KERNEL_CHIRP)
