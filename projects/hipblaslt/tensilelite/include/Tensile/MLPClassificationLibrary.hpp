@@ -153,7 +153,8 @@ namespace TensileLite
             {
                 std::partial_sort(it, it + numToSort, it_end, std::greater{});
                 for(; it != it + numToSort; it++)
-                    if((*((*it->second)->problemPredicate))(problem))
+                    if((*((*it->second)->problemPredicate))(problem)
+                       && (*it->second)->supportsRuntimeBatchMode(problem))
                     {
                         rv.emplace_back(*it->second);
                         numToSort--;

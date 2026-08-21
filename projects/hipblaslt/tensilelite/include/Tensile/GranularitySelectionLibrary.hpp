@@ -116,7 +116,8 @@ namespace TensileLite
                 Task task(hardware, problem, *rv);
                 bool predicateMatch = (*rv->problemPredicate)(problem)
                                       && (*rv->taskPredicate)(task)
-                                      && (*rv->hardwarePredicate)(hardware);
+                                      && (*rv->hardwarePredicate)(hardware)
+                                      && rv->supportsRuntimeBatchMode(problem);
                 if(debug)
                 {
                     PredicateDebugger::printHeader(
@@ -151,7 +152,8 @@ namespace TensileLite
                     Task task(hardware, problem, *(row.second));
                     bool predicateMatch = (*row.second->problemPredicate)(problem)
                                           && (*row.second->taskPredicate)(task)
-                                          && (*row.second->hardwarePredicate)(hardware);
+                                          && (*row.second->hardwarePredicate)(hardware)
+                                          && row.second->supportsRuntimeBatchMode(problem);
 
                     if(debug)
                     {

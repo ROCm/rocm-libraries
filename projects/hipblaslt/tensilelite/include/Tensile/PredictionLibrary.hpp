@@ -170,9 +170,10 @@ namespace TensileLite
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
-                const bool hwMatch   = (*(solution->hardwarePredicate))(hardware);
-                const bool probMatch = (*(solution->problemPredicate))(problem);
-                const bool predicateMatch = hwMatch && probMatch;
+                const bool hwMatch    = (*(solution->hardwarePredicate))(hardware);
+                const bool probMatch  = (*(solution->problemPredicate))(problem);
+                const bool batchMatch = solution->supportsRuntimeBatchMode(problem);
+                const bool predicateMatch = hwMatch && probMatch && batchMatch;
 
                 if(debug)
                 {

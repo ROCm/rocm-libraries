@@ -55,6 +55,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <complex>
 #include <exception>
@@ -3289,6 +3290,10 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
  ******************************************************************************/
+static void logRuntimeBatchModeSkip(
+    const char*                                                   caller,
+    const std::shared_ptr<TensileLite::ContractionSolution>& solution);
+
 rocblaslt_status runContractionProblem(rocblaslt_handle                   handle,
                                        const rocblaslt_matmul_algo*       algo,
                                        const RocblasltContractionProblem& prob,
@@ -3387,6 +3392,15 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
 
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        if(!solution)
+        {
+            return rocblaslt_status_not_implemented;
+        }
+        if(!solution->supportsRuntimeBatchMode(data->problem))
+        {
+            logRuntimeBatchModeSkip(__func__, solution);
+            return rocblaslt_status_invalid_value;
+        }
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -4317,6 +4331,19 @@ void _convertToHeuristicResultArray(
     }
 }
 
+static void logRuntimeBatchModeSkip(
+    const char*                                                   caller,
+    const std::shared_ptr<TensileLite::ContractionSolution>& solution)
+{
+    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+    {
+        std::ostringstream msg;
+        msg << "Skipping solution " << solution->index
+            << " - does not support runtime batch_mode=POINTER_ARRAY" << std::endl;
+        log_info(caller, msg.str());
+    }
+}
+
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -4518,6 +4545,12 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
                         << " - does not support batch_mode=POINTER_ARRAY" << std::endl;
                     log_info(__func__, msg.str());
                 }
+                continue;
+            }
+
+            if(!solution->supportsRuntimeBatchMode(prob))
+            {
+                logRuntimeBatchModeSkip(__func__, solution);
                 continue;
             }
         }
@@ -4725,6 +4758,12 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 << " (solution missing from library map; check Tensile packaging or version "
                    "skew)";
             log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
+
+        if(!solution->supportsRuntimeBatchMode(tensile_prob))
+        {
+            logRuntimeBatchModeSkip(__func__, solution);
             return rocblaslt_status_invalid_value;
         }
 

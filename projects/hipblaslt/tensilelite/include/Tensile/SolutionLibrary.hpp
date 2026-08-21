@@ -86,7 +86,8 @@ namespace TensileLite
             // once. This is reject-and-continue: selection falls through to
             // another (SK3-static / non-StreamK) solution for the GEMM.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
-                   && solutions.streamKDynamicQueueSupported(problem, hardware);
+                   && solutions.streamKDynamicQueueSupported(problem, hardware)
+                   && solutions.supportsRuntimeBatchMode(problem);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
             return isGemmTypeSame(solutions, problem);

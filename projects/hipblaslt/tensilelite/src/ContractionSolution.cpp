@@ -4260,6 +4260,14 @@ namespace TensileLite
         return false;
     }
 
+    bool ContractionSolution::supportsRuntimeBatchMode(Problem const& problem) const
+    {
+        if(sizeMapping.streamK == 0)
+            return true;
+
+        return problem.batchMode() != Problem::BATCHMODE::POINTER_ARRAY;
+    }
+
     namespace
     {
         size_t getSKGridImpl(ContractionSolution const& self,

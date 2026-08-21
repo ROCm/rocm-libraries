@@ -393,6 +393,11 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
+        // Stream-K solutions are generated for strided-batched addressing. A
+        // hipBLASLt pointer-array batch can otherwise match the same
+        // StridedBatched+UserArgs predicates at runtime, so reject these
+        // solutions during selection and explicit-index validation.
+        bool                 supportsRuntimeBatchMode(Problem const& problem) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
