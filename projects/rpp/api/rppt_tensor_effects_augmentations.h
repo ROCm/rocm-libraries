@@ -447,14 +447,6 @@ RppStatus rppt_gaussian_noise_voxel(RppPtr_t srcPtr, RpptGenericDescPtr srcGener
  * \return A <tt> \ref RppStatus</tt> enumeration.
  * \retval RPP_SUCCESS Successful completion.
  * \retval RPP_ERROR* Unsuccessful completion.
- * \note anchorBoxInfoTensor coordinates are always specified in absolute source-image coordinates
- (i.e. relative to the full image, not the ROI). When a partial ROI is used (roiTensorPtrSrc
- describes a sub-region smaller than the full image), the destination tensor is written packed at
- the ROI's origin - row/column 0 of dstPtr corresponds to the ROI's top-left pixel
- (roiTensorPtrSrc[n].xywhROI.xy). An erase-region's absolute coordinates are therefore
- automatically reinterpreted relative to the ROI offset internally so the erased box lands at the
- correct packed-destination location; callers do not need to offset anchorBoxInfoTensor
- themselves.
  */
 RppStatus rppt_erase(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                      RpptDescPtr dstDescPtr, RpptRoiLtrb* anchorBoxInfoTensor,
@@ -740,14 +732,6 @@ RppStatus rppt_channel_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
  * (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref RppStatus</tt>
  * enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful
  * completion.
- * \note anchorBoxInfoTensor coordinates are always specified in absolute source-image coordinates
- * (i.e. relative to the full image, not the ROI). When a partial ROI is used (roiTensorPtrSrc
- * describes a sub-region smaller than the full image), the destination tensor is written packed
- * at the ROI's origin - row/column 0 of dstPtr corresponds to the ROI's top-left pixel
- * (roiTensorPtrSrc[n].xywhROI.xy). An erase-region's absolute coordinates are therefore
- * automatically reinterpreted relative to the ROI offset internally so the erased box lands at
- * the correct packed-destination location; callers do not need to offset anchorBoxInfoTensor
- * themselves.
  */
 RppStatus rppt_cutout_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                               RpptDescPtr dstDescPtr, RpptRoiLtrb* anchorBoxInfoTensor,
@@ -781,13 +765,6 @@ RppStatus rppt_cutout_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t 
  * (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref RppStatus</tt>
  * enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful
  * completion.
- * \note anchorBoxInfoTensor coordinates are always specified in absolute source-image coordinates
- * (i.e. relative to the full image, not the ROI). When a partial ROI is used (roiTensorPtrSrc
- * describes a sub-region smaller than the full image), the destination tensor is written packed
- * at the ROI's origin - row/column 0 of dstPtr corresponds to the ROI's top-left pixel
- * (roiTensorPtrSrc[n].xywhROI.xy). A grid box's absolute coordinates are therefore automatically
- * reinterpreted relative to the ROI offset internally so each hole lands at the correct
- * packed-destination location; callers do not need to offset anchorBoxInfoTensor themselves.
  */
 RppStatus rppt_grid_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                             RpptDescPtr dstDescPtr, RpptRoiLtrb* anchorBoxInfoTensor,
