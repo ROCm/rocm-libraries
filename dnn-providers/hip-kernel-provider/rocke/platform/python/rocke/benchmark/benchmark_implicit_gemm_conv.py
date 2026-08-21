@@ -2371,6 +2371,7 @@ def _run_dgrad_sweep(
                 dump_fail=args.dump_fail,
                 extra_tensors={"dY": dY_t, "W": W_t},
                 u8=_u8,
+                arch=arch,
             )
             if stopped:
                 rt.free(sgbuf_dev)
