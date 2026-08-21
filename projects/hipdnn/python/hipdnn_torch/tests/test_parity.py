@@ -210,6 +210,55 @@ def test_sdpa_causal_parity(torch, dtype_name):
     _assert_parity(torch, got, want, dtype)
 
 
+def test_sdpa_out_layout_match_q_returns_packed_bshd(torch, monkeypatch):
+    """HIPDNN_TORCH_SDPA_OUT_LAYOUT=match_q allocates O in Q's packed BSHD layout.
+
+    A kernel with no stride arguments reads AND writes packed BSHD, so it can serve a
+    permuted Q/K/V but not a contiguous BHSD O -- that graph is mixed and gets declined.
+    The opt-in makes O match Q. Allocation happens before engine selection, so the
+    contract holds whichever engine ends up serving it.
+    """
+    import torch.nn.functional as F
+
+    dtype = torch.float16
+    q = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    k = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    v = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    want = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+    monkeypatch.setenv("HIPDNN_TORCH_SDPA_OUT_LAYOUT", "match_q")
+    got, aot, native = _run_routed(
+        "sdpa",
+        lambda: F.scaled_dot_product_attention(q, k, v, is_causal=True),
+    )
+    assert aot > 0, f"SDPA did not route (aot={aot}, native={native})"
+    assert got.stride() == q.stride(), (
+        f"match_q must return O in Q's packed BSHD strides; got {got.stride()} "
+        f"want {q.stride()}"
+    )
+    _assert_parity(torch, got, want, dtype)
+
+
+def test_sdpa_out_layout_default_is_contiguous(torch, monkeypatch):
+    """Unset (the default) keeps native's contract: a contiguous BHSD output."""
+    import torch.nn.functional as F
+
+    dtype = torch.float16
+    q = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    k = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    v = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    want = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+    monkeypatch.delenv("HIPDNN_TORCH_SDPA_OUT_LAYOUT", raising=False)
+    got, aot, native = _run_routed(
+        "sdpa",
+        lambda: F.scaled_dot_product_attention(q, k, v, is_causal=True),
+    )
+    assert aot > 0, f"SDPA did not route (aot={aot}, native={native})"
+    assert got.is_contiguous(), "default must keep native's contiguous BHSD contract"
+    _assert_parity(torch, got, want, dtype)
+
+
 @pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
 def test_layernorm_multi_axis_parity(torch, dtype_name):
     """Multi-axis normalized_shape built at true rank (no 2-D collapse)."""

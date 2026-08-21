@@ -36,6 +36,7 @@ smaller head count, described directly.
 
 import logging
 import math
+import os
 
 from .base import NotApplicable, OpOverride
 
@@ -185,9 +186,25 @@ class SdpaOverride(OpOverride):
             # Output mirrors native's contract: contiguous, Q's batch/heads/seq with
             # V's head dim (Dv). We own it, so its strides are known.
             dv = int(value.shape[-1])
-            o = torch.empty(
-                (*query.shape[:-1], dv), dtype=query.dtype, device=query.device
-            )
+            # Default: native's contract -- contiguous [B, Hq, Sq, Dv] (BHSD).
+            #
+            # HIPDNN_TORCH_SDPA_OUT_LAYOUT=match_q instead allocates O in Q's own
+            # packed layout. Q/K/V are normally [B, S, H, D] buffers viewed through
+            # .transpose(1, 2), i.e. packed BSHD, and a kernel with no stride
+            # arguments (rocKE's gfx950 attention_dense) reads AND writes that
+            # layout -- it can serve such a Q/K/V but not a contiguous BHSD O, so a
+            # mixed graph is declined. Same shape, dtype and values either way; only
+            # the strides differ, and the usual `.transpose(1,2).reshape(...)`
+            # consumer is indifferent.
+            if os.environ.get("HIPDNN_TORCH_SDPA_OUT_LAYOUT") == "match_q":
+                b, hq, sq = int(query.shape[0]), int(query.shape[1]), int(query.shape[2])
+                o = torch.empty(
+                    (b, sq, hq, dv), dtype=query.dtype, device=query.device
+                ).transpose(1, 2)
+            else:
+                o = torch.empty(
+                    (*query.shape[:-1], dv), dtype=query.dtype, device=query.device
+                )
 
             entry = self._cached_graph(
                 (
