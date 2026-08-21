@@ -252,6 +252,9 @@ function(create_device_library)
         TOOL_BIN_DIRS ${_tool_bin_dirs}
         ${_python_flags}
     )
+    if(HIPBLASLT_PYTHON_COMMAND AND NOT _cdl_PYTHON_EXECUTABLE)
+        set(_python_command ${HIPBLASLT_PYTHON_COMMAND})
+    endif()
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
 
@@ -307,7 +310,8 @@ function(create_device_library)
     set(_codegen_dependencies "${_known_bugs_resource}")
     if(TARGET _rocisa)
         list(APPEND _codegen_dependencies _rocisa)
-    elseif(HIPBLASLT_PYTHON_DEPS)
+    endif()
+    if(HIPBLASLT_PYTHON_DEPS)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
     endif()
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
