@@ -147,3 +147,45 @@ TEST(TestGraphWrapper, GetNodeWrapper)
               hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
     EXPECT_THROW(wrapper.getNodeWrapper(1), std::out_of_range);
 }
+
+/// `bytes()` is the cache-key seam: `GraphContentKey` reads the buffer back through it
+/// and calls `GetRoot` without re-verifying, so a buffer is retained only once the
+/// verifier has accepted it.
+TEST(TestGraphWrapper, BytesReturnsTheVerifiedBuffer)
+{
+    flatbuffers::FlatBufferBuilder builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto serializedGraph = builder.Release();
+
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    ASSERT_TRUE(wrapper.isValid());
+
+    const auto bytes = wrapper.bytes();
+    EXPECT_EQ(bytes.data, serializedGraph.data());
+    EXPECT_EQ(bytes.size, serializedGraph.size());
+}
+
+TEST(TestGraphWrapper, BytesIsEmptyForANullBuffer)
+{
+    const GraphWrapper wrapper(nullptr, 0);
+    ASSERT_FALSE(wrapper.isValid());
+
+    const auto bytes = wrapper.bytes();
+    EXPECT_EQ(bytes.data, nullptr);
+    EXPECT_EQ(bytes.size, 0U);
+}
+
+/// A buffer the verifier rejects must not reach bytes(): handing it out would let a
+/// caller GetRoot() a buffer getGraph() itself refuses to read.
+TEST(TestGraphWrapper, BytesIsEmptyWhenVerificationFails)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidEngineDetails(123);
+    auto serializedGraph = builder.Release();
+
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    ASSERT_FALSE(wrapper.isValid());
+
+    const auto bytes = wrapper.bytes();
+    EXPECT_EQ(bytes.data, nullptr);
+    EXPECT_EQ(bytes.size, 0U);
+}
