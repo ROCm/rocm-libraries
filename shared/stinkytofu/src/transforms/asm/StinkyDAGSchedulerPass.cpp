@@ -34,6 +34,7 @@
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
@@ -216,7 +217,14 @@ static void applyClusterBarrierSccRule(
         // it is dead here, so a clobber cannot hurt it.
         if (chain.readers.empty() && !chain.liveOut) continue;
 
-        DAGNode* first = chain.def ? chain.def : chain.readers.front();
+        // ClusterBarrier: every SCC use in the region must follow a region SCC writer.
+        // Live-in readers alone (def in an earlier region) are not supported.
+        if (chain.def == nullptr) {
+            STINKY_UNREACHABLE(
+                "applyClusterBarrierSccRule: region has SCC reader(s) but no SCC writer");
+        }
+
+        DAGNode* first = chain.def;
         DAGNode* last = chain.readers.empty() ? first : chain.readers.back();
 
         // A live-out value is read past the end of the region (the loop terminator, a

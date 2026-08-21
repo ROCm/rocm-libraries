@@ -1990,6 +1990,27 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_InRegionChainSurvivesGuarding
         << "the barrier must still guard the tensor_load:" << scheduleOrder(*body);
 }
 
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveInSccReaderWithoutDefAborts) {
+    EXPECT_DEATH(
+        {
+            BasicBlock* body = bb;
+
+            // Keep region in "normal schedulable" shape.
+            createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+            createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/10);
+
+            // SCC live-in reader: no SCC writer in this region before this point.
+            createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
+
+            // Barrier comes after the SCC reader.
+            createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+            createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+            runPassWithClusterBarrier(/*clusterBarrier=*/true);
+        },
+        "region has SCC reader\\(s\\) but no SCC writer");
+}
+
 // All instructions are preserved regardless of throttle (count invariant).
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     BasicBlock* body = bb;
