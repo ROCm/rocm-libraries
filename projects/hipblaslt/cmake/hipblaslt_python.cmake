@@ -55,6 +55,27 @@ function(hipblaslt_resolve_build_rocm_version output)
     set(${output} "${_version}" PARENT_SCOPE)
 endfunction()
 
+function(hipblaslt_tensilelite_python_environment output)
+    set(_path "$ENV{PATH}")
+    if(WIN32)
+        string(REPLACE ";" "$<SEMICOLON>" _path "${_path}")
+    endif()
+
+    set(_environment
+        "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
+        "PYTHONPATH=$<TARGET_FILE_DIR:_rocisa>/.."
+        "PATH=${_path}"
+    )
+    if(HIPBLASLT_ENABLE_THEROCK)
+        list(APPEND _environment
+            "THEROCK_PACKAGE_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}")
+    else()
+        list(APPEND _environment
+            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}")
+    endif()
+    set(${output} "${_environment}" PARENT_SCOPE)
+endfunction()
+
 function(hipblaslt_configure_tensilelite_python asan_options)
     if(NOT HIPBLASLT_ENABLE_DEVICE)
         set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}" PARENT_SCOPE)
@@ -84,12 +105,8 @@ function(hipblaslt_configure_tensilelite_python asan_options)
     add_custom_target(tensilelite-python-build-environment
         DEPENDS "${_install_stamp}" _rocisa)
 
-    set(_python_command
-        "${CMAKE_COMMAND}" -E env
-        "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
-        "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
-        "PYTHONPATH=$<TARGET_FILE_DIR:_rocisa>/.."
-    )
+    hipblaslt_tensilelite_python_environment(_python_environment)
+    set(_python_command "${CMAKE_COMMAND}" -E env ${_python_environment})
     if(asan_options)
         list(APPEND _python_command ${asan_options})
     endif()
