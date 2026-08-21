@@ -73,96 +73,14 @@ install(FILES
 )
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
-    # Run core origami binding tests (no torch required)
     add_test(
-        NAME "Python: test_origami_bindings"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_origami.py -v
+        NAME "Python: pytest"
+        COMMAND ${Python_EXECUTABLE} -m pytest -v
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
-
-    set_tests_properties(
-        "Python: test_origami_bindings"
-        PROPERTIES
-            ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
-            DEPENDS _pyorigami
-    )
-
-    # Run selector tests (requires torch)
-    add_test(
-        NAME "Python: test_selector"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_selector.py -v
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    set_tests_properties(
-        "Python: test_selector"
-        PROPERTIES
-            ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
-            DEPENDS _pyorigami
-            SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
-    )
-
-    # Run core origami binding tests (no torch required)
-    add_test(
-        NAME "Python: test_attention_bindings"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention.py -v
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    set_tests_properties(
-        "Python: test_attention_bindings"
-        PROPERTIES
-            ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
-            DEPENDS _pyorigami
-    )
-
-    # Run selector tests (requires torch)
-    add_test(
-        NAME "Python: test_attention_selector"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention_selector.py -v
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    set_tests_properties(
-        "Python: test_attention_selector"
-        PROPERTIES
-            ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
-            DEPENDS _pyorigami
-            SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
-    )
-
-    # Run hardware tests
-    add_test(
-        NAME "Python: test_hardware"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_hardware.py -v
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    set_tests_properties(
-        "Python: test_hardware"
-        PROPERTIES
-            ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
-            DEPENDS _pyorigami
-    )
-
-    # Run ranking regression tests
-    add_test(
-        NAME "Python: test_ranking_regression"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_ranking_regression.py -v
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    set_tests_properties(
-        "Python: test_ranking_regression"
-        PROPERTIES
-            ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
-            DEPENDS _pyorigami
+    set_tests_properties("Python: pytest" PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+        SKIP_RETURN_CODE 5
     )
 
     # Install Python test files to bin/origami/tests for TheRock CI testing.
