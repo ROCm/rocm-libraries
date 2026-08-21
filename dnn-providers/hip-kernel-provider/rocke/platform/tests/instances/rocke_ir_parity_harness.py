@@ -1586,6 +1586,48 @@ def cases():
                 "sliding_window": 256,
             },
         ),
+        # --- Sinks ---
+        # Full-sink (use_sinks=True, no sliding window): D64 and D128, default + persistent
+        ("sinks_d64_sq512", {"use_sinks": True, "head_size": 64}),
+        ("sinks_d128_sq512", {"use_sinks": True}),
+        (
+            "persist_sinks_d64_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "head_size": 64,
+            },
+        ),
+        (
+            "persist_sinks_d128_sq512",
+            {"persistent": True, "num_persistent": 256, "use_sinks": True},
+        ),
+        # SWA-sink (use_sinks=True + sliding_window>0): D64 and D128, default + persistent
+        (
+            "swa_sinks_d64_sq512",
+            {"use_sinks": True, "sliding_window": 128, "head_size": 64},
+        ),
+        ("swa_sinks_d128_sq512", {"use_sinks": True, "sliding_window": 128}),
+        (
+            "persist_swa_sinks_d64_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "sliding_window": 128,
+                "head_size": 64,
+            },
+        ),
+        (
+            "persist_swa_sinks_d128_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "sliding_window": 128,
+            },
+        ),
     ):
         add(
             "attention_dense",
