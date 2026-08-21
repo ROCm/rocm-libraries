@@ -341,26 +341,17 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-// The artifact executes
-// ---------------------------------------------------------------------------
-
-TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnDevice)
-{
-    auto graph = buildPointwiseAddGraph();
-    ASSERT_NO_FATAL_FAILURE(buildAndCompilePacked(*graph));
-
-    // The frontend's route into the engine's getMaxWorkspaceSize().
-    int64_t workspaceSize = 0;
-    auto result = graph->get_workspace_size(workspaceSize);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_GE(workspaceSize, 0);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
-}
-
-// ---------------------------------------------------------------------------
 // The artifact fails without taking the process with it
+//
+// First in the file, and that is load-bearing. Gtest runs suites in order of first
+// registration, which within one translation unit is definition order, so this suite runs
+// before IntegrationGpuKernelIngestorKpack below. It has to: the module cache is
+// process-lifetime, so once the packaged kernel has been executed once, a resident module
+// serves the plan and the corrupt bytes on disk are read by nothing. Anything that moves
+// this suite after the other -- including adding a new suite between them -- turns
+// SurvivesABrokenArchive into a test of nothing. Nothing in this repo or in the generated
+// build passes --gtest_shuffle, which is what makes definition order a sound guarantee
+// rather than a coincidence.
 // ---------------------------------------------------------------------------
 
 /// A truncated archive must produce a diagnosable failure, never a crash, and must leave
@@ -506,7 +497,10 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
 
     // An unreadable archive is reported at ERROR against the engine that owns it. If this
     // fails while the plan below still builds, the packaged engine was never asked -- a
-    // resident module served it, and the corrupt bytes were read by nothing.
+    // resident module served it, and the corrupt bytes were read by nothing. That is the
+    // failure mode the suite's position at the top of this file exists to prevent, so read
+    // this assertion as the detector for a registration-order regression as well as for a
+    // swallowed diagnostic.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
                                           std::string("engine '") + PACKED_ENGINE_NAME
                                               + "' could not build a plan"))
@@ -536,6 +530,25 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
     ASSERT_GE(workspaceSize, 0);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+}
+
+// ---------------------------------------------------------------------------
+// The artifact executes
+// ---------------------------------------------------------------------------
+
+TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnDevice)
+{
+    auto graph = buildPointwiseAddGraph();
+    ASSERT_NO_FATAL_FAILURE(buildAndCompilePacked(*graph));
+
+    // The frontend's route into the engine's getMaxWorkspaceSize().
+    int64_t workspaceSize = 0;
+    auto result = graph->get_workspace_size(workspaceSize);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_GE(workspaceSize, 0);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
     executeAndVerify(*graph, workspace.get(), /*seed=*/0);
 }
 
