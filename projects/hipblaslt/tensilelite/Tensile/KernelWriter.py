@@ -4993,7 +4993,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   ##############################################################################
   # Create a Src vreg value for TF32 Inf check (v_cmp_class_f32)
-  # 0x204 selects +Inf (bit 9) and -Inf (bit 1) for v_cmp_class_f32.
+  # 0x204 selects +Inf (bit 9) and -Inf (bit 2) for v_cmp_class_f32.
   ##############################################################################
   def createTF32ClassSrc(self, kernel):
     module = Module("TF32InfClassSrc")
