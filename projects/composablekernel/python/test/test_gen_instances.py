@@ -189,9 +189,7 @@ class TestDeterministicOrder(unittest.TestCase):
     sample a subset under a fixed seed (PyTorch Inductor draws
     `ck_max_profiling_configs`) then pick the same *positions* out of
     differently-ordered lists, i.e. different instances per machine from the same
-    wheel. Asserting only `sorted(names) == names` on a live enumerator would pass
-    vacuously if grep happened to return sorted output, so the round-trip below
-    feeds in a deliberately shuffled list."""
+    wheel."""
 
     # Every grep-based enumerator. `ck_tile_universal_gemm` is intentionally absent:
     # it enumerates from an itertools product and is already deterministic.
