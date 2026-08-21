@@ -14,16 +14,10 @@ namespace hip_kernel_provider::compilation
 namespace
 {
 
-/// The key is pinned literally, in the style of
-/// tests/engines/asm_sdpa_engine/TestSdpaModuleCache.cpp:30. A format change that
-/// merged two fields, or reordered them, would still round-trip through makeKey and
-/// pass any structural check; only the literal catches it.
-///
-/// Note what is *not* here: the kernel symbol. That is deliberate and is the mechanism
-/// behind AC #6 -- kernels differing only by entry point share one hipModule_t. It is
-/// recorded as a comment rather than an assertion because "makeKey does not take a
-/// symbol" is enforced by the signature at compile time; there is no runtime call that
-/// could fail.
+/// The key is pinned literally, in the style of TestSdpaModuleCache.cpp. A format change
+/// that merged or reordered fields would still round-trip through makeKey and pass any
+/// structural check; only the literal catches it. Note what is *not* in the key: the
+/// kernel symbol, so kernels differing only by entry point share one hipModule_t.
 TEST(TestKpackModuleCacheKey, MakeKeyFormatsCorrectly)
 {
     EXPECT_EQ(KpackModuleCache::makeKey("/opt/packs/pointwise.kpack", "lib/libhip.so#0", "gfx942"),
@@ -43,11 +37,9 @@ TEST(TestKpackModuleCacheKey, KeyDistinguishesTocKeyAndArch)
     EXPECT_NE(KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx942"),
               KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx1100"));
 
-    // Not asserted: injection-freedom. "::"-joining is not a prefix-free encoding, so a
-    // tocKey ending in "::" would collide with a longer one -- the same property
-    // SdpaModuleCache's key has. It is unreachable for real inputs (a toc key is a
-    // packer-emitted "<path>#<index>" and an arch name is [a-z0-9]+), and closing it
-    // would mean changing the format MakeKeyFormatsCorrectly pins on purpose.
+    // Not asserted: "::"-joining is not prefix-free, so a tocKey ending in "::" would
+    // collide -- unreachable for packer-emitted "<path>#<index>" keys and [a-z0-9]+ arch
+    // names, and closing it would change the format the case above pins.
 }
 
 } // namespace

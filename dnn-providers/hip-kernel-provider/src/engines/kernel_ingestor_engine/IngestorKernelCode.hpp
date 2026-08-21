@@ -29,7 +29,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// process-lifetime. Declared here rather than in IngestorPacks.hpp because it belongs
 /// to the kernel-code path, and exposed at all so a test can assert that two dispatches
 /// over one (archive, toc_key, arch) produced a single hipModule_t -- the direct
-/// evidence for AC #6. Defined in PointwiseNative.cpp beside the handler it serves.
+/// otherwise unobservable. Defined in PointwiseNative.cpp beside the handler it serves.
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 
 /// The program plus the kernel resolved out of it, in the shape every pack's

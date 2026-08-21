@@ -14,13 +14,11 @@ namespace hip_kernel_provider::compilation
 {
 
 /// Which step of turning a kpack archive into a loaded module failed. Carried separately
-/// from the raw reader code so a caller can phrase a diagnostic per stage: "wrong GPU" and
-/// "wrong toc_key" are the same reader error family but send a reader to entirely
-/// different places, and flattening both into one string loses that.
+/// from the raw reader code so a caller can phrase a diagnostic per stage: "wrong GPU"
+/// and "wrong toc_key" are the same reader error family but send a reader elsewhere.
 ///
-/// MODULE_LOAD is past the reader: the code object came out of the archive intact and HIP
-/// declined it. It is a distinct enumerator because folding it into DECOMPRESS makes a
-/// rejected code object read as a corrupt one, which is a different bug report entirely.
+/// MODULE_LOAD is past the reader: the code object came out intact and HIP declined it.
+/// Folding it into DECOMPRESS would make a rejected code object read as a corrupt one.
 enum class KpackLoadStage
 {
     OPEN_ARCHIVE,
@@ -39,8 +37,8 @@ struct KpackError
     int code = 0;
     std::string codeName;
     /// The archive file itself was not there, as opposed to being there and unreadable.
-    /// AC #7 wants those two phrased differently, and this saves the caller either
-    /// including kpack.h to compare the enum or matching on codeName text.
+    /// Saves the caller either including kpack.h to compare the enum or matching on
+    /// codeName text.
     bool archiveAbsent = false;
 };
 
@@ -86,7 +84,7 @@ private:
 ///
 /// Every entry point reports failure through KpackError rather than throwing, because
 /// the caller (KpackKernelLoader) is the layer that knows the descriptor label and the
-/// symbol that AC #7 requires every message to name.
+/// symbol every message must name.
 class KpackArchive
 {
 public:

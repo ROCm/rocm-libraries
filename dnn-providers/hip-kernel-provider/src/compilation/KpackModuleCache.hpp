@@ -25,9 +25,8 @@ namespace hip_kernel_provider::compilation
 /// tell "wrong GPU" from "wrong toc_key", and a message that already describes what
 /// went wrong -- but not *who asked*, because the cache is keyed on
 /// (archive, tocKey, arch) and deliberately never sees the descriptor or the symbol.
-/// KpackKernelLoader catches this and prefixes both, which is how AC #7's requirement
-/// that every message name the descriptor and the symbol is met without those two
-/// entering the key.
+/// KpackKernelLoader catches this and prefixes both, so every message names the
+/// descriptor and the symbol without either entering the key.
 class KpackModuleLoadFailure : public std::runtime_error
 {
 public:
@@ -52,23 +51,19 @@ using CachedKpackModule = std::shared_ptr<const KpackModule>;
 ///
 /// The key deliberately excludes the kernel symbol. `toc_key` is content-addressed on
 /// (source, build) only, so two kernels that differ solely by entry point name the same
-/// blob and must share one module -- that sharing is AC #6. `symbol` applies one layer
-/// up, at hipModuleGetFunction in KpackProgram. Do not add it here even though
+/// blob and must share one module. `symbol` applies one layer up, at
+/// hipModuleGetFunction in KpackProgram. Do not add it here even though
 /// KpackKernelLoader::load() receives one; it takes that parameter purely so its error
 /// messages can name it.
 ///
-/// Why not rocm-kpack's own cache: upstream ships kpack_cache_create /
-/// kpack_cache_destroy / kpack_load_code_object / kpack_discover_binary_path at the
-/// pinned SHA, but they cache the decompressed code-object *blob*, not the loaded
-/// hipModule_t. Caching the blob would still leave a hipModuleLoadData on every
-/// dispatch, which is exactly the cost AC #6 exists to remove. Building on
-/// compilation::ModuleCache also keeps this engine's caching in one house style with
-/// SdpaModuleCache. The two are complementary; upstream's is simply not this layer.
+/// Why not rocm-kpack's own cache: kpack_cache_* at the pinned SHA caches the
+/// decompressed code-object *blob*, not the loaded hipModule_t, so it would still leave
+/// a hipModuleLoadData on every dispatch. Building on compilation::ModuleCache also
+/// matches SdpaModuleCache.
 ///
-/// Not keyed by device ordinal (risk R6): a multi-GPU process holding two devices of the
-/// *same* arch shares one hipModule_t across both. SdpaModuleCache has the identical
-/// property. Arch is in the key, so the different-arch case is correct. Recorded, not
-/// fixed.
+/// Not keyed by device ordinal: a multi-GPU process holding two devices of the *same*
+/// arch shares one hipModule_t across both. SdpaModuleCache has the identical property.
+/// Arch is in the key, so the different-arch case is correct.
 class KpackModuleCache : public ModuleCache<KpackModuleCache,
                                             CachedKpackModule,
                                             const std::string& /*archivePath*/,
@@ -79,7 +74,7 @@ public:
     KpackModuleCache() = default;
 
     // Both members are public because MakeKeyFormatsCorrectly calls makeKey directly;
-    // the precedent is SdpaModuleCache.hpp:32-33.
+    // the precedent is SdpaModuleCache.hpp.
 
     static std::string makeKey(const std::string& archivePath,
                                const std::string& tocKey,

@@ -45,11 +45,11 @@
  *        a kpack archive rather than embedded source.
  *
  * Three questions, only one of which needs a device:
- *  - the workspace query is unchanged by the new source kind (AC #5);
+ *  - the workspace query is unchanged by the new source kind;
  *  - a kpack whose archive is absent costs only itself, and a sibling still serves
- *    (AC #8) -- this is the GPU-less case the plan's AC #8 note requires, and the
- *    failure it turns on is raised at archive-open, before any HIP call;
- *  - two dispatches over one (archive, toc_key, arch) load one module (AC #6), which
+ *    -- the failure is raised at archive-open, before any HIP call, so this needs no
+ *    device;
+ *  - two dispatches over one (archive, toc_key, arch) load one module, which
  *    cannot be observed without a device and is marked [GPU] accordingly.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -68,14 +68,12 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
 
 /// Where this build stages the descriptors it packed, one subdirectory per arch. Same
-/// value main.cpp points the binary at, so the [GPU] case below dispatches against the
-/// archive the packaging rule produced for the machine running the tests.
+/// value main.cpp points the binary at.
 constexpr const char* PACKED_DESCRIPTOR_ROOT = HIPDNN_TEST_DESCRIPTOR_DIR;
 
 /// The packaged descriptor the [GPU] case takes its archive and toc_key from. Read out of
-/// the built file rather than written here: a toc_key tracks the build defines and the
-/// packaging layout, both the packer's business, and a copy here would silently decouple
-/// this test from the artifact it exists to read.
+/// the built file rather than written here: a copy would silently decouple this test
+/// from the artifact it exists to read.
 constexpr const char* PACKED_UKD_DESCRIPTOR = "packed_pointwise_add_b256.ukd.json";
 
 /// The entry point that descriptor names.
@@ -91,12 +89,10 @@ struct PackagedKernelSource
 };
 
 /// The bare arch of device 0 and the directory this build packed for it. `directory` is
-/// left empty when nothing was packed for that arch -- environmental, since the build
-/// packs per arch and the device may sit outside GPU_TARGETS.
+/// left empty when nothing was packed for that arch -- environmental, not a broken build.
 ///
 /// hipGetDeviceProperties reports feature flags on some configurations ("gfx1152:xnack-")
-/// while the packager names its subdirectory and the archive's arch entry with the bare
-/// name, so everything past here uses the stripped form.
+/// while the packager uses the bare name, so everything past here uses the stripped form.
 ///
 /// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
 void findPackagedDirectory(hipDeviceProp_t& properties,
@@ -113,13 +109,11 @@ void findPackagedDirectory(hipDeviceProp_t& properties,
 }
 
 /// Reads `kernel_source` out of a built .ukd.json. Parsed directly rather than through
-/// DescriptorLoader: this case exercises the dispatch handler's loader path, and routing
-/// through the loader would couple it to a contract the integration tier already covers.
+/// DescriptorLoader, whose contract the integration tier covers.
 ///
-/// Everything below is asserted, never skipped: the per-arch directory exists by the time
-/// this is called, so anything missing inside it is a broken build.
-///
-/// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+/// Asserts rather than skips -- the per-arch directory exists by the time this is
+/// called, so anything missing inside it is a broken build. Call through
+/// ASSERT_NO_FATAL_FAILURE.
 void readPackagedKernelSource(const std::filesystem::path& directory,
                               const std::string& descriptorFile,
                               PackagedKernelSource& out)
@@ -178,13 +172,11 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
 }
 
 // ---------------------------------------------------------------------------
-// AC #5 -- the workspace seam, unchanged
+// The workspace seam, unchanged
 // ---------------------------------------------------------------------------
 
 /// `workspaceBytes` reads metadata only, so it never reaches a loader and needs no
-/// device. That is the claim AC #5 makes -- "satisfied by construction" -- and this is
-/// what makes it observable rather than merely argued: the same handler, asked about a
-/// KPACK kernel, answers from the same metadata it always did.
+/// device: the same handler, asked about a KPACK kernel, answers from the same metadata.
 TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
 {
     const GraphFixture fixture(buildPointwiseGraph(), testDeviceProperties());
@@ -205,18 +197,15 @@ TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
 }
 
 // ---------------------------------------------------------------------------
-// AC #8 -- a kpack that cannot load costs only itself
+// A kpack that cannot load costs only itself
 // ---------------------------------------------------------------------------
 
 /// Prepares without touching HIP at all.
 ///
-/// The sibling that must keep serving cannot be an EMBEDDED_SOURCE pointwise kernel:
-/// that path runs HIPRTC and then hipModuleLoadData, so it needs a device, and the case
-/// below would then be a [GPU] test -- exactly what the plan's AC #8 note forbids. It
-/// also cannot be a second kpack kernel, for the same reason. So the sibling is a
-/// test-local handler: the *failing* half is the real pointwise handler on the real
-/// loader against a real absent path, which is where the evidence lives, and the
-/// serving half only has to be something that succeeds.
+/// The sibling cannot be an EMBEDDED_SOURCE or a second kpack kernel -- both need a
+/// device, which would make the case below [GPU]. So the sibling is a test-local
+/// handler: the *failing* half is the real pointwise handler on the real loader against
+/// a real absent path, and the serving half only has to succeed.
 class NoHipDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -299,11 +288,10 @@ using KpackPlanBuilder = GenericPlanBuilder<Handle, KpackSettings, KpackContext>
 constexpr const char* SIBLING_DISPATCH_SYMBOL = "hipkernel.pointwise.kpack_fallback_probe";
 
 /// Two packs, not one. A KernelDefinition takes its dispatchId from its pack, so two
-/// kernels reached through two different handlers cannot share a pack -- the plan's
-/// "two-kernel pack" phrasing describes the intent, and two single-kernel packs over one
-/// graph is the shape that expresses it. The engine declares no UMD, so both packs reach
-/// the ranking; the real graph_match still runs, because the pointwise handler reads the
-/// tokens it binds and would otherwise fail for the wrong reason.
+/// kernels reached through two different handlers cannot share a pack -- two
+/// single-kernel packs over one graph express the same intent. The real graph_match
+/// still runs, because the pointwise handler reads the tokens it binds and would
+/// otherwise fail for the wrong reason.
 DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
 {
     DescriptorSet set;
@@ -374,7 +362,8 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     return set;
 }
 
-/// AC #8's only GPU-less evidence. The front-ranked candidate names a kpack archive that
+/// The GPU-less half of the drop-costs-only-itself case. The front-ranked candidate
+/// names a kpack archive that
 /// is not there; the loader reports it at archive-open, before HIP is involved, so the
 /// whole path runs on a machine with no device. The graph is still served, and the
 /// failure is named rather than swallowed.
@@ -417,14 +406,14 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
     EXPECT_TRUE(context.hasPlan());
 
     // ...and the kernel that could not is named, with the reason, rather than dropped
-    // silently. Both halves matter: a plan built from the sibling with no diagnostic
-    // would be indistinguishable from the broken kernel never having been a candidate.
+    // silently: a plan built from the sibling with no diagnostic would be
+    // indistinguishable from the broken kernel never having been a candidate.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, toString(id(0x30))));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "does not exist"));
 }
 
 // ---------------------------------------------------------------------------
-// AC #6 -- one module across two dispatches
+// One module across two dispatches
 // ---------------------------------------------------------------------------
 
 /// Two kernels differing only by block size, both naming one (archive, toc_key, arch):

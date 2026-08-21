@@ -15,13 +15,9 @@ namespace hip_kernel_provider::compilation
 
 /// Move-only owner of a hipModule_t loaded from a kpack code object.
 ///
-/// The pattern is asm_sdpa's HipModuleGuard (SdpaKernelUtils.hpp:147-215), deliberately
-/// without that type's bound hipFunction_t: one kpack module can back several kernels
-/// that differ only by entry point, which is exactly the sharing AC #6 asks for, so the
-/// resolved function belongs to the Kernel and not to the module.
-///
-/// Not shared with HipModuleGuard: the asm_sdpa path is out of scope for this story and
-/// refactoring it to a common base would put an unrelated engine in this diff.
+/// The pattern is asm_sdpa's HipModuleGuard in SdpaKernelUtils.hpp, deliberately without
+/// that type's bound hipFunction_t: one kpack module can back several kernels differing
+/// only by entry point, so the resolved function belongs to the Kernel, not the module.
 class KpackModule
 {
 public:

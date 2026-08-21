@@ -30,40 +30,32 @@ using hipdnn_test_sdk::utilities::ScopedDirectory;
 /// rocm-kpack's own test archive, path supplied by CMake from ROCM_KPACK_SOURCE_DIR.
 /// It holds gfx1100 and gfx1101 binaries under the toc keys "lib/libhip.so#0" and
 /// "bin/hiptest#0". Used rather than a hand-forged file so the reader under test is
-/// the pinned reader meeting an archive it actually accepts.
-///
-/// The parse-level cases below are its only users, and deliberately so: they need a real
-/// *container*, not a matching *device*, and ReportsAnArchMismatch needs an archive that
-/// is for the wrong arch by construction. The device cases read this build's own packed
-/// archive instead -- see PACKED_DESCRIPTOR_ROOT.
+/// the pinned reader meeting an archive it actually accepts. The parse-level cases
+/// need a real *container*, not a matching *device*; the device cases read this
+/// build's own packed archive -- see PACKED_DESCRIPTOR_ROOT.
 constexpr const char* REAL_ARCHIVE = HIPDNN_TEST_KPACK_ARCHIVE;
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
 /// Where this build stages the descriptors it packed, one subdirectory per arch. Same
-/// value main.cpp points the binary at, so the archive these cases open is the one the
-/// packaging rule produced for the machine the tests are running on.
+/// value main.cpp points the binary at.
 constexpr const char* PACKED_DESCRIPTOR_ROOT = HIPDNN_TEST_DESCRIPTOR_DIR;
 
 /// The two descriptors the packaged pointwise fixture stages, one per block size. Their
-/// archive and toc_key are read out of the built files rather than written here: a
-/// toc_key tracks the build defines and the packaging layout, both of which are the
-/// packer's business, and a copy of one here would silently decouple this test from the
-/// artifact it exists to read.
+/// archive and toc_key are read out of the built files rather than written here: a copy
+/// would silently decouple this test from the artifact it exists to read.
 constexpr const char* PACKED_KDP_DESCRIPTOR = "packed_pointwise_add.kdp.json";
 constexpr const char* PACKED_UKD_DESCRIPTOR = "packed_pointwise_add_b256.ukd.json";
 
 /// The two entry points the packaged fixture's translation unit exports. Only the first
-/// is named by a descriptor; the second exists so one code object carries two symbols,
-/// and is therefore spelled here rather than read from anywhere. It must match
-/// integration_tests/kernel_ingestor_engine/fixtures/packaged/PointwiseAdd.cpp.
+/// is named by a descriptor; the second exists so one code object carries two symbols.
+/// It must match integration_tests/kernel_ingestor_engine/fixtures/packaged/PointwiseAdd.cpp.
 constexpr const char* PACKED_SYMBOL = "PointwiseAdd";
 constexpr const char* PACKED_SECOND_SYMBOL = "PointwiseAddSecondSymbol";
 
-/// A symbol no code object exports, used to reach the resolution failure AC #7 names.
+/// A symbol no code object exports, used to reach the resolution-failure path.
 constexpr const char* ABSENT_SYMBOL = "there_is_no_such_symbol";
 
-/// The kpack coordinates a built descriptor declares.
 struct PackagedKernelSource
 {
     std::filesystem::path archive;
@@ -71,13 +63,10 @@ struct PackagedKernelSource
 };
 
 /// The bare arch of device 0 and the directory this build packed for it. `directory` is
-/// left empty when nothing was packed for that arch, which is an environmental condition
-/// -- the build packs per arch and this device is outside GPU_TARGETS -- rather than a
-/// broken build.
+/// left empty when nothing was packed for that arch -- environmental, not a broken build.
 ///
 /// hipGetDeviceProperties reports feature flags on some configurations ("gfx1152:xnack-")
-/// while the packager names both its subdirectory and the archive's arch entry with the
-/// bare name, so everything past here uses the stripped form.
+/// while the packager uses the bare name, so everything past here uses the stripped form.
 ///
 /// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
 void findPackagedDirectory(std::string& arch, std::filesystem::path& directory)
@@ -93,16 +82,12 @@ void findPackagedDirectory(std::string& arch, std::filesystem::path& directory)
 }
 
 /// Reads `kernel_source` out of a built descriptor. A .kdp.json nests it under its first
-/// inline kernel descriptor; a .ukd.json is one kernel and carries it at the top level.
+/// inline kernel descriptor; a .ukd.json carries it at the top level. Parsed directly
+/// rather than through DescriptorLoader, whose contract the integration tier covers.
 ///
-/// Parsed here rather than through DescriptorLoader on purpose: this is a kernel-loader
-/// test and has no business pulling in engine and matcher resolution, whose contract the
-/// integration tier already covers.
-///
-/// Everything below is asserted, never skipped: the per-arch directory exists by the time
-/// this is called, so anything missing inside it is a broken build.
-///
-/// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+/// Asserts rather than skips -- the per-arch directory exists by the time this is
+/// called, so anything missing inside it is a broken build. Call through
+/// ASSERT_NO_FATAL_FAILURE.
 void readPackagedKernelSource(const std::filesystem::path& directory,
                               const std::string& descriptorFile,
                               PackagedKernelSource& out)
@@ -133,8 +118,7 @@ void readPackagedKernelSource(const std::filesystem::path& directory,
         << descriptor << " names an archive that is not on disk: " << out.archive;
 }
 
-/// What a descriptor-shaped label looks like where the loader is really called; the
-/// assertions below check the message carries it through verbatim.
+/// What a descriptor-shaped label looks like where the loader is really called.
 const std::string& descriptorLabel()
 {
     static const std::string s_label = hipdnn_plugin_sdk::ingestor::describeDescriptor(
@@ -195,8 +179,8 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
         EXPECT_NE(what.find(descriptorLabel()), std::string::npos) << what;
         EXPECT_NE(what.find("PointwiseAdd"), std::string::npos) << what;
         EXPECT_NE(what.find("could not be read"), std::string::npos) << what;
-        // Distinct from the missing-archive wording: AC #7 wants "not there" and
-        // "there but unusable" told apart.
+        // Distinct from the missing-archive wording: "not there" and "there but
+        // unusable" are told apart.
         EXPECT_EQ(what.find("does not exist"), std::string::npos) << what;
     }
 }
@@ -216,8 +200,8 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
         const std::string what = error.what();
         EXPECT_NE(what.find(descriptorLabel()), std::string::npos) << what;
         EXPECT_NE(what.find("PointwiseAdd"), std::string::npos) << what;
-        // Names the device arch and what the archive does hold, so a reader can tell
-        // at a glance whether the packer or the machine is the odd one out.
+        // Names the device arch and what the archive holds, so packer-vs-machine is
+        // visible.
         EXPECT_NE(what.find("gfx942"), std::string::npos) << what;
         EXPECT_NE(what.find("gfx1100"), std::string::npos) << what;
         EXPECT_NE(what.find("gfx1101"), std::string::npos) << what;
@@ -268,8 +252,8 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingSymbol)
 
     // The load itself succeeds: the archive holds this arch and this toc_key. Symbol
     // resolution is a later, separate stage -- KpackKernelLoader::load never looks at the
-    // symbol, which is exactly why the cache key excludes it -- so the failure this case
-    // is after is raised by KpackProgram::getKernel against a module HIP has accepted.
+    // symbol -- so the failure this case is after is raised by KpackProgram::getKernel
+    // against a module HIP has accepted.
     const auto program
         = _loader.load(packed.archive, packed.tocKey, arch, ABSENT_SYMBOL, descriptorLabel());
     ASSERT_NE(program, nullptr);
@@ -284,9 +268,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingSymbol)
         const std::string what = error.what();
         EXPECT_NE(what.find(descriptorLabel()), std::string::npos) << what;
         EXPECT_NE(what.find(ABSENT_SYMBOL), std::string::npos) << what;
-        // The wording that tells this apart from the fifth failure: a missing toc_key
-        // means the packer and the descriptor disagree, whereas here the blob was found,
-        // decompressed and loaded and only the entry point is absent.
+        // The blob was found, decompressed and loaded; only the entry point is absent.
         EXPECT_NE(what.find("is not present in the loaded module"), std::string::npos) << what;
         EXPECT_EQ(what.find("no entry for toc_key"), std::string::npos) << what;
     }
@@ -329,10 +311,9 @@ TEST_F(TestKpackKernelLoader, TwoSymbolsResolveAgainstOneModule)
     EXPECT_NE(first->getKernel(PACKED_SYMBOL), nullptr);
     EXPECT_NE(second->getKernel(PACKED_SECOND_SYMBOL), nullptr);
 
-    // ...against one and the same hipModule_t. This is the behavioural half of the
-    // not-keyed-by-symbol decision and the only test that can observe the sharing
-    // directly. Measured as a delta rather than an absolute count so the assertion still
-    // means what it says if this cache ever outlives one case.
+    // ...against one and the same hipModule_t. Measured as a delta rather than an
+    // absolute count so the assertion still means what it says if this cache ever
+    // outlives one case.
     const auto* firstKpack = dynamic_cast<const KpackProgram*>(first.get());
     const auto* secondKpack = dynamic_cast<const KpackProgram*>(second.get());
     ASSERT_NE(firstKpack, nullptr);

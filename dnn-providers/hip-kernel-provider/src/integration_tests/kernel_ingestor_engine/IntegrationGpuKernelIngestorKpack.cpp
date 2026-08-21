@@ -180,8 +180,7 @@ bool isAllZero(const std::vector<char>& bytes)
 
 /// Puts back whatever an abandoned backup still holds. The backup directory is removed in
 /// teardown, so one surviving here means a run was killed while an archive was deliberately
-/// corrupt, and these are the last known good bytes. Every case in this suite runs this
-/// first, so the damage costs one re-run instead of persisting until someone reconfigures.
+/// corrupt, and these are the last known good bytes.
 ///
 /// Returns a description of the first failure, or an empty string.
 std::string recoverAbandonedBackups(const std::vector<std::filesystem::path>& archives)
@@ -346,11 +345,9 @@ protected:
 // registration, which within one translation unit is definition order, so this suite runs
 // before IntegrationGpuKernelIngestorKpack below. It has to: the module cache is
 // process-lifetime, so once the packaged kernel has been executed once, a resident module
-// serves the plan and the corrupt bytes on disk are read by nothing. Anything that moves
-// this suite after the other -- including adding a new suite between them -- turns
-// SurvivesABrokenArchive into a test of nothing. Nothing in this repo or in the generated
-// build passes --gtest_shuffle, which is what makes definition order a sound guarantee
-// rather than a coincidence.
+// serves the plan and the corrupt bytes on disk are read by nothing. Nothing in this repo
+// or in the generated build passes --gtest_shuffle, which is what makes definition order a
+// sound guarantee rather than a coincidence.
 // ---------------------------------------------------------------------------
 
 /// A truncated archive must produce a diagnosable failure, never a crash, and must leave
@@ -360,14 +357,14 @@ protected:
 /// function-local static, so the engine can only ever read the one tree it found first,
 /// and this suite is forbidden from redirecting it. Breaking a private copy would
 /// therefore corrupt bytes nothing reads. A ScopedDirectory holds the pristine archive
-/// instead, and TearDown puts it back unconditionally -- including after an assertion
-/// failure, which is why the restore is not written at the end of the body.
+/// instead, and TearDown puts it back unconditionally (not at the end of the body, which
+/// an assertion failure would skip).
 ///
 /// The staged archive is also durable state that outlives the process. TearDown always
 /// removes the backup directory, so a leftover backup means an earlier run was killed while
 /// the archive was corrupt; recoverAbandonedBackups(), run from the base fixture's SetUp,
-/// puts those last known good bytes back. A killed run therefore costs a re-run rather than
-/// cementing its damage into every later build.
+/// puts those last known good bytes back, costing a re-run rather than cementing the
+/// damage into every later build.
 class IntegrationGpuKernelIngestorKpackBroken : public IntegrationGpuKernelIngestorKpack
 {
 protected:

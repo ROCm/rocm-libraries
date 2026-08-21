@@ -18,15 +18,13 @@ namespace hip_kernel_provider::compilation
 ///
 /// Holds the module by shared_ptr because one module serves every kernel in the archive
 /// that shares its (toc_key, arch) -- see KpackModuleCache. Holds `descriptorLabel`
-/// because ICompiledProgram::getKernel (ICompiledProgram.hpp:18) takes only the kernel
-/// name, and this is the sole site that can raise the missing-symbol error; without the
-/// label that message could name the symbol but not the descriptor that asked for it.
+/// because ICompiledProgram::getKernel takes only the kernel name, and this is the sole
+/// site that can raise the missing-symbol error; without the label that message could
+/// name the symbol but not the descriptor that asked for it.
 ///
-/// Launch is not implemented here or anywhere else in the kpack path. getKernel returns
-/// a plain compilation::Kernel holding the resolved hipFunction_t, so
-/// hipModuleLaunchKernel and its error handling are the existing ones, byte for byte.
-/// A reviewer looking for the third dispatch stage will not find kpack-specific launch
-/// code because there deliberately is none.
+/// getKernel returns a plain compilation::Kernel holding the resolved hipFunction_t, so
+/// launch goes through the existing hipModuleLaunchKernel path unchanged. There is no
+/// kpack-specific launch code.
 class KpackProgram : public ICompiledProgram
 {
 public:
@@ -37,8 +35,8 @@ public:
     std::unique_ptr<IRunnableKernel> getKernel(const std::string& kernelName) const override;
 
     /// The module this program resolves symbols against. Exposed so a test can observe
-    /// that two programs differing only by symbol were handed the same hipModule_t --
-    /// the sharing AC #6 asks for is otherwise invisible from outside the cache.
+    /// that two programs differing only by symbol were handed the same hipModule_t,
+    /// which is otherwise invisible from outside the cache.
     hipModule_t module() const
     {
         return _module->module();

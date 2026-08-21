@@ -17,18 +17,12 @@ namespace hip_kernel_provider::compilation
 
 /// Turns a (kpack archive, toc_key, device arch, symbol) tuple into a runnable program.
 ///
-/// A narrow counterpart to IKernelCompiler in role only, not a subtype of it:
-/// compile(fileName, options) is HIPRTC-shaped and cannot express (library, tocKey).
-/// IKernelCompiler is an interface because the compiler genuinely is substituted in
-/// tests; this loader is not substituted anywhere -- §5.2 passes a real one everywhere,
-/// and the missing-archive test deliberately uses a genuinely nonexistent path so it
-/// exercises the real archive-open path rather than a mock's. That is why it is
-/// concrete: a virtual base with one implementation and no substitution would be
-/// abstraction for its own sake.
+/// Concrete rather than an IKernelCompiler implementation: compile(fileName, options)
+/// is HIPRTC-shaped and cannot express (library, tocKey), and nothing substitutes this
+/// loader -- the missing-archive test uses a genuinely nonexistent path.
 ///
-/// The module cache is injected rather than reached as a singleton, so a test can
-/// observe its size (AC #6) and so two loaders in one process do not silently share
-/// state. The referenced cache must outlive the loader.
+/// The module cache is injected rather than reached as a singleton, so two loaders in
+/// one process do not silently share state. It must outlive the loader.
 class KpackKernelLoader
 {
 public:
@@ -41,12 +35,10 @@ public:
     /// program over it.
     ///
     /// `symbol` is here for the message text only and is deliberately NOT part of the
-    /// cache key. Three of the failures below -- missing archive, unreadable archive,
-    /// arch mismatch -- are raised before any symbol lookup happens, yet AC #7 requires
-    /// every message to name the descriptor *and* the symbol. Folding `symbol` into
-    /// KpackModuleCache::makeKey because this function now receives one would defeat
-    /// AC #6's sharing of a single module across kernels that differ only by entry
-    /// point.
+    /// cache key. Missing archive, unreadable archive, and arch mismatch are all raised
+    /// before any symbol lookup, yet every message must name both the descriptor and the
+    /// symbol. Folding `symbol` into KpackModuleCache::makeKey would defeat the sharing
+    /// of one module across kernels differing only by entry point.
     ///
     /// @throws HipdnnPluginException, one distinct message per failing stage: archive
     ///         missing, archive unreadable, arch mismatch, toc_key absent, decompress

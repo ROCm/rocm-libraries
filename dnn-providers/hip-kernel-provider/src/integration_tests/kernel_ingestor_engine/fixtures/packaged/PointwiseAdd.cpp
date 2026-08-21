@@ -19,7 +19,7 @@
 // share one -- and therefore one hipModule_t -- is to sit in one translation unit. It is
 // the subject of TestKpackKernelLoader.TwoSymbolsResolveAgainstOneModule, which resolves
 // both entry points against a single toc_key and asserts they came from the same module.
-// Deleting it as dead code deletes that test's only evidence for AC #6.
+// Deleting it as dead code deletes that test's only evidence.
 
 #include <hip/hip_runtime.h>
 

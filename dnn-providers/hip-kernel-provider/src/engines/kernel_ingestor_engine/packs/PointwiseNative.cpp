@@ -469,7 +469,7 @@ compilation::KpackModuleCache& pointwiseKpackModuleCache()
 {
     // Process-lifetime, and exposed rather than hidden inside the loader so a test can
     // observe that two dispatches over the same (archive, toc_key, arch) loaded one
-    // module -- which is the only direct evidence for AC #6.
+    // module -- which is otherwise unobservable.
     static compilation::KpackModuleCache s_moduleCache;
     return s_moduleCache;
 }
