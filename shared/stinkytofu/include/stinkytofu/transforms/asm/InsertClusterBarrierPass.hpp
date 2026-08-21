@@ -45,7 +45,11 @@ namespace cluster_barrier {
 #endif
 
 /// Gate for Rule 3 hoisting and scheduler live-out SCC lead.
-inline constexpr bool kRule3CrossLoop = STINKY_KRULE3_CROSS_LOOP != 0;
+#if STINKY_KRULE3_CROSS_LOOP
+inline constexpr bool kRule3CrossLoop = true;
+#else
+inline constexpr bool kRule3CrossLoop = false;
+#endif
 
 }  // namespace cluster_barrier
 
