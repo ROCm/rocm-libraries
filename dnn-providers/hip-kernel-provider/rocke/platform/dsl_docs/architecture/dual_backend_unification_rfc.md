@@ -9,6 +9,12 @@
 | **Owner** | rocke team |
 | **Target horizon** | Multi-phase; each phase independently shippable. Differential soak ≈ 2–4 weeks before any default flip. |
 
+> **How to read this document.** The §7 test-layer table, the §9 CI-lane table, and
+> Appendix B are kept true to the current tree — they are what you act on.
+> Workstream task prose is the plan **as written** and is deliberately not
+> retro-edited; where it names a mechanism that was never built or has since been
+> retired, those three tables are authoritative.
+
 ---
 
 ## 0. Executive summary (TL;DR)
@@ -344,7 +350,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 **Objective.** WS3 Phase 1 only made the engine *compile* as C++20 (C-style code through the C++ frontend). WS10 is the **actual idiomatic conversion** — and explicitly includes the items that look "cosmetic" but are required for the long-term mirrored dual-backend to stay maintainable (1:1 Python↔C++ correspondence, clean namespaces for future provider direct-linking). **Nothing is skipped as cosmetic.**
 
-**Hard rules (same as WS3).** Two-step per module (compile-clean → then refactor); **byte-identity gated after every module** (`run_diff --mode ll` 62 GREEN/0 DRIFT, `--mode ir --canonical` 61 GREEN/1, the L5 golden, ctest); **keep the `vsnprintf` numeric-formatting core** (std::format/to_chars format floats differently → would break byte-identity).
+**Hard rules (same as WS3).** Two-step per module (compile-clean → then refactor); **byte-identity gated after every module** (`run_diff --mode ll` 62 GREEN/0 DRIFT, `--mode ir --canonical` 61 GREEN/1, the representative IR golden, ctest); **keep the `vsnprintf` numeric-formatting core** (std::format/to_chars format floats differently → would break byte-identity).
 
 **Tasks.**
 - **T10.1 Exceptions.** Replace the sticky-error status model (`builder->status` / `ROCKE_ERR_*` returns) with C++ exceptions (`ckc::ValueError`/`TypeError`/`KeyError`/`NotImplError`/`OOM`) mirroring Python's `raise`. Preserve a **stable `extern "C"` ABI**: public C wrappers `try/catch`→status code for legacy callers (provider, emitters, bindings); internal C++ throws. This is the single biggest drift-reducer (makes the port a literal Python translation).
@@ -420,7 +426,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS17 — Boilerplate reduction [after WS10/WS16; byte-identity gated]
 
-**Principle.** Cut **mechanical** duplication without collapsing the deliberate **1:1 Python↔C instance correspondence** (load-bearing for parity) or hurting readability/over-abstracting. Every change **byte-identity gated** (`run_diff` ll/ir + L5 golden unchanged) + tests green. Refactors *stable* code once, so it sequences after the engine settles. Complements WS10 (which already removes void*/sticky-error/manual `vec`+`strbuf` boilerplate via C++ idioms — not re-done here).
+**Principle.** Cut **mechanical** duplication without collapsing the deliberate **1:1 Python↔C instance correspondence** (load-bearing for parity) or hurting readability/over-abstracting. Every change **byte-identity gated** (`run_diff` ll/ir + the representative IR golden unchanged) + tests green. Refactors *stable* code once, so it sequences after the engine settles. Complements WS10 (which already removes void*/sticky-error/manual `vec`+`strbuf` boilerplate via C++ idioms — not re-done here).
 
 - **W1 Parity-emitter consolidation.** The 63 `tests/parity/*_emit.{c,py}` pairs are near-identical (`main` + `make_cfg` + ll/ir/verify dispatch). Replace with a **shared table-driven driver** (one C + one Python), each family providing only its config table + build entry. Biggest single cut. Gate: `run_diff` identical.
 - **W2 C instance-builder skeleton.** Factor the repeated `_spec_default/_finalize/_kernel_name/_is_valid_spec/build_*/_lower_to_llvm` scaffolding into macros/helpers (or templates post-C++), only where it doesn't damage the mirror.
@@ -480,7 +486,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 **Wave 2 — Cover** (document new functionality in READMEs + `dsl_docs` + docstrings):
 - `ck.dsl.ir/v1` serialization (`serialize`/`parse`/`canonicalize`) → `dsl_docs/ir_lowering` + reframe `ir_serialization_format.md` as a clean format reference.
 - The IR verifier (`verify`/`verify_or_raise`).
-- The differential test harness (`run_diff.py` modes `ll`/`ir`/`verify` + `--canonical`/`--pyroot`/`--golden`, `numeric.py`, the golden anchor) → a tests README or `dsl_docs/development/testing.md`.
+- The differential test harness (`run_diff.py` modes `ll`/`ir`/`verify` + `--canonical`/`--pyroot`, `numeric.py`) → a tests README or `dsl_docs/development/testing.md`.
 - Dispatch family coverage (gemm fp16/bf16, norm, conv, attention, moe) → `dispatch/README.md`.
 - The `Cpp` C++ engine README (what it is, C++20/CMake build, the parity harness, the bindings).
 - The pybind `rocke_engine` bindings README; numeric-harness usage.
@@ -543,8 +549,12 @@ We adopt the **IR-seam collapse (a)** mechanically — the serializer from WS1 *
 | L2 IR-diff | builder equivalence (upstream of text) | CPU / per-PR | block |
 | L3 `.ll` sha-identity | lowerer equivalence (incl. identical rejection) | CPU / per-PR | block |
 | L4 fuzz + sanitizers | no crash, agreement on random valid specs, UB-free | CPU / nightly + per-PR smoke | block on crash/UB |
-| L5 golden/regression | no unintended output change | CPU / per-PR | block unless blessed |
+| L5 golden/regression *(retired)* | — the per-config anchor was never wired | — | — |
 | L6 numeric on-GPU | correctness vs reference + cross-backend bit-identity | GPU arch runners / nightly + targeted per-PR | block on arch lanes |
+
+L5's slot stays numbered but empty; L1/L3/L6 are cited by number elsewhere. Change
+detection is now the representative IR golden, and what it does *not* cover is
+gap **G9** in [`TESTING.md`](../../../TESTING.md).
 
 ### 7.2 Numeric reference implementations (L6)
 Per family, a trusted CPU/torch reference with **explicit dtype + accumulation** matching:
@@ -602,7 +612,7 @@ The "very high" complexity families (conv, attention, MoE) get the deepest numer
 |---|---|---|---|
 | `parity-cpu` | every PR | L1 + L2 + L3 (full enumeration), build clean-link, warnings-as-errors | yes |
 | `fuzz-smoke` | every PR | L4 short budget under ASan/UBSan | yes (crash/UB) |
-| `golden` | every PR | L5 digests | yes (unless blessed) |
+| `golden` | every PR | representative IR sha256, all llvm flavors (the L5 per-config digests are retired) | yes (unless blessed) |
 | `numeric-gfx942/gfx950/rdna` | nightly + label-triggered | L6 on arch runners | yes on arch lanes |
 | `dispatch-parity` | every PR | C++↔Python selection across all families | yes |
 | `e2e-hipdnn` | nightly | provider EndToEnd, all ops/dtypes/layouts, leak/stress | yes |
@@ -700,7 +710,8 @@ An instance is "done" when, for every config in its enumeration and every releva
 1. L1 verifier passes on both backends with identical verdicts.
 2. L2 serialized IR is canonical-identical Python↔C++.
 3. L3 `.ll` is `sha256`-identical (or identical rejection).
-4. L5 golden recorded.
+4. Change detection: covered by the representative IR golden if the instance is in
+   the representative set. Per-instance coverage does not exist — that is gap **G9**.
 5. L6 numeric: each backend within tolerance vs reference, cross-backend bit-identical, on each supported arch.
 6. (If on the provider path) WS7 E2E case green.
 

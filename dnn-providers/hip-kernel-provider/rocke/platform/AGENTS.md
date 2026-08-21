@@ -221,7 +221,9 @@ GPU node.
 ## Hard rules
 
 - **Byte-identity**: mirror every emission change in both engines; re-run the gate.
-  If you intend to change emitted output, re-bless the golden in the same change.
+  If you intend to change emitted output, re-bless the representative IR golden in
+  the same change:
+  `python tests/instances/rocke_ir_parity_harness.py --write tests/golden/rocke_representative_ir_sha256.json`
 - **Relative paths only**: no file under `rocke/platform/` may hardcode an absolute repo
   path or a path escaping `rocke/platform/`. `tests/run_all.py` enforces this with a grep
   guard; keep anchors derived from `__file__` / `CMAKE_CURRENT_SOURCE_DIR`.

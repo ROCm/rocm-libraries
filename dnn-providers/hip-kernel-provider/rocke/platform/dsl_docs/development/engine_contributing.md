@@ -42,8 +42,8 @@ An engine change is done when **all** of these hold:
 2. The C++ engine builds clean.
 3. The **differential `.ll` gate is green** — C++ emission matches Python
    emission, byte for byte, across every family. This is the contract.
-4. If you *intended* to change emitted output, the golden snapshot is re-blessed
-   in the same change, with the diff reviewed.
+4. If you *intended* to change emitted output, the representative IR golden is
+   re-blessed in the same change, with the diff reviewed.
 
 Steps 2–3 are a single command (next section). Make it a habit; run it before you
 consider a change finished.
@@ -146,16 +146,25 @@ Add `--canonical` to `--mode ir` to re-triage byte differences into "real" vs
 
 ## Golden snapshots (intentional output changes)
 
-The gate also has a committed golden snapshot so output changes can't slip in
-unnoticed:
+Byte-identity proves the two engines *agree*; it is blind to a change made
+correctly in **both** of them. Catching that is the golden's job — a committed
+sha256 per representative lowering case, per llvm flavor:
 
 ```bash
-# Fail if any family's emission differs from the blessed golden.
-PYTHONPATH="$PY" python3 -m tests/instances/differential/run_diff.py --check-golden
+# From rocke/platform. Fail if any case's lowered IR differs from the golden.
+python tests/instances/rocke_ir_parity_harness.py \
+  --check tests/golden/rocke_representative_ir_sha256.json
 
 # Re-bless — ONLY from a green state, as part of a reviewed, intended change.
-PYTHONPATH="$PY" python3 -m tests/instances/differential/run_diff.py --record-golden
+python tests/instances/rocke_ir_parity_harness.py \
+  --write tests/golden/rocke_representative_ir_sha256.json
 ```
+
+The same check runs without you invoking it, as `test_ir_cases_match_golden_sha256`
+(`tests/test_rocke_ci_static.py`) and again over an install prefix. Both verify
+**every** flavor sub-document (`llvm20`, `llvm22`, `llvm23`), not just the one
+this host autodetects — otherwise the `llvm23` hashes would go unchecked on any
+host running ROCm older than 7.13.
 
 If you deliberately change what a kernel emits, re-blessing the golden is part of
 the change, and the diff is what your reviewer reads. Re-blessing to make a red
@@ -199,6 +208,6 @@ code — the cause is usually the build, not the source.
 
 - [ ] Python unit tests pass (`test_rocke.py`; most no-GPU, ~20 need a GPU).
 - [ ] `tools/check_byte_identity.py` is green (engine builds + `.ll` gate).
-- [ ] If output changed on purpose: golden re-blessed, diff reviewed.
+- [ ] If output changed on purpose: representative IR golden re-blessed, diff reviewed.
 - [ ] New/changed instance family: `prove_parity_binding.py` validates the binding.
 - [ ] No new internal-tracker nomenclature in code comments or docs (functionality only).
