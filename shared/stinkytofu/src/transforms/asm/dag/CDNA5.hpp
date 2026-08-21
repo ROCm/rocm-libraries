@@ -507,6 +507,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
+    // True when decidePromote() / pickOne() may consider issuing this barrier now.
+    // No-op when clusterBarrier is off (see sccChainBlocks()).
+    bool isBarrierEligibleNow(const DAGNode* node) const {
+        return !sccChainBlocks(node);
+    }
+
     // kRule3CrossLoop false: no-op (earliestClock unset).
     bool heldBackForLead(const DAGNode* node) const {
         if (!clusterBarrierEnabled()) return false;
@@ -1089,7 +1095,7 @@ void CDNA5ReadyQueue::decidePromote() {
 
     if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
         for (DAGNode* node : barrierQueue) {
-            if (sccChainBlocks(node)) continue;
+            if (!isBarrierEligibleNow(node)) continue;
             auto thIt = barrierWmmaThresholds_.find(node->inst);
             if (thIt != barrierWmmaThresholds_.end() &&
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
@@ -1143,6 +1149,7 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 
     DAGNode* forced = nullptr;
     for (DAGNode* node : barrierQueue) {
+        if (!isBarrierEligibleNow(node)) continue;
         auto thIt = barrierWmmaThresholds_.find(node->inst);
         if (thIt != barrierWmmaThresholds_.end() && wmmaIssuedCountThisRegion_ >= thIt->second) {
             forced = node;
@@ -1684,7 +1691,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // Skip barriers held back by an open SCC chain; a later phase issues them
             // once the chain's last reader has gone out.
             for (DAGNode* cand : barrierQueue) {
-                if (sccChainBlocks(cand)) continue;
+                if (!isBarrierEligibleNow(cand)) continue;
                 barrier = cand;
                 break;
             }
