@@ -61,19 +61,25 @@ target_link_libraries(
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# D4's cross-process criterion: one process writes a winner record, a SECOND process reads
-# it back. Two ctest invocations of the same binary, sequenced with
-# FIXTURES_SETUP/FIXTURES_REQUIRED, following the shape hipdnn/cmake/Tests.cmake:130-154
-# already uses. A single-process double-compute does not satisfy the criterion, and
-# MIOpen's ProcessAsync self-invocation was rejected as flaky, so this is the cheapest
-# honest form.
+# D4's cross-process criterion: one process writes a winner record, a SECOND process
+# reads it back. Two ctest invocations of the same binary, sequenced with
+# FIXTURES_SETUP/FIXTURES_REQUIRED, following the shape hipdnn/cmake/Tests.cmake's
+# MIOpen-cache fixture already uses. A single-process double-compute does not satisfy the
+# criterion, and MIOpen's ProcessAsync self-invocation was rejected as flaky.
 #
-# Both halves are DISABLED_ in gtest so a developer running the suite by hand skips them
-# (they are meaningless individually); ctest opts in explicitly. RUN_SERIAL because they
-# share one shard file, and the shared HIPDNN_CACHE_DIR lives under the build tree so a
-# clean build starts from an empty cache.
+# Both halves are DISABLED_ in gtest so a bare developer run of the suite skips them --
+# neither is meaningful alone -- and ctest opts in with --gtest_also_run_disabled_tests.
+# RUN_SERIAL because they share one shard file, and the shared HIPDNN_CACHE_DIR lives
+# under the build tree so a clean build starts from an empty cache.
+#
+# The category labels are not optional decoration: CI selects tests by label tier, so an
+# unlabelled test is invisible to every tier and would never run there while passing
+# locally. _apply_hipdnn_test_category_labels() is what add_hipdnn_test() applies to every
+# other test in this tree; these are registered by hand (one binary, three ctest entries,
+# which add_hipdnn_test() cannot express) so they must apply it themselves.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_disk_cache_cross_process_dir "${CMAKE_CURRENT_BINARY_DIR}/disk_cache_cross_process")
+    set(_disk_cache_cross_process_env "HIPDNN_CACHE_DIR=${_disk_cache_cross_process_dir}")
 
     add_test(NAME DiskCacheCrossProcess_Setup
              COMMAND ${CMAKE_COMMAND} -E rm -rf "${_disk_cache_cross_process_dir}")
@@ -88,7 +94,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                          RUN_SERIAL TRUE
                          FIXTURES_REQUIRED DiskCacheCrossProcessClean
                          FIXTURES_SETUP DiskCacheCrossProcessWritten
-                         ENVIRONMENT "HIPDNN_CACHE_DIR=${_disk_cache_cross_process_dir}")
+                         ENVIRONMENT "${_disk_cache_cross_process_env}")
 
     add_test(NAME DiskCacheCrossProcess_Reader
              COMMAND hipdnn_plugin_sdk_tests
@@ -97,5 +103,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_tests_properties(DiskCacheCrossProcess_Reader PROPERTIES
                          RUN_SERIAL TRUE
                          FIXTURES_REQUIRED "DiskCacheCrossProcessClean;DiskCacheCrossProcessWritten"
-                         ENVIRONMENT "HIPDNN_CACHE_DIR=${_disk_cache_cross_process_dir}")
+                         ENVIRONMENT "${_disk_cache_cross_process_env}")
+
+    # One call per test: the helper forwards its arguments positionally to the parser,
+    # which takes a single explicit test name.
+    _apply_hipdnn_test_category_labels(DiskCacheCrossProcess_Setup)
+    _apply_hipdnn_test_category_labels(DiskCacheCrossProcess_Writer)
+    _apply_hipdnn_test_category_labels(DiskCacheCrossProcess_Reader)
 endif()
