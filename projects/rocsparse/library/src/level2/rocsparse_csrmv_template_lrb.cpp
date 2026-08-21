@@ -658,7 +658,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                         // RDNA (wave32): use 128-thread blocks (4 wavefronts) instead of 256.
                         // One wavefront reduces one row, so grid is sized by wavefronts-per-block.
                         constexpr uint32_t mr_block = WG_SIZE_WAVE32;
-                        int64_t  num_wgs = (info->lrb.nRowsBins[j] - 1) / (mr_block / 32) + 1;
+                        int64_t  num_wgs   = (info->lrb.nRowsBins[j] - 1) / (mr_block / 32) + 1;
                         uint32_t grid_size = static_cast<uint32_t>(
                             rocsparse::min(num_wgs, int64_t(handle->properties.maxGridSize[0])));
                         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

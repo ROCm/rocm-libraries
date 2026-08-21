@@ -931,8 +931,7 @@ namespace rocsparse
                 if(this_row_offset_in_wg < wg_num_rows)
                 {
                     const uint32_t lds_start_idx = (this_row_offset_in_wg << bin_id);
-                    const J        row_id
-                        = rows_bins[bin_start + wg_row_start + this_row_offset_in_wg];
+                    const J row_id = rows_bins[bin_start + wg_row_start + this_row_offset_in_wg];
 
                     T acc = 0;
                     for(uint32_t idx = 0; idx < (1 << bin_id); idx++)
@@ -1214,8 +1213,9 @@ namespace rocsparse
             // TODO: Can the wg_flags-based coordination be done instead with cooperative-groups?
 
             // Each workgroup computes exactly one row.
-            const I vecStart = (I)wg * (I)BLOCK_MULTIPLIER * BLOCKSIZE + csr_row_ptr[row] - idx_base;
-            const I vecEnd   = rocsparse::min(csr_row_ptr[row + 1] - idx_base,
+            const I vecStart
+                = (I)wg * (I)BLOCK_MULTIPLIER * BLOCKSIZE + csr_row_ptr[row] - idx_base;
+            const I vecEnd = rocsparse::min(csr_row_ptr[row + 1] - idx_base,
                                             vecStart + I(BLOCK_MULTIPLIER * BLOCKSIZE));
 
             T temp_sum = static_cast<T>(0);
