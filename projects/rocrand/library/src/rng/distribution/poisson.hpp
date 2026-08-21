@@ -89,7 +89,7 @@ public:
     }
 
     __forceinline__ __host__ __device__
-    bool check_lds_size()
+    bool check_lds_size() const
     {
         return base_t::check_lds_size();
     }

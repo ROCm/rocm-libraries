@@ -346,7 +346,10 @@ void generate_kernel(EngineState* states,
 
     EngineState  state = states[state_id];
     unsigned int index = state_id * f.n;
-    __syncthreads(); // Barrier allows better compiler optimizations
+    // The barrier re-aligns sibling waves before the loop so they enter with identical cadence;
+    // otherwise waves can drift out of sync and block each other's memory access
+    // latency, greatly reducing throughput.
+    __syncthreads();
     while(index < size)
     {
         f(&state, data + index);
@@ -598,7 +601,10 @@ void generate_sobol_kernel(EngineState* states,
     EngineState  state  = states[gridDim.x * blockDim.x * dimension + state_id];
     const size_t offset = dimension * size;
     unsigned int index  = state_id;
-    __syncthreads(); // Barrier allows better compiler optimizations
+    // The barrier re-aligns sibling waves before the loop so they enter with identical cadence;
+    // otherwise waves can drift out of sync and block each other's memory access
+    // latency, greatly reducing throughput.
+    __syncthreads();
     while(index < size)
     {
         f(&state, data + offset + index);
