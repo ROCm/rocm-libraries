@@ -3,7 +3,7 @@
 
 find_package(hip REQUIRED)
 
-if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
+if(ORIGAMI_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     set(ORIGAMI_LIBRARY_TYPE SHARED)
 else()
     set(ORIGAMI_LIBRARY_TYPE STATIC)
@@ -26,11 +26,7 @@ generate_export_header(origami
     BASE_NAME ORIGAMI
     EXPORT_MACRO_NAME ORIGAMI_EXPORT
     EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/include/origami/origami_export.h"
-    STATIC_DEFINE ORIGAMI_STATIC
 )
-if(ORIGAMI_LIBRARY_TYPE STREQUAL "STATIC")
-    target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
-endif()
 
 add_library(origami-headers INTERFACE)
 add_library(roc::origami-headers ALIAS origami-headers)
