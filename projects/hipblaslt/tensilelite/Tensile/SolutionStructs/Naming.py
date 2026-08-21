@@ -44,8 +44,16 @@ _INTERNAL_ARGS = (
     "SFCWGM",
 )
 
-def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
-  """Return a string key that identifies a kernel ignoring internal args.
+_NON_CODEGEN_PARAMETERS = (
+    "AssertAIGreaterThanEqual",
+    "AssertAILessThanEqual",
+    "NoReject",
+    "NonTemporalGate",
+    "Sparse",
+)
+
+def getKernelCompileKey(state, splitGSU: bool) -> str:
+  """Return a key that identifies generated assembly, excluding placement.
 
   Internal args (WorkGroupMapping, StaggerU, etc.) are runtime dispatch
   parameters — they don't change the generated assembly. This function
@@ -69,6 +77,9 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
 
   # Save originals
   backups = {k: s[k] for k in _INTERNAL_ARGS}
+  nonCodegenBackups = {
+      key: s[key] for key in _NON_CODEGEN_PARAMETERS if key in s
+  }
   gsu_backup = s["GlobalSplitU"]
   gg_backup = pt["GroupedGemm"]
 
@@ -85,15 +96,26 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
     s["GlobalSplitU"] = "M"
   for k in _INTERNAL_ARGS:
     s[k] = "M"
+  for key in nonCodegenBackups:
+    s[key] = "M"
 
-  # Compute string key (same as what str(deep_copied_solution) would produce)
-  key = _getName(s, getRequiredParametersFull(), splitGSU, False)
+  try:
+    compileKey = _getName(s, getRequiredParametersFull(), splitGSU, False)
+  finally:
+    pt["GroupedGemm"] = gg_backup
+    s["GlobalSplitU"] = gsu_backup
+    for k in _INTERNAL_ARGS:
+      s[k] = backups[k]
+    for parameter, value in nonCodegenBackups.items():
+      s[parameter] = value
 
-  # Restore
-  pt["GroupedGemm"] = gg_backup
-  s["GlobalSplitU"] = gsu_backup
-  for k in _INTERNAL_ARGS:
-    s[k] = backups[k]
+  return compileKey
+
+
+def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
+  """Return the compile key plus code-object placement metadata."""
+  s = state._state if hasattr(state, '_state') else state
+  key = getKernelCompileKey(s, splitGSU)
 
   # Include codeObjectFile and DeviceNames in the key to prevent
   # over-deduplication across different code object files / devices.
@@ -149,7 +171,7 @@ def getParameterValueAbbreviation(key, value):
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
   ck = state.get("CustomKernel")
-  if isinstance(ck, dict) and ck.get("name"):
+  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
     return ck["name"]
   if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
@@ -158,11 +180,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   ggBackup = state["ProblemType"]["GroupedGemm"]
   wgmxccBackup = state["WorkGroupMappingXCC"]
 
-  # Include WGMXCC in kernel name as either n1 for auto or 1 for set value
-  # Fixed values produce different assembly code
-  # If the key is missing from name, kernels are dropped as duplicates when they should be kept
+  # Encode only the fixed WGMXCC categories that change generated assembly.
   if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
-    state["WorkGroupMappingXCC"] = 1
+    state["WorkGroupMappingXCC"] = (
+        2
+        if state.get("StreamK") in (4, 5)
+        and state.get("StreamKXCCMapping", 0) != 0
+        and state["WorkGroupMappingXCC"] > 1
+        else 1
+    )
 
   if ignoreInternalArgs:
     # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
@@ -221,6 +247,16 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
   if state.get("LDSSegmentInterleave") == 1:
     requiredParametersTemp.add("LDSSegmentInterleave")
+
+  # These values remove or replace generated control-flow paths.
+  if state.get("DebugStreamK", 0) != 0:
+    requiredParametersTemp.add("DebugStreamK")
+  if state.get("StreamKAtomic", 0) != 0:
+    requiredParametersTemp.add("StreamKAtomic")
+  if state.get("MbskPrefetchMethod", 0) != 0:
+    requiredParametersTemp.add("MbskPrefetchMethod")
+  if state.get("DebugPersistentKernelLoopForever", False):
+    requiredParametersTemp.add("DebugPersistentKernelLoopForever")
 
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":

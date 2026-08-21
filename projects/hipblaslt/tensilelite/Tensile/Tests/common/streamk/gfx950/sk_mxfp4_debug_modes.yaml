@@ -22,8 +22,8 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Test DebugStreamK: 0, 1, 2, 3
-  # 0: Full StreamK, 1: No fixup, 2: No partials, 3: No fixup and no partials
+  # Mode 0 correctness for the subtile path. Nonzero modes are incompatible
+  # with UseSubtileImpl and are covered by the gfx1250 launch-only test.
   # TN transpose only
   #######################################
   -
@@ -58,7 +58,7 @@ BenchmarkProblems:
         - SourceSwap: [false]
         - DirectToLds: [1]
         - StreamK: [3]
-        - DebugStreamK: [0, 1, 2, 3]
+        - DebugStreamK: [0]
         - StaggerU: [0]
         - WavefrontSize: [64]
         - WorkGroupMapping: [1]
