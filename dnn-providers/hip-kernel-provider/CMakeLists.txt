@@ -245,6 +245,16 @@ endif()
 # packer that writes archives and the runtime that reads them are one dependency
 # at one commit, so there is no state in which only one of them is wanted; a
 # separate switch could only ever advertise an ingestor that cannot dispatch.
+#
+# The order of the two calls below is load-bearing, and reversing it fails
+# silently rather than loudly. rocm_kpack_add_runtime() is the only function that
+# honours HIPKERNELPROVIDER_KPACK_RUNTIME_DIR, and it publishes the tree it chose
+# as ROCM_KPACK_SOURCE_DIR. The packaging module's resolver only reads that cache
+# entry, via rocm_kpack_populate(), which fetches the pinned tree when nothing has
+# set it yet. So calling the runtime first makes the packer inherit whichever tree
+# the reader is built from; calling it second lets the packer fetch the pinned
+# commit and the reader then override to a different one, leaving a build whose
+# packer and reader disagree and whose configure output looks correct.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     include(RocmKpack)
     rocm_kpack_add_runtime()

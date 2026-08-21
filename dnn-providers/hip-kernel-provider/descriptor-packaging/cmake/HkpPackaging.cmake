@@ -36,11 +36,19 @@ include(RocmKpack)
 #   (2) the shared pinned rocm-kpack tree. Sets <out_var> to the resolved python
 #   dir. rocm_kpack is load-bearing (the tool cannot pack without it), so an
 #   unresolvable dependency is a hard error.
+#
+#   This resolves the PACKER only. HIPKERNELPROVIDER_KPACK_PYTHON_DIR predates the
+#   runtime half of kpack support and now names one side of a pair: the reader is
+#   resolved separately, by rocm_kpack_add_runtime(), from
+#   HIPKERNELPROVIDER_KPACK_RUNTIME_DIR. Overriding one and not the other resolves
+#   the two halves from different trees.
 # ---------------------------------------------------------------------------
 function(hkp_resolve_kpack out_var)
     if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND EXISTS "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}")
         set(${out_var} "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}" PARENT_SCOPE)
-        message(STATUS "hkp: using rocm_kpack from HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}")
+        message(STATUS "hkp: using the rocm_kpack packer from \
+HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}; the reader is \
+resolved separately, from HIPKERNELPROVIDER_KPACK_RUNTIME_DIR")
         return()
     endif()
 
