@@ -84,6 +84,32 @@ def _base_config(**overrides) -> ContractionMultiABDKernelConfig:
     return ContractionMultiABDKernelConfig(**kw)
 
 
+def _base_name(**overrides) -> str:
+    """Kernel name for a parameter set, bypassing config/spec validation.
+
+    The naming contract has to hold for parameter values the operator does not
+    currently accept (num_a_tensor > 1, persistent) as well as those it does:
+    the name must keep encoding them distinctly so that lifting a restriction
+    later cannot collide with headers generated today. So these tests exercise
+    the name function directly rather than going through a validated config.
+    """
+    kw = dict(
+        dtype="fp16",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        pad_m=False, pad_n=False, pad_k=False, persistent=False,
+        tile_m=256, tile_n=256, tile_k=64,
+        warp_m=2, warp_n=2, warp_k=1,
+        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        num_a_tensor=1, num_b_tensor=1, num_d_tensor=1,
+        num_dim_g=1, num_dim_m=2, num_dim_n=2, num_dim_k=1,
+    )
+    kw.update(overrides)
+    return make_contraction_multi_abd_kernel_name(**kw)
+
+
 def _base_problem() -> ContractionMultiABDProblem:
     return ContractionMultiABDProblem(
         g_dims=[2], m_dims=[4, 4], n_dims=[4, 4], k_dims=[8]
@@ -112,15 +138,17 @@ class TestKernelNameUniqueness(unittest.TestCase):
         self.assertNotEqual(base, other)
 
     def test_different_a_tensor_counts_produce_distinct_names(self):
-        a1 = _base_config(num_a_tensor=1).name
-        a2 = _base_config(num_a_tensor=2).name
+        # num_a_tensor > 1 is currently rejected by config/spec validation, but
+        # the name must still encode it -- see _base_name().
+        a1 = _base_name(num_a_tensor=1)
+        a2 = _base_name(num_a_tensor=2)
         self.assertNotEqual(a1, a2)
         self.assertIn("_na1_", a1)
         self.assertIn("_na2_", a2)
 
     def test_different_b_tensor_counts_produce_distinct_names(self):
-        b1 = _base_config(num_b_tensor=1).name
-        b2 = _base_config(num_b_tensor=2).name
+        b1 = _base_name(num_b_tensor=1)
+        b2 = _base_name(num_b_tensor=2)
         self.assertNotEqual(b1, b2)
 
     def test_different_d_tensor_counts_produce_distinct_names(self):
@@ -209,11 +237,15 @@ class TestCodegenConfigProjection(unittest.TestCase):
         self.assertEqual(tc["tile_k"], 32)
 
     def test_tensor_counts_round_trip(self):
-        cfg = _base_config(num_a_tensor=2, num_b_tensor=3, num_d_tensor=1)
+        # num_a/num_b are pinned to 1 by validation, so only num_d can carry a
+        # distinguishing value here. That still catches num_d landing in the
+        # wrong slot; restore distinct A/B values if the multi-A/B restriction
+        # is ever lifted.
+        cfg = _base_config(num_a_tensor=1, num_b_tensor=1, num_d_tensor=3)
         d = cfg.to_codegen_config()
-        self.assertEqual(d["num_a_tensors"], [2])
-        self.assertEqual(d["num_b_tensors"], [3])
-        self.assertEqual(d["num_d_tensors"], [1])
+        self.assertEqual(d["num_a_tensors"], [1])
+        self.assertEqual(d["num_b_tensors"], [1])
+        self.assertEqual(d["num_d_tensors"], [3])
 
     def test_dim_counts_round_trip(self):
         cfg = _base_config(num_dim_g=2, num_dim_m=3, num_dim_n=3, num_dim_k=2)
@@ -252,7 +284,7 @@ class TestCodegenConfigProjection(unittest.TestCase):
         This is the contract that keeps the name the Python side looks up
         byte-identical to the KERNEL_NAME baked into the generated header.
         """
-        cfg = _base_config(pad_m=True, pad_k=True, num_a_tensor=2, num_dim_g=2)
+        cfg = _base_config(pad_m=True, pad_k=True, num_d_tensor=2, num_dim_g=2)
         specs = build_specs(cfg.to_codegen_config())
         self.assertEqual([s.name for s in specs], [cfg.name])
 
@@ -684,6 +716,95 @@ class TestSpecValidation(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             build_specs(cfg)
+
+    def test_multi_a_tensor_raises(self):
+        """The kernel's (A, B) loop overwrites instead of accumulating.
+
+        num_a_tensor > 1 compiles and launches but returns only the last pair's
+        contribution, so it must be refused rather than silently mis-computed.
+        """
+        with self.assertRaises(ValueError) as ctx:
+            ContractionMultiABDKernelSpec(**_base_spec_kwargs(num_a_tensor=2))
+        self.assertIn("num_a_tensor", str(ctx.exception))
+
+    def test_multi_b_tensor_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            ContractionMultiABDKernelSpec(**_base_spec_kwargs(num_b_tensor=3))
+        self.assertIn("num_b_tensor", str(ctx.exception))
+
+    def test_multi_d_tensor_is_accepted(self):
+        """num_d_tensor is handled by the epilogue and is genuinely supported."""
+        spec = ContractionMultiABDKernelSpec(**_base_spec_kwargs(num_d_tensor=4))
+        self.assertEqual(spec.num_d_tensor, 4)
+
+    def test_build_specs_rejects_multi_a_tensor(self):
+        cfg = {
+            "dtypes": ["fp16"], "layouts": ["rcr"],
+            "pipelines": ["compv3"], "schedulers": ["intrawave"],
+            "epilogues": ["cshuffle"],
+            "num_a_tensors": [1, 2],
+        }
+        with self.assertRaises(ValueError):
+            build_specs(cfg)
+
+
+class TestConfigValidation(unittest.TestCase):
+    """The dispatcher-side config must enforce the same rules as the codegen spec.
+
+    Both call validate_contraction_multi_abd_params(), so a combination rejected
+    when emitting a header is also rejected when a caller builds a config for it
+    -- instead of surfacing much later as codegen subprocess stderr.
+    """
+
+    @staticmethod
+    def _kwargs(**overrides) -> dict:
+        kw = dict(
+            dtype="fp16",
+            layout="rcr",
+            pipeline="compv3",
+            epilogue="cshuffle",
+            scheduler="intrawave",
+            tile_m=256, tile_n=256, tile_k=64,
+            warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        )
+        kw.update(overrides)
+        return kw
+
+    def test_valid_config_is_accepted(self):
+        cfg = ContractionMultiABDKernelConfig(**self._kwargs(num_d_tensor=2))
+        self.assertEqual(cfg.num_d_tensor, 2)
+
+    def test_unknown_epilogue_raises(self):
+        with self.assertRaises(ValueError):
+            ContractionMultiABDKernelConfig(**self._kwargs(epilogue="bogus"))
+
+    def test_persistent_true_raises(self):
+        with self.assertRaises(ValueError):
+            ContractionMultiABDKernelConfig(**self._kwargs(persistent=True))
+
+    def test_multi_a_tensor_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            ContractionMultiABDKernelConfig(**self._kwargs(num_a_tensor=2))
+        self.assertIn("num_a_tensor", str(ctx.exception))
+
+    def test_multi_b_tensor_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            ContractionMultiABDKernelConfig(**self._kwargs(num_b_tensor=2))
+        self.assertIn("num_b_tensor", str(ctx.exception))
+
+    def test_config_and_spec_reject_identically(self):
+        """Same rejection, same message -- the two sides cannot drift apart."""
+        for override in ({"epilogue": "bogus"},
+                         {"persistent": True},
+                         {"num_a_tensor": 2},
+                         {"num_b_tensor": 2}):
+            with self.subTest(**override):
+                with self.assertRaises(ValueError) as spec_ctx:
+                    ContractionMultiABDKernelSpec(**_base_spec_kwargs(**override))
+                with self.assertRaises(ValueError) as cfg_ctx:
+                    ContractionMultiABDKernelConfig(**self._kwargs(**override))
+                self.assertEqual(str(spec_ctx.exception), str(cfg_ctx.exception))
 
 
 class TestMaxInstancesCap(unittest.TestCase):

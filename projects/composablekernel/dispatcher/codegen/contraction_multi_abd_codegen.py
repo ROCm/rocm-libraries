@@ -88,6 +88,52 @@ _UNSUPPORTED_PIPELINE_SCHEDULER = frozenset({
 SUPPORTED_EPILOGUES = ("cshuffle", "default2d")
 
 
+def validate_contraction_multi_abd_params(
+    *,
+    epilogue: str,
+    persistent: bool,
+    num_a_tensor: int,
+    num_b_tensor: int,
+) -> None:
+    """Reject parameter combinations this operator cannot honour.
+
+    Shared by the codegen spec and the dispatcher-side config (as
+    make_contraction_multi_abd_kernel_name is) so the two cannot drift: a
+    combination rejected when generating a header must also be rejected when
+    a caller builds a config for it, and with the same message.
+
+    Raises ValueError on an unsupported combination.
+    """
+    if epilogue not in SUPPORTED_EPILOGUES:
+        raise ValueError(
+            f"Unsupported epilogue: {epilogue!r}. "
+            f"Supported values are {list(SUPPORTED_EPILOGUES)}."
+        )
+    if persistent:
+        # batched_contraction_multi_abd_kernel.hpp exposes only GridSize() --
+        # there is no MaxOccupancyGridSize(), so a persistent variant cannot be
+        # emitted. Fail here rather than generating a header whose name says
+        # persistent=True while the kernel is not persistent.
+        raise ValueError(
+            "persistent=True is not supported by batched_contraction_multi_abd: "
+            "the kernel has no persistent (occupancy-limited grid) variant. "
+            "Set persistent to false in the config."
+        )
+    # BatchedContractionMultiABDKernel::launch loops over the (A, B) tensor pairs
+    # but *stores* the epilogue result rather than accumulating it, so only the
+    # last pair survives -- any count above 1 silently returns a wrong answer.
+    # Refuse the combination until the kernel itself accumulates; a hard error
+    # beats plausible garbage.
+    if num_a_tensor != 1 or num_b_tensor != 1:
+        raise ValueError(
+            f"num_a_tensor={num_a_tensor}, num_b_tensor={num_b_tensor}: "
+            "batched_contraction_multi_abd currently supports only a single A and "
+            "a single B tensor. The kernel's (A, B) loop overwrites instead of "
+            "accumulating, so larger counts would produce silently incorrect "
+            "results. Multiple D tensors (num_d_tensor > 1) are supported."
+        )
+
+
 # =============================================================================
 # Kernel name construction (byte-exact with Python utils side)
 # =============================================================================
@@ -196,21 +242,12 @@ class ContractionMultiABDKernelSpec:
     cde_elementwise: str = "MultiDAdd"
 
     def __post_init__(self):
-        if self.epilogue not in SUPPORTED_EPILOGUES:
-            raise ValueError(
-                f"Unsupported epilogue: {self.epilogue!r}. "
-                f"Supported values are {list(SUPPORTED_EPILOGUES)}."
-            )
-        if self.persistent:
-            # batched_contraction_multi_abd_kernel.hpp exposes only GridSize() --
-            # there is no MaxOccupancyGridSize(), so a persistent variant cannot be
-            # emitted. Fail here rather than generating a header whose name says
-            # persistent=True while the kernel is not persistent.
-            raise ValueError(
-                "persistent=True is not supported by batched_contraction_multi_abd: "
-                "the kernel has no persistent (occupancy-limited grid) variant. "
-                "Set persistent to false in the config."
-            )
+        validate_contraction_multi_abd_params(
+            epilogue=self.epilogue,
+            persistent=self.persistent,
+            num_a_tensor=self.num_a_tensor,
+            num_b_tensor=self.num_b_tensor,
+        )
 
     @property
     def name(self) -> str:

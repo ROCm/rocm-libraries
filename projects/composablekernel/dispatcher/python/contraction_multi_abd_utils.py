@@ -58,7 +58,10 @@ _CTYPES_LIB_SRC = (
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from contraction_multi_abd_codegen import make_contraction_multi_abd_kernel_name  # noqa: E402
+from contraction_multi_abd_codegen import (  # noqa: E402
+    make_contraction_multi_abd_kernel_name,
+    validate_contraction_multi_abd_params,
+)
 
 _DEFAULT_HIPCC = "hipcc"
 
@@ -125,6 +128,18 @@ class ContractionMultiABDKernelConfig:
     # Empty means "detect at build time"; there is deliberately no hard-coded
     # default arch, so a wrong-GPU build fails loudly instead of silently.
     gfx_arch: str = ""
+
+    def __post_init__(self):
+        # Same rules the codegen spec enforces, via the same function. Without
+        # this, an unsupported combination is accepted here and only surfaces
+        # much later as codegen subprocess stderr, by which point the caller has
+        # lost the connection to the field that was wrong.
+        validate_contraction_multi_abd_params(
+            epilogue=self.epilogue,
+            persistent=self.persistent,
+            num_a_tensor=self.num_a_tensor,
+            num_b_tensor=self.num_b_tensor,
+        )
 
     @property
     def name(self) -> str:

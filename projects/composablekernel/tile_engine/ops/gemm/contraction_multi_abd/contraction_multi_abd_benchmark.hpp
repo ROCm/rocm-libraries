@@ -203,7 +203,7 @@ inline void run_contraction_multi_abd_benchmark(const ContractionMultiABDProblem
     for(auto& v : ha)
         v = static_cast<AElementType>(1.0f / K);
     for(auto& v : hb)
-        v = static_cast<AElementType>(1.0f / K);
+        v = static_cast<BElementType>(1.0f / K);
     for(auto& hd : hds)
         for(auto& v : hd)
             v = static_cast<DElementType>(0.0f);
