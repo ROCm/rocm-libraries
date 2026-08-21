@@ -3,13 +3,12 @@
 """Disassembly-backed checks that custom-kernel StaggerU metadata is truthful.
 
 The host-side launch gate for uniform summation order (``checkUniformSummationOrder``
-in ``ContractionSolution.cpp``) reasons entirely from declared metadata.  It clamps
-StaggerU by writing zero into a bitfield of a packed kernel argument, and refuses
-any solution declaring ``SupportCustomStaggerU: False`` with a non-zero
-``StaggerU``.  Every admitted solution therefore claims either that it derives
-StaggerU from the packed argument, so writing zero really does stop the
-staggering, or that it declares ``StaggerU: 0`` and does not stagger at all.
-These tests check both claims against the instructions the kernels execute.
+in ``ContractionSolution.cpp``) currently refuses handwritten custom kernels, and
+the StaggerU clamp still reasons from declared metadata for every other solution.
+It clamps StaggerU by writing zero into a bitfield of a packed kernel argument, and
+refuses any solution declaring ``SupportCustomStaggerU: False`` with a non-zero
+``StaggerU``.  These tests pin that metadata against the instructions the kernels
+execute, so a later admission path cannot trust a lying declaration.
 
 Reading the ``.s`` files cannot do it: 98 of the 119 shipped custom kernels are
 pre-assembled ``.long`` blobs with no readable mnemonics, and every kernel that
@@ -222,10 +221,9 @@ if _REQUIRED_BECAUSE is not None:
         f"the custom-kernel StaggerU checks cannot run, and {_REQUIRED_BECAUSE}, so "
         f"this is an environment where they are expected to: assembling a probe "
         f"kernel for gfx942 with clang={CLANG} and objdump={OBJDUMP} did not produce "
-        f"readable AMDGCN. Failing rather than skipping, because the uniform "
-        f"summation order launch gate admits custom kernels on the strength of the "
-        f"StaggerU metadata these tests validate, and a silent skip would leave that "
-        f"unchecked. Set TENSILE_REQUIRE_AMDGCN_DISASM=0 to skip deliberately."
+        f"readable AMDGCN. Failing rather than skipping, because a silent skip would "
+        f"leave custom-kernel StaggerU metadata unpinned against disassembly. Set "
+        f"TENSILE_REQUIRE_AMDGCN_DISASM=0 to skip deliberately."
     )
 
 pytestmark = [
@@ -411,8 +409,8 @@ def clampCannotReach(code: KernelCode, metadata: KernelMetadata) -> Optional[str
     if metadata.supportsCustomStaggerU:
         if not code.decodesPackedArgument:
             return (
-                f"{code.name} declares SupportCustomStaggerU: True, so the gate admits it "
-                f"and relies on the clamp, but its {len(code.wrapSites)} wrap site(s) run "
+                f"{code.name} declares SupportCustomStaggerU: True, so a clamp-based "
+                f"admission would rely on the packed argument, but its {len(code.wrapSites)} wrap site(s) run "
                 f"without the canonical unpack (s_and_b32 against "
                 f"{', '.join(sorted(_PACKED_MASKS))}): the clamp cannot reach a StaggerU "
                 f"the kernel never reads"
@@ -421,8 +419,8 @@ def clampCannotReach(code: KernelCode, metadata: KernelMetadata) -> Optional[str
 
     if metadata.effectiveStaggerU == 0:
         return (
-            f"{code.name} declares SupportCustomStaggerU: False with StaggerU: 0, so the "
-            f"gate reads it as 'this kernel does not stagger' and admits it unclamped, but "
+            f"{code.name} declares SupportCustomStaggerU: False with StaggerU: 0, so "
+            f"metadata claims the kernel does not stagger, but "
             f"the disassembly has {len(code.wrapSites)} wrap site(s) at buffer "
             f"descriptor(s) {sorted(set(code.wrapSites))}"
         )
@@ -652,8 +650,8 @@ def test_a_lying_declaration_is_caught(tmp_path):
     """Mutation control: the checks are not vacuously satisfiable.
 
     A kernel whose machine code really does stagger is given, in a temp copy of
-    its ``.s``, each of the two declarations that would let the launch gate
-    admit it without a working clamp.  Both must be reported, and the shipped
+    its ``.s``, each of the two declarations that would claim the kernel is
+    clamp-safe or non-staggering.  Both must be reported, and the shipped
     declaration must not be.
     """
 

@@ -34,6 +34,10 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+#include <mxDataGenerator/bf16.hpp>
+#endif
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -53,6 +57,7 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -283,30 +288,13 @@ namespace
         return type == HIP_R_32F ? sizeof(float) : sizeof(uint16_t);
     }
 
-    // Round-to-nearest-even truncation to bfloat16. Written out rather than
-    // pulled from a vendor header so the harness has no dependency on which
-    // narrow-type header happens to be installed.
-    uint16_t toBFloat16(float value)
-    {
-        uint32_t bits = 0;
-        std::memcpy(&bits, &value, sizeof(bits));
-        const uint32_t lsb = (bits >> 16) & 1u;
-        bits += 0x7fffu + lsb;
-        return static_cast<uint16_t>(bits >> 16);
-    }
-
-    float fromBFloat16(uint16_t value)
-    {
-        const uint32_t bits = static_cast<uint32_t>(value) << 16;
-        float          out  = 0.0f;
-        std::memcpy(&out, &bits, sizeof(out));
-        return out;
-    }
-
     // Rounds values in place to what the device will actually hold, then
     // returns the byte image to upload. Rounding in place matters: the host
     // reference below must see the same numbers the kernel does, or its
     // order-sensitivity self-check describes a different problem.
+    //
+    // HIP_R_16BF goes through mxDataGenerator's bf16 convert so this harness
+    // does not keep a second rounding implementation.
     std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
     {
         std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
@@ -316,13 +304,21 @@ namespace
             return bytes;
         }
 
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
         auto* out = reinterpret_cast<uint16_t*>(bytes.data());
         for(size_t idx = 0; idx < values.size(); ++idx)
         {
-            out[idx]     = toBFloat16(values[idx]);
-            values[idx] = fromBFloat16(out[idx]);
+            const auto packed
+                = static_cast<uint16_t>(DGen::satConvertToType<DGen::bf16>(values[idx]));
+            out[idx] = packed;
+            uint8_t packedBytes[sizeof(packed)];
+            std::memcpy(packedBytes, &packed, sizeof(packed));
+            values[idx] = DGen::toFloat<DGen::bf16>(packedBytes, packedBytes, 0, 0);
         }
         return bytes;
+#else
+        throw std::logic_error("encodeOperand: HIP_R_16BF requires mxDataGenerator");
+#endif
     }
 
     // Owns every device and host resource for one problem size and can replay
@@ -366,6 +362,14 @@ namespace
             const int64_t m = m_problem.m;
             const int64_t n = m_problem.n;
             const int64_t k = m_problem.k;
+
+            if(m_problem.abType != HIP_R_32F)
+            {
+#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
+                skipReason = "bf16 operands require mxDataGenerator";
+                return false;
+#endif
+            }
 
             if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS
                || hipStreamCreate(&m_stream) != hipSuccess)
