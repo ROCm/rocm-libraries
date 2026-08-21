@@ -20,7 +20,6 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
 #include <climits>
@@ -38,6 +37,7 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
@@ -181,10 +181,9 @@ static std::vector<char> reachableFrom(unsigned start,
 // kRule3CrossLoop true only.
 constexpr int kLiveOutSccDefLeadCycles = 50;
 
-static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
-                                       const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
-                                       std::vector<std::unordered_set<unsigned>>& dagGraph,
-                                       int regionCycles) {
+static void applyClusterBarrierSccRule(
+    DAGNodeList& dagNodes, const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
+    std::vector<std::unordered_set<unsigned>>& dagGraph, int regionCycles) {
     const std::vector<HandshakeBarrier> barriers = collectHandshakeBarriers(dagNodes);
     if (barriers.empty()) return;
 
@@ -231,9 +230,9 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
             if (cluster_barrier::kRule3CrossLoop) {
                 first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
                 PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-out chain"
-                                     << " (dagId=" << first->id << ") held back to clock >= "
-                                     << first->earliestClock << " (region " << regionCycles
-                                     << " cycles)\n");
+                                     << " (dagId=" << first->id
+                                     << ") held back to clock >= " << first->earliestClock
+                                     << " (region " << regionCycles << " cycles)\n");
             }
             continue;
         }
@@ -266,8 +265,8 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
         if (alreadySplit) {
             // The incoming order already spans the barrier, so the scheduler is not what
             // broke it and no ordering it can pick will put it back together.
-            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain ["
-                                 << first->id << ".." << last->id
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
+                                 << ".." << last->id
                                  << "] already spans a barrier; leaving it to the"
                                     " barrier pass\n");
             continue;
@@ -276,9 +275,10 @@ static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
         for (const HandshakeBarrier* barrier : pinAfter) {
             if (barrier->wait->id >= first->id) continue;
             addEdgeById(barrier->wait, first, dagGraph);
-            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
-                                 << ".." << last->id << "] has a reader depending on barrier (dagId="
-                                 << barrier->signal->id << "); pinned after it instead of locking\n");
+            PASS_DEBUG(
+                std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id << ".."
+                          << last->id << "] has a reader depending on barrier (dagId="
+                          << barrier->signal->id << "); pinned after it instead of locking\n");
         }
 
         if (!needsLock) continue;

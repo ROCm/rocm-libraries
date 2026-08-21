@@ -403,8 +403,8 @@ class DAGSchedulerPassTest : public ::testing::Test {
             if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
             const auto* inst = cast<StinkyInstruction>(&ir);
             if (inst == to) return started ? total : -1;
-            if (started) total += isMatrixInstruction(*inst) ? inst->latencyCycles
-                                                             : inst->issueCycles;
+            if (started)
+                total += isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles;
             if (inst == from) started = true;
         }
         return -1;
@@ -1560,7 +1560,8 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinsLiveOutSccDefBelowLastBar
 // kLiveOutSccDefLeadCycles.
 constexpr int kSccDefLeadCycles = 50;
 
-IF_RULE3_CROSS_LOOP(TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBranch) {
+IF_RULE3_CROSS_LOOP(TEST_F(DAGSchedulerPassTest,
+                           ClusterBarrierSccRule_LiveOutSccDefLandsNearItsBranch) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
 
@@ -1662,8 +1663,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLeavesSccDefFarFromIt
     const int lead = cyclesBetween(*body, sccDef, branch);
     ASSERT_GE(lead, 0);
     EXPECT_GT(lead, kSccDefLeadCycles)
-        << "with the rule off nothing keeps the compare near its branch:"
-        << scheduleOrder(*body);
+        << "with the rule off nothing keeps the compare near its branch:" << scheduleOrder(*body);
 }
 
 // A live-out def written between two barriers. Following the barrier above it is not
