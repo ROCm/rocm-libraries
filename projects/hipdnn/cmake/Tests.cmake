@@ -229,10 +229,10 @@ endfunction() # _create_check_targets_internal
 # header's runtime behaviour is covered by the C++ suites; this covers the generator's
 # field policy, so a change to it fails here rather than silently reshaping the key.
 function(_create_cache_key_codegen_test_internal prefix_name)
-    # Registered only when the generator itself runs (flatbuffers_sdk/CMakeLists.txt
-    # gates cachekey_generated.h regeneration the same way); an ingestor-off build has
-    # nothing here to pin.
-    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND Python3_FOUND)
+    # Not gated on HIPDNN_ENABLE_KERNEL_INGESTOR: the field policy under test belongs to
+    # the schemas, which every build has, and the tests drive the generator directly
+    # without flatc or any build artifact.
+    if(Python3_FOUND)
         add_test(
             NAME ${prefix_name}_cache_key_codegen_tests
             COMMAND ${Python3_EXECUTABLE} -m unittest discover -s
@@ -240,7 +240,7 @@ function(_create_cache_key_codegen_test_internal prefix_name)
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/scripts
         )
         _apply_hipdnn_test_category_labels(${prefix_name}_cache_key_codegen_tests)
-    endif() # HIPDNN_ENABLE_KERNEL_INGESTOR AND Python3_FOUND
+    endif() # Python3_FOUND
 endfunction() # _create_cache_key_codegen_test_internal
 
 # Finalizes and creates all of the test targets
