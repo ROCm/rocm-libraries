@@ -30,20 +30,16 @@ using SharedLibraryHandle = HMODULE;
 
 inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 {
-    std::string result = defaultValue != nullptr ? defaultValue : "";
-
-    GetEnvironmentVariableA(var, nullptr, 0);
-
-    DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
-    if(size > 0)
+    // The sizing call counts the terminator, the fetching call does not.
+    const DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
+    if(size == 0)
     {
-        char* dst = new char[size];
-        GetEnvironmentVariableA(var, dst, size);
-        result = dst;
-        delete[] dst;
+        return defaultValue != nullptr ? defaultValue : "";
     }
 
-    return result;
+    std::string value(size, '\0');
+    value.resize(GetEnvironmentVariableA(var, value.data(), size));
+    return value;
 }
 
 inline void setEnv(const char* var, const char* value)
@@ -67,7 +63,7 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
 inline std::filesystem::path getCurrentExecutableDirectory()
 {
     std::array<wchar_t, MAX_PATH> result{};
-    DWORD length = GetModuleFileNameW(nullptr, result.data(), MAX_PATH);
+    const DWORD length = GetModuleFileNameW(nullptr, result.data(), MAX_PATH);
     if(length == 0 || length == MAX_PATH)
     {
         throw std::runtime_error("Failed to get executable path");
