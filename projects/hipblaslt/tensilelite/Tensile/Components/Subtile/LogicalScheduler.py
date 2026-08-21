@@ -482,18 +482,20 @@ class WaitGRCounts:
     SA: int = 0
     SB: int = 0
     # When True, emit_wait_gr resolves the count as
-    # tileInfoA.numGRTotal / numPartitionsM + tileInfoB.numGRTotal / numPartitionsN + …
-    # — the exact number of MT1 (second-batch) buffer_load instructions in flight for
-    # partition 0 only.  Used by the PGR=2 preloop GR reorder.  numPartitionsM/N default
-    # to 1 so all single-partition callers are unaffected.
+    # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
+    # — the exact number of batch-1 buffer_load instructions in flight.
+    # Used by the PGR=2 preloop GR reorder for the single-partition fast path.
     use_num_gr_total: bool = False
-    numPartitionsM: int = 1
-    numPartitionsN: int = 1
+    # When True, A/B/SA/SB hold raw GRPlacement counts (one per subtile atom, not
+    # per buffer_load).  emit_wait_gr converts to buffer_loads via
+    # ceil(count / loadRatioGR), which is exact for any partition/GR-subtile geometry.
+    # Used by the PGR=2 preloop GR reorder when numPartitions > 1.
+    use_gr_placement_counts: bool = False
 
     def __str__(self):
+        if self.use_gr_placement_counts:
+            return f"mt1_gr_placements(A={self.A} B={self.B} SA={self.SA} SB={self.SB})"
         if self.use_num_gr_total:
-            if self.numPartitionsM != 1 or self.numPartitionsN != 1:
-                return f"num_gr_total/partM{self.numPartitionsM}N{self.numPartitionsN}"
             return "num_gr_total"
         parts = []
         for t in ('A', 'B', 'SA', 'SB'):
@@ -3324,6 +3326,26 @@ class LogicalScheduler:
             return m
         return InlineModuleOp(build=_build_branch, label=f"reorder_branch_{target}")
 
+    @staticmethod
+    def _mt1_wait_gr_counts(mt1_ops: list, cfg: 'SchedulerConfig') -> 'WaitGRCounts':
+        """Return a WaitGRCounts for the full-path MT1 wait in the PGR=2 reorder.
+
+        For single-partition kernels, uses use_num_gr_total (fast path: tileInfo is not
+        needed at the scheduler level).  For multi-partition kernels, counts GRPlacement
+        atoms per tensor directly from mt1_ops so the emitter can convert to buffer_loads
+        via ceil(count / loadRatioGR) without assuming any GR/partition alignment.
+        """
+        if cfg.numPartitions == 1:
+            return WaitGRCounts(use_num_gr_total=True)
+        counts = {'A': 0, 'B': 0, 'SA': 0, 'SB': 0}
+        for op in mt1_ops:
+            if isinstance(op, GRPlacement):
+                counts[op.tensor] = counts.get(op.tensor, 0) + 1
+        return WaitGRCounts(
+            use_gr_placement_counts=True,
+            A=counts['A'], B=counts['B'], SA=counts['SA'], SB=counts['SB'],
+        )
+
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
@@ -3449,9 +3471,7 @@ class LogicalScheduler:
                        target='PreloopReorderPartial', rawLabel=True,
                        branchComment='partial K tile: skip MT1 GR prefetch'),
                 *mt1_ops,
-                WaitGROp(wait_gr_counts=WaitGRCounts(use_num_gr_total=True,
-                                                     numPartitionsM=cfg.numPartitionsM,
-                                                     numPartitionsN=cfg.numPartitionsN)),
+                WaitGROp(wait_gr_counts=self._mt1_wait_gr_counts(mt1_ops, cfg)),
                 self._make_reorder_branch_op('PreloopReorderJoin'),
                 self._make_reorder_label_op('PreloopReorderPartial'),
                 WaitGROp(wait_gr_counts=WaitGRCounts(), force_drain=True),
