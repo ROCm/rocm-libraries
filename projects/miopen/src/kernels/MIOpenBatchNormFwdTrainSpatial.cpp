@@ -712,9 +712,6 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
 
         commitID = 0;
 
-        if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
-            return;
-
         for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
             for(unsigned int yoffset = ylid; yoffset < ngrps; yoffset += ygrp_sz)
@@ -1034,10 +1031,13 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     fp_prec_c_type variance;
     fp_prec_c_type invVariance;
 
-    unsigned int xgid;
+    unsigned int xgid = blockDim.x * blockIdx.x + threadIdx.x;
     unsigned int ygid;
     unsigned int zgid;
     unsigned int commitID;
+
+    if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
+        return;
 
     miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);
