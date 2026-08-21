@@ -6862,6 +6862,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # s_wait_xcnt drains to order them.
                                "RequiresXCntForVolatileVMEM": bool(
                                    self.states.archCaps["RequiresXCntForVolatileVMEM"]),
+                               "EnableXnackReplay": bool(
+                                   self.states.archCaps["EnableXnackReplay"]),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.

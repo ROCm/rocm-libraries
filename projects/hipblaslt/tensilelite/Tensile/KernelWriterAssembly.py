@@ -2171,7 +2171,7 @@ class KernelWriterAssembly(KernelWriter):
       for idx in kernel["ProblemType"]["IndicesBatch"]:
         if not isPackedIndex(kernel,idx):
           module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
-          if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+          if self.states.archCaps["EnableXnackReplay"]:
             with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressDTmp") as tmpSgprRes:
               sgprIdx: int = tmpSgprRes.idx
               module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressD", 2)))
@@ -2188,7 +2188,7 @@ class KernelWriterAssembly(KernelWriter):
         for idx in kernel["ProblemType"]["IndicesBatch"]:
           if not isPackedIndex(kernel,idx):
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
-            if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            if self.states.archCaps["EnableXnackReplay"]:
               with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressCTmp") as tmpSgprRes:
                 sgprIdx: int = tmpSgprRes.idx
                 module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressC", 2)))
@@ -2211,7 +2211,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
     for idx in kernel["ProblemType"]["IndicesBatch"]:
       if not isPackedIndex(kernel,idx):
-        if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+        if self.states.archCaps["EnableXnackReplay"]:
           with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressABTmp") as tmpSgprRes:
             sgprIdx: int = tmpSgprRes.idx
             module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressA", 2)))
@@ -2571,7 +2571,7 @@ class KernelWriterAssembly(KernelWriter):
         # load ws/ user args
         hbmArgs = Module("load HBM arguments")
         hbmArgs.addComment1("Load address of kernel arguments")
-        if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+        if self.states.archCaps["EnableXnackReplay"]:
           with self.allocTmpSgpr(2, tag="defineAndResources_sgprKernArgAddressTmp") as tmpSgprRes:
             sgprIdx: int = tmpSgprRes.idx
             hbmArgs.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("KernArgAddress", 2), comment="XNACK protect for SMEM"))
@@ -13552,7 +13552,7 @@ class KernelWriterAssembly(KernelWriter):
       self.addSgprVarToPool("SrdWS")
 
     # Keep tmp SGPR usage lean for the common path.
-    requiredNumSgpr = 4 if self.states.archCaps["RequiresXCntForVolatileVMEM"] else 3
+    requiredNumSgpr = 4 if self.states.archCaps["EnableXnackReplay"] else 3
     with self.allocTmpSgpr(requiredNumSgpr, tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfo:
       tmpS0 = tmpSgprInfo.idx
       tmpS1 = tmpS0+1
@@ -13684,7 +13684,7 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SAddU32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
               module.add(SAddCU32(dst=sgpr(tmpS1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
               sgprSrdTmp = tmpS0
-              if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+              if self.states.archCaps["EnableXnackReplay"]:
                 # wgMT1 (= tmpS0+2) holds wg1*MT1, used as coord only at i == Index1.
                 # Index1 is always 0 or 1 (inner free dimension of C), so by i == 2
                 # wgMT1 is dead. Reuse [wgMT1, wgMT1+1] as the xnack-safe load dst
