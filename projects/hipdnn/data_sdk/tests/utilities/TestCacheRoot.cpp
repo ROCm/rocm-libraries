@@ -12,6 +12,7 @@
 
 #if defined(__linux__)
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 using namespace hipdnn_data_sdk::utilities;
@@ -83,6 +84,16 @@ TEST_F(TestCacheRoot, CustomWritableDirIsUsedAndCreated)
 #if defined(__linux__)
 TEST_F(TestCacheRoot, UnwritableLocationDegradesInsteadOfThrowing)
 {
+    // Root bypasses directory permission bits, so an unwritable directory is still
+    // writable and cacheRoot() correctly returns a usable path. CI containers run as
+    // root; skipping there is honest, where asserting would pin behaviour that only
+    // holds for unprivileged users.
+    if(::geteuid() == 0)
+    {
+        GTEST_SKIP() << "runs as root, which ignores the directory permissions this case "
+                        "depends on";
+    }
+
     const auto parentDir = makeUniqueTempDir();
     _cleanupPath = parentDir;
     std::filesystem::remove_all(parentDir);
