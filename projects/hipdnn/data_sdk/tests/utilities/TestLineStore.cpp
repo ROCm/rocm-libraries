@@ -202,6 +202,18 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
               .count();
     const std::string startInstantArg = std::to_string(startInstant);
 
+    // The helper ships beside this binary, so resolve it from this process's own
+    // location rather than from a path baked at configure time: CI installs the test
+    // binaries and runs them from the install prefix, where the build tree no longer
+    // exists and execl() would fail with 127.
+    std::error_code exeError;
+    const auto selfPath = std::filesystem::read_symlink("/proc/self/exe", exeError);
+    ASSERT_FALSE(exeError) << "could not resolve this test binary's own path";
+    const auto helperPath = selfPath.parent_path() / HIPDNN_LINESTORE_LOCK_HELPER_NAME;
+    ASSERT_TRUE(std::filesystem::exists(helperPath))
+        << "LineStoreLockHelper is not beside the test binary: " << helperPath;
+    const std::string helper = helperPath.string();
+
     std::array<pid_t, 2> pids{};
     for(auto& pid : pids)
     {
@@ -209,8 +221,8 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
         ASSERT_NE(pid, -1) << "fork() failed";
         if(pid == 0)
         {
-            execl(HIPDNN_LINESTORE_LOCK_HELPER_PATH,
-                  HIPDNN_LINESTORE_LOCK_HELPER_PATH,
+            execl(helper.c_str(),
+                  helper.c_str(),
                   _shardPath.c_str(),
                   "v1",
                   "shared-key",
