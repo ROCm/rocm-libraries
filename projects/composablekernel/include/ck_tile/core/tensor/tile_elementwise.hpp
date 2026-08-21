@@ -286,6 +286,41 @@ CK_TILE_DEVICE auto cast_tile_pk_fp16bf16_fp32(const InTensor& in_dstr_tensors)
     return out_dstr_tensor;
 }
 
+// f32 -> bf16/fp16, converting and storing a pair at a time.
+//
+// The element-wise cast this replaces costs two instructions per element: the
+// scalar conversion lowers to a v_cvt_pk_*_f32 that fills only its low half,
+// and a v_mov_b16 then places that half into .l / .h of the destination dword.
+// Converting the pair as a vector and storing it as a dword uses the same
+// conversion instruction at full width and needs no placement move.
+//
+// cast_tile_pk_fp16bf16_fp32 above does convert in pairs, but then writes the
+// halves back through .at(), which puts the placement moves right back -- it
+// generates identical code to the element-wise path. Writing through
+// set_as<f16x2_t> is the part that matters.
+template <typename OutDataType, typename InTensor>
+CK_TILE_DEVICE auto cast_tile_pk_f32_to_16bit(const InTensor& in_dstr_tensors)
+{
+    constexpr auto in_tile_dstr = InTensor::get_tile_distribution();
+
+    constexpr index_t thread_buffer_size = InTensor::get_thread_buffer_size();
+    static_assert(thread_buffer_size % 2 == 0);
+
+    auto out_dstr_tensor = make_static_distributed_tensor<OutDataType>(in_tile_dstr);
+
+    using f16x2_t = std::conditional_t<std::is_same_v<OutDataType, fp16_t>, fp16x2_t, bf16x2_t>;
+
+    static_for<0, thread_buffer_size / 2, 1>{}([&](auto i) {
+        const fp32x2_t in_pair{in_dstr_tensors.get_thread_buffer()[number<2 * i + 0>{}],
+                               in_dstr_tensors.get_thread_buffer()[number<2 * i + 1>{}]};
+
+        out_dstr_tensor.get_thread_buffer().template set_as<f16x2_t>(
+            i, __builtin_convertvector(in_pair, f16x2_t));
+    });
+
+    return out_dstr_tensor;
+}
+
 #if CK_TILE_USE_SUBDWORD_TILE_CAST
 // this function assume either src or dst (or both) date type is under 1 dword
 // we pack subdword value into 1 dword to avoid compiler's default subdword behavior(which is buggy)
@@ -369,6 +404,12 @@ CK_TILE_DEVICE auto cast_tile(const SrcTensor& src_tensor)
                       std::is_same_v<typename SrcTensor::DataType, float> &&
                       (SrcTensor::get_thread_buffer_size() % 2 == 0))
         return impl::cast_tile_pk_fp16bf16_fp32<DstType, SrcTensor>(src_tensor);
+#endif
+#if CK_TILE_USE_PK_F32_TO_16BIT_TILE_CAST
+    else if constexpr((std::is_same_v<DstType, bf16_t> || std::is_same_v<DstType, fp16_t>) &&
+                      std::is_same_v<typename SrcTensor::DataType, float> &&
+                      (SrcTensor::get_thread_buffer_size() % 2 == 0))
+        return impl::cast_tile_pk_f32_to_16bit<DstType, SrcTensor>(src_tensor);
 #endif
 #if CK_TILE_USE_SUBDWORD_TILE_CAST
     else if constexpr(sizeof(DstType) < 4 || sizeof(typename SrcTensor::DataType) < 4)
