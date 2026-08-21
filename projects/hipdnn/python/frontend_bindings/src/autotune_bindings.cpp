@@ -38,6 +38,14 @@ void autotuneBindings(nb::module_& m)
         .value("ABORT_ON_PRIMING_FAILURE", PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE)
         .value("BENCHMARK_UNPRIMED", PrimingFailurePolicy::BENCHMARK_UNPRIMED);
 
+    // Bind AutotuneCacheWriteOutcome enum
+    nb::enum_<AutotuneCacheWriteOutcome>(m, "AutotuneCacheWriteOutcome")
+        .value("NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE",
+               AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE)
+        .value("WRITTEN", AutotuneCacheWriteOutcome::WRITTEN)
+        .value("DECLINED_DISABLED", AutotuneCacheWriteOutcome::DECLINED_DISABLED)
+        .value("DECLINED_UNKEYABLE", AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE);
+
     // Bind the concrete knob constraints. The C++ ConstraintKind discriminator exists
     // so -fno-rtti callers can downcast; Python gets the concrete type instead and
     // discriminates with isinstance(). Instances are copies, so they outlive their Knob.
