@@ -18,6 +18,7 @@ from pathlib import Path
 
 # Diagnostic source label for an active Python rocm-sdk-core installation.
 _PYTHON_SDK_SOURCE = "active Python rocm_sdk_core"
+_THEROCK_CI_SOURCE = "TheRock CI build"
 
 # Temporary compatibility gates. Keep the implementation below intact so the
 # version and Python-SDK paths can be re-enabled once TheRock provides them.
@@ -43,6 +44,11 @@ class PythonRocm(ValidatedRocm):
     source: str = _PYTHON_SDK_SOURCE
 
 
+@dataclass(frozen=True)
+class TheRockCIRocm(ValidatedRocm):
+    source: str = _THEROCK_CI_SOURCE
+
+
 class SystemRocm(ValidatedRocm):
     pass
 
@@ -66,6 +72,11 @@ def validate_distribution(
         if _ENABLE_ROCM_VERSION_VALIDATION
         else "BYPASS"
     )
+    therock_ci_version = _therock_ci_version()
+    if therock_ci_version is not None:
+        return _validate_therock_ci(
+            distribution, distribution_version, expected, therock_ci_version
+        )
     if _ENABLE_PYTHON_ROCM_RUNTIME:
         python_sdk_version = _python_sdk_version()
         if python_sdk_version is not None:
@@ -148,6 +159,61 @@ def _rocm_base_version(value: str) -> str:
     if match is None:
         raise TensileLiteRuntimeError(f"Invalid ROCm release value: {value!r}")
     return match.group(1)
+
+
+# ---------------------------------------------------------------------------
+# TheRock CI adapter
+# ---------------------------------------------------------------------------
+
+def _therock_ci_version() -> str | None:
+    """Return the command-scoped TheRock package identity, when selected."""
+    if "THEROCK_PACKAGE_VERSION" not in os.environ:
+        return None
+    value = os.environ["THEROCK_PACKAGE_VERSION"]
+    if not value or value == "git":
+        raise TensileLiteRuntimeError(
+            "TheRock CI requires a release THEROCK_PACKAGE_VERSION."
+        )
+    return value
+
+
+def _therock_ci_executable_search_paths() -> tuple[Path, ...]:
+    """Return TheRock's graph-prepared executable search locations."""
+    raw_path = os.environ.get("PATH", "")
+    paths = tuple(
+        dict.fromkeys(Path(item).resolve() for item in raw_path.split(os.pathsep) if item)
+    )
+    if not paths:
+        raise TensileLiteRuntimeError(
+            "TheRock CI provided no executable search paths."
+        )
+    return paths
+
+
+def _validate_therock_ci(
+    distribution: str,
+    distribution_version: str | None,
+    expected: str,
+    therock_package_version: str,
+) -> TheRockCIRocm:
+    """Validate a wheel against TheRock's graph-owned build identity."""
+    version = _canonical_rocm_version(therock_package_version)
+    executable_search_paths = _therock_ci_executable_search_paths()
+    selected_path = executable_search_paths[0]
+    if expected != "BYPASS":
+        _validate_compatibility(
+            distribution=distribution,
+            distribution_version=distribution_version,
+            expected_version=expected,
+            actual_version=version,
+            path=selected_path,
+            source=_THEROCK_CI_SOURCE,
+        )
+    return TheRockCIRocm(
+        path=selected_path,
+        version=version,
+        executable_search_paths=executable_search_paths,
+    )
 
 
 # ---------------------------------------------------------------------------
