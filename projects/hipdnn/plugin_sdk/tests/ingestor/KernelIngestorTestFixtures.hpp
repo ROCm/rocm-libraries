@@ -445,9 +445,9 @@ public:
 
 constexpr const char* NAN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.nan_score";
 
-/// Scores the largest block size NaN and everything else by block size, so a ranking
-/// that mishandles NaN misorders the *finite* kernels too -- the failure this models is
-/// one pack poisoning the order for the rest, not merely losing its own place.
+/// Scores the largest block size NaN and everything else by block size, modeling one
+/// pack poisoning the whole ranking: a comparator that mishandles NaN misorders the
+/// finite kernels too, not just the NaN-scored one.
 inline double scoreNanForLargestBlock(const MatchContext& /*context*/,
                                       const BoundTokens& /*bound*/,
                                       const KernelDefinition& kernel)
@@ -628,9 +628,8 @@ inline std::unique_ptr<StateManager>
 }
 
 /// The same engine as makeStateManager(), but carrying @p engineName so its on-disk
-/// winner-cache shard resolves. makeStateManager() deliberately leaves the name empty,
-/// which disables the disk cache -- every test that does not opt in stays in-memory and
-/// touches no filesystem.
+/// winner-cache shard resolves. makeStateManager() leaves the name empty, which
+/// disables the disk cache, so every test that does not opt in stays in-memory only.
 inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
 {
     std::vector<MatchDescriptor> matchers{

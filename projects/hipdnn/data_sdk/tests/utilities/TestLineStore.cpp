@@ -34,9 +34,6 @@ std::filesystem::path makeUniqueShardPath()
     return std::filesystem::temp_directory_path() / ("hipdnn_test_linestore_" + unique + ".txt");
 }
 
-// A minimal parse callback: rejects any line beginning with "BAD", otherwise returns the
-// line verbatim. Used to exercise the skip-malformed-line contract without depending on
-// any real record format (LineStore itself is format-agnostic).
 std::optional<std::string> parseLine(std::string_view line)
 {
     if(line.rfind("BAD", 0) == 0)
@@ -95,8 +92,6 @@ TEST_F(TestLineStore, MalformedLineIsSkippedNotFatal)
     EXPECT_EQ(appendLine(*shard, "good2"), LineStoreStatus::OK);
     unlockLineStore(*shard);
 
-    // The malformed line is skipped -- it is neither returned nor does it stop later
-    // lines from being read, and the call as a whole still reports success.
     const auto [records, readStatus] = readAllLines(*shard, parseLine);
     EXPECT_EQ(readStatus, LineStoreStatus::OK);
     ASSERT_EQ(records.size(), 2u);
@@ -120,14 +115,9 @@ TEST_F(TestLineStore, VersionMismatchOnReadIsADeclineNotAThrow)
 
 TEST_F(TestLineStore, MultipleThreadsInOneProcessAppendWithoutCorruption)
 {
-    // NOTE: this exercises only the in-process append path, not the lock's actual
-    // contention behavior. POSIX fcntl() record locks are scoped per PROCESS, not per
-    // thread/file-descriptor-open -- two threads in the same process holding "the lock"
-    // never contend on the underlying primitive the way two processes do. What this test
-    // does prove: appendLine()/lockLineStore()/unlockLineStore() are safe to call
-    // concurrently from multiple threads against one shard with no torn or lost lines.
-    // The two-PROCESS case below (TwoProcessesAppendingConcurrentlyProducesNoTornLines) is
-    // the one that actually exercises fcntl() contention.
+    // Only tests in-process append safety: POSIX fcntl() record locks are per-process, so
+    // threads in one process never contend on the lock the way two processes do (see
+    // TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce below).
     {
         auto [shard, openStatus] = openLineStore(_shardPath, "v1");
         ASSERT_EQ(openStatus, LineStoreStatus::OK);
@@ -170,10 +160,8 @@ TEST_F(TestLineStore, MultipleThreadsInOneProcessAppendWithoutCorruption)
     }
 }
 
-/// A shard whose path cannot be opened declines rather than throwing or yielding a
-/// half-open handle. A directory is the portable way to name something that exists and
-/// is not an openable file; the root-ignores-permissions problem makes chmod unreliable
-/// in a container.
+/// Uses a directory as the unopenable path: chmod-based permission tricks are unreliable
+/// when running as root.
 TEST_F(TestLineStore, AnUnopenablePathDeclines)
 {
     const auto directoryPath = _shardPath.parent_path() / "not-a-file";
@@ -185,22 +173,19 @@ TEST_F(TestLineStore, AnUnopenablePathDeclines)
     EXPECT_EQ(status, LineStoreStatus::OPEN_FAILED);
 }
 
-/// unlockLineStore on a shard that never took the lock is a no-op, not a double release.
-/// The write-back path calls it on early-return branches where the lock may not be held.
+/// Not a double release: the write-back path calls unlockLineStore() on early-return
+/// branches where the lock may not be held.
 TEST_F(TestLineStore, UnlockingAnUnlockedShardIsANoOp)
 {
     auto [shard, status] = openLineStore(_shardPath, "v1");
     ASSERT_EQ(status, LineStoreStatus::OK);
 
     EXPECT_NO_THROW(unlockLineStore(*shard));
-    // Still usable afterwards: the no-op did not invalidate the handle.
     EXPECT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
     EXPECT_NO_THROW(unlockLineStore(*shard));
 }
 
-/// A shard destroyed while it still holds the lock releases it. Without this the lock
-/// would outlive its owner and the next process would block forever on a shard whose
-/// holder had already exited normally.
+/// Otherwise the next opener would block forever on a lock whose holder already exited.
 TEST_F(TestLineStore, DestroyingALockedShardReleasesTheLock)
 {
     {
@@ -208,7 +193,6 @@ TEST_F(TestLineStore, DestroyingALockedShardReleasesTheLock)
         ASSERT_EQ(status, LineStoreStatus::OK);
         ASSERT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
         EXPECT_EQ(appendLine(*shard, "written-under-a-lock-never-released"), LineStoreStatus::OK);
-        // No unlockLineStore(): the destructor is what must release it.
     }
 
     auto [shard, status] = openLineStore(_shardPath, "v1");
@@ -218,12 +202,8 @@ TEST_F(TestLineStore, DestroyingALockedShardReleasesTheLock)
     unlockLineStore(*shard);
 }
 
-/// Move assignment closes the handle the target already held rather than leaking it, and
-/// leaves the source safe to destroy.
 TEST_F(TestLineStore, MoveAssignmentTakesOverTheHandleAndClosesTheOldOne)
 {
-    // Its own file, removed first: the fixture directory is reused across cases in this
-    // suite, and a shard left by an earlier one would make this read see extra lines.
     const auto otherPath = _shardPath.parent_path() / "move-assignment-target.jsonl";
     std::filesystem::remove(otherPath);
 
@@ -237,7 +217,6 @@ TEST_F(TestLineStore, MoveAssignmentTakesOverTheHandleAndClosesTheOldOne)
 
     *first = std::move(*second);
 
-    // Reads now come from the moved-in shard, so the target's own handle was replaced.
     const auto [records, readStatus] = readAllLines(*first, parseLine);
     ASSERT_EQ(readStatus, LineStoreStatus::OK);
     ASSERT_EQ(records.size(), 1U);
@@ -247,17 +226,9 @@ TEST_F(TestLineStore, MoveAssignmentTakesOverTheHandleAndClosesTheOldOne)
 #if defined(__linux__)
 TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
 {
-    // The only case in this suite that exercises the lock's real job. It is NOT about torn
-    // lines: the shard is opened O_APPEND, so a single write() is already atomic and an
-    // append-only test passes with the lock removed entirely (verified by mutating
-    // acquireLineStoreLock() to a no-op). What the lock actually protects is D3's
-    // concurrent-miss race -- the read-then-decide-then-append sequence. Two processes can
-    // both read a key as absent and both append it, leaving a duplicate.
-    //
-    // Both sides are spawned helpers rather than parent-plus-child: a forked parent begins
-    // its loop immediately while the child still pays execl() startup, so the two barely
-    // overlap and the race is missed. Two helpers started back to back overlap for
-    // essentially their whole run.
+    // Exercises the concurrent-miss race the lock protects (see LineStoreLockHelper.cpp).
+    // Uses spawned helpers rather than fork-plus-parent, since a forked parent starts
+    // looping before the child finishes paying execl() startup and the two barely overlap.
     {
         auto [shard, openStatus] = openLineStore(_shardPath, "v1");
         ASSERT_EQ(openStatus, LineStoreStatus::OK);
@@ -266,9 +237,8 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
     constexpr int APPENDS_PER_PROCESS = 40;
     constexpr const char* APPENDS_PER_PROCESS_ARG = "40";
 
-    // Both helpers spin until this instant before touching the shard, so neither is
-    // still paying execl() startup while the other is already looping. Without the
-    // barrier the overlap is partial and a no-op lock escapes detection on some runs.
+    // Both helpers spin until this instant before touching the shard; without a shared
+    // start, one helper's execl() lag lets a broken lock go undetected.
     const auto startInstant
         = std::chrono::duration_cast<std::chrono::microseconds>(
               (std::chrono::system_clock::now() + std::chrono::milliseconds(300))
@@ -276,10 +246,8 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
               .count();
     const std::string startInstantArg = std::to_string(startInstant);
 
-    // The helper ships beside this binary, so resolve it from this process's own
-    // location rather than from a path baked at configure time: CI installs the test
-    // binaries and runs them from the install prefix, where the build tree no longer
-    // exists and execl() would fail with 127.
+    // Resolve the helper beside this binary (see CMakeLists.txt for why only the filename
+    // is baked in).
     std::error_code exeError;
     const auto selfPath = std::filesystem::read_symlink("/proc/self/exe", exeError);
     ASSERT_FALSE(exeError) << "could not resolve this test binary's own path";
@@ -320,8 +288,6 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
     const auto [records, readStatus] = readAllLines(*shard, parseLine);
     ASSERT_EQ(readStatus, LineStoreStatus::OK);
 
-    // Each key exactly once. A duplicate means both processes observed it as absent
-    // inside the same unserialized read-modify-write window.
     std::map<std::string, int> counts;
     for(const auto& record : records)
     {

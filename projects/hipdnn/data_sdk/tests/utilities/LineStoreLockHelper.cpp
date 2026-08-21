@@ -1,24 +1,20 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Standalone helper process for TestLineStore's two-process lock contention case.
+// Standalone helper for TestLineStore's two-process lock contention case.
 //
-// Invoked as: LineStoreLockHelper <shard-path> <version> <line> <repeat-count> <start-epoch-us>
+// Usage: LineStoreLockHelper <shard-path> <version> <line> <repeat-count> <start-epoch-us>
+// Opens/creates the shard, then <repeat-count> times acquires its lock, appends <line>
+// suffixed with the iteration number, and releases the lock.
 //
-// Opens the shard at <shard-path> (creating it with <version> as its first line if it
-// does not exist), then <repeat-count> times acquires the shard's advisory lock, appends
-// <line> suffixed with the iteration number, and releases the lock.
+// The repeat loop is what makes this a real contention test: a single append is one
+// write() and lands atomically even with no lock held, but many interleaved
+// lock/append/unlock cycles from two processes do not survive a missing lock. A
+// single-process, multi-thread version cannot substitute for this: POSIX fcntl() record
+// locks are per-process, so only a real second OS process exercises contention.
 //
-// The repeat loop is what makes this a real contention test. A single append of a short
-// line is one write() and lands atomically whether or not the lock is held, so a
-// one-append-per-process version passes even with the lock removed entirely (verified by
-// mutation). Many interleaved lock/append/unlock cycles from two processes do not. This is the only way this plan exercises the file lock's actual contention
-// path -- two threads in one process never contend on a POSIX fcntl() record lock, since
-// those locks are per-process, so a real second OS process is required.
-//
-// Exit codes: 0 on success; 1 for a usage error; 2-4 mirror LineStore's own failure modes
-// (open/lock/append) so the parent test can distinguish "helper never got the lock" from
-// "helper's write itself failed."
+// Exit codes: 0 on success; 1 for a usage error; 2-4 mirror LineStore's own failure modes,
+// letting the parent test distinguish "never got the lock" from "write itself failed."
 
 #include <algorithm>
 #include <chrono>
@@ -68,11 +64,10 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    // D3's concurrent-miss race, which is what the lock actually protects: read the
-    // shard under the lock, append only if this key is still absent, release. The append
-    // itself is already torn-line-safe via O_APPEND -- what is NOT safe without the lock
-    // is the read-then-decide-then-write sequence, where two processes can both observe
-    // "absent" and both append, leaving a duplicate.
+    // The concurrent-miss race this lock protects against: read the shard under the
+    // lock, append only if the key is still absent, release. The append is already
+    // torn-line-safe via O_APPEND; what needs the lock is the read-then-decide-then-write
+    // sequence, where two processes could both observe "absent" and both append.
     const auto parseLine
         = [](std::string_view raw) -> std::optional<std::string> { return std::string(raw); };
 
@@ -96,10 +91,8 @@ int main(int argc, char** argv)
 
         const bool present = std::find(records.begin(), records.end(), key) != records.end();
 
-        // Widen the read-modify-write window deliberately. A real caller spends time here
-        // parsing and comparing records; without a pause the window is a few microseconds
-        // and two processes essentially never interleave inside it, which would make this
-        // test pass whether or not the lock works.
+        // Widen the read-modify-write window: without a pause here, two processes rarely
+        // interleave inside it and the test would pass even with a broken lock.
         std::this_thread::sleep_for(std::chrono::microseconds(200));
         LineStoreStatus appendStatus = LineStoreStatus::OK;
         if(!present)

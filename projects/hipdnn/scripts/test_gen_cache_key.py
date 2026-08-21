@@ -229,14 +229,14 @@ class TestUidCanonicalization(unittest.TestCase):
             Emitter(broken, f"{NS}.Root")
 
     def test_an_unresolved_uid_folds_the_original_value_not_a_shared_sentinel(self):
-        # Finding I5: two dangling references only fold alike if they carry the same
-        # uid -- the miss path returns the caller's value, never a shared constant.
+        # A dangling reference folds the caller's uid itself, never a shared sentinel,
+        # so two dangling references only alias when they carry the same uid.
         header = self.emit([field("x_tensor_uid", "Long", 0, uid=True)])
         self.assertIn("return Fold{false, uid};", header)
 
     def test_a_resolved_uid_still_folds_to_exactly_its_ordinal(self):
-        # Fixing the dangling-uid alias must not perturb the renumbering-invariance
-        # the whole scheme exists for.
+        # A resolved reference must still fold to its ordinal, the invariant
+        # renumbering-equivalence depends on.
         header = self.emit([field("x_tensor_uid", "Long", 0, uid=True)])
         self.assertIn("return Fold{true, static_cast<int64_t>(index)};", header)
 
@@ -250,7 +250,7 @@ class TestUidCanonicalization(unittest.TestCase):
 
 
 class TestHasherConstants(unittest.TestCase):
-    """B2: the emitted basis/prime must be the canonical FNV-1a-64 constants.
+    """The emitted basis/prime must be the canonical FNV-1a-64 constants.
 
     Pinned in hex against `StringUtil.hpp` so a reviewer can eyeball the digits
     against the spec instead of counting a 20-digit decimal literal.
@@ -272,7 +272,7 @@ class TestHasherConstants(unittest.TestCase):
 
 
 class TestUnhandledBaseType(unittest.TestCase):
-    """I7: a base type the generator has no fold rule for must fail loudly.
+    """A base type the generator has no fold rule for must fail loudly.
 
     `Array` is the concrete case that motivates this -- its accessor returns a
     pointer, which would silently satisfy `Hasher::raw`'s trivially-copyable check

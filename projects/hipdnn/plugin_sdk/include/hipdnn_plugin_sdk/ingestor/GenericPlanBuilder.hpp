@@ -180,9 +180,9 @@ public:
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
 
-        // Check 2 asks the same coverage-and-orderability question as Check 1, but of
-        // the knob-filtered candidates; the two are independent, so Check 1 can fail
-        // while Check 2 passes.
+        // Coverage and orderability are checked against the knob-filtered candidates
+        // here, independent of the same check against the full catalog in
+        // sortedCatalog(): one can fail while the other passes.
         const WinnerKey winnerKey{
             hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
             DeviceKey{context.deviceProperties}};

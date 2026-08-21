@@ -22,12 +22,11 @@
 namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing
 {
 
-/// A finalized graph's stable identity, preserved across serialization round trips.
 using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
 /// A graph fake carrying real content, for tests proving `GraphContentKey` discriminates
-/// on it; `TestGraph` is content-empty by construction (D12). Every field the key
-/// compares is independently settable through `Spec`.
+/// on it; `TestGraph` is content-empty by construction. Every field the key compares
+/// is independently settable through `Spec`.
 class ContentCarryingTestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
@@ -38,7 +37,6 @@ public:
             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         std::vector<int64_t> dims{4, 8};
         std::vector<int64_t> strides{8, 1};
-        /// A nullable tensor reference.
         std::optional<int64_t> raggedOffsetTensorUid = std::nullopt;
     };
     struct NodeSpec
@@ -46,17 +44,14 @@ public:
         std::string name = "pointwise";
         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
-        /// Two independently variable attribute fields, so a test can discriminate
-        /// inside the union payload rather than only on its discriminant.
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation
             = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD;
         int64_t in0TensorUid = 1;
         int64_t out0TensorUid = 2;
-        /// Optional second operand, for moving one tensor between operand slots.
         std::optional<int64_t> in1TensorUid = std::nullopt;
     };
 
-    /// Defaults describe one valid two-tensor, one-node graph.
+    /// Describes one valid two-tensor, one-node graph by default.
     struct Spec
     {
         std::optional<GraphId> graphId;
@@ -69,16 +64,15 @@ public:
             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         std::optional<int64_t> preferredEngineId;
         bool isOverrideShapeEnabled = false;
-        /// The backend derives this from isOverrideShapeEnabled and three tensor facts
-        /// (PluginVersionConstants.hpp:58-93); the fixture must be able to set it to
-        /// reproduce what production does.
+        /// Derived from isOverrideShapeEnabled and tensor facts in production
+        /// (PluginVersionConstants.hpp:58-93); settable here to reproduce that.
         std::optional<hipdnn_data_sdk::utilities::Version> minRequiredApiVersion;
         std::vector<TensorSpec> tensors{TensorSpec{1}, TensorSpec{2}};
         std::vector<NodeSpec> nodes{NodeSpec{}};
     };
 
-    /// Two constructors rather than a `Spec{}` default argument: a default argument is
-    /// not a complete-class context and cannot see `Spec`'s member initializers.
+    /// Two constructors, not a `Spec{}` default argument: a default argument is not a
+    /// complete-class context and cannot see `Spec`'s member initializers.
     ContentCarryingTestGraph()
         : ContentCarryingTestGraph(Spec{})
     {
@@ -248,8 +242,8 @@ private:
 };
 
 /// A content-empty graph double: a valid, keyable graph carrying no tensors or nodes.
-/// Mirrors `hipdnn_plugin_sdk::ingestor::testing::TestGraph`, minus its layer-3
-/// dependency on `GraphId`/`toEngineApiVersion` plumbing this fixture does not need.
+/// A separate fixture from `hipdnn_plugin_sdk::ingestor::testing::TestGraph` so this
+/// file needs no dependency on its `GraphId`/`toEngineApiVersion` plumbing.
 class EmptyTestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:

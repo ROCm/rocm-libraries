@@ -25,16 +25,14 @@ TEST_F(TestPathSanitizer, ScopedEngineNameStaysHumanReadable)
 {
     const auto result = sanitizeForPath("hipkernel:Pointwise");
 
-    // The sanitized stem portion is still recognizable, even with the colon replaced and
-    // the hash suffix appended.
     EXPECT_NE(result.find("hipkernel"), std::string::npos);
     EXPECT_NE(result.find("Pointwise"), std::string::npos);
 }
 
 TEST_F(TestPathSanitizer, ResultAlwaysCarriesTheUnconditionalHashSuffix)
 {
-    // The suffix is unconditional -- present on every result, not only when a collision is
-    // detected (there is no collision-detection registry to detect one).
+    // Unconditional: present on every result, not only when a collision is detected --
+    // there is no collision-detection registry to detect one.
     const auto result = sanitizeForPath("plain_name");
 
     const auto dashPos = result.rfind('-');
@@ -69,9 +67,8 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_F(TestPathSanitizer, InjectivityAcrossDistinctInputs)
 {
-    // Includes pairs that would collide under a naive, non-suffixed sanitization scheme
-    // (a colon replaced by '_' makes "a:b" and "a_b" collide without the hash suffix; two
-    // differently-cased reserved names collide once both are altered the same way).
+    // Includes pairs that would collide without the hash suffix under a naive
+    // non-suffixed scheme (e.g. "a:b" and "a_b" both sanitize to "a_b").
     const std::vector<std::string> inputs = {
         "a:b",
         "a_b",
@@ -109,8 +106,8 @@ TEST_F(TestPathSanitizer, LongInputIsCapped)
 
     const auto result = sanitizeForPath(longInput);
 
-    // The stem is capped well under a typical 255-byte filesystem component limit, even
-    // after the "-<16 hex digits>" suffix is appended.
+    // Capped well under a typical 255-byte filesystem component limit, even with the
+    // "-<16 hex digits>" suffix appended.
     EXPECT_LT(result.size(), 255u);
 }
 
@@ -127,9 +124,8 @@ TEST_F(TestPathSanitizer, LeadingAndTrailingDotsAreStripped)
 
 TEST_F(TestPathSanitizer, DifferentInputsSharingASanitizedStemStillDiffer)
 {
-    // "a:b" and "a/b" both sanitize their illegal character to '_', producing the same
-    // stem ("a_b") -- the hash suffix, computed over the untouched raw input, is what
-    // keeps the two final results distinct.
+    // "a:b" and "a/b" both sanitize to the same stem ("a_b"); the hash suffix over the
+    // raw input keeps the results distinct.
     const auto resultColon = sanitizeForPath("a:b");
     const auto resultSlash = sanitizeForPath("a/b");
 

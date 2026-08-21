@@ -59,18 +59,10 @@ inline void unsetEnv(const char* var)
     SetEnvironmentVariableA(var, nullptr);
 }
 
-/// Expands a **leading** `~` or a **leading** `%USERPROFILE%` in @p path to the current
-/// user's home directory, and returns everything else untouched.
-///
-/// hipDNN's own contract, not a general environment-variable expansion:
-///  - Only a `~` or `%USERPROFILE%` at the very start of @p path is eligible. Either
-///    token appearing anywhere else in the string is left exactly as written -- it is
-///    never treated as a home-directory reference.
-///  - `~user` (a leading `~` immediately followed by a username, not a path separator or
-///    end of string) is not expanded; only a bare leading `~` alone or followed by a path
-///    separator qualifies.
-///  - If `USERPROFILE` is unset or empty, @p path is returned unchanged -- this function
-///    never substitutes a temp directory or any other fallback location.
+/// Expands a **leading** `~` or **leading** `%USERPROFILE%` in @p path to the current
+/// user's home directory; see PlatformUtils.linux.hpp's expandUser() for the full
+/// leading-token/fallback contract, which applies here with `%USERPROFILE%` (matched
+/// case-insensitively) accepted alongside `~`.
 ///
 /// @param path The path string to expand, e.g. as read from a config value or env var.
 /// @return @p path with a qualifying leading `~` or `%USERPROFILE%` replaced by
@@ -78,14 +70,11 @@ inline void unsetEnv(const char* var)
 ///     `USERPROFILE` is unset/empty. Never throws.
 inline std::string expandUser(const std::string& path)
 {
-    // A leading '~' qualifies only alone or followed by a path separator ('/' or '\\');
-    // '~user' is left untouched.
+    // A leading '~' qualifies only alone or followed by a path separator.
     const bool hasLeadingTilde = !path.empty() && path.front() == '~'
                                  && (path.size() == 1 || path[1] == '/' || path[1] == '\\');
 
-    // "%USERPROFILE%" is matched as a literal leading token, case-insensitively (Windows
-    // environment variable references are case-insensitive), followed by nothing, or by a
-    // path separator.
+    // "%USERPROFILE%" matched as a literal leading token, case-insensitively.
     static const std::string kUserProfileToken = "%userprofile%";
     const std::string lowerPath = toLower(path);
     const bool hasLeadingToken
