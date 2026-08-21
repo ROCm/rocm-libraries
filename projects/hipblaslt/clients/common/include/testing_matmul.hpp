@@ -673,34 +673,43 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
     return {real_compute_input_typeA, real_compute_input_typeB};
 }
 
-std::pair<std::vector<double>, std::vector<double>>
-    matmulValidationTolerances(const Arguments&            arg,
-                               std::span<const int64_t>     reductionLengths,
-                               hipDataType                  inputTypeA,
-                               hipDataType                  inputTypeB,
-                               hipDataType                  computeType)
+std::vector<hipblaslt::host_validation::MatmulValidationCase::PointwiseTolerance>
+    matmulValidationTolerances(const Arguments&         arg,
+                               std::span<const int64_t> reductionLengths,
+                               hipDataType              inputTypeA,
+                               hipDataType              inputTypeB,
+                               hipDataType              outputType,
+                               hipDataType              computeType)
 {
-    std::vector<double> absolute(reductionLengths.size());
-    std::vector<double> symmetricRelative(reductionLengths.size());
+    using PointwiseTolerance = hipblaslt::host_validation::MatmulValidationCase::PointwiseTolerance;
+    std::vector<PointwiseTolerance> tolerances(reductionLengths.size());
+    const bool                      bfloat16Output = outputType == HIP_R_16BF;
 
     if(arg.unit_check && hipblaslt_get_arch_major() == 11 && realDataTypeSize(inputTypeA) == 2
        && realDataTypeSize(inputTypeB) == 2)
     {
         for(size_t i = 0; i < reductionLengths.size(); ++i)
         {
-            symmetricRelative[i]
-                = gfx11_low_precision_accumulation_tolerance_coefficient(
-                    computeType, reductionLengths[i]);
+            tolerances[i].symmetricRelative
+                = gfx11_low_precision_accumulation_tolerance_coefficient(computeType,
+                                                                         reductionLengths[i]);
+            if(bfloat16Output)
+                tolerances[i].symmetricRelative
+                    = std::max(tolerances[i].symmetricRelative,
+                               bfloat16_output_rounding_tolerance_coefficient());
         }
     }
 
     if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe
        || arg.initialization == hipblaslt_initialization::norm_dist_one_special)
     {
-        std::fill(absolute.begin(), absolute.end(), 1e-2);
-        std::fill(symmetricRelative.begin(), symmetricRelative.end(), 0.0);
+        for(auto& tolerance : tolerances)
+        {
+            tolerance          = {};
+            tolerance.absolute = 1e-2;
+        }
     }
-    return {std::move(absolute), std::move(symmetricRelative)};
+    return tolerances;
 }
 
 void testing_matmul_with_bias(const Arguments& arg,
@@ -3509,8 +3518,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     };
 
     auto makeValidationCases
-        = [&](const std::vector<double>& absoluteTolerances,
-              const std::vector<double>& symmetricRelativeTolerances) {
+        = [&](const std::vector<
+                  hipblaslt::host_validation::MatmulValidationCase::PointwiseTolerance>&
+                  pointwiseTolerances) {
               using hipblaslt::host_validation::HostComparisonRequest;
               using hipblaslt::host_validation::MatmulValidationCase;
 
@@ -3538,8 +3548,7 @@ void testing_matmul_with_bias(const Arguments& arg,
               if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
               {
                   MatmulValidationCase testCase;
-                  testCase.absoluteTolerance          = absoluteTolerances.front();
-                  testCase.symmetricRelativeTolerance = symmetricRelativeTolerances.front();
+                  testCase.pointwiseTolerance = pointwiseTolerances.front();
                   testCase.outputs.reserve(num_batches.front());
                   for(int batch = 0; batch < num_batches.front(); ++batch)
                   {
@@ -3560,9 +3569,7 @@ void testing_matmul_with_bias(const Arguments& arg,
               for(int gemmIdx = 0; gemmIdx < gemm_count; ++gemmIdx)
               {
                   MatmulValidationCase testCase;
-                  testCase.absoluteTolerance          = absoluteTolerances[gemmIdx];
-                  testCase.symmetricRelativeTolerance
-                      = symmetricRelativeTolerances[gemmIdx];
+                  testCase.pointwiseTolerance = pointwiseTolerances[gemmIdx];
                   testCase.outputs.push_back(output(M[gemmIdx],
                                                     N[gemmIdx],
                                                     ldd[gemmIdx],
@@ -3624,11 +3631,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     auto validateOutputs
         = [&](hipblaslt::host_validation::MatmulValidationMetrics metrics) {
-              auto [absoluteTolerances, symmetricRelativeTolerances]
-                  = matmulValidationTolerances(arg, K, TiA, TiB, Tc);
+              const auto pointwiseTolerances
+                  = matmulValidationTolerances(arg, K, TiA, TiB, To, Tc);
               readValidationSideOutputs();
-              const auto cases
-                  = makeValidationCases(absoluteTolerances, symmetricRelativeTolerances);
+              const auto cases = makeValidationCases(pointwiseTolerances);
               hipblaslt::host_validation::validateMatmulOutputs(
                   {.options = validationOptions, .cases = cases, .metrics = metrics});
           };
