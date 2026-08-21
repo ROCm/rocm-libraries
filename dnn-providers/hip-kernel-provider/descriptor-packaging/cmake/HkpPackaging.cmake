@@ -16,6 +16,12 @@ set(HKP_PYTHON_ROOT "${HKP_PKG_DIR}/python")
 set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
 set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 
+# The authored hip-form source root the integration suite's packaged artifact is built
+# from. It lives beside the test that consumes it, not in the product tree: it is a test
+# fixture, so it is staged into the build tree and never installed.
+set(HKP_DEMO_SOURCE_ROOT
+    "${HKP_PKG_DIR}/../src/integration_tests/kernel_ingestor_engine/fixtures/packaged")
+
 # The rocm-kpack repo/ref pin and the fetch itself live in RocmKpack.cmake, which
 # is shared with the runtime half of this provider. The packer written by this
 # module and the reader linked into the provider must come from one commit, so
@@ -136,8 +142,98 @@ function(hkp_wire_production source_root arches hipcc kpack_python install_base)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_wire_demo(<source_root> <arches> <hipcc> <kpack_python> <stage_root>)
+#   Wire the same compile -> prune -> pack DAG as hkp_wire_production, then a
+#   second, cheap step that copies the packed tree into the build tree's staged
+#   descriptor directory. Two differences, both deliberate:
+#
+#   * No install() of any kind. The artifact exists so an integration ctest has a
+#     real .kpack to load; it is not shipped surface.
+#   * Missing hipcc warns and skips instead of failing. A release that silently
+#     ships nothing is worse than a failed build, which is why production is
+#     fatal -- but a test fixture must never break a developer's build. The test
+#     GTEST_SKIP()s when the artifact is absent.
+#
+#   The two steps are separate custom commands on purpose. The pack step is
+#   expensive and keyed on the authored sources; the copy step is keyed on a
+#   stamp placed INSIDE stage_root, which hip-kernel-provider/CMakeLists.txt
+#   wipes with file(REMOVE_RECURSE) once per configure. The wipe therefore takes
+#   the stamp with it and the next build re-copies -- a stamp outside stage_root
+#   would leave the tree wiped and the copy skipped, which looks exactly like
+#   "packaging did not run".
+#
+#   The packer's <arch>/ + kpack/ layout is copied through verbatim: `library` on
+#   a packed UKD is relative to the directory of the descriptor that declared it,
+#   so flattening the tree breaks resolution at dispatch time with an error that
+#   points at the loader rather than at this function.
+# ---------------------------------------------------------------------------
+function(hkp_wire_demo source_root arches hipcc kpack_python stage_root)
+    if(NOT arches)
+        message(STATUS
+            "hkp: no GPU_TARGETS/AMDGPU_TARGETS selected; the packaged integration "
+            "fixture is not staged.")
+        return()
+    endif()
+    if(NOT IS_DIRECTORY "${source_root}")
+        message(WARNING
+            "hkp: packaged integration fixture source root not found at ${source_root}; "
+            "the artifact will not be staged.")
+        return()
+    endif()
+    if(NOT stage_root)
+        message(WARNING
+            "hkp: HIPDNN_DESCRIPTOR_BUILD_DIR is not set, so there is nowhere to stage "
+            "the packaged integration fixture; skipping it.")
+        return()
+    endif()
+    if(NOT hipcc)
+        message(WARNING
+            "hkp: hipcc not found (searched hipcc, hipcc.bat, hipcc.bin.exe); the "
+            "packaged integration fixture cannot be compiled and will not be staged. "
+            "IntegrationGpuKernelIngestorKpack will skip. Put the ROCm bin dir on PATH "
+            "to build it.")
+        return()
+    endif()
+
+    set(_out_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-demo-descriptors")
+    set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-demo-intermediate")
+    string(REPLACE ";" "," _arch_csv "${arches}")
+    set(_pack_stamp "${_out_root}.stamp")
+    file(GLOB _source_inputs CONFIGURE_DEPENDS
+         "${source_root}/*.json" "${source_root}/*.cpp")
+    file(GLOB _tool_sources CONFIGURE_DEPENDS "${HKP_PYTHON_ROOT}/hkp_pack/*.py")
+
+    add_custom_command(
+        OUTPUT "${_pack_stamp}"
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_out_root}"
+        COMMAND "${Python3_EXECUTABLE}" "${HKP_TOOL}"
+                --source-root "${source_root}"
+                --out-root "${_out_root}"
+                --arches "${_arch_csv}"
+                --hipcc "${hipcc}"
+                --inter-root "${_inter_root}"
+                --kpack-python-dir "${kpack_python}"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_pack_stamp}"
+        DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
+        COMMENT "hkp: packing the integration fixture for ${arches}"
+        VERBATIM)
+
+    set(_stage_stamp "${stage_root}/.hkp-demo-staged.stamp")
+    add_custom_command(
+        OUTPUT "${_stage_stamp}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_out_root}" "${stage_root}"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_stage_stamp}"
+        DEPENDS "${_pack_stamp}"
+        COMMENT "hkp: staging the packaged integration fixture into ${stage_root}"
+        VERBATIM)
+
+    add_custom_target(hkp_demo_packaging ALL DEPENDS "${_stage_stamp}"
+                      COMMENT "hkp: packaged integration fixture")
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
-#   Two independent gates. The production pack+install wires only when
+#   Three independent gates. The production pack+install wires only when
 #   HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT names an existing authored source
 #   folder (empty default = dormant; set-but-missing = fatal). The tests are
 #   wired regardless: they drive the fixture slice directly, never the
@@ -177,6 +273,15 @@ for a release build.")
         message(STATUS
             "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT empty; production "
             "packaging dormant (tests still run against the fixtures).")
+    endif()
+
+    # The integration suite's packaged artifact, staged into the build tree rather than
+    # installed. Gated on the ingestor and nothing else: HIPDNN_DESCRIPTOR_BUILD_DIR is
+    # only defined under that gate, and a build with the ingestor on but the tests off
+    # still wants the staging rule to be exercised rather than silently absent.
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_wire_demo("${HKP_DEMO_SOURCE_ROOT}" "${_arches}" "${HKP_HIPCC}"
+                      "${_kpack_python}" "${HIPDNN_DESCRIPTOR_BUILD_DIR}")
     endif()
 
     hkp_register_tests("${_kpack_python}" "${HKP_HIPCC}")
