@@ -17,6 +17,24 @@ bool isSupportedMov(const StinkyInstruction& inst) {
     return uop == GFX::v_mov_b32 || uop == GFX::s_mov_b32;
 }
 
+bool hasRegisterSourceModifier(const StinkyRegister& reg) {
+    return reg.isRegister() && (reg.reg.isMinus || reg.reg.isAbs);
+}
+
+bool hasVop3SourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
+    const VOP3Modifiers* vop3 = inst.getModifier<VOP3Modifiers>();
+    if (!vop3 || srcIdx > 2) return false;
+    switch (srcIdx) {  // NOLINT(bugprone-switch-missing-default-case)
+        case 0:
+            return vop3->neg_src0 || vop3->abs_src0;
+        case 1:
+            return vop3->neg_src1 || vop3->abs_src1;
+        case 2:
+            return vop3->neg_src2 || vop3->abs_src2;
+    }
+    return false;
+}
+
 bool isSafeMovDstReg(const StinkyRegister& reg) {
     if (!reg.isRegister()) return false;
     switch (reg.reg.type) {
@@ -40,6 +58,8 @@ bool isEligibleMov(const StinkyInstruction& inst) {
     const StinkyRegister& dst = inst.getDestReg(0);
     const StinkyRegister& src = inst.getSrcReg(0);
     if (!dst.isRegister() || !src.isRegister()) return false;
+    // Keep mov with source modifiers untouched.
+    if (hasRegisterSourceModifier(dst) || hasRegisterSourceModifier(src)) return false;
     if (dst.reg.num != 1 || src.reg.num != 1) return false;
     if (isPseudoReg(dst) || isPseudoReg(src)) return false;
     // Never optimize mov that writes exec/vcc/scc, because they affect lane-mask/condition state
@@ -253,8 +273,12 @@ class AsmMovePropagationPassImpl : public Pass {
             for (size_t i = 0; i < inst->getNumSrcRegs(); ++i) {
                 const StinkyRegister& oldSrc = inst->getSrcReg(i);
                 if (!oldSrc.isRegister()) continue;
+                // Skip source operands that carry modifiers
+                // (inline reg modifiers or VOP3 source modifiers).
+                if (hasRegisterSourceModifier(oldSrc) || hasVop3SourceModifier(*inst, i)) continue;
 
                 StinkyRegister newSrc = resolveMappedSrc(oldSrc);
+                if (hasRegisterSourceModifier(newSrc)) continue;
                 if (newSrc != oldSrc && isSamePropagatableClass(oldSrc, newSrc)) {
                     inst->setSrcReg(i, newSrc);
                 }
