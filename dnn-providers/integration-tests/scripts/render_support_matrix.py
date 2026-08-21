@@ -1025,6 +1025,15 @@ def render_markdown(
         "sidecars.",
         "Do not hand-edit — regenerate with: "
         f"`{REGEN_OVERVIEW_COMMAND if overview_only else REGEN_COMMAND}`",
+        *(
+            [
+                "",
+                "For the full per-variant and per-dtype detail matrix, run: "
+                f"`{REGEN_COMMAND}`",
+            ]
+            if overview_only
+            else []
+        ),
         "",
         *_legend(overview_only),
     ]
