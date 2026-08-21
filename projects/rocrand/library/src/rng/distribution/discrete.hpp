@@ -106,7 +106,7 @@ public:
     }
 
     __forceinline__ __host__ __device__
-    bool check_lds_size()
+    bool check_lds_size() const
     {
         return m_distribution.size <= LDS_DISTR_MAX;
     }
@@ -160,7 +160,9 @@ private:
             __shared__
             double s_cdf[LDS_DISTR_MAX];
 
-            // Stash the array pointers into s_dist once, harmless if repeated.
+            // Eliminating this write by moving it to stage_to_lds made things slower.
+            // Splitting into per-field __shared__ accessors avoided the regression,
+            // but the improvements were inconclusive. Needs further investigation.
             s_dist.cdf = s_cdf;
         }
         if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
@@ -170,7 +172,9 @@ private:
             __shared__
             unsigned int s_alias[LDS_DISTR_MAX];
 
-            // Stash the array pointers into s_dist once, harmless if repeated.
+            // Eliminating this write by moving it to stage_to_lds made things slower.
+            // Splitting into per-field __shared__ accessors avoided the regression,
+            // but the improvements were inconclusive. Needs further investigation.
             s_dist.probability = s_probability;
             s_dist.alias       = s_alias;
         }
