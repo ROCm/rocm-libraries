@@ -444,8 +444,9 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
             return false;
         if(!problem.IsDirectionBackwardWrW())
             return false;
-        if(problem.Is3d() && !problem.IsLayoutDefault())
-            return false;
+        // Channel-last works in 2D and 3D alike: x and dw both enumerate C*Z*Y*X in (z,y,x,c)
+        // order instead of (c,z,y,x), so the GEMM pairs the same elements, and dy is contiguous
+        // over K because its spatial extent is 1.
         if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
             return false;
 
