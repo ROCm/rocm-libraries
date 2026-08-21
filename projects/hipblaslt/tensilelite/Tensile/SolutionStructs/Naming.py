@@ -65,7 +65,7 @@ def getKernelCompileKey(state, splitGSU: bool) -> str:
 
   Used to:
     - Deduplicate kernels before code generation (BenchmarkProblems.py,
-      Run.py:getUniqueKernels) — avoids compiling the same assembly twice.
+      Run.py:groupKernelRecords) — avoids compiling the same assembly twice.
     - Identify invalid kernels after compilation and propagate failures
       to all solutions sharing that kernel (Run.py:removeInvalidSolutionsAndKernels).
     - Build kernel-to-solution mappings for post-processing
