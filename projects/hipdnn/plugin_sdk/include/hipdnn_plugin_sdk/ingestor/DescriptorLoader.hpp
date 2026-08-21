@@ -59,9 +59,10 @@
  * file's folder means nothing here. The seven suffixes above are the only loadable
  * spellings: a file whose name misses all of them is a WARN and skip, not an error. That
  * includes every `.jsonc`, which no suffix can match and which is therefore diagnosed
- * rather than read -- the loader has no comment-stripping parser. Every file carries a
- * required `version`, gated per type (FILE_TYPES below) by RFC 0017 §4: accept iff the
- * major matches and the minor is no newer.
+ * rather than read -- the loader has no comment-stripping parser. Every descriptor carries
+ * a required `version`, gated per type (FILE_TYPES below) by RFC 0017 §4: accept iff the
+ * major matches and the minor is no newer. An inline kernel gates against the UKD row; its
+ * pack's own version gates the pack.
  *
  * A KDP names its kernels either inline or by id: an entry of `kernelDescriptors` is an
  * object (the kernel itself) or a bare UUID string naming a `.ukd.json`. The two are
@@ -175,9 +176,8 @@ inline constexpr std::string_view SUFFIX_UKD = ".ukd.json";
 
 /// One row per descriptor file type: the suffix that selects it, the `major.minor` this
 /// build accepts per RFC 0017 §4 (per type, not a build-wide pair, so one type reaching
-/// 1.1 can't widen what the others accept), and the parse-and-insert function. Declared
-/// ahead of the parse functions so versionIsSupported() below can take a row by
-/// reference; FILE_TYPES itself is assembled further down.
+/// 1.1 can't widen what the others accept), and the parse-and-insert function. FILE_TYPES
+/// itself is assembled further down, once the parse functions its rows name exist.
 struct FileType
 {
     std::string_view suffix;
@@ -278,6 +278,12 @@ struct DescriptorVersion
     int minor = 0;
 };
 
+/// The UKD version this build reads. Named here as well as in the UKD row, which reads
+/// these, because an inline kernel gates against them from above where FILE_TYPES is
+/// assembled.
+inline constexpr int UKD_VERSION_MAJOR = 1;
+inline constexpr int UKD_VERSION_MINOR = 0;
+
 /// Parses `<major>.<minor>` as two separate integers, not a decimal fraction: RFC 0020
 /// §11.1 compares them as integers, so `1.10` is newer than `1.9` -- reading the field as
 /// a float would order those two backwards.
@@ -309,25 +315,25 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
 /// ahead of the catalog insert: RFC 0020 §10.2.1 requires an unsupported-version UED to
 /// drop for its version alone and leave the descriptors it would have collided with
 /// standing.
+///
+/// Serves every descriptor, file or not, so @p where is the caller's locator: a file names
+/// itself by path, an inline `kernelDescriptors` entry by its position in a pack.
 inline bool versionIsSupported(const nlohmann::json& document,
-                               const FileType& fileType,
-                               const std::filesystem::path& path)
+                               int major,
+                               int minor,
+                               const std::string& where)
 {
-    const std::string where{fileType.suffix};
-    if(document.find("version") == document.end())
-    {
-        fail("missing required key 'version' in " + where);
-    }
-
+    // requireKey() inside requireString() fails a missing `version` with this same key and
+    // locator, so there is no presence check here.
     const auto version = parseDescriptorVersion(requireString(document, "version", where), where);
-    if(version.major != fileType.major || version.minor > fileType.minor)
+    if(version.major != major || version.minor > minor)
     {
         // Warning, not error: a descriptor from a newer toolchain landing beside an older
         // provider is a version skew the operator can act on, not a malformed file.
-        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: "
-                               << path << " declares " << where << " version " << version.major
-                               << "." << version.minor << "; this build reads " << fileType.major
-                               << "." << fileType.minor << " and earlier minors; skipping");
+        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: " << where << " declares version "
+                                                     << version.major << "." << version.minor
+                                                     << "; this build reads " << major << "."
+                                                     << minor << " and earlier minors; skipping");
         return false;
     }
     return true;
@@ -830,12 +836,23 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     return source;
 }
 
-/// The fields a kernel carries in either form: inline in a KDP's `kernelDescriptors`, or
-/// alone in a `.ukd.json`. The caller owns the allow-list, because the two forms differ by
-/// exactly one key -- a file carries `version`, an inline entry has no file to version.
-inline KernelDescriptor parseKernelDescriptorBody(const nlohmann::json& root,
-                                                  const std::string& entryLabel)
+/// UKD: one launchable kernel, in either spelling -- alone in a `.ukd.json`, or inline in
+/// a KDP's `kernelDescriptors`. One function because there is one schema; @p entryLabel is
+/// the caller's locator. A file exists so a kernel can ship separately from the pack that
+/// binds it, or be shared by packs of different engines.
+///
+/// Callers gate `version` before calling this: the FILE_TYPES walk for a file,
+/// parseInlineKernelDescriptor() for an entry. The key is accepted here but not checked,
+/// so a new caller must gate too or it reads a descriptor this build may not understand.
+/// `arch` is optional in both spellings: the devices this one kernel runs on, which must
+/// stay within what its pack claims. Absent, it inherits the pack.
+inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
+                                              const std::string& entryLabel)
 {
+    requireKnownKeys(root,
+                     {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"},
+                     entryLabel);
+
     KernelDescriptor kernel;
     kernel.id = requireId(root, "id", entryLabel);
     kernel.name = requireString(root, "name", entryLabel);
@@ -865,36 +882,26 @@ inline KernelDescriptor parseKernelDescriptorBody(const nlohmann::json& root,
         }
         kernel.priority = requireInt64(*it, where + " priority");
     }
+
+    kernel.arch = requireArchList(root, entryLabel);
     return kernel;
 }
 
-/// A kernel spelled inside its pack. Takes the pack's file, so a diagnostic about an
-/// inline kernel names the file it is spelled in rather than only its shape. `arch` is
-/// optional here and means the same as on a `.ukd.json`: the devices this one kernel
-/// runs on, which must stay within what its pack claims. Absent, it inherits the pack.
-inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
-                                              const std::string& packWhere)
+/// A kernel spelled inside its pack: the same descriptor, plus the locator and the version
+/// gate a file gets from the walk instead. Takes the pack's file, so a diagnostic about an
+/// inline kernel names the file it is spelled in rather than only its shape.
+///
+/// The rest of the descriptor is only validated if the version is acceptable.
+inline std::optional<KernelDescriptor> parseInlineKernelDescriptor(const nlohmann::json& root,
+                                                                   const std::string& packWhere)
 {
     const std::string where = "a 'kernelDescriptors' entry in " + packWhere;
     requireObject(root, where);
-    requireKnownKeys(root, {"id", "name", "kernel_source", "metadata", "priority", "arch"}, where);
-    auto kernel = parseKernelDescriptorBody(root, where);
-    kernel.arch = requireArchList(root, where);
-    return kernel;
-}
-
-/// UKD: a kernel shipped in its own file, named from a pack by bare id. Identical to an
-/// inline one once loaded, `arch` included -- the file exists so a kernel can ship
-/// separately from the pack that binds it, or be shared by packs of different engines,
-/// and only this form carries `version`, since only this form is a file.
-inline KernelDescriptor parseStandaloneKernelDescriptor(const nlohmann::json& root,
-                                                        const std::string& where)
-{
-    requireKnownKeys(
-        root, {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"}, where);
-    auto kernel = parseKernelDescriptorBody(root, where);
-    kernel.arch = requireArchList(root, where);
-    return kernel;
+    if(!versionIsSupported(root, UKD_VERSION_MAJOR, UKD_VERSION_MINOR, where))
+    {
+        return std::nullopt;
+    }
+    return parseKernelDescriptor(root, where);
 }
 
 /// A UUID string from an array-valued key, with the key named in any failure. Shared by
@@ -958,18 +965,22 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
         }
         else
         {
-            auto kernel = parseKernelDescriptor(entry, where);
+            auto kernel = parseInlineKernelDescriptor(entry, where);
+            if(!kernel)
+            {
+                continue;
+            }
             // Checked here rather than at resolution, because an inline kernel has exactly
             // one parent and it is already parsed: a kernel reaching past its pack is a
             // property of this file alone, so it fails the file instead of every pack that
             // might bind it.
-            if(!archCovers(pack.arch, kernel.arch))
+            if(!archCovers(pack.arch, kernel->arch))
             {
-                fail("kernel '" + kernel.name + "' in " + where + " declares arch "
-                     + describeArch(kernel.arch) + ", which reaches past the pack's "
+                fail("kernel '" + kernel->name + "' in " + where + " declares arch "
+                     + describeArch(kernel->arch) + ", which reaches past the pack's "
                      + describeArch(pack.arch));
             }
-            pack.kernels.push_back(std::move(kernel));
+            pack.kernels.push_back(std::move(*kernel));
         }
     }
     return pack;
@@ -1300,11 +1311,10 @@ inline constexpr std::array FILE_TYPES{
                  insertCatalogEntry(c.packs, parseKernelDescriptorPack(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UKD,
-             1,
-             0,
+             UKD_VERSION_MAJOR,
+             UKD_VERSION_MINOR,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(
-                     c.kernels, parseStandaloneKernelDescriptor(d, p.string()), d, p);
+                 insertCatalogEntry(c.kernels, parseKernelDescriptor(d, p.string()), d, p);
              }},
 };
 static_assert(FILE_TYPES.size() == 7, "one row per descriptor file type");
@@ -1508,7 +1518,7 @@ inline void
             // version it names rather than for whatever its body does with keys this build
             // has never heard of, and RFC 0020 §10.2.1's version-before-duplicate ordering
             // is unaffected.
-            if(!versionIsSupported(document, *fileType, path))
+            if(!versionIsSupported(document, fileType->major, fileType->minor, path.string()))
             {
                 continue;
             }
