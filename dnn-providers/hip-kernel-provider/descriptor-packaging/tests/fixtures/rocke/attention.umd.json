@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-attention",
+  "name": "Attention matcher",
+  "nodes": ["attention"],
+  "criteria": { "op": "attention" }
+}
