@@ -36,26 +36,43 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_crop_mirror_normalize, derived from the op's definition
-// ("crops each image to a given ROI, does an optional mirror and/or normalize"), NOT from the RPP
-// kernel. Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// Output (j, i) = f(source (y0 + j, x0 + [mirror ? w-1-i : i])), with
-// f(v) = v * multiplier + offset. The affine form is what the API's ranges (offset <= 0,
-// multiplier > 0) imply and what the legacy harness encodes as offset = -mean/stdDev,
-// multiplier = 1/stdDev. offset/multiplier are per image AND per channel (index n*c + c), which is
-// how the legacy harness fills them; the header says size batchSize.
-//
-// offset is in [0,255] intensity units (the brightness/contrast/resize_mirror_normalize
-// convention); multiplier is a ratio. I8 intensities are shifted by -128:
-//   U8      : clamp[0,255]  ( round( v * multiplier + offset ) )
-//   I8      : clamp[-128,127]( round( (v + 128) * multiplier + offset ) - 128 )
-//   F16/F32 : v * multiplier + offset/255
-// Floats are deliberately NOT clamped to [0,1] -- a normalized result is signed by construction --
-// matching the resize_mirror_normalize and ND normalize goldens.
-//
-// The header states neither the intensity space nor the clamping. The test's offset-0 sets are
-// invariant to both, so a diff on the Normalize set is a finding, not a reference bug.
+/*
+Reference model: crop_mirror_normalize
+
+RPP op
+  rppt_crop_mirror_normalize   (Image / Geometric augmentation)
+
+Description
+  Crops each image to its ROI, optionally mirrors it left-to-right, then
+  applies a per-channel affine normalize. The affine form is what the API's
+  ranges (offset <= 0, multiplier > 0) imply and what the legacy harness
+  encodes as offset = -mean/stdDev, multiplier = 1/stdDev.
+
+  offset and multiplier are per image AND per channel (index n*c + c), which
+  is how the legacy harness fills them; the header says size batchSize.
+
+Expression
+  dst(j, i) = f( src(y0 + j, x0 + (mirror ? w-1-i : i)) )
+  f(v)      = v * multiplier + offset
+
+Per-type form
+  offset is in [0,255] intensity units (the brightness / contrast /
+  resize_mirror_normalize convention); multiplier is a ratio. I8 is the same
+  intensity shifted -128.
+
+    U8      clamp[0,255]   ( round( v * multiplier + offset ) )
+    I8      clamp[-128,127]( round( (v + 128) * multiplier + offset ) - 128 )
+    F16/F32                ( v * multiplier + offset/255 )
+
+  Floats are deliberately NOT clamped to [0,1] -- a normalized result is
+  signed by construction -- matching the resize_mirror_normalize and ND
+  normalize goldens.
+
+Notes
+  The header states neither the intensity space nor the clamping. The test's
+  offset-0 sets are invariant to both, so a diff on the Normalize set is a
+  finding, not a reference bug.
+*/
 
 // Normalizes one cropped value, taking and returning STORED units.
 inline double crop_mirror_normalize_scalar(double v, DType dt, double offset, double multiplier) {

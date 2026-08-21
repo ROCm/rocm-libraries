@@ -34,14 +34,25 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_dilate, derived from the op's definition
-// (grayscale morphological dilation: per-channel MAX over a KxK flat square window,
-// clamp-to-edge border), NOT from the RPP kernel. Used as the reference for both
-// backends so kernel bugs surface as diffs.
-//
-// The window, its REPLICATE border and the src-at-ROI-offset / dst-at-origin placement come from
-// filter_reference (reference/filter_common.hpp); dilation supplies only the MAX reduction. The max
-// selects an existing source value (no arithmetic), so the result is bit-exact (tolerance 0).
+/*
+Reference model: dilate
+
+RPP op
+  rppt_dilate   (Image / Morphological)
+
+Description
+  Greyscale morphological dilation: the per-channel MAX over a flat KxK square
+  window centred on each pixel, which grows bright regions and shrinks dark
+  ones. The window and its REPLICATE border come from filter_reference
+  (reference/filter_common.hpp); dilation supplies only the MAX reduction.
+
+Expression
+  dst(j, i) = max{ src(j+dy, i+dx) : dy, dx in [-r, r] }
+
+Per-type form
+  The max selects an existing source value and performs no arithmetic, so the
+  result is bit-exact (tolerance 0) for every type.
+*/
 template <typename T>
 void dilate_reference(const T* src, T* dst, const RpptDesc& d, DType /*dt*/, const RpptROI* roi,
                       RpptRoiType type, Rpp32u kernelSize) {

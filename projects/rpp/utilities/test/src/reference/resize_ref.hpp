@@ -32,30 +32,41 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_resize, derived from the op's definition (scale the source
-// ROI to fill a per-image destination size), NOT from the RPP kernel. Used as the reference for both
-// backends so kernel bugs surface as diffs.
-//
-// resize is an inverse map: for output pixel (i,j) of a dstW x dstH image, the source coordinate is
-// found by scaling with the pixel-CENTER convention (the resize that has no half-texel drift, so an
-// exact-integer scale is a verbatim copy and scale 1 is the identity):
-//     scaleX = roiWidth / dstW ,  scaleY = roiHeight / dstH
-//     srcX = x0 + (i + 0.5) * scaleX - 0.5
-//     srcY = y0 + (j + 0.5) * scaleY - 0.5
-// The source ROI [x0,x0+roiW) x [y0,y0+roiH) maps onto the whole destination, so every output pixel
-// samples INSIDE the source region: the boundary is edge-clamped (replicate), not black-filled -- a
-// resize does not introduce border pixels (this is the key difference from the warp/rotate golden,
-// which black-fills off-image samples). Sampling (nearest / bilinear) and per-dtype round-to-nearest
-// quantization stay independent of the kernel.
-//
-// The walk itself is resize_driver() (framework/geometric.hpp), shared with resize_crop_mirror and
-// resize_mirror_normalize, which owns the pixel-center map, the edge clamp and the quantization;
-// resize adds neither a mirror nor a post-transform.
-//
-// NOTE (semantics assumption): the public header documents neither the scale/offset convention nor
-// the boundary handling. The pixel-center map and edge-clamped boundary above are the mathematically
-// principled resize (drift-free, no synthetic border) and are what the reference holds to; a kernel
-// that uses a different convention shows up as a diff, which is a finding, not a reference bug.
+/*
+Reference model: resize
+
+RPP op
+  rppt_resize   (Image / Geometric augmentation)
+
+Description
+  Scales the source ROI to fill a per-image destination size. Like every
+  geometric op it is an inverse map: each output pixel computes the source
+  coordinate it samples from, using the pixel-CENTRE convention, which is the
+  resize with no half-texel drift -- an exact-integer scale is a verbatim copy
+  and scale 1 is the identity.
+
+  The source ROI [x0,x0+roiW) x [y0,y0+roiH) maps onto the whole destination,
+  so every output pixel samples INSIDE the source region: the boundary is
+  edge-clamped (replicate), not black-filled. A resize introduces no border
+  pixels, which is the key difference from the warp/rotate goldens.
+
+  The walk is resize_driver() (framework/geometric.hpp), shared with
+  resize_crop_mirror and resize_mirror_normalize, which owns the pixel-centre
+  map, the edge clamp and the quantization. resize adds neither a mirror nor a
+  post-transform.
+
+Expression
+  scaleX = roiWidth / dstW,  scaleY = roiHeight / dstH
+  srcX   = x0 + (i + 0.5) * scaleX - 0.5
+  srcY   = y0 + (j + 0.5) * scaleY - 0.5
+
+Notes
+  The public header documents neither the scale/offset convention nor the
+  boundary handling. The pixel-centre map and edge-clamped boundary above are
+  the mathematically principled resize (drift-free, no synthetic border) and
+  are what the reference holds to; a kernel that uses a different convention
+  shows up as a diff, which is a finding, not a reference bug.
+*/
 template <typename T>
 void resize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                       const RpptROI* roi, RpptRoiType roiType, const RpptImagePatch* dstSizes,

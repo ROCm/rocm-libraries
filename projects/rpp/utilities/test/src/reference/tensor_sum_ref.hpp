@@ -34,14 +34,24 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_tensor_sum, derived from the op's definition (the
-// channel-wise sum R/G/B and the total sum, per image, over the ROI in raw intensity space),
-// NOT from the RPP kernel. Used as the reference for both backends so kernel bugs surface as
-// diffs.
-//
-// Per image: out[R]=sum(R), out[G]=sum(G), out[B]=sum(B), out[total]=sum(R)+sum(G)+sum(B).
-// For a 1-channel image the single result is that channel's sum. Sums are exact in the stored
-// intensity space (U8 [0,255], I8 [-128,127], F16/F32 [0,1]); the golden accumulates in double.
+/*
+Reference model: tensor_sum
+
+RPP op
+  rppt_tensor_sum   (Image / Statistical)
+
+Description
+  Reduces each image's ROI to a channel-wise sum plus a total. For a 1-channel
+  image the single result is that channel's sum.
+
+Expression
+  out[R] = sum(R),  out[G] = sum(G),  out[B] = sum(B)
+  out[total] = sum(R) + sum(G) + sum(B)
+
+Per-type form
+  Sums are taken in the stored intensity space (U8 [0,255], I8 [-128,127],
+  F16/F32 [0,1]); the golden accumulates in double.
+*/
 template <typename T>
 std::vector<double> tensor_sum_reference(const T* src, const RpptDesc& d, const RpptROI* roi,
                                          RpptRoiType type) {

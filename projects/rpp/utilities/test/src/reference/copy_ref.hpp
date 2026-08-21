@@ -33,12 +33,23 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_copy, derived from the op's definition (dst = src, a
-// bit-exact buffer copy of every element), NOT from the RPP kernel. Used as the reference for
-// both backends so kernel bugs surface as diffs.
-//
-// copy takes no ROI and no scalar params: every dtype is copied verbatim with no arithmetic,
-// rounding, or clamping, so the result is bit-exact for U8/I8/F16/F32 alike.
+/*
+Reference model: copy
+
+RPP op
+  rppt_copy   (Image / Data exchange)
+
+Description
+  Verbatim element copy. Every element of the source is reproduced in the
+  destination unchanged. There are no scalar parameters.
+
+Expression
+  dst(x, y, c) = src(x, y, c)
+
+Per-type form
+  No arithmetic, rounding, or clamping is performed, so the result is
+  bit-exact for U8, I8, F16 and F32 alike.
+*/
 template <typename T>
 void copy_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
                     RpptRoiType roiType) {

@@ -36,26 +36,38 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_non_linear_blend (two-source, scalar stdDev per image),
-// derived from the op's definition (a spatially-varying alpha blend whose weight is a 2D gaussian
-// centered on the region, of the given standard deviation), NOT from the kernel. Used for both
-// backends.
-//
-// For output pixel (row j, col i) of a roiW x roiH region, with the gaussian centered at
-// (roiW/2, roiH/2) (integer halves):
-//     multiplier    = -0.5 / stdDev^2
-//     gaussianValue = exp( ((j - roiH/2)^2 + (i - roiW/2)^2) * multiplier )   in (0, 1]
-//     out           = (src1 - src2) * gaussianValue + src2
-// The gaussian peaks at 1 in the center (out == src1) and decays to 0 at the edges (out == src2),
-// so out is a convex combination of the two sources and never leaves [min,max] -- clamping is only
-// a safety net. Integer types round to nearest (the +128 I8 offsets cancel in (src1 - src2), so the
-// interpolation is identical in signed space).
-//
-// NOTE (semantics assumption): the public header describes only "standard deviation based
-// non-linear alpha-blending" via a gaussian; the peak-1 gaussian (no 1/(2*pi*sigma^2) prefactor),
-// the region center, and the round-to-nearest quantization above are the principled interpretation
-// the golden holds to. A kernel using a different convention shows up as a diff -- a finding, not a
-// reference bug.
+/*
+Reference model: non_linear_blend
+
+RPP op
+  rppt_non_linear_blend   (Image / Effects augmentation)
+
+Description
+  Spatially-varying cross-fade between two sources, weighted by a 2D gaussian
+  centred on the region with the given standard deviation. The gaussian peaks
+  at 1 in the centre (out == src1) and decays to 0 at the edges (out == src2),
+  so the output is a convex combination of the two sources and never leaves
+  [min,max] -- clamping is only a safety net.
+
+Expression
+  For output pixel (row j, col i) of a roiW x roiH region, gaussian centred at
+  (roiW/2, roiH/2) with integer halves:
+
+  multiplier = -0.5 / stdDev^2
+  gaussian   = exp( ((j - roiH/2)^2 + (i - roiW/2)^2) * multiplier )   in (0,1]
+  dst        = (src1 - src2) * gaussian + src2
+
+Per-type form
+  Integer types round to nearest. The +128 I8 offsets cancel in
+  (src1 - src2), so the interpolation is identical in signed space.
+
+Notes
+  The public header describes only "standard deviation based non-linear
+  alpha-blending" via a gaussian. The peak-1 gaussian (no 1/(2*pi*sigma^2)
+  prefactor), the region centre and the round-to-nearest quantization are the
+  principled interpretation the golden holds to. A kernel using a different
+  convention shows up as a diff -- a finding, not a reference bug.
+*/
 inline double non_linear_blend_scalar(double s1, double s2, DType dt, double gaussian) {
     const double v = (s1 - s2) * gaussian + s2;
     switch (dt) {

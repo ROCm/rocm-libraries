@@ -32,20 +32,28 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for rppt_bitwise_not. Computed once on the host and used as the
-// reference for both the HOST and HIP backends.
-//
-// bitwise_not is a U8-only op (rppt_bitwise_not rejects any other dtype): each byte is
-// replaced by its bitwise complement, which for U8 is exactly 255 - v. The result is
-// bit-exact, so the caller compares with zero tolerance.
+/*
+Reference model: bitwise_not
+
+RPP op
+  rppt_bitwise_not   (Image / Bitwise)
+
+Description
+  Element-wise bitwise complement. Each byte is replaced by its complement,
+  which for U8 is exactly 255 - v, so the op is a tone inversion.
+
+Expression
+  dst(x, y, c) = ~src(x, y, c) = 255 - src(x, y, c)
+
+Per-type form
+  U8-only; the op rejects any other type. The result is bit-exact, so the
+  caller compares with zero tolerance.
+*/
 
 inline double bitwise_not_scalar(double v) {
     return static_cast<double>(static_cast<Rpp8u>(~static_cast<Rpp8u>(v)));
 }
 
-// Writes the bitwise-not result into dst, reading the source at the ROI offset and writing
-// packed at the destination origin (matching the region and placement the RPP op uses).
-// dst outside the written region is left as the caller initialized it.
 template <typename T>
 void bitwise_not_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
                            RpptRoiType roiType) {

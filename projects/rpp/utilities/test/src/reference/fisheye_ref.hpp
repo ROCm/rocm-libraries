@@ -36,42 +36,56 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_fisheye, derived from the definition of the fisheye
-// augmentation (a radial magnification about the frame centre, the classic "fish eye" filter) and
-// NOT from the RPP kernel. Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// The op takes no parameters, so the whole of its behaviour is the map below. Destination pixel
-// (i, j) of the ROI-sized output region is placed on the centred unit square, its radius pulled in
-// by the fisheye profile, and the source read back at the rescaled point:
-//
-//     nx = 2 i / w - 1 ,  ny = 2 j / h - 1 ,  r = hypot(nx, ny)      // r approximate, see below
-//     r > 1                        -> black (the destination corners fall outside the unit disc)
-//     r' = (r + 1 - sqrt(1 - r^2)) / 2                       // radial profile, r' <= r
-//     theta = atan2(ny, nx)
-//     srcX = x0 + (r' cos(theta) + 1) w / 2
-//     srcY = y0 + (r' sin(theta) + 1) h / 2
-//
-// r' <= r everywhere and r'(1) = 1, so the disc is magnified towards its centre and its rim is
-// fixed. The profile is the identity only at r = 0 and r = 1, where the map reproduces the source
-// pixel exactly -- which is what makes the sub-pixel conventions below self-consistent rather than
-// arbitrary.
-//
-// NOTE (semantics assumptions): the public header documents no formula, so a kernel that chose
-// differently shows up as a diff -- a finding, not a reference bug.
-//   - Sampling is NEAREST_NEIGHBOR: the op exposes no interpolationType, and a fisheye is a plain
-//     resampling of existing texels. Bilinear would disagree on nearly every pixel.
-//   - Coordinates are frame-corner based (nx = 2i/w - 1, no +0.5 pixel-centre term), which is what
-//     makes r' = r round-trip to exactly srcX = i. The inverse of that choice is that the map is
-//     asymmetric by half a texel about the centre.
-//   - The normalisation extent and the destination region are the ROI's, and the source is read at
-//     the ROI offset, matching the ROI convention of the suite's other warps
-//     (framework/geometric.hpp): the ROI both sizes the output and bounds the valid source
-//     rectangle.
-//   - The radius is the fast approximation below rather than an exact sqrt, and the whole map runs
-//     in single precision. That is a deliberate accuracy-for-speed trade of this augmentation, so
-//     the model has to make it too: an exact radius disagrees on the disc rim (where r = 1 exactly
-//     is pushed outside the disc) and on the ~2% of pixels whose mapped coordinate sits within the
-//     approximation's error of a half-integer, which nearest-neighbour then rounds the other way.
+/*
+Reference model: fisheye
+
+RPP op
+  rppt_fisheye   (Image / Effects augmentation)
+
+Description
+  Radial magnification about the frame centre -- the classic "fish eye"
+  filter. The op takes no parameters, so the whole of its behaviour is the map
+  below: destination pixel (i, j) of the ROI-sized output region is placed on
+  the centred unit square, its radius pulled in by the fisheye profile, and
+  the source read back at the rescaled point.
+
+  r' <= r everywhere and r'(1) = 1, so the disc is magnified towards its
+  centre while its rim stays fixed. The profile is the identity only at r = 0
+  and r = 1, where the map reproduces the source pixel exactly -- which is
+  what makes the sub-pixel conventions below self-consistent rather than
+  arbitrary.
+
+Expression
+  nx    = 2 i / w - 1,  ny = 2 j / h - 1,  r = hypot(nx, ny)
+  r > 1 -> black (the destination corners fall outside the unit disc)
+  r'    = (r + 1 - sqrt(1 - r^2)) / 2          radial profile, r' <= r
+  theta = atan2(ny, nx)
+  srcX  = x0 + (r' cos(theta) + 1) w / 2
+  srcY  = y0 + (r' sin(theta) + 1) h / 2
+
+Notes
+  The public header documents no formula, so a kernel that chose differently
+  shows up as a diff -- a finding, not a reference bug.
+
+  - Sampling is NEAREST_NEIGHBOR: the op exposes no interpolationType, and a
+    fisheye is a plain resampling of existing texels. Bilinear would disagree
+    on nearly every pixel.
+  - Coordinates are frame-corner based (nx = 2i/w - 1, no +0.5 pixel-centre
+    term), which is what makes r' = r round-trip to exactly srcX = i. The
+    inverse of that choice is that the map is asymmetric by half a texel about
+    the centre.
+  - The normalisation extent and the destination region are the ROI's, and the
+    source is read at the ROI offset, matching the ROI convention of the
+    suite's other warps (framework/geometric.hpp): the ROI both sizes the
+    output and bounds the valid source rectangle.
+  - The radius is the fast approximation below rather than an exact sqrt, and
+    the whole map runs in single precision. That is a deliberate
+    accuracy-for-speed trade of this augmentation, so the model has to make it
+    too: an exact radius disagrees on the disc rim (where r = 1 exactly is
+    pushed outside the disc) and on the ~2% of pixels whose mapped coordinate
+    sits within the approximation's error of a half-integer, which
+    nearest-neighbour then rounds the other way.
+*/
 
 // A destination coordinate outside every ROI rectangle, so the shared driver fills it with the
 // dtype's black. Used for the pixels that fall outside the unit disc.

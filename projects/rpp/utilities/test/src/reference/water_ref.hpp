@@ -35,28 +35,39 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_water, derived from the op's definition (a sinusoidal
-// "water surface" displacement) and its six documented parameters -- an amplitude, frequency and
-// phase per axis -- NOT from the RPP kernel. Used as the reference for both backends so kernel bugs
-// surface as diffs.
-//
-// Each axis is displaced by a wave driven by the *other* coordinate, which is what makes the
-// surface ripple and what the separate X and Y parameter triples are for:
-//
-//     srcX = x + amplitudeX * sin(frequencyX * y + phaseX)
-//     srcY = y + amplitudeY * cos(frequencyY * x + phaseY)
-//
-// The source is then sampled at (srcX, srcY) and the result quantized per dtype -- both handled by
-// geometric_reference() / interpolation.hpp, shared with the other warps, so the sampling model is
-// the suite's own and not the kernel's. A zero amplitude makes the map the exact identity.
-//
-// NOTE (semantics assumptions): the public header documents none of the following, so a kernel that
-// chose differently shows up as a diff -- a finding, not a reference bug.
-//   - Sampling is NEAREST_NEIGHBOR (the op exposes no interpolationType) and a displaced coordinate
-//     outside the ROI reads the dtype's black, the border rule the suite's other warps use.
-//   - The wave is a function of the position within the processed region (ROI-local x, y), and the
-//     ROI origin is then added to reach the source. Under a full ROI the two readings coincide, so
-//     that grid validates the formula independently of this choice.
+/*
+Reference model: water
+
+RPP op
+  rppt_water   (Image / Effects augmentation)
+
+Description
+  Sinusoidal "water surface" displacement, driven by six parameters -- an
+  amplitude, frequency and phase per axis. Each axis is displaced by a wave
+  driven by the OTHER coordinate, which is what makes the surface ripple and
+  what the separate X and Y parameter triples are for. A zero amplitude makes
+  the map the exact identity.
+
+  The source is sampled at (srcX, srcY) and the result quantized per type,
+  both handled by geometric_reference() / interpolation.hpp and shared with
+  the other warps.
+
+Expression
+  srcX = x + amplitudeX * sin(frequencyX * y + phaseX)
+  srcY = y + amplitudeY * cos(frequencyY * x + phaseY)
+
+Notes
+  The public header documents none of the following, so a kernel that chose
+  differently shows up as a diff -- a finding, not a reference bug.
+
+  - Sampling is NEAREST_NEIGHBOR (the op exposes no interpolationType) and a
+    displaced coordinate outside the ROI reads the type's black, the border
+    rule the suite's other warps use.
+  - The wave is a function of the position within the processed region
+    (ROI-local x, y), and the ROI origin is then added to reach the source.
+    Under a full ROI the two readings coincide, so that grid validates the
+    formula independently of this choice.
+*/
 
 // Destination pixel (outX, outY) of a region whose source origin is (x0, y0) -> the source
 // coordinate to sample, in the absolute image frame.

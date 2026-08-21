@@ -36,44 +36,69 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Kernel-derived REGRESSION golden for rppt_color_jitter. Used for both backends (the op is HOST
-// only today) and deterministic, so this is an exact model, not a property check.
-//
-// The public header cannot be used to derive this one. Its description and parameter ranges are
-// copied verbatim from rppt_color_twist, which is a different algorithm; color_jitter is a colour
-// transform matrix (CTM). That mismatch is a filed documentation defect, so the algorithm here is
-// transcribed from the RPP kernel (src/modules/tensor/cpu/kernel/color_jitter.cpp) instead, with
-// the user's explicit authorization. The transcription was validated numerically against the
-// kernel across eight parameter settings: it reproduces every pixel to 4.7e-7 in F32.
-//
-// What this model deliberately does NOT reproduce are the three confirmed defects, so they stay
-// red rather than being locked in:
-//
-//   1. The kernel applies the hue/saturation matrix TRANSPOSED. A saturation matrix is pinned by
-//      two properties: at (saturation 1, hue 0) it must be the identity, and at saturation 0 it
-//      must desaturate to the luma grey. The transposed form fails the second outright -- it maps
-//      every pixel to (Wr, Wg, Wb) * (R+G+B), which depends only on the channel sum. This model
-//      uses the correct orientation, which satisfies both exactly.
-//   2. The kernel's saturation basis is Haeberli's published table, whose third row is rounded to
-//      -0.300 / -0.588 rather than the -Wr / -Wg that would cancel the luma weights, so even the
-//      neutral setting is off by 1e-3. This model derives that basis exactly as (I - L).
-//   3. The kernel writes the brightness translation into the matrix's fourth row, where the
-//      product annihilates it, so the parameter is dead. This model applies it.
-//
-// Semantics. With sch = saturation*cos(hue), ssh = saturation*sin(hue), L the luma matrix (every
-// row = the Rec.601 weights) and B Haeberli's rotation generator:
-//   hueSat = L + sch*(I - L) + ssh*B
-//   out    = (contrast + 1) * (hueSat . rgb) + brightness
-// The (contrast + 1) scale is the kernel's own convention, kept because it is the op's design
-// intent -- that its neutral value is 0 while the header documents 0 < contrast <= 255 is the
-// documentation defect, not something for the golden to reinterpret.
-//
-// Everything runs in normalized [0,1] intensity space (to_unit / from_unit), matching the rest of
-// the suite. The 3x3 part is homogeneous, so this is identical to the kernel's per-dtype domain
-// (raw 0..255 for U8, +128-shifted for I8, [0,1] for F16/F32); only the brightness translation is
-// scale-dependent, and the kernel's translation is dead, so no test outcome rests on that choice.
-// A single quantization closes the pipeline: U8 clamp[0,255](round(x*255)),
-// I8 clamp[-128,127](round(x*255)-128), F16/F32 clamp[0,1](x).
+/*
+Reference model: color_jitter   (kernel-derived REGRESSION golden)
+
+RPP op
+  rppt_color_jitter   (Image / Color augmentation; HOST only today)
+
+Description
+  A colour transform matrix (CTM) applying hue rotation, saturation, contrast
+  and brightness in a single 3x3 product. Deterministic, so this is an exact
+  model rather than a property check.
+
+Expression
+  With sch = saturation*cos(hue), ssh = saturation*sin(hue), L the luma matrix
+  (every row = the Rec.601 weights) and B Haeberli's rotation generator:
+
+  hueSat = L + sch*(I - L) + ssh*B
+  dst    = (contrast + 1) * (hueSat . rgb) + brightness
+
+  The (contrast + 1) scale is the kernel's own convention, kept because it is
+  the op's design intent. That its neutral value is 0 while the header
+  documents 0 < contrast <= 255 is the documentation defect, not something for
+  the golden to reinterpret.
+
+Per-type form
+  Everything runs in normalized [0,1] intensity space (to_unit / from_unit),
+  matching the rest of the suite. The 3x3 part is homogeneous, so this is
+  identical to the kernel's per-type domain (raw 0..255 for U8, +128-shifted
+  for I8, [0,1] for F16/F32); only the brightness translation is
+  scale-dependent, and the kernel's translation is dead, so no test outcome
+  rests on that choice. A single quantization closes the pipeline.
+
+    U8    clamp[0,255]   ( round(x*255) )
+    I8    clamp[-128,127]( round(x*255) - 128 )
+    F16   clamp[0,1]
+    F32   clamp[0,1]
+
+Notes
+  The public header cannot be used to derive this model. Its description and
+  parameter ranges are copied verbatim from rppt_color_twist, which is a
+  different algorithm. That mismatch is a filed documentation defect, so the
+  algorithm is transcribed from the RPP kernel
+  (src/modules/tensor/cpu/kernel/color_jitter.cpp) instead, with the user's
+  explicit authorization. The transcription was validated numerically against
+  the kernel across eight parameter settings: it reproduces every pixel to
+  4.7e-7 in F32.
+
+  What this model deliberately does NOT reproduce are three confirmed defects,
+  so they stay red rather than being locked in:
+
+  1. The kernel applies the hue/saturation matrix TRANSPOSED. A saturation
+     matrix is pinned by two properties: at (saturation 1, hue 0) it must be
+     the identity, and at saturation 0 it must desaturate to the luma grey.
+     The transposed form fails the second outright -- it maps every pixel to
+     (Wr, Wg, Wb) * (R+G+B), which depends only on the channel sum. This model
+     uses the correct orientation, which satisfies both exactly.
+  2. The kernel's saturation basis is Haeberli's published table, whose third
+     row is rounded to -0.300 / -0.588 rather than the -Wr / -Wg that would
+     cancel the luma weights, so even the neutral setting is off by 1e-3. This
+     model derives that basis exactly as (I - L).
+  3. The kernel writes the brightness translation into the matrix's fourth
+     row, where the product annihilates it, so the parameter is dead. This
+     model applies it.
+*/
 
 namespace color_jitter_detail {
 

@@ -38,29 +38,44 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for the ND tensor-vs-tensor arithmetic ops (rppt_tensor_add_tensor /
-// _subtract_tensor / _multiply_tensor / _divide_tensor). Modelled from the operations'
-// definition and the public API header, NOT from the kernel; computed once on the host and
-// used as the reference for both the HOST and HIP backends.
-//
-// Semantics: "element-wise addition/subtraction/multiplication/division of two
-// N-dimensional tensors", with NumPy-style broadcasting -- "for every axis, the two input
-// tensors must either have the same length or one of them must be 1", so an operand axis of
-// extent 1 is reused across the corresponding output axis.
-//
-// Two per-dtype behaviors the header does not spell out, taken from the operations'
-// definition and RPP's convention everywhere else:
-//   - Integer dtypes hold integers, so the exact arithmetic result is rounded to nearest
-//     (std::nearbyint) and saturated to the dtype's storable range. Only division produces a
-//     fractional intermediate, so rounding is only observable there; addition, subtraction
-//     and multiplication only exercise the saturation.
-//   - Floating-point dtypes are NOT clamped. These are generic ND tensors rather than image
-//     intensities, so a subtraction that goes negative or a division that exceeds 1 is the
-//     intended result; clamping to [0,1] here would make subtract and divide meaningless.
-// Arithmetic is carried in double and quantized once, at the store.
-//
-// Division by zero is undefined and is not modelled: the divide test shapes its second
-// operand so no divisor is ever zero.
+/*
+Reference model: tensor arithmetic
+
+RPP op
+  rppt_tensor_add_tensor / rppt_tensor_subtract_tensor /
+  rppt_tensor_multiply_tensor / rppt_tensor_divide_tensor
+  (ND / Arithmetic)
+
+Description
+  Element-wise arithmetic between two N-dimensional tensors, with NumPy-style
+  broadcasting: for every axis the two inputs must either have the same length
+  or one must be 1, and an operand axis of extent 1 is reused across the
+  corresponding output axis. Arithmetic is carried in double and quantized
+  once, at the store.
+
+Expression
+  add   dst = a + b
+  sub   dst = a - b
+  mul   dst = a * b
+  div   dst = a / b
+
+Per-type form
+  Two behaviours the header does not spell out, taken from the operations'
+  definition and RPP's convention everywhere else:
+
+  - Integer types hold integers, so the exact result is rounded to nearest
+    (std::nearbyint) and saturated to the type's storable range. Only division
+    produces a fractional intermediate, so rounding is only observable there;
+    add, subtract and multiply exercise the saturation alone.
+  - Floating-point types are NOT clamped. These are generic ND tensors rather
+    than image intensities, so a subtraction that goes negative or a division
+    that exceeds 1 is the intended result; clamping to [0,1] would make
+    subtract and divide meaningless.
+
+Notes
+  Division by zero is undefined and is not modelled: the divide test shapes
+  its second operand so no divisor is ever zero.
+*/
 
 enum class ArithmeticTensorOp { Add, Subtract, Multiply, Divide };
 

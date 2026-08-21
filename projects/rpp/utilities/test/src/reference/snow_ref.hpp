@@ -36,26 +36,49 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Kernel-derived REGRESSION golden for rppt_snow.
-//
-// Unlike the other references in this suite, snow's exact per-element semantics are NOT
-// documented in the public API header (it describes only the parameters), and there is no
-// spec. This model is therefore transcribed from the RPP snow kernel
-// (src/modules/tensor/cpu/kernel/snow.cpp) with the user's explicit authorization. It LOCKS
-// current behavior (a regression test) rather than encoding independently-derived intent,
-// and deliberately mirrors the kernel's quirks -- notably that the I8 store truncates toward
-// zero (no round-to-nearest) -- so the grid stays green until behavior changes. snow is fully
-// deterministic (no RNG), so the same model serves both HOST and HIP.
-//
-// Semantics (per pixel, in normalized [0,1] intensity space):
-//   snowCoefficient = fmaf(snowThreshold, 0.5, 0.333333333)
-//   3-channel: RGB -> HSL; (darkMode) boost L in [0,0.39215686]; if L <= snowCoefficient and
-//     the pixel is NOT in the excluded blue/white band (hue in [0.514,0.63], sat >= 0.196,
-//     L >= 0.196), scale L by brightnessCoefficient; HSL -> RGB.
-//   1-channel: treat the intensity directly as L and apply the same L adjustments (no band).
-// Per dtype: U8/I8 normalize to [0,1] on load ( U8: v/255, I8: (v+128)/255 ) and denormalize
-//   on store ( U8: round(x*255) clamp[0,255]; I8: trunc(x*255-128) clamp[-128,127] ); F16/F32
-//   compute in place and clamp to [0,1].
+/*
+Reference model: snow   (kernel-derived REGRESSION golden)
+
+RPP op
+  rppt_snow   (Image / Effects augmentation)
+
+Description
+  Brightens the darker parts of an image toward white to simulate snow,
+  working in HSL and leaving an excluded blue/white band untouched so already
+  sky-like pixels are not blown out. snow is fully deterministic (no RNG), so
+  the same model serves both HOST and HIP.
+
+Expression
+  Per pixel, in normalized [0,1] intensity space:
+
+  snowCoefficient = fmaf(snowThreshold, 0.5, 0.333333333)
+
+  3-channel  RGB -> HSL; (darkMode) boost L in [0, 0.39215686]; if
+             L <= snowCoefficient and the pixel is NOT in the excluded band
+             (hue in [0.514, 0.63], sat >= 0.196, L >= 0.196), scale L by
+             brightnessCoefficient; HSL -> RGB.
+  1-channel  treat the intensity directly as L and apply the same L
+             adjustments, with no band.
+
+Per-type form
+  U8/I8 normalize to [0,1] on load (U8 v/255, I8 (v+128)/255) and denormalize
+  on store; F16/F32 compute in place and clamp to [0,1].
+
+    U8    clamp[0,255]   ( round(x*255) )
+    I8    clamp[-128,127]( trunc(x*255 - 128) )
+    F16   clamp[0,1]
+    F32   clamp[0,1]
+
+Notes
+  This is a REGRESSION golden, not an independently-derived one. snow's exact
+  per-element semantics are NOT documented in the public API header, which
+  describes only the parameters, and there is no spec. The model is therefore
+  transcribed from the RPP snow kernel (src/modules/tensor/cpu/kernel/snow.cpp)
+  with the user's explicit authorization. It LOCKS current behaviour rather
+  than encoding intent, and deliberately mirrors the kernel's quirks --
+  notably that the I8 store truncates toward zero rather than rounding to
+  nearest -- so the grid stays green until behaviour changes.
+*/
 
 namespace snow_detail {
 

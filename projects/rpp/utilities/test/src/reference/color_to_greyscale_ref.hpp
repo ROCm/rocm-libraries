@@ -35,17 +35,35 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_color_to_greyscale, derived from the op's definition
-// (grey = the pixel's luminance, a weighted sum of its colour channels), NOT from the RPP kernel.
-// Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// The header does not name the coefficients, so the standard BT.601 luma weights are used -- the
-// same ones this suite already applies in histogram_equalize (he_luma_y):
-//   grey = 0.299 R + 0.587 G + 0.114 B
-// The weights sum to exactly 1, so the luma is a convex combination and commutes with the I8
-// intensity offset: 0.299(R+128) + 0.587(G+128) + 0.114(B+128) = luma + 128. The dot product can
-// therefore be taken directly on stored values for every dtype and quantized once, with no detour
-// through [0,1] intensity space.
+/*
+Reference model: color_to_greyscale
+
+RPP op
+  rppt_color_to_greyscale   (Image / Data exchange)
+
+Description
+  Collapses a 3-channel colour image to a single luma plane. Each output
+  element is the weighted sum of that pixel's colour channels, so the op is
+  not pointwise in the usual sense: it reads a whole pixel and writes one
+  element, and the source and destination descriptors differ (srcDesc c = 3
+  in PKD3/PLN3, dstDesc c = 1 planar).
+
+  srcSubpixelLayout names the source channel order: RGBtype => (R,G,B),
+  BGRtype => (B,G,R), i.e. R and B swap and G is unchanged.
+
+Expression
+  The public header does not name the coefficients, so the standard BT.601
+  luma weights are used -- the same ones histogram_equalize applies.
+
+  grey(x, y) = 0.299 R + 0.587 G + 0.114 B
+
+Per-type form
+  The weights sum to exactly 1, so the luma is a convex combination and
+  commutes with the I8 intensity offset:
+  0.299(R+128) + 0.587(G+128) + 0.114(B+128) = luma + 128. The dot product is
+  therefore taken directly on stored values for every type and quantized
+  once, with no detour through [0,1] intensity space.
+*/
 inline double color_to_greyscale_scalar(double c0, double c1, double c2, DType dt,
                                         RpptSubpixelLayout subpixel) {
     // srcSubpixelLayout names the source channel order: RGBtype => (R,G,B), BGRtype => (B,G,R),
@@ -56,12 +74,8 @@ inline double color_to_greyscale_scalar(double c0, double c1, double c2, DType d
     return quantize_stored(0.299 * r + 0.587 * g + 0.114 * b, dt);
 }
 
-// Reads a whole 3-channel pixel and writes one destination element, so this is not pointwise in
-// the usual sense and the two operands have different descriptors (srcDesc c = 3 in PKD3/PLN3,
-// dstDesc c = 1 planar). The source walk supplies the channel-0 pixel offset and the channels are
-// reached with channel_index(); the destination offset is computed against dstDesc. Source is read
-// at the ROI offset and the output written packed at the destination origin, the placement RPP
-// uses. dst outside the written region is left as the caller initialized it.
+// The source walk supplies the channel-0 pixel offset and the channels are reached with
+// channel_index(); the destination offset is computed against dstDesc.
 template <typename T>
 void color_to_greyscale_reference(const T* src, const RpptDesc& srcDesc, T* dst,
                                   const RpptDesc& dstDesc, DType dt, const RpptROI* roi,

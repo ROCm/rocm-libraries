@@ -31,28 +31,44 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_jitter, derived from the op's public API doc and the
-// standard "pixel jitter" augmentation definition (DALI/Albumentations-style), NOT from the RPP
-// kernel:
-//
-// For every output pixel at absolute source-space coordinate (sx, sy) inside an image's ROI, a
-// per-PIXEL random integer offset (dx, dy) is drawn, each independently uniform over [-r, r] with
-// r = kernelSize / 2 (integer division; kernelSize is odd, e.g. kernelSize=3 -> r=1, a 3x3
-// neighbourhood). The SAME offset is used for every channel of that pixel, so a multi-channel
-// pixel is displaced as a whole rather than splitting its channels apart. The output pixel is the
-// source pixel at (sx+dx, sy+dy), independently clamped on each axis into the ROI bounds
-// ([roi.x0, roi.x0+roi.w-1], [roi.y0, roi.y0+roi.h-1]) if the offset would leave the ROI. `seed`
-// seeds the RNG for the whole call: same seed -> bit-identical output, different seed -> a
-// different output somewhere.
-//
-// This header only encodes the RNG-FREE corner of that definition: kernelSize = 1 gives r = 0, so
-// the offset window collapses to {0} for both axes regardless of any RNG draw -- the op is forced
-// to identity (output pixel == input pixel) for every element, independent of seed. That is the
-// only case a static golden buffer can match bit-for-bit without reimplementing the kernel's PRNG
-// (which would make the golden dependent on the kernel, defeating its purpose). The general
-// kernelSize > 1 case is instead checked at runtime against the real kernel output via structural
-// invariants (membership of the output pixel in its legal candidate window; same-seed repeatability;
-// different-seed divergence) -- see jitter_test.cpp, not this file.
+/*
+Reference model: jitter   (RNG-free corner only)
+
+RPP op
+  rppt_jitter   (Image / Effects augmentation)
+
+Description
+  Standard pixel-jitter augmentation (DALI/Albumentations-style). For every
+  output pixel at absolute source-space coordinate (sx, sy) inside an image's
+  ROI, a per-PIXEL random integer offset (dx, dy) is drawn, each independently
+  uniform over [-r, r] with r = kernelSize / 2 (integer division; kernelSize
+  is odd, so kernelSize = 3 gives r = 1, a 3x3 neighbourhood).
+
+  The SAME offset is used for every channel of that pixel, so a multi-channel
+  pixel is displaced as a whole rather than splitting its channels apart.
+  `seed` seeds the RNG for the whole call: same seed -> bit-identical output,
+  different seed -> a different output somewhere.
+
+Expression
+  dst(sx, sy) = src( clamp(sx + dx), clamp(sy + dy) )
+
+  clamped independently on each axis into the ROI bounds
+  [roi.x0, roi.x0+roi.w-1] x [roi.y0, roi.y0+roi.h-1] if the offset would
+  leave the ROI.
+
+Scope
+  This header encodes only the RNG-FREE corner: kernelSize = 1 gives r = 0, so
+  the offset window collapses to {0} on both axes regardless of any RNG draw
+  and the op is forced to identity for every element, independent of seed.
+  That is the only case a static golden can match bit-for-bit without
+  reimplementing the kernel's PRNG, which would make the golden depend on the
+  kernel and defeat its purpose.
+
+  The general kernelSize > 1 case is checked at runtime against the real
+  kernel output via structural invariants -- membership of the output pixel in
+  its legal candidate window, same-seed repeatability, different-seed
+  divergence -- in jitter_test.cpp, not here.
+*/
 
 // Clamps an integer coordinate into [lo, hi]. Shared by the identity case (trivially, since the
 // window is {0}) and the runtime membership-invariant check in the test file.
@@ -60,9 +76,7 @@ inline int clamp_coord(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Writes the kernelSize=1 identity result into dst, reading the source at the ROI offset and
-// writing packed at the destination origin (matching the region and placement the RPP op uses).
-// dst outside the written region is left as the caller initialized it.
+// Writes the kernelSize = 1 identity result into dst.
 template <typename T>
 void jitter_identity_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
                                RpptRoiType roiType) {

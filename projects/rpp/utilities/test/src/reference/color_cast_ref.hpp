@@ -35,18 +35,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_color_cast, derived from the op's definition (an
-// alpha-blend between each pixel and a per-channel constant R/G/B value,
-// out = (pixel - c) * alpha + c), NOT from the RPP kernel. Used as the reference for both
-// backends so kernel bugs surface as diffs.
-//
-// c is the channel's cast constant in [0,255] pixel units (rgbTensor.R/G/B). Integer types
-// work in [0,255] intensity space and round to nearest; I8 pixels are the same intensities
-// shifted by -128:
-//   U8  : clamp[0,255]  ( round( (v - c) * alpha + c ) )
-//   I8  : clamp[-128,127]( round( ((v + 128) - c) * alpha + c ) - 128 )
-//   F32 : clamp[0,1]    ( (v - c/255) * alpha + c/255 )
-//   F16 : same as F32, stored as half
+/*
+Reference model: color_cast
+
+RPP op
+  rppt_color_cast   (Image / Color augmentation)
+
+Description
+  Pointwise tint toward a constant colour. Each channel is alpha-blended with
+  that channel's cast constant, so alpha = 1 leaves the image unchanged and
+  alpha = 0 floods it with the cast colour. Channels are independent; PLN1
+  uses the red constant.
+
+Expression
+  dst(x, y, c) = clamp( (src(x, y, c) - cast[c]) * alpha + cast[c] )
+
+Per-type form
+  The cast constant is in [0,255] pixel units (rgbTensor.R/G/B) for every
+  type. Integer types work in [0,255] intensity space and round to nearest;
+  I8 is the same intensity shifted -128.
+
+    U8    clamp[0,255]   ( round( (v - c) * alpha + c ) )
+    I8    clamp[-128,127]( round( ((v + 128) - c) * alpha + c ) - 128 )
+    F32   clamp[0,1]     ( (v - c/255) * alpha + c/255 )
+    F16   as F32, stored as half
+*/
 inline double color_cast_scalar(double v, DType dt, double alpha, double c) {
     switch (dt) {
         case DType::U8:
@@ -62,10 +75,6 @@ inline double color_cast_scalar(double v, DType dt, double alpha, double c) {
     }
 }
 
-// Writes the color-cast result into dst, reading the source at the ROI offset and writing
-// packed at the destination origin (matching the region and placement the RPP op uses). The
-// per-channel constant rgb[c] casts channel c (R/G/B; PLN1 uses rgb[0]). dst outside the
-// written region is left as the caller initialized it.
 template <typename T>
 void color_cast_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                           RpptRoiType roiType, double alpha, const double rgb[3]) {

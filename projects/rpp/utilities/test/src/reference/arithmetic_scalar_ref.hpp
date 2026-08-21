@@ -35,26 +35,38 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for the four Voxel scalar-arithmetic ops (rppt_add_scalar /
-// rppt_subtract_scalar / rppt_multiply_scalar / rppt_fused_multiply_add_scalar). Modelled from the
-// operations' definition and the public API header, NOT from the kernel; computed once on the host
-// and used as the reference for both the HOST and HIP backends.
-//
-// Semantics: each op takes one Rpp32f per batch sample and applies it to every voxel of that
-// sample's ROI box -- "adds a corresponding element from the 'addTensor' to source tensor",
-// likewise subtract and multiply, while fmadd "multiplies each element of the source tensor by a
-// corresponding element in the 'mulTensor', adds a corresponding element from the 'addTensor'".
-// All four are declared f32 -> f32 only.
-//
-// Two behaviors the header does not spell out, taken from the operations' definition:
-//   - The result is NOT clamped. These are 3D volumes (the legacy harness drives them with NIFTI
-//     scans), not [0,1] image intensities, and the ops are plain arithmetic; clamping a
-//     subtraction at 0 or a multiply at 1 would make them meaningless. The test parameters are
-//     chosen so a clamp anywhere would show.
-//   - Placement follows RPP's pointwise convention (for_each_voxel_roi_io): the source is read at
-//     the ROI offset and the result is written packed at the destination origin. The header
-//     documents nothing about the destination outside that block, so the comparator ignores it.
-// Arithmetic is carried in double and stored once.
+/*
+Reference model: scalar arithmetic
+
+RPP op
+  rppt_add_scalar / rppt_subtract_scalar / rppt_multiply_scalar /
+  rppt_fused_multiply_add_scalar   (Voxel / Arithmetic)
+
+Description
+  Applies one scalar per batch sample to every voxel of that sample's ROI box.
+  add/subtract/multiply take a single parameter; fmadd multiplies by the first
+  and adds the second. All four are declared f32 -> f32 only. Arithmetic is
+  carried in double and stored once.
+
+Expression
+  add     dst = src + p0
+  sub     dst = src - p0
+  mul     dst = src * p0
+  fmadd   dst = src * p0 + p1
+
+Notes
+  Two behaviours the header does not spell out, taken from the operations'
+  definition:
+
+  - The result is NOT clamped. These are 3D volumes (the legacy harness drives
+    them with NIFTI scans), not [0,1] image intensities, and the ops are plain
+    arithmetic; clamping a subtraction at 0 or a multiply at 1 would make them
+    meaningless. The test parameters are chosen so a clamp anywhere would show.
+  - Placement follows RPP's pointwise convention (for_each_voxel_roi_io): the
+    source is read at the ROI offset and the result written packed at the
+    destination origin. The header documents nothing about the destination
+    outside that block, so the comparator ignores it.
+*/
 
 enum class ScalarArithmeticOp { Add, Subtract, Multiply, FusedMultiplyAdd };
 

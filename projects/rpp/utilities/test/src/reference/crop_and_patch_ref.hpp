@@ -33,15 +33,27 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_crop_and_patch, derived from the op's definition (copy
-// the 2nd image, then overlay the rectangular crop taken from the 1st image at the patch
-// co-ordinates), NOT from the RPP kernel. Used as the reference for both backends so kernel bugs
-// surface as diffs.
-//
-// crop_and_patch does no arithmetic, rounding, or clamping: every output element is copied verbatim
-// from one of the two sources, so the result is bit-exact for U8/I8/F16/F32 alike. Crop size ==
-// patch size (no resize), the documented unambiguous case. Coordinates are absolute (image origin
-// (0,0)); pixels whose source or destination fall outside [0,d.h) x [0,d.w) are skipped.
+/*
+Reference model: crop_and_patch
+
+RPP op
+  rppt_crop_and_patch   (Image / Geometric augmentation)
+
+Description
+  Copies the 2nd image, then overlays the rectangular crop taken from the 1st
+  image at the patch co-ordinates. Crop size == patch size (no resize), the
+  documented unambiguous case. Coordinates are absolute (image origin (0,0));
+  pixels whose source or destination fall outside [0,h) x [0,w) are skipped.
+
+Expression
+  dst           = src2                        everywhere
+  dst(patch + k) = src1(crop + k)             for k inside the patch rectangle
+
+Per-type form
+  No arithmetic, rounding, or clamping is performed -- every output element is
+  copied verbatim from one of the two sources -- so the result is bit-exact
+  for U8, I8, F16 and F32 alike.
+*/
 template <typename T>
 void crop_and_patch_reference(const T* src1, const T* src2, T* dst, const RpptDesc& d,
                               const RpptROI* /*dstRoi*/, const RpptROI* cropRoi,

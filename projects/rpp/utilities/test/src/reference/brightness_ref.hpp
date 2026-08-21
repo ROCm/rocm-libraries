@@ -35,16 +35,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_brightness, derived from the op's definition
-// (out = alpha * pixel + beta), NOT from the RPP kernel. Used as the reference for both
-// backends so kernel bugs surface as diffs.
-//
-// beta is expressed in [0,255] pixel units. Integer types work in [0,255] intensity space
-// and round to nearest; I8 pixels are the same intensities shifted by -128:
-//   U8  : clamp[0,255]  ( round(alpha * v + beta) )
-//   I8  : clamp[-128,127]( round(alpha * (v + 128) + beta) - 128 )
-//   F32 : clamp[0,1]    ( alpha * v + beta / 255 )
-//   F16 : same as F32, stored as half
+/*
+Reference model: brightness
+
+RPP op
+  rppt_brightness   (Image / Color augmentation)
+
+Description
+  Pointwise linear intensity remap. Each channel of each pixel in the ROI is
+  scaled by a per-image gain (alpha) and shifted by a per-image bias (beta),
+  then clamped to the range of the pixel type. Channels are independent; no
+  neighbourhood is read.
+
+Expression
+  dst(x, y, c) = clamp( alpha * src(x, y, c) + beta )
+
+Per-type form
+  beta is in [0,255] pixel units for every type. Integer types work in [0,255]
+  intensity space and round to nearest; I8 is the same intensity shifted -128.
+
+    U8    clamp[0,255]   ( round(alpha * v + beta) )
+    I8    clamp[-128,127]( round(alpha * (v + 128) + beta) - 128 )
+    F32   clamp[0,1]     ( alpha * v + beta / 255 )
+    F16   as F32, stored as half
+*/
+
 inline double brightness_scalar(double v, DType dt, double alpha, double beta) {
     switch (dt) {
         case DType::U8:
@@ -59,9 +74,6 @@ inline double brightness_scalar(double v, DType dt, double alpha, double beta) {
     }
 }
 
-// Writes the brightness result into dst, reading the source at the ROI offset and writing
-// packed at the destination origin (matching the region and placement the RPP op uses).
-// dst outside the written region is left as the caller initialized it.
 template <typename T>
 void brightness_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                           RpptRoiType roiType, double alpha, double beta) {

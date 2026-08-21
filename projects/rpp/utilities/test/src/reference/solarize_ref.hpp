@@ -35,15 +35,30 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_solarize, derived from the op's definition (pixels at or
-// above the threshold are inverted about the intensity range), NOT from the kernel. The inversion
-// and threshold compare are exact integer operations, so no rounding of a product is involved.
-//
-// The normalized [0,1] threshold is scaled to the integer intensity range; I8 pixels invert in
-// [0,255] intensity space (i = v + 128, inverted intensity 255 - i, back to signed = -1 - v):
-//   U8      : T = round(threshold * 255); out = (v >= T)       ? (255 - v) : v
-//   I8      : T = round(threshold * 255); out = (v + 128 >= T) ? (-1 - v)  : v
-//   F16/F32 : out = (v >= threshold) ? (1 - v) : v
+/*
+Reference model: solarize
+
+RPP op
+  rppt_solarize   (Image / Effects augmentation)
+
+Description
+  Pointwise partial tone inversion. Channels at or above the threshold are
+  inverted about the intensity range while those below are passed through
+  unchanged, producing the characteristic solarized look. The inversion and
+  the compare are exact operations, so no product is rounded.
+
+Expression
+  dst(x, y, c) = src >= threshold ? (max - src) : src
+
+Per-type form
+  The threshold is given normalized in [0,1] and scaled to the integer
+  intensity range. I8 inverts in [0,255] intensity space (i = v + 128,
+  inverted intensity 255 - i, back to signed = -1 - v).
+
+    U8      T = round(threshold * 255);  (v >= T)       ? (255 - v) : v
+    I8      T = round(threshold * 255);  (v + 128 >= T) ? (-1 - v)  : v
+    F16/F32                              (v >= threshold) ? (1 - v) : v
+*/
 inline double solarize_scalar(double v, DType dt, double threshold) {
     switch (dt) {
         case DType::U8: {

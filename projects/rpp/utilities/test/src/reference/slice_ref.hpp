@@ -35,32 +35,49 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for the ND slice op (rppt_slice). Modelled from the operation's definition
-// and the public API header, NOT from the kernel; computed once on the host and used as the
-// reference for both the HOST and HIP backends.
-//
-// Semantics: "selecting a region of interest from the source tensor and copying it to the
-// destination tensor". anchorTensor holds the per-axis start index of the slice and shapeTensor
-// its per-axis length (both batchSize * nDim, batch axis excluded); roiTensor (batchSize * nDim
-// * 2 -- per-axis starts followed by per-axis lengths) delimits the valid source region.
-//
-// The slice is written densely at the destination origin: destination coordinate c takes source
-// coordinate s[a] = anchor[a] + c[a]. When every s[a] lies inside the ROI
-// (roiStart[a] <= s[a] < roiStart[a] + roiLength[a]) the element is copied verbatim -- slice
-// moves values and never computes on them, so the result is bit-exact for every dtype. When some
-// s[a] falls outside, the element has no source and takes fillValue.
-//
-// Two things the header leaves open, and how they are handled rather than guessed:
-//   - The out-of-ROI result with enablePadding false is unspecified, so the caller is required to
-//     keep the slice inside the ROI in that case; the fill branch is then unreachable rather than
-//     an encoded guess. enablePadding is consequently not a parameter here.
-//   - fillValue's type is unspecified (the API takes a void pointer). The caller passes 0, which
-//     is the same value under every interpretation, so the golden only needs the scalar.
-//
-// The walk covers shape[] per sample, which is exactly the destination extents the caller builds
-// (dstDims = {batch, shape...}), so every destination element is written. Both tensors are
-// addressed by logical coordinate through their own strides (nd_offset), so either may be dense or
-// padded -- slice's own convention is padded (see the test).
+/*
+Reference model: slice
+
+RPP op
+  rppt_slice   (ND / Geometric augmentation)
+
+Description
+  Selects a region of interest from the source tensor and copies it to the
+  destination. anchorTensor holds the per-axis start index of the slice and
+  shapeTensor its per-axis length (both batchSize * nDim, batch axis
+  excluded); roiTensor (batchSize * nDim * 2 -- per-axis starts followed by
+  per-axis lengths) delimits the valid source region.
+
+  The slice is written densely at the destination origin. When every source
+  coordinate lies inside the ROI the element is copied verbatim; when some
+  axis falls outside, the element has no source and takes fillValue.
+
+  The walk covers shape[] per sample, which is exactly the destination extents
+  the caller builds (dstDims = {batch, shape...}), so every destination
+  element is written. Both tensors are addressed by logical coordinate through
+  their own strides (nd_offset), so either may be dense or padded -- slice's
+  own convention is padded.
+
+Expression
+  s[a] = anchor[a] + c[a]
+  dst[c] = in-ROI ? src[s] : fillValue
+  in-ROI = roiStart[a] <= s[a] < roiStart[a] + roiLength[a]  for every axis a
+
+Per-type form
+  Slice moves values and never computes on them, so the result is bit-exact
+  for every type.
+
+Notes
+  Two things the header leaves open, handled rather than guessed:
+
+  - The out-of-ROI result with enablePadding false is unspecified, so the
+    caller is required to keep the slice inside the ROI in that case; the fill
+    branch is then unreachable rather than an encoded guess. enablePadding is
+    consequently not a parameter here.
+  - fillValue's type is unspecified (the API takes a void pointer). The caller
+    passes 0, which is the same value under every interpretation, so the
+    golden only needs the scalar.
+*/
 template <typename T>
 void slice_reference(const T* src, T* dst, const RpptGenericDesc& srcDesc,
                      const RpptGenericDesc& dstDesc, const Rpp32s* anchorTensor,

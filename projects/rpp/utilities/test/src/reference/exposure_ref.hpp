@@ -35,14 +35,28 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_exposure, derived from the op's definition
-// (out = pixel * 2^exposureFactor), NOT from the RPP kernel.
-//
-// Integer types work in [0,255] intensity space and round to nearest; I8 pixels are the same
-// intensities shifted by -128:
-//   U8      : clamp[0,255]  ( round(v * mult) )
-//   I8      : clamp[-128,127]( round((v + 128) * mult) - 128 )
-//   F16/F32 : clamp[0,1]    ( v * mult )
+/*
+Reference model: exposure
+
+RPP op
+  rppt_exposure   (Image / Color augmentation)
+
+Description
+  Pointwise exposure adjustment in stops. Each channel of each pixel is scaled
+  by 2^exposureFactor, so a factor of +1 doubles the intensity and -1 halves
+  it, then clamped to the range of the pixel type.
+
+Expression
+  dst(x, y, c) = clamp( src(x, y, c) * 2^exposureFactor )
+
+Per-type form
+  Integer types work in [0,255] intensity space and round to nearest; I8 is
+  the same intensity shifted -128. mult = 2^exposureFactor.
+
+    U8      clamp[0,255]   ( round(v * mult) )
+    I8      clamp[-128,127]( round((v + 128) * mult) - 128 )
+    F16/F32 clamp[0,1]     ( v * mult )
+*/
 inline double exposure_scalar(double v, DType dt, double mult) {
     switch (dt) {
         case DType::U8: return clampd(std::nearbyint(v * mult), 0.0, 255.0);

@@ -33,14 +33,24 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_crop, derived from the op's definition (crop each image
-// to its ROI: the destination is the source region at the ROI offset, written packed at the
-// destination origin), NOT from the RPP kernel. Used as the reference for both backends so kernel
-// bugs surface as diffs.
-//
-// crop has no scalar params and does no arithmetic, rounding, or clamping: each cropped element is
-// copied verbatim, so the result is bit-exact for U8/I8/F16/F32 alike. for_each_roi_io() encodes
-// crop's src-at-ROI-offset -> dst-at-origin placement (the same mapping every ROI op shares).
+/*
+Reference model: crop
+
+RPP op
+  rppt_crop   (Image / Geometric augmentation)
+
+Description
+  Crops each image to its ROI. The source region at the ROI offset is copied
+  verbatim to the destination origin, so the op is a pure relocation of pixels
+  with no resampling. There are no scalar parameters.
+
+Expression
+  dst(x, y, c) = src(x + roi.x, y + roi.y, c)
+
+Per-type form
+  No arithmetic, rounding, or clamping is performed, so the result is
+  bit-exact for U8, I8, F16 and F32 alike.
+*/
 template <typename T>
 void crop_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
                     RpptRoiType roiType) {

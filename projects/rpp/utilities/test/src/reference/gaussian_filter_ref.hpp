@@ -35,15 +35,25 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_gaussian_filter, derived from the Gaussian-blur definition
-// (each output pixel is a normalized Gaussian-weighted sum of its KxK neighbourhood, per channel,
-// REPLICATE border), NOT from the RPP kernel. Used as the reference for both backends so kernel bugs
-// surface as diffs.
-//
-// The weight at offset (dy,dx) relative to the window centre is exp(-(dy*dy + dx*dx)/(2*sigma*sigma))
-// for dy,dx in [-r, r] (r = kernelSize/2), and the whole KxK kernel is normalized so its weights sum
-// to 1.0 (preserves DC). Weights are laid out row-major (dy = -r..r outer, dx = -r..r inner) to match
-// gather_roi_window; convolve_reference applies the window/border/quantization.
+/*
+Reference model: gaussian_filter
+
+RPP op
+  rppt_gaussian_filter   (Image / Filter augmentation)
+
+Description
+  Per-channel Gaussian blur: each output pixel is a normalized
+  Gaussian-weighted sum of its KxK neighbourhood. The whole kernel is
+  normalized so its weights sum to 1.0, which preserves DC.
+
+  Weights are laid out row-major (dy = -r..r outer, dx = -r..r inner) to match
+  gather_roi_window; convolve_reference applies the window, REPLICATE border
+  and quantization.
+
+Expression
+  w(dy, dx)  = exp( -(dy^2 + dx^2) / (2 sigma^2) )    for dy, dx in [-r, r]
+  dst(j, i)  = sum{ w(dy, dx) * src(j+dy, i+dx) } / sum{ w(dy, dx) }
+*/
 template <typename T>
 void gaussian_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                                RpptRoiType type, Rpp32u kernelSize, double stdDev) {

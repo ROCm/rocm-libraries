@@ -33,14 +33,25 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_flip, derived from the op's definition (a
-// mask-controlled mirror of the ROI region about its vertical and/or horizontal axis), NOT from
-// the RPP kernel. Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// Flip is a pure permutation of source elements -- no arithmetic, so no rounding or clamping and
-// every dtype is bit-exact. The source is read at the ROI offset and the output written packed at
-// the destination origin (the placement every RPP op uses), so output element (j, i) comes from
-// source (y0 + [vertical ? h-1-j : j], x0 + [horizontal ? w-1-i : i]).
+/*
+Reference model: flip
+
+RPP op
+  rppt_flip   (Image / Geometric augmentation)
+
+Description
+  Mask-controlled mirror of the ROI region about its vertical and/or
+  horizontal axis. The two flags are independent, so setting both rotates the
+  region by 180 degrees.
+
+Expression
+  dst(j, i) = src( y0 + (vertical   ? h-1-j : j),
+                   x0 + (horizontal ? w-1-i : i) )
+
+Per-type form
+  A pure permutation of source elements. No arithmetic is performed, so there
+  is no rounding or clamping and every type is bit-exact.
+*/
 template <typename T>
 void flip_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
                     RpptRoiType roiType, Rpp32u horizontal, Rpp32u vertical) {

@@ -35,22 +35,29 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for rppt_transpose. Modelled from the operation's definition and the
-// public API header ("an input-permutation based transpose on a generic ND Tensor"), NOT
-// from the kernel; computed once on the host and used as the reference for both the HOST
-// and HIP backends.
-//
-// Semantics: permTensor is a permutation of the nDim per-sample axes -- the batch axis is
-// neither permuted nor part of perm. Output axis k reads source axis perm[k]:
-//
-//     dst[b][c_0, ..., c_{n-1}] == src[b][s_0, ..., s_{n-1}]   where s[perm[k]] = c[k]
-//
-// so the output extent along axis k is the source ROI extent along axis perm[k].
-//
-// This is pure data movement: no arithmetic, no dtype conversion, no clamping. Every output
-// element is a bit-exact copy of exactly one source element and the coordinate map is a
-// bijection, so the reference reproduces the operation exactly at every dtype -- any
-// difference from the kernel is a real defect, never a rounding artifact.
+/*
+Reference model: transpose
+
+RPP op
+  rppt_transpose   (ND / Geometric augmentation)
+
+Description
+  An input-permutation based transpose on a generic ND tensor. permTensor is a
+  permutation of the nDim per-sample axes -- the batch axis is neither
+  permuted nor part of perm. Output axis k reads source axis perm[k], so the
+  output extent along axis k is the source ROI extent along axis perm[k].
+
+Expression
+  dst[b][c_0, ..., c_{n-1}] == src[b][s_0, ..., s_{n-1}]
+  where s[perm[k]] = c[k]
+
+Per-type form
+  Pure data movement: no arithmetic, no type conversion, no clamping. Every
+  output element is a bit-exact copy of exactly one source element and the
+  coordinate map is a bijection, so the reference reproduces the operation
+  exactly at every type -- any difference from the kernel is a real defect,
+  never a rounding artifact.
+*/
 
 // The destination extents implied by a source shape and a permutation, batch axis first.
 inline NdDims transpose_dst_dims(const NdDims& srcDims, const std::vector<Rpp32u>& perm) {

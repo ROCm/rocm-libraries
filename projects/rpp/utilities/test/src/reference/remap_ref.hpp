@@ -36,25 +36,36 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_remap, derived from the op's definition
-// output(x,y) = input(colRemapTable(x,y), rowRemapTable(x,y)), NOT from the RPP kernel. Used as the
-// reference for both backends so kernel bugs surface as diffs.
-//
-// The remap tables are a per-image lookup: for output pixel (i,j) the source COLUMN to sample is
-// colRemapTable(i,j) and the source ROW is rowRemapTable(i,j). The table value is taken literally as
-// the ABSOLUTE source coordinate (image origin = texel (0,0)); the source is sampled in that absolute
-// frame with the requested interpolation and per-dtype round-to-nearest quantization (both shared,
-// kernel-independent, from interpolation.hpp / tensor_setup.hpp).
-//
-// Unlike the same-size warps this does not reuse geometric_reference(): remap genuinely has two
-// distinct descriptors (the image descriptor vs the unpadded single-channel table descriptor), so the
-// walk is written here while the sampler (interpolation.hpp) stays shared.
-//
-// NOTE (semantics assumption): the public header states neither the coordinate frame nor the boundary
-// handling. The reference holds to the literal reading -- absolute-frame coordinates, with the valid
-// source rectangle being the ROI rectangle [x0,x0+roiW) x [y0,y0+roiH) and samples outside it
-// returning the dtype's black (sample()'s border param). A kernel that uses a different frame or
-// border shows up as a diff, which is a finding, not a reference bug.
+/*
+Reference model: remap
+
+RPP op
+  rppt_remap   (Image / Geometric augmentation)
+
+Description
+  Arbitrary per-pixel resampling driven by two lookup tables. For output pixel
+  (i,j) the source COLUMN to sample is colRemapTable(i,j) and the source ROW is
+  rowRemapTable(i,j). The table value is taken literally as the ABSOLUTE source
+  coordinate (image origin = texel (0,0)); the source is sampled in that
+  absolute frame with the requested interpolation and per-type
+  round-to-nearest quantization.
+
+  Unlike the same-size warps this does not reuse geometric_reference(): remap
+  genuinely has two distinct descriptors (the image descriptor vs the unpadded
+  single-channel table descriptor), so the walk is written here while the
+  sampler (interpolation.hpp) stays shared.
+
+Expression
+  dst(x, y) = src( colRemapTable(x, y), rowRemapTable(x, y) )
+
+Notes
+  The public header states neither the coordinate frame nor the boundary
+  handling. The reference holds to the literal reading: absolute-frame
+  coordinates, with the valid source rectangle being the ROI rectangle
+  [x0,x0+roiW) x [y0,y0+roiH) and samples outside it returning the type's
+  black. A kernel that uses a different frame or border shows up as a diff,
+  which is a finding, not a reference bug.
+*/
 template <typename T>
 void remap_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                      const Rpp32f* rowRemapTable, const Rpp32f* colRemapTable, const RpptDesc& td,

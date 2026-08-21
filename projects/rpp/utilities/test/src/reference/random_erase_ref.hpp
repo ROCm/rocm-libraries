@@ -34,25 +34,46 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_random_erase, derived from the op's public API doc
-// comment and first principles, NOT from the RPP kernel. Unlike rppt_erase / coarse_dropout,
-// random_erase takes exactly one user-defined rectangular region per image (anchorBoxInfoTensor[n],
-// no numBoxes/maxBoxesPerImage) and fills it not with a solid color but with values sampled
-// spatially (tiled) from a caller-supplied noiseBuffer of size 255*255*channels. There is no seed
-// anywhere in this API: every "random" input (box placement, noise contents) is supplied by the
-// caller, so the op itself is a deterministic tiling/lookup and this golden is bit-exact.
-//
-// anchorBoxInfoTensor[n] gives the box as an RpptRoiLtrb in ABSOLUTE image coordinates, inclusive on
-// both corners (same convention as erase_ref.hpp / roi_bounds: width rb-lt+1), so the box covers
-// columns [lt.x, rb.x] and rows [lt.y, rb.y]. For an output pixel at absolute source coordinate
-// (sx, sy) that falls inside the box, the erased value for channel c is looked up by tiling the
-// image-space coordinate modulo the 255x255 noise tile, with the row phase additionally shifted by
-// the image's own batch index n. Both backends add their per-image batch index to the row before
-// the modulo, independently of one another, so this is the intended per-image tile phase (each
-// image in a batch samples a different vertical slice of the tile) rather than a shared bug:
-//   noiseBuffer[(((sy + n) % 255) * 255 + (sx % 255)) * channels + c]
-// All other pixels copy the source unchanged. No arithmetic beyond modulo + lookup, so every dtype
-// is bit-exact.
+/*
+Reference model: random_erase
+
+RPP op
+  rppt_random_erase   (Image / Effects augmentation)
+
+Description
+  Fills one user-defined rectangular region per image with noise sampled
+  spatially from a caller-supplied buffer, passing every other pixel through
+  unchanged. Unlike erase and coarse_dropout it takes exactly one box per
+  image (anchorBoxInfoTensor[n], no numBoxes/maxBoxesPerImage), and the fill is
+  not a solid colour but a tiled lookup into a noiseBuffer of size
+  255*255*channels.
+
+  Despite the name there is no seed anywhere in this API: every "random" input
+  (box placement, noise contents) is supplied by the caller, so the op is a
+  deterministic tiling lookup and this golden is bit-exact.
+
+  anchorBoxInfoTensor[n] gives the box as an RpptRoiLtrb in ABSOLUTE image
+  coordinates, inclusive on both corners (same convention as erase_ref.hpp /
+  roi_bounds: width rb-lt+1), covering columns [lt.x, rb.x] and rows
+  [lt.y, rb.y].
+
+Expression
+  For a pixel at absolute source coordinate (sx, sy) inside the box:
+
+  dst = noiseBuffer[ (((sy + n) % 255) * 255 + (sx % 255)) * channels + c ]
+
+  and dst = src everywhere else.
+
+Per-type form
+  No arithmetic beyond the modulo and the lookup, so every type is bit-exact.
+
+Notes
+  The row phase is shifted by the image's own batch index n. Both backends add
+  their per-image batch index to the row before the modulo, independently of
+  one another, so this is the intended per-image tile phase -- each image in a
+  batch samples a different vertical slice of the tile -- rather than a shared
+  bug.
+*/
 template <typename T>
 void random_erase_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                             RpptRoiType roiType, const RpptRoiLtrb* boxes, const T* noiseBuffer) {

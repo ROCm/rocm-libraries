@@ -32,27 +32,38 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_warp_perspective, derived from the op's definition (a
-// projective image warp), NOT from the RPP kernel. Used as the reference for both backends so
-// kernel bugs surface as diffs.
-//
-// perspectiveTensor holds 9 values per image, the row-major 3x3 matrix M = [m0 m1 m2; m3 m4 m5;
-// m6 m7 m8]. A warp is an inverse mapping: for each output pixel the matrix gives the SOURCE
-// coordinate to sample, in homogeneous form
-//     w    = m6*outX + m7*outY + m8
-//     srcX = (m0*outX + m1*outY + m2) / w
-//     srcY = (m3*outX + m4*outY + m5) / w
-// the projective generalization of the remap contract output(x,y) = input(mapx(x,y), mapy(x,y)).
-// The output index (outX,outY) is origin-based and the source coordinate is absolute (full-image
-// frame): RPP's warp ignores the ROI offset for the mapping and uses the ROI only to size the
-// output and bound the valid-source rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is
-// black. Output pixel centers are at integer indices; sampling/interpolation/border/quantize are
-// handled by geometric_reference() (shared with warp_affine).
-//
-// NOTE (semantics assumption): the public header does not document the matrix direction or the
-// mapping frame. The destination->source direction and absolute-frame / origin-based output
-// placement are assumed, matching rppt_warp_affine (whose conventions were confirmed against the op
-// via pure-translation cases) since the two share the same geometric machinery.
+/*
+Reference model: warp_perspective
+
+RPP op
+  rppt_warp_perspective   (Image / Geometric augmentation)
+
+Description
+  Projective image warp. perspectiveTensor holds 9 values per image, the
+  row-major 3x3 matrix M = [m0 m1 m2; m3 m4 m5; m6 m7 m8]. A warp is an
+  inverse mapping: for each output pixel the matrix gives the SOURCE
+  coordinate to sample, in homogeneous form -- the projective generalization
+  of the remap contract output(x,y) = input(mapx(x,y), mapy(x,y)).
+
+  The output index (outX, outY) is origin-based and the source coordinate is
+  absolute (full-image frame): RPP's warp ignores the ROI offset for the
+  mapping and uses the ROI only to size the output and bound the valid-source
+  rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is black. Output
+  pixel centres are at integer indices; sampling, interpolation, border and
+  quantize are handled by geometric_reference(), shared with warp_affine.
+
+Expression
+  w    =  m6*outX + m7*outY + m8
+  srcX = (m0*outX + m1*outY + m2) / w
+  srcY = (m3*outX + m4*outY + m5) / w
+
+Notes
+  The public header does not document the matrix direction or the mapping
+  frame. The destination->source direction and absolute-frame / origin-based
+  output placement are assumed, matching rppt_warp_affine (whose conventions
+  were confirmed against the op via pure-translation cases) since the two
+  share the same geometric machinery.
+*/
 template <typename T>
 void warp_perspective_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                                 const RpptROI* roi, RpptRoiType roiType,

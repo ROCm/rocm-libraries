@@ -35,16 +35,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_posterize, derived from the op's definition (reduce each
-// channel to the requested number of bits by keeping the top `levelBits` most-significant bits of
-// its 8-bit representation and zeroing the rest -- the canonical posterize bit-mask), NOT from the
-// kernel. The same reference serves both HOST and HIP backends.
-//
-// The bit-mask lives in 8-bit unsigned intensity space; each dtype is mapped in and back out:
-//   U8      : i = round(v);                   out = i & mask
-//   I8      : i = round(v) + 128;             out = (i & mask) - 128
-//   F16/F32 : i = round(v * 255) in [0,255];  out = (i & mask) / 255
-// masking is an exact integer operation, so no rounding of a product is involved for U8/I8.
+/*
+Reference model: posterize
+
+RPP op
+  rppt_posterize   (Image / Effects augmentation)
+
+Description
+  Reduces each channel to the requested number of bits by keeping the top
+  `levelBits` most-significant bits of its 8-bit representation and zeroing the
+  rest -- the canonical posterize bit-mask. The result is a banded image with
+  2^levelBits distinct levels per channel.
+
+Expression
+  mask         = (0xFF << (8 - levelBits)) & 0xFF
+  dst(x, y, c) = src(x, y, c) & mask
+
+Per-type form
+  The bit-mask lives in 8-bit unsigned intensity space, so each type is mapped
+  in and back out. Masking is an exact integer operation, so no product is
+  rounded for U8/I8.
+
+    U8      i = round(v);                   out = i & mask
+    I8      i = round(v) + 128;             out = (i & mask) - 128
+    F16/F32 i = round(v * 255) in [0,255];  out = (i & mask) / 255
+*/
 inline int posterize_mask(int levelBits) { return (0xFF << (8 - levelBits)) & 0xFF; }
 
 inline double posterize_scalar(double v, DType dt, int levelBits) {

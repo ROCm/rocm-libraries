@@ -35,24 +35,41 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for rppt_spatter, used for both HOST and HIP.
-//
-// The blend itself is modeled from the op's public API doc comment: a per-texel alpha composite of
-// the source over a user-defined spatter color, in normalized [0,1] intensity space,
-//   out = src * (1 - mask) + color * mask
-// with `mask` sampled from the op's 1920x1080 spatter texture. The channel mapping follows the
-// header's "RGB values to use for the spatter augmentation": channel 0 takes R, 1 takes G, 2 takes
-// B. A 1-channel image has no channel to map onto, so the color collapses to its mean intensity.
-//
-// The texture itself is not modeled here, and cannot be: it is a baked constant pair in the private
-// header src/include/tensor/spatter_mask.hpp, which is not installed with the library, and the
-// window the kernel samples from is drawn per image from an unseedable std::random_device-seeded
-// mt19937 on both backends. There is therefore no pointwise golden for this op. What is modeled
-// instead are the parts of the blend that hold whatever texel the RNG lands on -- the documented
-// channel mapping, and the fixed point where the source already equals the spatter colour.
-//
-// Per dtype: U8/I8 normalize to [0,1] on load and quantize back with round-to-nearest on store
-// (to_unit / from_unit); F16/F32 are already unit intensities and only clamp to [0,1].
+/*
+Reference model: spatter   (fixed point only)
+
+RPP op
+  rppt_spatter   (Image / Effects augmentation)
+
+Description
+  Per-texel alpha composite of the source over a user-defined spatter colour,
+  in normalized [0,1] intensity space, with `mask` sampled from the op's
+  1920x1080 spatter texture. The channel mapping follows the header's "RGB
+  values to use for the spatter augmentation": channel 0 takes R, 1 takes G, 2
+  takes B. A 1-channel image has no channel to map onto, so the colour
+  collapses to its mean intensity.
+
+Expression
+  dst = src * (1 - mask) + color * mask
+
+Per-type form
+  U8/I8 normalize to [0,1] on load and quantize back with round-to-nearest on
+  store (to_unit / from_unit); F16/F32 are already unit intensities and only
+  clamp to [0,1].
+
+Scope
+  The texture is not modelled here and cannot be: it is a baked constant pair
+  in the private header src/include/tensor/spatter_mask.hpp, which is not
+  installed with the library, and the window the kernel samples from is drawn
+  per image from an unseedable std::random_device-seeded mt19937 on both
+  backends. There is therefore no pointwise golden for this op.
+
+  What is modelled instead are the parts of the blend that hold whatever texel
+  the RNG lands on: the documented channel mapping, and the fixed point where
+  the source already equals the spatter colour (mask + maskInv == 1
+  everywhere). That fixed point is the only exact golden that holds at an
+  arbitrary image size.
+*/
 
 // Documented spatter intensity for channel `c` of a `channels`-channel image, in [0,1].
 inline double spatter_color_unit(RpptRGB color, Rpp32u channels, Rpp32u c) {
@@ -69,9 +86,6 @@ inline double spatter_color_stored(RpptRGB color, Rpp32u channels, Rpp32u c, DTy
     return from_unit(spatter_color_unit(color, channels, c), dt);
 }
 
-// mask + maskInv == 1 everywhere, so a source already equal to the spatter color is a fixed point
-// of the blend whatever window the RNG lands on. This is the only exact golden that holds at an
-// arbitrary image size.
 template <typename T>
 void spatter_identity_reference(T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                                 RpptRoiType roiType, RpptRGB color) {

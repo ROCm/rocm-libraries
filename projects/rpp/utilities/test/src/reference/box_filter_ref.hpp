@@ -34,11 +34,20 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_box_filter, derived from the box-filter definition
-// (per-channel arithmetic mean over a KxK window with a clamp-to-edge / REPLICATE border), NOT
-// from the RPP kernel. Used as the reference for both backends so kernel bugs surface as diffs.
-// The uniform kernel weights (each 1/(K*K)) are handed to convolve_reference, which owns the
-// shared window/border/quantization math (see reference/filter_common.hpp).
+/*
+Reference model: box_filter
+
+RPP op
+  rppt_box_filter   (Image / Filter augmentation)
+
+Description
+  Per-channel arithmetic mean over a KxK window -- the simplest blur. The
+  uniform weights are handed to convolve_reference, which owns the shared
+  window, REPLICATE border and quantization (reference/filter_common.hpp).
+
+Expression
+  dst(j, i) = (1 / K^2) * sum{ src(j+dy, i+dx) : dy, dx in [-r, r] }
+*/
 template <typename T>
 void box_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                           RpptRoiType type, Rpp32u kernelSize) {

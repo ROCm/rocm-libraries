@@ -35,24 +35,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for rppt_log. Modelled from the operation's definition and the public
-// API header, NOT from the kernel; computed once on the host and used as the reference for
-// both the HOST and HIP backends.
-//
-// Semantics, per the header: "Computes Log to base e(natural log) of the input", which
-// "Uses Absolute of input for log computation":
-//
-//     dst = log(|src|)
-//
-// applied element-wise over the whole densely packed tensor (a single source, no broadcast,
-// no op params). Everything is computed in double; no clamping is applied, since a log
-// result is signed and the documented output dtypes (f32, f16) are floating point.
-//
-// The header also states that a zero input is replaced via nextafter() "to avoid undefined
-// result", but it pins neither the precision nor the direction of that nextafter:
-// nextafterf(0.f, 1.f) = 1.4e-45 gives log = -103.28, while the double form 4.9e-324 gives
-// -744.44. The expected value is therefore ambiguous, so the tests deliberately feed no zero
-// inputs rather than encoding a guess, and this model does not special-case zero.
+/*
+Reference model: log
+
+RPP op
+  rppt_log   (ND / Arithmetic)
+
+Description
+  Element-wise natural logarithm over the whole densely packed tensor (a
+  single source, no broadcast, no op params). The header specifies that the
+  absolute value of the input is used, so negative inputs are folded before
+  the log. Everything is computed in double; no clamping is applied, since a
+  log result is signed and the documented output types (f32, f16) are
+  floating point.
+
+Expression
+  dst = log(|src|)
+
+Notes
+  The header states that a zero input is replaced via nextafter() "to avoid
+  undefined result", but pins neither the precision nor the direction of that
+  nextafter: nextafterf(0.f, 1.f) = 1.4e-45 gives log = -103.28, while the
+  double form 4.9e-324 gives -744.44. The expected value is therefore
+  ambiguous, so the tests deliberately feed no zero inputs rather than
+  encoding a guess, and this model does not special-case zero.
+*/
 
 inline double log_scalar(double v) {
     return std::log(std::fabs(v));

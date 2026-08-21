@@ -35,16 +35,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_contrast, derived from the op's definition
-// (out = (pixel - center) * factor + center), NOT from the RPP kernel. Used as the
-// reference for both backends so kernel bugs surface as diffs.
-//
-// center is expressed in [0,255] pixel units. Integer types work in [0,255] intensity
-// space and round to nearest; I8 pixels are the same intensities shifted by -128:
-//   U8  : clamp[0,255]  ( round( (v - center) * factor + center ) )
-//   I8  : clamp[-128,127]( round( ((v + 128) - center) * factor + center ) - 128 )
-//   F32 : clamp[0,1]    ( (v - center/255) * factor + center/255 )
-//   F16 : same as F32, stored as half
+/*
+Reference model: contrast
+
+RPP op
+  rppt_contrast   (Image / Color augmentation)
+
+Description
+  Pointwise contrast stretch about a fixed pivot. Each channel's distance from
+  the contrast centre is scaled by factor and added back to the centre, so
+  factor > 1 pushes intensities away from the centre and factor < 1 pulls them
+  toward it. The centre itself is unchanged.
+
+Expression
+  dst(x, y, c) = clamp( (src(x, y, c) - centre) * factor + centre )
+
+Per-type form
+  centre is in [0,255] pixel units for every type. Integer types work in
+  [0,255] intensity space and round to nearest; I8 is the same intensity
+  shifted -128.
+
+    U8    clamp[0,255]   ( round( (v - centre) * factor + centre ) )
+    I8    clamp[-128,127]( round( ((v + 128) - centre) * factor + centre ) - 128 )
+    F32   clamp[0,1]     ( (v - centre/255) * factor + centre/255 )
+    F16   as F32, stored as half
+*/
 inline double contrast_scalar(double v, DType dt, double factor, double center) {
     switch (dt) {
         case DType::U8:
@@ -61,9 +76,6 @@ inline double contrast_scalar(double v, DType dt, double factor, double center) 
     }
 }
 
-// Writes the contrast result into dst, reading the source at the ROI offset and writing
-// packed at the destination origin (matching the region and placement the RPP op uses).
-// dst outside the written region is left as the caller initialized it.
 template <typename T>
 void contrast_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                         RpptRoiType roiType, double factor, double center) {

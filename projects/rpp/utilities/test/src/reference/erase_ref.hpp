@@ -34,20 +34,33 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_erase, derived from the op's definition (overwrite one or
-// more user-defined rectangular regions of an image with caller-supplied solid colors, passing every
-// other pixel through unchanged) and its public API doc, NOT from the RPP kernel. Used as the
-// reference for both backends so kernel bugs surface as diffs.
-//
-// anchorBoxInfoTensor gives each erase-region as an RpptRoiLtrb in ABSOLUTE image coordinates,
-// inclusive on both corners (RpptRoiLtrb is inclusive throughout RPP -- see roi_bounds, which spans
-// [lt, rb] with width rb-lt+1), so a box covers columns [lt.x, rb.x] and rows [lt.y, rb.y]. The box
-// and color tensors are packed with a per-image stride of maxBoxesPerImage: box k of image n is at
-// [n*maxBoxesPerImage + k], and its color for channel c at [(n*maxBoxesPerImage + k)*channels + c]
-// (per-box RGB triplet, one value per channel). numBoxes[n] is the count of active boxes for image n
-// (they are required not to overlap). Any output pixel whose absolute source coordinate falls inside
-// an active box is a direct, bit-exact store of that box's per-channel color; all other pixels copy
-// the source. No arithmetic, so every dtype is bit-exact.
+/*
+Reference model: erase
+
+RPP op
+  rppt_erase   (Image / Effects augmentation)
+
+Description
+  Overwrites one or more user-defined rectangular regions with caller-supplied
+  solid colours, passing every other pixel through unchanged.
+
+  anchorBoxInfoTensor gives each erase-region as an RpptRoiLtrb in ABSOLUTE
+  image coordinates, inclusive on both corners (RpptRoiLtrb is inclusive
+  throughout RPP -- see roi_bounds, which spans [lt, rb] with width
+  rb-lt+1), so a box covers columns [lt.x, rb.x] and rows [lt.y, rb.y]. The
+  box and colour tensors are packed with a per-image stride of
+  maxBoxesPerImage: box k of image n is at [n*maxBoxesPerImage + k], and its
+  colour for channel c at [(n*maxBoxesPerImage + k)*channels + c] (a per-box
+  RGB triplet, one value per channel). numBoxes[n] is the count of active
+  boxes for image n, and they are required not to overlap.
+
+Expression
+  dst(x, y, c) = inside box k ? colors[k][c] : src(x, y, c)
+
+Per-type form
+  No arithmetic is performed -- an output pixel is either a box colour or a
+  source value, stored directly -- so every type is bit-exact.
+*/
 template <typename T>
 void erase_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                      RpptRoiType roiType, const RpptRoiLtrb* boxes, const Rpp32u* numBoxes,

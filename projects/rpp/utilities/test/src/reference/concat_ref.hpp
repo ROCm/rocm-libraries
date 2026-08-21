@@ -34,21 +34,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for the ND concatenation op (rppt_concat). Modelled from the operation's
-// definition and the public API header, NOT from the kernel; computed once on the host and used
-// as the reference for both the HOST and HIP backends.
-//
-// Semantics: "concatenates two 2D, 3D or ND tensors along a specified axis ... all dimensions
-// except the concatenation axis must match". With A = src1's extent along the axis:
-//   - the output extent along the axis is src1's + src2's, every other extent is unchanged;
-//   - dst[c] = src1[c]                       when c[axis] <  A,
-//     dst[c] = src2[c with c[axis] -= A]     when c[axis] >= A.
-// The axis is given 0-based over the per-sample axes (the batch axis is excluded), so it indexes
-// the descriptors' dims/strides at axis + 1.
-//
-// Concat only relocates elements -- no arithmetic, no dtype conversion -- so the golden copies
-// the stored value verbatim (no double round-trip, which would perturb F16) and the comparison
-// is bit-exact for every dtype.
+/*
+Reference model: concat
+
+RPP op
+  rppt_concat   (ND / Geometric augmentation)
+
+Description
+  Concatenates two 2D, 3D or ND tensors along a specified axis; all dimensions
+  except the concatenation axis must match. The output extent along the axis
+  is the sum of the two inputs', and every other extent is unchanged.
+
+  The axis is given 0-based over the per-sample axes (the batch axis is
+  excluded), so it indexes the descriptors' dims/strides at axis + 1.
+
+Expression
+  With A = src1's extent along the axis:
+
+  dst[c] = src1[c]                      when c[axis] <  A
+  dst[c] = src2[c with c[axis] -= A]    when c[axis] >= A
+
+Per-type form
+  Concat only relocates elements -- no arithmetic, no type conversion -- so
+  the golden copies the stored value verbatim (no double round-trip, which
+  would perturb F16) and the comparison is bit-exact for every type.
+*/
 
 // Every tensor is addressed by logical coordinate through its own strides (nd_offset), so operands
 // and output may be dense or padded independently -- the descriptor, not the buffer layout, defines

@@ -40,46 +40,73 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_jpeg_compression_distortion, derived from the definition
-// of baseline JPEG lossy compression (ITU-T T.81 + the IJG quality convention every encoder uses)
-// and the op's header description ("converting the image to the frequency domain using the DCT,
-// applying quantization, and then reconstructing the image using the IDCT"), NOT from the RPP
-// kernel. The same reference serves both HOST and HIP backends.
-//
-// This is a block-structured (non-pointwise) op: each output pixel depends on its whole 8x8 block,
-// so it cannot use the pointwise scalar template. The pipeline, per image, over the ROI:
-//
-//   1. Load into [0,255] intensity space (U8 v; I8 v+128; F16/F32 v*255).
-//   2. 3 channels: RGB -> YCbCr, BT.601 full-range -- the JPEG color transform, shared with
-//      histogram_equalize via reference/color_ycbcr.hpp. 1 channel: the value is Y.
-//   3. Y is processed at full resolution; Cb/Cr are subsampled 4:2:0 (see below).
-//   4. Tile each plane into 8x8 blocks from its top-left origin, level-shift by -128, forward
-//      DCT-II (T.81 eq. 8-3), quantize q = round(F / Q), dequantize q * Q, inverse DCT (eq. 8-2),
-//      level-shift by +128 and clamp to [0,255]. A block running past the right/bottom edge
-//      replicates the last valid column/row into the padding (the encoder-side edge extension).
-//   5. 3 channels: upsample Cb/Cr back to full resolution, then YCbCr -> RGB.
-//   6. Store: U8 round+clamp[0,255], I8 round-128+clamp[-128,127], F16/F32 /255 clamp[0,1].
-//
-// Chroma follows the 4:2:0 sampling that is the default of every baseline JPEG encoder: each
-// chroma sample is the 2x2 box average of the luma-resolution plane, and the image is padded out
-// to whole 16x16 MCUs by edge replication before subsampling -- so a chroma plane is always a
-// whole number of 8x8 blocks, ceil(dim/16)*8 samples per axis. Reconstruction replicates each
-// chroma sample back over its 2x2 pixel group (box upsampling).
-//
-// Q is the T.81 Annex K table (K.1 luminance for Y / a 1-channel image, K.2 chrominance for
-// Cb/Cr) scaled by the IJG quality mapping:
-//   scale = quality < 50 ? 5000/quality : 200 - 2*quality;  Q = clamp((base*scale + 50)/100, 1, 255)
-// The result is an 8-bit integer because baseline JPEG stores quantization values in 8 bits for
-// 8-bit sample precision (T.81 B.2.4.1): no encoder can quantize by 3.4, nor by more than 255.
-// RPP keeps the scaled table real-valued and unclamped, so it quantizes by neither an integer nor
-// anything a decoder could read back, and that single difference is what the q10 and q90 halves of
-// the grid disagree on -- with the table rounded and clamped this model reproduces both backends
-// bit-exactly. It deliberately stays spec-correct.
-//
-// One degree of freedom the header does not pin down, chosen as a documented assumption: the
-// intermediate YCbCr samples are kept continuous rather than re-quantized to 8 bits between the
-// color transform and the DCT, so the model is dtype-independent -- the distortion comes from the
-// coefficient quantization, and only the final store quantizes.
+/*
+Reference model: jpeg_compression_distortion
+
+RPP op
+  rppt_jpeg_compression_distortion   (Image / Geometric augmentation)
+
+Description
+  Simulates baseline JPEG lossy compression, per the header, by "converting
+  the image to the frequency domain using the DCT, applying quantization, and
+  then reconstructing the image using the IDCT". Modelled from ITU-T T.81 plus
+  the IJG quality convention every encoder uses.
+
+  This is a block-structured (non-pointwise) op: each output pixel depends on
+  its whole 8x8 block, so it cannot use the pointwise scalar template.
+
+Expression
+  Per image, over the ROI:
+
+  1. Load into [0,255] intensity space (U8 v; I8 v+128; F16/F32 v*255).
+  2. 3 channels: RGB -> YCbCr, BT.601 full-range -- the JPEG colour
+     transform, shared with histogram_equalize via
+     reference/color_ycbcr.hpp. 1 channel: the value is Y.
+  3. Y is processed at full resolution; Cb/Cr are subsampled 4:2:0.
+  4. Tile each plane into 8x8 blocks from its top-left origin, level-shift
+     by -128, forward DCT-II (T.81 eq. 8-3), quantize q = round(F / Q),
+     dequantize q * Q, inverse DCT (eq. 8-2), level-shift by +128 and clamp
+     to [0,255]. A block running past the right/bottom edge replicates the
+     last valid column/row into the padding (the encoder-side edge
+     extension).
+  5. 3 channels: upsample Cb/Cr back to full resolution, then YCbCr -> RGB.
+
+  Chroma follows the 4:2:0 sampling that is the default of every baseline JPEG
+  encoder: each chroma sample is the 2x2 box average of the luma-resolution
+  plane, and the image is padded out to whole 16x16 MCUs by edge replication
+  before subsampling -- so a chroma plane is always a whole number of 8x8
+  blocks, ceil(dim/16)*8 samples per axis. Reconstruction replicates each
+  chroma sample back over its 2x2 pixel group (box upsampling).
+
+  Q is the T.81 Annex K table (K.1 luminance for Y or a 1-channel image, K.2
+  chrominance for Cb/Cr) scaled by the IJG quality mapping:
+
+    scale = quality < 50 ? 5000/quality : 200 - 2*quality
+    Q     = clamp((base*scale + 50)/100, 1, 255)
+
+Per-type form
+  Only the final store quantizes.
+
+    U8    round + clamp[0,255]
+    I8    round - 128 + clamp[-128,127]
+    F16   /255, clamp[0,1]
+    F32   /255, clamp[0,1]
+
+Notes
+  Q is an 8-bit integer because baseline JPEG stores quantization values in 8
+  bits for 8-bit sample precision (T.81 B.2.4.1): no encoder can quantize by
+  3.4, nor by more than 255. RPP keeps the scaled table real-valued and
+  unclamped, so it quantizes by neither an integer nor anything a decoder
+  could read back. That single difference is what the q10 and q90 halves of
+  the grid disagree on -- with the table rounded and clamped this model
+  reproduces both backends bit-exactly. It deliberately stays spec-correct.
+
+  One degree of freedom the header does not pin down, chosen as a documented
+  assumption: the intermediate YCbCr samples are kept continuous rather than
+  re-quantized to 8 bits between the colour transform and the DCT, so the
+  model is type-independent and the distortion comes only from the coefficient
+  quantization.
+*/
 
 namespace jpeg_detail {
 

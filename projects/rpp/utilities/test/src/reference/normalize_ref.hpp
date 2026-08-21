@@ -37,29 +37,40 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for rppt_normalize. Modelled from the operation's definition and the
-// public API header, NOT from the kernel; computed once on the host and used as the
-// reference for both the HOST and HIP backends.
-//
-// Semantics, per the header: "removing the mean and dividing by the standard deviation",
-// with scale "multiplied with data after subtracting from mean" and shift "added finally":
-//
-//     dst = ((src - mean) / stdDev) * scale + shift
-//
-// axisMask selects the axes that are REDUCED: bit i set collapses axis i, so mean/stdDev
-// carry one value per combination of the remaining (non-reduced) coordinates --
-// paramSize = product over i of (bit i set ? 1 : dims[i]), laid out row-major over those
-// same axes, one such block per sample.
-//
-// computeMeanStddev is a bitmask: bit 0 requests that the mean be computed internally,
-// bit 1 the standard deviation; a clear bit means the caller's value is used. The model
-// mirrors that, computing whichever statistics the flag asks for over each reduction group
-// and taking the rest from the supplied tensors.
-//
-// Assumption (undocumented): the standard deviation is the POPULATION deviation --
-// sqrt(sum((x - mean)^2) / N), not the N-1 sample form. Everything is accumulated in
-// double; no clamping is applied, since a normalized result is signed and the documented
-// output dtypes are floating point.
+/*
+Reference model: normalize
+
+RPP op
+  rppt_normalize   (ND / Statistical)
+
+Description
+  Removes the mean and divides by the standard deviation, then applies an
+  affine scale and shift: per the header, scale is "multiplied with data after
+  subtracting from mean" and shift is "added finally".
+
+  axisMask selects the axes that are REDUCED: bit i set collapses axis i, so
+  mean/stdDev carry one value per combination of the remaining (non-reduced)
+  coordinates -- paramSize = product over i of (bit i set ? 1 : dims[i]), laid
+  out row-major over those same axes, one such block per sample.
+
+  computeMeanStddev is a bitmask: bit 0 requests that the mean be computed
+  internally, bit 1 the standard deviation; a clear bit means the caller's
+  value is used. The model mirrors that, computing whichever statistics the
+  flag asks for over each reduction group and taking the rest from the
+  supplied tensors.
+
+Expression
+  dst = ((src - mean) / stdDev) * scale + shift
+
+Per-type form
+  Everything is accumulated in double. No clamping is applied, since a
+  normalized result is signed by construction and the documented output types
+  are floating point.
+
+Notes
+  Undocumented assumption: the standard deviation is the POPULATION deviation,
+  sqrt(sum((x - mean)^2) / N), not the N-1 sample form.
+*/
 
 // Per-axis extents of the mean/stdDev tensor for a given reduction mask: reduced axes
 // collapse to 1, the rest keep their extent. dims includes the leading batch axis.

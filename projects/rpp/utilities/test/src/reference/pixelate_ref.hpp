@@ -37,30 +37,41 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for rppt_pixelate. Used as the reference for both the HOST and HIP backends.
-//
-// The public API header documents only that pixelationPercentage "controls how much pixelation is
-// applied" (0 to 100) -- it pins neither the block size nor the aggregation. The op's definition is
-// instead stated at the dispatch level: pixelation is a two-step resize, the image scaled DOWN with
-// bilinear interpolation and then back UP with nearest-neighbour, which is what turns the lost
-// detail into blocks. That definition is what this model encodes:
-//
-//   interW = roiW * (100 - p) / 100      interH = roiH * (100 - p) / 100     (truncated)
-//   step 1: bilinear resize of the source ROI down to interW x interH, packed at the origin
-//   step 2: nearest-neighbour resize of that intermediate back up to roiW x roiH
-//
-// Only the composition above is taken from the operator; the resize itself is the suite's own
-// resize_reference (drift-free pixel-CENTER inverse map, edge-clamped, per-dtype round-to-nearest
-// quantization -- see reference/resize_ref.hpp), NOT the kernel's. A resize defect therefore
-// surfaces here as a diff rather than being reproduced, which is the point: pixelate inherits
-// whatever the resize paths get wrong.
-//
-// Step 2's source is the intermediate image, which step 1 wrote packed at the destination ORIGIN
-// (the placement rule every resize in the suite follows). Its ROI origin is therefore (0,0)
-// regardless of where the source ROI sat -- the intermediate is not offset.
-//
-// The intermediate is held in the source dtype at the source descriptor's strides, matching the
-// scratch buffer the op requires (n * strides.nStride elements).
+/*
+Reference model: pixelate
+
+RPP op
+  rppt_pixelate   (Image / Effects augmentation)
+
+Description
+  Reduces the image to visible blocks via a two-step resize: scaled DOWN with
+  bilinear interpolation, then back UP with nearest-neighbour, which is what
+  turns the lost detail into blocks.
+
+  Only the composition is taken from the operator; the resize itself is the
+  suite's own resize_reference (drift-free pixel-CENTRE inverse map,
+  edge-clamped, per-type round-to-nearest quantization). A resize defect
+  therefore surfaces here as a diff rather than being reproduced, which is the
+  point: pixelate inherits whatever the resize paths get wrong.
+
+  Step 2's source is the intermediate image, which step 1 wrote packed at the
+  destination ORIGIN (the placement rule every resize in the suite follows).
+  Its ROI origin is therefore (0,0) regardless of where the source ROI sat.
+  The intermediate is held in the source type at the source descriptor's
+  strides, matching the scratch buffer the op requires.
+
+Expression
+  interW = roiW * (100 - p) / 100    (truncated)
+  interH = roiH * (100 - p) / 100    (truncated)
+  step 1: bilinear resize of the source ROI down to interW x interH
+  step 2: nearest-neighbour resize of that intermediate back up to roiW x roiH
+
+Notes
+  The public API header documents only that pixelationPercentage "controls how
+  much pixelation is applied" (0 to 100) -- it pins neither the block size nor
+  the aggregation. The two-step resize definition above is stated at the
+  dispatch level instead.
+*/
 
 // The downsampled extent of one ROI edge. Truncating, matching the Rpp32u image-patch field the
 // extent is carried in. Floored at 1: a zero extent has no pixels to sample and the second resize

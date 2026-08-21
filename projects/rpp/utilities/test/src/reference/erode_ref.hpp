@@ -34,14 +34,25 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_erode, derived from the op's definition
-// (grayscale morphological erosion: per-channel MIN over a flat KxK square window centered
-// on each pixel, with clamp-to-edge border), NOT from the RPP kernel. Used as the reference
-// for both HOST and HIP backends so kernel bugs surface as diffs.
-//
-// The window, its REPLICATE border and the src-at-ROI-offset / dst-at-origin placement come from
-// filter_reference (reference/filter_common.hpp); erosion supplies only the MIN reduction. The min
-// selects an existing source value (no arithmetic), so the result is bit-exact for every dtype.
+/*
+Reference model: erode
+
+RPP op
+  rppt_erode   (Image / Morphological)
+
+Description
+  Greyscale morphological erosion: the per-channel MIN over a flat KxK square
+  window centred on each pixel, which shrinks bright regions and grows dark
+  ones. The window and its REPLICATE border come from filter_reference
+  (reference/filter_common.hpp); erosion supplies only the MIN reduction.
+
+Expression
+  dst(j, i) = min{ src(j+dy, i+dx) : dy, dx in [-r, r] }
+
+Per-type form
+  The min selects an existing source value and performs no arithmetic, so the
+  result is bit-exact for every type.
+*/
 template <typename T>
 void erode_reference(const T* src, T* dst, const RpptDesc& d, DType /*dt*/, const RpptROI* roi,
                      RpptRoiType type, Rpp32u kernelSize) {

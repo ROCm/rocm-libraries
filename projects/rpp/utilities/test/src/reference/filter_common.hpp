@@ -37,16 +37,28 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Shared primitives for the KxK spatial-window golden models (box / gaussian / median / sobel
-// filters, erode / dilate morphology). These are derived from the operators' definitions (a KxK
-// window sampled per output pixel with a clamp-to-edge / REPLICATE border), NOT from the RPP
-// kernels, so kernel bugs surface as diffs.
-//
-// Border & ROI model: each op treats the ROI as its working image. For output-local pixel (j,i)
-// the KxK window samples ROI-local neighbours (j+dy, i+dx) for dy,dx in [-r, r] (r = kernelSize/2),
-// each neighbour coordinate clamped to the ROI bounds [0, roiH-1] x [0, roiW-1] (REPLICATE). The
-// source/destination element mapping mirrors for_each_roi_io (framework/tensor_setup.hpp): source
-// read at the ROI offset, output written packed at the destination origin.
+/*
+Shared helper: KxK spatial window
+
+Used by
+  box_filter, gaussian_filter, median_filter, sobel_filter, emboss
+  (Image / Filter augmentation)
+  erode, dilate   (Image / Morphological)
+
+Description
+  The window, border and placement every KxK spatial op shares, so all of them
+  have a single definition of what a neighbourhood is.
+
+  Each op treats the ROI as its working image. For output-local pixel (j,i)
+  the KxK window samples ROI-local neighbours (j+dy, i+dx) for dy,dx in
+  [-r, r] with r = kernelSize/2, each neighbour coordinate clamped to the ROI
+  bounds [0, roiH-1] x [0, roiW-1] (REPLICATE). The source/destination element
+  mapping mirrors for_each_roi_io (framework/tensor_setup.hpp): source read at
+  the ROI offset, output written packed at the destination origin.
+
+Expression
+  dst(j, i) = reduce{ src(clamp(j+dy), clamp(i+dx)) : dy, dx in [-r, r] }
+*/
 
 // Gathers the KxK neighbourhood of output-local pixel (j,i) for the channel plane whose element
 // base offset is `base`, clamping each neighbour to the ROI bounds (REPLICATE border), into

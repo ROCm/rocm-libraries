@@ -32,15 +32,27 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_gaussian_noise_voxel, derived from the op's public API
-// doc ("adds gaussian noise to a batch of 4D tensors ... meanTensor[i] >= 0 ... stdDevTensor[i]
-// >= 0"), NOT from the RPP kernel.
-//
-// The voxel counterpart of gaussian_noise_ref.hpp and scoped the same way: only the
-// (mean = 0, stdDev = 0) corner is modeled, where N(mean, stdDev) collapses to a point mass at 0
-// and the additive noise degenerates to a passthrough with no RNG involved. The general case
-// depends on the kernel's Box-Muller stream, which the public API does not describe. Used as the
-// reference for both backends.
+/*
+Reference model: gaussian_noise_voxel   (degenerate corner only)
+
+RPP op
+  rppt_gaussian_noise_voxel   (Voxel / Effects augmentation)
+
+Description
+  Adds Gaussian noise to a batch of 4D tensors, per the public API doc, with
+  meanTensor[i] >= 0 and stdDevTensor[i] >= 0. The voxel counterpart of
+  gaussian_noise_ref.hpp.
+
+Expression
+  dst = src + N(mean, stdDev)
+
+Scope
+  Scoped the same way as the image op: only the (mean = 0, stdDev = 0) corner
+  is modelled, where N(mean, stdDev) collapses to a point mass at 0 and the
+  additive noise degenerates to a passthrough with no RNG involved. The
+  general case depends on the kernel's Box-Muller stream, which the public API
+  does not describe.
+*/
 template <typename T>
 void gaussian_noise_voxel_identity_reference(const T* src, T* dst, const RpptGenericDesc& desc,
                                              const RpptROI3D* roi, Roi3D roiType) {

@@ -35,25 +35,40 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Kernel-derived REGRESSION golden for rppt_rain -- restricted to the DEGENERATE case
-// rainPercentage == 0 (no rain drops).
-//
-// The rain kernel seeds its rain-layer generator with std::random_device
-// (src/modules/tensor/cpu/kernel/rain.cpp: create_rain_layer), so the drop pattern -- and
-// therefore the output for any rainPercentage > 0 -- is NON-DETERMINISTIC: the kernel's own
-// output differs run to run and no golden can match it. The only reproducible configuration
-// is rainPercentage == 0, where zero drops are drawn and the rain layer stays at its memset
-// background value. The op then reduces to a per-element alpha blend of the source toward
-// that background:
-//     out = (background - src) * alpha + src
-// with background = 0 for U8/F16/F32 and -127 (0x81) for I8. This LOCKS the blend + clamp +
-// round + per-layout/dtype store paths (a regression test), which is all that is
-// deterministically testable; drop placement is intentionally not covered. The model is
-// transcribed from the kernel with the user's explicit authorization (snow/rain/fog have no
-// documented per-element spec) and serves both HOST and HIP.
-//
-// Per dtype (native intensity units; rain does NOT normalize): U8/I8 round to nearest and
-// clamp ([0,255] / [-128,127]); F16/F32 clamp to [0,1]. (rain's I8 store rounds, unlike snow.)
+/*
+Reference model: rain   (kernel-derived REGRESSION golden, degenerate case only)
+
+RPP op
+  rppt_rain   (Image / Effects augmentation)
+
+Description
+  Overlays a generated rain layer on the image. At rainPercentage == 0 zero
+  drops are drawn and the rain layer stays at its memset background value, so
+  the op reduces to a per-element alpha blend of the source toward that
+  background.
+
+Expression
+  dst = (background - src) * alpha + src
+
+  with background = 0 for U8/F16/F32 and -127 (0x81) for I8.
+
+Per-type form
+  Native intensity units; rain does NOT normalize. U8/I8 round to nearest and
+  clamp ([0,255] / [-128,127]); F16/F32 clamp to [0,1]. rain's I8 store
+  rounds, unlike snow's.
+
+Scope
+  Restricted to rainPercentage == 0. The rain kernel seeds its rain-layer
+  generator with std::random_device (src/modules/tensor/cpu/kernel/rain.cpp:
+  create_rain_layer), so the drop pattern -- and therefore the output for any
+  rainPercentage > 0 -- is NON-DETERMINISTIC: the kernel's own output differs
+  run to run and no golden can match it.
+
+  This LOCKS the blend, clamp, round and per-layout/type store paths, which is
+  all that is deterministically testable; drop placement is intentionally not
+  covered. The model is transcribed from the kernel with the user's explicit
+  authorization, since snow/rain/fog have no documented per-element spec.
+*/
 
 namespace rain_detail {
 

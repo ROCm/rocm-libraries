@@ -34,16 +34,26 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_flip_voxel, derived from the op's definition (a
-// mask-controlled mirror of the ROI box about its horizontal/vertical/depth axis) and the public
-// API header, NOT from the RPP kernel. Used as the reference for both backends so kernel bugs
-// surface as diffs.
-//
-// Flip is a pure permutation of source elements -- no arithmetic, so no rounding or clamping and
-// every dtype is bit-exact (the op is documented f32 -> f32 and u8 -> u8 only). Following the
-// voxel-domain pointwise convention (for_each_voxel_roi_io), the source is read at the ROI offset
-// and the output written packed at the destination origin, so output voxel (z, y, x) comes from
-// source (z0 + [depth ? d-1-z : z], y0 + [vertical ? h-1-y : y], x0 + [horizontal ? w-1-x : x]).
+/*
+Reference model: flip_voxel
+
+RPP op
+  rppt_flip_voxel   (Voxel / Geometric augmentation)
+
+Description
+  Mask-controlled mirror of the ROI box about its horizontal, vertical and/or
+  depth axis. The three flags are independent.
+
+Expression
+  dst(z, y, x) = src( z0 + (depth      ? d-1-z : z),
+                      y0 + (vertical   ? h-1-y : y),
+                      x0 + (horizontal ? w-1-x : x) )
+
+Per-type form
+  A pure permutation of source elements. No arithmetic is performed, so there
+  is no rounding or clamping and every type is bit-exact (the op is documented
+  f32 -> f32 and u8 -> u8 only).
+*/
 template <typename T>
 void flip_voxel_reference(const T* src, T* dst, const RpptGenericDesc& desc, const RpptROI3D* roi,
                           Roi3D roiType, const Rpp32u* horizontalTensor,

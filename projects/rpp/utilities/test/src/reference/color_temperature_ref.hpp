@@ -33,19 +33,33 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_color_temperature, derived from the op's definition
-// (a per-channel pixel adjustment: Red += adjustment, Blue -= adjustment, Green unchanged),
-// NOT from the RPP kernel. Used as the reference for both backends so kernel bugs surface as
-// diffs.
-//
-// adjustment is an integer "pixel adjustment value" in [0,255] intensity units (API range
-// [-100,100]). It is a pure additive offset, so no rounding is involved for integer dtypes;
-// I8 shares the same intensity scale as U8 (offset by -128), so the shift cancels:
-//   U8  : clamp[0,255]  ( v + delta )
-//   I8  : clamp[-128,127]( v + delta )
-//   F32 : clamp[0,1]    ( v + delta/255 )
-//   F16 : same as F32, stored as half
-// where delta = +adjustment on Red (c==0), -adjustment on Blue (c==2), 0 on Green (c==1).
+/*
+Reference model: color_temperature
+
+RPP op
+  rppt_color_temperature   (Image / Color augmentation)
+
+Description
+  Pointwise warm/cool shift. Red is raised and blue is lowered by the same
+  adjustment while green is left alone, so a positive adjustment warms the
+  image and a negative one cools it. Channel order is RGB: c=0 Red, c=1
+  Green, c=2 Blue.
+
+Expression
+  delta        = +adjustment (c=0), 0 (c=1), -adjustment (c=2)
+  dst(x, y, c) = clamp( src(x, y, c) + delta )
+
+Per-type form
+  adjustment is an integer pixel adjustment in [0,255] intensity units (API
+  range [-100,100]). It is a pure additive offset, so no rounding is involved
+  for the integer types; I8 shares the U8 intensity scale, so the -128 shift
+  cancels.
+
+    U8    clamp[0,255]   ( v + delta )
+    I8    clamp[-128,127]( v + delta )
+    F32   clamp[0,1]     ( v + delta/255 )
+    F16   as F32, stored as half
+*/
 inline double color_temperature_scalar(double v, DType dt, double delta) {
     switch (dt) {
         case DType::U8:
@@ -60,10 +74,6 @@ inline double color_temperature_scalar(double v, DType dt, double delta) {
     }
 }
 
-// Writes the color-temperature result into dst, reading the source at the ROI offset and
-// writing packed at the destination origin (matching the region and placement the RPP op
-// uses). dst outside the written region is left as the caller initialized it. Channel order
-// is RGB: c==0 Red, c==1 Green, c==2 Blue.
 template <typename T>
 void color_temperature_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                                  const RpptROI* roi, RpptRoiType roiType, int adjustment) {

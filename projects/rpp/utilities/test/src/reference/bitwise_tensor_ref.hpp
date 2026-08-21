@@ -35,18 +35,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for the ND tensor-vs-tensor bitwise ops (rppt_tensor_and_tensor /
-// _or_tensor / _xor_tensor). Modelled from the operations' definition and the public API
-// header, NOT from the kernel; computed once on the host and used as the reference for
-// both the HOST and HIP backends.
-//
-// Semantics: an elementwise bitwise combination of the two operands' stored bit patterns,
-// with NumPy-style broadcasting -- an operand axis of extent 1 is reused across the
-// corresponding output axis (the header permits broadcasting "when, for each axis, the
-// corresponding dimensions of the input tensors are either equal or one of them is 1").
-// The operation is on bits, not intensities: for signed I8 the byte is combined as-is, so
-// there is no rounding, clamping or intensity-space conversion anywhere in this model and
-// results are bit-exact (callers compare with zero tolerance).
+/*
+Reference model: tensor bitwise
+
+RPP op
+  rppt_tensor_and_tensor / rppt_tensor_or_tensor / rppt_tensor_xor_tensor
+  (ND / Bitwise)
+
+Description
+  Element-wise bitwise combination of two N-dimensional tensors' stored bit
+  patterns, with NumPy-style broadcasting: an operand axis of extent 1 is
+  reused across the corresponding output axis (the header permits
+  broadcasting when, for each axis, the input dimensions are either equal or
+  one of them is 1).
+
+Expression
+  and   dst = a & b
+  or    dst = a | b
+  xor   dst = a ^ b
+
+Per-type form
+  The operation is on bits, not intensities: for signed I8 the byte is
+  combined as-is. There is no rounding, clamping or intensity-space
+  conversion anywhere in this model, so results are bit-exact and callers
+  compare with zero tolerance.
+*/
 
 enum class BitwiseTensorOp { And, Or, Xor };
 

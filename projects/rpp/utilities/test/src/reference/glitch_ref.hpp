@@ -31,25 +31,36 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_glitch, derived from the op's definition (a per-channel
-// RGB pixel shift -- the classic colour-fringe glitch) and its documented parameter (one
-// RpptChannelOffsets per image, giving an (x, y) offset for R, G and B), NOT from the RPP kernel.
-// Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// For output pixel (i, j) of image n's ROI-sized region, channel c is read from the source shifted
-// by that channel's offset:
-//
-//     sx = x0 + i + offset[c].x ,  sy = y0 + j + offset[c].y
-//
-// The op only moves whole pixels, so no interpolation, rounding or clamping is involved and every
-// dtype is a verbatim copy.
-//
-// NOTE (semantics assumption): the header documents no behaviour for a shifted coordinate that
-// leaves the ROI. The model passes the unshifted source pixel through, which keeps the frame intact
-// and is what an RGB-shift glitch does; a kernel that blacks or clamps those pixels instead shows
-// up as a diff -- a finding, not a reference bug.
-//
-// Greyscale is out of scope: the op takes three offsets and the legacy harness rejects PLN1.
+/*
+Reference model: glitch
+
+RPP op
+  rppt_glitch   (Image / Effects augmentation)
+
+Description
+  Per-channel RGB pixel shift -- the classic colour-fringe glitch. Each
+  channel is read from the source displaced by its own (x, y) offset, given as
+  one RpptChannelOffsets per image, so the three channels separate at edges.
+
+  Greyscale is out of scope: the op takes three offsets and the legacy harness
+  rejects PLN1.
+
+Expression
+  sx = x0 + i + offset[c].x
+  sy = y0 + j + offset[c].y
+  dst(i, j, c) = src(sx, sy, c)
+
+Per-type form
+  The op only moves whole pixels, so no interpolation, rounding or clamping is
+  involved and every type is a verbatim copy.
+
+Notes
+  The header documents no behaviour for a shifted coordinate that leaves the
+  ROI. The model passes the unshifted source pixel through, which keeps the
+  frame intact and is what an RGB-shift glitch does; a kernel that blacks or
+  clamps those pixels instead shows up as a diff -- a finding, not a reference
+  bug.
+*/
 
 // The (x, y) offset for channel c of RpptChannelOffsets.
 inline RpptPoint2D glitch_channel_offset(const RpptChannelOffsets& o, Rpp32u c) {

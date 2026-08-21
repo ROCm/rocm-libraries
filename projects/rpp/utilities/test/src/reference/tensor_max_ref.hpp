@@ -36,14 +36,25 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_tensor_max, derived from the op's definition (the
-// channel-wise maximum R/G/B and the overall maximum across all channels, per image, over the
-// ROI), NOT from the RPP kernel. Used as the reference for both backends so kernel bugs surface
-// as diffs.
-//
-// Per image: out[R/G/B] = max of that channel, out[total] = max over all three channels. For a
-// 1-channel image the single result is that channel's maximum. max selects an existing element,
-// so there is no arithmetic and the result is exact for every dtype.
+/*
+Reference model: tensor_max
+
+RPP op
+  rppt_tensor_max   (Image / Statistical)
+
+Description
+  Reduces each image's ROI to a channel-wise maximum plus an overall maximum
+  across all channels. For a 1-channel image the single result is that
+  channel's maximum.
+
+Expression
+  out[R/G/B] = max of that channel
+  out[total] = max over all three channels
+
+Per-type form
+  max selects an existing element, so there is no arithmetic and the result is
+  exact for every type.
+*/
 template <typename T>
 std::vector<double> tensor_max_reference(const T* src, const RpptDesc& d, const RpptROI* roi,
                                          RpptRoiType type) {

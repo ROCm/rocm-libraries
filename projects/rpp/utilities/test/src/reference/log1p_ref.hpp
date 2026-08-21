@@ -35,26 +35,32 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden model for rppt_log1p. Modelled from the operation's definition and the public
-// API header, NOT from the kernel; computed once on the host and used as the reference for
-// both the HOST and HIP backends.
-//
-// Semantics, per the header: "Computes Log1p i.e (log(1 + x)) of the input", which "Uses
-// Absolute of input for log1p computation to avoid undefined result":
-//
-//     dst = log1p(|src|) = log(1 + |src|)
-//
-// applied element-wise over the whole densely packed tensor (a single source, no broadcast,
-// no op params). Everything is computed in double; no clamping is applied, since the
-// documented output dtype (f32) is floating point.
-//
-// Taking the absolute value first makes the argument of log1p >= 0, so the result is defined
-// for every representable input -- including zero, where log1p(0) = 0 exactly. Unlike
-// rppt_log (undefined at zero, which the header dodges with an unspecified nextafter) there
-// is no ambiguous edge case here, so the standard input fill is used as-is, zeros included.
-//
-// std::log1p is used rather than std::log(1 + x) so the golden keeps full precision for small
-// |x|, where 1 + x loses the low bits of x.
+/*
+Reference model: log1p
+
+RPP op
+  rppt_log1p   (ND / Arithmetic)
+
+Description
+  Element-wise log(1 + x) over the whole densely packed tensor (a single
+  source, no broadcast, no op params). The header specifies that the absolute
+  value of the input is used, so negative inputs are folded before the log.
+  Everything is computed in double; no clamping is applied, since the
+  documented output type (f32) is floating point.
+
+Expression
+  dst = log1p(|src|) = log(1 + |src|)
+
+Notes
+  Taking the absolute value first makes the argument >= 0, so the result is
+  defined for every representable input -- including zero, where log1p(0) = 0
+  exactly. Unlike rppt_log (undefined at zero, which the header dodges with an
+  unspecified nextafter) there is no ambiguous edge case here, so the standard
+  input fill is used as-is, zeros included.
+
+  std::log1p is used rather than std::log(1 + x) so the golden keeps full
+  precision for small |x|, where 1 + x loses the low bits of x.
+*/
 
 inline double log1p_scalar(double v) { return std::log1p(std::fabs(v)); }
 

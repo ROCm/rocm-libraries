@@ -33,17 +33,31 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_threshold, derived from the op's definition (a
-// black/white binary mask: a pixel is white iff every channel value falls within its
-// per-channel [min,max] cutoff, else black), NOT from the RPP kernel. Used as the reference
-// for both backends so kernel bugs surface as diffs.
-//
-// minTensor/maxTensor are per-image, per-channel cutoffs expressed in the same units as the
-// stored pixels (U8 [0,255], I8 [-128,127], F16/F32 [0,1]); they are the exact values handed
-// to the op. The output is a binary mask in the dtype's black/white extremes:
-//   U8      : white 255, black 0
-//   I8      : white 127, black -128   (same intensities as U8, shifted by -128)
-//   F16/F32 : white 1.0, black 0.0
+/*
+Reference model: threshold
+
+RPP op
+  rppt_threshold   (Image / Statistical)
+
+Description
+  Produces a black/white binary mask. A pixel is white iff EVERY channel value
+  falls within that channel's [min,max] cutoff, and black otherwise -- so the
+  test is per pixel, not per channel, and all channels of the output take the
+  same value.
+
+Expression
+  dst(x, y, *) = (min[c] <= src(x, y, c) <= max[c] for every c) ? white : black
+
+Per-type form
+  minTensor and maxTensor are per-image, per-channel cutoffs expressed in the
+  same units as the stored pixels (U8 [0,255], I8 [-128,127], F16/F32 [0,1]);
+  they are the exact values handed to the op. The mask uses the type's
+  black/white extremes.
+
+    U8      white 255, black 0
+    I8      white 127, black -128   (the U8 intensities shifted by -128)
+    F16/F32 white 1.0, black 0.0
+*/
 inline double threshold_white(DType dt) {
     switch (dt) {
         case DType::U8: return 255.0;
@@ -56,9 +70,6 @@ inline double threshold_white(DType dt) {
 
 inline double threshold_black(DType dt) { return dt == DType::I8 ? -128.0 : 0.0; }
 
-// Writes the threshold mask into dst, reading each source pixel's channels at the ROI offset
-// and writing packed at the destination origin (matching the region and placement the RPP op
-// uses). dst outside the written region is left as the caller initialized it.
 template <typename T>
 void threshold_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                          RpptRoiType roiType, const Rpp32f* minTensor, const Rpp32f* maxTensor) {

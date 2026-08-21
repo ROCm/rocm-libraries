@@ -33,14 +33,26 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_channel_permute, derived from the op's definition (a
-// per-image reordering of the 3 channels: output channel i takes source channel perm[i]), NOT
-// from the RPP kernel. Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// channel_permute is a pure data-exchange op: it only moves whole channel values around, with no
-// arithmetic, rounding, or clamping, so the result is bit-exact for U8/I8/F16/F32 alike. The
-// permutation tensor holds n contiguous triples (perm[n*3 + 0..2], each in 0..2); a rotation like
-// {2,0,1} distinguishes this convention from its inverse (source channel c -> output perm[c]).
+/*
+Reference model: channel_permute
+
+RPP op
+  rppt_channel_permute  (Image / Data exchange)
+
+Description
+  Per-image reordering of the 3 channels. The permutation tensor holds n
+  contiguous triples (perm[n*3 + 0..2], each in 0..2). A rotation like {2,0,1}
+  distinguishes this convention from its inverse, which would be
+  source channel c -> output perm[c].
+
+Expression
+  dst(x, y, i) = src(x, y, perm[i])
+
+Per-type form
+  A pure data exchange: only whole channel values move, with no arithmetic,
+  rounding, or clamping, so the result is bit-exact for U8, I8, F16 and F32
+  alike.
+*/
 template <typename T>
 void channel_permute_reference(const T* src, T* dst, const RpptDesc& d, const Rpp32u* perm,
                                const RpptROI* roi, RpptRoiType roiType) {

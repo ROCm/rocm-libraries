@@ -32,10 +32,24 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Shared RGB<->HSV building blocks for the color golden models (hue, saturation, color_twist).
-// These encode the standard sextant conversion on normalized [0,1] channels, derived from the
-// HSV definition (NOT any RPP kernel), so every op that manipulates hue/saturation rounds the
-// same way and a single reviewed copy backs them all.
+/*
+Shared helper: RGB <-> HSV
+
+Used by
+  hue, saturation, color_twist   (Image / Color augmentation)
+
+Description
+  The standard sextant RGB<->HSV conversion on normalized [0,1] channels,
+  plus the two in-place manipulations built on it. Kept in one place so every
+  op that touches hue or saturation converts and rounds identically, and a
+  single reviewed copy backs them all.
+
+Expression
+  H in [0,360), S and V in [0,1]
+  V = max(R, G, B)
+  S = V > 0 ? (V - min(R, G, B)) / V : 0
+  H = the sextant angle of the (R, G, B) triplet
+*/
 
 // Standard RGB->HSV sextant conversion on normalized [0,1] channels. H in [0,360), S,V in [0,1].
 inline void rgb_to_hsv(double r, double g, double b, double& h, double& s, double& v) {

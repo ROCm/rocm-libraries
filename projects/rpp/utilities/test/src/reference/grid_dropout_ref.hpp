@@ -35,27 +35,40 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_grid_dropout, derived from the op's definition
-// (erase a regular grid of rectangular holes from an image) and its public API doc, NOT from
-// the RPP kernel. Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// The grid holes are provided directly as boxes (anchorBoxInfoTensor), laid out per image as
-// [n * boxesInEachImage + k]. Each box is an RpptRoiLtrb in ABSOLUTE image coordinates, LTRB
-// inclusive (a box covers columns [lt.x, rb.x] and rows [lt.y, rb.y]). A pixel inside any box
-// is erased; every other pixel is copied through unchanged. "Erase" means set the pixel to
-// black, i.e. 0 intensity in the suite's shared intensity model:
-//   U8  : 0        I8  : -128 (0 intensity shifted by -128)
-//   F16 : 0.0      F32 : 0.0
-// The op carries maxHoleW/maxHoleH as separate scalars; the golden ignores them and uses the
-// boxes directly (a kernel that misuses maxHoleW/H would surface as a diff).
+/*
+Reference model: grid_dropout
+
+RPP op
+  rppt_grid_dropout   (Image / Effects augmentation)
+
+Description
+  Erases a regular grid of rectangular holes from an image, passing every
+  other pixel through unchanged.
+
+  The holes are provided directly as boxes (anchorBoxInfoTensor), laid out per
+  image as [n*boxesInEachImage + k]. Each box is an RpptRoiLtrb in ABSOLUTE
+  image coordinates, LTRB inclusive (covering columns [lt.x, rb.x] and rows
+  [lt.y, rb.y]).
+
+Expression
+  dst(x, y, c) = inside any hole ? black : src(x, y, c)
+
+Per-type form
+  "Black" is 0 intensity in the suite's shared intensity model.
+
+    U8  0        I8  -128 (0 intensity shifted by -128)
+    F16 0.0      F32 0.0
+
+Notes
+  The op carries maxHoleW/maxHoleH as separate scalars; the golden ignores
+  them and uses the boxes directly, so a kernel that misuses maxHoleW/H
+  surfaces as a diff.
+*/
 inline double grid_dropout_scalar(double v, DType dt, bool erased) {
     return erased ? from_unit(0.0, dt) : v;
 }
 
-// Writes the grid-dropout result into dst, reading the source at the ROI offset and writing
-// packed at the destination origin (matching the region and placement the RPP op uses). Hole
-// membership is tested against the ABSOLUTE source coordinate (x0+i, y0+j). dst outside the
-// written region is left as the caller initialized it.
+// Hole membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j).
 template <typename T>
 void grid_dropout_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                             const RpptROI* roi, RpptRoiType roiType,

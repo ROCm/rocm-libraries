@@ -34,19 +34,30 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_cutout_dropout, derived from the op's definition
-// (overwrite one or more rectangular boxes of an image with caller-supplied solid colors) and
-// its public API doc, NOT from the RPP kernel. Used as the reference for both backends so
-// kernel bugs surface as diffs.
-//
-// Boxes are given in absolute image coordinates, LTRB inclusive (rb is the last covered pixel,
-// so a box spans columns [lt.x, rb.x] and rows [lt.y, rb.y]). anchorBoxInfoTensor and colors are
-// laid out with a per-image stride of maxBoxesPerImage: box k of image n is at
-// [n * maxBoxesPerImage + k], and its color channel c at [(n * maxBoxesPerImage + k) * c... ].
-// numBoxes[n] gives the count of active boxes for image n. Any output pixel whose absolute source
-// coordinate falls inside an active box is a direct, bit-exact store of that box's color for the
-// pixel's channel; all other pixels pass the source through unchanged. No arithmetic, so every
-// dtype is bit-exact.
+/*
+Reference model: cutout_dropout
+
+RPP op
+  rppt_cutout_dropout   (Image / Effects augmentation)
+
+Description
+  Overwrites one or more rectangular boxes of an image with caller-supplied
+  solid colours, passing every other pixel through unchanged.
+
+  Boxes are given in ABSOLUTE image coordinates, LTRB inclusive (rb is the
+  last covered pixel, so a box spans columns [lt.x, rb.x] and rows
+  [lt.y, rb.y]). anchorBoxInfoTensor and colors are laid out with a per-image
+  stride of maxBoxesPerImage: box k of image n is at [n*maxBoxesPerImage + k],
+  and its colour for channel c at [(n*maxBoxesPerImage + k)*channels + c].
+  numBoxes[n] gives the count of active boxes for image n.
+
+Expression
+  dst(x, y, c) = inside box k ? colors[k][c] : src(x, y, c)
+
+Per-type form
+  No arithmetic is performed -- an output pixel is either a box colour or a
+  source value, stored directly -- so every type is bit-exact.
+*/
 template <typename T>
 void cutout_dropout_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                               const RpptROI* roi, RpptRoiType roiType,

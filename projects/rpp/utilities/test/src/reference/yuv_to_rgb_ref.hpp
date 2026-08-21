@@ -35,20 +35,50 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model shared by rppt_yuv_to_rgb, rppt_yuv_to_rgb_linear_v and
-// rppt_yuv_to_rgb_cubic_v. Modelled from the ops' documented definition (NV12 semi-planar 8-bit in,
-// packed RGB24 out, byte pitches, RpptColorStandard / RpptColorRange) plus the published
-// non-constant-luminance YCbCr -> RGB derivation, NOT from the RPP kernel. The three ops differ
-// only in vertical chroma upsampling, so they share one parameterized reference and any kernel
-// disagreement surfaces as a diff.
+/*
+Reference model: yuv_to_rgb
 
-// Which vertical chroma upsampler the op under test documents. Horizontal upsampling is
-// nearest-neighbour in all three (chroma column = luma column / 2).
-enum class YuvChromaUpsample {
-    Nearest,  // rppt_yuv_to_rgb:          chroma row = luma row / 2
-    LinearV,  // rppt_yuv_to_rgb_linear_v: odd rows identity, even rows average two chroma rows
-    CubicV    // rppt_yuv_to_rgb_cubic_v:  odd rows identity, even rows a symmetric 4-tap Mitchell
-};
+RPP op
+  rppt_yuv_to_rgb / rppt_yuv_to_rgb_linear_v / rppt_yuv_to_rgb_cubic_v
+  (Image / Data exchange)
+
+Description
+  Converts NV12 semi-planar 8-bit YUV to packed RGB24, with byte pitches and a
+  caller-selected RpptColorStandard / RpptColorRange. The three ops differ only
+  in vertical chroma upsampling, so they share one parameterized reference.
+
+  Horizontal upsampling is nearest-neighbour in all three (chroma column =
+  luma column / 2). Vertically:
+
+    Nearest    rppt_yuv_to_rgb:          chroma row = luma row / 2
+    LinearV    rppt_yuv_to_rgb_linear_v: odd rows identity, even rows average
+                                         two chroma rows
+    CubicV     rppt_yuv_to_rgb_cubic_v:  odd rows identity, even rows a
+                                         symmetric 4-tap Mitchell
+
+Expression
+  The published non-constant-luminance derivation, with wg = 1 - wr - wb:
+
+  Yn = (Y - yBias) * yScale
+  Un = (U - 128) * cScale
+  Vn = (V - 128) * cScale
+
+  R  = Yn + 2(1 - wr) Vn
+  B  = Yn + 2(1 - wb) Un
+  G  = Yn - (2(1 - wr) wr / wg) Vn - (2(1 - wb) wb / wg) Un
+
+  then round-to-nearest and clamp to [0, 255].
+
+Notes
+  The header documents unknown colour standards as behaving like BT.709 and
+  unknown ranges as behaving like studio, so those are the defaults.
+  RpptColorStandard_BT2020_CL is deliberately not special-cased: constant
+  luminance is a genuinely different transfer, out of scope for this golden
+  and not gridded.
+*/
+
+// Which vertical chroma upsampler the op under test documents.
+enum class YuvChromaUpsample { Nearest, LinearV, CubicV };
 
 // ---- colour matrix ---------------------------------------------------------
 
@@ -56,9 +86,7 @@ struct YuvLumaWeights {
     double wr, wb;  // wg = 1 - wr - wb
 };
 
-// The luma coefficients each standard defines. The header documents unknown values as BT.709, so
-// that is the default. RpptColorStandard_BT2020_CL is deliberately not special-cased: constant
-// luminance is a genuinely different transfer and is out of scope for this golden (and not gridded).
+// The luma coefficients each standard defines.
 inline YuvLumaWeights yuv_luma_weights(RpptColorStandard standard) {
     switch (standard) {
         case RpptColorStandard_FCC:         return {0.30, 0.11};
@@ -70,8 +98,7 @@ inline YuvLumaWeights yuv_luma_weights(RpptColorStandard standard) {
     }
 }
 
-// Y bias/scale and chroma scale for the requested range. The header documents values other than
-// FULL as behaving like studio, so FULL is the tested-for case.
+// Y bias/scale and chroma scale for the requested range.
 struct YuvRangeScale {
     double yBias, yScale, cScale;
 };
@@ -81,12 +108,7 @@ inline YuvRangeScale yuv_range_scale(RpptColorRange range) {
     return {16.0, 255.0 / 219.0, 255.0 / 224.0};  // studio: luma 16-235, chroma 16-240
 }
 
-// Converts one (Y, U, V) triple of stored 8-bit codes into R, G, B stored codes:
-//   Yn = (Y - yBias) * yScale,  Un = (U - 128) * cScale,  Vn = (V - 128) * cScale
-//   R  = Yn + 2(1 - wr) Vn
-//   B  = Yn + 2(1 - wb) Un
-//   G  = Yn - (2(1 - wr) wr / wg) Vn - (2(1 - wb) wb / wg) Un
-// then round-to-nearest and clamp to [0, 255].
+// Converts one (Y, U, V) triple of stored 8-bit codes into R, G, B stored codes.
 inline void yuv_to_rgb_pixel(double y, double u, double v, RpptColorStandard standard,
                              RpptColorRange range, double rgb[3]) {
     const YuvLumaWeights w = yuv_luma_weights(standard);

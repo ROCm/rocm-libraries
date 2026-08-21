@@ -34,16 +34,26 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_median_filter, derived from the median-filter definition
-// (each output pixel is the middle element of its sorted KxK neighbourhood, per channel, REPLICATE
-// border), NOT from the RPP kernel. Used as the reference for both backends so kernel bugs surface
-// as diffs.
-//
-// Median is a rank filter (not a convolution): the window filter_reference gathers (same
-// clamp-to-ROI REPLICATE border as the other filters) is sorted and the middle element selected.
-// kernelSize is odd so kernelSize*kernelSize is odd and the median is an EXISTING pixel value (no
-// arithmetic), so to_double/from_double round-trips exactly for every dtype and the result is
-// bit-exact (tolerance 0).
+/*
+Reference model: median_filter
+
+RPP op
+  rppt_median_filter   (Image / Filter augmentation)
+
+Description
+  Per-channel median over a KxK window -- a rank filter, not a convolution.
+  The window filter_reference gathers (same clamp-to-ROI REPLICATE border as
+  the other filters) is sorted and the middle element selected.
+
+Expression
+  dst(j, i) = median{ src(j+dy, i+dx) : dy, dx in [-r, r] }
+
+Per-type form
+  kernelSize is odd, so K^2 is odd and the median is an EXISTING pixel value
+  rather than an average of two. No arithmetic is performed, so the
+  to_double/from_double round-trip is exact for every type and the result is
+  bit-exact (tolerance 0).
+*/
 template <typename T>
 void median_filter_reference(const T* src, T* dst, const RpptDesc& d, DType /*dt*/,
                              const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize) {

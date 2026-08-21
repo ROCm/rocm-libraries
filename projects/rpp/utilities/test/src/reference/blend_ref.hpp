@@ -35,14 +35,30 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_blend (two-source), derived from the op's definition
-// (out = alpha * src1 + (1 - alpha) * src2 = (src1 - src2) * alpha + src2), NOT from the kernel.
-//
-// Integer types round to nearest. For I8 the +128 intensity offsets cancel in (src1 - src2),
-// so the interpolation is identical in signed space:
-//   U8      : clamp[0,255]  ( round((src1 - src2) * alpha + src2) )
-//   I8      : clamp[-128,127]( round((src1 - src2) * alpha + src2) )
-//   F16/F32 : clamp[0,1]    ( (src1 - src2) * alpha + src2 )
+/*
+Reference model: blend
+
+RPP op
+  rppt_blend   (Image / Color augmentation)
+
+Description
+  Pointwise linear cross-fade between two co-located sources. Each output
+  element is the interpolation of the two source elements at the same
+  position, weighted by a per-image alpha: alpha = 1 yields src1, alpha = 0
+  yields src2.
+
+Expression
+  dst(x, y, c) = clamp( alpha * src1 + (1 - alpha) * src2 )
+               = clamp( (src1 - src2) * alpha + src2 )
+
+Per-type form
+  Integer types round to nearest. For I8 the +128 intensity offsets cancel in
+  (src1 - src2), so the interpolation is identical in signed space.
+
+    U8      clamp[0,255]   ( round((src1 - src2) * alpha + src2) )
+    I8      clamp[-128,127]( round((src1 - src2) * alpha + src2) )
+    F16/F32 clamp[0,1]     ( (src1 - src2) * alpha + src2 )
+*/
 inline double blend_scalar(double s1, double s2, DType dt, double alpha) {
     const double v = (s1 - s2) * alpha + s2;
     switch (dt) {

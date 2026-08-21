@@ -35,27 +35,38 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_coarse_dropout, derived from the op's definition
-// (erase user-selected rectangular regions of an image to black) and its public API doc, NOT
-// from the RPP kernel. Used as the reference for both backends so kernel bugs surface as diffs.
-//
-// anchorBoxInfoTensor holds erase-region boxes as RpptRoiLtrb, laid out with a per-image stride
-// of maxBoxesPerImage: box k of image n is at [n * maxBoxesPerImage + k]. numBoxesTensor[n] is
-// the count of active boxes for image n (only k < numBoxesTensor[n] are read). Boxes are given
-// in ABSOLUTE image coordinates, LTRB inclusive (box width = rb.x - lt.x + 1). Per the API doc
-// the user-supplied boxes must not overlap. Every pixel inside any active box is "erased", i.e.
-// set to black -- 0 intensity in the suite's shared intensity model:
-//   U8  : 0        I8  : -128 (0 intensity shifted by -128)
-//   F16 : 0.0      F32 : 0.0
-// Everything else is a bit-exact passthrough of the source.
+/*
+Reference model: coarse_dropout
+
+RPP op
+  rppt_coarse_dropout   (Image / Effects augmentation)
+
+Description
+  Erases user-selected rectangular regions of an image to black, passing every
+  other pixel through unchanged.
+
+  anchorBoxInfoTensor holds the erase-region boxes as RpptRoiLtrb with a
+  per-image stride of maxBoxesPerImage: box k of image n is at
+  [n*maxBoxesPerImage + k]. numBoxesTensor[n] is the count of active boxes for
+  image n (only k < numBoxesTensor[n] are read). Boxes are in ABSOLUTE image
+  coordinates, LTRB inclusive (box width = rb.x - lt.x + 1). Per the API doc
+  the user-supplied boxes must not overlap.
+
+Expression
+  dst(x, y, c) = inside any active box ? black : src(x, y, c)
+
+Per-type form
+  "Black" is 0 intensity in the suite's shared intensity model. Everything
+  outside a box is a bit-exact passthrough.
+
+    U8  0        I8  -128 (0 intensity shifted by -128)
+    F16 0.0      F32 0.0
+*/
 inline double coarse_dropout_scalar(double v, DType dt, bool erased) {
     return erased ? from_unit(0.0, dt) : v;
 }
 
-// Writes the coarse-dropout result into dst, reading the source at the ROI offset and writing
-// packed at the destination origin (matching the region and placement the RPP op uses). Box
-// membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j). dst outside the
-// written region is left as the caller initialized it.
+// Box membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j).
 template <typename T>
 void coarse_dropout_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                               const RpptROI* roi, RpptRoiType roiType, const RpptRoiLtrb* boxes,

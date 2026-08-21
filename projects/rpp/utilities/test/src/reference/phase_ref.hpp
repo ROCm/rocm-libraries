@@ -35,17 +35,29 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_phase (two-source, no params), derived from the op's
-// definition (the phase angle of the vector (src2, src1) = atan2(src1, src2)), NOT from the kernel.
-//
-// The angle is normalized so a first-quadrant angle [0, pi/2] fills the whole output range: the
-// stored result is (2/pi) * atan2(src1, src2) expressed in [0,1] unit intensity, then quantized to
-// the dtype (integers round to nearest, I8 pixels are the same intensities shifted by -128). atan2
-// is scale-invariant in a common positive factor, so integers may be combined in stored [0,255]
-// space directly; I8 is shifted into that space first:
-//   U8      : round( (2/pi) * atan2(a, b)            * 255 ),          clamp[0,255]
-//   I8      : round( (2/pi) * atan2(a+128, b+128)    * 255 ) - 128,    clamp[-128,127]
-//   F16/F32 :        (2/pi) * atan2(a, b),                            clamp[0,1]
+/*
+Reference model: phase
+
+RPP op
+  rppt_phase   (Image / Geometric augmentation)
+
+Description
+  Element-wise phase angle of the vector (src2, src1) formed by two co-located
+  sources. Takes no parameters. The angle is normalized so that a
+  first-quadrant angle [0, pi/2] fills the whole output range.
+
+Expression
+  dst(x, y, c) = (2/pi) * atan2( src1, src2 )
+
+Per-type form
+  atan2 is scale-invariant in a common positive factor, so integers may be
+  combined in stored [0,255] space directly; I8 is shifted into that space
+  first.
+
+    U8      clamp[0,255]   ( round( (2/pi) * atan2(a, b)         * 255 ) )
+    I8      clamp[-128,127]( round( (2/pi) * atan2(a+128, b+128) * 255 ) - 128 )
+    F16/F32 clamp[0,1]     (        (2/pi) * atan2(a, b) )
+*/
 inline double phase_scalar(double a, double b, DType dt) {
     constexpr double kTwoOverPi = 0.63661977236758134308;  // 2 / pi
     switch (dt) {

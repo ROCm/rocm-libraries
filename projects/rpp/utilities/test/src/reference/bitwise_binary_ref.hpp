@@ -32,13 +32,26 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Host golden models for the two-source bitwise ops (rppt_bitwise_and / _or / _xor).
-// Computed once on the host and used as the reference for both the HOST and HIP backends.
-//
-// All three are U8-only (the ops reject any other dtype): each output byte is the bitwise
-// combination of the two source bytes. Both sources are read at the ROI offset and the
-// output is written packed at the destination origin (matching the kernel). Results are
-// bit-exact, so the caller compares with zero tolerance.
+/*
+Reference model: bitwise binary
+
+RPP op
+  rppt_bitwise_and / rppt_bitwise_or / rppt_bitwise_xor
+  (Image / Bitwise)
+
+Description
+  Element-wise bitwise combination of two co-located sources. Each output byte
+  is formed from the two source bytes at the same position.
+
+Expression
+  and   dst = a & b
+  or    dst = a | b
+  xor   dst = a ^ b
+
+Per-type form
+  All three are U8-only; the ops reject any other type. Results are
+  bit-exact, so the caller compares with zero tolerance.
+*/
 
 enum class BitwiseOp { And, Or, Xor };
 

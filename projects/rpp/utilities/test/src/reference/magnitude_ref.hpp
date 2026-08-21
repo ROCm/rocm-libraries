@@ -35,14 +35,28 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_magnitude (two-source, no params), derived from the op's
-// definition (out = sqrt(src1^2 + src2^2)), NOT from the kernel.
-//
-// Integer types round to nearest and combine in [0,255] intensity space; I8 pixels are the same
-// intensities shifted by -128:
-//   U8      : clamp[0,255]  ( round(sqrt(a^2 + b^2)) )
-//   I8      : clamp[-128,127]( round(sqrt((a+128)^2 + (b+128)^2)) - 128 )
-//   F16/F32 : clamp[0,1]    ( sqrt(a^2 + b^2) )
+/*
+Reference model: magnitude
+
+RPP op
+  rppt_magnitude   (Image / Arithmetic)
+
+Description
+  Element-wise Euclidean magnitude of two co-located sources, i.e. the length
+  of the vector formed by the two source elements at the same position. Takes
+  no parameters.
+
+Expression
+  dst(x, y, c) = clamp( sqrt( src1^2 + src2^2 ) )
+
+Per-type form
+  Integer types round to nearest and combine in [0,255] intensity space; I8
+  is the same intensity shifted -128.
+
+    U8      clamp[0,255]   ( round(sqrt(a^2 + b^2)) )
+    I8      clamp[-128,127]( round(sqrt((a+128)^2 + (b+128)^2)) - 128 )
+    F16/F32 clamp[0,1]     ( sqrt(a^2 + b^2) )
+*/
 inline double magnitude_scalar(double a, double b, DType dt) {
     switch (dt) {
         case DType::U8:

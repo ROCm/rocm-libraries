@@ -39,23 +39,42 @@ SOFTWARE.
 
 namespace rpptest {
 
-// Independent host golden model for rppt_histogram_equalize (single source, no params, U8 only),
-// derived from the op's definition (per-image histogram equalization over the ROI), NOT from the
-// kernel. The same reference serves both HOST and HIP backends.
-//
-// This is a two-pass, per-image (non-pointwise) op: the output at each pixel depends on the whole
-// ROI's intensity histogram, so it cannot use the pointwise scalar template.
-//
-//   1. Build the 256-bin histogram of the equalization channel over the ROI (N = roiW*roiH pixels):
-//        - 1 channel : the pixel value itself.
-//        - 3 channel : the luminance Y, in BT.601 full-range (JPEG) YCbCr.
-//   2. LUT[v] = round( (cdf[v] - cdfMin) / (N - cdfMin) * 255 ), the standard cdf-min-normalized
-//      equalization mapping (cdfMin = first non-zero CDF value).
-//   3. Apply: 1-channel out = LUT[in]; 3-channel equalizes only Y (Y' = LUT[Y]), keeps the original
-//      Cb/Cr, and converts YCbCr->RGB. Y/Cb/Cr are quantized to U8 (round+clamp) as in a standard
-//      integer YCbCr pipeline; the RGB round-trip clamps to [0,255].
-//
-// The BT.601 full-range (JPEG) transform itself lives in reference/color_ycbcr.hpp.
+/*
+Reference model: histogram_equalize
+
+RPP op
+  rppt_histogram_equalize   (Image / Color augmentation)
+
+Description
+  Per-image histogram equalization over the ROI, spreading the intensity
+  distribution to use the full range. Takes no parameters and is U8 only.
+
+  This is a two-pass, per-image (non-pointwise) op: the output at each pixel
+  depends on the whole ROI's intensity histogram, so it cannot use the
+  pointwise scalar template.
+
+  The BT.601 full-range (JPEG) transform itself lives in
+  reference/color_ycbcr.hpp.
+
+Expression
+  1. Build the 256-bin histogram of the equalization channel over the ROI,
+     with N = roiW * roiH pixels:
+       1 channel   the pixel value itself
+       3 channel   the luminance Y, in BT.601 full-range (JPEG) YCbCr
+
+  2. LUT[v] = round( (cdf[v] - cdfMin) / (N - cdfMin) * 255 )
+     the standard cdf-min-normalized mapping, cdfMin = first non-zero CDF
+     value.
+
+  3. Apply:
+       1 channel   dst = LUT[src]
+       3 channel   equalize only Y (Y' = LUT[Y]), keep the original Cb/Cr,
+                   then convert YCbCr -> RGB
+
+Per-type form
+  U8 only. Y/Cb/Cr are quantized to U8 (round + clamp) as in a standard
+  integer YCbCr pipeline, and the RGB round-trip clamps to [0,255].
+*/
 
 // Builds the cdf-min-normalized equalization LUT from a 256-bin histogram of N samples.
 inline std::array<int, 256> he_build_lut(const std::array<long, 256>& hist, long N) {
