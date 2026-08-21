@@ -1,8 +1,2 @@
-# Keep the rocKE Beads Rust project visible even when a developer has a broad
-# local `.beads/` exclude. Runtime database files remain ignored by
-# `.beads/.gitignore`.
-!.beads/
-!.beads/.gitignore
-!.beads/config.yaml
-!.beads/issues.jsonl
-!.beads/metadata.json
+# Local beads_rust task-tracker state.
+.beads/
