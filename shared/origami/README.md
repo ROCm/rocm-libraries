@@ -27,17 +27,85 @@
 
 ### Prerequisites
 
-**ROCm/HIP**: This package requires ROCm/HIP to be installed on your system. ROCm cannot be installed via pip and must be installed separately. See the [ROCm Quick Start Guide](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) for installation instructions. Ensure `CMAKE_PREFIX_PATH` includes your ROCm install (default: `/opt/rocm`).
+**ROCm/HIP**: This package requires a ROCm install. The native Origami library (`liborigami` and its CMake package) is first-class in ROCm, so a ROCm install provides it. See the [ROCm Quick Start Guide](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) for installation instructions.
+
+By default the Python extension links the installed shared `liborigami` (`find_package(origami)`) rather than building it from source. The build therefore needs a prefix that CMake can discover (via `CMAKE_PREFIX_PATH`) containing:
+
+```text
+lib/cmake/origami/origami-config.cmake
+lib/liborigami.so
+include/origami/...
+```
+
+A generic "ROCm is installed" is not sufficient if that prefix is not on `CMAKE_PREFIX_PATH`. To build the native library from this source tree instead, pass `-DORIGAMI_BUILD_FROM_SOURCE=ON` (via `CMAKE_ARGS`). That is a development path, not a self-contained one: the wheel never bundles `liborigami`, so the extension still resolves `liborigami.so.1` through the loader at import time and you must install the library you built and put it on the loader path yourself.
 
 ### Install
 
+Run the Python packaging workflows from `shared/origami`, where the project's
+`pyproject.toml` lives. Use `python -m build` to create a distributable wheel,
+or `pip install -e .` to create a local development installation.
+
+#### Build a wheel
+
+The wheel workflow selects the `python` CMake preset. It builds the extension
+against an installed shared `liborigami` and does not bundle that library in the
+wheel:
+
 ```bash
-pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
+cd shared/origami
+python -m pip install build
+
+CMAKE_PREFIX_PATH=/path/to/rocm \
+  python -m build --wheel --outdir dist
+```
+
+Install the built artifact:
+
+```bash
+python -m pip install dist/*.whl
+```
+
+The wheel links the installed shared `liborigami`; that runtime must be visible to the dynamic loader at import time (via RPATH, `LD_LIBRARY_PATH`, or `ldconfig`).
+
+#### Create an editable development install
+
+The editable workflow selects the `dev` CMake preset, which builds `liborigami`
+from this checkout and links the extension to that build-tree library:
+
+```bash
+cd shared/origami
+pip install -e .
+```
+
+Python source edits are visible through the editable installation immediately.
+The native library and extension are built once during installation, so rerun
+`pip install -e .` after changing C++ or binding sources. See
+[Iterative development](#iterative-development) for the CMake-only edit-build-test
+loop.
+
+Alternatively, install directly from the repository in one step (builds a wheel under the hood):
+
+```bash
+pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami
+```
+
+To build the native library from source in the same step instead:
+
+```bash
+CMAKE_ARGS="-DORIGAMI_BUILD_FROM_SOURCE=ON" \
+  pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami
 ```
 
 ## API Example
 
 ### Python API
+
+The compiled extension is a private submodule, `origami._pyorigami`; every public
+name is re-exported from the `origami` package, so import from `origami` directly.
+`origami.origami` still resolves, but it is deprecated, emits a `DeprecationWarning`,
+and will be removed in the next minor release. One consequence of the rename is
+visible in reprs, error messages, and pickle paths: types now report
+`origami._pyorigami` as their module instead of `origami.origami`.
 
 ```python
 import origami
@@ -167,10 +235,12 @@ Origami provides Python bindings that allow you to use Origami's functionality d
 
 #### Installation
 
+The build system uses `pyproject.toml` with scikit-build-core, which integrates with CMake for building the Python bindings. Use `python -m build --wheel` for a distributable artifact or `pip install -e .` for local development, as described in [Install](#install). The repository installation workflows below are alternatives to building from an existing checkout.
+
 Install directly from the rocm-libraries repository (this could take some time due to the size of the rocm-libraries repo):
 
 ```bash
-pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
+pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami
 ```
 
 To efficiently install directly from the rocm-libraries repository use do the following:
@@ -180,22 +250,55 @@ TEMP_DIR=$(mktemp -d)
 git clone --no-checkout --filter=blob:none --sparse https://github.com/ROCm/rocm-libraries.git $TEMP_DIR
 git -C $TEMP_DIR sparse-checkout set shared/origami
 git -C $TEMP_DIR checkout develop
-pip install $TEMP_DIR/shared/origami/python -v
+pip install $TEMP_DIR/shared/origami -v
 rm -rf $TEMP_DIR
 ```
 
-If you have already cloned the repository:
+#### Iterative development
+
+Both development workflows below build `liborigami` from this source tree, driven from `shared/origami`. Neither needs an installed Origami or installs the native library system-wide. The editable workflow does install the Python package. Pick a workflow based on whether you want `import origami` to work without setting `PYTHONPATH`.
+
+CMake, no pip. The build tree holds a ready-to-import package:
 
 ```bash
-cd shared/origami/python
-pip install -e .
+cd shared/origami
+cmake --preset dev
+cmake --build --preset dev
+PYTHONPATH=build/dev/python python -m pytest python/tests -v
 ```
 
-The build system uses `pyproject.toml` with scikit-build-core, which integrates with CMake for building the Python bindings.
+Editing a C++ source and re-running `cmake --build --preset dev` relinks `liborigami` and the extension. The extension picks up the build-tree `liborigami` through its build RPATH, so there is nothing to install between the edit and the test run.
 
-#### CMake Build (Alternative)
+The `dev` preset builds `RelWithDebInfo` with `-Wall` on the extension, so a stack trace names lines and warnings are visible. `dev:debug` is the same loop at `-O0 -g`.
 
-When building with CMake, you'll need to manually install the Python dependencies listed in `shared/origami/python/requirements.txt`:
+Editable install:
+
+```bash
+cd shared/origami
+pip install -e .
+python -m pytest python/tests -v
+```
+
+The install builds `liborigami` and the extension once. Python source edits are visible immediately, but a later C++ or binding edit does not reach the installed package on its own. Rerun `pip install -e .` to rebuild it, or use the preset loop above, which needs no install at all.
+
+`scikit-build-core` can rebuild on every `import origami` (`editable.rebuild`), and this project deliberately leaves it off. Rebuild-on-import runs outside the ephemeral build environment, so it only works when every install also passes `--no-build-isolation` and the build requirements are present in the environment itself. An install that omits the flag records pip's temporary overlay in `CMakeCache.txt`; pip deletes that overlay afterwards, and the next import fails in `cmake --build` on a path that no longer exists. The preset loop gives the same edit-test cycle without that coupling.
+
+Both suites in one tree. The `dev:tests` preset is `dev` with `ORIGAMI_BUILD_TESTING=ON`, which adds the Catch2 C++ binary and registers it alongside the Python tests so a single `ctest` covers both:
+
+```bash
+cd shared/origami
+cmake --preset dev:tests
+cmake --build --preset dev:tests
+ctest --preset dev:tests
+```
+
+The C++ tests need Catch2 3. If CMake cannot find one, the build fetches it from GitHub, so the first `dev:tests` configure needs network access; `dev` does not.
+
+The `ORIGAMI_BUILD_FROM_SOURCE=ON` define is what makes either loop build the native library rather than look for an installed one. Wheel builds leave it off and link the Origami that ROCm provides.
+
+#### Plain CMake build
+
+`shared/origami/CMakeLists.txt` is the only entry point: it either adds `origami-cpp/` or calls `find_package(origami)`, then adds `python/`. The presets above drive it; the invocation below is the same build spelled out. You'll need to manually install the Python dependencies listed in `shared/origami/python/requirements.txt`:
 
 ```bash
 pip install -r shared/origami/python/requirements.txt
@@ -250,9 +353,10 @@ cmake --install build/
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `ORIGAMI_BUILD_SHARED_LIBS` | Build shared libraries | `ON` (standalone), `OFF` (as part of rocm-libraries) |
+| `ORIGAMI_BUILD_SHARED_LIBS` | Build `liborigami` shared instead of static | `ON` |
+| `ORIGAMI_BUILD_FROM_SOURCE` | Add `origami-cpp/` and build liborigami from this tree instead of calling `find_package(origami)` | `ON` (the wheel sets it `OFF`) |
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
-| `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
+| `ORIGAMI_BUILD_TESTING` | Build the Catch2 C++ suite, and the Python suite when `ORIGAMI_ENABLE_PYTHON=ON` | `OFF` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
 
 
@@ -285,32 +389,31 @@ ctest --output-on-failure
 Run only C++ tests:
 
 ```bash
-./build/tests/origami-tests
+./build/origami-cpp/tests/origami-tests
 ```
 
 Run a specific C++ test by name:
 
 ```bash
-./build/tests/origami-tests "Origami: select_config_mnk unit test"
+./build/origami-cpp/tests/origami-tests "Origami: select_config_mnk unit test"
 ```
 
-Run only Python tests (from `shared/origami/python`):
+Run only Python tests (from `shared/origami`), against a build tree produced by the `dev` preset:
 
 ```bash
-pip install -e .
-python -m pytest tests/ -v
+PYTHONPATH=build/dev/python python -m pytest python/tests -v
 ```
 
 Run Python tests excluding slow tests:
 
 ```bash
-python -m pytest tests/ -m "not slow"
+python -m pytest python/tests -m "not slow"
 ```
 
 Run selector tests (requires torch):
 
 ```bash
-python -m pytest tests/test_selector.py -v
+python -m pytest python/tests/test_selector.py -v
 ```
 
 ## Debug Logging
