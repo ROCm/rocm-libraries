@@ -44,7 +44,7 @@ from Tensile.SolutionStructs.Solution import Solution
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
-from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
+from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 
 from .BenchmarkStructs import BenchmarkProcess
 from .backends import BackendFactory
@@ -71,6 +71,7 @@ _CACHE_FIELDS = {
     "InternalSupportParams": "internalSupportParams",
     "CustomKernelWildcard": "customKernelWildcard",
 }
+_KERNEL_NAMING_VERSION = 1
 
 # Deterministic synthetic GFlops value emitted per (problem size, solution) cell in the
 # --cpu-only results CSV. Fixed (never random / never timestamped) so the file is
@@ -121,12 +122,15 @@ _CACHE_KEY_LEN = 12
 
 def _cacheDataMatches(cacheData, benchmarkStep):
     """Check if cached data matches the current benchmark step parameters."""
-    return all(cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items())
+    return cacheData.get("KernelNamingVersion") == _KERNEL_NAMING_VERSION and all(
+        cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()
+    )
 
 
 def _computeCacheKey(benchmarkStep):
     """Compute a deterministic hash from the cache-relevant parameter fields."""
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
+    cacheFields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
@@ -473,7 +477,6 @@ def writeBenchmarkFiles(
 
     kernels = []
     kernelHelperObjs = []
-    kernelNames = set()
     kernelHelperNames = set()
 
     # get unique kernels and kernel helpers
@@ -481,10 +484,7 @@ def writeBenchmarkFiles(
         for solution in tqdm(solutions, "Finding unique solutions"):
             solutionKernels = solution.getKernels()
             for kernel in solutionKernels:
-                kName = getKeyNoInternalArgs(kernel, debugConfig.splitGSU)
-                if kName not in kernelNames:
-                    kernels.append(kernel)
-                    kernelNames.add(kName)
+                kernels.append(kernel)
 
             solutionHelperKernels = initHelperKernelObjects(solution,
                                                             KernelHelperEnum.All,
@@ -747,6 +747,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                 with timing_context("python_write_cache"):
                     cachePath = os.path.join(cacheDir, "cache.yaml")
                     cacheData = {
+                        "KernelNamingVersion": _KERNEL_NAMING_VERSION,
                         "CodeObjectFiles": codeObjectFiles,
                         "LibraryFile": libraryFileRel,
                         "ConstantParams": benchmarkStep.constantParams,
