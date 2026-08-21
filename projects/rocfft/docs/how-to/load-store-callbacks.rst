@@ -72,8 +72,8 @@ The parameters for the functions are as follows:
   to. This counts by elements from the ``buffer`` pointer.
 * ``element``: For store callbacks only, the element to be stored.
 * ``callback_data``: A pointer value accepted by
-  :cpp:func:`rocfft_plan_description_set_load_callback` and
-  :cpp:func:`rocfft_plan_description_set_store_callback` which is passed
+  :cpp:func:`rocfft_execution_info_set_load_callback_data` and
+  :cpp:func:`rocfft_execution_info_set_store_callback_data` which is passed
   through to the callback function.
 * ``shared_memory``: A pointer to an amount of shared memory requested
   when the callback is set. Shared memory is not supported,
