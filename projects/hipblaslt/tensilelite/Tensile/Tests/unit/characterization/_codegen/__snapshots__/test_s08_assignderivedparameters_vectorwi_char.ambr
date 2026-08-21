@@ -2,7 +2,7 @@
 # name: test_s08_assignderivedparameters_vectorwi_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT128x128x32_MI16YMJ-AmyJeFUdGflNW2GGqRRADxXCTzHJoZmrxFO9BKE=',
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT128x128x32_MI16CZVgKN_yZCwegqM8Ig8EeyVOc-9P_xFKjPuCR_H3gzA=',
       'err': 0,
     }),
   ])
