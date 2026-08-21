@@ -77,8 +77,7 @@ namespace rocsparse
         // Grid-stride over the batch dimension so batch counts larger than the
         // grid-y limit (65535) are handled correctly. Each batch owns its own
         // done_array slice of size m, so no reset is needed between iterations.
-        for(int64_t batch_index = blockIdx.y; batch_index < batch_count;
-            batch_index += gridDim.y)
+        for(int64_t batch_index = blockIdx.y; batch_index < batch_count; batch_index += gridDim.y)
         {
             rocsparse::csrsv_device<BLOCKSIZE, WF_SIZE, SLEEP>(
                 m,
