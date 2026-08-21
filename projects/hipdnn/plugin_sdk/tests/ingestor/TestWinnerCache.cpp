@@ -4,13 +4,18 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <atomic>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "ContentCarryingTestGraph.hpp"
@@ -508,6 +513,229 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
 
     EXPECT_FALSE(torn) << "every read must be one whole record, never a mixture";
     EXPECT_EQ(reads.load(), 2000) << "the key exists throughout, so no read may miss";
+}
+
+/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
+/// restores the caller's value after, so the on-disk cases never read or write a real user
+/// cache and never observe each other's shards.
+class ScopedCacheDir
+{
+public:
+    explicit ScopedCacheDir(const std::string& name)
+        : _previous(hipdnn_data_sdk::utilities::getEnv(CACHE_DIR_ENV))
+        , _path(std::filesystem::temp_directory_path() / ("hipdnn_winner_cache_test_" + name))
+    {
+        std::filesystem::remove_all(_path);
+        std::filesystem::create_directories(_path);
+        const std::string value = _path.string();
+        hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, value.c_str());
+    }
+
+    ScopedCacheDir(const ScopedCacheDir&) = delete;
+    ScopedCacheDir& operator=(const ScopedCacheDir&) = delete;
+    ScopedCacheDir(ScopedCacheDir&&) = delete;
+    ScopedCacheDir& operator=(ScopedCacheDir&&) = delete;
+
+    ~ScopedCacheDir()
+    {
+        if(_previous.empty())
+        {
+            hipdnn_data_sdk::utilities::unsetEnv(CACHE_DIR_ENV);
+        }
+        else
+        {
+            hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, _previous.c_str());
+        }
+        std::error_code ignored;
+        std::filesystem::remove_all(_path, ignored);
+    }
+
+    const std::filesystem::path& path() const
+    {
+        return _path;
+    }
+
+private:
+    static constexpr const char* CACHE_DIR_ENV = "HIPDNN_CACHE_DIR";
+
+    std::string _previous;
+    std::filesystem::path _path;
+};
+
+/// A device whose arch carries the feature suffix a real gfx942 reports.
+DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
+{
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942:sramecc+:xnack-";
+    properties.warpSize = 64;
+    properties.multiProcessorCount = multiProcessorCount;
+    return properties;
+}
+
+WinnerKey keyFor(const ContentCarryingTestGraph& graph, const DeviceProperties& properties)
+{
+    return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
+}
+
+/// A ranking a manager can record, distinct per @p kernel so two records do not alias.
+WinnerRecord recordFor(uint8_t kernel, double timeMs)
+{
+    return WinnerRecord{entryFor(definitionFor(kernel), timeMs)};
+}
+
+/// Proves the codec plus the read-once path across two manager lifetimes. This is a
+/// same-process check: the genuine cross-PROCESS acceptance criterion (D4) is the paired
+/// ctest invocation in the integration phase, not this test.
+TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroughTheShard)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("cross_instance");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    {
+        const auto writer = makeNamedStateManager("test:CrossInstance");
+        writer->recordWinner(key, recordFor(0x11, 1.5));
+    }
+
+    const auto reader = makeNamedStateManager("test:CrossInstance");
+    const auto served = reader->winnerFor(key);
+
+    ASSERT_TRUE(served.has_value())
+        << "a fresh manager did not read back the record the previous one wrote";
+    ASSERT_EQ(served->size(), 1U);
+    EXPECT_EQ(served->front().kernelId, testId(0x11));
+}
+
+/// gcnArchName is raw and suffixed; ':' is illegal in a Windows path component, so the
+/// arch directory must be the stripped base id. Run on Linux CI, where a Windows-only
+/// break would otherwise never surface.
+TEST(TestIngestorWinnerCache, TheArchShardComponentCarriesNoColon)
+{
+    const ScopedCacheDir cacheDir("arch_component");
+
+    const auto path = winnerCacheShardPath("test:ArchComponent", "gfx942:sramecc+:xnack-");
+    ASSERT_FALSE(path.empty());
+
+    const auto archComponent = path.parent_path().filename().string();
+    EXPECT_EQ(archComponent, "gfx942");
+    EXPECT_EQ(archComponent.find(':'), std::string::npos);
+
+    // The engine component is sanitized for the same reason: a conforming scoped name
+    // always contains a colon.
+    const auto engineComponent = path.parent_path().parent_path().filename().string();
+    EXPECT_EQ(engineComponent.find(':'), std::string::npos);
+}
+
+/// The shard is per-arch but the key is per-device: two parts reporting the same arch with
+/// different compute-unit counts do not share a measurement, yet do share a file.
+TEST(TestIngestorWinnerCacheStateManager, TwoDevicesOnOneArchShareAShardAndStayDistinctRecords)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("coarse_shard");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto small = suffixedDeviceProperties(228);
+    const auto large = suffixedDeviceProperties(304);
+    ASSERT_NE(DeviceKey{small}, DeviceKey{large});
+
+    {
+        const auto manager = makeNamedStateManager("test:CoarseShard");
+        manager->recordWinner(keyFor(graph, small), recordFor(0x21, 1.0));
+        manager->recordWinner(keyFor(graph, large), recordFor(0x22, 2.0));
+    }
+
+    // One shard file, because both devices strip to the same base arch.
+    const auto path = winnerCacheShardPath("test:CoarseShard", small.gcnArchName);
+    ASSERT_EQ(path, winnerCacheShardPath("test:CoarseShard", large.gcnArchName));
+    ASSERT_TRUE(std::filesystem::exists(path));
+
+    // Two records inside it, and each device is served its own.
+    const auto reader = makeNamedStateManager("test:CoarseShard");
+    const auto forSmall = reader->winnerFor(keyFor(graph, small));
+    const auto forLarge = reader->winnerFor(keyFor(graph, large));
+    ASSERT_TRUE(forSmall.has_value());
+    ASSERT_TRUE(forLarge.has_value());
+    EXPECT_EQ(forSmall->front().kernelId, testId(0x21));
+    EXPECT_EQ(forLarge->front().kernelId, testId(0x22));
+}
+
+/// A shard written by a different build is declined rather than misread, and says so once.
+TEST(TestIngestorWinnerCacheStateManager, AVersionMismatchedShardIsDeclinedAndLogged)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("version_mismatch");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+
+    const auto path = winnerCacheShardPath("test:VersionMismatch", properties.gcnArchName);
+    ASSERT_FALSE(path.empty());
+    std::filesystem::create_directories(path.parent_path());
+    {
+        std::ofstream out(path);
+        out << "not-the-version-this-build-writes\n";
+    }
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto manager = makeNamedStateManager("test:VersionMismatch");
+
+    EXPECT_FALSE(manager->winnerFor(keyFor(graph, properties)).has_value())
+        << "a version-mismatched shard must decline, not serve";
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "version mismatch"))
+        << "the decline must say why, rather than failing silently:\n"
+        << recorder.getRecordedLogsAsString();
+}
+
+/// One unparseable line costs itself and nothing else -- a shard is not poisoned by a
+/// record a newer build wrote or a partial write left behind.
+TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("malformed_line");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    {
+        const auto writer = makeNamedStateManager("test:MalformedLine");
+        writer->recordWinner(key, recordFor(0x31, 1.0));
+    }
+
+    const auto path = winnerCacheShardPath("test:MalformedLine", properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        std::ofstream out(path, std::ios::app);
+        out << "{not valid json at all\n";
+    }
+
+    const auto reader = makeNamedStateManager("test:MalformedLine");
+    const auto served = reader->winnerFor(key);
+
+    ASSERT_TRUE(served.has_value()) << "the good line before the garbage one must still load";
+    EXPECT_EQ(served->front().kernelId, testId(0x31));
+}
+
+/// The opt-out that keeps every other test in this suite off the filesystem: a manager
+/// built without an engine name has no shard path to compose, so it neither reads nor
+/// writes even with a perfectly writable cache directory configured.
+TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("unnamed_engine");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    const auto manager = makeStateManager();
+    manager->recordWinner(key, recordFor(0x41, 1.0));
+
+    // Served from memory, so the recording itself worked.
+    EXPECT_TRUE(manager->winnerFor(key).has_value());
+
+    EXPECT_TRUE(std::filesystem::is_empty(cacheDir.path()))
+        << "an unnamed engine wrote into the cache directory; every directly-constructed "
+           "test manager would then share one shard";
 }
 
 } // namespace
