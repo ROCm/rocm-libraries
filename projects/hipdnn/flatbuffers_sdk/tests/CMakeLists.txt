@@ -28,6 +28,8 @@ add_executable(
     utilities/TestApplicabilityUtils.cpp
     utilities/TestFlatbufferUtils.cpp
     utilities/TestJson.cpp
+    utilities/TestUuid.cpp
+    utilities/TestMoeGroupedMatmulValidation.cpp
     utilities/TestPointwiseValidation.cpp
 )
 
