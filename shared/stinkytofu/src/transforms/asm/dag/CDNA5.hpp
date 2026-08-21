@@ -45,6 +45,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
 namespace {
@@ -1723,17 +1724,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // Only barriers are left and an SCC chain is still holding them back.
     // applyClusterBarrierSccRule only locks chains whose readers can all issue without
     // the barrier going first, so a locked chain always has a reader to make progress
-    // on and this should be unreachable; release rather than stall if that ever breaks.
+    // on; reaching here means the SCC/barrier ordering invariant broke.
     if (clusterBarrierEnabled() && openSccChain_ != 0 && !barrierQueue.empty()) {
-        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] SCC chain " << openSccChain_
-                             << " open but only barriers are ready; releasing the lock"
-                                " to keep the schedule progressing\n");
-        openSccChain_ = 0;
-        sccReadersLeft_ = 0;
-        DAGNode* barrier = barrierQueue.top();
-        barrierQueue.pop();
-        updateWMMAStatus(barrier);
-        return rememberPick(barrier);
+        STINKY_UNREACHABLE("CDNA5ReadyQueue::pickOne: open SCC chain but only barriers are ready");
     }
 
     assert(false && "CDNA5ReadyQueue::pickOne: all buckets empty");
