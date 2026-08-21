@@ -191,7 +191,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_csc]
   batch_count: [131072]
   device_memory_gb: 2
   host_memory_gb: 1
@@ -217,7 +217,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_csc]
   batch_count: [131072]
   device_memory_gb: 2
   host_memory_gb: 1
