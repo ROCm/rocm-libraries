@@ -37,7 +37,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKMulticast, streamK2DMulticast, deriveWaveParams
+                    streamKMulticast, streamK2DMulticast
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -659,7 +659,7 @@ class Solution(collections.abc.Mapping):
       for key in defaultInternalSupportParams:
         assignParameterWithDefault(self["InternalSupportParams"], key, config["InternalSupportParams"], defaultInternalSupportParams)
     else:
-      self["InternalSupportParams"] = dict(defaultInternalSupportParams)
+      self["InternalSupportParams"] = defaultInternalSupportParams
 
     # Assign solution state from config, filling missing from the defaultSolution
     for key in defaultSolution:
@@ -709,26 +709,16 @@ class Solution(collections.abc.Mapping):
     # skip post-derived validation to avoid cascading/noisy type mismatch records.
     pre_records = validateParameterTypes(self._state, srcFile=srcName)
     mergeMismatchRecords(pre_records)
-
-    isHandwrittenCustomKernel = ("CustomKernel" in self._state
-        and self._state["CustomKernel"].get("name", "")
-        and not self._state["CustomKernel"].get("generated", False))
-    if isHandwrittenCustomKernel:
-      Solution._assignCustomKernelParameters(self._state)
-      self._name = self._state["CustomKernel"]["name"]
-    else:
-      savedCustomKernel = self._state.pop("CustomKernel", None) if "CustomKernel" in self._state else None
-      Solution.assignDerivedParameters(
-        self._state,
-        splitGSU,
-        printSolutionRejectionReason,
-        printIndexAssignmentInfo,
-        isaInfoMap,
-        assembler.rocm_version
-      )
-      if savedCustomKernel:
-        self._state["CustomKernel"] = savedCustomKernel
-      self._name = None
+    
+    Solution.assignDerivedParameters(
+      self._state,
+      splitGSU,
+      printSolutionRejectionReason,
+      printIndexAssignmentInfo,
+      isaInfoMap,
+      assembler.rocm_version
+    )
+    self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
 
     # Only merge and report mismatches if there were no pre-existing mismatches
     # To avoid duplicates and noise from cascading issues.
@@ -1731,71 +1721,6 @@ class Solution(collections.abc.Mapping):
         divisorName = "LVP{}".format(tC)
     return divisorName
 
-  @staticmethod
-  def _assignCustomKernelParameters(state):
-    """Minimal parameter setup for handwritten custom kernels.
-
-    These kernels carry their own argument layout and don't go through the
-    full assignDerivedParameters validation (which would reject them for
-    missing MatrixInstruction, etc.)."""
-    ck = state["CustomKernel"]
-    state["MacroTile0"] = ck["macrotile"][0]
-    state["MacroTile1"] = ck["macrotile"][1]
-    state["DepthU"]     = ck["macrotile"][2]
-
-    # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
-    # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
-    # solutions.  Without this the legacy beta-only kernel
-    # (`Cijk_<dT>_BiasS`) was launched and not found in the library.
-    state["_GlobalAccumulation"]    = None
-    if state.get("StreamK", 0) > 0 and state.get("StreamKAtomic", 0) == 0:
-      state["_GlobalAccumulation"] = 'PartialsBuffer'
-    elif state.get("GlobalSplitUAlgorithm", "") == 'SingleBuffer':
-      computeName = state["ProblemType"]["ComputeDataType"].toName()
-      if computeName != state["ProblemType"]["DestDataType"].toName():
-        state["_GlobalAccumulation"] = 'SingleBuffer'
-    elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBuffer':
-      state["_GlobalAccumulation"] = 'MultipleBuffer'
-    elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
-      state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
-    state["CUOccupancy"]            = -1
-    state["MathClocksUnrolledLoop"] = 0
-    state["PackedC0IndicesX"] = []
-    state["ThreadTile0"] = 0
-    state["ThreadTile1"] = 0
-    state["NumThreads"] = ck["threads"][0] * ck["threads"][1] * ck["threads"][2]
-
-    numElementsPerWorkGroup = state["MacroTile0"] * state["MacroTile1"]
-    state["NumElementsPerThread"] = numElementsPerWorkGroup // state["NumThreads"]
-
-    state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
-    state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
-
-    state["_WorkspaceSizePerElemC"] = ck.get("workspaceSizePerElemC", 0)
-    state["_WorkspaceSizePerElemBias"] = 0
-    if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
-      state["_WorkspaceSizePerElemBias"] = ck.get("workspaceSizePerElemBias", 0)
-
-    mi = state.get("MatrixInstruction", [])
-    state.setdefault("EnableMatrixInstruction", isinstance(mi, list) and len(mi) >= 4)
-
-    if state["EnableMatrixInstruction"]:
-      wavefrontSize = state.get("WavefrontSize", 64)
-      macrotile = [state["MacroTile0"], state["MacroTile1"]]
-      waveGroup, waveTile = deriveWaveParams(mi, state["NumThreads"], macrotile, wavefrontSize)
-      if "MIWaveTile" not in state:
-        state["MIWaveTile"] = waveTile
-      if "MIWaveGroup" not in state or state["MIWaveGroup"] == [0, 0]:
-        state["MIWaveGroup"] = waveGroup
-    else:
-      state.setdefault("MIWaveTile", [0, 0])
-      state["MIWaveGroup"] = [0, 0]
-
-    state["LocalSplitU"] = 1
-    state["GlobalReadVectorWidthA"] = 1
-    state["GlobalReadVectorWidthB"] = 1
-    state["StoreVectorWidth"] = 1
-
   ########################################
   # assign all derived parameters
   @staticmethod
@@ -1847,8 +1772,9 @@ class Solution(collections.abc.Mapping):
         #del state[s]
 
     # Force update _GlobalAccumulation
+    computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_GlobalAccumulation"] = None
-    computeName = state["ProblemType"]["ComputeDataType"].toName()
+    computeName  = state["ProblemType"]["ComputeDataType"].toName()
     if state["UseDotInstruction"] and state["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
       # dot2 kernel does not support MBSK
       state["GlobalSplitUAlgorithm"] = 'MultipleBuffer'
@@ -5102,11 +5028,7 @@ class Solution(collections.abc.Mapping):
           else:
             reject(state, printRejectionReason, "%s's padded address is inconsistent"%tc)
 
-    ck = state.get("CustomKernel")
-    isActualCustomKernel = bool(state.get("CustomKernelName", "")) or \
-        (isinstance(ck, dict) and bool(ck.get("name"))
-         and not ck.get("generated", False))
-    if(not isActualCustomKernel):
+    if(not (state["CustomKernelName"] and state["CustomKernelName"] != "")): #don't check the custom kernel.
       checkLdsBlockSizePerPad("A")
       checkLdsBlockSizePerPad("B")
 

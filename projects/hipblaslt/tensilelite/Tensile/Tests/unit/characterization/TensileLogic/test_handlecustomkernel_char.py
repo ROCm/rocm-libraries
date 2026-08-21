@@ -86,15 +86,6 @@ def test_has_custom_kernel_false_empty_name(tmp_path, snapshot):
     assert hasCustomKernel(f) == snapshot
 
 
-def test_has_custom_kernel_true_new_style_mapping(tmp_path, snapshot):
-    # The CustomKernel: mapping (name/args/macrotile/...) that replaced the
-    # flat CustomKernelName: string must be detected too -- both are live
-    # inputs to handleCustomKernel(). See adr/0003-hascustomkernel-dual-schema.md.
-    f = tmp_path / "withck_new.yaml"
-    f.write_text("- foo\n  CustomKernel:\n    name: MyKernel\n    args: []\n", encoding="utf-8")
-    assert hasCustomKernel(f) == snapshot
-
-
 # --- handleCustomKernel -----------------------------------------------------
 
 def test_handle_non_custom_returns_false(snapshot):
