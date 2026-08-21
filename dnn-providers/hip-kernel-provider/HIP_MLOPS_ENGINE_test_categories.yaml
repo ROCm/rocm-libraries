@@ -78,6 +78,17 @@ test_categories:
       - "full"
       - "all"
 
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
@@ -86,3 +97,4 @@ execution_settings:
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
+    ffm-quick: 7200       # 2 hours

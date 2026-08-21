@@ -54,6 +54,7 @@ B and D use simpler descriptors:
 | `compv4` | Double-buffer LDS (ping-pong) + scheduler hints + `s_setprio`. |
 | `unroll_k` | Python-level K-loop unroll with double-buffering; also triggers double-buffer allocation. |
 | `async_dma` | Direct DRAM→LDS via `raw_ptr_buffer_load_lds`; paired with `SoftwarePipeline` for overlap. |
+| `wavelet`  | Load/math wave specialization (CK Tile PR #8009). **gfx1250/WMMA only.** Appends `num_load_waves` dedicated load waves to the workgroup; those waves handle all DRAM→LDS transfers while the `warp_m × warp_n` math waves run WMMA exclusively. Single-buffer LDS shared by both roles; no scheduler hints. |
 
 ### Epilogues
 
@@ -93,6 +94,72 @@ B and D use simpler descriptors:
 
 - `async_dma=True` switches the global→LDS path to `raw_ptr_buffer_load_lds` via `AsyncTileLoader`.
 - LDS layout must be plain `[block_m, block_k]` (no K-pad); paired with `SoftwarePipeline` for DRAM/MFMA overlap.
+
+### Wavelet pipeline (`wavelet`)
+
+The wavelet pipeline implements the load/math wave specialization introduced in CK Tile PR #8009 (`gemm_pipeline_ag_bg_cr_wavelet.hpp`). It targets **gfx1250 (WMMA/RDNA wave32)** exclusively and is rejected by `is_valid_spec` on MFMA/CDNA targets.
+
+#### Wave role split
+
+The workgroup is enlarged by `num_load_waves` extra waves appended after the standard `warp_m × warp_n` math waves:
+
+| Role | Thread range | Responsibility |
+|------|-------------|----------------|
+| Math waves | `[0, block_size)` = `warp_m × warp_n × wave_size` threads | WMMA only — never touch global memory |
+| Load waves | `[block_size, launch_block_size)` = `num_load_waves × wave_size` threads | DRAM→LDS transfers only |
+
+```
+launch_block_size = block_size + num_load_waves * wave_size
+                  = (warp_m × warp_n × wave_size) + (num_load_waves × wave_size)
+```
+
+With the gfx1250 defaults (`warp_m=2`, `warp_n=2`, `wave_size=32`, `num_load_waves=4`):
+- `block_size` = 128 (math waves)
+- `launch_block_size` = 256 (math + load waves)
+
+For all other pipelines `launch_block_size == block_size`. The HIP launch and the kernel's `max_workgroup_size` attribute must use `launch_block_size`, not `block_size`.
+
+#### Overlap mechanism: split fetch / store
+
+Because gfx1250 has separate VMEM and WMMA issue queues, DRAM loads (`buffer_load_vN`) and WMMA matrix instructions can be in flight simultaneously — unlike MFMA targets where both share a single issue slot. The wavelet pipeline exploits this by splitting each tile load into two phases:
+
+1. **`wavelet_fetch`** — issues `buffer_load_vN` into registers *before* the synchronisation barrier. The DRAM request is in flight while math waves execute WMMA.
+2. **`wavelet_store`** — after `s_waitcnt(vmcnt=0)` confirms data arrival, writes the fetched registers to LDS.
+
+This is the `fetch` / `store_fetched` split on `CoalescedTileLoader` in `helpers/loads.py`.
+
+#### Barrier protocol (`scf_if_else` form)
+
+The kernel emits a single `scf_if_else` block (`tid < block_size`) that drives both roles through matched barrier sequences. The number of barriers per branch must be identical:
+
+```
+MATH branch:   barrier_0
+               repeat K-2 times: WMMA-atom → barrier_A → barrier_B
+               tail WMMA-atom
+               epilogue stub barriers
+
+LOAD branch:   fetch[0] → store[0] → barrier_0
+               repeat K-2 times: fetch[i+1] → barrier_A → store[i+1] → barrier_B
+               N_epi stub barriers (no-op for load role)
+```
+
+This uses LLVM `br i1` branching rather than `s_and_saveexec_b64` exec-mask manipulation, so both branches are lowered to ordinary conditional jumps and the separate issue queues remain active for both roles.
+
+#### LDS allocation
+
+The wavelet pipeline uses a **single-buffer** LDS tile (no ping-pong):
+
+- The `_double` flag that enables ping-pong for `compv4` / `async_dma` / `unroll_k` does not include `wavelet`.
+- Because both branches of the `scf_if_else` reference A/B LDS simultaneously throughout the kernel body, the liveness packer cannot alias the cshuffle C tile onto the A/B region. The `_no_alias` flag is forced `True` for wavelet regardless of `cshuffle_no_alias`, making the LDS budget always additive: `total = ab + c` (not `max(ab, c)`).
+- The cshuffle epilogue requires **two WAR barriers** (`_war_barriers = 2`) instead of one, because two synchronisation points are needed: math waves done (load waves may exit) and load waves exited (A/B LDS safe to overwrite).
+
+#### Scheduler hints
+
+The wavelet schedule (`helpers/schedule.py`) sets `emit_hints=False` and `mode="default"` — no `sched_group_barrier` hints are emitted. Hardware concurrency between VMEM and WMMA is provided by the separate issue queues, not by software scheduling.
+
+#### Known issue: `ds_load_tr16_b128` mis-optimisation (gfx1250)
+
+The AMDGPU LLVM backend may replace a `load <8 x half>, ptr addrspace(3)` that feeds a WMMA instruction with `ds_load_tr16_b128` (a transposed LDS read). This optimisation assumes LDS was stored in column-major layout, but the wavelet kernel stores A_smem / B_smem row-major (for coalesced DRAM→LDS writes). The result is garbage WMMA inputs even though the load-wave transfers completed correctly. Root cause and three candidate fixes are tracked in the debug notes;
 
 ### Python-level K-loop unroll (`unroll_k`)
 

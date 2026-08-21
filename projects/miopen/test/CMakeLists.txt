@@ -228,6 +228,11 @@ add_custom_target(miopen-check
 )
 add_custom_target(miopen-tests COMMENT "Aggregate target for MIOpen tests")
 
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
+    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
+endif()
+
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
     add_custom_target(miopen-gpu-detection-check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1 COMMENT "Reporting failed GPU detection")
     add_dependencies(miopen-check miopen-gpu-detection-check)
@@ -904,10 +909,4 @@ if(MIOPEN_TEST_DISCRETE)
 add_subdirectory(gtest EXCLUDE_FROM_ALL)
 else()
 add_subdirectory(gtest)
-endif()
-
-# Legacy targets are defined for CI support ONLY. Always use the 'miopen-' targets.
-if(NOT ROCM_LIBS_SUPERBUILD)
-    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
-    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
 endif()
