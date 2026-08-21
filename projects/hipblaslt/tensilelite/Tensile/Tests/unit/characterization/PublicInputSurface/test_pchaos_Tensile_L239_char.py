@@ -45,12 +45,6 @@ def _make_args(**overrides):
         RuntimeLanguage=None,
         CodeObjectVersion=None,
         debug=False,
-        # --validate-metadata: action="store_true", so a real argparse Namespace
-        # always carries this (default False), unrelated to the `platform`
-        # predicate under test here -- see
-        # TensileMain/test_tensile_helpers_char.py for dedicated ValidateMetadata
-        # coverage.
-        ValidateMetadata=False,
         client_lock=None,
         prebuilt_client=None,
         MXScaleFormat=0,

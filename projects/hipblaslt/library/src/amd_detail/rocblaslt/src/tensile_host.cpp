@@ -4509,12 +4509,12 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
             if(prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
-               && !solution->customKernel.name.empty() && !solution->customKernel.generated)
+               && !solution->sizeMapping.customKernelName.empty())
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
                     std::ostringstream msg;
-                    msg << "Skipping custom kernel " << solution->customKernel.name
+                    msg << "Skipping custom kernel " << solution->sizeMapping.customKernelName
                         << " - does not support batch_mode=POINTER_ARRAY" << std::endl;
                     log_info(__func__, msg.str());
                 }
