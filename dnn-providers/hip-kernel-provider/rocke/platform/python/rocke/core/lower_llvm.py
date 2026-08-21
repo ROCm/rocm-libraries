@@ -36,7 +36,7 @@ import enum
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .ir import (
     KernelDef,
@@ -48,6 +48,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    split_loc,
 )
 
 
@@ -1124,6 +1125,277 @@ class _Block:
         self.lines.append(line)
 
 
+# --------------------------- debug metadata -------------------------------
+
+# LLVM drops every ``!dbg`` attachment in a module that does not carry this
+# flag, silently and with no diagnostic, so it is not optional.
+_DEBUG_INFO_VERSION = 3
+
+# ``finalize`` hardcodes low metadata ids for the AMDGPU markers (fp-atomic,
+# agent scope). Debug nodes start above them and are numbered in a fixed
+# allocation order, so the C++ engine can reproduce the same bytes when it is
+# taught to emit debug info too.
+_DEBUG_MD_BASE = 10
+
+
+def _escape_md_string(text: str) -> str:
+    r"""Escape ``text`` for an LLVM metadata string literal.
+
+    LLVM textual string literals keep printable ASCII verbatim and write every
+    other byte (and ``"`` / ``\``) as a ``\XX`` hex escape. Paths are encoded
+    as UTF-8 first so this matches the C++ walk over ``unsigned char``.
+    """
+
+    out = []
+    for b in text.encode("utf-8"):
+        if b == 0x5C:
+            out.append("\\5C")
+        elif b == 0x22:
+            out.append("\\22")
+        elif 0x20 <= b <= 0x7E:
+            out.append(chr(b))
+        else:
+            out.append(f"\\{b:02X}")
+    return "".join(out)
+
+
+def _di_file(path: str) -> str:
+    directory, filename = os.path.split(path)
+    return (
+        f'!DIFile(filename: "{_escape_md_string(filename)}", '
+        f'directory: "{_escape_md_string(directory)}")'
+    )
+
+
+class _Frame(NamedTuple):
+    """One authoring call-stack entry parsed out of an ``Op.loc``."""
+
+    path: str
+    line: int
+    col: int
+    func: str
+
+
+def _parse_frame(text: str) -> Optional[_Frame]:
+    """Parse ``"<path>:<line>[:<col>[:<func>]]"``.
+
+    Fields are taken from the right and validated rather than split positionally,
+    so a path that itself contains a colon still parses.
+    """
+
+    parts = text.split(":")
+    if len(parts) < 2:
+        return None
+    func = ""
+    if not parts[-1].isdigit():
+        func = parts.pop()
+    col = 0
+    if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
+        col = int(parts.pop())
+    if len(parts) < 2 or not parts[-1].isdigit():
+        return None
+    line = int(parts.pop())
+    path = ":".join(parts)
+    if not path:
+        return None
+    return _Frame(path, line, col, func)
+
+
+def _parse_loc(loc: str) -> List[_Frame]:
+    """Parse an ``Op.loc`` into its call-stack frames, innermost first.
+
+    Accepts both the single-frame form (``"file:line"``, which is what a
+    hand-written or externally supplied location looks like) and the captured
+    chain form (``"file:line:col:func;..."``). Frame separators are unescaped
+    ``;``; a semicolon in a path is stored as ``\\;``.
+    """
+
+    frames = []
+    for part in split_loc(loc):
+        frame = _parse_frame(part)
+        if frame is not None:
+            frames.append(frame)
+    return frames
+
+
+class _DebugInfo:
+    """Line-table debug metadata assembled from the ``Op.loc`` of lowered ops.
+
+    Line tables only (``emissionKind: LineTablesOnly``): enough for a profiler
+    to map a program counter back to the Python line that emitted it, without
+    the variable and type DWARF a source-level debugger would want. That keeps
+    the metadata small and, as measured, leaves codegen untouched.
+    """
+
+    def __init__(self, kernel_name: str) -> None:
+        self._kernel_name = kernel_name
+        self._flag_id = _DEBUG_MD_BASE
+        self._empty_id = _DEBUG_MD_BASE + 1
+        self._subroutine_id = _DEBUG_MD_BASE + 2
+        self._primary_file_id = _DEBUG_MD_BASE + 3
+        self._cu_id = _DEBUG_MD_BASE + 4
+        self.subprogram_id = _DEBUG_MD_BASE + 5
+        self._next_id = _DEBUG_MD_BASE + 6
+        self._primary_file: Optional[str] = None
+        self._primary_line = 0
+        self._file_ids: Dict[str, int] = {}
+        self._block_ids: Dict[str, int] = {}
+        self._inlined_subprograms: Dict[Tuple[str, str], int] = {}
+        self._locations: Dict[Tuple[_Frame, int, Optional[int]], int] = {}
+        # Rendered in allocation order, which is also id order.
+        self._nodes: List[str] = []
+
+    @property
+    def has_locations(self) -> bool:
+        return self._primary_file is not None
+
+    def _alloc(self) -> int:
+        mid = self._next_id
+        self._next_id += 1
+        return mid
+
+    def _file_id(self, path: str) -> int:
+        if path == self._primary_file:
+            return self._primary_file_id
+        existing = self._file_ids.get(path)
+        if existing is not None:
+            return existing
+        file_id = self._alloc()
+        self._nodes.append(f"!{file_id} = {_di_file(path)}")
+        self._file_ids[path] = file_id
+        return file_id
+
+    def _lexical_block_id(self, path: str) -> int:
+        """Scope for a lone frame in a file other than the kernel's own.
+
+        DILexicalBlockFile is LLVM's node for code whose source file differs from
+        the enclosing function's -- what clang emits for ``#line``. Used only when
+        a location arrived without a call stack, so there is no callee function to
+        name; a captured chain uses real inlined subprograms instead.
+        """
+
+        if path == self._primary_file:
+            return self.subprogram_id
+        existing = self._block_ids.get(path)
+        if existing is not None:
+            return existing
+        file_id = self._file_id(path)
+        scope_id = self._alloc()
+        self._nodes.append(
+            f"!{scope_id} = !DILexicalBlockFile(scope: !{self.subprogram_id}, "
+            f"file: !{file_id}, discriminator: 0)"
+        )
+        self._block_ids[path] = scope_id
+        return scope_id
+
+    def _inlined_subprogram_id(self, frame: _Frame) -> int:
+        """A DISubprogram for a Python function the kernel was built through.
+
+        One per (file, function) rather than per call site, so repeated calls
+        share it -- which is what lets a viewer group instructions by the
+        function that emitted them.
+        """
+
+        key = (frame.path, frame.func)
+        existing = self._inlined_subprograms.get(key)
+        if existing is not None:
+            return existing
+        file_id = self._file_id(frame.path)
+        mid = self._alloc()
+        self._inlined_subprograms[key] = mid
+        name = _escape_md_string(frame.func or "<anonymous>")
+        self._nodes.append(
+            f'!{mid} = distinct !DISubprogram(name: "{name}", scope: !{file_id}, '
+            f"file: !{file_id}, line: {frame.line}, type: !{self._subroutine_id}, "
+            f"scopeLine: {frame.line}, spFlags: DISPFlagDefinition, "
+            f"unit: !{self._cu_id})"
+        )
+        return mid
+
+    def location_id(self, loc: str) -> Optional[int]:
+        """Intern ``loc`` and return the id of the innermost ``!DILocation``.
+
+        A captured call stack becomes a chain of DILocations linked by
+        ``inlinedAt``, exactly how LLVM represents an inlined C++ call: the
+        instruction points at the line that emitted it, and following the chain
+        gives the call sites that led there. The outermost frame is scoped to the
+        kernel's own subprogram, which is what LLVM requires of the end of an
+        inlining chain.
+        """
+
+        frames = _parse_loc(loc)
+        if not frames:
+            return None
+        outermost = frames[-1]
+        if self._primary_file is None:
+            # The outermost frame is the kernel builder's own entry point, so it
+            # is the natural file for the compile unit and the subprogram.
+            self._primary_file = outermost.path
+            self._primary_line = outermost.line
+        elif outermost.path == self._primary_file:
+            self._primary_line = min(self._primary_line, outermost.line)
+
+        parent: Optional[int] = None
+        for depth, frame in enumerate(reversed(frames)):
+            if depth == 0:
+                scope = self._lexical_block_id(frame.path)
+            else:
+                scope = self._inlined_subprogram_id(frame)
+            key = (frame, scope, parent)
+            cached = self._locations.get(key)
+            if cached is None:
+                cached = self._alloc()
+                tail = f", inlinedAt: !{parent}" if parent is not None else ""
+                self._nodes.append(
+                    f"!{cached} = !DILocation(line: {frame.line}, "
+                    f"column: {frame.col}, scope: !{scope}{tail})"
+                )
+                self._locations[key] = cached
+            parent = cached
+        return parent
+
+    @staticmethod
+    def annotate(lines: List[str], start: int, dbg: int) -> None:
+        """Attach ``!dbg !dbg`` to instructions appended from ``start`` onward."""
+
+        for i in range(start, len(lines)):
+            line = lines[i]
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if ", !dbg !" in line:
+                # A nested op already claimed this line with a tighter
+                # location; the innermost one is the useful one.
+                continue
+            lines[i] = f"{line}, !dbg !{dbg}"
+
+    def render(self) -> List[str]:
+        if self._primary_file is None:
+            return []
+        # The subprogram stands in for the kernel builder function, so anchor it
+        # at the earliest line seen in the primary file.
+        line = max(1, self._primary_line)
+        return [
+            f"!llvm.module.flags = !{{!{self._flag_id}}}",
+            f"!llvm.dbg.cu = !{{!{self._cu_id}}}",
+            "",
+            f'!{self._flag_id} = !{{i32 2, !"Debug Info Version", '
+            f"i32 {_DEBUG_INFO_VERSION}}}",
+            f"!{self._empty_id} = !{{}}",
+            f"!{self._subroutine_id} = !DISubroutineType(types: !{self._empty_id})",
+            f"!{self._primary_file_id} = {_di_file(self._primary_file)}",
+            f"!{self._cu_id} = distinct !DICompileUnit(language: DW_LANG_Python, "
+            f'file: !{self._primary_file_id}, producer: "rocke", isOptimized: true, '
+            f"runtimeVersion: 0, emissionKind: LineTablesOnly)",
+            f'!{self.subprogram_id} = distinct !DISubprogram(name: "{self._kernel_name}", '
+            f"scope: !{self._primary_file_id}, file: !{self._primary_file_id}, "
+            f"line: {line}, type: !{self._subroutine_id}, scopeLine: {line}, "
+            f"spFlags: DISPFlagDefinition, unit: !{self._cu_id})",
+            *self._nodes,
+            "",
+        ]
+
+
 # ----------------------------- lowerer -----------------------------------
 
 
@@ -1162,6 +1434,13 @@ class _Lowerer:
         self._needs_fp_atomic_md: bool = False
         # Set when av.load/store.b128 intrinsics are lowered (agent-scope MD).
         self._needs_av_scope_md: bool = False
+        # Off unless the kernel was built with source-location capture (see
+        # IRBuilder's ``capture_loc`` / ROCKE_DEBUG_LOC). When off, not one byte
+        # of the emitted .ll changes, so the byte-identity gate and the IR
+        # goldens are untouched.
+        self._debug: Optional[_DebugInfo] = (
+            _DebugInfo(kernel.name) if kernel.attrs.get("debug_info") else None
+        )
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
         # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
@@ -1629,7 +1908,22 @@ class _Lowerer:
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no LLVM lowering for op {op.name!r}")
+        dbg = (
+            self._debug.location_id(op.loc)
+            if self._debug is not None and op.loc
+            else None
+        )
+        if dbg is None:
+            method(op)
+            return
+        # One op can append to several blocks and can create new ones (scf.for
+        # builds a header/body/latch/exit diamond), so remember where each block
+        # ended and label only what this op added. Ops with nested regions lower
+        # their children first, and those keep their own tighter locations.
+        marks = {id(blk): len(blk.lines) for blk in self._blocks}
         method(op)
+        for blk in self._blocks:
+            _DebugInfo.annotate(blk.lines, marks.get(id(blk), 0), dbg)
 
     def lower_region(self, region: Region) -> None:
         for op in region.ops:
@@ -5410,8 +5704,14 @@ class _Lowerer:
             f"{_param_llvm_type(p)}{_param_attrs(p.attrs, p.type)} %{p.name}"
             for p in self.kernel.params
         ]
+        sub = (
+            f" !dbg !{self._debug.subprogram_id}"
+            if self._debug is not None and self._debug.has_locations
+            else ""
+        )
         out.append(
-            f"define amdgpu_kernel void @{self.kernel.name}({', '.join(params)}) #0 {{"
+            f"define amdgpu_kernel void @{self.kernel.name}"
+            f"({', '.join(params)}) #0{sub} {{"
         )
 
         for blk in self._blocks:
@@ -5453,6 +5753,8 @@ class _Lowerer:
         if self._needs_av_scope_md:
             out.append('!3 = !{!"agent"}')
             out.append("")
+        if self._debug is not None:
+            out.extend(self._debug.render())
         return "\n".join(out)
 
 
