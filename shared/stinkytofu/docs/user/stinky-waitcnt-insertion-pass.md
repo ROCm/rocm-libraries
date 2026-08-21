@@ -5,7 +5,7 @@
 ### Key characteristics
 
 - **SSA def-use dependencies** via `buildUseDefChain(includePseudo=true)` — memtoken pseudo-registers become first-class edges, so `inst->getSources()` lists the memops a consumer depends on (including through PHIs at CFG joins)
-- **Four counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), scalar memory (`kmcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
+- **Four counter types**: DS (`dlcnt`), vector load (`vlcnt`), scalar memory (`kmcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
 - **Per-predecessor queues** — each counter keeps separate in-flight FIFOs tagged by CFG predecessor edge, so join consumers see each path's depth instead of a collapsed union queue
 - **Tensor loop policy** — TensileLite promises tagged tensor-token deps are correct without propagating `CK_Tensor` through loop back-edges, so by default exact `CK_Tensor` queues are frozen after the first solver sweep; blocks with untagged tensor anchors keep their live tensor queues because those anchors are fences, and `loopCarriedTokenDepsEnabled` restores normal tensor fixed-point iteration when conservative propagation is needed
 - **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, untagged conservative fallbacks)
@@ -22,11 +22,18 @@ Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_loa
 | `CounterKind` | Covers | Wait instruction | Modifier field | Completion order |
 |---------------|--------|------------------|----------------|------------------|
 | `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` | in order |
-| `CK_Buffer` | global/buffer load + store, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` | in order |
+| `CK_Load` | global/buffer/flat **load**, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` | in order |
 | `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt 0` | `SWaitCntData.kmcnt` | **out of order** |
 | `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
 
 `s_wait_*cnt N` blocks until the counter has dropped to **at most `N`**. On the in-order counters each op contributes exactly 1, so `N` is an op count and it identifies precisely which ops completed: the `N` most-recently-issued stay in flight and everything older has landed. `kmcnt` is neither in order nor one-per-op (see below).
+
+A counter's FIFO must therefore hold **exactly** the ops that hardware counts on it, no more. Vector stores are excluded from `CK_Load` for this reason: per the ISA's *Memory Dependency Counters* section (5.7.1 in the public gfx1250 doc) they increment `STOREcnt`, not `LOADcnt`. Counting them in the loadcnt FIFO caused two distinct hazards:
+
+1. **Inflated immediate.** A store between a load and its consumer pushed the load one position further from the tail, so `countFrom - 1` came out one too high. For `buffer_load; buffer_store; consumer` the pass emitted `s_wait_loadcnt 1` when hardware `LOADcnt` was already 1 — the wait retired immediately and the consumer read an unloaded register.
+2. **Dropped wait.** `creditObservedWait` trims the queue to an observed immediate. Against a mixed queue `[load, store, store]`, an incoming `s_wait_loadcnt 2` kept the two stores and evicted the load, so the consumer saw nothing pending and got **no wait at all**.
+
+Both are pinned by `waitcnt_insertion_store_not_on_loadcnt_test.stir`. `STOREcnt` is not modelled today — the pass emits no `s_wait_storecnt`, and `StinkyRemoveWaitCntPass` strips incoming ones.
 
 ### Wait arithmetic
 
@@ -265,7 +272,7 @@ Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pre
 |         WaitCountSpec          |
 +--------------------------------+
 | dsCount:     int  (dlcnt)      |  or kUnused (-1)
-| bufferCount: int  (vlcnt)      |
+| loadCount:   int  (vlcnt)      |
 | kmCount:     int  (kmcnt)      |
 | tensorCount: int  (tlcnt)      |
 +--------------------------------+
@@ -333,7 +340,7 @@ Per-pred queues are **not** collapsed at block exit.
 
 ### Existing waits in the input
 
-`StinkyRemoveWaitCntPass` does not hand the pass a fully clean slate: `s_wait_kmcnt` and (outside SIA4) `s_wait_xcnt` survive it, `s_wait_tensorcnt` survives when `removeTensorWaitCnt` is false, and blocks the strip pass skipped keep everything. A wait already in the stream drains the hardware exactly like one the pass plans, so `observedWaitDrains` decodes it and `creditObservedWait` applies it: `trimQueues` on that counter plus `CounterEmitState::recordEmittedWait`, which is what stops a duplicate from being planned. A credited wait that is *too weak* for a later consumer does not suppress that consumer's wait, because `needsNewWait` compares against the required value.
+`StinkyRemoveWaitCntPass` does not hand the pass a fully clean slate: `s_wait_kmcnt` and (outside SIA4) `s_wait_xcnt` survive it, `s_wait_tensorcnt` survives when `RemoveWaitCntOptions::removeTensor` is false, and blocks the strip pass skipped keep everything. A wait already in the stream drains the hardware exactly like one the pass plans, so `observedWaitDrains` decodes it and `creditObservedWait` applies it: `trimQueues` on that counter plus `CounterEmitState::recordEmittedWait`, which is what stops a duplicate from being planned. A credited wait that is *too weak* for a later consumer does not suppress that consumer's wait, because `needsNewWait` compares against the required value.
 
 Decoding takes the counter from the **opcode** and the value from the **literal source operand**. `SWaitCntData` is not authoritative per instruction: `legalizeWaitCnt` splits one `s_waitcnt` into several `s_wait_*` and attaches the whole pre-split spec to the last member of the group and none to the others. The modifier is a fallback for the opcode's own counter only, used for hand-written IR that carries no literal. Two deliberate gaps:
 
@@ -555,7 +562,7 @@ Each non-`kUnused` field in `WaitCountSpec` produces one instruction:
 | WaitCountSpec field | Emitted instruction | Modifier |
 |---------------------|---------------------|----------|
 | `dsCount` | `s_wait_dscnt <N>` | `SWaitCntData.dlcnt` |
-| `bufferCount` | `s_wait_loadcnt <N>` | `SWaitCntData.vlcnt` |
+| `loadCount` | `s_wait_loadcnt <N>` | `SWaitCntData.vlcnt` |
 | `kmCount` | `s_wait_kmcnt <N>` | `SWaitCntData.kmcnt` |
 | `tensorCount` | `s_wait_tensorcnt <N>` | `SWaitTensorCntData.tlcnt` |
 

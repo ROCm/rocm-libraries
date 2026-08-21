@@ -111,9 +111,11 @@ const std::vector<PassInfo> availablePasses = {
     //   removeKmcnt  — also strip s_wait_kmcnt
     {"StinkyRemoveWaitCntPass",
      [](const std::vector<std::string>& args) {
-         bool removeTensor = !hasPassArg(args, "keepTensor");
-         return createStinkyRemoveWaitCntPass(removeTensor, hasPassArg(args, "removeXcnt"),
-                                              hasPassArg(args, "removeKmcnt"));
+         RemoveWaitCntOptions options;
+         options.removeTensor = !hasPassArg(args, "keepTensor");
+         options.removeXcnt = hasPassArg(args, "removeXcnt");
+         options.removeKmcnt = hasPassArg(args, "removeKmcnt");
+         return createStinkyRemoveWaitCntPass(options);
      }},
     {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
     {"RemoveDscntPass", [](const auto&) { return createRemoveDscntPass(); }},

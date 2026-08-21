@@ -80,14 +80,21 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         // CK_DS: ds_read / ds_write / ds_atomic; every consumer drains.
         {[](const StinkyInstruction& i) { return isDSRead(i) || isDSWrite(i) || isDSAtomic(i); },
          [](const StinkyInstruction&) { return true; }, CounterOrder::InOrder},
-        // CK_Buffer: vector global/buffer load+store, plus returning MUBUF/FLAT/
-        // GLOBAL atomics (their result completes on the same loadcnt counter as
-        // an ordinary load -- see isReturningAtomic() in StinkyAsmIR.hpp for why
-        // scalar-memory atomics are excluded); every consumer drains.
-        {[](const StinkyInstruction& i) {
-             return isBufferMemLoad(i) || isBufferMemStore(i) || isReturningAtomic(i);
-         },
+
+        // CK_Load: LOADcnt only -- vector global/buffer loads plus returning
+        // MUBUF/FLAT/GLOBAL atomics (their result completes on the same loadcnt
+        // counter as an ordinary load -- see isReturningAtomic() in
+        // StinkyAsmIR.hpp for why scalar-memory atomics are excluded); every
+        // consumer drains.
+        //
+        // Vector STORES belong to STOREcnt (ISA "Memory Dependency Counters"),
+        // not here: including them would shift later loads' queue positions --
+        // see the pass doc for the two hazards that caused. Excluding them is
+        // lossless (a store has no dest register and no CK_Load anti-dep scan
+        // reads the queue), and STOREcnt is not modelled yet.
+        {[](const StinkyInstruction& i) { return isBufferMemLoad(i) || isReturningAtomic(i); },
          [](const StinkyInstruction&) { return true; }, CounterOrder::InOrder},
+
         // CK_KM: SMRD scalar loads (s_load_*); every consumer drains.
         //
         // Two independent reasons a nonzero kmcnt cannot name a specific load:
@@ -100,15 +107,16 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         //     different times.
         // Only s_wait_kmcnt 0 has a well-defined meaning for a consumer.
         //
-        // This pass is not the sole source of kmcnt waits: it runs region-scoped,
-        // so an s_load in the kernel prologue (argument preload) never enters
-        // this dataflow. StinkyRemoveWaitCntPass therefore preserves incoming
-        // s_wait_kmcnt until insertion covers the whole kernel.
+        // This pass is not the sole source of kmcnt waits: it is region-scoped,
+        // so StinkyRemoveWaitCntPass keeps the incoming ones (see
+        // RemoveWaitCntOptions::removeKmcnt).
         {[](const StinkyInstruction& i) { return isSMemLoad(i); },
          [](const StinkyInstruction&) { return true; }, CounterOrder::OutOfOrder},
+
         // CK_Tensor: tensor_load_to_lds; every consumer drains.
         {[](const StinkyInstruction& i) { return isTensorLoad(i); },
          [](const StinkyInstruction& i) { return true; }, CounterOrder::InOrder},
+
         // CK_Async: global_store_async_from_lds_*; drains via the LDS WAR
         // anti-dep scan (scanAsyncAntiDeps), not via SSA consumers.
         {[](const StinkyInstruction& i) { return isAsyncMemOp(i); },
@@ -422,7 +430,7 @@ int modifierWaitValue(const StinkyInstruction& inst, CounterKind c) {
             // may use dscnt instead (or both).
             if (w->dlcnt >= 0 && w->dscnt >= 0) return std::min(w->dlcnt, w->dscnt);
             return w->dlcnt >= 0 ? w->dlcnt : w->dscnt;
-        case CK_Buffer:
+        case CK_Load:
             return w->vlcnt;
         case CK_KM:
             return w->kmcnt;
@@ -455,37 +463,36 @@ bool observedWaitDrains(const StinkyInstruction& inst, int counts[CK_Count]) {
         break;
     }
 
-    auto single = [&](CounterKind c) {
+    auto decodeInto = [&](CounterKind c) {
         counts[c] = hasLiteral ? literal : modifierWaitValue(inst, c);
     };
 
     switch (inst.getUnifiedOpcode()) {
         case GFX::s_wait_dscnt:
-            single(CK_DS);
+            decodeInto(CK_DS);
             break;
         case GFX::s_wait_loadcnt:
-            single(CK_Buffer);
+            decodeInto(CK_Load);
             break;
         case GFX::s_wait_kmcnt:
-            single(CK_KM);
+            decodeInto(CK_KM);
             break;
         case GFX::s_wait_tensorcnt:
-            single(CK_Tensor);
+            decodeInto(CK_Tensor);
             break;
         case GFX::s_wait_asynccnt:
-            single(CK_Async);
+            decodeInto(CK_Async);
             break;
         case GFX::s_wait_loadcnt_dscnt:
-            // Packed as {loadcnt << 8 | dscnt}.
             if (hasLiteral) {
-                counts[CK_Buffer] = (literal >> 8) & 0xFF;
-                counts[CK_DS] = literal & 0xFF;
+                counts[CK_Load] = unpackMemWaitCnt(literal);
+                counts[CK_DS] = unpackDsWaitCnt(literal);
             }
             break;
         case GFX::s_wait_storecnt_dscnt:
-            // storecnt is not tracked as its own counter, so only the ds half is
-            // creditable.
-            if (hasLiteral) counts[CK_DS] = literal & 0xFF;
+            // The MEM half is storecnt here, which is not a tracked counter, so
+            // only the ds half is creditable.
+            if (hasLiteral) counts[CK_DS] = unpackDsWaitCnt(literal);
             break;
         default:
             // s_wait_storecnt, s_wait_xcnt and the legacy packed s_waitcnt drain
@@ -505,6 +512,19 @@ void creditObservedWait(DataflowState& state, CounterEmitState emit[CK_Count], C
     if (w != 0 && completesOutOfOrder(c)) return;
     trimQueues(state.queues[c], w);
     emit[c].recordEmittedWait(w);
+}
+
+// Credit every counter an existing wait drains. Returns true when `inst` IS a
+// wait, meaning the caller must skip it as both consumer and producer. Shared by
+// the two block walks (transferBlock and finalizePlan) so they cannot drift.
+bool creditIfObservedWait(const StinkyInstruction& inst, DataflowState& state,
+                          CounterEmitState emit[CK_Count]) {
+    int observed[CK_Count];
+    if (!observedWaitDrains(inst, observed)) return false;
+    for (int c = 0; c < CK_Count; ++c) {
+        creditObservedWait(state, emit, static_cast<CounterKind>(c), observed[c]);
+    }
+    return true;
 }
 
 // Append a local in-block memop to every per-pred queue. Local ops are in
@@ -532,8 +552,8 @@ const char* counterName(CounterKind c) {
     switch (c) {
         case CK_DS:
             return "ds (dscnt)";
-        case CK_Buffer:
-            return "buffer (loadcnt/storecnt)";
+        case CK_Load:
+            return "buffer (loadcnt)";
         case CK_KM:
             return "scalar (kmcnt)";
         case CK_Tensor:
@@ -549,8 +569,8 @@ int getCounterField(const WaitCountSpec& spec, CounterKind c) {
     switch (c) {
         case CK_DS:
             return spec.dsCount;
-        case CK_Buffer:
-            return spec.bufferCount;
+        case CK_Load:
+            return spec.loadCount;
         case CK_KM:
             return spec.kmCount;
         case CK_Tensor:
@@ -567,8 +587,8 @@ void setCounterField(WaitCountSpec& spec, CounterKind c, int w) {
         case CK_DS:
             spec.dsCount = w;
             break;
-        case CK_Buffer:
-            spec.bufferCount = w;
+        case CK_Load:
+            spec.loadCount = w;
             break;
         case CK_KM:
             spec.kmCount = w;
@@ -884,13 +904,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
 
         // A wait already in the stream drains for us; credit it instead of
         // planning a duplicate.
-        int observed[CK_Count];
-        if (observedWaitDrains(*inst, observed)) {
-            for (int c = 0; c < CK_Count; ++c) {
-                creditObservedWait(state, emit, static_cast<CounterKind>(c), observed[c]);
-            }
-            continue;
-        }
+        if (creditIfObservedWait(*inst, state, emit)) continue;
 
         int required[CK_Count];
         computeRequiredWaits(inst, state, rawNeedsWait, required);
@@ -906,8 +920,8 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
                 case CK_DS:
                     spec.dsCount = required[c];
                     break;
-                case CK_Buffer:
-                    spec.bufferCount = required[c];
+                case CK_Load:
+                    spec.loadCount = required[c];
                     break;
                 case CK_KM:
                     spec.kmCount = required[c];
@@ -1082,13 +1096,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 if (inst == nullptr) continue;
                 if (isPhi(*inst)) continue;
 
-                int observed[CK_Count];
-                if (observedWaitDrains(*inst, observed)) {
-                    for (int c = 0; c < CK_Count; ++c) {
-                        creditObservedWait(state, emit, static_cast<CounterKind>(c), observed[c]);
-                    }
-                    continue;
-                }
+                if (creditIfObservedWait(*inst, state, emit)) continue;
 
                 int computed[CK_Count];
                 computeRequiredWaits(inst, state, rawNeedsWait, computed);
@@ -1153,7 +1161,7 @@ WaitInsertionPlan WaitDataflow::materializePlan() const {
             for (const auto& entry : kv.second) {
                 WaitCountSpec spec;
                 if (entry.second.dsCount != WaitCountSpec::kUnused) spec.dsCount = 0;
-                if (entry.second.bufferCount != WaitCountSpec::kUnused) spec.bufferCount = 0;
+                if (entry.second.loadCount != WaitCountSpec::kUnused) spec.loadCount = 0;
                 if (entry.second.kmCount != WaitCountSpec::kUnused) spec.kmCount = 0;
                 if (entry.second.tensorCount != WaitCountSpec::kUnused) spec.tensorCount = 0;
                 if (entry.second.asyncCount != WaitCountSpec::kUnused) spec.asyncCount = 0;

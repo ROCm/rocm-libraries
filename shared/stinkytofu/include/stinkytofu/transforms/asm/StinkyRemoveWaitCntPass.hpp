@@ -30,41 +30,42 @@
 namespace stinkytofu {
 class Pass;
 
+/// Which wait opcodes StinkyRemoveWaitCntPass strips. The default is "all of
+/// them except the two below", so a wait survives only by opting out here.
+///
+/// This struct is the single place documenting *why* each exception exists;
+/// call sites should point here rather than restate it.
+struct RemoveWaitCntOptions {
+    /// Also strip @c s_wait_tensorcnt. On by default so the insertion pass owns
+    /// every wait; turn it off to let that pass reuse the incoming ones.
+    ///
+    /// @c s_wait_tensorcnt carries @c IF_WaitTensorCnt, a flag disjoint from
+    /// @c IF_WaitCnt, so it needs its own check -- @c isWaitCnt() misses it.
+    bool removeTensor = true;
+
+    /// Also strip @c s_wait_xcnt. Off by default because only the O3 path has a
+    /// hazard pass that re-places xcnt; elsewhere hand-authored drains must
+    /// survive. TODO: drop this knob once a dedicated hazard pass owns xcnt
+    /// placement.
+    bool removeXcnt = false;
+
+    /// Also strip @c s_wait_kmcnt. Off by default because wait-count insertion
+    /// is region-scoped: an @c s_load in the kernel prologue (argument preload)
+    /// never enters its dataflow, so an in-region consumer would be left
+    /// unguarded. TODO: drop this knob once insertion covers the whole kernel.
+    bool removeKmcnt = false;
+};
+
 /**
  * @brief Strip wait-counter instructions from a function.
  *
- * Walks every basic block approved by @c PassContext::shouldProcessBasicBlock
- * and removes:
- *   1. Every instruction carrying the @c IF_WaitCnt flag, which covers the
- *      standard wait-counter opcodes (@c s_wait_dscnt, @c s_wait_loadcnt,
- *      @c s_wait_storecnt, @c s_wait_asynccnt, @c s_wait_kmcnt,
- *      @c s_wait_xcnt, @c s_wait_loadcnt_dscnt, @c s_wait_storecnt_dscnt,
- *      and @c s_waitcnt). These are the instructions for which
- *      @c isWaitCnt() returns true.
- *   2. Every instruction carrying the @c IF_WaitTensorCnt flag
- *      (@c s_wait_tensorcnt) iff @p removeTensorWaitCnt is true.
- *      @c IF_WaitTensorCnt is a separate flag from @c IF_WaitCnt, so an
- *      explicit second branch is needed; @c isWaitCnt() does not match it.
- *
- * @param removeTensorWaitCnt When true (default) also strip
- *                            @c s_wait_tensorcnt; when false leave tensor
- *                            waits in place so a subsequent insertion pass
- *                            can reuse them.
- * @param removeXcntWaitCnt   When true also strip @c s_wait_xcnt.
- *                            TODO: replace this temporary SIA4/SIA0 split once
- *                            a dedicated hazard pass handles xcnt placement.
- *                            Until then, non-SIA4 paths preserve hand-authored
- *                            xcnt drains.
- * @param removeKmcntWaitCnt  When true also strip @c s_wait_kmcnt. Default
- *                            false: the insertion pass runs region-scoped, so
- *                            an @c s_load in the kernel prologue (e.g. kernel
- *                            argument preload) is outside its dataflow and its
- *                            in-region consumer would be left unguarded.
- *                            TODO: strip these once wait-count insertion runs
- *                            over the whole kernel.
+ * Runs over every basic block approved by
+ * @c PassContext::shouldProcessBasicBlock. Precondition pass for
+ * StinkyWaitCntInsertionPass, which expects to own every emitted wait; see
+ * docs/user/stinky-waitcnt-insertion-pass.md, section
+ * "Companion: StinkyRemoveWaitCntPass".
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(
-    bool removeTensorWaitCnt = true, bool removeXcntWaitCnt = false,
-    bool removeKmcntWaitCnt = false);
+    RemoveWaitCntOptions options = {});
 
 }  // namespace stinkytofu
