@@ -19,6 +19,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pinned rocm-kpack commit installed into the build venv. Keep in sync with
+  # HIPKERNELPROVIDER_KPACK_GIT_REF in
+  # dnn-providers/hip-kernel-provider/cmake/KpackPython.cmake.
+  KPACK_REF: e3483286e751060b3a70b792792cc122632c66e8
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
@@ -121,6 +127,27 @@ jobs:
             --deps-dir $env:THIRD_PARTY_DEPS_DIR
           if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
 
+      - name: Install rocm_kpack
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          # --force-reinstall: rocm-kpack is version 0.1.0 at every commit, so
+          # pip would treat the pinned requirement as already satisfied in a
+          # warm venv. Its deps are installed separately because the pinned
+          # commit's pyproject omits msgpack.
+          & $python -m pip install --force-reinstall --no-deps "rocm-kpack @ git+https://github.com/ROCm/rocm-kpack@${{ env.KPACK_REF }}"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack" }
+          & $python -m pip install "zstandard>=0.20.0" "msgpack>=1.0.0"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack dependencies" }
+          $installed = (& $python -c "import importlib.metadata as m, json; print(json.loads(m.distribution('rocm-kpack').read_text('direct_url.json'))['vcs_info']['commit_id'])")
+          if ($installed -ne "${{ env.KPACK_REF }}") { throw "rocm_kpack is $installed, expected ${{ env.KPACK_REF }}" }
+          # From the installed module: site.getsitepackages()[0] is the venv
+          # root on Windows.
+          $sitePackages = (& $python -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
+          if ($LASTEXITCODE -ne 0) { throw "rocm_kpack is not importable after install" }
+          if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
+          echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
+
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -132,13 +159,26 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
-            -DPython_EXECUTABLE="$VENV_PATH/Scripts/python.exe"
+            -DPython_EXECUTABLE="$VENV_PATH/Scripts/python.exe" \
+            -DPython3_EXECUTABLE="$VENV_PATH/Scripts/python.exe"
 
       - name: Build
         run: cmake --build build
+
+      # Packing is skipped with a STATUS message, so a resolution regression
+      # would otherwise pass CI while producing no archives.
+      - name: Verify kpack archives were produced
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${kpacks[@]}"
 
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
@@ -269,6 +309,23 @@ jobs:
           "$VENV_PATH/bin/python" projects/hipdnn/python/download_third_party_deps.py \
             --deps-dir "$THIRD_PARTY_DEPS_DIR"
 
+      - name: Install rocm_kpack
+        run: |
+          set -euo pipefail
+          # --force-reinstall: rocm-kpack is version 0.1.0 at every commit, so
+          # pip would treat the pinned requirement as already satisfied in a
+          # warm venv. Its deps are installed separately because the pinned
+          # commit's pyproject omits msgpack.
+          "$VENV_PATH/bin/pip" install --force-reinstall --no-deps \
+            "rocm-kpack @ git+https://github.com/ROCm/rocm-kpack@${{ env.KPACK_REF }}"
+          "$VENV_PATH/bin/pip" install "zstandard>=0.20.0" "msgpack>=1.0.0"
+          installed=$("$VENV_PATH/bin/python" -c "import importlib.metadata as m, json; print(json.loads(m.distribution('rocm-kpack').read_text('direct_url.json'))['vcs_info']['commit_id'])")
+          test "$installed" = "${{ env.KPACK_REF }}" || { echo "rocm_kpack is $installed, expected ${{ env.KPACK_REF }}" >&2; exit 1; }
+          # Derived from the installed module, which also proves it imports.
+          KPACK_PYTHON_DIR=$("$VENV_PATH/bin/python" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
+          test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
+          echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
+
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -281,13 +338,25 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
-            -DPython_EXECUTABLE="$VENV_PATH/bin/python"
+            -DPython_EXECUTABLE="$VENV_PATH/bin/python" \
+            -DPython3_EXECUTABLE="$VENV_PATH/bin/python"
 
       - name: Build
         run: cmake --build build
+
+      # Packing is skipped with a STATUS message, so a resolution regression
+      # would otherwise pass CI while producing no archives.
+      - name: Verify kpack archives were produced
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${kpacks[@]}"
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
