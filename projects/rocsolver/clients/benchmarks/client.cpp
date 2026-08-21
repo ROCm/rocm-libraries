@@ -209,6 +209,28 @@ try
             "                           Typically, the number of columns of a matrix on the right-hand side of a problem.\n"
             "                           ")
 
+        // bandwidth options
+        ("kd",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Bandwidth of Hermitian or symmetric matrix,\n"
+            "                           the number of super-diagonals and sub-diagonals.\n"
+            "                           ")
+
+        ("kl",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Lower bandwidth of general matrix,\n"
+            "                           the number of sub-diagonals.\n"
+            "                           ")
+
+        ("ku",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Upper bandwidth of general matrix,\n"
+            "                           the number of super-diagonals.\n"
+            "                           ")
+
         // increment options
         ("inca",
          value<rocblas_int>()->default_value(1),

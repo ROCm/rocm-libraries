@@ -7,6 +7,7 @@ This document describes the environment variables and runtime configuration opti
 - [Environment Variables](#environment-variables)
   - [Plugin Discovery](#plugin-discovery)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
+  - [Benchmarking](#benchmarking)
   - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
@@ -129,6 +130,37 @@ export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOPEN_ENGINE,HIPBLASLT_ENGINE"
 # By ID, in the form printed for an engine that declares no name, mixed with a name
 export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="0x1A2B3C4D5E6F7080,MIOPEN_ENGINE"
 ```
+
+### Benchmarking
+
+#### HIPDNN_FORCE_BENCHMARKING
+
+A process-wide override for the `global.benchmarking` knob, independent of any engine's own knob setting. Every provider implementing `global.benchmarking` -- today the generic kernel ingestor engine and the MIOpen provider -- consults it.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | No effect. Benchmarking is whatever the `global.benchmarking` knob says (the default) |
+| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Force benchmarking **on**, regardless of the knob |
+| `0`, `false`, `off`, `no`, `disable`, `disabled` | Force benchmarking **off**, overriding the knob and autotune's EXHAUSTIVE priming |
+
+Values are case-insensitive and tolerant of surrounding whitespace (`ON`, ` On `, `TRUE`, `Off` all resolve). Any value not in the table is ignored and treated as unset, never as on, and logs a warning naming the variable and the value. The empty string is indistinguishable from unset and is silently ignored.
+
+The override needs no autotune call and no knob setting to take effect: setting it to `1` benchmarks a plain `hipdnnExecute()` with no other configuration.
+
+**Example:**
+```bash
+# Force benchmarking on for every provider that implements the knob
+export HIPDNN_FORCE_BENCHMARKING=1
+
+# Force it off, even if a caller's knob or autotune run asked for it
+export HIPDNN_FORCE_BENCHMARKING=0
+```
+
+**Notes:**
+- With benchmarking on, the first `execute()` of a plan samples every knob-filtered candidate kernel before caching the winner for the plan's life, so it is slower than subsequent calls.
+- The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
+- `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
+- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
 
 ### Logging Variables
 

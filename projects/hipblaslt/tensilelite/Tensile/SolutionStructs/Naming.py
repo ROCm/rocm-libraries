@@ -148,10 +148,7 @@ def getParameterValueAbbreviation(key, value):
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
-  ck = state.get("CustomKernel")
-  if isinstance(ck, dict) and ck.get("name"):
-    return ck["name"]
-  if state.get("CustomKernelName", ""):
+  if "CustomKernelName" in state and state["CustomKernelName"]:
     return state["CustomKernelName"]
 
   gsuBackup = state["GlobalSplitU"]
@@ -223,7 +220,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     requiredParametersTemp.add("LDSSegmentInterleave")
 
   for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernel":
+    if key not in state or key == "CustomKernelName":
       continue
     components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
@@ -249,10 +246,7 @@ def shortenFileBase(splitGSU, kernel):
 
 
 def getKernelFileBase(splitGSU: bool, kernel):
-  ck = kernel.get("CustomKernel")
-  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
-    fileBase = ck["name"]
-  elif kernel.get("CustomKernelName", ""):
+  if "CustomKernelName" in kernel and kernel["CustomKernelName"]:
     fileBase = kernel["CustomKernelName"]
   else:
     fileBase = shortenFileBase(splitGSU, kernel)
