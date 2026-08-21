@@ -123,7 +123,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
-    /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from K).
+    /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from kpg).
      * Python build_implicit_gemm_conv calls is_valid_spec which now checks:
      *   _eff_vec_c = vector_size_c if set else default_vector_sizes(cpg,kpg,dtype_d)[2]
      *   if _eff_vec_c > 1 and epilogue == "default": raise ValueError(...)
