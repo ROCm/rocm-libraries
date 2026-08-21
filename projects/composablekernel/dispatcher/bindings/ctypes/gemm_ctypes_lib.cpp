@@ -492,6 +492,15 @@ int dispatcher_run_gemm(
         return -1;
     }
 
+    // Reject non-positive dims before any size arithmetic: a negative M/N/K from a
+    // mis-marshaled caller would otherwise wrap to an enormous size_t byte count in
+    // the hipMalloc/hipMemcpy calls below. (Matches the guard in
+    // dispatcher_is_supported.)
+    if(M <= 0 || N <= 0 || K <= 0)
+    {
+        return -1;
+    }
+
     // First check if any kernel supports this problem
     Problem problem(M, N, K);
     auto kernel = g_dispatcher->select_kernel(problem);
@@ -523,24 +532,26 @@ int dispatcher_run_gemm(
             (void)hipFree(C_dev);
     };
 
-    if(hipMalloc(&A_dev, M * K * sizeof(ADataType)) != hipSuccess)
+    if(hipMalloc(&A_dev, static_cast<size_t>(M) * K * sizeof(ADataType)) != hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
     }
-    if(hipMalloc(&B_dev, K * N * sizeof(BDataType)) != hipSuccess)
+    if(hipMalloc(&B_dev, static_cast<size_t>(K) * N * sizeof(BDataType)) != hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
     }
-    if(hipMalloc(&C_dev, M * N * sizeof(CDataType)) != hipSuccess)
+    if(hipMalloc(&C_dev, static_cast<size_t>(M) * N * sizeof(CDataType)) != hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
     }
 
     // Copy input data to GPU
-    if(hipMemcpy(A_dev, A_host, M * K * sizeof(ADataType), hipMemcpyHostToDevice) != hipSuccess)
+    if(hipMemcpy(
+           A_dev, A_host, static_cast<size_t>(M) * K * sizeof(ADataType), hipMemcpyHostToDevice) !=
+       hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
@@ -564,8 +575,10 @@ int dispatcher_run_gemm(
         // way the shuffle runs here, before the timed g_dispatcher->run() below,
         // so it never affects the kernel measurement.
         const BDataType* b_shuffled = get_shuffled_b<SelectedKernel>(B_host, K, N);
-        if(hipMemcpy(B_dev, b_shuffled, K * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
-           hipSuccess)
+        if(hipMemcpy(B_dev,
+                     b_shuffled,
+                     static_cast<size_t>(K) * N * sizeof(BDataType),
+                     hipMemcpyHostToDevice) != hipSuccess)
         {
             cleanup_gpu_mem();
             return -1;
@@ -573,7 +586,10 @@ int dispatcher_run_gemm(
     }
     else
     {
-        if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
+        if(hipMemcpy(B_dev,
+                     B_host,
+                     static_cast<size_t>(K) * N * sizeof(BDataType),
+                     hipMemcpyHostToDevice) != hipSuccess)
         {
             cleanup_gpu_mem();
             return -1;
@@ -582,13 +598,15 @@ int dispatcher_run_gemm(
 #else
     // Legacy header (pre-GEMM_KEY_* codegen): no Preshuffle trait and no
     // preshuffle kernels are generated for it -- copy B verbatim.
-    if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
+    if(hipMemcpy(
+           B_dev, B_host, static_cast<size_t>(K) * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
+       hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
     }
 #endif // GEMM_KEY_DTYPE_A
-    if(hipMemset(C_dev, 0, M * N * sizeof(CDataType)) != hipSuccess)
+    if(hipMemset(C_dev, 0, static_cast<size_t>(M) * N * sizeof(CDataType)) != hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
@@ -607,7 +625,9 @@ int dispatcher_run_gemm(
     }
 
     // Copy result back to host
-    if(hipMemcpy(C_host, C_dev, M * N * sizeof(CDataType), hipMemcpyDeviceToHost) != hipSuccess)
+    if(hipMemcpy(
+           C_host, C_dev, static_cast<size_t>(M) * N * sizeof(CDataType), hipMemcpyDeviceToHost) !=
+       hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
