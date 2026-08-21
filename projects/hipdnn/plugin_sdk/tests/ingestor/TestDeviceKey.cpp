@@ -47,11 +47,10 @@ TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)
 // the winner on the other.
 TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInComputeUnitsCompareUnequal)
 {
-    // Not named "small": <windows.h> pulls in rpcndr.h, which defines it as a macro.
-    const auto fewerUnits = propertiesFor("gfx942", 64, 228);
-    const auto moreUnits = propertiesFor("gfx942", 64, 304);
+    const auto small = propertiesFor("gfx942", 64, 228);
+    const auto large = propertiesFor("gfx942", 64, 304);
 
-    EXPECT_NE(DeviceKey{fewerUnits}, DeviceKey{moreUnits});
+    EXPECT_NE(DeviceKey{small}, DeviceKey{large});
 }
 
 TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInWarpSizeCompareUnequal)
