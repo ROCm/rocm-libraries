@@ -30,9 +30,9 @@
 namespace stinkytofu {
 class Pass;
 
-/// Policy knobs for StinkyRemoveWaitCntPass, layered on top of the pass's safety
-/// gate. The gate comes first and is not configurable: a wait is only ever a
-/// candidate for removal if some pass regenerates it, per
+/// Policy knobs for StinkyRemoveWaitCntPass, applied only to removals that are
+/// already legal. Legality is decided first and is not configurable: a wait is
+/// only a candidate if some pass regenerates it, per
 /// `waitcnt::waitReconstruction()`. Anything naming STOREcnt therefore survives
 /// with no knob at all, and needs none until a store counter exists.
 ///
@@ -48,8 +48,8 @@ struct RemoveWaitCntOptions {
     bool removeTensor = true;
 
     /// Also strip `s_wait_xcnt`. This is the one opcode whose regenerator is
-    /// `Gfx1250HazardPass` rather than the wait-count dataflow, so it clears the
-    /// safety gate on that pass's promise. Off by default because that pass
+    /// `Gfx1250HazardPass` rather than the wait-count dataflow, so removing it is
+    /// legal only on that pass's promise. Off by default because that pass
     /// rebuilds from its own XNACK replay-group rules (atomic-after-memory, FLAT
     /// and SMEM source overlap), not from where the drains originally sat:
     /// TensileLite emits `s_wait_xcnt 0` ahead of any volatile/atomic VMEM op --
@@ -67,15 +67,13 @@ struct RemoveWaitCntOptions {
     bool removeKmcnt = false;
 };
 
-/**
- * @brief Strip wait-counter instructions from a function.
- *
- * Runs over every basic block approved by
- * `PassContext::shouldProcessBasicBlock`. Precondition pass for
- * StinkyWaitCntInsertionPass, which expects to own every emitted wait; see
- * docs/user/stinky-waitcnt-insertion-pass.md, section
- * "Companion: StinkyRemoveWaitCntPass".
- */
+/// Strip wait-counter instructions from a function.
+///
+/// Runs over every basic block approved by
+/// `PassContext::shouldProcessBasicBlock`. Precondition pass for
+/// StinkyWaitCntInsertionPass, which expects to own every emitted wait; see
+/// docs/user/stinky-waitcnt-insertion-pass.md, section
+/// "The reconstruction contract".
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(
     RemoveWaitCntOptions options = {});
 

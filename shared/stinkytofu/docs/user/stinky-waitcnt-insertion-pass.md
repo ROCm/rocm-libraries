@@ -340,7 +340,7 @@ Per-pred queues are **not** collapsed at block exit.
 
 ### The reconstruction contract
 
-`StinkyRemoveWaitCntPass` may only strip a wait that some pass regenerates. `waitcnt::waitReconstruction()` is the single source of truth and lives with this dataflow — the thing that does the regenerating — so the two cannot drift; the strip pass gates on its result and has no code path to remove a `None`. An unrecognised wait opcode classifies as `None`, so a newly added one is preserved by default rather than silently dropped.
+Removing a wait is **legal** only when some pass regenerates it; otherwise the hazard it guarded goes unguarded. `waitcnt::waitReconstruction()` is the single source of truth for that, and lives with this dataflow — the thing that does the regenerating — so the two cannot drift. `StinkyRemoveWaitCntPass` decides legality first and has no code path that removes a `None`. An unrecognised wait opcode classifies as `None`, so a newly added one is preserved by default rather than silently dropped.
 
 | Classification | Opcodes | Rebuilt by |
 |----------------|---------|------------|
@@ -348,7 +348,7 @@ Per-pred queues are **not** collapsed at block exit.
 | `HazardPass` | `s_wait_xcnt` | `Gfx1250HazardPass`, from its own XNACK replay-group rules |
 | `None` | `s_wait_storecnt`, `s_wait_storecnt_dscnt`, legacy `s_waitcnt` | nothing — all three can name `STOREcnt` |
 
-`RemoveWaitCntOptions` then narrows the candidates further, for reasons that are policy rather than safety: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless.
+`RemoveWaitCntOptions` then applies **policy** to what is legal: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless.
 
 ### Existing waits in the input
 

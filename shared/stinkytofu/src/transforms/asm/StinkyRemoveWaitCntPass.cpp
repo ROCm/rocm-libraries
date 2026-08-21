@@ -8,19 +8,20 @@
 // StinkyWaitCntInsertionPass can run later in the pipeline against a clean
 // slate and own every emitted wait. The gfx1250 backend invokes this pass right
 // after the CFG builder; see docs/user/stinky-waitcnt-insertion-pass.md,
-// section "Companion: StinkyRemoveWaitCntPass".
+// section "The reconstruction contract".
 //
 // Removal spans two *disjoint* instruction flag bits: IF_WaitCnt (s_wait_dscnt,
 // s_wait_loadcnt, s_wait_storecnt, s_wait_asynccnt, s_wait_kmcnt, s_wait_xcnt,
 // s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt, s_waitcnt) and IF_WaitTensorCnt
 // (s_wait_tensorcnt alone).
 //
-// "Clean slate" is bounded by one rule: a wait may only be stripped if some
-// pass regenerates it. waitcnt::waitReconstruction() -- which lives with the
-// dataflow that does the regenerating -- is the single source of truth, and
-// shouldRemove() gates on it, so this pass cannot drop a guard the compiler has
-// no way to put back. See RemoveWaitCntOptions for the policy exemptions layered
-// on top.
+// "Clean slate" is bounded by a legality rule: a wait may only be removed if
+// some pass regenerates it, otherwise the hazard it guarded goes unguarded.
+// waitcnt::waitReconstruction() -- which lives with the dataflow that does the
+// regenerating -- is the single source of truth for that, so this pass cannot
+// drop a wait the compiler has no way to put back. Legality is decided first and
+// is not configurable; RemoveWaitCntOptions then applies policy to whatever
+// remains legal.
 // ----------------------------------------------------------------------------
 
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
@@ -33,33 +34,32 @@
 namespace {
 using namespace stinkytofu;
 
-/// Two gates, in order: a wait must be rebuildable at all, and then policy may
-/// still keep it. The first gate is what makes the pass safe by construction --
-/// there is no path here that strips a wait nothing regenerates.
-bool shouldRemove(const StinkyInstruction& inst, const RemoveWaitCntOptions& options) {
-    // IF_WaitTensorCnt is disjoint from IF_WaitCnt, so isWaitCnt() alone would
-    // miss s_wait_tensorcnt.
-    if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
+/// Legality: removing a wait no pass regenerates drops the hazard it guarded, so
+/// it is never legal however the pass is configured.
+bool isLegalToRemove(const StinkyInstruction& inst) {
+    return waitcnt::waitReconstruction(inst) != waitcnt::WaitReconstruction::None;
+}
 
-    switch (waitcnt::waitReconstruction(inst)) {
-        case waitcnt::WaitReconstruction::None:
-            return false;
-        case waitcnt::WaitReconstruction::HazardPass:
-            return options.removeXcnt;
-        case waitcnt::WaitReconstruction::WaitCntInsertion:
-            break;
-    }
-
-    // Rebuildable, but kept anyway on request. Unlike the gate above, these are
-    // policy choices; see RemoveWaitCntOptions for each rationale.
+/// Policy: which of the legal candidates the caller actually wants gone. See
+/// RemoveWaitCntOptions for why each opcode is exempt.
+bool isRemovalWanted(const StinkyInstruction& inst, const RemoveWaitCntOptions& options) {
     switch (inst.getUnifiedOpcode()) {
         case GFX::s_wait_tensorcnt:
             return options.removeTensor;
+        case GFX::s_wait_xcnt:
+            return options.removeXcnt;
         case GFX::s_wait_kmcnt:
             return options.removeKmcnt;
         default:
             return true;
     }
+}
+
+bool shouldRemove(const StinkyInstruction& inst, const RemoveWaitCntOptions& options) {
+    // IF_WaitTensorCnt is disjoint from IF_WaitCnt, so isWaitCnt() alone would
+    // miss s_wait_tensorcnt.
+    if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
+    return isLegalToRemove(inst) && isRemovalWanted(inst, options);
 }
 
 void removeWaitCntsInBlock(BasicBlock& bb, const RemoveWaitCntOptions& options) {

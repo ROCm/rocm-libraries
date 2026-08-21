@@ -1,17 +1,18 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass --print-output
 #
-# Removal is gated on waitcnt::waitReconstruction(): a wait is only stripped if
-# some pass puts it back. Under the default policy that leaves three groups.
+# Removing a wait is legal only when some pass puts it back, per
+# waitcnt::waitReconstruction(). Under the default policy that leaves three
+# groups.
 #
 # Stripped -- StinkyWaitCntInsertionPass re-derives them:
 #   s_wait_dscnt, s_wait_loadcnt, s_wait_asynccnt, s_wait_tensorcnt,
 #   s_wait_loadcnt_dscnt (both halves are tracked counters).
 #
-# Kept because NOTHING rebuilds them -- every opcode naming STOREcnt, which has
-# no CounterKind: s_wait_storecnt, s_wait_storecnt_dscnt (its MEM half), and the
-# legacy packed s_waitcnt (can carry vscnt).
+# Illegal to remove -- nothing rebuilds them. Every opcode naming STOREcnt, which
+# has no CounterKind: s_wait_storecnt, s_wait_storecnt_dscnt (its MEM half), and
+# the legacy packed s_waitcnt (can carry vscnt).
 #
-# Kept by policy, though they are rebuildable:
+# Legal to remove, but kept by policy:
 #   - s_wait_kmcnt: insertion is region-scoped, so an s_load in the kernel
 #     prologue (argument preload) never enters its dataflow and its in-region
 #     consumer would be left unguarded.

@@ -86,10 +86,10 @@ enum class WaitReconstruction {
 
 /// Classify a wait instruction by who can rebuild it.
 ///
-/// This is the contract StinkyRemoveWaitCntPass is built on: it gates removal on
-/// this result, so there is no code path that strips a `None`. Unrecognised wait
-/// opcodes classify as `None`, making a newly added one preserved-by-default
-/// rather than silently dropped.
+/// This is the legality condition StinkyRemoveWaitCntPass is built on: removing
+/// a `None` is never legal, so the pass has no code path that does it.
+/// Unrecognised wait opcodes classify as `None`, making a newly added one
+/// preserved-by-default rather than silently dropped.
 ///
 /// Keep in lockstep with StinkyWaitCntInsertionPass::emitOneSpec -- that
 /// function is what "WaitCntInsertion" promises.
