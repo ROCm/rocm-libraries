@@ -67,8 +67,8 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename J>
     static uint32_t csritsv_grid_stride_blocks(rocsparse_handle handle, J m)
     {
-        const int64_t nblocks   = (static_cast<int64_t>(m) - 1) / BLOCKSIZE + 1;
-        const int64_t max_grid  = static_cast<int64_t>(handle->properties.maxGridSize[0]);
+        const int64_t nblocks  = (static_cast<int64_t>(m) - 1) / BLOCKSIZE + 1;
+        const int64_t max_grid = static_cast<int64_t>(handle->properties.maxGridSize[0]);
         return static_cast<uint32_t>((nblocks < max_grid) ? nblocks : max_grid);
     }
 

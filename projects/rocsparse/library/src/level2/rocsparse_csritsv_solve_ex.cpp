@@ -433,20 +433,19 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         //
         // Compute the inverse of the diagonal.
         //
-        RETURN_IF_ROCSPARSE_ERROR(
-            (calculator_inverse_diagonal_t<T, I, J>::calculate)(handle,
-                                                                trans,
-                                                                m,
-                                                                nnz,
-                                                                csr_col_ind,
-                                                                csr_val,
-                                                                descr->base,
-                                                                invdiag,
-                                                                ptr_diag,
-                                                                ptr_diag_shift,
-                                                                descr->base,
-                                                                (rocsparse_int*)info->csritsv_info
-                                                                    ->get_position()));
+        RETURN_IF_ROCSPARSE_ERROR((calculator_inverse_diagonal_t<T, I, J>::calculate)(
+            handle,
+            trans,
+            m,
+            nnz,
+            csr_col_ind,
+            csr_val,
+            descr->base,
+            invdiag,
+            ptr_diag,
+            ptr_diag_shift,
+            descr->base,
+            (rocsparse_int*)info->csritsv_info->get_position()));
 
         int64_t zero_pivot;
         auto    csritsv_info = info->csritsv_info;
