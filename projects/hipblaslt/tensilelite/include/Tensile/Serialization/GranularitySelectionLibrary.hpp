@@ -98,8 +98,8 @@ namespace TensileLite
 
                     for(int index : mappingIndices)
                     {
-                        auto slnIter = ctx->solutions->find(index);
-                        if(slnIter == ctx->solutions->end())
+                        auto solution = resolveContextSolution(ctx, index);
+                        if(!solution)
                         {
                             iot::setError(
                                 io,
@@ -109,7 +109,6 @@ namespace TensileLite
                         }
                         else
                         {
-                            auto solution = slnIter->second;
                             lib.solutions.insert(std::make_pair(index, solution));
                         }
                     }

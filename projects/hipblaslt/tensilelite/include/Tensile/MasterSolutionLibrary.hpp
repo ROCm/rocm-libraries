@@ -26,13 +26,16 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
@@ -61,7 +64,51 @@ namespace TensileLite
         std::set<std::string>*   loadedFiles;
 
         void* indexLoadedLibraries;
+
+        // Set only when loading an indexed (format_version 2) file. Leaf nodes
+        // capture this instead of resolving an index against `solutions`, which
+        // stays empty for indexed files.
+        std::shared_ptr<SolutionBlobCache<MySolution>> blobCache;
+
+        // Points at the owning master's list of shard caches so a placeholder
+        // can publish a shard's indices after loading it. Defaulted because the
+        // existing aggregate initializers in the loaders pass only the first
+        // few fields.
+        std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>>* solutionSources = nullptr;
     };
+
+    /**
+ * Resolves a solution index against a load context, covering both layouts:
+ * the eager `solutions` map for legacy files and the blob cache for indexed
+ * ones. Returns nullptr for an unknown index so callers can raise a
+ * load-time error, matching legacy behaviour.
+ *
+ * Nodes that rank across a whole index set use this and therefore materialize
+ * their solutions at load. That is deliberate: in shipped gfx942 libraries
+ * GranularitySelection and MLPClassification do not appear at all, and
+ * Prediction only appears in small dedicated shards where it owns the entire
+ * file, so per-node laziness would buy nothing there. Leaf nodes, which own
+ * effectively all solutions, stay lazy via SingleSolutionLibrary.
+ */
+    template <typename MySolution>
+    std::shared_ptr<MySolution> resolveContextSolution(LibraryIOContext<MySolution>* ctx,
+                                                       int                           index)
+    {
+        if(ctx == nullptr)
+            return std::shared_ptr<MySolution>();
+
+        if(ctx->blobCache)
+            return ctx->blobCache->get(index);
+
+        if(ctx->solutions == nullptr)
+            return std::shared_ptr<MySolution>();
+
+        auto iter = ctx->solutions->find(index);
+        if(iter == ctx->solutions->end())
+            return std::shared_ptr<MySolution>();
+
+        return iter->second;
+    }
 
     /**
  * \ingroup SolutionLibrary
@@ -82,16 +129,18 @@ namespace TensileLite
         }
         std::string description() const override
         {
+            // For an indexed library `solutions` only holds what has been
+            // materialized so far, so report the cache's total instead of
+            // printing 0 for a fully loaded file.
+            size_t count = solutions.size();
+            if(blobCache)
+                count = blobCache->size();
+
             if(library == nullptr)
-                return concatenate(
-                    type(), " (", solutions.size(), " solutions, next level: nullptr)");
+                return concatenate(type(), " (", count, " solutions, next level: nullptr)");
             else
-                return concatenate(type(),
-                                   " (",
-                                   solutions.size(),
-                                   " solutions, next level: ",
-                                   library->type(),
-                                   ")");
+                return concatenate(
+                    type(), " (", count, " solutions, next level: ", library->type(), ")");
         }
 
         std::string                   libraryDirectory;
@@ -107,6 +156,14 @@ namespace TensileLite
         std::string                                             version;
         mutable std::mutex                                      solutionsGuard;
         mutable std::atomic<bool>                               lastFindTopRetAll = false;
+
+        // Indexed-format state. `blobCache` serves this file's own solutions;
+        // `solutionSources` collects the caches of lazily loaded shards. A list
+        // of caches rather than an index->cache map on purpose: registering
+        // every index would rebuild the very table this format exists to avoid,
+        // and only a handful of shards are ever resident.
+        std::shared_ptr<SolutionBlobCache<MySolution>>                      blobCache;
+        mutable std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>> solutionSources;
 
         MasterSolutionLibrary() = default;
 
@@ -188,6 +245,12 @@ namespace TensileLite
             using std::begin;
             using std::end;
 
+            // An indexed shard carries no materialized solutions to copy, so
+            // stamp the code object name on its cache instead and let it apply
+            // as solutions are parsed.
+            if(mLibrary->blobCache)
+                mLibrary->blobCache->setCodeObjectFilename(filePrefix + ".co");
+
             std::lock_guard<std::mutex> lock(solutionsGuard);
             if(loadedFiles.find(filePrefix) != loadedFiles.end())
             {
@@ -195,6 +258,18 @@ namespace TensileLite
             }
             // Push to cache
             indexLoadedLibraries[filePrefix] = mLibrary->library;
+
+            // Publish the shard's cache so index lookups can reach solutions
+            // this shard owns but has not parsed yet. One entry per shard, not
+            // per solution.
+            if(mLibrary->blobCache)
+            {
+                if(std::find(begin(solutionSources), end(solutionSources), mLibrary->blobCache)
+                   == end(solutionSources))
+                {
+                    solutionSources.push_back(mLibrary->blobCache);
+                }
+            }
 
             std::transform(begin(mLibrary->solutions),
                            end(mLibrary->solutions),
@@ -212,16 +287,64 @@ namespace TensileLite
             }
         }
 
+        /// Single point of truth for turning a solution index into an object.
+        ///
+        /// `solutions` is only fully populated for legacy files. For an indexed
+        /// file it starts empty and fills in as queries materialize solutions,
+        /// so every index lookup has to be prepared to fall through to this
+        /// file's blob cache or to a loaded shard's cache.
+        std::shared_ptr<MySolution> resolveSolutionByIndex(const int index) const
+        {
+            // Idempotent, and a no-op unless this is a lazy-loading master.
+            loadLibrary(index);
+
+            {
+                std::lock_guard<std::mutex> lock(solutionsGuard);
+                auto                        iter = solutions.find(index);
+                if(iter != solutions.end())
+                    return iter->second;
+            }
+
+            std::shared_ptr<MySolution> solution;
+            if(blobCache && blobCache->contains(index))
+            {
+                solution = blobCache->get(index);
+            }
+            else
+            {
+                std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>> sources;
+                {
+                    std::lock_guard<std::mutex> lock(solutionsGuard);
+                    sources = solutionSources;
+                }
+                for(auto const& source : sources)
+                {
+                    if(source && source->contains(index))
+                    {
+                        solution = source->get(index);
+                        break;
+                    }
+                }
+            }
+
+            if(!solution)
+                return std::shared_ptr<MySolution>();
+
+            // Publish so the workspace fixups below run once per solution and
+            // later lookups take the map hit.
+            std::lock_guard<std::mutex> lock(solutionsGuard);
+            return solutions.emplace(index, solution).first->second;
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            std::lock_guard<std::mutex> lock(solutionsGuard);
-            if(solutions.find(index) == solutions.end())
+            auto solution = resolveSolutionByIndex(index);
+            if(!solution)
             {
                 return std::shared_ptr<MySolution>();
             }
-            auto solution = solutions.at(index);
             if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
             {
                 solution->requiredHostWorkspaceSizePerProblem
@@ -233,14 +356,12 @@ namespace TensileLite
         virtual std::shared_ptr<MySolution> getSolutionByIndex(Hardware const& hardware,
                                                                const int       index) const override
         {
-            loadLibrary(index);
-            std::lock_guard<std::mutex> lock(solutionsGuard);
-            if(solutions.find(index) == solutions.end())
+            auto solution = resolveSolutionByIndex(index);
+            if(!solution)
             {
                 return std::shared_ptr<MySolution>();
             }
-            auto                   solution = solutions.at(index);
-            
+
             TensileLite::TensorOps nop;
 
             if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
@@ -323,9 +444,16 @@ namespace TensileLite
                              "default behavior."
                           << std::endl;
                 {
-                    std::lock_guard<std::mutex> guard(solutionsGuard);
-                    auto                        selected_solution = solutions.at(solution_index);
-                    Task                        task(hardware, problem, *(selected_solution));
+                    // Goes through the resolver: for an indexed library the
+                    // forced index will not be in `solutions` yet.
+                    auto selected_solution = resolveSolutionByIndex(solution_index);
+                    if(!selected_solution)
+                    {
+                        std::cout << "Solution index " << solution_index
+                                  << " not found in this library." << std::endl;
+                        return nullptr;
+                    }
+                    Task task(hardware, problem, *(selected_solution));
                     if((*selected_solution->problemPredicate)(problem)
                        && (*selected_solution->taskPredicate)(task)
                        && (*selected_solution->hardwarePredicate)(hardware))

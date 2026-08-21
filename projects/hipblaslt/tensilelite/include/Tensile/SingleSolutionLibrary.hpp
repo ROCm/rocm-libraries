@@ -28,6 +28,7 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/SolutionBlobCache.hpp>
 
 #include <tensilelitehost/export.h>
 
@@ -59,6 +60,13 @@ namespace TensileLite
                 rv += ": ";
                 rv += solution->name();
             }
+            else if(m_cache)
+            {
+                // Deliberately does not resolve: this is called from debug
+                // printing on selection paths, and forcing a parse just to
+                // build a log line would defeat lazy loading.
+                rv += concatenate(" (index ", m_index, ", unresolved)");
+            }
             else
             {
                 rv += " (nullptr)";
@@ -75,10 +83,27 @@ namespace TensileLite
         {
         }
 
+        /// Lazy form: remembers which solution it stands for and asks the cache
+        /// for it when a query actually needs it.
+        SingleSolutionLibrary(int index, std::shared_ptr<SolutionBlobCache<MySolution>> cache)
+            : m_index(index)
+            , m_cache(std::move(cache))
+        {
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
+            // Compare before resolving. A tree walk looking for one index would
+            // otherwise parse every leaf it passes.
+            if(m_cache)
+            {
+                if(m_index != index)
+                    return std::shared_ptr<MySolution>();
+                return resolved();
+            }
+
             if(solution && solution->index == index)
             {
                 return solution;
@@ -93,6 +118,7 @@ namespace TensileLite
         {
             bool debug = Debug::Instance().printPredicateEvaluation();
 
+            auto solution = resolved();
             if(solution)
             {
                 Task task(hardware, problem, *(solution));
@@ -129,6 +155,7 @@ namespace TensileLite
         {
             bool debug = Debug::Instance().printPredicateEvaluation();
 
+            auto solution = resolved();
             if(solution)
             {
                 if(debug)
@@ -193,6 +220,7 @@ namespace TensileLite
         {
             bool debug = Debug::Instance().printPredicateEvaluation();
 
+            auto solution    = resolved();
             bool useSolution = false;
             if(solution)
             {
@@ -234,6 +262,7 @@ namespace TensileLite
         {
             bool debug = Debug::Instance().printPredicateEvaluation();
 
+            auto solution    = resolved();
             bool useSolution = false;
             if(solution)
             {
@@ -295,6 +324,25 @@ namespace TensileLite
 
             return SolutionSet<MySolution>();
         }
+
+    private:
+        /// The solution this leaf stands for, parsing it from the blob on first
+        /// use when the library was loaded in indexed form.
+        ///
+        /// Deliberately does not memoize into `solution`: several matching table
+        /// rows can wrap the same index, and concurrent queries would then race
+        /// writing that shared_ptr. The cache is already the memo, and its hit
+        /// path is a lookup under a shared lock.
+        std::shared_ptr<MySolution> resolved() const
+        {
+            if(solution || !m_cache)
+                return solution;
+
+            return m_cache->get(m_index);
+        }
+
+        int                                           m_index = -1;
+        std::shared_ptr<SolutionBlobCache<MySolution>> m_cache;
     };
 } // namespace TensileLite
 

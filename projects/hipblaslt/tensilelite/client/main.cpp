@@ -1142,7 +1142,16 @@ int main(int argc, const char* argv[])
     }
 
     if(firstSolutionIdx < 0)
-        firstSolutionIdx = library->solutions.begin()->first;
+    {
+        // solutions is empty until something is materialized when the library
+        // was loaded in indexed form, and begin() on an empty map would be a
+        // dereference of end(). The client enumerates anyway, so fill it.
+        if(library->blobCache)
+            library->blobCache->materializeAll();
+
+        if(!library->solutions.empty())
+            firstSolutionIdx = library->solutions.begin()->first;
+    }
 
     if(numSolutions < 0)
     {

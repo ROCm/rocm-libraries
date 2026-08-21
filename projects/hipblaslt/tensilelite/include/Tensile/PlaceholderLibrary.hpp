@@ -153,6 +153,12 @@ namespace TensileLite
         mutable std::mutex*                                             solutionsGuard;
         mutable std::mutex                                              lazyLoadingGuard;
         std::string                                                     filePrefix;
+
+        // Where to publish an indexed shard's blob cache, so the owning master
+        // can resolve indices this shard has not parsed yet. Without it the
+        // shard loads but its solutions stay unreachable by index.
+        mutable std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>>* solutionSources
+            = nullptr;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
         mutable std::atomic<bool>                                       lastFindTopRetAll = false;
@@ -174,7 +180,27 @@ namespace TensileLite
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
                 library = mLibrary->library;
 
+                // Indexed shards have nothing materialized to stamp in bulk
+                // below, so the name goes on the cache and is applied to each
+                // solution as it is parsed.
+                if(mLibrary->blobCache)
+                    mLibrary->blobCache->setCodeObjectFilename(getCodeObjectFileName());
+
                 std::lock_guard<std::mutex> lock(*solutionsGuard);
+
+                if(mLibrary->blobCache && solutionSources != nullptr)
+                {
+                    // Idempotent: either this path or MasterSolutionLibrary
+                    // ::loadLibrary may have published this cache already.
+                    if(std::find(solutionSources->begin(),
+                                 solutionSources->end(),
+                                 mLibrary->blobCache)
+                       == solutionSources->end())
+                    {
+                        solutionSources->push_back(mLibrary->blobCache);
+                    }
+                }
+
                 if(loadedFiles->find(filePrefix) != loadedFiles->end())
                 {
                     if(indexLoadedLibraries->find(filePrefix) == indexLoadedLibraries->end())

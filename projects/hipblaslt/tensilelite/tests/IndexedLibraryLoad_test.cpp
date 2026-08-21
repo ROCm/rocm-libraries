@@ -1,0 +1,583 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+// Tests for the indexed (format_version 2) library layout, where solutions are
+// held as an unparsed blob and deserialized on demand.
+//
+// Three groups:
+//   1. SolutionBlobCache in isolation, driven by a stub deserializer. This is
+//      where laziness, dedup, failure handling and thread safety are pinned
+//      down without needing a real library file.
+//   2. Malformed indexed files, which must be rejected at load rather than
+//      surfacing later as a failed query.
+//   3. Parity against a real legacy fixture, converted to indexed form in
+//      process. Skipped when no fixture is installed, matching
+//      RangeLibrary_test.
+//
+// Laziness is asserted on the cache's materialized count, never on
+// MasterSolutionLibrary::solutions: leaf nodes resolve straight through the
+// cache and never touch that map, so it legitimately stays empty after a
+// query.
+
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+#include <unistd.h>
+
+#include <msgpack.hpp>
+#include <zlib.h>
+
+#include <Tensile/ContractionLibrary.hpp>
+#include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/SolutionBlobCache.hpp>
+#include <Tensile/Tensile.hpp>
+// For Serialization::objectToMap, used to walk a legacy document's top level.
+#include <Tensile/msgpack/MessagePack.hpp>
+
+#include "TestData.hpp"
+
+namespace fs = std::filesystem;
+
+using namespace TensileLite;
+
+namespace
+{
+    // Minimal stand-in for ContractionSolution: the cache only ever touches
+    // `index` and `codeObjectFilename`.
+    struct FakeSolution
+    {
+        int         index = -1;
+        std::string codeObjectFilename;
+        std::string tag;
+    };
+
+    using FakeCache = SolutionBlobCache<FakeSolution>;
+
+    /// Builds a cache over `count` one-byte slices. The stub deserializer turns
+    /// byte value N into a FakeSolution with index N, and counts how many times
+    /// it ran so tests can prove work was deferred.
+    std::shared_ptr<FakeCache> makeFakeCache(int                   count,
+                                             std::shared_ptr<std::atomic<int>> parses,
+                                             bool                  failEveryParse = false)
+    {
+        std::vector<uint8_t>                       blob;
+        std::unordered_map<int, FakeCache::Slice>  slices;
+        for(int i = 0; i < count; i++)
+        {
+            slices.emplace(i, FakeCache::Slice(blob.size(), 1));
+            blob.push_back(static_cast<uint8_t>(i));
+        }
+
+        auto deserialize
+            = [parses, failEveryParse](const uint8_t* data,
+                                       size_t         size) -> std::shared_ptr<FakeSolution> {
+            parses->fetch_add(1);
+            if(failEveryParse || size != 1)
+                return nullptr;
+            auto rv   = std::make_shared<FakeSolution>();
+            rv->index = static_cast<int>(*data);
+            rv->tag   = "parsed";
+            return rv;
+        };
+
+        return std::make_shared<FakeCache>(std::move(blob), std::move(slices), deserialize);
+    }
+
+    std::vector<uint8_t> deflateBytes(std::vector<uint8_t> const& raw)
+    {
+        uLongf             bound = compressBound(static_cast<uLong>(raw.size()));
+        std::vector<uint8_t> out(bound);
+        uLongf             outSize = bound;
+        int                ret     = compress2(out.data(),
+                             &outSize,
+                             raw.data(),
+                             static_cast<uLong>(raw.size()),
+                             Z_BEST_COMPRESSION);
+        EXPECT_EQ(ret, Z_OK);
+        out.resize(outSize);
+        return out;
+    }
+
+    void writeFile(fs::path const& path, std::vector<uint8_t> const& bytes)
+    {
+        std::ofstream out(path, std::ios::binary);
+        ASSERT_TRUE(out.good()) << "cannot open " << path;
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+        ASSERT_TRUE(out.good()) << "write failed for " << path;
+    }
+
+    struct TempDirTest : public ::testing::Test
+    {
+        fs::path tmpDir;
+
+        void SetUp() override
+        {
+            tmpDir = fs::temp_directory_path()
+                     / fs::path("hipblaslt-indexed-"
+                                + std::to_string(static_cast<long long>(getpid())) + "-"
+                                + ::testing::UnitTest::GetInstance()->current_test_info()->name());
+            fs::create_directories(tmpDir);
+        }
+
+        void TearDown() override
+        {
+            std::error_code ec;
+            fs::remove_all(tmpDir, ec);
+        }
+    };
+} // namespace
+
+// ---------------------------------------------------------------------------
+// 1. SolutionBlobCache in isolation
+// ---------------------------------------------------------------------------
+
+TEST(SolutionBlobCacheTest, ParsesNothingUntilAsked)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(100, parses);
+
+    EXPECT_EQ(cache->size(), 100u);
+    EXPECT_EQ(cache->materializedCount(), 0u);
+    EXPECT_EQ(parses->load(), 0) << "constructing the cache must not parse anything";
+}
+
+TEST(SolutionBlobCacheTest, ParsesOnlyTheRequestedSolution)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(100, parses);
+
+    auto solution = cache->get(42);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(solution->index, 42);
+    EXPECT_EQ(parses->load(), 1);
+    EXPECT_EQ(cache->materializedCount(), 1u)
+        << "one query must not drag in the other 99 solutions";
+}
+
+TEST(SolutionBlobCacheTest, RepeatedGetReusesTheSameObject)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(10, parses);
+
+    auto first  = cache->get(3);
+    auto second = cache->get(3);
+    EXPECT_EQ(first, second) << "callers must not see two objects for one index";
+    EXPECT_EQ(parses->load(), 1) << "second get should hit the memo";
+}
+
+TEST(SolutionBlobCacheTest, UnknownIndexReturnsNullWithoutParsing)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(10, parses);
+
+    EXPECT_FALSE(cache->contains(999));
+    EXPECT_EQ(cache->get(999), nullptr);
+    EXPECT_EQ(parses->load(), 0);
+}
+
+TEST(SolutionBlobCacheTest, ParseFailureIsRememberedNotRetried)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(10, parses, /*failEveryParse=*/true);
+
+    EXPECT_EQ(cache->get(5), nullptr);
+    EXPECT_EQ(cache->get(5), nullptr);
+    EXPECT_EQ(parses->load(), 1)
+        << "a corrupt slice must not be re-parsed on every query";
+}
+
+TEST(SolutionBlobCacheTest, RejectsPayloadWhoseIndexDisagreesWithTheTable)
+{
+    // Slice for index 7 holds a payload that decodes to index 9: the file is
+    // inconsistent, so the cache must refuse rather than answer under 7.
+    std::vector<uint8_t>                      blob{9};
+    std::unordered_map<int, FakeCache::Slice> slices;
+    slices.emplace(7, FakeCache::Slice(0, 1));
+
+    FakeCache cache(std::move(blob), std::move(slices),
+                    [](const uint8_t* data, size_t) {
+                        auto rv   = std::make_shared<FakeSolution>();
+                        rv->index = static_cast<int>(*data);
+                        return rv;
+                    });
+
+    EXPECT_EQ(cache.get(7), nullptr);
+}
+
+TEST(SolutionBlobCacheTest, MaterializeAllParsesEverythingOnce)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(50, parses);
+
+    cache->materializeAll();
+    EXPECT_EQ(cache->materializedCount(), 50u);
+    EXPECT_EQ(parses->load(), 50);
+
+    cache->materializeAll();
+    EXPECT_EQ(parses->load(), 50) << "second pass should be a no-op";
+}
+
+TEST(SolutionBlobCacheTest, CodeObjectFilenameIsStampedOnMaterialization)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(4, parses);
+
+    // Stamped before any parse: applies as solutions come out of the blob.
+    cache->setCodeObjectFilename("shard_prefix.co");
+    EXPECT_EQ(cache->get(1)->codeObjectFilename, "shard_prefix.co");
+
+    // Stamped after a parse: must reach the already-materialized ones too,
+    // since shard loading can publish the name either side of a query.
+    auto later = makeFakeCache(4, parses);
+    auto early = later->get(2);
+    ASSERT_NE(early, nullptr);
+    EXPECT_TRUE(early->codeObjectFilename.empty());
+    later->setCodeObjectFilename("late.co");
+    EXPECT_EQ(early->codeObjectFilename, "late.co");
+}
+
+TEST(SolutionBlobCacheTest, IndicesCoversEverySlice)
+{
+    auto parses  = std::make_shared<std::atomic<int>>(0);
+    auto cache   = makeFakeCache(8, parses);
+    auto indices = cache->indices();
+
+    std::sort(indices.begin(), indices.end());
+    ASSERT_EQ(indices.size(), 8u);
+    for(int i = 0; i < 8; i++)
+        EXPECT_EQ(indices[i], i);
+    EXPECT_EQ(parses->load(), 0) << "listing indices must not parse";
+}
+
+TEST(SolutionBlobCacheTest, ConcurrentGetOfOneIndexYieldsOneObject)
+{
+    // Several matching table rows commonly wrap the same index, so this is the
+    // realistic contention case. Run under TSan to check the locking.
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(4, parses);
+
+    constexpr int                             kThreads = 16;
+    std::vector<std::thread>                  threads;
+    std::vector<std::shared_ptr<FakeSolution>> got(kThreads);
+
+    for(int t = 0; t < kThreads; t++)
+        threads.emplace_back([&, t]() { got[t] = cache->get(2); });
+    for(auto& thread : threads)
+        thread.join();
+
+    for(int t = 0; t < kThreads; t++)
+    {
+        ASSERT_NE(got[t], nullptr);
+        EXPECT_EQ(got[t], got[0]) << "thread " << t << " saw a different object";
+    }
+    EXPECT_EQ(cache->materializedCount(), 1u);
+}
+
+TEST(SolutionBlobCacheTest, ConcurrentGetOfDifferentIndicesIsSafe)
+{
+    auto parses = std::make_shared<std::atomic<int>>(0);
+    auto cache  = makeFakeCache(64, parses);
+
+    std::vector<std::thread> threads;
+    for(int t = 0; t < 16; t++)
+    {
+        threads.emplace_back([&, t]() {
+            for(int i = t; i < 64; i += 16)
+            {
+                auto solution = cache->get(i);
+                ASSERT_NE(solution, nullptr);
+                EXPECT_EQ(solution->index, i);
+            }
+        });
+    }
+    for(auto& thread : threads)
+        thread.join();
+
+    EXPECT_EQ(cache->materializedCount(), 64u);
+    EXPECT_EQ(parses->load(), 64) << "each index should be parsed exactly once";
+}
+
+// ---------------------------------------------------------------------------
+// 2. Malformed indexed files must fail at load
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    /// Writes an indexed .dat.zlib with a caller-supplied index table and blob.
+    /// The library tree is a stub; validation runs before it is read, so these
+    /// cases never get that far.
+    void writeIndexedLibrary(fs::path const&             base,
+                             int                         formatVersion,
+                             std::vector<int64_t> const& table,
+                             std::vector<uint8_t> const& blob,
+                             bool                        omitBlob = false)
+    {
+        msgpack::sbuffer  buffer;
+        msgpack::packer<msgpack::sbuffer> packer(buffer);
+
+        packer.pack_map(omitBlob ? 3 : 4);
+
+        packer.pack(std::string("format_version"));
+        packer.pack(formatVersion);
+
+        packer.pack(std::string("solutions_index"));
+        packer.pack(table);
+
+        if(!omitBlob)
+        {
+            packer.pack(std::string("solutions_blob"));
+            packer.pack_bin(static_cast<uint32_t>(blob.size()));
+            packer.pack_bin_body(reinterpret_cast<const char*>(blob.data()),
+                                 static_cast<uint32_t>(blob.size()));
+        }
+
+        // Deliberately not a valid tree: these loads must fail earlier.
+        packer.pack(std::string("library"));
+        packer.pack_map(0);
+
+        std::vector<uint8_t> raw(buffer.data(), buffer.data() + buffer.size());
+        writeFile(fs::path(base.string() + ".zlib"), deflateBytes(raw));
+    }
+} // namespace
+
+using IndexedLibraryLoadTest = TempDirTest;
+
+TEST_F(IndexedLibraryLoadTest, RejectsUnknownFormatVersion)
+{
+    // A future layout must not be misread as the one this build understands.
+    auto base = tmpDir / "TensileLibrary_future.dat";
+    writeIndexedLibrary(base, 99, {0, 0, 1}, {0x01});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+TEST_F(IndexedLibraryLoadTest, RejectsIndexTableThatIsNotTriples)
+{
+    auto base = tmpDir / "TensileLibrary_ragged.dat";
+    writeIndexedLibrary(base, 2, {0, 0}, {0x01});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+TEST_F(IndexedLibraryLoadTest, RejectsSliceRunningPastTheBlob)
+{
+    auto base = tmpDir / "TensileLibrary_overrun.dat";
+    writeIndexedLibrary(base, 2, {0, 0, 64}, {0x01, 0x02});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+TEST_F(IndexedLibraryLoadTest, RejectsNegativeFields)
+{
+    auto base = tmpDir / "TensileLibrary_negative.dat";
+    writeIndexedLibrary(base, 2, {0, -8, 1}, {0x01});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+TEST_F(IndexedLibraryLoadTest, RejectsDuplicateIndex)
+{
+    auto base = tmpDir / "TensileLibrary_dup.dat";
+    writeIndexedLibrary(base, 2, {5, 0, 1, 5, 1, 1}, {0x01, 0x02});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+TEST_F(IndexedLibraryLoadTest, RejectsMissingBlob)
+{
+    auto base = tmpDir / "TensileLibrary_noblob.dat";
+    writeIndexedLibrary(base, 2, {0, 0, 1}, {}, /*omitBlob=*/true);
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// 3. Parity against a real legacy library, converted in process
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    /// Rewrites a legacy {solutions, library} msgpack document into the indexed
+    /// layout, re-packing each solution object into the blob. Mirrors what
+    /// LibraryIO.writeMsgPackIndexed does on the Python side.
+    std::vector<uint8_t> toIndexed(msgpack::object const& legacy)
+    {
+        std::unordered_map<std::string, msgpack::object> top;
+        Serialization::objectToMap(legacy, top);
+
+        auto solutionsIter = top.find("solutions");
+        if(solutionsIter == top.end())
+            return {};
+
+        auto solutions = solutionsIter->second.as<std::vector<msgpack::object>>();
+
+        std::vector<int64_t> table;
+        msgpack::sbuffer     blob;
+        for(auto const& solution : solutions)
+        {
+            std::unordered_map<std::string, msgpack::object> fields;
+            Serialization::objectToMap(solution, fields);
+            const int64_t index  = fields.at("index").as<int64_t>();
+            const size_t  offset = blob.size();
+            msgpack::pack(blob, solution);
+            table.push_back(index);
+            table.push_back(static_cast<int64_t>(offset));
+            table.push_back(static_cast<int64_t>(blob.size() - offset));
+        }
+
+        msgpack::sbuffer                  out;
+        msgpack::packer<msgpack::sbuffer> packer(out);
+        const bool hasVersion = top.find("version") != top.end();
+        packer.pack_map(hasVersion ? 5 : 4);
+
+        packer.pack(std::string("format_version"));
+        packer.pack(2);
+        if(hasVersion)
+        {
+            packer.pack(std::string("version"));
+            packer.pack(top.at("version"));
+        }
+        packer.pack(std::string("solutions_index"));
+        packer.pack(table);
+        packer.pack(std::string("solutions_blob"));
+        packer.pack_bin(static_cast<uint32_t>(blob.size()));
+        packer.pack_bin_body(blob.data(), static_cast<uint32_t>(blob.size()));
+        packer.pack(std::string("library"));
+        packer.pack(top.at("library"));
+
+        return std::vector<uint8_t>(out.data(), out.data() + out.size());
+    }
+} // namespace
+
+using IndexedLibraryParityTest = TempDirTest;
+
+TEST_F(IndexedLibraryParityTest, IndexedLoadMatchesLegacyLoad)
+{
+    auto fixture = TestData::Instance().file("SolutionLibraries/KernelsLite.dat");
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    std::ifstream in(fixture, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(in.good());
+    std::vector<char> bytes(static_cast<size_t>(in.tellg()));
+    in.seekg(0);
+    in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+
+    auto handle  = msgpack::unpack(bytes.data(), bytes.size());
+    auto indexed = toIndexed(handle.get());
+    ASSERT_FALSE(indexed.empty()) << "fixture has no solutions array";
+
+    auto indexedBase = tmpDir / "TensileLibrary_indexed.dat";
+    writeFile(fs::path(indexedBase.string() + ".zlib"), deflateBytes(indexed));
+
+    auto legacyLib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
+    ASSERT_NE(legacyLib, nullptr);
+    auto indexedLib
+        = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(indexedBase.string());
+    ASSERT_NE(indexedLib, nullptr) << "indexed library failed to load";
+
+    auto* legacyMaster
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            legacyLib.get());
+    auto* indexedMaster
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            indexedLib.get());
+    ASSERT_NE(legacyMaster, nullptr);
+    ASSERT_NE(indexedMaster, nullptr);
+
+    ASSERT_NE(indexedMaster->blobCache, nullptr) << "indexed load produced no blob cache";
+    EXPECT_EQ(indexedMaster->blobCache->size(), legacyMaster->solutions.size());
+
+    // The whole point: the tree is up, but no solution has been parsed.
+    EXPECT_EQ(indexedMaster->blobCache->materializedCount(), 0u)
+        << "loading an indexed library must not parse any solution";
+
+    // Every index resolves to the same solution the legacy load produced.
+    for(auto const& entry : legacyMaster->solutions)
+    {
+        auto lazy = indexedMaster->resolveSolutionByIndex(entry.first);
+        ASSERT_NE(lazy, nullptr) << "index " << entry.first << " did not resolve";
+        EXPECT_EQ(lazy->index, entry.second->index);
+        EXPECT_EQ(lazy->kernelName, entry.second->kernelName);
+        EXPECT_EQ(lazy->solutionName, entry.second->solutionName);
+    }
+}
+
+TEST_F(IndexedLibraryParityTest, ResolveByIndexWorksWithoutAnyPriorQuery)
+{
+    // Guards the hipBLASLt algo-index path, which calls getSolutionByIndex
+    // without a preceding findBestSolution and used to depend on the shard
+    // merge having pre-populated the solutions map.
+    auto fixture = TestData::Instance().file("SolutionLibraries/KernelsLite.dat");
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    std::ifstream in(fixture, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(in.good());
+    std::vector<char> bytes(static_cast<size_t>(in.tellg()));
+    in.seekg(0);
+    in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+
+    auto handle  = msgpack::unpack(bytes.data(), bytes.size());
+    auto indexed = toIndexed(handle.get());
+    ASSERT_FALSE(indexed.empty());
+
+    auto base = tmpDir / "TensileLibrary_indexed.dat";
+    writeFile(fs::path(base.string() + ".zlib"), deflateBytes(indexed));
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    ASSERT_NE(lib, nullptr);
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_NE(master->blobCache, nullptr);
+
+    auto indices = master->blobCache->indices();
+    ASSERT_FALSE(indices.empty());
+
+    auto solution = master->resolveSolutionByIndex(indices.front());
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(solution->index, indices.front());
+    EXPECT_EQ(master->blobCache->materializedCount(), 1u)
+        << "resolving one index must not materialize the rest";
+}
