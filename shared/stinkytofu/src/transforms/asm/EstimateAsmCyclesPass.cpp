@@ -802,29 +802,31 @@ class EstimateAsmCyclesPassImpl : public Pass {
         std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
 
         uint32_t totalCycles = 0;
-        // When IR is hierarchical (e.g. populateFunctionFromString), ^block: is only a block
-        // boundary. "LoopBeginL" avoids parser conflating label_* with branch target;
-        // "label_LoopBeginL" for compat.
+        // Loop-body modelling runs in the LoopBeginL basic block (tensilelite names the block
+        // ^label_LoopBeginL). Non-loop blocks are skipped unless
+        // computeEstimatedCyclesPerInstruction is modelling the preheader tail ahead of an in-block
+        // label_LoopBeginL (hierarchical IR).
         std::size_t startIdx = 0;
         if (bb.getLabel() != "label_LoopBeginL" && bb.getLabel() != "LoopBeginL") {
-            // A block that holds no loop head models nothing at all.
             startIdx = instructions.size();
-            for (std::size_t i = 0; i < instructions.size(); ++i) {
-                const LabelData* labelData = instructions[i]->getModifier<LabelData>();
-                if (isLabel(*instructions[i]) && labelData != nullptr &&
-                    labelData->label == "label_LoopBeginL") {
-                    startIdx = i;
-                    break;
-                }
-            }
-            // Back up over the preheader tail so the run-up to the first iteration is
-            // modelled too. The last global load into LDS is where that run-up begins:
-            // everything after it is the setup the loop head is waiting on.
-            if (includePreLoopTail_ && startIdx < instructions.size()) {
-                for (std::size_t i = startIdx; i-- > 0;) {
-                    if (isTensorLoad(*instructions[i])) {
+            if (includePreLoopTail_) {
+                for (std::size_t i = 0; i < instructions.size(); ++i) {
+                    const LabelData* labelData = instructions[i]->getModifier<LabelData>();
+                    if (isLabel(*instructions[i]) && labelData != nullptr &&
+                        labelData->label == "label_LoopBeginL") {
                         startIdx = i;
                         break;
+                    }
+                }
+                // Back up over the preheader tail so the run-up to the first iteration is
+                // modelled too. The last global load into LDS is where that run-up begins:
+                // everything after it is the setup the loop head is waiting on.
+                if (startIdx < instructions.size()) {
+                    for (std::size_t i = startIdx; i-- > 0;) {
+                        if (isTensorLoad(*instructions[i])) {
+                            startIdx = i;
+                            break;
+                        }
                     }
                 }
             }
