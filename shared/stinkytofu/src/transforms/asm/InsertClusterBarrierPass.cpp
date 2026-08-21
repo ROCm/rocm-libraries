@@ -214,20 +214,6 @@ StinkyInstruction* findFirstTensorLoadBetween(BasicBlock::iterator start,
     return nullptr;
 }
 
-/// Whether a cluster wait already stands anywhere above \p anchor in its block.
-bool hasClusterBarrierWaitAbove(StinkyInstruction* anchor) {
-    BasicBlock* parent = anchor->getParent();
-    if (parent == nullptr) return false;
-    auto it = BasicBlock::iterator(anchor);
-    while (it != parent->begin()) {
-        --it;
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (isClusterBarrierWait(*inst)) return true;
-    }
-    return false;
-}
-
 StinkyInstruction* findPrecedingWorkgroupBarrierWaitBetween(BasicBlock::iterator boundary,
                                                             StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
@@ -1167,13 +1153,12 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
         }
 
-        // The run-up gets exactly one cluster wait, and this is it. Asking whether one is
-        // already there has to look at the whole stretch above the load rather than the
-        // instruction immediately in front of it: a pre-loop signal placed by an earlier run
-        // sits between the two, and reading only the neighbour would hand the run-up a second
-        // wait it has no second token for.
+        // Rule 2: one cluster wait immediately before the run-up's first tensor load, pairing
+        // Rule 1's prologue arrive. Only skip when that load is already directly preceded by a
+        // cluster wait; a wait on a different CFG path above (e.g. StreamK zero-iter skip) does
+        // not count.
         StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
-        if (firstTL != nullptr && !hasClusterBarrierWaitAbove(firstTL)) {
+        if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
             BasicBlock* parent = firstTL->getParent();
             AsmIRBuilder irBuilder(*parent, archId);
             insertClusterBarrierWaitBefore(firstTL, "cluster_barrier wait", irBuilder, archId);
