@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Container.hpp"
-#include "compilation/KernelCompiler.hpp"
 #include "device/CurrentDevicePropertyProvider.hpp"
 
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
@@ -12,6 +11,7 @@
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormPlanBuilder.hpp"
+#include "engines/hip_mlops_engine/plans/resample/ResamplePlanBuilder.hpp"
 #endif
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
@@ -35,10 +35,10 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
     // HIP_MLOPS_ENGINE
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
         {HIP_MLOPS_ENGINE_ID,
-         [](const compilation::IKernelCompiler& kernelCompiler,
-            const device::IDevicePropertyProvider& devicePropertyProvider)
+         [](const device::IDevicePropertyProvider& devicePropertyProvider)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
+             const compilation::IKernelCompiler& kernelCompiler = engine->getKernelCompiler();
              engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
@@ -49,14 +49,15 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<layernorm::LayernormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<resample::ResamplePlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
              return engine;
          }},
 #endif
 #ifdef HIPDNN_ENGINE_ASM_SDPA
         // ASM_SDPA_ENGINE
         {ASM_SDPA_ENGINE_ID,
-         [](const compilation::IKernelCompiler& /*kernelCompiler*/,
-            const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+         [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
@@ -93,7 +94,6 @@ uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint3
 
 Container::Container()
     : _devicePropertyProvider(std::make_unique<device::CurrentDevicePropertyProvider>())
-    , _kernelCompiler(std::make_unique<compilation::KernelCompiler>())
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating Container");
 
@@ -102,8 +102,7 @@ Container::Container()
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
-        _engineManager->addEngine(
-            engineDefinition.createEngine(*_kernelCompiler, *_devicePropertyProvider));
+        _engineManager->addEngine(engineDefinition.createEngine(*_devicePropertyProvider));
     }
 }
 

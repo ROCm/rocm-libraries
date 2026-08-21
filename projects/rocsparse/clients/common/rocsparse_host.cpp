@@ -24,7 +24,7 @@
 #include "rocsparse_clients_routine_trace.hpp"
 #include "utility.hpp"
 
-#include <rocsparse/rocsparse-version.h>
+#include <rocsparse/rocsparse-config.h>
 
 #include <limits>
 
@@ -2289,6 +2289,72 @@ void host_csrsv(rocsparse_operation  trans,
     *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
 }
 
+template <typename I, typename J, typename T>
+void host_cscsv(rocsparse_operation  trans,
+                J                    M,
+                I                    nnz,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // A CSC matrix is the transpose of the CSR matrix sharing the same arrays,
+    // so a CSC triangular solve is a CSR triangular solve with the transpose
+    // operation and the fill mode flipped:
+    //   op=none          -> op'=transpose       (solve A*y=α*x via (A^T)^T=A)
+    //   op=transpose     -> op'=none            (data is already A^T)
+    //   op=conj_trans    -> op'=none on conj    (A^H = conj(A^T); pre-conjugate values)
+    //   fill=lower (A)   -> fill'=upper (A^T), and vice versa
+    const rocsparse_operation trans_csr = (trans == rocsparse_operation_none)
+                                              ? rocsparse_operation_transpose
+                                              : rocsparse_operation_none;
+    const rocsparse_fill_mode fill_csr  = (fill_mode == rocsparse_fill_mode_lower)
+                                              ? rocsparse_fill_mode_upper
+                                              : rocsparse_fill_mode_lower;
+
+    // For the conjugate transpose, pre-conjugate the values so the CSR solve with
+    // op'=none solves conj(A^T)*y = alpha*x = A^H*y = alpha*x.
+    const T*       val = csc_val;
+    std::vector<T> conj_val;
+    if(trans == rocsparse_operation_conjugate_transpose)
+    {
+        conj_val.resize(nnz);
+        for(I i = 0; i < nnz; ++i)
+        {
+            conj_val[i] = rocsparse_conj(csc_val[i]);
+        }
+        val = conj_val.data();
+    }
+
+    // The CSC column pointer / row index arrays act as the CSR row pointer /
+    // column index arrays of A^T.
+    host_csrsv<I, J, T>(trans_csr,
+                        M,
+                        nnz,
+                        alpha,
+                        csc_col_ptr,
+                        csc_row_ind,
+                        val,
+                        x,
+                        x_inc,
+                        y,
+                        diag_type,
+                        fill_csr,
+                        base,
+                        struct_pivot,
+                        numeric_pivot);
+}
+
 template <typename I, typename T>
 void host_coosv(rocsparse_operation  trans,
                 I                    M,
@@ -3939,6 +4005,76 @@ void host_csrsm(J                    M,
         *struct_pivot  = (*struct_pivot == M + 1) ? -1 : *struct_pivot;
         *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
     }
+}
+
+template <typename I, typename J, typename T>
+void host_cscsm(J                    M,
+                J                    nrhs,
+                I                    nnz,
+                rocsparse_operation  transA,
+                rocsparse_operation  transB,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                T*                   B,
+                int64_t              ldb,
+                rocsparse_order      order_B,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // A CSC matrix is the transpose of the CSR matrix sharing the same arrays, so
+    // a CSC triangular solve is a CSR triangular solve on A^T with the transpose
+    // operation and the fill mode flipped (transB acts on B and is unchanged):
+    //   opA=none       -> opA'=transpose       (solve A*C=α*op_B(B) via (A^T)^T=A)
+    //   opA=transpose  -> opA'=none            (data is already A^T)
+    //   opA=conj_trans -> opA'=none on conj    (A^H = conj(A^T); pre-conjugate values)
+    //   fill=lower (A) -> fill'=upper (A^T), and vice versa
+    const rocsparse_operation transA_csr = (transA == rocsparse_operation_none)
+                                               ? rocsparse_operation_transpose
+                                               : rocsparse_operation_none;
+    const rocsparse_fill_mode fill_csr   = (fill_mode == rocsparse_fill_mode_lower)
+                                               ? rocsparse_fill_mode_upper
+                                               : rocsparse_fill_mode_lower;
+
+    // For the conjugate transpose, pre-conjugate the values so the CSR solve with
+    // opA'=none solves conj(A^T)*C = alpha*op_B(B) = A^H*C = alpha*op_B(B).
+    const T*       val = csc_val;
+    std::vector<T> conj_val;
+    if(transA == rocsparse_operation_conjugate_transpose)
+    {
+        conj_val.resize(nnz);
+        for(I i = 0; i < nnz; ++i)
+        {
+            conj_val[i] = rocsparse_conj(csc_val[i]);
+        }
+        val = conj_val.data();
+    }
+
+    // The CSC column pointer / row index arrays act as the CSR row pointer /
+    // column index arrays of A^T.
+    host_csrsm<I, J, T>(M,
+                        nrhs,
+                        nnz,
+                        transA_csr,
+                        transB,
+                        alpha,
+                        csc_col_ptr,
+                        csc_row_ind,
+                        val,
+                        B,
+                        ldb,
+                        order_B,
+                        diag_type,
+                        fill_csr,
+                        base,
+                        struct_pivot,
+                        numeric_pivot);
 }
 
 template <typename I, typename T>
@@ -7740,6 +7876,231 @@ void host_coo_to_dense(I                     m,
     }
 }
 
+template <typename I, typename T>
+void host_dense_to_bell(I                     m,
+                        I                     n,
+                        rocsparse_index_base  base,
+                        const std::vector<T>& A,
+                        int64_t               ld,
+                        rocsparse_order       order,
+                        I                     ell_block_size,
+                        I&                    ell_cols,
+                        std::vector<T>&       bell_val,
+                        std::vector<I>&       bell_col_ind)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    const I mb = (m + ell_block_size - 1) / ell_block_size;
+    const I nb = (n + ell_block_size - 1) / ell_block_size;
+
+    ell_cols = 0;
+
+    if(order == rocsparse_order_row)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I blocks_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    blocks_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
+        for(I i = 0; i < mb; i++)
+        {
+            I slot = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gr + gc] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
+                }
+            }
+
+            for(I s = slot; s < ell_block_width; s++)
+            {
+                bell_col_ind[i * ell_block_width + s] = base - 1;
+            }
+        }
+    }
+    else if(order == rocsparse_order_column)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I blocks_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    blocks_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
+        for(I i = 0; i < mb; i++)
+        {
+            I slot = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gc + gr] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
+                }
+            }
+
+            for(I s = slot; s < ell_block_width; s++)
+            {
+                bell_col_ind[i * ell_block_width + s] = base - 1;
+            }
+        }
+    }
+}
+
 template <typename I, typename J>
 void host_csr_to_coo(J                     M,
                      I                     nnz,
@@ -9572,17 +9933,27 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   std::vector<TTYPE>&       A,           \
                                                   int64_t                   ld,          \
                                                   rocsparse_order           order);
-#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                              \
-    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,           \
-                                                  ITYPE                     n,           \
-                                                  rocsparse_index_base      base,        \
-                                                  const std::vector<TTYPE>& A,           \
-                                                  int64_t                   ld,          \
-                                                  rocsparse_order           order,       \
-                                                  const std::vector<ITYPE>& nnz_per_row, \
-                                                  std::vector<TTYPE>&       coo_val,     \
-                                                  std::vector<ITYPE>&       coo_row_ind, \
-                                                  std::vector<ITYPE>&       coo_col_ind);
+#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                                  \
+    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,               \
+                                                  ITYPE                     n,               \
+                                                  rocsparse_index_base      base,            \
+                                                  const std::vector<TTYPE>& A,               \
+                                                  int64_t                   ld,              \
+                                                  rocsparse_order           order,           \
+                                                  const std::vector<ITYPE>& nnz_per_row,     \
+                                                  std::vector<TTYPE>&       coo_val,         \
+                                                  std::vector<ITYPE>&       coo_row_ind,     \
+                                                  std::vector<ITYPE>&       coo_col_ind);          \
+    template void host_dense_to_bell<ITYPE, TTYPE>(ITYPE                     m,              \
+                                                   ITYPE                     n,              \
+                                                   rocsparse_index_base      base,           \
+                                                   const std::vector<TTYPE>& A,              \
+                                                   int64_t                   ld,             \
+                                                   rocsparse_order           order,          \
+                                                   ITYPE                     ell_block_size, \
+                                                   ITYPE&                    ell_cols,       \
+                                                   std::vector<TTYPE>&       bell_val,       \
+                                                   std::vector<ITYPE>&       bell_col_ind);
 
 #define INSTANTIATE_IJ(ITYPE, JTYPE)                                                       \
     template void host_csr_to_coo<ITYPE, JTYPE>(JTYPE                     M,               \
@@ -9680,6 +10051,21 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   rocsparse_index_base base,                 \
                                                   JTYPE*               struct_pivot,         \
                                                   JTYPE*               numeric_pivot);                     \
+    template void host_cscsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                \
+                                                  JTYPE                M,                    \
+                                                  ITYPE                nnz,                  \
+                                                  TTYPE                alpha,                \
+                                                  const ITYPE*         csc_col_ptr,          \
+                                                  const JTYPE*         csc_row_ind,          \
+                                                  const TTYPE*         csc_val,              \
+                                                  const TTYPE*         x,                    \
+                                                  int64_t              x_inc,                \
+                                                  TTYPE*               y,                    \
+                                                  rocsparse_diag_type  diag_type,            \
+                                                  rocsparse_fill_mode  fill_mode,            \
+                                                  rocsparse_index_base base,                 \
+                                                  JTYPE*               struct_pivot,         \
+                                                  JTYPE*               numeric_pivot);                     \
     template void host_csrsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
                                                   JTYPE                nrhs,                 \
                                                   ITYPE                nnz,                  \
@@ -9689,6 +10075,23 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   const ITYPE*         csr_row_ptr,          \
                                                   const JTYPE*         csr_col_ind,          \
                                                   const TTYPE*         csr_val,              \
+                                                  TTYPE*               B,                    \
+                                                  int64_t              ldb,                  \
+                                                  rocsparse_order      order_B,              \
+                                                  rocsparse_diag_type  diag_type,            \
+                                                  rocsparse_fill_mode  fill_mode,            \
+                                                  rocsparse_index_base base,                 \
+                                                  JTYPE*               struct_pivot,         \
+                                                  JTYPE*               numeric_pivot);                     \
+    template void host_cscsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
+                                                  JTYPE                nrhs,                 \
+                                                  ITYPE                nnz,                  \
+                                                  rocsparse_operation  transA,               \
+                                                  rocsparse_operation  transB,               \
+                                                  TTYPE                alpha,                \
+                                                  const ITYPE*         csc_col_ptr,          \
+                                                  const JTYPE*         csc_row_ind,          \
+                                                  const TTYPE*         csc_val,              \
                                                   TTYPE*               B,                    \
                                                   int64_t              ldb,                  \
                                                   rocsparse_order      order_B,              \

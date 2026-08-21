@@ -2,11 +2,11 @@
 # name: test_gfx90a_hhs_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_HHS_BH_Bias_A_S_UserArgs_MT64x16x2Is2ktKjOrVjH0RGMLAjmZgas5pGBjZWs-tdEVQm5Lc=',
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_Bias_A_S_UserArgs_MT64x16xOFXXVKPIih86zgkczLJRBouzGer_dP-rzqR86gsmuZY=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_HHS_BH_Bias_A_S_UserArgs_MT64x16xtYotte_HoaUlOCcQg3EqOL47xArl9YGzuC7_6ydTzuU=',
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_Bias_A_S_UserArgs_MT64x16xmNyA8myNxwNjZoiy9CjyxlkCiEXByi4SU9NwZRSs6D0=',
       'err': 0,
     }),
   ])

@@ -27,7 +27,9 @@
 #endif
 #include "blas3/rocblas_gemm_source.hpp"
 
+#include "blas3/Tensile/gemm_templates.hpp"
 #include "blas3/rocblas_gemm.hpp"
+#include "blas3/rocblas_gemm_grouped_batched.hpp"
 
 #include "check_numerics_matrix.hpp"
 #include "handle.hpp"
@@ -375,3 +377,32 @@ INSTANTIATE_GEMM_BATCHED_TEMPLATE(rocblas_float_complex)
 INSTANTIATE_GEMM_BATCHED_TEMPLATE(rocblas_double_complex)
 
 #undef INSTANTIATE_GEMM_BATCHED_TEMPLATE
+
+#ifdef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE
+#error INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE already defined
+#endif
+
+#define INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(TI_, T_)       \
+    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status     \
+        rocblas_internal_gemm_grouped_batched_template<TI_, T_>( \
+            rocblas_handle           handle,                     \
+            const rocblas_operation* transa_array,               \
+            const rocblas_operation* transb_array,               \
+            const TI_*               m_array,                    \
+            const TI_*               n_array,                    \
+            const TI_*               k_array,                    \
+            const T_*                alpha_array,                \
+            const T_* const*         Aarray,                     \
+            const TI_*               lda_array,                  \
+            const T_* const*         Barray,                     \
+            const TI_*               ldb_array,                  \
+            const T_*                beta_array,                 \
+            T_* const*               Carray,                     \
+            const TI_*               ldc_array,                  \
+            TI_                      group_count,                \
+            const TI_*               group_size);
+
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(rocblas_int, float)
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(rocblas_int, double)
+
+#undef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE

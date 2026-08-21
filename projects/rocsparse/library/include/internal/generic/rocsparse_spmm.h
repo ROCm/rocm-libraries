@@ -191,6 +191,16 @@ extern "C" {
 *  See the examples below.
 *
 *  \note
+*  When using batched computation, the sparsity pattern of the sparse matrix \f$A\f$ must be the same
+*  across all batches. That is, even in the batch modes that use a distinct \f$A_i\f$ per batch
+*  (\f$C_i = A_i \times B\f$ and \f$C_i = A_i \times B_i\f$), only the values of \f$A_i\f$ may differ
+*  between batches; the row offset and column index arrays must describe an identical sparsity pattern
+*  for every batch. This is because the \ref rocsparse_spmm_stage_preprocess analysis of \f$op(A)\f$ is
+*  performed only once and is reused for all batches. Note that the offset and index arrays may still be
+*  laid out per batch in memory via \p offsets_batch_stride_A and \p columns_values_batch_stride_A, but
+*  their contents must be identical from one batch to the next.
+*
+*  \note
 *  None of the algorithms above are deterministic when \f$A\f$ is transposed or conjugate transposed.
 *
 *  \note

@@ -4,6 +4,8 @@ Determines which component CI jobs to run based on changed files.
 Outputs boolean flags per component via GITHUB_OUTPUT:
   - stinkytofu=true/false
   - rocisa=true/false
+  - miopen=true/false
+  - tensilelite_coverage=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -27,6 +29,10 @@ COMPONENTS = {
     "miopen": [
         "projects/miopen/**",
         ".github/workflows/component-ci-miopen.yml",
+    ],
+    "tensilelite_coverage": [
+        "projects/hipblaslt/tensilelite/**",
+        ".github/workflows/component-ci-tensilelite-coverage.yml",
     ],
 }
 

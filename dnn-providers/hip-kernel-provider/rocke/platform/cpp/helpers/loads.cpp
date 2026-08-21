@@ -292,6 +292,146 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
 }
 
 /* ============================================================================
+ * CoalescedTileLoader split-load helpers (load_global / store_lds)
+ *
+ * Mirror of Python load_global() / store_lds() added for CK pipeline_basic.
+ * load_global emits only buffer_load_vN; store_lds emits only smem_store_vN.
+ * ========================================================================== */
+
+void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
+                                             const rocke_coalesced_tile_loader_t* self,
+                                             rocke_value_t* tid,
+                                             rocke_loads_descriptor_fn descriptor,
+                                             void* descriptor_user,
+                                             rocke_value_t* rsrc,
+                                             rocke_value_t* ptr,
+                                             rocke_ctl_staged_t* staged)
+{
+    rocke_value_t* c_threads;
+    rocke_value_t* c_load_vec;
+    rocke_value_t* c_cols_per_vec;
+    rocke_value_t* c_half_bytes;
+    rocke_value_t* c0;
+    rocke_value_t* c_oob;
+    int vecs_per_thread;
+    int e;
+
+    if(staged != NULL)
+        staged->count = 0;
+
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || staged == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "load_global: NULL loader or staged");
+        return;
+    }
+    if(self->use_buffer_rsrc && rsrc == NULL)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader: use_buffer_rsrc=True requires rsrc");
+        return;
+    }
+    if(!self->use_buffer_rsrc && ptr == NULL)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader: use_buffer_rsrc=False requires ptr");
+        return;
+    }
+
+    /* Same constants as load() — byte-identical SSA prefix. */
+    c_threads = rocke_b_const_i32(b, self->block_size);
+    c_load_vec = rocke_b_const_i32(b, self->load_vec);
+    c_cols_per_vec = rocke_b_const_i32(b, rocke_coalesced_tile_loader_cols_per_vec(self));
+    c_half_bytes = rocke_b_const_i32(b, 2);
+    c0 = rocke_b_const_i32(b, 0);
+    c_oob = rocke_b_const_i32(b, self->oob_sentinel);
+
+    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: bad vecs_per_thread");
+        return;
+    }
+    if(vecs_per_thread > ROCKE_CTL_MAX_VECS_PER_THREAD)
+    {
+        rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "CoalescedTileLoader: vecs_per_thread %d > ROCKE_CTL_MAX_VECS_PER_THREAD %d",
+            vecs_per_thread,
+            ROCKE_CTL_MAX_VECS_PER_THREAD);
+        return;
+    }
+
+    for(e = 0; e < vecs_per_thread; ++e)
+    {
+        rocke_value_t* vec_idx;
+        rocke_value_t* row;
+        rocke_value_t* col_v;
+        rocke_value_t* col;
+        rocke_value_t* off_elems;
+        rocke_value_t* valid;
+        rocke_value_t* v;
+
+        vec_idx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
+        row = rocke_b_div(b, vec_idx, c_cols_per_vec);
+        col_v = rocke_b_mod(b, vec_idx, c_cols_per_vec);
+        col = (self->load_vec > 1) ? rocke_b_mul(b, col_v, c_load_vec) : col_v;
+
+        valid = NULL;
+        off_elems = descriptor(b, row, col, &valid, descriptor_user);
+
+        if(self->use_buffer_rsrc)
+        {
+            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
+            rocke_value_t* safe
+                = (valid != NULL) ? rocke_b_select(b, valid, off_bytes, c_oob) : off_bytes;
+            if(self->load_vec == 1)
+                v = rocke_b_buffer_load_f16(b, rsrc, safe, c0);
+            else
+                v = rocke_b_buffer_load_vN_f16(b, rsrc, safe, c0, self->load_vec / 2);
+        }
+        else
+        {
+            if(self->load_vec == 1)
+                v = rocke_b_global_load_f16(b, ptr, off_elems, 0);
+            else
+                v = rocke_b_global_load_vN_f16(b, ptr, off_elems, self->load_vec, 0);
+        }
+
+        staged->vecs[e].row = row;
+        staged->vecs[e].col = col;
+        staged->vecs[e].v = v;
+    }
+    staged->count = vecs_per_thread;
+}
+
+void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
+                                           const rocke_coalesced_tile_loader_t* self,
+                                           rocke_value_t* smem_dst,
+                                           const rocke_ctl_staged_t* staged)
+{
+    int e;
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || staged == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "store_lds: NULL loader or staged");
+        return;
+    }
+    for(e = 0; e < staged->count; ++e)
+    {
+        rocke_value_t* indices[2];
+        indices[0] = staged->vecs[e].row;
+        indices[1] = staged->vecs[e].col;
+        if(self->load_vec == 1)
+            rocke_b_smem_store_f16(b, smem_dst, indices, 2, staged->vecs[e].v);
+        else
+            rocke_b_smem_store_vN_f16(b, smem_dst, indices, 2, staged->vecs[e].v, self->load_vec);
+    }
+}
+
+/* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */
 

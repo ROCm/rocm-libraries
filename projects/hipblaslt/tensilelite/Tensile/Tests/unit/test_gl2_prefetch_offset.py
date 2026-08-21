@@ -21,13 +21,17 @@
 #   - data tensors A and B (non-MX), TLU and non-TLU layouts
 #   - MX scale tensors MXSA / MXSB (mxUnit = MatrixInstK / MXBlock)
 #   - FP8 (bpe=1) and FP4 (bpe=0.5) element sizes, including mixed A/B dtypes
-#   - ClusterDim != [1,1]: gl2-prefetch is only emitted for cooperative clusters,
-#     so every config runs a real [cx, cy] grid (shapes vary, incl. [4,4]). Each
+#   - ClusterDim != [1,1]: gl2-prefetch is emitted whenever PrefetchGL2 is set,
+#     but the cooperative fan-out only engages for a real cluster, so every config
+#     runs a [cx, cy] grid (shapes vary, incl. [4,4]). Each
 #     WG self-identifies via ttmp (gfx12 carries the workgroup id in ttmp, not
 #     s2): wg_x -> WorkGroup0, wg_y -> WorkGroup1. A 2D cluster drives A and B
-#     (and MXSA/MXSB) cooperatively at the same time, since A is cooperative along
-#     WorkGroup1 / macro-tile-selected by WorkGroup0 and B is the mirror. Each WG
-#     writes to its own output region; the host aggregates across all cx*cy.
+#     (and MXSA/MXSB) cooperatively at the same time. The *whole* cluster
+#     cooperates: A is macro-tile-selected by WorkGroup0 and cooperative across
+#     the rest of the cluster, B is the mirror, and together the cluster's
+#     workgroups cover every macro-tile the cluster consumes (contiguous along
+#     the MT-selector axis). Each WG writes to its own output region; the host
+#     aggregates across all cx*cy.
 #   - StridedBatched: a batch dim (index 2) maps to WorkGroup2, and
 #     calculateStartAddr folds WorkGroup2 * Stride{tc}K into the base address.
 #     Batched configs launch a 3D [cx, cy, num_batches] grid (wg_z from
@@ -38,11 +42,16 @@
 #     prefetched-ahead iteration advances every address by `inc` (incrementAddr).
 #     The kernel re-exports all addresses across n_inc+1 stages; stage s must be
 #     the base footprint shifted by (PGR+s)*inc along the summation (K) axis.
+#   - Non-power-of-2 MacroTile (e.g. 384 for A/B, 192/96 for MX scales): exercises
+#     MT offset, non-POT gl2ncc (vectorStaticDivideAndRemainder), and non-POT
+#     perpendicular/coalesced extents. DepthU remains a multiple of MatrixInstK.
 # Verification is set-based: the union of each tensor's computed byte offsets
-# (per stage) must equal M macro-tiles {m*mt_stride + c*GPS} shifted by the
-# stage's K increment, where M is the launch extent along the tensor's
-# MT-selector axis (1 for the non-cluster case). This tolerates the benign
-# replication when a tensor's nc < cooperative threads (e.g. MX scales).
+# (per stage) must equal the cluster's contiguous prefetch footprint
+# {perp*perp_stride + c*GPS} (the mt_tiles macro-tiles the cluster spans folded
+# into one block), shifted by the stage's K increment. The cluster's workgroups
+# jointly enumerate this footprint (the host aggregates across all cx*cy). It
+# tolerates the benign replication of the whole-cluster scheme (overlapping
+# cooperative-thread slices, and nc < cooperative threads, e.g. MX scales).
 #
 # Usage:
 #   pytest test_gl2_prefetch_offset.py -v -s
@@ -55,6 +64,7 @@ import struct
 import tempfile
 import types
 from dataclasses import dataclass
+from math import ceil
 from types import SimpleNamespace
 
 import pytest
@@ -89,14 +99,18 @@ GLOBAL_PREFETCH_SIZE = 256
 # ---------------------------------------------------------------------------
 @dataclass
 class TensorSpec:
-    tc: str            # "A", "B", "MXSA", "MXSB"
+    tc: str            # "A", "B", "MXSA", "MXSB", "Metadata"
     tlu: bool
     mt: int            # MacroTile (A-type tensors share MacroTileA; B-type MacroTileB)
     bpe: float = 1     # bytes/elem: FP8/scale=1 (int), FP4=0.5
+    is_m: bool = False       # sparse metadata tensor (isM in GL2Prefetch)
+    sparse_side: str = None  # for is_m: "A" or "B" -- which sparse data tensor this
+                             # metadata mirrors (Sparse==1 -> A, Sparse==2 -> B); tc
+                             # itself is always literally "Metadata"
 
     @property
     def subtc(self):
-        return self.tc[-1]            # 'A' or 'B'
+        return self.sparse_side if self.is_m else self.tc[-1]  # 'A' or 'B'
 
     @property
     def idx(self):
@@ -137,6 +151,13 @@ class GL2Config:
                               # into the base address (the batch-offset path).
     num_batches: int = 1      # batch extent (grid z). Each batch b shifts the whole
                               # footprint by b * Stride{tc}K * bpe.
+    sparse: int = 0           # 0 = dense; 1 = A is the 2:4-compressed sparse operand;
+                              # 2 = B is. Halves _DepthU{A,B} for that data tensor
+                              # (GL2Prefetch reads _DepthU{A,B}, not the raw DepthU,
+                              # so this must be modeled here too) and is required
+                              # whenever cfg.tensors includes a Metadata (_M) spec.
+    depth_u_metadata: int = 0 # _DepthUMetadata: metadata's own (already-compressed)
+                              # unroll extent; independent of DepthU/_DepthU{A,B}.
 
     @property
     def n_wg(self):
@@ -148,22 +169,59 @@ class GL2Config:
         return self.n_wg * self.num_batches
 
 
+def num_cooperative_threads(cfg, subtc):
+    """Cooperative thread count = the *whole* cluster (matches GL2Prefetch.init).
+    Every workgroup in the cluster cooperates on the prefetch, so the pool is
+    ClusterDim[0]*ClusterDim[1]*NumThreads regardless of the tensor."""
+    return cfg.cluster[0] * cfg.cluster[1] * cfg.num_threads
+
+
+def depth_u_side(side, cfg):
+    """_DepthU{A,B}: the per-tensor unroll extent GL2Prefetch.init actually reads
+    for a plain data tensor (matches Solution.py). Equal to DepthU, except for
+    the 2:4-compressed sparse data tensor (A when Sparse==1, B when Sparse==2),
+    which is physically halved along K."""
+    if (cfg.sparse == 1 and side == "A") or (cfg.sparse == 2 and side == "B"):
+        return cfg.depth_u // 2
+    return cfg.depth_u
+
+
+def data_depth_u(spec, cfg):
+    return depth_u_side(spec.subtc, cfg)
+
+
 def tensor_dims(spec, cfg):
-    """(coal_dim, perp_dim, ncc, nc) for a tensor, matching GL2Prefetch.init."""
-    if spec.is_mx:
-        coal = spec.mt * cfg.matrix_inst_k // cfg.mx_block
+    """(coal_dim, perp_dim, ncc, nc) for a tensor, matching GL2Prefetch.init.
+    The prefetched block spans *all* the macro-tiles the cluster consumes along
+    the MT-selector axis (mt_tiles of them, contiguous in memory), so the tile
+    dimension is scaled by mt_tiles: it is the coalesced dim for TLU/MX and the
+    perpendicular dim for non-TLU."""
+    M = mt_tiles(spec, cfg)
+    if spec.is_m:
+        # metadata uses its own compressed unroll extent (_DepthUMetadata), not
+        # DepthU/_DepthU{A,B}; bpe is always 1 (already byte-granular)
+        coal, perp = (spec.mt * M, cfg.depth_u_metadata) if spec.tlu else (cfg.depth_u_metadata, spec.mt * M)
+    elif spec.is_mx:
+        coal = spec.mt * M * cfg.matrix_inst_k // cfg.mx_block
         perp = cfg.depth_u // cfg.matrix_inst_k
     else:
-        coal, perp = (spec.mt, cfg.depth_u) if spec.tlu else (cfg.depth_u, spec.mt)
+        du = data_depth_u(spec, cfg)
+        coal, perp = (spec.mt * M, du) if spec.tlu else (du, spec.mt * M)
     ncc = max(1, round(coal * spec.bpe) // GLOBAL_PREFETCH_SIZE)
     return coal, perp, ncc, perp * ncc
+
+
+def tensor_gl2nl(spec, cfg):
+    """Loads per thread (gl2nl), matching GL2Prefetch.init."""
+    nc = tensor_dims(spec, cfg)[3]
+    return max(1, ceil(nc / num_cooperative_threads(cfg, spec.subtc)))
 
 
 def free_dim_size(cfg, subtc):
     """Programmed SizeI/SizeJ (the GEMM free-dim, used for the edge-limit clamp).
     Defaults to a clean tiling (cluster_extent * MacroTile); an explicit size_i/
     size_j makes the last macro-tile partial so the edge clamp fires."""
-    mt = next((t.mt for t in cfg.tensors if t.subtc == subtc), 1)
+    mt = next((t.mt for t in cfg.tensors if t.subtc == subtc and not t.is_m), 1)
     if subtc == "A":
         return cfg.size_i if cfg.size_i is not None else cfg.cluster[0] * mt
     return cfg.size_j if cfg.size_j is not None else cfg.cluster[1] * mt
@@ -181,16 +239,27 @@ def _A(tlu, mt, bpe=1):   return TensorSpec("A", tlu, mt, bpe)
 def _B(tlu, mt, bpe=1):   return TensorSpec("B", tlu, mt, bpe)
 def _MXSA(mt):            return TensorSpec("MXSA", True, mt, 1)
 def _MXSB(mt):            return TensorSpec("MXSB", True, mt, 1)
+def _M(side, tlu, mt):    return TensorSpec("Metadata", tlu, mt, 1, is_m=True, sparse_side=side)
 
 
-# gl2-prefetch is only emitted for ClusterDim != [1,1], so every config runs a
-# (power-of-2) cooperative cluster. ClusterDim = [cx, cy]: A/MXSA cooperate along
-# cy and span cx macro-tiles; B/MXSB are the mirror. Cluster shapes are varied
-# across configs (and include [4,4]) to exercise both cooperative axes.
+# gl2-prefetch is emitted whenever PrefetchGL2 is set (KernelWriter guards
+# gl2PrefetchCalcAddr on kernel["PrefetchGL2"] only, not ClusterDim). The
+# cooperative fan-out only kicks in for a real cluster, so most configs run with
+# ClusterDim != [1,1] to exercise it (one [1,1] case covers the degenerate path).
+# ClusterDim = [cx, cy]: A/MXSA cooperate along cy and span cx macro-tiles; B/MXSB are the mirror. Shapes
+# include power-of-2 and non-POT MacroTile / cluster extents
+# (scalarStaticRemainder, ceil(gl2nl), ncc divide).
 CONFIGS = [
-    # ---- A + B together, FP8, assorted cluster shapes (incl. [4,4]) ----
-    GL2Config("ab_fp8_tlu",          [_A(True, 256),  _B(True, 256)],  cluster=(2, 2)),
-    GL2Config("ab_fp8_ntlu",         [_A(False, 256), _B(False, 256)], cluster=(4, 4)),
+    # ---- ClusterDim [1,1]: gl2-prefetch is still emitted (guard is PrefetchGL2,
+    # not ClusterDim), but there is no cooperative fan-out -- numTileWGs ==
+    # numShareWGs == 1, so every scalarStaticRemainder divides by 1 and the whole
+    # footprint is covered by this single WG's threads. Guards the degenerate
+    # single-workgroup path. ----
+    GL2Config("ab_fp8_tlu_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1)),
+    # ---- A + B together, FP8 TLU; MT=384 (non-POT) -> gl2ncc==2 ----
+    GL2Config("ab_fp8_tlu",          [_A(True, 384),  _B(True, 384)],  cluster=(2, 2)),
+    # ---- A + B non-TLU; MT=384 (non-POT) on perpendicular dim ----
+    GL2Config("ab_fp8_ntlu",         [_A(False, 384), _B(False, 384)], cluster=(4, 4)),
     # batched=True also exercises the StridedBatched path (WorkGroup2 * Stride{tc}K
     # folded into the base addr): batch 0 reproduces the non-batched footprint, and
     # batch >0 verifies the per-batch shift. The grid gains a z extent (wg_z from
@@ -204,9 +273,11 @@ CONFIGS = [
               depth_u=512, cluster=(1, 2)),
     # ---- A + B + MXSA + MXSB together (full MX problem) ----
     # batched=True here also covers the StridedBatched path for MX scales (Stride{MXSx}K).
-    GL2Config("abmx_fp8",      [_A(True, 256),  _B(True, 256),  _MXSA(256), _MXSB(256)],
+    # ---- A + B + MXSA + MXSB together; MT=192 (non-POT) -> MX gl2ncc==3 ----
+    GL2Config("abmx_fp8",      [_A(True, 192),  _B(True, 192),  _MXSA(192), _MXSB(192)],
               depth_u=256, mx_block=32, cluster=(2, 2), batched=True, num_batches=2),
-    GL2Config("abmx_fp8_ntlu", [_A(False, 256), _B(False, 256), _MXSA(256), _MXSB(256)],
+    # ---- full MX problem, non-TLU data; MT=384 (non-POT) ----
+    GL2Config("abmx_fp8_ntlu", [_A(False, 384), _B(False, 384), _MXSA(384), _MXSB(384)],
               depth_u=256, mx_block=32, cluster=(2, 1)),
     # ---- FP4 (bpe=0.5) on A and B, TLU, ncc==1 and (coal*bpe==2*GPS) ncc==2 ----
     GL2Config("ab_fp4_tlu",      [_A(True, 512, bpe=0.5),  _B(True, 512, bpe=0.5)],
@@ -216,8 +287,8 @@ CONFIGS = [
     # ---- non-TLU: FP4 tile-split on A + FP8 coalesced-split ncc2 on B (coal==DepthU) ----
     GL2Config("ab_ntlu_f4f8", [_A(False, 256, bpe=0.5), _B(False, 128, bpe=1)],
               depth_u=512, cluster=(2, 2)),
-    # ---- MX scales together: MXSA at ncc==2, MXSB at ncc==1 ----
-    GL2Config("mxab_ncc", [_MXSA(128), _MXSB(64)], depth_u=1024, num_threads=16,
+    # ---- MX scales together: MXSA ncc==3, MXSB ncc==2 (non-POT MT 192 / 96) ----
+    GL2Config("mxab_ncc", [_MXSA(192), _MXSB(96)], depth_u=1024, num_threads=16,
               mx_block=32, cluster=(2, 4)),
     # ---- Edge clamp: SizeI/SizeJ is NOT a clean multiple of the tiling, so the
     # last macro-tile is partial and the edge-limit clamp min(idx, Size-1) fires.
@@ -227,7 +298,44 @@ CONFIGS = [
     GL2Config("ab_tlu_edge",  [_A(True, 512), _B(True, 512)],
               depth_u=128, cluster=(2, 2), size_i=700, size_j=700),
     GL2Config("mx_edge", [_MXSA(128), _MXSB(64)], depth_u=1024, num_threads=16,
-              mx_block=32, cluster=(2, 2), size_i=150, size_j=50),
+              mx_block=32, cluster=(2, 2), size_i=150, size_j=80),
+    # ---- gl2nl > 1: nc > cooperative threads (stride-add path); DU is MIK-aligned ----
+    GL2Config("ab_tlu_nl2", [_A(True, 256), _B(True, 256)], depth_u=640, cluster=(2, 2)),
+    # ---- gl2nl >> 1 with an uneven nc/nl: exercises the per-inst index stride
+    # ncPerInst = ceil(nc/nl). A floor(nc/nl) stride under-tiles the top of the
+    # footprint here (nc=1536, T=144, nl=11 -> floor stride 139 leaves the last
+    # two cache lines uncovered; ceil stride 140 covers them). Needs a small
+    # thread pool so nc/T is large; DU stays MIK-aligned (512 % 128 == 0). ----
+    GL2Config("ab_tlu_nl_ceil", [_A(True, 256), _B(True, 256)], depth_u=512,
+              num_threads=16, cluster=(3, 3)),
+    # ---- non-POT cooperative cluster extent (scalarStaticRemainder non-POT path) ----
+    GL2Config("ab_cluster_cy3", [_A(True, 256), _B(True, 256)], cluster=(2, 3)),
+    # ---- non-POT cluster on a non-TLU layout: both cluster axes are non-POT, so
+    # every scalarStaticRemainder (tile-selector and share) hits the non-POT path
+    # for both A and B, while the MT offset/folded tile dim land on the perp dim ----
+    GL2Config("ab_ntlu_cluster3", [_A(False, 256), _B(False, 256)], cluster=(3, 3)),
+    # ---- Sparse metadata (isM) coverage. Sparse=1 -> A is the 2:4-compressed
+    # data tensor (_DepthUA halved) and Metadata mirrors A's tile axis (idx=0);
+    # Sparse=2 is the mirror on B. MetadataLayout is independent of the data
+    # tensor's TLU (real kernels support both), so both are exercised. ----
+    # ---- Sparse=1, data TLU, metadata non-TLU (MetadataLayout=0) ----
+    GL2Config("a_sparse_tlu_mlayout0", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64),
+    # ---- Sparse=1, data TLU, metadata also TLU (MetadataLayout=1) ----
+    GL2Config("a_sparse_tlu_mlayout1", [_A(True, 256), _B(True, 256), _M("A", True, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64),
+    # ---- Sparse=2 (mirror on B), non-TLU data; MT=384 (non-POT) on both data and
+    # metadata -> exercises non-POT gl2ncc/scalarStaticRemainder for isM too ----
+    GL2Config("b_sparse_ntlu_nonpot", [_A(False, 384), _B(False, 384), _M("B", True, 384)],
+              cluster=(3, 3), sparse=2, depth_u_metadata=96),
+    # ---- Sparse=1 + StridedBatched: exercises the WorkGroup2*Stride{tc}K batch
+    # offset for Metadata too (AddressMetadata/StrideMetadataK) ----
+    GL2Config("a_sparse_batched", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64, batched=True, num_batches=2),
+    # ---- Sparse=1 + gl2nl > 1 for the metadata tensor (small thread pool, larger
+    # DepthUMetadata) -> exercises the per-inst stride-add path on isM ----
+    GL2Config("a_sparse_nl2", [_A(True, 256), _B(True, 256), _M("A", True, 256)],
+              cluster=(2, 2), num_threads=16, sparse=1, depth_u_metadata=256),
 ]
 
 
@@ -236,7 +344,8 @@ def batch_stride_elems(spec, cfg):
     but fixed and distinct per tensor so the verifier can reproduce the
     WorkGroup2 * Stride{tc}K * bpe shift and so a cross-tensor stride mixup fails.
     Chosen even so that stride * bpe is integral for fractional bpe (FP4)."""
-    return {"A": 1_000_002, "B": 2_000_006, "MXSA": 3_000_010, "MXSB": 4_000_014}[spec.tc]
+    return {"A": 1_000_002, "B": 2_000_006, "MXSA": 3_000_010, "MXSB": 4_000_014,
+            "Metadata": 5_000_018}[spec.tc]
 
 # ---------------------------------------------------------------------------
 # Kernel + writer construction
@@ -244,7 +353,7 @@ def batch_stride_elems(spec, cfg):
 
 def _subtc_attr(cfg, sub, attr, default):
     for t in cfg.tensors:
-        if t.subtc == sub:
+        if t.subtc == sub and not t.is_m:
             return getattr(t, attr)
     return default
 
@@ -252,7 +361,8 @@ def _subtc_attr(cfg, sub, attr, default):
 def _make_kernel(cfg):
     has_mxa = any(t.tc == "MXSA" for t in cfg.tensors)
     has_mxb = any(t.tc == "MXSB" for t in cfg.tensors)
-    return {
+    m_spec = next((t for t in cfg.tensors if t.is_m), None)
+    kernel = {
         "ProblemType": {
             "Batched": cfg.batched,
             "StridedBatched": cfg.batched,
@@ -266,9 +376,15 @@ def _make_kernel(cfg):
             "MXBlockB": cfg.mx_block if has_mxb else 0,
             "TLUA": _subtc_attr(cfg, "A", "tlu", True),
             "TLUB": _subtc_attr(cfg, "B", "tlu", True),
+            "Sparse": cfg.sparse,
         },
         "MacroTileA": _subtc_attr(cfg, "A", "mt", 256),
         "MacroTileB": _subtc_attr(cfg, "B", "mt", 256),
+        # _DepthU{A,B}: per-tensor unroll extent (== DepthU for dense; GL2Prefetch
+        # reads these instead of the plain DepthU so it matches the sparse-halved
+        # layout when a data tensor is the compressed (2:4) sparse operand).
+        "_DepthUA": depth_u_side("A", cfg),
+        "_DepthUB": depth_u_side("B", cfg),
         "MatrixInstK": cfg.matrix_inst_k,
         "ClusterDim": list(cfg.cluster),
         "NumThreads": cfg.num_threads,
@@ -277,6 +393,10 @@ def _make_kernel(cfg):
         "WavefrontSize": WAVESIZE,
         "PrefetchGL2": cfg.pgl,
     }
+    if m_spec is not None:
+        kernel["MacroTileMetadata"] = m_spec.mt
+        kernel["_DepthUMetadata"] = cfg.depth_u_metadata
+    return kernel
 
 
 def _make_writer(kernel):
@@ -296,7 +416,7 @@ def _make_writer(kernel):
     w.states = SimpleNamespace(
         kernel=kernel,
         indexChars=INDEX_CHARS,
-        regCaps={"MaxSgpr": 102, "MaxVgpr": 1024, "PhysicalMaxVgpr": 1024,
+        regCaps={"MaxSgpr": 106, "MaxVgpr": 1024, "PhysicalMaxVgpr": 1024,
                  "GlobalPrefetchSize": GLOBAL_PREFETCH_SIZE},
         asmCaps={"HasSMulHi": True, "HasGlobalPrefetch": True},
         unrollIdx=0,
@@ -346,6 +466,10 @@ def build_kernel(cfg):
         shared += ["StrideAI", "StrideAL", "SizeI"]
     if "B" in subtcs:
         shared += ["StrideBJ", "StrideBL", "SizeJ"]
+    for t in cfg.tensors:
+        if t.is_m:                        # StrideMetadata{I,J} + StrideMetadataL
+            idxChar = "I" if t.idx == 0 else "J"
+            shared += [f"StrideMetadata{idxChar}", "StrideMetadataL"]
     for n in shared:
         w.sgprs[n] = w.sgprPool.checkOut(1, n, preventOverflow=False)
     for t in cfg.tensors:
@@ -361,20 +485,21 @@ def build_kernel(cfg):
     vgpr_sets = {}
     for t in cfg.tensors:
         ia = t.ia + [2] if cfg.batched else t.ia   # batch index 2 must be in ia
-        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": ia}
+        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": ia, "isM": t.is_m}
         comp.init(w, kernel, tp)
         assert tp["gl2nc"] == tensor_dims(t, cfg)[3], \
             f"{t.tc}: gl2nc {tp['gl2nc']} != expected {tensor_dims(t, cfg)[3]}"
-        for i in range(tp["gl2nlp"]):
-            for j in range(tp["gl2nlc"]):
-                name = f"GL2PrefetchAddr{t.tc}_{i}_{j}"
-                vgpr_sets[name] = w.vgprPool.checkOutAligned(2, 2, name, preventOverflow=False)
+        assert tp["gl2nl"] == tensor_gl2nl(t, cfg), \
+            f"{t.tc}: gl2nl {tp['gl2nl']} != expected {tensor_gl2nl(t, cfg)}"
+        for i in range(tp["gl2nl"]):
+            name = f"GL2PrefetchAddr{t.tc}_{i}"
+            vgpr_sets[name] = w.vgprPool.checkOutAligned(2, 2, name, preventOverflow=False)
         tps.append((t, tp))
 
     # output elements written by one workgroup (used to shift per-wg regions);
     # each of the n_stages re-exports every tensor's loads.
     n_stages = cfg.n_inc + 1
-    n_out_per_wg = n_stages * sum(cfg.num_threads * tp["gl2nlp"] * tp["gl2nlc"] for _, tp in tps)
+    n_out_per_wg = n_stages * sum(cfg.num_threads * tp["gl2nl"] for _, tp in tps)
 
     # ---- body: setIncrement (all), then calculateStartAddr (each).
     # calculateStartAddr now folds in the base Address{tc} and the PGR pre-skip
@@ -404,6 +529,14 @@ def build_kernel(cfg):
         coal_b = _data_coal(cfg, "B")
         consts += [("StrideBJ", coal_b), ("StrideBL", coal_b),
                    ("SizeJ", free_dim_size(cfg, "B"))]
+    for t in cfg.tensors:
+        if t.is_m:
+            # StrideMetadata{I,J}/StrideMetadataL are both programmed to the
+            # metadata's own (folded) coalesced extent, mirroring how StrideAI==
+            # StrideAL / StrideBJ==StrideBL are set for a plain data tensor.
+            coal_m = tensor_dims(t, cfg)[0]
+            idxChar = "I" if t.idx == 0 else "J"
+            consts += [(f"StrideMetadata{idxChar}", coal_m), ("StrideMetadataL", coal_m)]
     consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0)]
     if cfg.batched:                              # programmed batch stride Stride{tc}K
         consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
@@ -440,29 +573,28 @@ def build_kernel(cfg):
     val = w.vgprPool.checkOut(1, "val", preventOverflow=False)
 
     def export_tensor(t, tp, region):
-        num_loads = tp["gl2nlp"] * tp["gl2nlc"]
+        num_loads = tp["gl2nl"]
         base = w.sgprs[f"Address{t.tc}"]
         k = 0
-        for i in range(tp["gl2nlp"]):
-            for j in range(tp["gl2nlc"]):
-                addr = vgpr_sets[f"GL2PrefetchAddr{t.tc}_{i}_{j}"]
-                epi.add(TextBlock("  v_sub_co_u32 v%d, vcc_lo, v%d, s%d\n" % (val, addr, base)))
-                # output element index = region + Serial*num_loads + k
-                if num_loads == 1:
-                    epi.add(TextBlock("  v_add_nc_u32 v%d, %d, v0\n" % (off, region + k)))
-                else:
-                    epi.add(TextBlock("  v_mul_u32_u24 v%d, v0, %d\n" % (off, num_loads)))
-                    epi.add(TextBlock("  v_add_nc_u32 v%d, %d, v%d\n" % (off, region + k, off)))
-                if cfg.n_regions > 1:          # shift this region's results into its own slice
-                    epi.add(TextBlock("  v_add_nc_u32 v%d, s%d, v%d\n"
-                                      % (off, w.sgprs["WGOUT"], off)))
-                epi.add(TextBlock("  v_lshlrev_b32 v%d, 2, v%d\n" % (off, off)))
-                epi.add(TextBlock("  v_add_co_u32 v%d, vcc_lo, s%d, v%d\n"
-                                  % (a_lo, w.sgprs["OutPtr"], off)))
-                epi.add(TextBlock("  v_mov_b32 v%d, s%d\n" % (a_hi, w.sgprs["OutPtr"] + 1)))
-                epi.add(TextBlock("  v_add_co_ci_u32 v%d, vcc_lo, v%d, 0, vcc_lo\n" % (a_hi, a_hi)))
-                epi.add(TextBlock("  flat_store_b32 v[%d:%d], v%d\n" % (a_lo, a_hi, val)))
-                k += 1
+        for i in range(tp["gl2nl"]):
+            addr = vgpr_sets[f"GL2PrefetchAddr{t.tc}_{i}"]
+            epi.add(TextBlock("  v_sub_co_u32 v%d, vcc_lo, v%d, s%d\n" % (val, addr, base)))
+            # output element index = region + Serial*num_loads + k
+            if num_loads == 1:
+                epi.add(TextBlock("  v_add_nc_u32 v%d, %d, v0\n" % (off, region + k)))
+            else:
+                epi.add(TextBlock("  v_mul_u32_u24 v%d, v0, %d\n" % (off, num_loads)))
+                epi.add(TextBlock("  v_add_nc_u32 v%d, %d, v%d\n" % (off, region + k, off)))
+            if cfg.n_regions > 1:          # shift this region's results into its own slice
+                epi.add(TextBlock("  v_add_nc_u32 v%d, s%d, v%d\n"
+                                  % (off, w.sgprs["WGOUT"], off)))
+            epi.add(TextBlock("  v_lshlrev_b32 v%d, 2, v%d\n" % (off, off)))
+            epi.add(TextBlock("  v_add_co_u32 v%d, vcc_lo, s%d, v%d\n"
+                              % (a_lo, w.sgprs["OutPtr"], off)))
+            epi.add(TextBlock("  v_mov_b32 v%d, s%d\n" % (a_hi, w.sgprs["OutPtr"] + 1)))
+            epi.add(TextBlock("  v_add_co_ci_u32 v%d, vcc_lo, v%d, 0, vcc_lo\n" % (a_hi, a_hi)))
+            epi.add(TextBlock("  flat_store_b32 v[%d:%d], v%d\n" % (a_lo, a_hi, val)))
+            k += 1
 
     layout = []
     region = 0
@@ -471,7 +603,7 @@ def build_kernel(cfg):
             for t, tp in tps:
                 epi.add(comp.incrementAddr(w, kernel, tp))
         for t, tp in tps:
-            num_loads = tp["gl2nlp"] * tp["gl2nlc"]
+            num_loads = tp["gl2nl"]
             export_tensor(t, tp, region)
             layout.append((t, num_loads, stage, region))
             region += cfg.num_threads * num_loads
@@ -544,9 +676,10 @@ amdhsa.kernels:
 def _data_coal(cfg, sub):
     """Leading (coalesced) extent of the data tensor for subtc, used as the
     contiguous stride. MX tensors derive their stride in-kernel, so any value
-    works there; fall back to whatever tensor is present."""
+    works there; fall back to whatever tensor is present. Excludes Metadata:
+    the data tensor's stride is programmed independently of StrideMetadataL."""
     for t in cfg.tensors:
-        if t.subtc == sub and not t.is_mx:
+        if t.subtc == sub and not t.is_mx and not t.is_m:
             return tensor_dims(t, cfg)[0]
     for t in cfg.tensors:
         if t.subtc == sub:
@@ -562,16 +695,21 @@ def inc_bytes(spec, cfg):
     """Per-iteration K (summation) address increment in bytes, matching
     GL2Prefetch.setIncrement. Advancing the prefetch by one iteration moves a
     full DepthU along the summation axis; in bytes this is:
-      - MX:      SizeFree * (DepthU // MXBlock)              (* bpe == 1)
-      - TLU:     StrideUnroll(=coal) * (DepthU * bpe)
-      - non-TLU: (DepthU * bpe)                              (K is the coalesced axis)
+      - MX:       SizeFree * (DepthU // MXBlock)              (* bpe == 1)
+      - Metadata: StrideMetadataL(=coal_m) * DepthUMetadata if TLUMetadata,
+                  else DepthUMetadata                          (bpe == 1)
+      - TLU:      StrideUnroll(=coal) * (_DepthU{A,B} * bpe)
+      - non-TLU:  (_DepthU{A,B} * bpe)                        (K is the coalesced axis)
     """
     bpe = spec.bpe
     if spec.is_mx:
         return free_dim_size(cfg, spec.subtc) * round(cfg.depth_u // cfg.mx_block * bpe)
+    if spec.is_m:
+        coal, _, _, _ = tensor_dims(spec, cfg)
+        return round(coal * cfg.depth_u_metadata) if spec.tlu else round(cfg.depth_u_metadata)
     if spec.tlu:
-        return _data_coal(cfg, spec.subtc) * round(cfg.depth_u * bpe)
-    return round(cfg.depth_u * bpe)
+        return _data_coal(cfg, spec.subtc) * round(data_depth_u(spec, cfg) * bpe)
+    return round(data_depth_u(spec, cfg) * bpe)
 
 
 def expected_offsets(spec, cfg, stage=0, batch=0):
@@ -586,9 +724,11 @@ def expected_offsets(spec, cfg, stage=0, batch=0):
     `batch` adds the StridedBatched shift batch * Stride{tc}K * bpe (the
     WorkGroup2 * batchStride term calculateStartAddr folds into the base
     address); like the stage shift it is a pure translation of the set.
-    Per tensor this is M macro-tiles (MT-selector axis) x ncc coalesced GPS-chunks
-    x `perp` perpendicular rows, with the edge-limit clamp min(index, SizeFree-1)
-    applied to the coalesced index (TLU/MX) or the perpendicular index (non-TLU).
+    The whole cluster cooperates, so the footprint spans all mt_tiles macro-tiles
+    the cluster consumes as one contiguous block (folded into tensor_dims): ncc
+    coalesced GPS-chunks x `perp` perpendicular rows, with the edge-limit clamp
+    min(index, SizeFree-1) applied to the coalesced index (TLU/MX) or the
+    perpendicular index (non-TLU).
 
     We deliberately do NOT model the thread<->address mapping (cooperative-WG
     fan-out, inactive-bit shifts, per-thread load counts): those are an
@@ -596,34 +736,30 @@ def expected_offsets(spec, cfg, stage=0, batch=0):
     only a coverage bug (a missing/extra/out-of-bounds address) fails."""
     GPS = GLOBAL_PREFETCH_SIZE
     bpe = spec.bpe
-    coal, perp, ncc, _ = tensor_dims(spec, cfg)
-    M = mt_tiles(spec, cfg)
+    coal, perp, ncc, _ = tensor_dims(spec, cfg)   # tile dim folded over the cluster
     size_free = free_dim_size(cfg, spec.subtc)
     if spec.is_mx:
         mx_unit = cfg.matrix_inst_k // cfg.mx_block
         perp_stride = size_free * mx_unit
         edge = (size_free - 1) * mx_unit
-        mt_off = mx_unit * spec.mt
     else:
-        perp_stride = coal            # StrideAL (TLU) == mt; StrideAI (nTLU) == DepthU
+        perp_stride = coal            # StrideAL (TLU) / StrideAI (nTLU): the folded leading dim
         edge = size_free - 1
-        mt_off = spec.mt
     coal_to_mt = (spec.is_mx or spec.tlu)    # MT offset & clamp land in coal (else perp)
     gps_elems = round(GPS / bpe)
     shift = (cfg.pgr + stage) * inc_bytes(spec, cfg)
     if cfg.batched:
         shift += batch * round(batch_stride_elems(spec, cfg) * bpe)
     out = set()
-    for m in range(M):
-        for c in range(ncc):
-            for p in range(perp):
-                if coal_to_mt:
-                    coal_idx = min(m * mt_off + c * gps_elems, edge)
-                    perp_idx = p
-                else:
-                    perp_idx = min(p + m * mt_off, edge)
-                    coal_idx = c * gps_elems
-                out.add(round((perp_idx * perp_stride + coal_idx) * bpe) + shift)
+    for c in range(ncc):
+        for p in range(perp):
+            if coal_to_mt:
+                coal_idx = min(c * gps_elems, edge)
+                perp_idx = p
+            else:
+                perp_idx = min(p, edge)
+                coal_idx = c * gps_elems
+            out.add(round((perp_idx * perp_stride + coal_idx) * bpe) + shift)
     return out
 
 

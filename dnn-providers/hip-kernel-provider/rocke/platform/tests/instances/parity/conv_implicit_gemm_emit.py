@@ -186,6 +186,65 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
+    if idx == 10:
+        # cshuffle epilogue with cshuffle_no_alias=True (idx 2 shape): the C tile
+        # gets its own exclusive LDS bytes and the step-0 reuse barrier is elided.
+        p = _cp(N=16, Hi=112, Wi=112, C=128, K=128, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                cshuffle_no_alias=True,
+            ),
+            "gfx950",
+        )
+    if idx == 11:
+        # basic pipeline, default epilogue (single-buffer global-read/compute overlap).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="basic",
+                epilogue="default",
+            ),
+            "gfx950",
+        )
+    if idx == 12:
+        # basic pipeline, cshuffle epilogue.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="basic",
+                epilogue="cshuffle",
+            ),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

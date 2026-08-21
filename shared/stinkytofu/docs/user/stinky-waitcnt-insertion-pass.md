@@ -7,7 +7,7 @@
 - **SSA def-use dependencies** via `buildUseDefChain(includePseudo=true)` — memtoken pseudo-registers become first-class edges, so `inst->getSources()` lists the memops a consumer depends on (including through PHIs at CFG joins)
 - **Four counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), scalar memory (`kmcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
 - **Per-predecessor queues** — each counter keeps separate in-flight FIFOs tagged by CFG predecessor edge, so join consumers see each path's depth instead of a collapsed union queue
-- **Tensor loop policy** — by default, the `CK_Tensor` slice of dataflow state is frozen after the first solver sweep so tensor tokens do not propagate around loop back-edges; a conservative option restores normal tensor fixed-point iteration
+- **Tensor loop policy** — TensileLite promises tagged tensor-token deps are correct without propagating `CK_Tensor` through loop back-edges, so by default exact `CK_Tensor` queues are frozen after the first solver sweep; blocks with untagged tensor anchors keep their live tensor queues because those anchors are fences, and `loopCarriedTokenDepsEnabled` restores normal tensor fixed-point iteration when conservative propagation is needed
 - **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, untagged conservative fallbacks)
 - **Analyze → Optimize → Finalize** — dataflow solve, then `ShallowPredPromotion`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
 - **Selective IR mutation**: `buildUseDefChain` and `WaitDataflow::solve()` run over every basic block so skipped preds still contribute in-flight state; `PassContext::shouldProcessBasicBlock` gates `emitWaits` and `removePHIs` only
@@ -21,7 +21,7 @@ Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_loa
 | `CounterKind` | Covers | Wait instruction | Modifier field |
 |---------------|--------|------------------|----------------|
 | `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` |
-| `CK_Buffer` | global/buffer load + store | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` |
+| `CK_Buffer` | global/buffer load + store, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` |
 | `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt N` | `SWaitCntData.kmcnt` |
 | `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` |
 
@@ -178,7 +178,7 @@ Loop-carried tensor-token dependencies are controlled separately:
 df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 ```
 
-By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during solver sweep 0, then freezes only the tensor slice of `DataflowState` on later sweeps. This prevents tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
 
 When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
 
@@ -235,7 +235,7 @@ Per-pred queues are kept separate at block exit (not collapsed) so successors pr
 
 ### DataflowResult
 
-Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pred]` for per-path queue depths; `finalizePlan` reads `entryState`. In default mode, the `CK_Tensor` slice of these states is the frozen post-sweep-0 tensor snapshot, while the other counters are fully converged.
+Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pred]` for per-path queue depths; `finalizePlan` reads `entryState`. In default mode, exact `CK_Tensor` queues and tensor PHI waits are the frozen post-sweep-0 tensor snapshot except for blocks with untagged tensor anchors, where live tensor queues continue to iterate through the normal dataflow state. The other counters are fully converged.
 
 ### WaitCountSpec / WaitInsertionPlan
 
@@ -245,6 +245,7 @@ Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pre
 +--------------------------------+
 | dsCount:     int  (dlcnt)      |  or kUnused (-1)
 | bufferCount: int  (vlcnt)      |
+| kmCount:     int  (kmcnt)      |
 | tensorCount: int  (tlcnt)      |
 +--------------------------------+
 
@@ -279,7 +280,7 @@ Intuition: after emitting `s_wait N`, at most `N` old ops remain; each new op is
 
 1. Seed every block with empty state (lattice bottom).
 2. Each iteration: for each block, `mergeFromPredecessors` builds entry state, then `transferBlock` walks instructions and mutates state.
-3. In default mode, after sweep 0, restore the `CK_Tensor` slice of each block's entry/exit state from the frozen sweep-0 snapshot. DS, buffer, and KM continue normal fixed-point iteration.
+3. In default mode, after sweep 0, call `restoreTensorState` on each block's entry and exit state. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen sweep-0 snapshot, unless `hasUntaggedTensorAnchor(bb)` is true. DS, buffer, and KM continue normal fixed-point iteration.
 4. Convergence = full RPO sweep with no exit-state change.
 5. On convergence, report any counter that exceeded `kMaxInFlight` as a non-fatal diagnostic.
 
@@ -363,7 +364,7 @@ Anchor helpers:
 | LDS writer | Writer lacks `MemTokenData`, any DS op in flight, writer is not `ds_write` | `required[CK_DS] = 0` |
 | Barrier | Any in-flight DS op and (barrier untagged OR any pending DS op untagged) | `required[CK_DS] = 0` |
 
-These widen waits, never narrow them.
+These widen waits, never narrow them. In default tensor-freeze mode, blocks with untagged tensor anchors keep live tensor queues specifically so the tensor-anchor fallback can still see loop-carried tensor loads.
 
 ---
 
@@ -400,23 +401,23 @@ After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `Sha
 
 After optimizers, `WaitDataflow::finalizePlan()` replays blocks where the solver's queue simulation may disagree with the final plan.
 
-### When a block is replayed
+### Replay scope
 
-`blockNeedsFinalize` returns true when the block has any entry in `plan.anchorWaits` **or** ≥2 wait-anchor candidates (any instruction where `rawNeedsWait` is true for any counter).
+`finalizePlan()` replays every block in RPO order against recomputed predecessor exits. Back-edges start at bottom and tighten over iterations, just like `solve()`. The replay rebuilds `newAnchors` from scratch each sweep using the optimizer's plan as the floor.
 
 ### Per-block replay algorithm
 
-For each replayed block in RPO order:
+For each block in RPO order:
 
 1. **`adjustedEntry`** — start from converged `entryState[bb]`. For each predecessor with a `TailDrain` in the plan, virtually trim only that pred's per-pred queues by the tail-drain wait values. Tail drains execute on the predecessor **before** control enters the successor; converged `entryState` does not include them.
-2. **Tensor freeze restore** — in default mode and after replay sweep 0, restore only the `CK_Tensor` slice of the block entry from the frozen replay entry snapshot.
+2. **Tensor freeze restore** — in default mode and after replay sweep 0, call `restoreTensorState` on the replay entry. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen replay entry snapshot, unless `hasUntaggedTensorAnchor(bb)` is true.
 3. **Program-order walk** — for each non-PHI instruction:
    - `computed = computeRequiredWaits(inst, state, rawNeedsWait)`
    - `applySpec = mergePlanAndComputed(plan, inst, computed, emitState)`
    - Trim queues with applied wait values (never with pre-optimizer solver values)
    - Update `plan.anchorWaits[inst]` — add, update, or erase redundant fields
    - Append producers to counter queues after the wait decision
-4. **Tensor exit restore** — in default mode and after replay sweep 0, restore only the `CK_Tensor` slice of the block exit from the frozen replay exit snapshot before convergence comparison.
+4. **Tensor exit restore** — in default mode and after replay sweep 0, call `restoreTensorState` on the replay exit before convergence comparison, with the same untagged-anchor exception.
 
 When `enableLoopCarriedTokenDeps` is true, both tensor restore steps are skipped and all counters are replayed to a fixed point.
 
@@ -524,6 +525,7 @@ Each non-`kUnused` field in `WaitCountSpec` produces one instruction:
 |---------------------|---------------------|----------|
 | `dsCount` | `s_wait_dscnt <N>` | `SWaitCntData.dlcnt` |
 | `bufferCount` | `s_wait_loadcnt <N>` | `SWaitCntData.vlcnt` |
+| `kmCount` | `s_wait_kmcnt <N>` | `SWaitCntData.kmcnt` |
 | `tensorCount` | `s_wait_tensorcnt <N>` | `SWaitTensorCntData.tlcnt` |
 
 ### removePHIs

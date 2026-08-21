@@ -24,7 +24,7 @@ struct SdpaFwdParams
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
-                  std::optional<float> attnScaleValue,
+                  std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
                   int64_t leftBound,
                   int64_t rightBound,
                   bool topLeftAlignment,
@@ -36,7 +36,7 @@ struct SdpaFwdParams
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
         , oTensor(unpackTensorAttributes(oAttributes))
-        , attnScaleValue(attnScaleValue)
+        , scaleTensor(std::move(scale))
         , leftBound(leftBound)
         , rightBound(rightBound)
         , topLeftAlignment(topLeftAlignment)
@@ -53,7 +53,7 @@ struct SdpaFwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT kTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT vTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT oTensor;
-    std::optional<float> attnScaleValue;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor;
     int64_t leftBound;
     int64_t rightBound;
     bool topLeftAlignment;
@@ -105,12 +105,19 @@ public:
                                                           variantPack.at(_params.lseTensor->uid));
         }
 
+        std::optional<float> effectiveScale;
+        if(_params.scaleTensor.has_value())
+        {
+            effectiveScale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
+                _params.scaleTensor.value(), variantPack, "SDPA scale");
+        }
+
         utilities::CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, float>(
             *shallowQTensor,
             *shallowKTensor,
             *shallowVTensor,
             *shallowOTensor,
-            _params.attnScaleValue,
+            effectiveScale,
             shallowAttnMaskTensor.get(),
             _params.leftBound,
             _params.rightBound,
@@ -214,6 +221,8 @@ public:
             return false;
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 
@@ -239,6 +248,11 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
+        const auto* scalePtr = nodeAttributes->scale_tensor_uid().has_value()
+                                   ? tensorMap.at(nodeAttributes->scale_tensor_uid().value())
+                                   : nullptr;
+        auto scale = foldSdpaScale(scalePtr, attnScaleValue);
+
         const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
                                  : nullptr;
@@ -251,7 +265,7 @@ public:
                           *tensorMap.at(nodeAttributes->k_tensor_uid()),
                           *tensorMap.at(nodeAttributes->v_tensor_uid()),
                           *tensorMap.at(nodeAttributes->o_tensor_uid()),
-                          attnScaleValue,
+                          std::move(scale),
                           leftBound,
                           rightBound,
                           isTopLeft,

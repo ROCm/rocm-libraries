@@ -24,6 +24,16 @@ show_missing = true
 skip_covered = false
 skip_empty = true
 sort = "Cover"
+# Whole-project coverage floor (AIHPBLAS-3877). This is the single documented
+# source of truth for the floor: the `coverage report` step in the coverage-gate
+# tox env reads it, so a job that runs that env fails when coverage drops below
+# this number, without the value being duplicated in tox.ini or CI YAML.
+# (coverage-unit measures with --fail-under=0 and does not gate; see tox.ini.)
+# Interim value: the GPU-less coverage-unit run currently measures ~79% and the
+# 80% target is aspirational. Set to 75 for now so the gate can land green while
+# the per-file ratchet (AIHPBLAS-3878) prevents regressions; ratchet this back
+# up toward 80 as coverage improves.
+fail_under = 75
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -136,7 +146,10 @@ members = ["rocisa"]
 [tool.mutmut]
 source_paths = ["Tensile"]
 only_mutate = [
+    "Tensile/Common/DataType.py",
     "Tensile/Common/Utilities.py",
+    "Tensile/Common/Types.py",
+    "Tensile/Common/ValidParameters.py",
     "Tensile/TensileLogic/ValidChipId.py",
     "Tensile/TensileLogic/ValidMatrixInstruction.py",
     "Tensile/TensileLogic/ValidWorkGroup.py",
@@ -149,8 +162,11 @@ do_not_mutate = [
     "*/conftest.py",
 ]
 pytest_add_cli_args_test_selection = [
+    "Tensile/Tests/unit/characterization/CommonTypes",
     "Tensile/Tests/unit/characterization/CommonUtilities",
+    "Tensile/Tests/unit/characterization/DataType",
     "Tensile/Tests/unit/characterization/TensileLogic",
+    "Tensile/Tests/unit/characterization/ValidParameters"
 ]
 also_copy = ["pytest.ini"]
 # mutate_only_covered_lines MUST stay false here: when true, mutmut runs an

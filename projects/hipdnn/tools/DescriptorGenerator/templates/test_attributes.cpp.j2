@@ -1,3 +1,4 @@
+{% from "macros.j2" import assign_frontend_data_field %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
@@ -7,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
 // --- Test suite: Test{{ op.frontend.attributes_class }} ---
@@ -17,21 +19,26 @@ TEST(Test{{ op.frontend.attributes_class }}, Create{{ op.frontend.attributes_cla
 
     // Set all tensors
 {% for tensor in op.frontend.all_tensors %}
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
-    {{ tensor.name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }});
-    attrs.{{ tensor.effective_setter_name }}({{ tensor.name }}Tensor);
+    auto {{ tensor.camel_name }}Tensor = std::make_shared<TensorAttributes>();
+    {{ tensor.camel_name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }});
+    attrs.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}Tensor);
 {% endfor %}
 
     // Set data fields
 {% for df in op.data_fields %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endfor %}
 
@@ -45,13 +52,16 @@ TEST(Test{{ op.frontend.attributes_class }}, Create{{ op.frontend.attributes_cla
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     EXPECT_EQ(attrs.{{ df.frontend_getter }}, (std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }}));
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    EXPECT_EQ(attrs.{{ df.frontend_getter }}, {{ value }});
 {% endif %}
 {% endfor %}
 }
 
 TEST(Test{{ op.frontend.attributes_class }}, DefaultValues)
 {
-    {{ op.frontend.attributes_class }} attrs;
+    const {{ op.frontend.attributes_class }} attrs;
 
     // Tensors should be null by default
 {% for tensor in op.frontend.all_tensors %}
@@ -62,6 +72,12 @@ TEST(Test{{ op.frontend.attributes_class }}, DefaultValues)
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     EXPECT_TRUE(attrs.{{ df.frontend_getter }}.empty());
+{% elif df.is_optional_scalar %}
+    EXPECT_FALSE(attrs.{{ df.frontend_getter }}.has_value());
+{% elif df.is_mode %}
+    EXPECT_EQ(attrs.{{ df.frontend_getter }}, {{ df.default_value }});
+{% elif df.is_scalar %}
+    EXPECT_EQ(attrs.{{ df.frontend_getter }}, {{ df.default_value if df.default_value else "0" }});
 {% endif %}
 {% endfor %}
 }
@@ -72,18 +88,18 @@ TEST(Test{{ op.frontend.attributes_class }}, Set{{ tensor.name | replace('_', ' 
 {
     {{ op.frontend.attributes_class }} attrs;
 
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
-    {{ tensor.name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }})
+    auto {{ tensor.camel_name }}Tensor = std::make_shared<TensorAttributes>();
+    {{ tensor.camel_name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }})
         .set_name("Moved{{ tensor.name | replace('_', ' ') | title | replace(' ', '') }}Tensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
     // Store the raw pointer before moving
-    auto rawPtr = {{ tensor.name }}Tensor.get();
+    auto rawPtr = {{ tensor.camel_name }}Tensor.get();
 
-    attrs.{{ tensor.effective_setter_name }}(std::move({{ tensor.name }}Tensor));
+    attrs.{{ tensor.effective_setter_name }}(std::move({{ tensor.camel_name }}Tensor));
 
     // After move, original should be nullptr
-    EXPECT_EQ({{ tensor.name }}Tensor, nullptr);
+    EXPECT_EQ({{ tensor.camel_name }}Tensor, nullptr);
 
     // The moved tensor should be accessible through the getter
     auto retrievedTensor = attrs.{{ tensor.effective_getter_name }}();
@@ -98,7 +114,7 @@ TEST(Test{{ op.frontend.attributes_class }}, Set{{ df.name | replace('_', ' ') |
     {{ op.frontend.attributes_class }} attrs;
 
     std::vector<int64_t> {{ df.camel_name }}Move = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
-    attrs.{{ df.frontend_setter_name }}(std::move({{ df.camel_name }}Move));
+    {{ assign_frontend_data_field("attrs", df, "std::move(" ~ df.camel_name ~ "Move)") }}
 
     EXPECT_EQ(attrs.{{ df.frontend_getter }}, (std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }}));
 }
@@ -111,17 +127,17 @@ TEST(Test{{ op.frontend.attributes_class }}, SetTensorsConstRef)
 
     // Create tensors
 {% for tensor in op.frontend.all_tensors %}
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
-    {{ tensor.name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index * 10 + 40) }}).set_name("{{ tensor.name | replace('_', ' ') | title | replace(' ', '') }}ConstRef");
+    auto {{ tensor.camel_name }}Tensor = std::make_shared<TensorAttributes>();
+    {{ tensor.camel_name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index * 10 + 40) }}).set_name("{{ tensor.name | replace('_', ' ') | title | replace(' ', '') }}ConstRef");
 {% endfor %}
 
     // Set using const reference (copy)
 {% for tensor in op.frontend.all_tensors %}
-    attrs.{{ tensor.effective_setter_name }}({{ tensor.name }}Tensor);
+    attrs.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}Tensor);
 {% endfor %}
 
     // Original tensors should still be valid
 {% for tensor in op.frontend.all_tensors %}
-    EXPECT_NE({{ tensor.name }}Tensor, nullptr);
+    EXPECT_NE({{ tensor.camel_name }}Tensor, nullptr);
 {% endfor %}
 }

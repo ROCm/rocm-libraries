@@ -1043,6 +1043,7 @@ def make_lds_view(
     shape: Sequence[int],
     name_hint: str = "lds",
     strides: Optional[Sequence[StrideElem]] = None,
+    exclusive: bool = False,
 ) -> TensorView:
     """``make_tensor_view<addr_space_enum::lds>(make_lds_alloc<T>(...), desc)``.
 
@@ -1050,8 +1051,12 @@ def make_lds_view(
     returns a view over it. ``strides`` defaults to packed row-major;
     pass an explicit stride (e.g. ``shape[1] + lds_pad``) to introduce
     bank-conflict padding.
+
+    ``exclusive`` (cshuffle no-alias mode) forwards to ``smem_alloc`` so the
+    smem-pool packer gives this buffer its own byte range instead of aliasing
+    another allocation's slot.
     """
-    smem = b.smem_alloc(dtype, list(shape), name_hint=name_hint)
+    smem = b.smem_alloc(dtype, list(shape), name_hint=name_hint, exclusive=exclusive)
     if strides is None:
         desc = TensorDescriptor.packed(shape, dtype)
     else:

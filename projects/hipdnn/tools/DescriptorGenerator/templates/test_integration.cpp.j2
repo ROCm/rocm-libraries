@@ -1,10 +1,11 @@
-{% from "macros.j2" import vector_const_name %}
+{% from "macros.j2" import assign_frontend_data_field, baseline_mode_name, baseline_scalar_value, cpp_literal, vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/{{ op.fbs_generated_header }}>
@@ -49,7 +50,11 @@ protected:
     /// Callers set up attrs before calling; this creates tensors, calls the
     /// graph method, validates, lowers, serializes, and deserializes.
     hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserialize(
-        {{ op.frontend.attributes_class }}& attrs)
+        {{ op.frontend.attributes_class }}& attrs
+{% for param in op.frontend.graph_method_params if param.optional %}
+        , bool include{{ param.name[0] | upper }}{{ param.name[1:] }} = false
+{% endfor %}
+        , bool assignUids = true)
     {
         auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("{{ op.name }}IntegrationTest")
@@ -61,26 +66,50 @@ protected:
 {% for param in op.frontend.graph_method_params %}
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
 {% set tc = op.test_data.tensor_configs.get(tf_name) %}
-        auto {{ param.name }} = std::make_shared<TensorAttributes>();
-        {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
-            .set_name("{{ param.tensor_name }}")
-            .set_data_type(DataType::FLOAT);
+{% if param.optional %}
+        std::shared_ptr<TensorAttributes> {{ param.name }};
+        if(include{{ param.name[0] | upper }}{{ param.name[1:] }})
+        {
+            {{ param.name }} = std::make_shared<TensorAttributes>();
+            if(assignUids)
+            {
+                {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID);
+            }
+            {{ param.name }}->set_name("{{ param.tensor_name }}")
+                .set_data_type(DataType::{{ tc.data_type if tc else "FLOAT" }});
 {% if tc %}
-        {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+            {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS))
+                .set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+{% endif %}
+        }
+{% else %}
+        auto {{ param.name }} = std::make_shared<TensorAttributes>();
+        if(assignUids)
+        {
+            {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID);
+        }
+        {{ param.name }}->set_name("{{ param.tensor_name }}")
+            .set_data_type(DataType::{{ tc.data_type if tc else "FLOAT" }});
+{% if tc %}
+        {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS))
+            .set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+{% endif %}
 {% endif %}
 
 {% endfor %}
 {% if op.frontend.graph_return_type == 'single' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
-{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
         auto {{ out_name }} = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
             {{ param.name }},
 {% endfor %}
             attrs);
-        {{ out_name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
-            .set_output(true)
+        if(assignUids)
+        {
+            {{ out_name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID);
+        }
+        {{ out_name }}->set_output(true)
             .set_name("{{ out_name }}");
 {% endif %}
 
@@ -103,15 +132,18 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_op");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% if non_sentinel %}
-    attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
-{% endif %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for df in op.data_fields if df.is_vector and df.required %}
 {% if df.name in op.test_data.field_values %}
 {% set const_name = vector_const_name(df, op) %}
-    attrs.{{ df.frontend_setter_name }}(toVec({{ const_name }}));
+    {{ assign_frontend_data_field("attrs", df, "toVec(" ~ const_name ~ ")") }}
 {% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endfor %}
 
     auto graphT = buildAndDeserialize(attrs);
@@ -129,7 +161,9 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->dims, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->strides, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
-    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::{{ tc.data_type if tc else "FLOAT" }});
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->name, "{{ ft.name if ft else tf.name }}");
 {% endfor %}
 
     // Verify operation node
@@ -154,9 +188,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
     // Verify mode
-{% if non_sentinel %}
-    EXPECT_EQ(opNode->{{ mf.fbs_field }}, {{ mf.enum_short_type }}Sdk::{{ non_sentinel[0].effective_sdk_name }});
-{% endif %}
+    EXPECT_EQ(opNode->{{ mf.fbs_field }}, {{ mf.enum_short_type }}Sdk::{{ baseline_mode_name(op, mf) }});
 {% endif %}
 
 {% for df in op.data_fields if df.is_vector and df.required %}
@@ -166,7 +198,137 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     EXPECT_EQ(opNode->{{ df.fbs_field }}, toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = baseline_scalar_value(op, df) %}
+    EXPECT_EQ(opNode->{{ df.fbs_field }}, {{ value }});
+{% endfor %}
 }
+
+{% if op.has_compute_data_type %}
+// Verifies an operation-level compute type overrides the graph default during lowering.
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowering, OperationComputeDataTypeOverride)
+{
+    {{ op.frontend.attributes_class }} attrs;
+    attrs.set_name("test_operation_compute_type");
+{% if op.mode_fields %}
+{% set mf = op.mode_fields[0] %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
+{% endif %}
+{% for df in op.data_fields if df.is_vector and df.required %}
+{% if df.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(df, op) %}
+    {{ assign_frontend_data_field("attrs", df, "toVec(" ~ const_name ~ ")") }}
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = baseline_scalar_value(op, df) %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
+{% endfor %}
+    attrs.set_compute_data_type(DataType::HALF);
+
+    auto graphT = buildAndDeserialize(attrs);
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    EXPECT_EQ(graphT.nodes[0]->compute_data_type, DataTypeSdk::HALF);
+}
+{% endif %}
+
+{% for scenario in op.mode_integration_scenarios %}
+// Verifies the canonical serialized footprint for {{ scenario.mode }} mode.
+// Surplus frontend attributes are accepted for cuDNN compatibility and omitted
+// when the selected mode does not serialize them.
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowering, ModeScenario{{ scenario.pascal_name }})
+{
+    {{ op.frontend.attributes_class }} attrs;
+    attrs.set_name("test_{{ scenario.name }}");
+{% set mf = op.mode_fields[0] %}
+    {{ assign_frontend_data_field("attrs", mf, mf.effective_frontend_type ~ "::" ~ scenario.mode) }}
+{% for df in op.data_fields if df.is_vector and df.required %}
+{% if df.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(df, op) %}
+    {{ assign_frontend_data_field("attrs", df, "toVec(" ~ const_name ~ ")") }}
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = scenario.scalar_overrides.get(df.name, df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0)) %}
+    {{ assign_frontend_data_field("attrs", df, cpp_literal(value)) }}
+{% endfor %}
+
+    auto graphT = buildAndDeserialize(
+        attrs
+{% for param in op.frontend.graph_method_params if param.optional %}
+        , {{ "true" if (param.tensor_name or param.name) in scenario.provided_optional_inputs else "false" }}
+{% endfor %}
+        );
+
+    ASSERT_EQ(graphT.tensors.size(), {{ (op.required_tensor_fields | length) + (scenario.expected_optional_inputs | length) }}u);
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    const auto* opNode = graphT.nodes[0]->attributes.As{{ op.fbs_table }}();
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->{{ mf.fbs_field }}, {{ mf.enum_short_type }}Sdk::{{ scenario.mode }});
+{% for tf in op.optional_tensor_fields %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% if tf.name in scenario.expected_optional_inputs %}
+    ASSERT_TRUE(opNode->{{ tf.uid_field }}.has_value());
+    EXPECT_EQ(*opNode->{{ tf.uid_field }}, {{ uid_const }});
+{% else %}
+    EXPECT_FALSE(opNode->{{ tf.uid_field }}.has_value());
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set input_value = scenario.scalar_overrides.get(df.name, df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0)) %}
+{% set expected_value = scenario.expected_scalar_values.get(df.name, input_value) %}
+    EXPECT_EQ(opNode->{{ df.fbs_field }}, {{ cpp_literal(expected_value) }});
+{% endfor %}
+}
+{% endfor %}
+
+{% if op.frontend.graph_return_type == 'single' %}
+// Verifies that lowering assigns unique UIDs when callers omit them.
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
+{
+    {{ op.frontend.attributes_class }} attrs;
+    attrs.set_name("test_auto_uid");
+{% if op.mode_fields %}
+{% set mf = op.mode_fields[0] %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
+{% endif %}
+{% for df in op.data_fields if df.is_vector and df.required %}
+{% if df.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(df, op) %}
+    {{ assign_frontend_data_field("attrs", df, "toVec(" ~ const_name ~ ")") }}
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = baseline_scalar_value(op, df) %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
+{% endfor %}
+
+    auto graphT = buildAndDeserialize(
+        attrs
+{% for param in op.frontend.graph_method_params if param.optional %}
+        , false
+{% endfor %}
+        , false);
+
+    ASSERT_EQ(graphT.tensors.size(), {{ op.required_tensor_fields | length }}u);
+    std::unordered_set<int64_t> uids;
+    for(const auto& tensor : graphT.tensors)
+    {
+        uids.insert(tensor->uid);
+    }
+    ASSERT_EQ(uids.size(), {{ op.required_tensor_fields | length }}u);
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    const auto* opNode = graphT.nodes[0]->attributes.As{{ op.fbs_table }}();
+    ASSERT_NE(opNode, nullptr);
+{% for tf in op.required_tensor_fields %}
+    EXPECT_TRUE(uids.count(opNode->{{ tf.uid_field }}) > 0);
+{% endfor %}
+}
+{% endif %}
 
 {% for df in op.optional_scalar_fields %}
 {% if df.type == 'scalar_float' %}
@@ -185,17 +347,16 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_{{ df.name }}");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% if non_sentinel %}
-    attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
-{% endif %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for vf in op.data_fields if vf.is_vector and vf.required %}
 {% if vf.name in op.test_data.field_values %}
 {% set const_name = vector_const_name(vf, op) %}
-    attrs.{{ vf.frontend_setter_name }}(toVec({{ const_name }}));
+    {{ assign_frontend_data_field("attrs", vf, "toVec(" ~ const_name ~ ")") }}
 {% endif %}
 {% endfor %}
-    attrs.{{ df.frontend_setter_name }}({{ test_val }});
+    {{ assign_frontend_data_field("attrs", df, test_val) }}
 
     auto graphT = buildAndDeserialize(attrs);
 

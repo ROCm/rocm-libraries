@@ -599,6 +599,7 @@ using FieldMap = std::unordered_map<std::string, std::string>;
 /// not a reliable indicator).
 bool hasMatrixFmtFields(const FieldMap& fields) {
     return fields.count("matrix_a_fmt") || fields.count("matrix_b_fmt") ||
+           fields.count("matrix_a_scale") || fields.count("matrix_b_scale") ||
            fields.count("matrix_a_scale_fmt") || fields.count("matrix_b_scale_fmt") ||
            fields.count("matrix_a_reuse") || fields.count("matrix_b_reuse");
 }
@@ -869,6 +870,10 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         // form like "MATRIX_FMT_FP8" directly).
         if (fields.contains("matrix_a_fmt")) modFields["fmtA"] = fields["matrix_a_fmt"];
         if (fields.contains("matrix_b_fmt")) modFields["fmtB"] = fields["matrix_b_fmt"];
+        // MX scale-select (matrix_a_scale / matrix_b_scale) maps to the raw
+        // integer fields scaleSelA / scaleSelB on MatrixFmtModifiers.
+        if (fields.contains("matrix_a_scale")) modFields["scaleSelA"] = fields["matrix_a_scale"];
+        if (fields.contains("matrix_b_scale")) modFields["scaleSelB"] = fields["matrix_b_scale"];
         if (fields.contains("matrix_a_scale_fmt"))
             modFields["scaleFmtA"] = fields["matrix_a_scale_fmt"];
         if (fields.contains("matrix_b_scale_fmt"))

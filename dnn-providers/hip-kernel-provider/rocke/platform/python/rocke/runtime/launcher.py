@@ -95,7 +95,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
 from .hip_module import Runtime
-from .torch_module import pack_args, resolve_stream
+from .packing import pack_args
+from .torch_interop import resolve_stream
 
 __all__ = [
     "DeviceMem",

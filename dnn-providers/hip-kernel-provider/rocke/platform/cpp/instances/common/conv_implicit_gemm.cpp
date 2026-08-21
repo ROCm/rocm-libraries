@@ -51,6 +51,7 @@ rocke_conv_problem_t rocke_conv_problem_make(int N,
     p.sD = 0;
     p.pD = 0;
     p.dD = 0;
+    p.groups = 1;
     return p;
 }
 

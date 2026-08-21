@@ -242,6 +242,14 @@ class TraitSpec:
     # None (default): arch-resolved -> hints OFF on gfx950 (take the uplift), ON
     # elsewhere (preserve the historical emission). True/False forces the choice.
     emit_sched_hints: Optional[bool] = None
+    # cshuffle epilogue LDS aliasing. By default (False) the smem-pool packer
+    # aliases the cshuffle C tile onto the A/B staging bytes (pool = max(ab, c)),
+    # which needs a barrier between the main loop's last A/B read and the first
+    # C write (the epilogue "step-0 reuse barrier"). Setting True gives C its own
+    # LDS bytes (pool = ab + c) and elides that barrier -> lower latency for
+    # small tiles, at the cost of more LDS (lower occupancy) for large tiles.
+    # Only affects the cshuffle epilogue; False keeps byte-identical output.
+    cshuffle_no_alias: bool = False
 
 
 @dataclass(frozen=True)
@@ -314,6 +322,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 "pref": tr.dtl_prefetch,
                 "actt": tr.active_tile_skip,
                 f"spk{tr.split_k}": tr.split_k > 1,
+                "noalc": tr.cshuffle_no_alias,
             },
         )
 
@@ -2455,7 +2464,33 @@ def _emit_epilogue_cshuffle(
             record_runtime(b, N=N)
 
     # LDS staging tile: tile_m x tile_n of output storage dtype.
-    Cs = b.smem_alloc(storage_dtype, [t.tile_m, t.tile_n], name_hint="C_smem")
+    # ``cshuffle_no_alias`` marks it exclusive so the smem-pool packer gives it
+    # its own byte range instead of aliasing the A/B staging bytes.
+    Cs = b.smem_alloc(
+        storage_dtype,
+        [t.tile_m, t.tile_n],
+        name_hint="C_smem",
+        exclusive=spec.trait.cshuffle_no_alias,
+    )
+
+    # ---- step 0: reuse barrier. ----
+    # The common-LDS packer aliases this C staging tile onto the A/B
+    # staging bytes (they are non-interfering in program order, so the
+    # liveness packer places C at the A/B pool offset). The double-buffered
+    # and prefetched mainloops (``_emit_kloop_db`` / ``_emit_kloop_prefetch``)
+    # end with the tail-tile MFMA reading A/B from LDS *after* their last
+    # drain barrier and emit no trailing barrier, so without a barrier here a
+    # fast wave's first C ``ds_write`` would clobber A/B bytes a slow wave is
+    # still reading for its tail MFMA -- a cross-wave WAR on the aliased pool.
+    # (The single-buffer ``_emit_kloop_simple`` already has a trailing in-loop
+    # barrier, which makes this one redundant-but-harmless there.)
+    #
+    # With ``cshuffle_no_alias`` the C tile has its own exclusive LDS bytes that
+    # never overlap A/B, so this cross-wave WAR cannot occur and the barrier is
+    # elided -- the small-tile latency win. The step-3 C-write->C-read barrier
+    # below is a genuine intra-epilogue RAW and always stays.
+    if not spec.trait.cshuffle_no_alias:
+        b.sync()
 
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))

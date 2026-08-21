@@ -232,6 +232,10 @@ def retrieve_projects(args):
                 if mapped_project == project:
                     label_subtrees.append(subtree)
                     break  # Only need one representative subtree per project
+        if "test:hipblaslt" in pr_labels:
+            # The generic BLAS representative may be a different subtree.
+            # Preserve the explicit hipBLASLt request for rocjitsu selection.
+            label_subtrees.append("projects/hipblaslt")
 
         # Combine file-based detection with label-based selection
         subtrees = list(set(subtrees + label_subtrees))

@@ -16,6 +16,7 @@
 #include "HipblasltMxMatmulPlan.hpp"
 #include "HipblasltMxMatmulPlanBuilder.hpp"
 #include "HipblasltUtils.hpp"
+#include "Workarounds.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -101,19 +102,23 @@ using TensorWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttrib
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 // Our current implementation limitations (distinct from hipBLASLt's own
-// restrictions, checked later). For now we only support OCP FP8 inputs
-// (E4M3 / E5M2).
+// restrictions, checked later). Inputs must be MX operand types: FP8 OCP
+// (E4M3 / E5M2) or FP4 (E2M1). A and B are checked independently, so mixed
+// pairs (e.g. FP8 OCP + FP4) are supported here; hipBLASLt's heuristic is the
+// final gate on whether a given combination has a kernel.
 void checkImplementationLimitations(const TensorWrapper& tXA, const TensorWrapper& tXB)
 {
-    if(!hipblaslt_utils::isTypeFp8Ocp(tXA.dataType()))
+    if(!hipblaslt_utils::isTypeMxOcp(tXA.dataType()))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: A input must be FP8 OCP (E4M3 or E5M2)");
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MX matmul: A input must be an MX type (FP8 OCP E4M3/E5M2 or FP4 E2M1)");
     }
-    if(!hipblaslt_utils::isTypeFp8Ocp(tXB.dataType()))
+    if(!hipblaslt_utils::isTypeMxOcp(tXB.dataType()))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: B input must be FP8 OCP (E4M3 or E5M2)");
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MX matmul: B input must be an MX type (FP8 OCP E4M3/E5M2 or FP4 E2M1)");
     }
 }
 
@@ -170,8 +175,8 @@ void checkVirtualTensors(const BlockScaleDequantizeAttributes& deqAttrA,
         }
     };
 
-    requireNonVirtual(deqAttrA.x_tensor_uid(), "A (FP8 input)");
-    requireNonVirtual(deqAttrB.x_tensor_uid(), "B (FP8 input)");
+    requireNonVirtual(deqAttrA.x_tensor_uid(), "A (MX input)");
+    requireNonVirtual(deqAttrB.x_tensor_uid(), "B (MX input)");
     requireNonVirtual(deqAttrA.scale_tensor_uid(), "A scale");
     requireNonVirtual(deqAttrB.scale_tensor_uid(), "B scale");
     requireNonVirtual(matmulAttr.c_tensor_uid(), "matmul output");
@@ -341,7 +346,7 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     checkNoBatch(dimsB, "B");
     checkNoBatch(dimsC, "C");
 
-    // opA = T, opB = N — inferred from FP8 X tensor strides.
+    // opA = T, opB = N — inferred from the MX X tensor strides.
     // Rule: row-major (stride[-1]==1) → HIPBLAS_OP_N; col-major (stride[-2]==1) → HIPBLAS_OP_T
     const auto& stridesA = tXA.strides();
     const auto& stridesB = tXB.strides();
@@ -357,13 +362,13 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: A (FP8) must have opA=T (column-major strides, stride[-2]==1)");
+            "MX matmul: A (MX) must have opA=T (column-major strides, stride[-2]==1)");
     }
     if(stridesB[stridesB.size() - 1] != 1)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: B (FP8) must have opB=N (row-major strides, stride[-1]==1)");
+            "MX matmul: B (MX) must have opB=N (row-major strides, stride[-1]==1)");
     }
 
     // Alignment: m % 16 == 0, n % 16 == 0, K % 128 == 0.
@@ -439,6 +444,7 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    REJECT_IF_WORKAROUND_ISSUE_9962(handle);
     try
     {
         auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);

@@ -167,6 +167,13 @@ macro(_add_external_integration_category_suites)
         if(ARG_ENVIRONMENT)
             list(APPEND _apply_category_args ENVIRONMENT ${ARG_ENVIRONMENT})
         endif()
+        if(ARG_ENVIRONMENT_MODIFICATION)
+            list(APPEND _apply_category_args
+                ENVIRONMENT_MODIFICATION ${ARG_ENVIRONMENT_MODIFICATION})
+        endif()
+        if(ARG_FIXTURES_REQUIRED)
+            list(APPEND _apply_category_args FIXTURES_REQUIRED ${ARG_FIXTURES_REQUIRED})
+        endif()
 
         if(ARG_INSTALL_TEST_FILE AND _install_bin)
             set(_category_install_command_args
@@ -203,7 +210,7 @@ function(add_external_integration_test_target)
         ARG
         ""
         "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX"
-        "GTEST_FILTER;ENVIRONMENT"
+        "GTEST_FILTER;ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
 
@@ -236,6 +243,17 @@ function(add_external_integration_test_target)
     if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
         add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
         set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")
+        if(ARG_ENVIRONMENT)
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES ENVIRONMENT "${ARG_ENVIRONMENT}")
+        endif()
+        if(ARG_ENVIRONMENT_MODIFICATION)
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES
+                ENVIRONMENT_MODIFICATION "${ARG_ENVIRONMENT_MODIFICATION}")
+        endif()
+        if(ARG_FIXTURES_REQUIRED)
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES
+                FIXTURES_REQUIRED "${ARG_FIXTURES_REQUIRED}")
+        endif()
     endif()
 
     _stage_external_integration_install_test()

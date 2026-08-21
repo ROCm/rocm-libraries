@@ -203,10 +203,15 @@ wait_stream_and_release
 release_retained_for_stream
 ```
 
-## `from rocke.runtime.torch_module import ...`
+## `from rocke.runtime.packing import ...`
 
 ```text
-pack_args, pack_args_kernelparams
+pack_args, pack_args_kernelparams   # torch-agnostic kernarg packing
+```
+
+## `from rocke.runtime.torch_interop import ...`
+
+```text
 resolve_stream
 empty_workspace
 launch_torch_kernel # back-compat shim

@@ -39,6 +39,19 @@ using hipdnn_frontend::PointwiseMode_t;
 using hipdnn_frontend::ReductionMode_t;
 using hipdnn_frontend::ResampleMode_t;
 
+// Deliberately-hollow placeholders: they exist only so the cuDNN-spelled setter
+// signatures (set_kernel_cache / set_device_properties) compile against hipified
+// consumer source. They carry none of cuDNN's real API — a consumer that calls
+// methods on them will not compile. Grow real members only when the shim can
+// honor the corresponding feature.
+struct KernelCache
+{
+};
+
+struct DeviceProperties
+{
+};
+
 // Other cuDNN FE-namespace enums (NumericalNote_t, NormMode_t, RngDistribution_t,
 // DescriptorType_t, MoeGroupedMatmulMode_t, TensorReordering_t, ReshapeMode_t)
 // are not aliased yet: hipDNN does not publish them and their nodes are out of

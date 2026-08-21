@@ -74,6 +74,9 @@ void Backend::configurePassManager(PassManager& pm) {
         asmCapsConfig = ToolchainCaps::probe(archId);
     }
 
+    // After the probe above, which replaces the whole struct.
+    asmCapsConfig.requiresXCntForVolatileVMEM = opts.RequiresXCntForVolatileVMEM;
+
     pm.setAsmCapsConfig(asmCapsConfig);
 
     if (opts.EnableRemarks) {

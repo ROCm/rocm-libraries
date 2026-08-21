@@ -15,9 +15,9 @@ torch reference — so it runs on any box with torch + a gfx942 GPU.
 
 ## What it shows
 
-- A correct gfx942 tiled SDPA-forward over a canonical shape set
-  (`shapes.json`): fp16/bf16, `head_size` 64 / 128, MHA + GQA, and the
-  decode / short-prefill / long-prefill regimes — each gated against an fp32
+- A correct gfx942 tiled SDPA-forward over a canonical inline shape set
+  (`default` / `fmha` / `creative` groups): fp16/bf16, `head_size` 64 / 128,
+  MHA + GQA, and decode / prefill regimes — each gated against an fp32
   paged reference.
 - The two shipped D128-fp16 flash geometries side by side: the provider's
   analytic-default **wide4** (workgroup 256, `num_warps=4`) and the **L4**
@@ -38,8 +38,7 @@ torch reference — so it runs on any box with torch + a gfx942 GPU.
 
 | file | role |
 |------|------|
-| `shapes.json` | the canonical shape set, grouped by regime: `decode`, `short_prefill`, `long_prefill`, and `d256_disabled` (off by default) |
-| `parity_unified_attention.py` | per-shape parity + latency harness; builds the gfx942 spec **explicitly** (wide4 vs L4) and exposes the `HIPDNN_GFX942_*` lever knobs via `--scenario` |
+| `parity_unified_attention.py` | per-shape parity + latency harness; defines inline scenario groups (`default` / `fmha` / `creative`), builds the gfx942 spec **explicitly** (wide4 vs L4), and exposes the `HIPDNN_GFX942_*` lever knobs via `--scenario` |
 | `final_shapes_check.py` | the definitive correctness + perf check over every shape via the **production dispatcher** (`run_unified_attention_torch`), timed eager + graph against PyTorch's flash SDPA |
 | `__init__.py` | package marker + module docstring |
 
@@ -54,7 +53,7 @@ directory (so `python/` is the package root):
 PYTHONPATH=python python python/rocke/examples/gfx942/attention/final_shapes_check.py
 
 # 2) The explicit parity + latency harness (builds the spec by hand; default
-#    runs the whole shapes.json set):
+#    runs all inline scenario groups):
 PYTHONPATH=python python python/rocke/examples/gfx942/attention/parity_unified_attention.py
 ```
 
@@ -62,7 +61,7 @@ PYTHONPATH=python python python/rocke/examples/gfx942/attention/parity_unified_a
 
 | flag | default | meaning |
 |------|---------|---------|
-| `--groups G [G ...]` | all non-`*_disabled` groups | which `shapes.json` groups to run (e.g. `--groups decode`, or `--groups d256_disabled` to include the off-by-default d256 set) |
+| `--groups G [G ...]` | all non-`*_disabled` groups | which shape groups to run (e.g. `--groups decode`, or `--groups d256_disabled` to include the off-by-default d256 set) |
 | `--warmup N` | 10 | warm-up launches before timing |
 | `--iters N` | 50 | inner timed launches per measurement |
 | `--reps N` | 10 | timed measurements per cell, reduced per `--reduce` |
@@ -78,20 +77,17 @@ correctness failure.
 
 | flag | default | meaning |
 |------|---------|---------|
-| `--scenario S` (repeatable) | all shapes | a group (`correctness` / `perf` / `decode` / `all`) **or** an exact shape name; multiple flags union together |
+| `--scenario S` (repeatable) | all shapes | a group (`default` / `fmha` / `creative` / `all`) **or** an exact shape name; multiple flags union together |
 | `--attempts N` | 30 | timed launches |
 | `--warmup N` | 10 | warm-up launches |
 | `--tol F` | `2e-2` fp16 / `4e-2` bf16 | absolute-tolerance override |
 | `--report PATH` | none | write a JSON results report |
 | `--debug-mismatch N` | 0 | on failure, print the `N` worst mismatch samples |
 
-> **Note on `--scenario`:** the selector special-cases the group names
-> `correctness`, `perf`, `decode`, and `all`. The current `shapes.json` groups
-> are `decode` / `short_prefill` / `long_prefill` / `d256_disabled`, so
-> `--scenario decode` selects the decode group and `--scenario all` (or no flag)
-> runs everything; any other value is matched as an **exact shape name**, e.g.
-> `--scenario fp16_h32kv8_b1_s2048x2048_d128`. To target the other regimes by
-> group, prefer `final_shapes_check.py --groups short_prefill long_prefill`.
+> **Note on `--scenario`:** the selector accepts the group names
+> `default`, `fmha`, `creative`, and `all`. `--scenario all` (or no flag)
+> runs all three groups; any other value is matched as an **exact shape name**,
+> e.g. `--scenario decode_d128_q1k1024`.
 
 ```bash
 # Force the L4 (WG=64) flash geometry instead of the default wide4, on one shape:
@@ -100,17 +96,17 @@ HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python python \
     --scenario fp16_h32kv8_b1_s2048x2048_d128
 ```
 
-## The shape set (`shapes.json`)
+## The shape set (inline scenarios)
 
-Grouped by regime; every shape is causal (the kernel always applies a causal
-mask), so non-causal *prefill* shapes are not included.
+Shapes are defined inline in `parity_unified_attention.py` across three groups;
+every shape is causal (the kernel always applies a causal mask), so non-causal
+prefill shapes are not included.
 
 | group | what it covers |
 |-------|----------------|
-| `decode` | `seqlen_q == 1`, long KV (a single query attends to all keys) — fp16, D64/D128, MHA + GQA, batch 1–64 |
-| `short_prefill` | 1–2 KV tiles (`seqlen_q` 64 / 512 / 528) — fp16/bf16, D64/D128, MHA + GQA |
-| `long_prefill` | square prefill `seqlen_q == seqlen_k` up to 8192 — fp16/bf16, D64/D128, MHA + GQA, batch 1–51 |
-| `d256_disabled` | `head_size = 256` — **off by default** (no tiled d256 path on gfx942 → scalar fallback; see below) |
+| `default` | core production shapes — decode (`seqlen_q == 1`) and prefill, fp16/bf16, D64/D128, MHA + GQA, varied batch sizes |
+| `fmha` | integration-test net shapes — GQA ratios, asymmetric seq-lens, tiny seqs, cross-attention, large-batch decode, and select D256 shapes |
+| `creative` | exploratory sweep — long-KV decode (up to 64 k), chunked prefill, non-standard GQA ratios, D64/D256 bf16, large-batch variants |
 
 ## Arch notes
 

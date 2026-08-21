@@ -98,6 +98,8 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_scatter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_rot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spvv.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell_no_set_pointers.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_coo.cpp"
@@ -113,6 +115,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bell.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bsr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spgeam_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemmreuse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr.cpp"
@@ -127,6 +130,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv_interleaved_batch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_csrcolor.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
@@ -135,6 +139,18 @@ target_sources(hipsparse-test PRIVATE
 if(HIPSPARSE_ENABLE_SPMV_BSR)
     target_sources(hipsparse-test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSV)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
     )
 endif()
 

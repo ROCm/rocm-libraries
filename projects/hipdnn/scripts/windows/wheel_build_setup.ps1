@@ -1,6 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# NOTE: The wheel-provisioning logic in this script (venv creation, ROCm SDK
+# wheel install from nightlies/S3, and `rocm-sdk init`) has been ported to
+# Python in:
+#   projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts/windows_rocm_setup.py
+# That port is what the hipdnn-superbuild / hipdnn-superbuild-test skills use so
+# they can provision without PowerShell. This file is intentionally left
+# untouched otherwise: its existing consumers -- interactive users and
+# tools/dnn-benchmarking/setup.ps1 (which depends on the in-shell venv
+# activation and the ROCM_WHEEL_VENV env var this script publishes, neither of
+# which a child Python process can do for a parent shell) -- must keep working
+# unchanged. Keep the install logic here and in windows_rocm_setup.py in sync.
+
 <#
 .SYNOPSIS
     Sets up a ROCm Windows development environment using Python wheels.

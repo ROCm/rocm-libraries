@@ -7,6 +7,7 @@
     'Jobs': '8',
     'KnownBugs': 'kb.yaml',
     'LogicPath': 'logic/dir',
+    'StrictKnownBugs': False,
     'Verbose': 2,
   })
 # ---
@@ -18,6 +19,7 @@
     'Jobs': 48,
     'KnownBugs': None,
     'LogicPath': 'logic/dir',
+    'StrictKnownBugs': False,
     'Verbose': 1,
   })
 # ---
@@ -29,6 +31,7 @@
     'Jobs': 48,
     'KnownBugs': None,
     'LogicPath': 'logic/dir',
+    'StrictKnownBugs': False,
     'Verbose': 1,
   })
 # ---

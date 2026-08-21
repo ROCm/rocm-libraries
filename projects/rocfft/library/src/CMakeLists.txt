@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,15 +54,7 @@ endfunction()
 
 add_executable( rocfft_rtc_helper rocfft_rtc_helper.cpp )
 
-# each backend requires different libraries for host and device code
-if( USE_CUDA )
-  set( ROCFFT_HOST_LINK_LIBS -lcuda )
-  set( ROCFFT_RTC_LINK_LIBS -lnvrtc -lnvrtc-builtins -lnvptxcompiler_static )
-else()
-  set( ROCFFT_HOST_LINK_LIBS hip::host )
-  set( ROCFFT_DEVICE_LINK_LIBS hip::device )
-  set( ROCFFT_RTC_LINK_LIBS hiprtc::hiprtc )
-endif()
+set( ROCFFT_HOST_LINK_LIBS hip::host )
 
 if( ROCFFT_MPI_ENABLE )
   set( ROCFFT_HOST_LINK_LIBS "${ROCFFT_HOST_LINK_LIBS}" "MPI::MPI_CXX" )
@@ -369,10 +361,7 @@ foreach( target
     POSITION_INDEPENDENT_CODE ON
   )
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options( ${target} PRIVATE -Og )
-  endif()
-  target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} ${ROCFFT_RTC_LINK_LIBS} )
+  target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} hiprtc::hiprtc )
   rocfft_add_coverage_flags( ${target} )
   target_link_directories( ${target} PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
@@ -459,7 +448,7 @@ if( NOT BUILD_SHARED_LIBS )
   target_link_directories( rocfft PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 endif()
 
-target_link_libraries( rocfft PRIVATE ${ROCFFT_DEVICE_LINK_LIBS} )
+target_link_libraries( rocfft PRIVATE hip::device )
 
 foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_helper rocfft_kernel_config_search )
 
@@ -502,9 +491,6 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     endif()
 
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options(${target} PRIVATE -Og)
-  endif()
 endforeach()
 
 rocfft_link_internal_lib( rocfft generator )
@@ -533,7 +519,7 @@ target_link_std_experimental_filesystem( rocfft_aot_helper )
  # build executable rocfft-offline-tuner
 if( ROCFFT_BUILD_OFFLINE_TUNER )
   target_link_libraries( rocfft_offline_tuner PRIVATE
-    ${ROCFFT_DEVICE_LINK_LIBS}
+    hip::device
     rocfft
     generator
     rocfft-function-pool
@@ -584,6 +570,16 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT amdgcnspirv )
+
+  # On Windows, to run rocfft_aot_helper we need to be able to find
+  # the hiprtc and HIP runtime DLLs.  So add those dirs to the PATH
+  # when we launch that exe.
+  if( WIN32 )
+    set( aot_exec_path "$ENV{PATH};${hiprtc_BIN_INSTALL_DIR};${hip_BIN_INSTALL_DIR}" )
+  else()
+    set( aot_exec_path "$ENV{PATH}" )
+  endif()
 
   # build separate kernel cache for each target
   foreach( arch IN ITEMS ${GPU_TARGETS_AOT} )
@@ -597,7 +593,9 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
 
     add_custom_command(
       OUTPUT rocfft_kernel_cache_${arch}.db
-      COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${arch_kernel_cache_path} $<TARGET_FILE:rocfft_rtc_helper> ${arch}
+      COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=$<SHELL_PATH:${aot_exec_path}>"
+        "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${arch_kernel_cache_path} $<TARGET_FILE:rocfft_rtc_helper> ${arch}
       DEPENDS rocfft_aot_helper rocfft_rtc_helper
       COMMENT "Compile ${arch} kernels into shipped cache file"
     )

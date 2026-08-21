@@ -3,6 +3,21 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.6.0 for ROCm 10.0
+ 
+### Added
+ 
+* True global support in hipstdpar
+* Return value checks for assorted locations in the codebase that were previously missing.
+ 
+### Fixed
+ 
+* Fixed over-read and NULL deref in __hipstdpar_realloc
+
+### Upcoming changes
+
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
+
 ## rocThrust 4.5.0 for ROCm 7.14
 
 ### Added

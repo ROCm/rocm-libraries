@@ -92,6 +92,18 @@ Tests:
   function: spildlt0
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [3, 4]
+
+- name: spildlt0
+  category: quick
+  function: spildlt0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
   numericboost: [0, 1]
   boosttol: [0.05, 0.5]
   boostval: [1.0]

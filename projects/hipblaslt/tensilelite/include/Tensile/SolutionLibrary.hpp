@@ -80,7 +80,13 @@ namespace TensileLite
         switch(searchType)
         {
         case SolutionLibrarySearchType::DEFAULT:
-            return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task);
+            // streamKDynamicQueueSupported() excludes StreamK dynamic-queue /
+            // work-stealing solutions (SK4 and the dynamic sub-path of SK5) on
+            // devices whose XCD count is not a power of two, warning the user
+            // once. This is reject-and-continue: selection falls through to
+            // another (SK3-static / non-StreamK) solution for the GEMM.
+            return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
+                   && solutions.streamKDynamicQueueSupported(problem, hardware);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
             return isGemmTypeSame(solutions, problem);

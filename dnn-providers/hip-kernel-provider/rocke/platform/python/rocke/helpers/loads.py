@@ -175,6 +175,85 @@ class CoalescedTileLoader:
     def cols_per_vec(self) -> int:
         return self.tile_cols // self.load_vec
 
+    def load_global(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        descriptor: DescriptorFn,
+        rsrc: Optional[Value] = None,
+        ptr: Optional[Value] = None,
+    ) -> list:
+        """Emit only the global memory reads (buffer_load_vN / global_load_vN).
+
+        Returns a list of ``(row, col, v)`` triples — the tile-local coordinates
+        and the loaded VGPR value — that can later be passed to
+        :meth:`store_lds` to emit the matching ``smem_store_vN`` operations.
+        This split is required by pipelines that need to issue the global read for
+        tile k+1 before the LDS write, e.g. CK pipeline_basic.
+        """
+        if self.use_buffer_rsrc and rsrc is None:
+            raise ValueError("CoalescedTileLoader: use_buffer_rsrc=True requires rsrc")
+        if not self.use_buffer_rsrc and ptr is None:
+            raise ValueError("CoalescedTileLoader: use_buffer_rsrc=False requires ptr")
+
+        dtype = self.elem_dtype
+        elem_bytes = _ELEM_BYTES.get(dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
+            )
+
+        c_threads = b.const_i32(self.block_size)
+        c_load_vec = b.const_i32(self.load_vec)
+        c_cols_per_vec = b.const_i32(self.cols_per_vec)
+        c_elem_bytes = b.const_i32(elem_bytes)
+        c0 = b.const_i32(0)
+        c_oob = b.const_i32(self.oob_sentinel)
+
+        staged = []
+        for e in range(self.vecs_per_thread):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            row = b.div(vec_idx, c_cols_per_vec)
+            col_v = b.mod(vec_idx, c_cols_per_vec)
+            col = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
+
+            off_elems, valid = descriptor(b, row, col)
+
+            if self.use_buffer_rsrc:
+                off_bytes = b.mul(off_elems, c_elem_bytes)
+                if valid is not None:
+                    safe = b.select(valid, off_bytes, c_oob)
+                else:
+                    safe = off_bytes
+                if self.load_vec == 1:
+                    v = b.buffer_load(rsrc, safe, c0, dtype)
+                else:
+                    v = b.buffer_load_vN(rsrc, safe, c0, dtype, self.load_vec)
+            else:
+                if self.load_vec == 1:
+                    v = b.global_load(ptr, off_elems, dtype)
+                else:
+                    v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
+
+            staged.append((row, col, v))
+        return staged
+
+    def store_lds(
+        self,
+        b: IRBuilder,
+        *,
+        smem_dst: Value,
+        staged: list,
+    ) -> None:
+        """Emit the LDS writes for values previously loaded by :meth:`load_global`.
+
+        ``staged`` must be the list returned by a prior :meth:`load_global` call
+        on the same loader instance. Emits ``smem_store_vN`` for each entry.
+        """
+        for row, col, v in staged:
+            b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+
     def load(
         self,
         b: IRBuilder,

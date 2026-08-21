@@ -3,7 +3,11 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
+#include <sstream>
 #include <string>
 
 // Dependency-free config/result types (and their validation) for the adaptive
@@ -30,6 +34,7 @@ namespace hipblaslt_bench
         int32_t stability_window    = 0; // rel_iqr readings tested for the plateau (>= 2)
         int32_t stability_interval  = 0; // record a rel_iqr reading every N samples (>= 1)
         bool    use_gpu_timer       = false; // hipEvent timing vs CPU wall clock
+        double  flush_us            = 0.0; // per-launch flush_icache overhead, subtracted/sample
     };
 
     // Validate the semantic constraints of an adaptive TimingConfig. Returns an empty
@@ -110,4 +115,102 @@ namespace hipblaslt_bench
         bool    stable       = false; // robust-dispersion (rel_iqr) plateau reached: the
         // distribution is characterized though the precision target was not met (fallback exit)
     };
+
+    // Result of sizing the rotating buffer's block count (see compute_rotating_buffer_plan).
+    struct RotatingBufferPlan
+    {
+        int32_t block_count = 1; // number of physical buffer copies to allocate
+        int32_t iter_cap    = 0; // iteration bound considered; meaningful only when capped
+        bool    capped      = false; // true if iter_cap was the binding constraint
+    };
+
+    // Sizes the rotating buffer's block count: enough blocks to cover rotating_bytes, but
+    // never more than the total iterations that will run (blocks are indexed via
+    // i % block_count, so extra blocks past the iteration count go unused). Adaptive mode
+    // ignores cold_iters/iters and caps on adaptive_max_iters instead; 0 there is unbounded.
+    inline RotatingBufferPlan compute_rotating_buffer_plan(bool    adaptive,
+                                                           int32_t adaptive_max_iters,
+                                                           int32_t cold_iters,
+                                                           int32_t iters,
+                                                           int64_t rotating_bytes,
+                                                           int64_t total_size_needed_bytes)
+    {
+        RotatingBufferPlan plan;
+        plan.iter_cap  = adaptive ? adaptive_max_iters : std::max(cold_iters, iters);
+        bool apply_cap = !(adaptive && plan.iter_cap == 0);
+
+        // A zero-byte-per-iteration problem has nothing to rotate
+        if(total_size_needed_bytes <= 0)
+        {
+            plan.block_count = 1;
+            plan.capped      = false;
+            return plan;
+        }
+
+        double mem_blocks = std::ceil(static_cast<double>(rotating_bytes)
+                                      / static_cast<double>(total_size_needed_bytes));
+
+        // Edge case: mem_blocks can exceed int32_t's range for a huge budget vs. a tiny
+        // per-iteration size, and casting an out-of-range double is undefined behavior.
+        // When that happens the memory side has no usable bound: fall back to the
+        // iteration cap, or to a single block when there isn't one either.
+        constexpr double max_blocks = static_cast<double>(std::numeric_limits<int32_t>::max());
+        if(mem_blocks > max_blocks)
+        {
+            plan.block_count = apply_cap ? std::max(1, plan.iter_cap) : 1;
+            plan.capped      = apply_cap;
+            return plan;
+        }
+
+        // Both sides are now valid, in-range values; take the smaller when a cap applies.
+        double chosen
+            = apply_cap ? std::min(static_cast<double>(plan.iter_cap), mem_blocks) : mem_blocks;
+        plan.block_count = std::max(1, static_cast<int32_t>(chosen));
+        plan.capped      = apply_cap && static_cast<double>(plan.iter_cap) < mem_blocks;
+        return plan;
+    }
+
+    // Formats a one-time, human-readable summary of a resolved adaptive-timing configuration,
+    // handling each field's "0 => unbounded/disabled" special case (see TimingConfig above).
+    // No trailing newline.
+    inline std::string format_adaptive_timing_summary(const TimingConfig& cfg)
+    {
+        std::ostringstream oss;
+        oss << "Adaptive timing: warmup " << cfg.warmup_time << "ms. Sample ";
+        if(cfg.sample_time == 0.0f)
+            oss << "single-enqueue";
+        else
+            oss << cfg.sample_time << "ms";
+        oss << ". Measure " << cfg.measure_time << "ms (max ";
+        if(cfg.max_measure_time == 0.0f)
+            oss << "unbounded";
+        else
+            oss << cfg.max_measure_time << "ms";
+        oss << "). Iters " << cfg.min_iters << " (max ";
+        if(cfg.max_iters == 0)
+            oss << "unbounded";
+        else
+            oss << cfg.max_iters;
+        oss << "). Noise threshold ";
+        if(cfg.noise_threshold == 0.0f)
+            oss << "disabled";
+        else
+            oss << cfg.noise_threshold * 100 << "%";
+        if(cfg.stability_threshold == 0.0f)
+            oss << " (stability fallback disabled)";
+        else
+            oss << " (stability " << cfg.stability_threshold * 100 << "%, window "
+                << cfg.stability_window << ", interval " << cfg.stability_interval << ")";
+        oss << ".";
+        return oss.str();
+    }
+
+    // Converts a per-call amount to a per-second rate (amount / time_us * 1e6). A
+    // flush-overhead-corrected time_us can land at or below zero (e.g. a near-instant
+    // kernel), which would otherwise divide into inf/-inf/nan; returns invalid_value
+    // instead.
+    inline double rate_per_second(double amount, double time_us, double invalid_value)
+    {
+        return time_us > 0.0 ? amount / time_us * 1e6 : invalid_value;
+    }
 } // namespace hipblaslt_bench

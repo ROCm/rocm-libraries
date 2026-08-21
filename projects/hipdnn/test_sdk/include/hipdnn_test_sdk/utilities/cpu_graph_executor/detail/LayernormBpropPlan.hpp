@@ -122,8 +122,8 @@ public:
         double epsilon = 1e-5;
         if(_params.epsilonTensor.has_value())
         {
-            epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-                _params.epsilonTensor.value(), "Epsilon");
+            epsilon = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+                _params.epsilonTensor.value(), variantPack, "Epsilon");
         }
 
         utilities::CpuFpReferenceLayernorm::bprop<DyDataType,

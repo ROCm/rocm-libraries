@@ -11,7 +11,7 @@ hip_module``), times them with HIP events, and writes back real
 proxy, since the streaming trio has no GEMM FLOP) plus ``is_valid``.
 
 No torch dependency: device buffers come from ``Runtime.alloc`` (hipMalloc),
-args are packed with ``runtime.torch_module.pack_args`` (which accepts integer
+args are packed with ``runtime.packing.pack_args`` (which accepts integer
 device pointers directly).
 """
 
@@ -29,7 +29,7 @@ from rocke.instances.common import fused_moe as fm
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.runtime.comgr import build_hsaco_from_llvm_ir
 from rocke.runtime.hip_module import Runtime
-from rocke.runtime.torch_module import pack_args
+from rocke.runtime.packing import pack_args
 
 _DTYPE_BYTES = {"f16": 2, "fp16": 2, "bf16": 2}
 

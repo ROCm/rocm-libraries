@@ -315,6 +315,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.dtype_acc = "fp32";
 
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
+    s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
     return s;
 }
 
@@ -376,8 +377,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char pe_buf[64];
     char tag_buf[256];
     const char* parts[6];
-    const char* flag_names[1];
-    int flag_on[1];
+    const char* flag_names[2];
+    int flag_on[2];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -414,8 +415,10 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
 
     flag_names[0] = "async";
     flag_on[0] = s->async_dma ? 1 : 0;
+    flag_names[1] = "noalc";
+    flag_on[1] = s->cshuffle_no_alias ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 1, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 2, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -719,44 +722,77 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             "spec wave_size %d != %s wave_size %d", s->wave_size, arch, target->wave_size);
     }
 
-    /* MMA atom must be in the target's catalog (f16 in/out fp32 acc). */
-    mma = rocke_archtarget_mma(target);
-    if(!rocke_mma_catalog_has_shape(
-           mma, family, "f16", "f16", "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
+    /* MMA atom must be in the target's catalog for the requested dtype. */
     {
-        ROCKE_CONVVS_REJECT("unsupported f16 warp_tile (%d, %d, %d) on %s",
-                            s->warp_tile_m,
-                            s->warp_tile_n,
-                            s->warp_tile_k,
-                            arch);
+        char a_scratch[32], b_scratch[32];
+        const char* a_norm = rocke_normalize_dtype(s->dtype_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(s->dtype_b, b_scratch, sizeof(b_scratch));
+        mma = rocke_archtarget_mma(target);
+        if(!rocke_mma_catalog_has_shape(
+               mma, family, a_norm, b_norm, "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
+        {
+            ROCKE_CONVVS_REJECT("unsupported %s warp_tile (%d, %d, %d) on %s",
+                                s->dtype_a ? s->dtype_a : "f16",
+                                s->warp_tile_m,
+                                s->warp_tile_n,
+                                s->warp_tile_k,
+                                arch);
+        }
     }
 
-    /* LDS budget: must fit before we attempt codegen.
-     *   A_smem + B_smem, each (tile_m or tile_n) × row_stride × 2 bytes (f16).
-     *   row_stride = tile_k + k_pad  (k_pad = 8 when tile_k >= 16, else 0).
-     *   compv4 pipeline double-buffers A and B → ×2.
-     *   This mirrors the smem_alloc calls in instance_conv_implicit_gemm_conv_build_glue.c
-     *   and catches the overflow that would otherwise produce CODEGEN_BC_TO_RELOCATABLE. */
+    /* LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
+     * Mirrors the Python is_valid_spec LDS check (added on this branch):
+     *   _ab_dtype_bytes = 4 if dtype_a == "fp32" else 2
+     *   _a_shape = effective_lds_layout().storage_shape(tile_m) = (tile_m, row_stride)
+     *   _b_shape = effective_lds_layout().storage_shape(tile_n) = (tile_n, row_stride)
+     *   _ab_bytes = (a_rows*a_cols + b_rows*b_cols) * _ab_dtype_bytes
+     *   _ab_lds   = _ab_bytes * (2 if double_buffer else 1)
+     *   _c_lds    = tile_m * tile_n * _c_dtype_bytes  (if epilogue == "cshuffle")
+     *   _total_lds = (ab_lds + c_lds) if cshuffle_no_alias else max(ab_lds, c_lds)
+     *               (aliased default overlaps C onto A/B -> max; no-alias gives C
+     *                its own bytes -> sum). Mirrors Python is_valid_spec. */
     {
-        /* k_pad and double_buffer mirror build_glue priority order exactly:
-         *   k_pad: has_lds_k_pad → lds_k_pad; async_dma → 0; else (tile_k>=16)?8:0
-         *   double_buffer: compv4 || async_dma || unroll_k */
-        int k_pad
-            = s->has_lds_k_pad ? s->lds_k_pad : (s->async_dma ? 0 : ((s->tile_k >= 16) ? 8 : 0));
-        int row_stride = s->tile_k + k_pad;
-        int ab_single = (s->tile_m + s->tile_n) * row_stride * 2; /* f16 = 2 bytes */
-        int double_buf
+        rocke_conv_lds_layout_t lds_layout;
+        char lds_reason[256];
+        int ab_dtype_bytes;
+        int ab_bytes;
+        int ab_lds;
+        int c_lds;
+        int total_lds;
+        int double_buf;
+        bool is_cshuffle;
+
+        if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
+               s, &lds_layout, lds_reason, sizeof(lds_reason)))
+        {
+            ROCKE_CONVVS_REJECT("%s", lds_reason);
+        }
+
+        ab_dtype_bytes = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
+        /* storage_shape(rows) = (rows, row_stride) */
+        ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
+                   * ab_dtype_bytes;
+
+        double_buf
             = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma || s->unroll_k)
                   ? 1
                   : 0;
-        int bytes_lds = ab_single * (double_buf ? 2 : 1);
-        if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))
+        ab_lds = ab_bytes * (double_buf ? 2 : 1);
+
+        is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {
-            ROCKE_CONVVS_REJECT("LDS budget %d > %d cap (AB=%d, double_buf=%d) on %s",
-                                bytes_lds,
+            int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+            c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
+        }
+        total_lds = s->cshuffle_no_alias ? (ab_lds + c_lds) : ((ab_lds > c_lds) ? ab_lds : c_lds);
+
+        if(!rocke_archtarget_fits_lds(target, (long)total_lds))
+        {
+            ROCKE_CONVVS_REJECT("LDS budget %d bytes (A/B=%d, C=%d) > %d cap on %s",
+                                total_lds,
+                                ab_lds,
+                                c_lds,
                                 target->lds_capacity_bytes,
-                                ab_single,
-                                double_buf,
                                 arch);
         }
     }
@@ -764,14 +800,18 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     /* WMMA (RDNA wave32) narrow-subset gates. */
     if(strcmp(family, "wmma") == 0)
     {
+        /* gfx11/gfx12 use 16x16x16; gfx1250 uses 16x16x32 (fp16/bf16) or 16x16x4 (fp32) */
+        int is_16x16x4 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 4);
         int is_16x16x16 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 16);
-        if(!is_16x16x16)
+        int is_16x16x32 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 32);
+        if(!is_16x16x4 && !is_16x16x16 && !is_16x16x32)
         {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only 16x16x16 (got (%d, %d, %d)) on %s",
-                                s->warp_tile_m,
-                                s->warp_tile_n,
-                                s->warp_tile_k,
-                                arch);
+            ROCKE_CONVVS_REJECT(
+                "WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got (%d, %d, %d)) on %s",
+                s->warp_tile_m,
+                s->warp_tile_n,
+                s->warp_tile_k,
+                arch);
         }
         if(!(s->pipeline && strcmp(s->pipeline, "mem") == 0))
         {
@@ -779,11 +819,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                                 s->pipeline ? s->pipeline : "",
                                 arch);
         }
-        if(!(s->epilogue && strcmp(s->epilogue, "default") == 0))
+        if(!(s->epilogue
+             && (strcmp(s->epilogue, "default") == 0 || strcmp(s->epilogue, "cshuffle") == 0)))
         {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only the 'default' epilogue (got '%s') on %s",
-                                s->epilogue ? s->epilogue : "",
-                                arch);
+            ROCKE_CONVVS_REJECT(
+                "WMMA conv supports only 'default' or 'cshuffle' epilogue (got '%s') on %s",
+                s->epilogue ? s->epilogue : "",
+                arch);
         }
         if(s->async_dma)
         {
@@ -868,16 +910,21 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
     }
 
     /* op = target.mma.op_for_shape(family=_conv_mma_family(arch),
-     *                              a/b="f16", c="fp32",
+     *                              a=spec.data.dtype_a, b=spec.data.dtype_b, c="fp32",
      *                              m=warp_tile_m, n=warp_tile_n, k=warp_tile_k) */
-    op = rocke_archtarget_op_for_shape(target,
-                                       rocke_conv_mma_family(arch),
-                                       "f16",
-                                       "f16",
-                                       "fp32",
-                                       spec->warp_tile_m,
-                                       spec->warp_tile_n,
-                                       spec->warp_tile_k);
+    {
+        char a_scratch[32], b_scratch[32];
+        const char* a_norm = rocke_normalize_dtype(spec->dtype_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(spec->dtype_b, b_scratch, sizeof(b_scratch));
+        op = rocke_archtarget_op_for_shape(target,
+                                           rocke_conv_mma_family(arch),
+                                           a_norm,
+                                           b_norm,
+                                           "fp32",
+                                           spec->warp_tile_m,
+                                           spec->warp_tile_n,
+                                           spec->warp_tile_k);
+    }
     if(op == NULL)
     {
         /* raise ValueError(f"no MMA atom for conv warp_tile (...) on {arch}") */

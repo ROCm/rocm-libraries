@@ -33,7 +33,7 @@ from enum import Enum
 from glob import glob
 
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
-from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs
+from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from Tensile.Toolchain.Component import Assembler
 
 import rocisa
@@ -149,7 +149,10 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
       biasTypeArgs = BiasTypeArgs(problemType, [problemType["BiasDataTypeList"][0]])
     else:
       biasTypeArgs = ""
-
+    if len(problemType["GateResidualDataTypeList"]) > 0:
+      gateTypeArgs = GateTypeArgs(problemType, [problemType["GateResidualDataTypeList"][0]])
+    else:
+      gateTypeArgs = ""
     activationEnums = [[{'Enum': 'relu'}]]
     factorDimEnums = [0]
     # Reading the activation args from the LibraryClient section in the config YAML.
@@ -520,6 +523,16 @@ def problemSizeParams(problemType, problem, factorDim):
               (biasstrides[2], err_str, length))
       rv.append(('bias-strides', ",".join(map(str, biasstrides))))
 
+    if problemType.useGateResidual:
+      if problem.stridesGate:
+        gatestrides = list(problem.stridesGate)
+      else:
+        gatestrides = [-1] * problemType.dDims
+      for sc in problemType.setConstStrideGate:
+        index = problemType.indices[sc[0]]
+        gatestrides[index.d] = sc[1]
+      rv.append(('gate-strides', ",".join(map(str, gatestrides))))
+
     return rv
 
 def dataInitParams(problemType):
@@ -531,6 +544,7 @@ def dataInitParams(problemType):
     initAlpha = globalParameters['DataInitTypeAlpha']
     initBeta  = globalParameters['DataInitTypeBeta']
     initBias  = globalParameters['DataInitTypeBias']
+    initGate  = globalParameters['DataInitTypeGate']
     initScaleA  = globalParameters['DataInitTypeScaleA']
     initScaleB  = globalParameters['DataInitTypeScaleB']
     initScaleC  = globalParameters['DataInitTypeScaleC']
@@ -553,6 +567,7 @@ def dataInitParams(problemType):
             ('init-alpha',         DataInitName(initAlpha).name),
             ('init-beta',          DataInitName(initBeta).name),
             ('init-bias',          DataInitName(initBias).name),
+            ('init-gate',          DataInitName(initGate).name),
             ('init-scaleA',        DataInitName(initScaleA).name),
             ('init-scaleB',        DataInitName(initScaleB).name),
             ('init-scaleC',        DataInitName(initScaleC).name),
@@ -577,7 +592,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, gateTypeArgs="", probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
     # libraryFile must point at the per-base TensileLibrary{,.yaml,.dat}; the
@@ -616,6 +631,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-bias',   problemType.useBias)
         param('bias-source',   problemType.biasSrcWhiteList[0])
         param('use-e', problemType.useE)
+        param('use-gate-residual', problemType.useGateResidual)
         param('output-amaxD', problemType.outputAmaxD)
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
@@ -635,7 +651,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         if factorDimArgs:
           for fdim in factorDimArgs.factorDims:
             param('factor-dim-args', fdim)
-
+        if gateTypeArgs:
+          for gtype in gateTypeArgs.gateTypes:
+            param('gate-type-args',  gtype.toName())
 
         if icacheFlushArgs:
           for opt in icacheFlushArgs:
@@ -700,6 +718,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           param("dump-tensors",           1)
         if globalParameters["ExitOnFails"] > 1:
           param("exit-on-error", 1)
+        if globalParameters["PrintTensorGate"]:
+          param("print-tensor-gate",      1)          
 
         param('prune-mode',               pruneModeName(int(globalParameters["PruneSparseMode"])))
         param("bounds-check",             boundsCheckName(int(globalParameters["BoundsCheck"])))
@@ -766,6 +786,7 @@ def writeClientConfig(
       configBase = "ClientParameters",
       *,
       libraryFile,
+      gateTypeArgs = "",
       probSolMap = {},
       sourceDir = None
     ):
@@ -788,7 +809,7 @@ def writeClientConfig(
       resultsFileName = os.path.join(stepBaseDir, "../Data", stepName+".csv")
 
     newSolution = next(iter(newLibrary.solutions.values()))
-    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap)
+    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, gateTypeArgs, probSolMap)
 
     return filename
 

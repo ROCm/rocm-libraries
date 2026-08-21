@@ -147,7 +147,7 @@ The runner uses `default_shape` to allocate `X`, `Gamma`/`Beta` (norms), and `Y`
 "f32"                       # 4-byte scalar
 ```
 
-`size_bytes` is for the host arg-packer (`runtime/torch_module.py::pack_args`) and the runner. Pointers are always 8 bytes; scalars match the canonical width.
+`size_bytes` is for the host arg-packer (`runtime/packing.py::pack_args`) and the runner. Pointers are always 8 bytes; scalars match the canonical width.
 
 ## Standard Signatures
 

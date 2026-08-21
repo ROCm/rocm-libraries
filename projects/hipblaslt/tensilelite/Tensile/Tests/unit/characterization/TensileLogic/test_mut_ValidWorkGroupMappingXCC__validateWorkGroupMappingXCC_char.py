@@ -149,3 +149,55 @@ def test_exception_path_prints_error_message(capsys):
     assert ret is False
     assert "Error: ValidWorkGroupMappingXCC failed:" in out
     assert out.strip() != "None"
+
+
+# --- explicit missing-key / -1 sentinel branch (mutant 14 refactor) ---------
+#
+# The clean source computes the skip condition explicitly:
+#     xcc_minus_one = "WorkGroupMappingXCC" not in solution \
+#                     or solution["WorkGroupMappingXCC"] == -1
+#     if xcc_minus_one:
+#         return True
+#     xcc = solution["WorkGroupMappingXCC"]
+# This replaced the prior `solution.get("WorkGroupMappingXCC", -1)` form, whose
+# survivor `__mutmut_14` (mutating the `.get` default) was behaviorally
+# equivalent and therefore unkillable. The tests below pin the two skip cases
+# and the "key present, not -1" fall-through so mutations of `not in`, `or`, and
+# `== -1` are all distinguishable from the clean source.
+
+def test_missing_xcc_key_skips_on_cu_dir():
+    # `not in` -> `in`, or `or` -> `and`: the mutant would read the absent key
+    # and hit the except branch (return False). Original: absent key -> skip
+    # (True) even on a CU-variant directory.
+    reset_reported_failures()
+    assert _validateWorkGroupMappingXCC({"SolutionIndex": 0}, _CU38_DIR) is True
+
+
+def test_explicit_minus_one_skips_on_cu_dir():
+    # `== -1` -> `!= -1` (or a mutated sentinel literal): the mutant would stop
+    # skipping and reject xcc=-1 as "not positive". Original: explicit -1 -> skip
+    # (True).
+    reset_reported_failures()
+    assert _validateWorkGroupMappingXCC(
+        {"WorkGroupMappingXCC": -1, "SolutionIndex": 0}, _CU38_DIR
+    ) is True
+
+
+def test_present_valid_xcc_is_not_skipped():
+    # Guards the `or` -> `and` mutation from the other side: with the key present
+    # and a valid value (2 divides 38? no -> use 2 on 64cu), the skip branch must
+    # be False so the divisibility check actually runs and accepts.
+    reset_reported_failures()
+    assert _validateWorkGroupMappingXCC(
+        {"WorkGroupMappingXCC": 2, "SolutionIndex": 0}, _CU64_DIR
+    ) is True
+
+
+def test_present_invalid_xcc_is_not_skipped():
+    # If the skip branch were widened (e.g. `and` collapsing to always-skip),
+    # an invalid xcc=3 would be wrongly accepted. Original: key present, not -1
+    # -> fall through and reject (False).
+    reset_reported_failures()
+    assert _validateWorkGroupMappingXCC(
+        {"WorkGroupMappingXCC": 3, "SolutionIndex": 0}, _CU38_DIR
+    ) is False

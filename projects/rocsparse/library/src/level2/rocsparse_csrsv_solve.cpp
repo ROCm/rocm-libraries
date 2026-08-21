@@ -41,7 +41,8 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                                         rocsparse_dnvec_descr       y,
                                         rocsparse_solve_policy      policy,
                                         rocsparse_csrsv_info        csrsv_info,
-                                        void*                       temp_buffer)
+                                        void*                       temp_buffer,
+                                        bool                        force_conj)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -184,6 +185,24 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
         fill_mode             = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
                                                                          : rocsparse_fill_mode_lower;
+    }
+    else if(force_conj)
+    {
+        void*         conj_val        = ptr;
+        const int64_t conj_val_stride = A->nnz;
+        const size_t  sizeof_T        = rocsparse::datatype_sizeof(A->data_type);
+
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(conj_val,
+                                           A->const_val_data,
+                                           sizeof_T * A->nnz * A->batch_count,
+                                           hipMemcpyDeviceToDevice,
+                                           stream));
+
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::conjugate_strided_batched(
+            handle, A->batch_count, A->nnz, A->data_type, conj_val, conj_val_stride)));
+
+        local_val_data        = conj_val;
+        local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
     }
 
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);

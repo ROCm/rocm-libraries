@@ -2,12 +2,10 @@
 # SPDX-License-Identifier:  MIT
 #
 # rocke project umbrella:
-#   - library/  : the SDPA product (C-api provider plugin + build-time Python).
-#                 Added first to mirror the historical rocke-client-before-rocKE
-#                 ordering; both complete before src/ (added by the parent) reads
-#                 the staged CTest entries.
 #   - platform/ : the authoring SDK + engine (former rocKE/).
-add_subdirectory(library)
+# The library/ tree is build-time-only Python (kernels/builders/dispatch); it is
+# editable-installed and wheeled by the rocke-pyenv / rocke-wheels blocks below,
+# not added as a CMake subdirectory.
 add_subdirectory(platform)
 
 # ---------------------------------------------------------------------------
@@ -62,4 +60,39 @@ if(ROCKE_BUILD_PYENV)
     add_custom_target(rocke-pyenv ALL
         DEPENDS "${ROCKE_PYENV_STAMP}"
         COMMENT "rocke-pyenv: build-time editable Python environment")
+
+    # -----------------------------------------------------------------------
+    # rocke wheels: build pure-Python wheels for the platform and library
+    # packages so they can be shipped in the test artifact and pip-installed
+    # in CI instead of relying on raw directory copies + PYTHONPATH hacks.
+    # -----------------------------------------------------------------------
+    set(ROCKE_WHEEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/wheels"
+        CACHE PATH "Output directory for rocke Python wheels")
+    set(ROCKE_WHEEL_VERSION "0.1.0" CACHE STRING "rocke Python wheel version")
+
+    set(_rocke_platform_wheel "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+    add_custom_command(
+        OUTPUT "${_rocke_platform_wheel}"
+        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
+                --wheel-dir "${ROCKE_WHEEL_DIR}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/platform"
+        DEPENDS "${ROCKE_PYENV_STAMP}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/platform/pyproject.toml"
+        COMMENT "Building rocke platform wheel"
+        VERBATIM)
+
+    set(_rocke_library_wheel "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+    add_custom_command(
+        OUTPUT "${_rocke_library_wheel}"
+        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
+                --wheel-dir "${ROCKE_WHEEL_DIR}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/library"
+        DEPENDS "${ROCKE_PYENV_STAMP}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/library/pyproject.toml"
+        COMMENT "Building rocke-library wheel"
+        VERBATIM)
+
+    add_custom_target(rocke-wheels ALL
+        DEPENDS "${_rocke_platform_wheel}" "${_rocke_library_wheel}"
+        COMMENT "rocke-wheels: building platform + library Python wheels")
 endif()

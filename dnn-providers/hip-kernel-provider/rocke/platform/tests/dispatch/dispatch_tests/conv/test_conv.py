@@ -59,7 +59,7 @@ class TestConvDispatch(unittest.TestCase):
     def test_cshuffle_unsupported_on_gfx942(self):
         for c in conv_candidates():
             if c.spec_id == "cdna_cshuffle_64x64":
-                ok, why = c.supports(_conv("gfx942"))
+                ok, why = c.admits(_conv("gfx942"))
                 self.assertFalse(ok)
 
     def test_rdna_arch_selects_wmma(self):
@@ -72,17 +72,38 @@ class TestConvDispatch(unittest.TestCase):
         req = _conv("gfx950")
         for c in conv_candidates():
             if "rdna" in c.name:
-                ok, why = c.supports(req)
+                ok, why = c.admits(req)
                 self.assertFalse(ok)
-                self.assertIn("family", why)
+                self.assertIn("arch 'gfx950' not in", why)
 
     def test_cdna_candidates_unsupported_on_rdna(self):
         req = ConvRequest(N=1, C=32, K=32, Hi=16, Wi=16, Y=1, X=1, arch="gfx1151")
         for c in conv_candidates():
             if "cdna" in c.name:
-                ok, why = c.supports(req)
+                ok, why = c.admits(req)
                 self.assertFalse(ok)
-                self.assertIn("family", why)
+                self.assertIn("arch 'gfx1151' not in", why)
+
+    def test_gfx1250_is_served_only_by_its_own_wmma_candidate(self):
+        """gfx1250 is CDNA-family at wave32, so a family gate admitted it to
+        both wave64 candidates while rejecting the WMMA one that suits it.
+        Explicit arch lists cannot express that mistake.
+
+        gfx1250 now has a conv candidate of its own, so the assertion is no
+        longer "nothing admits it" -- it is that exactly the right one does,
+        and that the wave64 candidates still do not.
+        """
+        req = ConvRequest(N=1, C=32, K=32, Hi=16, Wi=16, Y=1, X=1, arch="gfx1250")
+        admitting = {c.name for c in conv_candidates() if c.admits(req)[0]}
+        self.assertEqual(admitting, {"conv_igemm_gfx1250_wmma"})
+
+    def test_gfx1250_candidate_uses_the_k32_wmma_atom(self):
+        """The reason gfx1250 could not simply join the RDNA WMMA list: its f16
+        WMMA is 16x16x32 where gfx12's is 16x16x16. A spec carrying
+        warp_tile_k=16 would not select an atom on this target."""
+        spec = dispatch_conv(_conv("gfx1250")).spec
+        self.assertEqual(spec.warp_tile_k, 32)
+        self.assertEqual(spec.wave_size, 32)
 
     def test_grid_ceildiv_nm(self):
         r = dispatch_conv(_conv("gfx950"))

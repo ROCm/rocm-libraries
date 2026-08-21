@@ -1,0 +1,58 @@
+# Integration test configuration for HIPBLASLT_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+
+# MatmulBiasActiv Bf16 (bias-add then SWISH_FWD) is flaky against the default
+# bf16 tolerance (atol=0.01, rtol=0.01): a local 40-run sweep of the whole
+# suite showed ~20% of runs mismatching by 1-2 bf16 ULP on a single output
+# element, and the failing parameterization/index/tensor-position varied
+# from run to run (e.g. Correctness/7, /19, /23, /31 all observed failing
+# across different sweeps; never more than one element per run). Observed
+# worst case: ref=4.5, GPU=4.5625, absolute diff 0.0625 vs default
+# threshold 0.055. This is nondeterministic GPU reduction/epilogue rounding
+# landing on the bf16 boundary just past bias-add before the nonlinear
+# SWISH slope amplifies it, not a fixed per-shape bug — a single-index
+# override would leave other indices intermittently red. Not a regression
+# from this port: same synthesis range and default tolerance as pre-port.
+# atol/rtol bumped to 0.02 covers the worst observed diff (0.0625 at
+# ref=4.5, threshold becomes 0.11) with ~75% margin, and covers the
+# smaller 0.03125-at-ref=2.0625 case with ~95% margin.
+[[tolerance_overrides]]
+filters = ["Smoke/IntegrationGpuMatmulBiasActivBf16.Correctness/*"]
+atol = 0.02
+rtol = 0.02
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+
+# ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns 0
+# algorithms on gfx12 (gfx1200, gfx1201, gfx1250, ...) for FP16 with
+# transA=T, transB=T, and a bias-fused epilogue (BIAS, RELU_BIAS,
+# GELU_BIAS, SWISH_BIAS_EXT, CLAMP_BIAS_EXT). Every neighboring cell (no
+# bias, BF16/FP32 with bias, FP16 with any other transpose pair) returns
+# at least one algorithm.
+#
+# Replaces the same-arch carve-out previously enforced at runtime by
+# IS_HIPBLASLT_GFX12_FP16_TT_BIAS / shouldSkipOnEngineConfigResult in
+# dnn-providers/hipblaslt-provider/integration_tests/TestWorkarounds.hpp.
+[[test_skips]]
+archs   = ["gfx12"]
+filters = ["*MatmulBias*Fp16*"]
+reason  = "ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns no algorithms for FP16 with transA=T, transB=T and any bias-fused epilogue on gfx12"

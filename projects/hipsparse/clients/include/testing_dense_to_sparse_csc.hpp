@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_dense_to_sparse_csc_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     int64_t safe_size = 100;
     int32_t m         = 10;
     int32_t n         = 10;
@@ -145,7 +145,7 @@ void testing_dense_to_sparse_csc_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_dense_to_sparse_csc(Arguments argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     J                           m        = argus.M;
     J                           n        = argus.N;
     hipsparseIndexBase_t        idx_base = argus.baseA;

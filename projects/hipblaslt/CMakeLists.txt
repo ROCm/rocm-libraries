@@ -290,6 +290,37 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
 )
 
+# Configure the Windows version resource (PE VERSIONINFO) embedded into
+# libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
+# DLL reports file/product version metadata in its Windows file properties.
+# A resource compiler is required to compile version.rc; the ROCm toolchain
+# detects one (llvm-rc/rc) or sets CMAKE_RC_COMPILER to a NOTREQUIRED/NOTFOUND
+# sentinel when none is available. When no real compiler is present, warn and
+# skip the resource rather than fail configuration, so the DLL still builds
+# (without version metadata) on machines lacking a resource compiler.
+if(WIN32 AND CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND")
+    if(GIT)
+        execute_process(
+            COMMAND "${GIT}" log -1 --format=%H .
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE hipblaslt_VERSION_COMMIT_ID
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
+    string(TIMESTAMP HIPBLASLT_COPYRIGHT_YEAR "%Y")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
+        @ONLY)
+    set(_hipblaslt_have_version_rc TRUE)
+elseif(WIN32)
+    message(WARNING
+        "hipBLASLt: no Windows resource compiler (llvm-rc/rc) detected; "
+        "libhipblaslt.dll will be built WITHOUT VERSIONINFO metadata. Install the "
+        "Windows SDK or make llvm-rc available (e.g. on PATH or in the ROCm "
+        "llvm/bin directory) to embed version info.")
+endif()
+
 # `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
 # only built when at least one consumer needs it. tensilelite/client and
 # tensilelite/tests reach for it on the same condition, so we drive the
@@ -311,6 +342,11 @@ add_subdirectory(tensilelite)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
+        # Embed Windows version resource (PE VERSIONINFO) into the shared DLL,
+        # only when a resource compiler was found (see version.rc guard above).
+        if(_hipblaslt_have_version_rc)
+            target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc")
+        endif()
     else()
         add_library(hipblaslt STATIC)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
@@ -545,6 +581,21 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    # Cotenant CU-contention helper: the kernel and its launcher install side by
+    # side in bin/ so hipblaslt-cotenant finds the precompiled kernel next to it.
+    # POSIX-only (see clients/CMakeLists.txt); not built/installed on Windows.
+    if(NOT WIN32)
+        rocm_install(
+            TARGETS hipblaslt-cotenant-kernel
+            COMPONENT benchmarks
+        )
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/cotenant/hipblaslt-cotenant"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT benchmarks
+        )
+    endif()
+
     if(HIPBLASLT_ENABLE_MARKER)
         rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0")
     endif()
@@ -607,6 +658,15 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
     )
+
+    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
+    # ship at the tensilelite root, not under scripts/.
+    install(
+        FILES
+            "${_tensilelite_src}/AMaxGenerator.py"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+    )
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
@@ -656,6 +716,15 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     # pytest config (marker registration, xfail_strict)
     install(
         FILES "${_tensilelite_src}/pytest.ini"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+        OPTIONAL
+    )
+
+    # Test filter standardization config consumed by TheRock's pytest_runner.py
+    # to drive quick/standard/comprehensive/full categories from the installed tree.
+    install(
+        FILES "${_tensilelite_src}/test_categories.yaml"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
         OPTIONAL

@@ -28,35 +28,42 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running convolution fprop graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    constexpr int64_t N = 16; // Batch size
-
-    // Input
-    constexpr int64_t C = 16; // Number of input (x) channels
-    constexpr int64_t H = 16; // Height
-    constexpr int64_t W = 16; // Width
+    // Input (x)
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // Batch size
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // Channels
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // Height
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // Width
 
     // Filter
-    constexpr int64_t K = 16; // Number of output (y) channels
-    constexpr int64_t R = 3; // Height
-    constexpr int64_t S = 3; // Width
-    constexpr int64_t U = 1; // Height stride
-    constexpr int64_t V = 1; // Width stride
-    constexpr int64_t PAD_H = 1; // Height padding
-    constexpr int64_t PAD_W = 1; // Width padding
-    constexpr int64_t DIL_H = 1; // Height dilation
-    constexpr int64_t DIL_W = 1; // Width dilation
+    const int64_t k = config.filter.size() > 0 ? config.filter[0] : 16; // Output channels
+    const int64_t r = config.filter.size() > 1 ? config.filter[1] : 3; // Filter height
+    const int64_t s = config.filter.size() > 2 ? config.filter[2] : 3; // Filter width
+
+    // Stride
+    const int64_t u = config.stride.size() > 0 ? config.stride[0] : 1; // Stride height
+    const int64_t v = config.stride.size() > 1 ? config.stride[1] : 1; // Stride width
+
+    // Padding
+    const int64_t padH = config.padding.size() > 0 ? config.padding[0] : 1; // Padding height
+    const int64_t padW = config.padding.size() > 1 ? config.padding[1] : 1; // Padding width
+
+    // Dilation
+    const int64_t dilH = config.dilation.size() > 0 ? config.dilation[0] : 1; // Dilation height
+    const int64_t dilW = config.dilation.size() > 1 ? config.dilation[1] : 1; // Dilation width
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto xAttr = createTensor({N, C, H, W}, inputType, layout);
-    auto wAttr = createTensor({K, C, R, S}, inputType, layout);
+    setPreferredEngine(graph, config);
+
+    auto xAttr = createTensor({n, c, h, w}, inputType, layout);
+    auto wAttr = createTensor({k, c, r, s}, inputType, layout);
 
     graph::ConvFpropAttributes convAttributes;
     convAttributes.set_name("conv_fprop_node");
-    convAttributes.set_padding({PAD_H, PAD_W});
-    convAttributes.set_stride({U, V});
-    convAttributes.set_dilation({DIL_H, DIL_W});
+    convAttributes.set_padding({padH, padW});
+    convAttributes.set_stride({u, v});
+    convAttributes.set_dilation({dilH, dilW});
 
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(true);
@@ -103,7 +110,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
-            xTensor, wTensor, yRefTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
+            xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         // Use dynamic tolerance calculation instead of static tolerance
         auto tolerance = hipdnn_test_sdk::utilities::conv::
@@ -121,6 +128,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     std::cout << "Convolution fprop graph execution complete for " << inputType << ".\n\n";
+
     return validationPassed;
 }
 
@@ -128,6 +136,8 @@ int main(int argc, char* argv[])
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();

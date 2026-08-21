@@ -251,6 +251,17 @@ class EstimateAsmCyclesPassImpl : public Pass {
         return totalCycles_;
     }
 
+    /// Per-instruction cumulative cycle positions recorded during the last run.
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& getPerInstructionCycles() const {
+        return perInstCycles_;
+    }
+
+    /// When false, suppress the `<This is N-cycle>` comment annotations so the
+    /// pass can be used purely as a cycle-position query by other passes.
+    void setAnnotateComments(bool annotate) {
+        annotateComments_ = annotate;
+    }
+
    private:
     // (For future extension: If analysis needs to track cycles per basic block/label,
     // consider using a map like below)
@@ -851,7 +862,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 activeWmmaStartCycle = cycles;
                 activeWmmaCoExecAdvance = 0;
                 activeWmmaValuSlots = wmmaCoExec->valuCoExecSlots;
-            } else if (isBranch(*inst)) {
+            } else if (isBranch(*inst) || isCall(*inst)) {
                 cycles = std::max(cycles + jumpOverhead, hwMFMA + 4);
                 // End of loop (LabelData set when branch comes from rocisa; IR-from-string may omit
                 // it)
@@ -938,8 +949,13 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Accumulate issue cycles from each instruction
             // totalCycles += estimateInstructionCycles(inst, passCtx);
 
+            // Record the cumulative cycle position of every processed
+            // instruction so other passes can query it (see
+            // computeEstimatedCyclesPerInstruction).
+            perInstCycles_[inst] = static_cast<uint32_t>(cycles < 0 ? 0 : cycles);
+
             // Update total cycles
-            if (!isLabel(*inst)) {
+            if (annotateComments_ && !isLabel(*inst)) {
                 // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
                 appendComment(inst, "<This is " + std::to_string(cycles) + "-cycle>");
             }
@@ -960,6 +976,9 @@ class EstimateAsmCyclesPassImpl : public Pass {
     }
 
     GfxArchID arch_ = GfxArchID::Gfx1250;
+
+    bool annotateComments_ = true;
+    std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
 
@@ -992,5 +1011,14 @@ unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getTotalCycles();
+}
+
+std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPerInstruction(
+    Function& func, PassContext& passCtx) {
+    EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    AnalysisManager AM;
+    (void)pass.run(func, passCtx, AM);
+    return pass.getPerInstructionCycles();
 }
 }  // namespace stinkytofu

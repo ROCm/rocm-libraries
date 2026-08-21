@@ -547,13 +547,16 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                attemptNode = env.NODE_NAME
-                echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                // Derive GPU requirement from the node label: only "nogpu" stages
-                // skip the driver/device checks. A new non-GPU label would need
-                // adding here (otherwise preflight would wrongly demand a GPU).
-                preflight(!label.contains('nogpu'))
-                runInPlace(body, transientRetries)
+                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}") {
+                    sh 'echo "The updated workspace is: $WORKSPACE"'
+                    attemptNode = env.NODE_NAME
+                    echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
+                    // Derive GPU requirement from the node label: only "nogpu" stages
+                    // skip the driver/device checks. A new non-GPU label would need
+                    // adding here (otherwise preflight would wrongly demand a GPU).
+                    preflight(!label.contains('nogpu'))
+                    runInPlace(body, transientRetries)
+                }
             }
             return
         }
@@ -1234,7 +1237,7 @@ def run_downstream_tests(Map conf=[:]){
         try
         {
             echo "Pulling image: ${conf.image}"
-            retimage = docker.image("${conf.image}")
+            def retimage = docker.image("${conf.image}")
             withDockerRegistry([ credentialsId: "ck_docker_cred", url: "" ]) {
                 retimage.pull()
             }
@@ -1284,7 +1287,8 @@ def getPytorchTestsCmds() {
 def getAiterTestsCmds() {
     return [
         // Pre-compile FlyDSL MoE AOT cache before the tests.
-        "cd /home/jenkins/workspace/aiter && python3 aiter/aot/flydsl/moe.py",
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/moe.py",
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_mha.py",
@@ -1545,6 +1549,6 @@ def runBuildInstancesOnly(String compiler) {
                 -DCMAKE_CXX_COMPILER="${compiler}" \
                 -DCMAKE_HIP_COMPILER="${compiler}" \
                 -DGPU_ARCHS="gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic" \
-                -D CMAKE_BUILD_TYPE=Release .. && ninja -j64"""
+                -D CMAKE_BUILD_TYPE=Release .. && ninja -j${nthreads()}"""
     )
 }

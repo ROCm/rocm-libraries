@@ -202,9 +202,9 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
     switch(type)
     {
     case ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT:
-        return "MATRIX_LAYOUT_BATCH_COUNT";
+        return "ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT";
     case ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET:
-        return "MATRIX_LAYOUT_STRIDED_BATCH_OFFSET";
+        return "ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET";
     case ROCBLASLT_MATRIX_LAYOUT_TYPE:
         return "ROCBLASLT_MATRIX_LAYOUT_TYPE";
     case ROCBLASLT_MATRIX_LAYOUT_ORDER:
@@ -217,6 +217,8 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
         return "ROCBLASLT_MATRIX_LAYOUT_LD";
     case ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE:
         return "ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE";        
+    case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
+        return "ROCBLASLT_MATRIX_LAYOUT_OFFSET";
     case ROCBLASLT_MATRIX_LAYOUT_MAX:
         return "ROCBLASLT_MATRIX_LAYOUT_MAX";
     default:

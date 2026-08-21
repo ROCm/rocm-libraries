@@ -74,8 +74,8 @@ Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=O
 
 In-process compile + launch needs the ROCm shared libs at runtime. The Python
 runtime resolves them WITHOUT importing torch
-(`Python/rocke/runtime/hip_module._candidate_lib_paths` / `_rocm_root_libdirs`),
-in priority order:
+(`Python/rocke/runtime/runtime_coexistence._candidate_lib_paths` /
+`_rocm_root_libdirs`), in priority order:
 
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;
 2. torch-bundled `<torch>/lib/lib*.so` — only if torch is already imported (the
@@ -87,7 +87,7 @@ in priority order:
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
 
 torch is therefore **optional** — required only for the `torch.fx` fusion
-frontend, torch-tensor launch (`runtime/torch_module.py`), and on-GPU torch-eager
+frontend, torch-tensor launch (`runtime/torch_interop.py`), and on-GPU torch-eager
 numeric checks. Building the engine, lowering, `comgr` compile, numpy launch, and
 the byte-identity gate need no torch. If a torch-less process reports `cannot load
 libamd_comgr.so`, set `ROCM_PATH` (or `ROCKE_COMGR_LIB`) to your ROCm install.

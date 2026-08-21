@@ -38,10 +38,45 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
 atol = 1.19
 rtol = 0.2
 
+# Case 5 recurred in CI exceeding the 1.328 threshold above. A ~1300-run sweep
+# on gfx942 showed the excursion is multi-element (worst channels DW[0,0,0,0,0]
+# ref=1.39 maxdiff=1.52, DW[0,14,...] ref=-2.56 maxdiff=1.58, DW[0,8,...]
+# ref=-4.94 maxdiff=2.00) and that atol=1.6 still failed ~0.2%. Cover the tail
+# via rtol instead: atol reverted to 1.19, rtol raised to 0.3 (threshold
+# 1.19 + 0.3*|ref|) so the loosening scales with each channel's magnitude.
 [[tolerance_overrides]]
 filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/5"]
 atol = 1.19
+rtol = 0.3
+
+# Bundle equivalents of Correctness/14 (NDHWC) and /5 (NCDHW) above
+[[tolerance_overrides]]
+filters = ["quick_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0"]
+atol = 1.19
 rtol = 0.2
+
+[[tolerance_overrides]]
+filters = ["quick_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0"]
+atol = 1.19
+rtol = 0.3
+
+# 3D fp32 conv forward accumulates a ~432-term dot product in fp32 on both GPU
+# and CPU reference, giving an ~1-2e-5 absolute error floor independent of
+# output magnitude. The default 1e-5 atol dips below it for small-magnitude
+# outputs, flaking IntegrationGpuConvFwd3dFp32 (~19% on Windows gfx1151). Raise
+# atol to 5e-5 (rtol unchanged at the 1e-5 default) for the 3D fp32 forward
+# cases only; 5e-5 clears the floor while staying ~50x below the worst-case
+# bound (~2.5e-3).
+[[tolerance_overrides]]
+filters = ["Smoke/IntegrationGpuConvFwd3dFp32.Correctness/*"]
+atol = 5e-5
+rtol = 1e-5
+
+# Bundle equivalent of the C++ 3D fp32 conv fwd override above
+[[tolerance_overrides]]
+filters = ["quick_ConvolutionFwd_Default.*fp32_ncdhw*", "quick_ConvolutionFwd_Default.*fp32_ndhwc*"]
+atol = 5e-5
+rtol = 1e-5
 
 # -- Test Skips --
 # Skip tests on specific architectures (or globally if 'archs' is omitted).

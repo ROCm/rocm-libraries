@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,10 +56,10 @@ namespace rocsparse
                      history<rocsparse::floating_data_t<T>, J>::run(parameters...)));
             return rocsparse_status_success;
         }
-        case rocsparse_itilu0_alg_sync_split_fusion:
+        case deprecated_rocsparse_itilu0_alg_sync_split_fusion:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split_fusion>::
+                (rocsparse::csritilu0_driver_t<deprecated_rocsparse_itilu0_alg_sync_split_fusion>::
                      history<rocsparse::floating_data_t<T>, J>::run(parameters...)));
             return rocsparse_status_success;
         }

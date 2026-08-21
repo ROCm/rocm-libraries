@@ -1094,13 +1094,7 @@ __device__ void dot(const rocblas_int tid,
 
     /** <========= Next do the reduction on the shared memory array =========> **/
 
-    val += shift_left(val, 1);
-    val += shift_left(val, 2);
-    val += shift_left(val, 4);
-    val += shift_left(val, 8);
-    val += shift_left(val, 16);
-    if(warpSize > 32)
-        val += shift_left(val, 32);
+    reduce_wave_sum(val);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = val;
     __syncthreads();
@@ -3391,13 +3385,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
     }
 
     // reduce within Warp
-    sum += shift_left(sum, 1);
-    sum += shift_left(sum, 2);
-    sum += shift_left(sum, 4);
-    sum += shift_left(sum, 8);
-    sum += shift_left(sum, 16);
-    if(WarpSize > 32)
-        sum += shift_left(sum, 32);
+    reduce_wave_sum(sum);
 
     if(tid % WarpSize == 0)
         sval[tid / WarpSize] = sum;
@@ -3490,21 +3478,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
     }
 
     // reduce within Warp
-    sum += shift_left(sum, 1);
-    repeated = repeated & __shfl_down(repeated, 1);
-    sum += shift_left(sum, 2);
-    repeated = repeated & __shfl_down(repeated, 2);
-    sum += shift_left(sum, 4);
-    repeated = repeated & __shfl_down(repeated, 4);
-    sum += shift_left(sum, 8);
-    repeated = repeated & __shfl_down(repeated, 8);
-    sum += shift_left(sum, 16);
-    repeated = repeated & __shfl_down(repeated, 16);
-    if(WarpSize > 32)
-    {
-        sum += shift_left(sum, 32);
-        repeated = repeated & __shfl_down(repeated, 32);
-    }
+    reduce_wave_sum(sum);
+    reduce_wave_and(repeated);
 
     if(tid % WarpSize == 0)
     {
@@ -3679,13 +3654,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump5(const I n, 
         sum += rocblas_abs(x[i]);
 
     // reduce within Warp
-    sum += shift_left(sum, 1);
-    sum += shift_left(sum, 2);
-    sum += shift_left(sum, 4);
-    sum += shift_left(sum, 8);
-    sum += shift_left(sum, 16);
-    if(WarpSize > 32)
-        sum += shift_left(sum, 32);
+    reduce_wave_sum(sum);
 
     if(tid % WarpSize == 0)
         sval[tid / WarpSize] = sum;

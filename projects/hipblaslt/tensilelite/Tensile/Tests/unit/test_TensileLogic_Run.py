@@ -278,8 +278,9 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
-                # ParallelMap2 returns list of (keep, total, known_bug_skips, chip_id_failures)
-                mock_parallel_map.return_value = [(5, 5, 0, 0)]
+                # ParallelMap2 returns list of
+                # (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
+                mock_parallel_map.return_value = [(5, 5, 0, 0, 0)]
 
                 # Should not raise - exits with None
                 try:
@@ -319,7 +320,7 @@ class TestMain:
 
                 mock_load_bugs.return_value = frozenset()
                 # 3 kept out of 5 total = 2 rejects
-                mock_parallel_map.return_value = [(3, 5, 0, 0)]
+                mock_parallel_map.return_value = [(3, 5, 0, 0, 0)]
 
                 with pytest.raises(SystemExit) as exc_info:
                     main()
@@ -351,8 +352,8 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
-                # keep=5, total=5, known_bug_skips=0, chip_id_failures=1
-                mock_parallel_map.return_value = [(5, 5, 0, 1)]
+                # keep=5, total=5, known_bug_skips=0, chip_id_failures=1, stale_known_bugs=0
+                mock_parallel_map.return_value = [(5, 5, 0, 1, 0)]
 
                 with pytest.raises(SystemExit) as exc_info:
                     main()
@@ -411,10 +412,11 @@ class TestMain:
 
                 mock_load_bugs.return_value = frozenset()
                 # Multiple batch results
+                # (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
                 mock_parallel_map.return_value = [
-                    (5, 5, 1, 0),  # Batch 1
-                    (3, 5, 0, 1),  # Batch 2
-                    (4, 4, 0, 0),  # Batch 3
+                    (5, 5, 1, 0, 0),  # Batch 1
+                    (3, 5, 0, 1, 0),  # Batch 2
+                    (4, 4, 0, 0, 0),  # Batch 3
                 ]
 
                 # Total: 12 keep, 14 total, 1 known_bug_skip, 1 chip_id_failure
@@ -450,7 +452,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
-                mock_parallel_map.return_value = [(5, 5, 0, 0)]
+                mock_parallel_map.return_value = [(5, 5, 0, 0, 0)]
 
                 try:
                     main()
@@ -459,3 +461,73 @@ class TestMain:
 
                 # Progress thread should not be created in verbose mode
                 mock_thread.assert_not_called()
+
+    def test_main_strict_known_bugs_exits_on_stale(self):
+        """main should exit 1 under --strict-known-bugs when a stale entry now passes"""
+        from Tensile.TensileLogic.Run import main
+
+        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
+             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
+             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
+             patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('warnings.filterwarnings'):
+
+            mock_args = Mock()
+            mock_args.Verbose = 2  # Use Verbose=2 to avoid threading behavior
+            mock_args.KnownBugs = None
+            mock_args.StrictKnownBugs = True
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                test_file = Path(tmpdir) / "logic.yaml"
+                test_file.write_text("dummy")
+
+                mock_setup.return_value = (
+                    4, {}, Path(tmpdir), [test_file],
+                    Check(OnlyCustomKernels=False, All=True),
+                    mock_args
+                )
+
+                mock_load_bugs.return_value = frozenset()
+                # No rejects, no chip-id failures, but 2 stale known-bug entries
+                # now pass validation -> strict mode must fail.
+                mock_parallel_map.return_value = [(5, 5, 0, 0, 2)]
+
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+
+                assert exc_info.value.code == 1
+
+    def test_main_stale_known_bugs_lenient_without_strict(self):
+        """main should not fail on stale entries when --strict-known-bugs is off"""
+        from Tensile.TensileLogic.Run import main
+
+        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
+             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
+             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
+             patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('warnings.filterwarnings'):
+
+            mock_args = Mock()
+            mock_args.Verbose = 2  # Use Verbose=2 to avoid threading behavior
+            mock_args.KnownBugs = None
+            mock_args.StrictKnownBugs = False
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                test_file = Path(tmpdir) / "logic.yaml"
+                test_file.write_text("dummy")
+
+                mock_setup.return_value = (
+                    4, {}, Path(tmpdir), [test_file],
+                    Check(OnlyCustomKernels=False, All=True),
+                    mock_args
+                )
+
+                mock_load_bugs.return_value = frozenset()
+                # Stale entries present but strict mode off -> warn only, success.
+                mock_parallel_map.return_value = [(5, 5, 0, 0, 2)]
+
+                # Should not raise - exits with None (or 0)
+                try:
+                    main()
+                except SystemExit as e:
+                    assert e.code in (None, 0)

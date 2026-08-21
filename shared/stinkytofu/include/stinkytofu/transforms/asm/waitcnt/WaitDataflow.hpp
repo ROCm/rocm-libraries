@@ -34,9 +34,9 @@
 //
 // Per-pred queues are KEPT at block exit (not collapsed) so the optimizer
 // layer can read each predecessor's path length for shallow-pred
-// promotion. Each queue is capped at the hardware counter window
-// (kMaxInFlight) so a self-loop with an undrained counter still reaches a
-// fixed point instead of growing the queue every iteration.
+// promotion. Each queue keeps a bounded tail plus a saturated producer set,
+// so wait-count immediates are capped to the hardware maximum while the
+// dataflow lattice remains finite.
 //
 // PHIs of pseudo-reg memtokens are summarised into a PhiSummary so
 // downstream consumers look up a single representative wait per counter.
@@ -50,6 +50,7 @@
 #include <functional>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -71,20 +72,22 @@ enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Count 
 CounterKind classifyMemOp(const StinkyInstruction& inst);
 
 /// One queue of in-flight memops on a given counter, tagged by the CFG
-/// predecessor it was seeded from. For an op OP at index I in a queue of
-/// size N, the wait value is N - I - 1.
+/// predecessor it was seeded from. For an op OP, the wait value is
+/// countFrom(OP) - 1, capped to the hardware maximum wait immediate. Ops
+/// older than the bounded tail are remembered in saturatedOps and report the
+/// maximum count.
 ///
 /// At block entry there is one entry per CFG predecessor; these are kept
 /// (not collapsed) at block exit so a successor's mergeFromPredecessors can
-/// recover each predecessor's path length. Queue length is capped at the
-/// hardware counter window so the lattice has finite height.
+/// recover each predecessor's path length.
 struct PerPredQueue {
     BasicBlock* pred = nullptr;
     std::deque<StinkyInstruction*> ops;
+    std::unordered_set<StinkyInstruction*> saturatedOps;
 
     int countFrom(StinkyInstruction* op) const;
     bool operator==(const PerPredQueue& other) const {
-        return pred == other.pred && ops == other.ops;
+        return pred == other.pred && ops == other.ops && saturatedOps == other.saturatedOps;
     }
 };
 
@@ -199,13 +202,11 @@ class WaitDataflow {
     unsigned iterationCap = 0;
     bool loopCarriedTokenDepsEnabled = false;
 
-    /// (block, counter) pairs whose per-pred queue overflowed the hardware
-    /// in-flight window (kMaxInFlight) during a solver sweep -- i.e. the
-    /// counter was issued past its window without draining and
-    /// appendToAllPaths had to drop the oldest (provably-complete) ops.
+    /// (block, counter) pairs whose per-pred queue exceeded the bounded
+    /// hardware-count window during a solver sweep. Older producers are
+    /// preserved in PerPredQueue::saturatedOps, so this is a diagnostic only.
     /// Cleared at the start of every sweep so that, at the fixed point, it
-    /// holds exactly the steady-state overflows. Surfaced by solve() as a
-    /// non-fatal warning; it never changes the emitted plan.
+    /// holds exactly the steady-state saturations.
     std::set<std::pair<const BasicBlock*, CounterKind>> overflowSites;
 
     /// Emit a non-fatal diagnostic (in RPO order) for every (block, counter)
@@ -226,7 +227,8 @@ class WaitDataflow {
         const std::unordered_map<const BasicBlock*, DataflowState>& exitState) const;
 
     /// Walk BB in program order, mutating STATE. Per-pred queues are kept
-    /// (not collapsed) at exit; each is capped at kMaxInFlight.
+    /// (not collapsed) at exit; wait immediates computed from them are
+    /// capped to the hardware maximum.
     void transferBlock(BasicBlock& bb, DataflowState& state);
 };
 

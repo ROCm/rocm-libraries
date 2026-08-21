@@ -161,6 +161,13 @@ struct CostOverrideEntry {
     int latency = 1;
 };
 
+// Co-issue override: when modifier matches (e.g. MatrixFmtModifiers(FP4, FP4)), use coIssueWindow
+struct CoIssueOverrideEntry {
+    std::string modifierType;       // e.g. "MatrixFmtModifiers"
+    std::vector<std::string> args;  // e.g. {"FP4", "FP4"}
+    int coIssueWindow = 0;
+};
+
 // Instruction definition
 struct InstructionDef {
     std::string instClass;  // e.g., "FloatAddInst"
@@ -172,11 +179,12 @@ struct InstructionDef {
     int cycle = 0;       // 0 = not specified (inherit from format, then arch default)
     int latency = 0;
     int coIssueWindow = -1;  // -1 = not specified (inherit from format); VALU co-issue window
-    std::vector<CostOverrideEntry> costOverrides;     // modifier-keyed overrides
-    std::vector<OperandSpec> operands;                // Operand specifications
-    std::vector<OperandFieldEntry> operandFields;     // Operand field descriptions
-    std::vector<OperandFieldEntry> altOperandFields;  // Promoted encoding field overrides
-    std::vector<std::string> flags;                   // Instruction-specific flags
+    std::vector<CostOverrideEntry> costOverrides;        // modifier-keyed overrides
+    std::vector<CoIssueOverrideEntry> coIssueOverrides;  // modifier-keyed co-issue overrides
+    std::vector<OperandSpec> operands;                   // Operand specifications
+    std::vector<OperandFieldEntry> operandFields;        // Operand field descriptions
+    std::vector<OperandFieldEntry> altOperandFields;     // Promoted encoding field overrides
+    std::vector<std::string> flags;                      // Instruction-specific flags
     std::vector<std::string> logical;  // Logical IR names mapping to this mnemonic: .logical =
                                        // {"A", "B"} or .logical = "A"
     std::string unit;                  // Override format unit
@@ -753,6 +761,7 @@ class DefTParser {
                 parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
                 parseFieldIntAuto(entryFields, ".coissue", inst.coIssueWindow);
                 parseFieldCostOverrides(entryFields, inst.costOverrides);
+                parseFieldCoIssueOverrides(entryFields, inst.coIssueOverrides);
                 parseFieldOperandFields(entryFields, ".operand_fields", inst.operandFields);
                 parseFieldOperandFields(entryFields, ".alt_operand_fields", inst.altOperandFields);
                 parseFieldLogical(entryFields, inst.logical);
@@ -890,6 +899,7 @@ class DefTParser {
             parseFieldCost(block, ".cost", inst.cycle, inst.latency);
             parseFieldIntAuto(block, ".coissue", inst.coIssueWindow);
             parseFieldCostOverrides(block, inst.costOverrides);
+            parseFieldCoIssueOverrides(block, inst.coIssueOverrides);
             parseFieldFlags(block, ".flags", inst.flags);
             parseFieldOperandFields(block, ".operand_fields", inst.operandFields);
             parseFieldOperandFields(block, ".alt_operand_fields", inst.altOperandFields);
@@ -1004,9 +1014,9 @@ class DefTParser {
         return std::string::npos;
     }
 
-    // Helper: Parse .costOverrides = { { MatrixFmtModifiers(FP4, FP4), 6, 24 }, ... }
+    // Helper: Parse .costOverride = { { MatrixFmtModifiers(FP4, FP4), 6, 24 }, ... }
     void parseFieldCostOverrides(const std::string& block, std::vector<CostOverrideEntry>& out) {
-        size_t pos = block.find(".costOverrides");
+        size_t pos = block.find(".costOverride");
         if (pos == std::string::npos) return;
         size_t eqPos = block.find('=', pos);
         if (eqPos == std::string::npos) return;
@@ -1061,6 +1071,66 @@ class DefTParser {
                 e.cycle = std::stoi(costPart.substr(0, cc));
                 e.latency = std::stoi(costPart.substr(cc + 1));
             }
+            out.push_back(e);
+            entryStart = entryR + 1;
+        }
+    }
+
+    // Helper: Parse .coissueOverride = { { MatrixFmtModifiers(FP4, FP4), 0x0008 }, ... }
+    void parseFieldCoIssueOverrides(const std::string& block,
+                                    std::vector<CoIssueOverrideEntry>& out) {
+        size_t pos = block.find(".coissueOverride");
+        if (pos == std::string::npos) return;
+        size_t eqPos = block.find('=', pos);
+        if (eqPos == std::string::npos) return;
+        size_t lbrace = block.find('{', eqPos);
+        if (lbrace == std::string::npos) return;
+        size_t rbrace = findMatchingBrace(block, lbrace);
+        if (rbrace == std::string::npos) return;
+        std::string content = block.substr(lbrace + 1, rbrace - lbrace - 1);
+        size_t entryStart = 0;
+        while (entryStart < content.size()) {
+            size_t entryL = content.find('{', entryStart);
+            if (entryL == std::string::npos) break;
+            size_t entryR = findMatchingBrace(content, entryL);
+            if (entryR == std::string::npos) break;
+            std::string entry = content.substr(entryL + 1, entryR - entryL - 1);
+            // entry is "MatrixFmtModifiers(FP4, FP4), 0x0008"
+            size_t sep = entry.find("),");
+            if (sep == std::string::npos) {
+                entryStart = entryR + 1;
+                continue;
+            }
+            std::string modPart = entry.substr(0, sep + 1);  // include ')'
+            std::string winPart = entry.substr(sep + 2);
+            size_t lparen = modPart.find('(');
+            if (lparen == std::string::npos) {
+                entryStart = entryR + 1;
+                continue;
+            }
+            size_t rparen = findMatchingParen(modPart, lparen + 1);
+            if (rparen == std::string::npos) {
+                entryStart = entryR + 1;
+                continue;
+            }
+            CoIssueOverrideEntry e;
+            e.modifierType = modPart.substr(0, lparen);
+            e.modifierType.erase(0, e.modifierType.find_first_not_of(" \t\n\r"));
+            e.modifierType.erase(e.modifierType.find_last_not_of(" \t\n\r") + 1);
+            std::string argsStr = modPart.substr(lparen + 1, rparen - lparen - 1);
+            size_t as = 0;
+            while (as < argsStr.size()) {
+                size_t ac = argsStr.find(',', as);
+                if (ac == std::string::npos) ac = argsStr.size();
+                std::string arg = argsStr.substr(as, ac - as);
+                arg.erase(0, arg.find_first_not_of(" \t\n\r"));
+                arg.erase(arg.find_last_not_of(" \t\n\r") + 1);
+                if (!arg.empty()) e.args.push_back(arg);
+                as = ac + 1;
+            }
+            winPart.erase(0, winPart.find_first_not_of(" \t\n\r"));
+            winPart.erase(winPart.find_last_not_of(" \t\n\r,") + 1);
+            if (!winPart.empty()) e.coIssueWindow = std::stoi(winPart, nullptr, 0);
             out.push_back(e);
             entryStart = entryR + 1;
         }
@@ -1273,40 +1343,6 @@ class InstructionCodeGen {
 
         out << "};\n\n";
 
-        // Emit cost overrides keyed by modifier (e.g. MatrixFmtModifiers(a, b)); runtime uses for
-        // modifier-dependent cost
-        std::vector<const InstructionDef*> withOverrides;
-        for (const auto& inst : instructions_) {
-            if (!inst.costOverrides.empty()) withOverrides.push_back(&inst);
-        }
-        if (!withOverrides.empty()) {
-            out << "// Cost overrides: when modifier matches (e.g. MatrixFmtModifiers), use "
-                   "(cycle, latency).\n"
-                   "// fmtA/fmtB values match stinkytofu::MatrixFmt enum (LLVM "
-                   "WMMA::MatrixFMT).\n";
-            out << "struct InstructionCostOverrideMatrixFmt { const char* mnemonic; uint8_t "
-                   "fmtA; uint8_t fmtB; uint16_t cycle; uint16_t latency; };\n";
-            out << "constexpr InstructionCostOverrideMatrixFmt " << arch_
-                << "_COST_OVERRIDES_MATRIX_FMT[] = {\n";
-            for (const auto* inst : withOverrides) {
-                for (const auto& ov : inst->costOverrides) {
-                    if (ov.modifierType != "MatrixFmtModifiers" || ov.args.size() < 2) continue;
-                    // Map .def format names to MatrixFmt enum values (LLVM WMMA::MatrixFMT)
-                    auto toFmt = [](const std::string& s) -> int {
-                        if (s == "FP8") return 0;
-                        if (s == "BF8") return 1;
-                        if (s == "FP6") return 2;
-                        if (s == "BF6") return 3;
-                        if (s == "FP4") return 4;
-                        return 0xFF;  // NONE
-                    };
-                    out << "    {\"" << inst->mnemonic << "\", " << toFmt(ov.args[0]) << ", "
-                        << toFmt(ov.args[1]) << ", " << ov.cycle << ", " << ov.latency << "},\n";
-                }
-            }
-            out << "};\n\n";
-        }
-
         out << "// Total generated instructions: " << instructions_.size() << "\n";
         return true;
     }
@@ -1492,6 +1528,99 @@ class InstructionCodeGen {
                 out << "    {\"" << inst->mnemonic << "\", " << "stinkytofu::" << pfmt << ", "
                     << arrayName << "}";
                 out << (i + 1 < withPromoted.size() ? ",\n" : "\n");
+            }
+            out << "};\n";
+        }
+
+        // Map .def format names to MatrixFmt enum values (LLVM WMMA::MatrixFMT)
+        auto toFmt = [](const std::string& s) -> int {
+            if (s == "FP8") return 0;
+            if (s == "BF8") return 1;
+            if (s == "FP6") return 2;
+            if (s == "BF6") return 3;
+            if (s == "FP4") return 4;
+            return 0xFF;  // NONE
+        };
+
+        // --- Matrix-format cost override arrays (issue/latency) ---
+        std::vector<const InstructionDef*> withCostOv;
+        for (const auto& inst : instructions_) {
+            if (!inst.costOverrides.empty()) withCostOv.push_back(&inst);
+        }
+        out << "\n";
+        if (withCostOv.empty()) {
+            out << "// No instructions with matrix-format cost overrides in this arch\n";
+            out << "static constexpr struct {\n";
+            out << "    const char* mnemonic;\n";
+            out << "    stinkytofu::span<const stinkytofu::HwInstDesc::MatrixFmtCostOverride> "
+                   "overrides;\n";
+            out << "} instMatrixFmtCostOverrides[] = {};\n";
+        } else {
+            for (const auto* inst : withCostOv) {
+                std::string arrayName =
+                    "matrix_fmt_cost_ov_" + mnemonicToArraySuffix(inst->mnemonic);
+                out << "static constexpr stinkytofu::HwInstDesc::MatrixFmtCostOverride "
+                    << arrayName << "[] = {\n";
+                for (const auto& ov : inst->costOverrides) {
+                    if (ov.modifierType != "MatrixFmtModifiers" || ov.args.size() < 2) continue;
+                    out << "    {" << toFmt(ov.args[0]) << ", " << toFmt(ov.args[1]) << ", "
+                        << ov.cycle << ", " << ov.latency << "},\n";
+                }
+                out << "};\n\n";
+            }
+            out << "static constexpr struct {\n";
+            out << "    const char* mnemonic;\n";
+            out << "    stinkytofu::span<const stinkytofu::HwInstDesc::MatrixFmtCostOverride> "
+                   "overrides;\n";
+            out << "} instMatrixFmtCostOverrides[] = {\n";
+            for (size_t i = 0; i < withCostOv.size(); ++i) {
+                const auto* inst = withCostOv[i];
+                std::string arrayName =
+                    "matrix_fmt_cost_ov_" + mnemonicToArraySuffix(inst->mnemonic);
+                out << "    {\"" << inst->mnemonic << "\", " << arrayName << "}";
+                out << (i + 1 < withCostOv.size() ? ",\n" : "\n");
+            }
+            out << "};\n";
+        }
+
+        // --- Matrix-format co-issue-window override arrays ---
+        std::vector<const InstructionDef*> withCoIssueOv;
+        for (const auto& inst : instructions_) {
+            if (!inst.coIssueOverrides.empty()) withCoIssueOv.push_back(&inst);
+        }
+        out << "\n";
+        if (withCoIssueOv.empty()) {
+            out << "// No instructions with matrix-format co-issue overrides in this arch\n";
+            out << "static constexpr struct {\n";
+            out << "    const char* mnemonic;\n";
+            out << "    stinkytofu::span<const stinkytofu::HwInstDesc::MatrixFmtCoIssueOverride> "
+                   "overrides;\n";
+            out << "} instMatrixFmtCoIssueOverrides[] = {};\n";
+        } else {
+            for (const auto* inst : withCoIssueOv) {
+                std::string arrayName =
+                    "matrix_fmt_coissue_ov_" + mnemonicToArraySuffix(inst->mnemonic);
+                out << "static constexpr stinkytofu::HwInstDesc::MatrixFmtCoIssueOverride "
+                    << arrayName << "[] = {\n";
+                for (const auto& ov : inst->coIssueOverrides) {
+                    if (ov.modifierType != "MatrixFmtModifiers" || ov.args.size() < 2) continue;
+                    out << "    {" << toFmt(ov.args[0]) << ", " << toFmt(ov.args[1]) << ", " << "0x"
+                        << std::hex << std::setfill('0') << std::setw(4) << ov.coIssueWindow
+                        << std::dec << std::setfill(' ') << "},\n";
+                }
+                out << "};\n\n";
+            }
+            out << "static constexpr struct {\n";
+            out << "    const char* mnemonic;\n";
+            out << "    stinkytofu::span<const stinkytofu::HwInstDesc::MatrixFmtCoIssueOverride> "
+                   "overrides;\n";
+            out << "} instMatrixFmtCoIssueOverrides[] = {\n";
+            for (size_t i = 0; i < withCoIssueOv.size(); ++i) {
+                const auto* inst = withCoIssueOv[i];
+                std::string arrayName =
+                    "matrix_fmt_coissue_ov_" + mnemonicToArraySuffix(inst->mnemonic);
+                out << "    {\"" << inst->mnemonic << "\", " << arrayName << "}";
+                out << (i + 1 < withCoIssueOv.size() ? ",\n" : "\n");
             }
             out << "};\n";
         }
@@ -1854,6 +1983,35 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "                    }\n"
         << "                }\n"
         << "            }\n"
+        << "            for(const auto& req : instMatrixFmtCostOverrides)\n"
+        << "            {\n"
+        << "                for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); "
+           "++i)\n"
+        << "                {\n"
+        << "                    if(MCIDTable[i].mnemonic && std::string(MCIDTable[i].mnemonic) "
+           "== req.mnemonic)\n"
+        << "                    {\n"
+        << "                        const_cast<HwInstDesc&>(MCIDTable[i]).matrixFmtCostOverrides = "
+           "req.overrides;\n"
+        << "                        break;\n"
+        << "                    }\n"
+        << "                }\n"
+        << "            }\n"
+        << "            for(const auto& req : instMatrixFmtCoIssueOverrides)\n"
+        << "            {\n"
+        << "                for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); "
+           "++i)\n"
+        << "                {\n"
+        << "                    if(MCIDTable[i].mnemonic && std::string(MCIDTable[i].mnemonic) "
+           "== req.mnemonic)\n"
+        << "                    {\n"
+        << "                        "
+           "const_cast<HwInstDesc&>(MCIDTable[i]).matrixFmtCoIssueOverrides "
+           "= req.overrides;\n"
+        << "                        break;\n"
+        << "                    }\n"
+        << "                }\n"
+        << "            }\n"
         << "        });\n\n"
         << "        return MCIDTable;\n"
         << "    }\n\n"
@@ -2093,6 +2251,9 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
     unifiedList.push_back("FENCE");
     unifiedList.push_back("LABEL");
     unifiedList.push_back("PHI");
+    // Pseudo: function ASM placement marker for FlattenCalleesPass (never emitted).
+    unifiedList.push_back("FUNCTION_ASM_PLACEMENT_MARKER");
+    unifiedList.push_back("EXEC_GROUP");
     unifiedList.push_back("INVALID");
     std::unordered_map<std::string, int> unifiedOpcodeMap;
     for (size_t i = 0; i < unifiedList.size(); ++i)

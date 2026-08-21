@@ -596,6 +596,17 @@ constexpr double dense2coo_gbyte_count(I M, I N, I nnz)
     return (reads + writes) / 1e9;
 }
 
+template <typename T, typename I>
+constexpr double dense2bell_gbyte_count(I M, I N, I ell_cols, I ell_block_size)
+{
+    const I Mb = (M + ell_block_size - 1) / ell_block_size;
+
+    size_t reads  = sizeof(T) * (M * N);
+    size_t writes = sizeof(I) * Mb * ell_cols / ell_block_size + sizeof(T) * M * ell_cols;
+
+    return (reads + writes) / 1e9;
+}
+
 template <typename T>
 constexpr double prune_dense2csr_gbyte_count(rocsparse_int M, rocsparse_int N, rocsparse_int nnz)
 {

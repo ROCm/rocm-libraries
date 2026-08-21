@@ -1,0 +1,79 @@
+PROJECT_NAME           = "hipThreads"
+PROJECT_BRIEF          = "HIP-based GPU threading primitives"
+
+# Run from docs/doxygen/. Paths are relative to this directory.
+OUTPUT_DIRECTORY       = .
+CREATE_SUBDIRS         = NO
+
+INPUT                  = ../../inc \
+                         ../../src \
+                         ../standard_api
+RECURSIVE              = YES
+EXCLUDE                = ../../build
+EXCLUDE_PATTERNS       = */CMakeFiles/* */_deps/*
+
+FILE_PATTERNS          = *.h *.hpp *.hh *.hxx *.inl *.ipp *.c *.cc *.cxx *.cpp *.dox \
+                         mutex pseudo_mutex pseudo_condition_variable condition_variable thread
+EXTENSION_MAPPING      = no_extension=C++
+
+# Only emit documented entities; the API is organised through @defgroup.
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = NO
+
+MULTILINE_CPP_IS_BRIEF = YES
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+TAB_SIZE               = 4
+
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_NO_PARAMDOC       = NO
+WARN_IF_DOC_ERROR      = YES
+QUIET                  = NO
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+PREDEFINED             = \
+  __global__= \
+  __launch_bounds__(x)= \
+  __forceinline__=inline \
+  _LIBHIPTHREADS_EXPORTED_FROM_ABI= \
+  __HIP_DEVICE_COMPILE__ \
+  __shared__= \
+  __constant__= \
+  __managed__= \
+  HIP_SYMBOL(x)=x \
+  __LIBHIPTHREADS_HIP_CHECK__(x)=x \
+  _LIBHIPTHREADS_TEMPLATE_VIS= \
+  _LIBHIPTHREADS_TYPE_VIS= \
+  _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(x)= \
+  _LIBHIPTHREADS_CONSTEXPR=constexpr \
+  _LIBHIPTHREADS_HIDE_FROM_ABI= \
+  _LIBHIPTHREADS_NODISCARD_EXT= \
+  _LIBHIPTHREADS_CTAD_SUPPORTED_FOR_TYPE(x)= \
+  _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS \
+  _NOEXCEPT=noexcept \
+  cuda=hip
+EXPAND_AS_DEFINED      = \
+  assert
+
+# Breathe consumes XML; Sphinx renders the HTML.
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+
+SOURCE_BROWSER         = NO
+VERBATIM_HEADERS       = NO
+HAVE_DOT               = NO
+
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+SORT_GROUP_NAMES       = YES
+SORT_BY_SCOPE_NAME     = YES

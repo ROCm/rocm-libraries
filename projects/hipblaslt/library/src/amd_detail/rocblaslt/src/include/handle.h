@@ -133,7 +133,7 @@ struct _rocblaslt_handle
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed
  * to all subsequent library function calls that involve the matrix.
- * It should be destroyed at the end using rocblaslt_matrix_layout_destory().
+ * It should be destroyed at the end using rocblaslt_matrix_layout_destroy().
  *******************************************************************************/
 struct _rocblaslt_matrix_layout
 {
@@ -152,6 +152,7 @@ struct _rocblaslt_matrix_layout
     hipDataType      type;
     int32_t          batch_count  = 1;
     int64_t          batch_stride = 0;
+    int64_t          batch_offset = 0;
     hipblasLtOrder_t order        = HIPBLASLT_ORDER_COL;
     // Batch Mode
     hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;    

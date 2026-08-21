@@ -30,12 +30,14 @@ include: test_sddmm_coo_aos.yaml
 include: test_sddmm_coo.yaml
 include: test_sddmm_csc.yaml
 include: test_sddmm_csr.yaml
+include: test_dense_to_sparse_bell_no_set_pointers.yaml
 include: test_dense_to_sparse_coo.yaml
 include: test_dense_to_sparse_csc.yaml
 include: test_dense_to_sparse_csr.yaml
 include: test_sparse_to_dense_coo.yaml
 include: test_sparse_to_dense_csc.yaml
 include: test_sparse_to_dense_csr.yaml
+include: test_spgeam_csr.yaml
 include: test_spgemm_csr.yaml
 include: test_spgemmreuse_csr.yaml
 include: test_spmm_batched_coo.yaml
@@ -52,7 +54,9 @@ include: test_spmv_csr.yaml
 include: test_spmv_csr_reuse_descr.yaml
 include: test_spmv_sell.yaml
 include: test_spsv_coo.yaml
+include: test_spsv_csc.yaml
 include: test_spsv_csr.yaml
 include: test_spsm_coo.yaml
+include: test_spsm_csc.yaml
 include: test_spsm_csr.yaml
 include: test_spvv.yaml

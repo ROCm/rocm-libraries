@@ -69,7 +69,11 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from Tensile.SolutionStructs import Solution
-from Tensile.SolutionStructs.Solution import mergeTypeMismatchCollector, printTypeMismatchSummary
+from Tensile.SolutionStructs.Solution import (
+    raiseIfTypeMismatches,
+    mergeTypeMismatchCollector,
+    resetTypeMismatchCollector,
+)
 from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
@@ -839,11 +843,40 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             for _, lazyLib in lib.lazyLibraries.items():
                 yield from libraryIter(lazyLib)
 
-    for library in ParallelMap2(
+    def mergeTypeMismatchSnapshot(
+        aggregate: dict,
+        snapshot: dict,
+    ) -> None:
+        """Merge one parseLibraryLogicFile() mismatch snapshot into aggregate."""
+        for key, entry in snapshot.items():
+            target = aggregate.setdefault(key, {"count": 0, "values": set(), "files": set()})
+            target["count"] += entry["count"]
+            target["values"].update(entry["values"])
+            target["files"].update(entry["files"])
+
+    # parseLibraryLogicData() uses Solution.py's module-level type mismatch
+    # collector as a per-file scratch buffer: it resets the collector at parse
+    # start, builds the ProblemType/Solution objects, and returns a snapshot in
+    # the LibraryLogic tuple. ParallelMap2 can execute those parses in worker
+    # processes or in this process (notably when CpuThreads resolves to 1). In
+    # the in-process path, the scratch buffer is the same global collector this
+    # function can see, and after parsing it still contains the most recently
+    # parsed file's mismatches.
+    #
+    # Keep the run-level aggregate detached from that global collector while
+    # consuming parse results. Merging returned snapshots directly into the live
+    # collector would mix aggregate state with parser scratch state: a later
+    # parse can reset previously merged aggregate state, and the final file's
+    # snapshot can be double-counted. Once every logic file has been parsed,
+    # replace the global collector with this clean aggregate so
+    # raiseIfTypeMismatches() can format the existing fatal aggregate error.
+    typeMismatchAggregate: dict = {}
+    parsedLibraries = ParallelMap2(
         LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
-    ):
+    )
+    for library in parsedLibraries:
         _, architectureName, _, _, _, newLibrary, typeMismatches = library
-        mergeTypeMismatchCollector(typeMismatches)
+        mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
         if architectureName == "":
             continue
@@ -855,8 +888,10 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
 
     # After all YAML files have been parsed and Solution objects created,
-    # print a summary of any type mismatches that were collected.
-    printTypeMismatchSummary(len(logicFiles))
+    # fail on any type mismatches that were collected.
+    resetTypeMismatchCollector()
+    mergeTypeMismatchCollector(typeMismatchAggregate)
+    raiseIfTypeMismatches()
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0

@@ -234,6 +234,12 @@ target_compile_definitions(rocsolver-test PRIVATE
   ROCSOLVER_CLIENTS_TEST
 )
 
+# Mirror the library's 64-bit eigensolver feature flag so the tests assert the
+# correct behavior (real run when ON, rocblas_status_not_implemented when OFF).
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+
 add_test(
   NAME rocsolver-test
   COMMAND rocsolver-test

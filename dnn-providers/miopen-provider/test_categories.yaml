@@ -77,6 +77,17 @@ test_categories:
       - "full"
       - "all"
 
+  ffm_quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "ffm_quick"
+      - "ffm_full"
+
 # GPU-arch-specific exclusions. Mirrors the TEST_TO_IGNORE map in the legacy
 # TheRock/build_tools/github_actions/test_executable_scripts/test_miopenprovider.py:
 #
