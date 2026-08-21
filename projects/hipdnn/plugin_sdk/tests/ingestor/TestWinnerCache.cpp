@@ -3,6 +3,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <unistd.h>
+
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -584,12 +586,20 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
 /// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
 /// restores the caller's value after, so the on-disk cases never read or write a real user
 /// cache and never observe each other's shards.
+///
+/// The directory name carries the process id because the suite runs from a shared /tmp:
+/// two builds of this binary on one machine -- two CI jobs, or a developer alongside a CI
+/// job -- would otherwise pick the same path, and one process's remove_all() would delete
+/// the shard another was mid-way through reading. That is a narrow window, which is
+/// exactly what makes it worth closing: it would surface as a rare unreproducible failure
+/// rather than an obvious one.
 class ScopedCacheDir
 {
 public:
     explicit ScopedCacheDir(const std::string& name)
         : _previous(hipdnn_data_sdk::utilities::getEnv(CACHE_DIR_ENV))
-        , _path(std::filesystem::temp_directory_path() / ("hipdnn_winner_cache_test_" + name))
+        , _path(std::filesystem::temp_directory_path()
+                / ("hipdnn_winner_cache_test_" + std::to_string(::getpid()) + "_" + name))
     {
         std::filesystem::remove_all(_path);
         std::filesystem::create_directories(_path);
