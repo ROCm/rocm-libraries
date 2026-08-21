@@ -493,8 +493,7 @@ int main(int argc, char** argv) noexcept
             if(!snapshots.empty())
             {
                 auto envOr = [](const char* name) -> std::string {
-                    const char* v = std::getenv(name);
-                    return v ? v : "";
+                    return hipdnn_data_sdk::utilities::getEnv(name, "");
                 };
 
                 const auto now
