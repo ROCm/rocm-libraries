@@ -25,13 +25,16 @@
  *******************************************************************************/
 
 #include "hipblaslt_data.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_parse_data.hpp"
 #include "hipblaslt_test.hpp"
 #include "test_cleanup.hpp"
 #include "utility.hpp"
-#include <cstring>
+#ifndef _WIN32
+#include "hipblaslt_parallel_test.hpp"
+#endif
+#include <algorithm>
 #include <string>
+#include <vector>
 
 using namespace testing;
 
@@ -39,6 +42,7 @@ class ConfigurableEventListener : public TestEventListener
 {
     TestEventListener* const eventListener;
     std::atomic_size_t       skipped_tests{0}; // Number of skipped tests.
+    std::atomic_size_t       current_test_number{0}; // Current test number (incremental counter).
 
 public:
     bool showTestCases      = true; // Show the names of each test case.
@@ -88,8 +92,14 @@ public:
 
     void OnTestStart(const TestInfo& test_info) override
     {
+        ++current_test_number;
         if(showTestNames)
+        {
+            // Print test number and delegate to default listener
+            int total_tests = UnitTest::GetInstance()->test_to_run_count();
+            hipblaslt_cout << "[Test #" << current_test_number << "/" << total_tests << "] " << std::flush;
             eventListener->OnTestStart(test_info);
+        }
     }
 
     void OnTestPartResult(const TestPartResult& result) override
@@ -104,14 +114,6 @@ public:
         {
             if(showInlineSkips)
                 hipblaslt_cout << "Skipped test due to too few GPUs." << std::endl;
-            ++skipped_tests;
-        }
-        // GTEST_SKIP() messages may include trailing detail (e.g. matched
-        // platforms), so use substring match instead of strcmp.
-        else if(strstr(result.message(), KNOWN_BUG_STRING_GTEST))
-        {
-            if(showInlineSkips)
-                hipblaslt_cout << "Skipped known bug for current platform." << std::endl;
             ++skipped_tests;
         }
         eventListener->OnTestPartResult(result);
@@ -211,21 +213,6 @@ static std::string hipblaslt_capture_args(int argc, char** argv)
     return cmdLine.str();
 }
 
-// Remove host_side_fill_kernel flag so gtest does not reject it
-static void hipblaslt_gtest_check_host_side_fill_kernel_flags(int& argc, char** argv)
-{
-    char** dst = argv + 1;
-    for(int i = 1; i < argc; ++i)
-    {
-        if(!strcmp(argv[i], "--host_side_fill_kernel"))
-            set_host_side_fill_kernel_state(true);
-        else
-            *dst++ = argv[i];
-    }
-    *dst = nullptr;
-    argc = static_cast<int>(dst - argv);
-}
-
 static void hipblaslt_print_args(const std::string& args)
 {
     hipblaslt_cout << args << std::endl;
@@ -253,10 +240,117 @@ int main(int argc, char** argv)
 {
     std::string args = hipblaslt_capture_args(argc, argv);
 
-    hipblaslt_gtest_check_host_side_fill_kernel_flags(argc, argv);
-    if(host_side_fill_kernel())
-        hipblaslt_cout << "info: --host_side_fill_kernel enabled (device matrix init via host + hipMemcpy)\n"
-                       << std::endl;
+    // Check for --help to add our custom options
+    for(int i = 1; i < argc; i++)
+    {
+        std::string arg = argv[i];
+        if(arg == "--help" || arg == "-h" || arg == "-?" || arg == "/?" || arg == "--help-all")
+        {
+            hipblaslt_cout << "\nhipBLASLt Test Options:\n";
+            hipblaslt_cout << "  --num_gpus=N\n";
+            hipblaslt_cout << "  --num_gpus N\n";
+            hipblaslt_cout << "      Run tests in parallel across N GPUs (Unix/Linux only).\n";
+            hipblaslt_cout << "      Tests are automatically split evenly across the specified\n";
+            hipblaslt_cout << "      number of GPUs. Each GPU runs its assigned tests independently.\n";
+            hipblaslt_cout << "      Example: ./hipblaslt-test --num_gpus 8 --gtest_filter=\"*smoke*\"\n";
+            hipblaslt_cout << "      Note: If --gtest_output=json:file.json is specified, per-GPU\n";
+            hipblaslt_cout << "            results are saved as file_gpu0.json, file_gpu1.json, etc.\n";
+            hipblaslt_cout << "\n";
+            break;
+        }
+    }
+
+    // Parse and strip --num_gpus argument
+    int num_gpus = 0;
+    bool has_num_gpus_flag = false;
+    std::vector<int> indices_to_remove;  // Track all indices to remove
+
+    for(int i = 1; i < argc; i++)
+    {
+        std::string arg = argv[i];
+        if(arg.find("--num_gpus=") == 0)
+        {
+            num_gpus = std::atoi(arg.substr(11).c_str());
+            has_num_gpus_flag = true;
+            indices_to_remove.push_back(i);
+            break;
+        }
+        else if(arg == "--num_gpus" && i + 1 < argc)
+        {
+            num_gpus = std::atoi(argv[i + 1]);
+            has_num_gpus_flag = true;
+            indices_to_remove.push_back(i);
+            indices_to_remove.push_back(i + 1);
+            break;
+        }
+    }
+
+    // Parse and strip --gtest_output to extract base filename
+    std::string gtest_output_base;
+    for(int i = 1; i < argc; i++)
+    {
+        std::string arg = argv[i];
+        if(arg.find("--gtest_output=") == 0)
+        {
+            size_t colon_pos = arg.find(":");
+            if(colon_pos != std::string::npos)
+            {
+                // Format: --gtest_output=json:file.json
+                std::string format = arg.substr(15, colon_pos - 15);
+                std::string filename = arg.substr(colon_pos + 1);
+                gtest_output_base = format + ":" + filename;
+            }
+            else
+            {
+                // Format: --gtest_output=json (uses default filename)
+                std::string format = arg.substr(15);
+                if(format == "json")
+                {
+                    gtest_output_base = "json:test_detail.json"; // GTest default
+                }
+                else
+                {
+                    gtest_output_base = format; // Pass through other formats
+                }
+            }
+            indices_to_remove.push_back(i);
+            break;
+        }
+    }
+
+#ifdef _WIN32
+    // On Windows, parallel GPU execution is not supported
+    if(has_num_gpus_flag)
+    {
+        hipblaslt_cerr << "Error: --num_gpus is not supported on Windows." << std::endl;
+        return 1;
+    }
+#else
+    // Check for invalid --num_gpus values
+    if(has_num_gpus_flag && num_gpus <= 1)
+    {
+        hipblaslt_cerr << "Error: --num_gpus requires a value greater than 1." << std::endl;
+        return 1;
+    }
+
+    // If parallel GPUs requested, use parallel execution
+    if(num_gpus > 1)
+    {
+        // Remove custom flags from argv before passing to parallel runner
+        // Sort indices in descending order to remove from back to front
+        std::sort(indices_to_remove.begin(), indices_to_remove.end(), std::greater<int>());
+        for(int idx : indices_to_remove)
+        {
+            for(int i = idx; i + 1 < argc; i++)
+            {
+                argv[i] = argv[i + 1];
+            }
+            argc--;
+        }
+
+        return run_tests_parallel_gpus(argc, argv, num_gpus, gtest_output_base);
+    }
+#endif
 
     // Set signal handler
     hipblaslt_test_sigaction();
@@ -286,7 +380,7 @@ int main(int argc, char** argv)
     // Failures printed at end for reporting so repeat version info
     hipblaslt_print_version();
 
-    // end test results with command line
+    // Print command line at the end
     hipblaslt_print_args(args);
 
     //hipblaslt_shutdown();
