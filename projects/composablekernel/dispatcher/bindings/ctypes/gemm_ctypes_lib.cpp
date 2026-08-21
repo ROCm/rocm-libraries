@@ -22,6 +22,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 
 #include "ck_tile/dispatcher/dispatcher.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
@@ -51,25 +52,40 @@ using namespace ck_tile::dispatcher;
 using namespace ck_tile::dispatcher::backends;
 using Priority = ck_tile::dispatcher::Registry::Priority;
 
-#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)
+#if defined(GEMM_KEY_DTYPE_A)
+// Host-side B-preshuffle utilities.
+//
+// Whether a kernel preshuffles its B operand is a CAPABILITY THE KERNEL CARRIES
+// IN ITS OWN METADATA -- the codegen emits `static constexpr bool
+// SelectedKernel::Preshuffle` (unified_gemm_codegen.py) on every kernel config.
+// The B-upload site below branches on that trait via `if constexpr`, so there is
+// no `GEMM_KEY_PRESHUFFLE` capability macro. These helpers are templated on the
+// kernel type so they are only instantiated for a preshuffled kernel: the
+// non-preshuffle `if constexpr` branch is discarded before instantiation, so
+// shuffle_b is never instantiated for a tile geometry that was never meant to be
+// shuffled. The one remaining preprocessor guard (`GEMM_KEY_DTYPE_A`) only asks
+// "is this a modern codegen header?" -- it mirrors the legacy-header fallback in
+// dispatcher_initialize() and is NOT a preshuffle capability switch.
+
 // Adapter exposing the force-included kernel's tile geometry under the field
 // names ck_tile::shuffle_b / shuffle_b_permuteN expect. Mirrors Old-TE's
 // gemm_preshuffle_benchmark.hpp::KernelConfig so the permutation is identical.
+template <typename Kernel>
 struct BridgePreshuffleConfig
 {
-    static constexpr ck_tile::index_t M_Tile = SelectedKernel::TileM;
-    static constexpr ck_tile::index_t N_Tile = SelectedKernel::TileN;
-    static constexpr ck_tile::index_t K_Tile = SelectedKernel::TileK;
+    static constexpr ck_tile::index_t M_Tile = Kernel::TileM;
+    static constexpr ck_tile::index_t N_Tile = Kernel::TileN;
+    static constexpr ck_tile::index_t K_Tile = Kernel::TileK;
 
-    static constexpr ck_tile::index_t M_Warp = SelectedKernel::WarpPerBlock_M;
-    static constexpr ck_tile::index_t N_Warp = SelectedKernel::WarpPerBlock_N;
-    static constexpr ck_tile::index_t K_Warp = SelectedKernel::WarpPerBlock_K;
+    static constexpr ck_tile::index_t M_Warp = Kernel::WarpPerBlock_M;
+    static constexpr ck_tile::index_t N_Warp = Kernel::WarpPerBlock_N;
+    static constexpr ck_tile::index_t K_Warp = Kernel::WarpPerBlock_K;
 
-    static constexpr ck_tile::index_t M_Warp_Tile = SelectedKernel::WarpTileM;
-    static constexpr ck_tile::index_t N_Warp_Tile = SelectedKernel::WarpTileN;
-    static constexpr ck_tile::index_t K_Warp_Tile = SelectedKernel::WarpTileK;
+    static constexpr ck_tile::index_t M_Warp_Tile = Kernel::WarpTileM;
+    static constexpr ck_tile::index_t N_Warp_Tile = Kernel::WarpTileN;
+    static constexpr ck_tile::index_t K_Warp_Tile = Kernel::WarpTileK;
 
-    static constexpr bool permuteN = SelectedKernel::PermuteN;
+    static constexpr bool permuteN = Kernel::PermuteN;
 };
 
 // Preshuffle host B into the packed layout the device pipeline reads. Returns a
@@ -83,9 +99,10 @@ struct BridgePreshuffleConfig
 // major == column-major [K, N]), so filling the col-major {K, N} tensor's flat
 // storage directly reproduces Old-TE's b_k_n byte-for-byte, hence an identical
 // permutation and identical results.
-template <typename T>
+template <typename Kernel, typename T>
 static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int64_t N)
 {
+    using Config = BridgePreshuffleConfig<Kernel>;
     // Build b_k_n with the SAME descriptor Old-TE uses:
     //   host_tensor_descriptor(K, N, stride_b, is_row_major(BLayout))
     // host_tensor_descriptor takes a compile-time bool_constant. BLayout is the
@@ -120,52 +137,71 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
     // the raw bytes. memcpy the exact byte span into the tensor's flat storage
     // instead: byte-identical, with no typed reads from the caller's buffer.
     std::memcpy(b_k_n.data(), b_host, static_cast<size_t>(K) * static_cast<size_t>(N) * sizeof(T));
-    if constexpr(BridgePreshuffleConfig::permuteN)
+    if constexpr(Config::permuteN)
     {
-        return ck_tile::shuffle_b_permuteN<BridgePreshuffleConfig>(b_k_n);
+        return ck_tile::shuffle_b_permuteN<Config>(b_k_n);
     }
     else
     {
-        return ck_tile::shuffle_b<BridgePreshuffleConfig>(b_k_n);
+        return ck_tile::shuffle_b<Config>(b_k_n);
     }
 }
 
-// Shuffled-B cache. SAFE BY DEFAULT: the cache is OFF unless explicitly opted
+// Shuffled-B cache key: the identity of the source B plus the transform that
+// produced the shuffled bytes. permute_n distinguishes shuffle_b (false) from
+// shuffle_b_permuteN (true), so the two transforms never alias one entry if a
+// process ever mixes them.
+struct ShuffleKey
+{
+    const void* ptr;
+    int64_t K;
+    int64_t N;
+    bool permute_n;
+    bool operator==(const ShuffleKey& o) const
+    {
+        return ptr == o.ptr && K == o.K && N == o.N && permute_n == o.permute_n;
+    }
+};
+
+struct ShuffleKeyHash
+{
+    size_t operator()(const ShuffleKey& k) const noexcept
+    {
+        auto mix = [](size_t h, size_t v) {
+            return h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2));
+        };
+        size_t h = std::hash<const void*>{}(k.ptr);
+        h        = mix(h, std::hash<int64_t>{}(k.K));
+        h        = mix(h, std::hash<int64_t>{}(k.N));
+        h        = mix(h, std::hash<bool>{}(k.permute_n));
+        return h;
+    }
+};
+
+// Multi-entry shuffled-B cache. SAFE BY DEFAULT: OFF unless explicitly opted
 // into, so every dispatcher_run_gemm recomputes the host shuffle from the B the
 // caller actually passed. This is the only correct default across the public
 // Python API, where GpuGemmRunner.run() builds a fresh (encoded) B temporary on
 // every call: once that temporary is freed, numpy may hand back the SAME address
-// for a different same-shaped B, so a (pointer, K, N) key cannot distinguish
-// them and a pointer-keyed cache would silently serve stale weights. Recomputing
-// each call is also free of timing risk -- the shuffle + H2D copy run BEFORE the
-// single g_dispatcher->run() (the only kernel-timed region), never inside it.
+// for a different same-shaped B, so a pointer-keyed entry cannot distinguish them
+// and would silently serve stale weights.
 //
-// OPT-IN CACHE (perf sweeps only): set
-//   CK_DISPATCHER_PRESHUFFLE_CACHE=1
-// to reuse the shuffle across calls keyed on (b_host pointer, K, N). This is
-// valid ONLY under a strict IMMUTABILITY CONTRACT: for a fixed (b_host, K, N)
-// the bytes behind *b_host must stay immutable for the process lifetime and the
-// same B object must be kept alive across the repeated calls (so its address is
-// not reused for different contents). The A/B perf sweep honours this -- it
-// allocates B once per shape and never mutates or frees it between iterations --
-// and only there does the cross-call cache avoid redundant host reorder work.
-struct ShuffledBCache
-{
-    const void* b_host = nullptr;
-    int64_t K          = 0;
-    int64_t N          = 0;
-    // Held by shared_ptr so the cache has a trivial (null) default state --
-    // HostTensor has no default constructor, and a dummy one would need a valid
-    // descriptor. Populated lazily on the first (or a changed) B.
-    std::shared_ptr<ck_tile::HostTensor<BDataType>> data;
-};
-static ShuffledBCache g_shuffled_b_cache;
+// OPT-IN CACHE (perf sweeps only): set CK_DISPATCHER_PRESHUFFLE_CACHE=1 to reuse
+// the shuffle across calls, keyed on {ptr, K, N, transform}. Unlike a single
+// slot -- which a multi-shape A/B sweep evicts on every shape change, dropping
+// the hit rate to ~0% -- the map keeps one entry per distinct shape so the cache
+// actually pays off. Valid ONLY under a strict IMMUTABILITY CONTRACT: for a fixed
+// (b_host, K, N) the bytes behind *b_host must stay immutable and the B object
+// kept alive across the repeated calls. The A/B perf sweep honours this (one B
+// per shape, never mutated or freed between iterations).
+using ShuffledBCache =
+    std::unordered_map<ShuffleKey, std::shared_ptr<ck_tile::HostTensor<BDataType>>, ShuffleKeyHash>;
+[[maybe_unused]] static ShuffledBCache g_shuffled_b_cache;
 
-// Whether the (pointer,K,N)-keyed cache is enabled. OFF by default; resolved
-// once from the environment. Only a caller that guarantees the IMMUTABILITY
-// CONTRACT above (perf sweep) should turn this on -- otherwise a reused pointer
-// with different contents would be served stale bytes.
-static bool preshuffle_cache_enabled()
+// Whether the opt-in cache is enabled. OFF by default; resolved once from the
+// environment. Only a caller that guarantees the IMMUTABILITY CONTRACT above
+// (perf sweep) should turn this on.
+[[maybe_unused]] static bool preshuffle_cache_enabled()
 {
     static const bool enabled = []() {
         const char* v = std::getenv("CK_DISPATCHER_PRESHUFFLE_CACHE");
@@ -175,27 +211,36 @@ static bool preshuffle_cache_enabled()
 }
 
 // Return a pointer to the shuffled bytes for this B. By default recomputes the
-// shuffle every call (safe: never serves stale bytes). Reuses the cache only
-// when CK_DISPATCHER_PRESHUFFLE_CACHE is set AND the (pointer, K, N) matches the
-// last call. Not thread-safe (bridge is single-threaded), which matches the rest
-// of this translation unit.
+// shuffle every call (safe: never serves stale bytes), returning a thread_local
+// scratch buffer that stays alive until the next call. Reuses the map only when
+// CK_DISPATCHER_PRESHUFFLE_CACHE is set. Not thread-safe (bridge is single-
+// threaded), which matches the rest of this translation unit.
+template <typename Kernel>
 static const BDataType* get_shuffled_b(const BDataType* b_host, int64_t K, int64_t N)
 {
-    const bool use_cache = preshuffle_cache_enabled();
-    if(!use_cache || !(g_shuffled_b_cache.data && g_shuffled_b_cache.b_host == b_host &&
-                       g_shuffled_b_cache.K == K && g_shuffled_b_cache.N == N))
+    constexpr bool permute_n = BridgePreshuffleConfig<Kernel>::permuteN;
+
+    if(!preshuffle_cache_enabled())
     {
-        g_shuffled_b_cache.data = std::make_shared<ck_tile::HostTensor<BDataType>>(
-            preshuffle_host_b<BDataType>(b_host, K, N));
-        // Record the key so a subsequent cached lookup can match. When caching is
-        // off these fields are simply never consulted (use_cache short-circuits).
-        g_shuffled_b_cache.b_host = b_host;
-        g_shuffled_b_cache.K      = K;
-        g_shuffled_b_cache.N      = N;
+        static thread_local std::shared_ptr<ck_tile::HostTensor<BDataType>> scratch;
+        scratch = std::make_shared<ck_tile::HostTensor<BDataType>>(
+            preshuffle_host_b<Kernel, BDataType>(b_host, K, N));
+        return scratch->data();
     }
-    return g_shuffled_b_cache.data->data();
+
+    const ShuffleKey key{b_host, K, N, permute_n};
+    auto it = g_shuffled_b_cache.find(key);
+    if(it == g_shuffled_b_cache.end())
+    {
+        it = g_shuffled_b_cache
+                 .emplace(key,
+                          std::make_shared<ck_tile::HostTensor<BDataType>>(
+                              preshuffle_host_b<Kernel, BDataType>(b_host, K, N)))
+                 .first;
+    }
+    return it->second->data();
 }
-#endif // GEMM_KEY_PRESHUFFLE
+#endif // GEMM_KEY_DTYPE_A
 
 // Global dispatcher (initialized once, managed via shared_ptr for safe cleanup)
 static std::shared_ptr<Dispatcher> g_dispatcher = nullptr;
@@ -500,18 +545,25 @@ int dispatcher_run_gemm(
         cleanup_gpu_mem();
         return -1;
     }
-#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)
-    // Weight-preshuffled kernel: reorder B on the host into the packed layout the
-    // device pipeline reads, exactly as Old-TE does before launch. The shuffle is
-    // a pure permutation (same element count), so the device buffer size is
-    // unchanged. B_host stays the logical (unshuffled) B so the Python-side
-    // numpy reference (A @ B) remains valid.
+#if defined(GEMM_KEY_DTYPE_A)
+    // Metadata-driven B upload: the kernel's own Preshuffle trait (emitted by the
+    // codegen as SelectedKernel::Preshuffle) decides whether B is reordered on the
+    // host before the copy -- no capability macro. The unused branch is discarded
+    // at compile time, so the shuffle helpers only instantiate for preshuffle
+    // kernels (identical dead-code elimination the old #if GEMM_KEY_PRESHUFFLE
+    // gave), but the capability is now read from kernel metadata.
+    if constexpr(SelectedKernel::Preshuffle)
     {
-        // Recomputes the host reorder each call by default (safe); reuses it
-        // across calls only when CK_DISPATCHER_PRESHUFFLE_CACHE is set (perf
-        // sweep, immutable B). Either way the shuffle runs here, before the timed
-        // g_dispatcher->run() below, so it never affects the kernel measurement.
-        const BDataType* b_shuffled = get_shuffled_b(B_host, K, N);
+        // Weight-preshuffled kernel: reorder B on the host into the packed layout
+        // the device pipeline reads, exactly as Old-TE does before launch. The
+        // shuffle is a pure permutation (same element count), so the device buffer
+        // size is unchanged. B_host stays the logical (unshuffled) B so the
+        // Python-side numpy reference (A @ B) remains valid. Recomputed each call
+        // by default (safe); reused across calls only when
+        // CK_DISPATCHER_PRESHUFFLE_CACHE is set (perf sweep, immutable B). Either
+        // way the shuffle runs here, before the timed g_dispatcher->run() below,
+        // so it never affects the kernel measurement.
+        const BDataType* b_shuffled = get_shuffled_b<SelectedKernel>(B_host, K, N);
         if(hipMemcpy(B_dev, b_shuffled, K * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
            hipSuccess)
         {
@@ -519,13 +571,23 @@ int dispatcher_run_gemm(
             return -1;
         }
     }
+    else
+    {
+        if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
+        {
+            cleanup_gpu_mem();
+            return -1;
+        }
+    }
 #else
+    // Legacy header (pre-GEMM_KEY_* codegen): no Preshuffle trait and no
+    // preshuffle kernels are generated for it -- copy B verbatim.
     if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
     }
-#endif // GEMM_KEY_PRESHUFFLE
+#endif // GEMM_KEY_DTYPE_A
     if(hipMemset(C_dev, 0, M * N * sizeof(CDataType)) != hipSuccess)
     {
         cleanup_gpu_mem();
@@ -677,12 +739,13 @@ void dispatcher_cleanup()
 {
     g_dispatcher.reset();
     g_initialized = false;
-#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)
+#if defined(GEMM_KEY_DTYPE_A)
     // Release the process-lifetime shuffled-B cache so an embedding library that
-    // calls dispatcher_cleanup() frees the held HostTensor instead of leaking it
-    // until process exit (the benchmark process never calls cleanup, but a
-    // library consumer should get its memory back).
-    g_shuffled_b_cache = ShuffledBCache{};
+    // calls dispatcher_cleanup() frees the held HostTensors instead of leaking
+    // them until process exit (the benchmark process never calls cleanup, but a
+    // library consumer should get its memory back). Empty for non-preshuffle
+    // kernels, where clear() is a no-op.
+    g_shuffled_b_cache.clear();
 #endif
 }
 
