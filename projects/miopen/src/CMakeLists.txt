@@ -201,15 +201,12 @@ set( MIOpen_Source
     solver/conv/conv_asm_implicit_gemm_wrw_v4r1_dynamic.cpp
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
-    solver/conv/conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
 
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_v1r1_xdlops.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_v4r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r1.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4.cpp

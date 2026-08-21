@@ -613,11 +613,6 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1``
-        | Controls ConvHipImplicitGemmBwdDataV4R1 solution.
-      - | 0: Disable
-        | 1: Enable
-
     * - | ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R1``
         | Controls ConvHipImplicitGemmV4R1WrW solution.
       - | 0: Disable
@@ -636,11 +631,6 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
 
     * - | ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FWD_V4R5_XDLOPS``
         | Controls ConvHipImplicitGemmForwardV4R5Xdlops solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1_XDLOPS``
-        | Controls ConvHipImplicitGemmBwdDataV1R1Xdlops solution.
       - | 0: Disable
         | 1: Enable
 
@@ -900,11 +890,6 @@ following table.
 
     * - **Environment variable**
       - **Value**
-
-    * - | ``MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW``
-        | Controls CK implicit GEMM forward V6R1 DLOPS NCHW solution.
-      - | 0: Disable
-        | 1: Enable
 
     * - | ``MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_BIAS_ACTIV``
         | Controls CK implicit GEMM forward bias activation fused solution.
