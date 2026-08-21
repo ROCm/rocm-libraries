@@ -10,7 +10,7 @@ iterN region with zero backend-inserted waitcnts (the region had no CFG
 predecessor) and another with four missing barriers, both of which a functional
 run cannot see. This script is therefore the gate that "PASSED" cannot be.
 
-Two independent checks:
+Three independent checks:
 
 1. Region equivalence. iter0 and iterN are two emissions of the same compute
    section, so their instruction histograms must match except for the transfers
@@ -21,6 +21,15 @@ Two independent checks:
    VGPRs that hold A/MXSA across persistent iterations. The scan resolves both
    `v[N]` and bare `vN` destinations -- the store address math uses the bare form,
    and missing it once let a wrong conclusion stand for several rounds.
+
+3. Wait sufficiency. Every ds_load must be waited for before anything reads what
+   it wrote. Counting waits cannot answer this: dropping iterN's A loads legitimately
+   removed 12 of its waits, and a count alone cannot distinguish that from a
+   backend that lost a wait it still needed.
+
+Run --mutate after touching check 3. It removes each wait in turn, and weakens
+each by one, and reports how many of those the check notices. Without that number
+"0 violations" might only mean the check never looked.
 
 Exit status is non-zero if any check fails.
 """
@@ -47,6 +56,17 @@ BANK_OFFSET_RE = re.compile(r"-\s*(\d+)\b")
 ITER0_LABEL = "label_PersistentLoopStart"
 ITERN_LABEL = "label_RAP_IterN"
 JOIN_LABEL = "label_RAP_StoreJoin"
+# KernelWriter.RAP_ITERN_SUFFIX. Labels the reuse copy renames to avoid colliding
+# with the fill copy's.
+ITERN_SUFFIX = "_RAPIterN"
+# Any operand naming a label: branch targets, and the s_add_i32 anchor of the
+# long-branch idiom.
+LABEL_OPERAND_RE = re.compile(r"\b(label_\w+)")
+# Every VGPR operand of an instruction, in printed order.
+OPERAND_V_RE = re.compile(r"v\[[^\]]*\]|\bv\d+\b")
+WAIT_DSCNT_RE = re.compile(r"^\s*s_wait_dscnt\s+(\S+)")
+# The unroll's head label; the reuse copy's twin carries the suffix.
+LOOP_HEAD_LABELS = ("label_LoopBeginL", "label_LoopBeginL" + ITERN_SUFFIX)
 
 
 def readInstructions(path):
@@ -204,7 +224,8 @@ EQUAL_KEYS = {
     "s_barrier": "barrier rebuild started iterN from iter0's memory-token state",
     "wmma": "the two emissions diverged",
     "wmma_zero_c": "iterN did not get the InitCIterWmma clone, so C is never zeroed",
-    "tensor_load_to_lds": "TDM descriptors are nulled, not removed, so the count is fixed",
+    "tensor_load_to_lds": "the two emissions drop the same sections' prefetch, so whatever "
+                          "survives must survive in both",
     "ds_load_ValuB": "B is reloaded every tile in both emissions",
     "ds_load_ValuMXSB": "B scales are reloaded every tile in both emissions",
 }
@@ -226,9 +247,10 @@ def checkRegions(path, mode, iter0, iterN):
 
     # Waits are inserted by the backend from real dataflow, so once iterN stops
     # loading A the two emissions legitimately need different numbers of them --
-    # they must match while the copies are identical, but after the drop the only
-    # sound invariant is that the backend produced any at all. Zero means it never
-    # looked at the region, which is the failure a functional run cannot see.
+    # they must match while the copies are identical, but after the drop a count
+    # says nothing either way, and whether the surviving waits are enough is
+    # checkWaitSufficiency's job. Zero still means the backend never looked at the
+    # region, which is the failure a functional run cannot see.
     for key in ("s_wait_dscnt", "s_wait_tensorcnt"):
         if mode == "peel" and h0[key] != hN[key]:
             failures.append("%s: iter0=%d iterN=%d (the two copies are identical here, so these must match)"
@@ -251,6 +273,245 @@ def checkRegions(path, mode, iter0, iterN):
                 failures.append("%s: iterN still has %d loads, which RAP should have dropped"
                                 % (key, hN[key]))
     return failures
+
+
+def checkIterNLabelTargets(labels, iterN):
+    """Every label the reuse copy names must be its own copy's.
+
+    Missing a suffix does not fail at assembly time when the fill copy defines the
+    same base name: the reference silently resolves to the other copy. That is how
+    the "do not enter LoopL" escape came to jump from the reuse copy into the fill
+    copy's drain, which reloads A over the resident registers. The escape is
+    unreachable while K is pinned, so nothing caught it.
+
+    No exemption list is needed, which is the point: a label defined outside the
+    compute section has no suffixed twin, so referring to it cannot trip this.
+    """
+    failures = []
+    for lineNo, label, text in iterN:
+        if label:
+            continue
+        for target in LABEL_OPERAND_RE.findall(text):
+            if target.endswith(ITERN_SUFFIX):
+                continue
+            if target + ITERN_SUFFIX in labels:
+                failures.append(
+                    "line %d names %s, but %s%s exists -- the reuse copy is "
+                    "pointing into the fill copy: %s"
+                    % (lineNo, target, target, ITERN_SUFFIX, text.strip()))
+    return failures
+
+
+def operandRanges(operandText, symbols):
+    """Logical [lo, hi] of every VGPR operand, in printed order."""
+    out = []
+    for match in OPERAND_V_RE.finditer(operandText):
+        token = match.group(0)
+        bare = BARE_RE.match(token)
+        if bare:
+            out.append((int(bare.group(1)), int(bare.group(1))))
+            continue
+        bracketed = BRACKETED_RE.match(token)
+        if not bracketed:
+            continue
+        parts = bracketed.group(1).split(":")
+        lo = evaluateOperand(parts[0], symbols)
+        if lo is None:
+            continue
+        hi = evaluateOperand(parts[1], symbols) if len(parts) > 1 else lo
+        out.append((lo, hi if hi is not None else lo))
+    return out
+
+
+def branchTargets(instructions):
+    """Labels control can arrive at from elsewhere.
+
+    A label nothing names is a marker that control only falls into, so the set of
+    outstanding loads carries straight through it. Clearing state at those too
+    would throw away most of this check's reach for no reason.
+    """
+    targets = set()
+    for _, label, text in instructions:
+        if not label:
+            targets.update(LABEL_OPERAND_RE.findall(text))
+    return targets
+
+
+def checkWaitSufficiency(instructions, symbols, targets, reportFrom=0):
+    """Registers a ds_load writes must not be touched until a wait covers it.
+
+    `s_wait_dscnt N` retires all but the newest N DS ops, and gfx1250 gives DS its
+    own counter with in-order LDS completion, so a load with M later DS ops issued
+    before the wait is covered exactly when N <= M. Walking the region while
+    tracking the outstanding queue therefore decides coverage without a second
+    build to compare against.
+
+    Where control flow is not straight-line the outstanding set is cleared: at any
+    label something branches to, and after any unconditional transfer. A
+    conditional branch is not a cut, because its fall-through continues with this
+    exact history. Clearing only ever forgets loads, so it cannot invent a
+    violation -- it costs reach, which is why the caller prints how much was
+    covered and why --mutate measures what the check still notices.
+    """
+    outstanding = []
+    violations = []
+    covered = 0
+    cut = 0
+
+    for index, (lineNo, label, text) in enumerate(instructions):
+        stripped = text.strip()
+        if label:
+            if label in targets:
+                cut += sum(1 for e in outstanding if e["dst"])
+                outstanding = []
+            continue
+        if not stripped or stripped.startswith("."):
+            continue
+        mnemonic = stripped.split()[0]
+        operands = stripped.split(None, 1)[1] if " " in stripped else ""
+
+        wait = WAIT_DSCNT_RE.match(text)
+        if wait:
+            try:
+                n = int(wait.group(1), 0)
+            except ValueError:
+                continue
+            retired = outstanding[:max(0, len(outstanding) - n)]
+            covered += sum(1 for e in retired if e["dst"])
+            outstanding = outstanding[len(retired):]
+            continue
+
+        ranges = operandRanges(operands, symbols)
+        isLoad = mnemonic.startswith("ds_") and "load" in mnemonic
+        # A DS load writes its first operand and reads the rest; anything else
+        # only reads, as far as a pending load is concerned.
+        uses = ranges[1:] if isLoad else ranges
+        if index >= reportFrom:
+            for use in uses:
+                for entry in outstanding:
+                    if entry["dst"] and overlapsRange(use, entry["dst"]):
+                        violations.append((lineNo, stripped, entry))
+
+        if mnemonic.startswith("ds_"):
+            outstanding.append({"dst": ranges[0] if (isLoad and ranges) else None,
+                                "line": lineNo, "text": stripped})
+            continue
+
+        if mnemonic == "s_branch" or mnemonic.startswith("s_setpc") \
+                or mnemonic == "s_endpgm":
+            cut += sum(1 for e in outstanding if e["dst"])
+            outstanding = []
+
+    return violations, covered, cut
+
+
+def overlapsRange(a, b):
+    return a[0] <= b[1] and b[0] <= a[1]
+
+
+def checkWaitsAcrossBackEdge(instructions, symbols, targets, headLabel):
+    """The hazards that cross the unroll's back edge.
+
+    The unroll is software-pipelined: a trip loads the X1 buffers and the next
+    trip's WMMAs read them. A straight-line walk clears state at the loop head and
+    so never checks those, which is most of the waits in the body -- when this was
+    first measured, adding the back edge took the check from noticing 213 of 245
+    wait mutations to 229.
+
+    Walking the body twice puts the back-edge state at the second copy's entry, so
+    uses there are checked against the first copy's loads. Only the second copy
+    reports; the first is there to build the state up.
+    """
+    head = next((i for i, (_, label, _) in enumerate(instructions)
+                 if label == headLabel), None)
+    if head is None:
+        return []
+    back = max((i for i, (_, label, text) in enumerate(instructions)
+                if not label and headLabel in LABEL_OPERAND_RE.findall(text)),
+               default=None)
+    if back is None or back <= head:
+        return []
+    body = instructions[head:back + 1]
+    violations, _, _ = checkWaitSufficiency(
+        body + body, symbols, targets - {headLabel}, reportFrom=len(body))
+    return violations
+
+
+def reportWaits(instructions, symbols, iter0, iterN):
+    failures = []
+    targets = branchTargets(instructions)
+    regions = [("whole", instructions)]
+    if iter0 is not None:
+        regions += [("iter0", iter0), ("iterN", iterN)]
+    for name, region in regions:
+        violations, covered, cut = checkWaitSufficiency(region, symbols, targets)
+        print("  waits %-6s loads covered before use: %-4d  at a control-flow cut: %-4d"
+              "  unwaited uses: %d" % (name, covered, cut, len(violations)))
+        for lineNo, text, entry in violations[:5]:
+            print("      line %d reads what the load at line %d writes"
+                  % (lineNo, entry["line"]))
+            print("          load: %s" % entry["text"][:110])
+            print("          use : %s" % text[:110])
+        failures += ["%s: line %d reads what the ds_load at line %d writes with no "
+                     "covering s_wait_dscnt" % (name, lineNo, entry["line"])
+                     for lineNo, _, entry in violations]
+    for headLabel in LOOP_HEAD_LABELS:
+        violations = checkWaitsAcrossBackEdge(instructions, symbols, targets, headLabel)
+        if violations:
+            print("  waits %-6s cross-iteration unwaited uses: %d"
+                  % (headLabel.replace("label_", "")[:6], len(violations)))
+        failures += ["%s: line %d reads across the back edge what the ds_load at "
+                     "line %d writes with no covering s_wait_dscnt"
+                     % (headLabel, lineNo, entry["line"])
+                     for lineNo, _, entry in violations]
+    return failures
+
+
+def mutateWaits(path):
+    """How many wait mutations does check 3 actually notice?
+
+    Removing a wait, or weakening it by one, must turn into a violation. Anything
+    missed is a blind spot, and the blind spots are not evenly spread: they cluster
+    at join points where state is cleared, so they are worth printing rather than
+    summarising.
+
+    Measured on MT64x256 at the time this was written: 229 of 245 noticed, for both
+    mutations. The 16 misses are the two InitCIterWmma descending staircases and the
+    PGR2 priming waits. Both are reached by an unconditional branch, and the loads
+    they cover are issued before it, so propagating state along that one edge is
+    what would close them -- they are not redundant waits.
+    """
+    instructions = readInstructions(path)
+    symbols = parseSymbols(path)
+    targets = branchTargets(instructions)
+    waitIndices = [i for i, (_, label, text) in enumerate(instructions)
+                   if not label and WAIT_DSCNT_RE.match(text)]
+
+    def notices(mutated):
+        violations, _, _ = checkWaitSufficiency(mutated, symbols, targets)
+        if violations:
+            return True
+        return any(checkWaitsAcrossBackEdge(mutated, symbols, targets, h)
+                   for h in LOOP_HEAD_LABELS)
+
+    for name, delta in (("removed", None), ("weakened by one", 1)):
+        missed = []
+        for i in waitIndices:
+            mutated = list(instructions)
+            if delta is None:
+                del mutated[i]
+            else:
+                lineNo, label, text = mutated[i]
+                n = int(WAIT_DSCNT_RE.match(text).group(1), 0)
+                mutated[i] = (lineNo, label,
+                              WAIT_DSCNT_RE.sub("  s_wait_dscnt %d" % (n + delta), text))
+            if not notices(mutated):
+                missed.append(instructions[i][0])
+        print("  wait %-16s mutations: %-4d noticed: %-4d missed: %d"
+              % (name, len(waitIndices), len(waitIndices) - len(missed), len(missed)))
+        if missed:
+            print("      missed at lines: %s"
+                  % ", ".join(str(x) for x in missed[:16]))
 
 
 def checkResidentRanges(path, instructions, symbols, ranges):
@@ -289,25 +550,45 @@ def main():
                              "drop: iterN must additionally have no A/MXSA local reads.")
     parser.add_argument("--skip-resident-scan", action="store_true",
                         help="only run the region equivalence check")
+    parser.add_argument("--mutate", action="store_true",
+                        help="report how many wait mutations the wait-sufficiency "
+                             "check notices; run after changing that check")
     args = parser.parse_args()
+
+    if args.mutate:
+        for path in args.assembly:
+            print("== mutation sensitivity: %s" % path)
+            mutateWaits(path)
+        return 0
 
     allFailures = []
     for path in args.assembly:
         print("== %s" % path)
         instructions = readInstructions(path)
+        symbols = parseSymbols(path)
         ranges = residentRanges(path)
+        iter0, iterN = splitRegions(instructions)
+
+        # Wait sufficiency does not depend on RAP, so the non-RAP kernel in the
+        # same build is worth checking too: it is untouched and validates PASSED,
+        # so a violation reported there is a false positive in this check.
+        allFailures += ["%s: %s" % (path, f)
+                        for f in reportWaits(instructions, symbols, iter0, iterN)]
+
         if not ranges:
-            print("  not a ReuseAcrossPersistent kernel; skipped")
+            print("  not a ReuseAcrossPersistent kernel; remaining checks skipped")
             continue
 
-        iter0, iterN = splitRegions(instructions)
         if iter0 is None:
             print("  peel labels absent; region equivalence not applicable yet")
         else:
             allFailures += ["%s: %s" % (path, f) for f in checkRegions(path, args.mode, iter0, iterN)]
+            labels = {label for _, label, _ in instructions if label}
+            targetFailures = checkIterNLabelTargets(labels, iterN)
+            print("  iterN label targets pointing into iter0: %d" % len(targetFailures))
+            allFailures += ["%s: %s" % (path, f) for f in targetFailures]
 
         if not args.skip_resident_scan:
-            symbols = parseSymbols(path)
             allFailures += ["%s: %s" % (path, f)
                             for f in checkResidentRanges(path, instructions, symbols, ranges)]
 
