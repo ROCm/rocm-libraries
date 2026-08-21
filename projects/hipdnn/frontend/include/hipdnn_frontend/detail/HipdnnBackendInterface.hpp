@@ -131,6 +131,18 @@ public:
     virtual hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t level) = 0;
     virtual hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* level) = 0;
 
+    // Declared last and non-pure so an older backend still satisfies the interface.
+    virtual hipdnnStatus_t
+        writeEngineRankingResultsExt([[maybe_unused]] hipdnnHandle_t handle,
+                                     [[maybe_unused]] hipdnnBackendDescriptor_t graphDescriptor,
+                                     [[maybe_unused]] const int64_t* engineIdsInRankOrder,
+                                     [[maybe_unused]] size_t engineIdCount,
+                                     [[maybe_unused]] hipdnnAutotuneCacheWriteOutcome_ext_t* outcome
+                                     = nullptr)
+    {
+        return HIPDNN_STATUS_NOT_SUPPORTED;
+    }
+
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()
     {

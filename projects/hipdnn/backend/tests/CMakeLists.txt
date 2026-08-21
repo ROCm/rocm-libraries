@@ -107,6 +107,7 @@ add_executable(
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
     TestGraphAndPlanSerializationApi.cpp
+    TestHipdnnBackendWriteRanking.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp
@@ -122,6 +123,9 @@ add_executable(
     TestHeuristicPluginManagerValidationPaths.cpp
     TestSelectionHeuristic.cpp
     TestHeuristicPluginResourceManager.cpp
+    heuristics/TestAutotuneCacheEnv.cpp
+    heuristics/TestAutotuneCacheKey.cpp
+    heuristics/TestAutotuneRankingStore.cpp
     heuristics/TestConfigBuiltIn.cpp
     heuristics/TestDeviceProperties.cpp
     heuristics/TestEngineOverrideConfig.cpp
@@ -143,6 +147,23 @@ target_link_libraries(
     hipdnn_backend_private
     hipdnn_test_sdk
     ${CMAKE_DL_LIBS}
+)
+
+# Standalone helper process for TestAutotuneRankingStore's cross-process cache cases.
+# Not a gtest binary and not registered via add_hipdnn_test(); hipdnn_backend_tests
+# locates it at runtime through the baked HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH below.
+add_executable(AutotuneCrossProcessHelper heuristics/AutotuneCrossProcessHelper.cpp)
+target_link_libraries(AutotuneCrossProcessHelper hipdnn_backend_private)
+target_compile_definitions(AutotuneCrossProcessHelper PRIVATE HIPDNN_BACKEND_COMPILATION)
+target_compile_options(AutotuneCrossProcessHelper PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(
+    AutotuneCrossProcessHelper
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+add_dependencies(hipdnn_backend_tests AutotuneCrossProcessHelper)
+target_compile_definitions(
+    hipdnn_backend_tests PRIVATE
+    HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH="$<TARGET_FILE:AutotuneCrossProcessHelper>"
 )
 
 target_compile_definitions(

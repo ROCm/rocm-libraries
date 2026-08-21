@@ -21,11 +21,15 @@
 
 #include "ConfigBuiltIn.hpp"
 
+#include "AutotuneCacheEnv.hpp"
+#include "AutotuneCacheKey.hpp"
+#include "AutotuneRankingStore.hpp"
 #include "EngineOverrideConfig.hpp"
 #include "heuristics/BuiltInLogging.hpp"
 #include "logging/Logging.hpp"
 
 #include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/HeuristicValidation.hpp>
@@ -37,13 +41,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -535,6 +542,111 @@ std::optional<std::vector<int64_t>>
     return reordered;
 }
 
+// getEngineNameFromId() throws std::out_of_range for an unregistered id; PR #10645 supersedes
+// this helper with a non-throwing equivalent.
+std::string engineNameOrHex(int64_t id)
+{
+    try
+    {
+        return std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(id));
+    }
+    catch(const std::out_of_range&)
+    {
+        return hipdnn_data_sdk::utilities::formatEngineIdHex(id);
+    }
+}
+
+/// Comma-separated engine names, hex fallback for unregistered ids.
+std::string engineIdsToNames(const std::vector<int64_t>& ids)
+{
+    std::string joined;
+    for(size_t i = 0; i < ids.size(); ++i)
+    {
+        if(i > 0)
+        {
+            joined += ", ";
+        }
+        joined += engineNameOrHex(ids[i]);
+    }
+    return joined;
+}
+
+// ---- Exact-match autotune cache --------------------------------------------
+
+enum class ExactCacheOutcome
+{
+    HIT_EXACT,
+    /// Cached order filtered to live candidates; sampled-but-absent ids dropped.
+    HIT_WITH_DROPS,
+    /// A candidate was never sampled; the whole entry is declined.
+    REJECT_UNSAMPLED,
+    /// Fewer than two ids remain after filtering to live candidates.
+    REJECT_DEGENERATE,
+};
+
+struct ExactCacheApplyResult
+{
+    ExactCacheOutcome outcome;
+    std::vector<int64_t> order;
+    std::vector<int64_t>
+        namedIds; // dropped ids (HIT_WITH_DROPS) or unsampled ids (REJECT_UNSAMPLED)
+};
+
+/// Applies a cached ranking to the live candidates. Rejects if any candidate was never
+/// sampled (C \ S non-empty); otherwise filters the cached order down to the live
+/// candidates, which is always a permutation of `candidates`.
+ExactCacheApplyResult applyExactCacheEntry(const CachedEntry& entry,
+                                           const std::vector<int64_t>& candidates)
+{
+    const std::unordered_set<int64_t> sampled(entry.sampledEngineIds.begin(),
+                                              entry.sampledEngineIds.end());
+
+    std::vector<int64_t> unsampled;
+    for(const int64_t candidateId : candidates)
+    {
+        if(sampled.find(candidateId) == sampled.end())
+        {
+            unsampled.push_back(candidateId);
+        }
+    }
+    if(!unsampled.empty())
+    {
+        return ExactCacheApplyResult{ExactCacheOutcome::REJECT_UNSAMPLED, {}, std::move(unsampled)};
+    }
+
+    const std::unordered_set<int64_t> candidateSet(candidates.begin(), candidates.end());
+    std::vector<int64_t> order;
+    order.reserve(candidates.size());
+    std::vector<int64_t> dropped;
+    for(const int64_t sampledId : entry.order)
+    {
+        if(candidateSet.find(sampledId) != candidateSet.end())
+        {
+            order.push_back(sampledId);
+        }
+        else
+        {
+            dropped.push_back(sampledId);
+        }
+    }
+
+    // A malformed entry (duplicate id) declines rather than aborting.
+    if(order.size() != candidates.size())
+    {
+        return ExactCacheApplyResult{ExactCacheOutcome::REJECT_DEGENERATE, {}, {}};
+    }
+
+    constexpr size_t MIN_MEANINGFUL_ORDER_SIZE = 2;
+    if(order.size() < MIN_MEANINGFUL_ORDER_SIZE)
+    {
+        return ExactCacheApplyResult{ExactCacheOutcome::REJECT_DEGENERATE, {}, {}};
+    }
+
+    const ExactCacheOutcome outcome
+        = dropped.empty() ? ExactCacheOutcome::HIT_EXACT : ExactCacheOutcome::HIT_WITH_DROPS;
+    return ExactCacheApplyResult{outcome, std::move(order), std::move(dropped)};
+}
+
 // ---- Per-handle / per-descriptor state -------------------------------------
 
 struct Handle
@@ -809,6 +921,103 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
 
+        // Exact-match cache hit wins outright; any decline falls through to the fuzzy rules below.
+        if(exactCacheDisabled())
+        {
+            CONFIG_BUILTIN_LOG(HIPDNN_SEV_INFO,
+                               "policyFinalize: exact-match cache disabled via "
+                               "HIPDNN_DISABLE_EXACT_ENGINE_CACHE; consulting fuzzy rules only");
+        }
+        else if(d->handle == nullptr || !d->handle->devicePropertiesSet)
+        {
+            CONFIG_BUILTIN_LOG(HIPDNN_SEV_INFO,
+                               "policyFinalize: exact-match cache unkeyable (no device "
+                               "properties set); consulting fuzzy rules only");
+        }
+        else
+        {
+            const hipdnnPluginConstData_t serializedGraphView{d->serializedGraph.data(),
+                                                              d->serializedGraph.size()};
+            const hipdnnPluginConstData_t devicePropertiesView{
+                d->handle->devicePropertiesBuffer.data(), d->handle->devicePropertiesBuffer.size()};
+            const auto cacheKey = deriveCacheKey(serializedGraphView, devicePropertiesView);
+            if(!cacheKey.has_value())
+            {
+                CONFIG_BUILTIN_LOG(HIPDNN_SEV_INFO,
+                                   "policyFinalize: exact-match cache unkeyable (empty graph "
+                                   "or device view); consulting fuzzy rules only");
+            }
+            else
+            {
+                RankingLookupStatus lookupStatus = RankingLookupStatus::MISS;
+                const auto entry = exactCacheStore().get(*cacheKey, {}, &lookupStatus);
+                if(lookupStatus == RankingLookupStatus::UNAVAILABLE)
+                {
+                    CONFIG_BUILTIN_LOG(HIPDNN_SEV_WARN,
+                                       "policyFinalize: exact-match cache unavailable "
+                                       "(shard could not be opened, locked, read, or its "
+                                       "version did not match this build); consulting "
+                                       "fuzzy rules only");
+                }
+                else if(!entry.has_value())
+                {
+                    CONFIG_BUILTIN_LOG(
+                        HIPDNN_SEV_INFO,
+                        "policyFinalize: exact-match cache miss; consulting fuzzy rules only");
+                }
+                else
+                {
+                    const auto applied = applyExactCacheEntry(*entry, d->candidateEngineIds);
+                    if(applied.outcome == ExactCacheOutcome::REJECT_UNSAMPLED)
+                    {
+                        CONFIG_BUILTIN_LOG(
+                            HIPDNN_SEV_INFO,
+                            "policyFinalize: exact-match cache entry rejected -- unsampled "
+                            "candidate(s) present [%s], record version=%s; consulting fuzzy "
+                            "rules only",
+                            engineIdsToNames(applied.namedIds).c_str(),
+                            entry->version.c_str());
+                    }
+                    else if(applied.outcome == ExactCacheOutcome::REJECT_DEGENERATE)
+                    {
+                        CONFIG_BUILTIN_LOG(
+                            HIPDNN_SEV_INFO,
+                            "policyFinalize: exact-match cache entry declined -- fewer than "
+                            "2 candidates remain after filtering, record version=%s; "
+                            "consulting fuzzy rules only",
+                            entry->version.c_str());
+                    }
+                    else if(applied.outcome == ExactCacheOutcome::HIT_WITH_DROPS)
+                    {
+                        CONFIG_BUILTIN_LOG(
+                            HIPDNN_SEV_INFO,
+                            "policyFinalize: exact-match cache hit (partial) -- reordered "
+                            "%zu engines, dropped sampled-but-absent [%s], record "
+                            "version=%s",
+                            applied.order.size(),
+                            engineIdsToNames(applied.namedIds).c_str(),
+                            entry->version.c_str());
+                        d->sortedEngineIds = applied.order;
+                        d->finalized = true;
+                        *outApplied = 1;
+                        return HIPDNN_PLUGIN_STATUS_SUCCESS;
+                    }
+                    else
+                    {
+                        CONFIG_BUILTIN_LOG(HIPDNN_SEV_INFO,
+                                           "policyFinalize: exact-match cache hit (exact) -- "
+                                           "reordered %zu engines, record version=%s",
+                                           applied.order.size(),
+                                           entry->version.c_str());
+                        d->sortedEngineIds = applied.order;
+                        d->finalized = true;
+                        *outApplied = 1;
+                        return HIPDNN_PLUGIN_STATUS_SUCCESS;
+                    }
+                }
+            }
+        }
+
         const auto config = EngineOverrideConfig::loadFromEnv();
         if(!config.has_value())
         {
@@ -843,10 +1052,12 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
 
-        CONFIG_BUILTIN_LOG(HIPDNN_SEV_INFO,
-                           "policyFinalize: reordered %zu engines with preferred 0x%llx first",
-                           reordered->size(),
-                           static_cast<unsigned long long>(*preferredEngineId));
+        CONFIG_BUILTIN_LOG(
+            HIPDNN_SEV_INFO,
+            "policyFinalize: exact-match cache did not decide; fuzzy rule matched -- "
+            "reordered %zu engines with preferred 0x%llx first",
+            reordered->size(),
+            static_cast<unsigned long long>(*preferredEngineId));
         d->sortedEngineIds = std::move(*reordered);
         d->finalized = true;
         *outApplied = 1;
