@@ -131,6 +131,45 @@ bool isSamePropagatableClass(const StinkyRegister& dst, const StinkyRegister& sr
     return dstClass != RegClass::Other && dstClass == srcClass;
 }
 
+struct MoveMapKey {
+    RegType type;
+    uint32_t idx;
+    uint16_t num;
+    int16_t offset;
+
+    bool operator==(const MoveMapKey& other) const noexcept {
+        return type == other.type && idx == other.idx && num == other.num && offset == other.offset;
+    }
+};
+
+struct MoveMapKeyHash {
+    size_t operator()(const MoveMapKey& key) const noexcept {
+        const size_t typeHash = std::hash<int>{}(static_cast<int>(key.type));
+        const size_t idxHash = std::hash<uint32_t>{}(key.idx);
+        const size_t numHash = std::hash<uint16_t>{}(key.num);
+        const size_t offsetHash = std::hash<int16_t>{}(key.offset);
+        return typeHash ^ (idxHash << 1) ^ (numHash << 2) ^ (offsetHash << 3);
+    }
+};
+
+MoveMapKey toMoveMapKey(const StinkyRegister& reg) {
+    return {reg.reg.type, reg.reg.idx, reg.reg.num, reg.reg.offset};
+}
+
+bool hasSameRegisterIdentity(const StinkyRegister& lhs, const StinkyRegister& rhs) {
+    if (!lhs.isRegister() || !rhs.isRegister()) return lhs == rhs;
+    return toMoveMapKey(lhs) == toMoveMapKey(rhs);
+}
+
+bool overlapsWithKey(const MoveMapKey& key, const StinkyRegister& reg) {
+    if (!reg.isRegister() || key.type != reg.reg.type) return false;
+    const uint32_t keyBegin = key.idx;
+    const uint32_t keyEnd = key.idx + key.num;
+    const uint32_t regBegin = reg.reg.idx;
+    const uint32_t regEnd = reg.reg.idx + reg.reg.num;
+    return !(keyEnd <= regBegin || regEnd <= keyBegin);
+}
+
 struct RegLaneKey {
     RegType type;
     uint32_t idx;
@@ -275,13 +314,14 @@ class AsmMovePropagationPassImpl : public Pass {
             }
         }
 
-        std::unordered_map<StinkyRegister, StinkyRegister> moveMap;
+        std::unordered_map<MoveMapKey, StinkyRegister, MoveMapKeyHash> moveMap;
 
         auto resolveMappedSrc = [&moveMap](const StinkyRegister& reg) {
             StinkyRegister resolved = reg;
             // moveMap is invalidated on defs, so chains should not form cycles.
             while (true) {
-                auto it = moveMap.find(resolved);
+                if (!resolved.isRegister()) break;
+                auto it = moveMap.find(toMoveMapKey(resolved));
                 if (it == moveMap.end()) break;
                 resolved = it->second;
             }
@@ -291,7 +331,7 @@ class AsmMovePropagationPassImpl : public Pass {
         auto invalidateByDef = [&moveMap](const StinkyRegister& defReg) {
             if (!defReg.isRegister()) return;
             for (auto it = moveMap.begin(); it != moveMap.end();) {
-                if (it->first.isOverlap(defReg) || it->second.isOverlap(defReg)) {
+                if (overlapsWithKey(it->first, defReg) || it->second.isOverlap(defReg)) {
                     it = moveMap.erase(it);
                 } else {
                     ++it;
@@ -314,7 +354,8 @@ class AsmMovePropagationPassImpl : public Pass {
 
                 StinkyRegister newSrc = resolveMappedSrc(oldSrc);
                 if (hasRegisterSourceModifier(newSrc)) continue;
-                if (newSrc != oldSrc && isSamePropagatableClass(oldSrc, newSrc)) {
+                if (!hasSameRegisterIdentity(newSrc, oldSrc) &&
+                    isSamePropagatableClass(oldSrc, newSrc)) {
                     inst->setSrcReg(i, newSrc);
                 }
             }
@@ -327,7 +368,9 @@ class AsmMovePropagationPassImpl : public Pass {
             countInputMovStat(*inst, stats);
             const StinkyRegister& dst = inst->getDestReg(0);
             const StinkyRegister& src = inst->getSrcReg(0);
-            if (dst != src && isSamePropagatableClass(dst, src)) moveMap[dst] = src;
+            if (!hasSameRegisterIdentity(dst, src) && isSamePropagatableClass(dst, src)) {
+                moveMap[toMoveMapKey(dst)] = src;
+            }
         }
 
         // Phase B - mov cleanup loop (O(N) backward next-event scan).
@@ -344,7 +387,7 @@ class AsmMovePropagationPassImpl : public Pass {
                 const StinkyRegister& src = inst->getSrcReg(0);
 
                 // Identity move has no semantic effect.
-                if (dst == src) {
+                if (hasSameRegisterIdentity(dst, src)) {
                     countErasedMovStat(*inst, stats, /*identity=*/true);
                     toErase.push_back(inst);
                 } else if (getNextEvent(dst, nextEvents) == NextEvent::Def) {
