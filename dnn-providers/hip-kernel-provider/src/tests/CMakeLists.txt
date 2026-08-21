@@ -107,8 +107,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPDNN_TEST_DESCRIPTOR_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}")
 
     # The kpack adapter's tests. Gated with the sources they exercise, and kept together
-    # here -- including the dispatch one, which sits under engines/ -- so all three are
-    # visible at the point the archive path below is defined for them.
+    # here -- including the dispatch one, which sits under engines/ -- so all three sit
+    # between the two defines they read. Those are HIPDNN_TEST_DESCRIPTOR_DIR above, under
+    # which the device cases find the archive this build packed for the local arch, and
+    # HIPDNN_TEST_KPACK_ARCHIVE below, which the parse-level cases open because they need
+    # a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp

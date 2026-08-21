@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
@@ -65,12 +67,83 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
 
-/// rocm-kpack's own test archive; see TestKpackKernelLoader.cpp for what it holds.
-constexpr const char* REAL_ARCHIVE = HIPDNN_TEST_KPACK_ARCHIVE;
+/// Where this build stages the descriptors it packed, one subdirectory per arch. Same
+/// value main.cpp points the binary at, so the [GPU] case below dispatches against the
+/// archive the packaging rule produced for the machine running the tests.
+constexpr const char* PACKED_DESCRIPTOR_ROOT = HIPDNN_TEST_DESCRIPTOR_DIR;
 
-/// The toc key and symbol that archive really carries, used only by the [GPU] case.
-constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
-constexpr const char* ARCHIVE_SYMBOL = "TEST_APP_KERNEL___B";
+/// The packaged descriptor the [GPU] case takes its archive and toc_key from. Read out of
+/// the built file rather than written here: a toc_key tracks the build defines and the
+/// packaging layout, both the packer's business, and a copy here would silently decouple
+/// this test from the artifact it exists to read.
+constexpr const char* PACKED_UKD_DESCRIPTOR = "packed_pointwise_add_b256.ukd.json";
+
+/// The entry point that descriptor names.
+constexpr const char* PACKED_SYMBOL = "PointwiseAdd";
+
+/// The kpack coordinates a built descriptor declares. `library` is kept in its authored,
+/// relative form because a KernelDefinition carries it that way and resolves it against
+/// originDirectory.
+struct PackagedKernelSource
+{
+    std::string library;
+    std::string tocKey;
+};
+
+/// The bare arch of device 0 and the directory this build packed for it. `directory` is
+/// left empty when nothing was packed for that arch -- environmental, since the build
+/// packs per arch and the device may sit outside GPU_TARGETS.
+///
+/// hipGetDeviceProperties reports feature flags on some configurations ("gfx1152:xnack-")
+/// while the packager names its subdirectory and the archive's arch entry with the bare
+/// name, so everything past here uses the stripped form.
+///
+/// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+void findPackagedDirectory(hipDeviceProp_t& properties,
+                           std::string& arch,
+                           std::filesystem::path& directory)
+{
+    ASSERT_EQ(hipGetDeviceProperties(&properties, 0), hipSuccess);
+
+    const std::string reported = properties.gcnArchName;
+    arch = reported.substr(0, reported.find(':'));
+
+    const std::filesystem::path candidate = std::filesystem::path(PACKED_DESCRIPTOR_ROOT) / arch;
+    directory = std::filesystem::is_directory(candidate) ? candidate : std::filesystem::path{};
+}
+
+/// Reads `kernel_source` out of a built .ukd.json. Parsed directly rather than through
+/// DescriptorLoader: this case exercises the dispatch handler's loader path, and routing
+/// through the loader would couple it to a contract the integration tier already covers.
+///
+/// Everything below is asserted, never skipped: the per-arch directory exists by the time
+/// this is called, so anything missing inside it is a broken build.
+///
+/// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+void readPackagedKernelSource(const std::filesystem::path& directory,
+                              const std::string& descriptorFile,
+                              PackagedKernelSource& out)
+{
+    const std::filesystem::path descriptor = directory / descriptorFile;
+    ASSERT_TRUE(std::filesystem::exists(descriptor))
+        << "the packaged descriptor is missing: " << descriptor;
+
+    std::ifstream in(descriptor);
+    ASSERT_TRUE(in.good()) << "could not open " << descriptor;
+
+    nlohmann::json document;
+    ASSERT_NO_THROW(document = nlohmann::json::parse(in)) << descriptor;
+    ASSERT_TRUE(document.contains("kernel_source")) << descriptor;
+
+    const nlohmann::json& source = document["kernel_source"];
+    ASSERT_TRUE(source.contains("toc_key")) << descriptor;
+    ASSERT_TRUE(source.contains("library")) << descriptor;
+
+    out.tocKey = source["toc_key"].get<std::string>();
+    out.library = source["library"].get<std::string>();
+    ASSERT_TRUE(std::filesystem::exists(directory / out.library))
+        << descriptor << " names an archive that is not on disk: " << directory / out.library;
+}
 
 DescriptorId id(uint8_t seed)
 {
@@ -362,35 +435,32 @@ TEST(TestPointwiseKpackDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
     SKIP_IF_NO_DEVICES();
 
     hipDeviceProp_t properties{};
-    ASSERT_EQ(hipGetDeviceProperties(&properties, 0), hipSuccess);
-    const std::string deviceArch = properties.gcnArchName;
-    if(deviceArch.rfind("gfx1100", 0) != 0 && deviceArch.rfind("gfx1101", 0) != 0)
+    std::string arch;
+    std::filesystem::path packaged;
+    ASSERT_NO_FATAL_FAILURE(findPackagedDirectory(properties, arch, packaged));
+    if(packaged.empty())
     {
-        GTEST_SKIP() << "the kpack test asset holds gfx1100/gfx1101 binaries; this device is "
-                     << deviceArch;
+        GTEST_SKIP() << "nothing was packaged for this device (" << arch
+                     << "): " << std::filesystem::path(PACKED_DESCRIPTOR_ROOT) / arch
+                     << " does not exist. Environmental -- the build packs per arch and this "
+                        "device is outside GPU_TARGETS.";
     }
 
+    PackagedKernelSource packed;
+    ASSERT_NO_FATAL_FAILURE(readPackagedKernelSource(packaged, PACKED_UKD_DESCRIPTOR, packed));
+
     DeviceProperties deviceProperties;
-    deviceProperties.gcnArchName = deviceArch;
+    deviceProperties.gcnArchName = arch;
     deviceProperties.warpSize = properties.warpSize;
 
     const GraphFixture fixture(buildPointwiseGraph(), deviceProperties);
     const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
     ASSERT_TRUE(bound.has_value());
 
-    const std::filesystem::path archive(REAL_ARCHIVE);
-    const auto first = makeKpackKernel(archive.parent_path(),
-                                       archive.filename().string(),
-                                       ARCHIVE_TOC_KEY,
-                                       ARCHIVE_SYMBOL,
-                                       256,
-                                       0x60);
-    const auto second = makeKpackKernel(archive.parent_path(),
-                                        archive.filename().string(),
-                                        ARCHIVE_TOC_KEY,
-                                        ARCHIVE_SYMBOL,
-                                        64,
-                                        0x70);
+    const auto first
+        = makeKpackKernel(packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 256, 0x60);
+    const auto second
+        = makeKpackKernel(packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 64, 0x70);
 
     const auto& handler = dispatchHandler(POINTWISE_ADD);
     const size_t before = pointwiseKpackModuleCache().size();
