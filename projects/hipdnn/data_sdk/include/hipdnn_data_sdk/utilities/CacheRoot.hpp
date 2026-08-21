@@ -7,6 +7,10 @@
 // autotune cache, and future consumers) share, one subdirectory per consumer beneath it.
 
 #include <filesystem>
+#include <hipdnn_data_sdk/utilities/CacheRootDefaults.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <string>
+#include <system_error>
 
 namespace hipdnn_data_sdk::utilities
 {
@@ -31,7 +35,33 @@ namespace hipdnn_data_sdk::utilities
 ///
 /// @return The cache root directory, guaranteed to exist, on success; an empty/invalid
 ///     path on any resolution or filesystem failure.
-inline std::filesystem::path cacheRoot();
-// TODO(Stream A): implement in Phase 2
+inline std::filesystem::path cacheRoot()
+{
+    std::string rawPath = getEnv("HIPDNN_CACHE_DIR");
+    if(rawPath.empty())
+    {
+        rawPath = HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULT;
+    }
+
+    const std::string expanded = expandUser(rawPath);
+    if(expanded.empty())
+    {
+        return {};
+    }
+
+    std::filesystem::path resolved(expanded);
+
+    std::error_code failed;
+    std::filesystem::create_directories(resolved, failed);
+    if(failed || !std::filesystem::is_directory(resolved))
+    {
+        // Either creation failed outright, or the path already existed as something other
+        // than a directory (e.g. a regular file) -- either way, no on-disk cache is
+        // available right now.
+        return {};
+    }
+
+    return resolved;
+}
 
 } // namespace hipdnn_data_sdk::utilities

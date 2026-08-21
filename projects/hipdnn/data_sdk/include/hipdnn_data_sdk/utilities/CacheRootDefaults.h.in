@@ -1,0 +1,15 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifndef HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULTS_H
+#define HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULTS_H
+
+// CMake-baked, per-platform default cache root, used by cacheRoot() when
+// HIPDNN_CACHE_DIR is unset or empty. Baked at configure time from the
+// HIPDNN_CACHE_ROOT_DEFAULT CMake variable (data_sdk/CMakeLists.txt) so a packager can
+// override the default without touching source; a leading `~`/`%USERPROFILE%` is still
+// expanded at run time by expandUser(), so the baked value follows $HOME across machines
+// sharing one build.
+#define HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULT "@HIPDNN_CACHE_ROOT_DEFAULT@"
+
+#endif // HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULTS_H

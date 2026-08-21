@@ -29,6 +29,7 @@
 // appended twice because two processes both missed the same cache lookup) is the caller's
 // job: LineStore guarantees line order and append atomicity, nothing about record identity.
 
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -36,6 +37,16 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace hipdnn_data_sdk::utilities
 {
@@ -47,12 +58,45 @@ namespace hipdnn_data_sdk::utilities
 /// have used with no on-disk cache at all, not treat it as fatal.
 enum class LineStoreStatus
 {
-    Ok,
-    OpenFailed,
-    LockFailed,
-    IoError,
-    VersionMismatch,
+    OK,
+    OPEN_FAILED,
+    LOCK_FAILED,
+    IO_ERROR,
+    VERSION_MISMATCH,
 };
+
+namespace detail
+{
+
+class LineStoreAccess;
+
+#if defined(_WIN32)
+using NativeLineStoreHandle = HANDLE;
+// Not constexpr: INVALID_HANDLE_VALUE casts an integer to a pointer, which is not a valid
+// constant expression in standard C++ even though every Win32 SDK defines the macro that
+// way.
+inline const NativeLineStoreHandle INVALID_LINE_STORE_HANDLE = INVALID_HANDLE_VALUE;
+inline bool isValidLineStoreHandle(NativeLineStoreHandle handle) noexcept
+{
+    return handle != INVALID_HANDLE_VALUE;
+}
+#else
+using NativeLineStoreHandle = int;
+constexpr NativeLineStoreHandle INVALID_LINE_STORE_HANDLE = -1;
+inline bool isValidLineStoreHandle(NativeLineStoreHandle handle) noexcept
+{
+    return handle >= 0;
+}
+#endif
+
+// Forward-declared here (defined further below, alongside acquireLineStoreLock and the
+// rest of the raw-file helpers) so LineStoreShard's destructor/move-assignment, defined
+// inline just below, can release a held lock and close the handle without reordering the
+// full set of raw-file helpers ahead of the type they operate on.
+void releaseLineStoreLock(NativeLineStoreHandle handle) noexcept;
+void closeLineStoreHandle(NativeLineStoreHandle handle) noexcept;
+
+} // namespace detail
 
 /// A handle to one open, version-checked shard file.
 ///
@@ -63,41 +107,377 @@ class LineStoreShard
 {
 public:
     LineStoreShard() = delete;
+    LineStoreShard(const LineStoreShard&) = delete;
+    LineStoreShard& operator=(const LineStoreShard&) = delete;
+
+    LineStoreShard(LineStoreShard&& other) noexcept
+        : _path(std::move(other._path))
+        , _handle(other._handle)
+        , _locked(other._locked)
+    {
+        other._handle = detail::INVALID_LINE_STORE_HANDLE;
+        other._locked = false;
+    }
+
+    LineStoreShard& operator=(LineStoreShard&& other) noexcept
+    {
+        if(this != &other)
+        {
+            closeIfOpen();
+            _path = std::move(other._path);
+            _handle = other._handle;
+            _locked = other._locked;
+            other._handle = detail::INVALID_LINE_STORE_HANDLE;
+            other._locked = false;
+        }
+        return *this;
+    }
+
+    ~LineStoreShard()
+    {
+        closeIfOpen();
+    }
 
     /// True while this handle holds the shard's advisory lock.
-    bool isLocked() const noexcept;
+    bool isLocked() const noexcept
+    {
+        return _locked;
+    }
 
-    // TODO(Stream A): implement in Phase 2
+private:
+    friend class detail::LineStoreAccess;
+
+    explicit LineStoreShard(std::filesystem::path path)
+        : _path(std::move(path))
+    {
+    }
+
+    void closeIfOpen() noexcept
+    {
+        if(detail::isValidLineStoreHandle(_handle))
+        {
+            if(_locked)
+            {
+                detail::releaseLineStoreLock(_handle);
+                _locked = false;
+            }
+            detail::closeLineStoreHandle(_handle);
+            _handle = detail::INVALID_LINE_STORE_HANDLE;
+        }
+    }
+
+    std::filesystem::path _path;
+    detail::NativeLineStoreHandle _handle = detail::INVALID_LINE_STORE_HANDLE;
+    bool _locked = false;
 };
+
+namespace detail
+{
+
+// Acquires a whole-file exclusive advisory lock on @p handle, blocking until it is held.
+// POSIX: fcntl() byte-range lock covering the whole file (l_len == 0). Win32: LockFileEx()
+// over the same [0, MAXDWORD*2) range, without LOCKFILE_FAIL_IMMEDIATELY so the call
+// blocks like fcntl(F_SETLKW) does.
+inline LineStoreStatus acquireLineStoreLock(NativeLineStoreHandle handle) noexcept
+{
+#if defined(_WIN32)
+    OVERLAPPED overlapped{};
+    if(LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped) == 0)
+    {
+        return LineStoreStatus::LOCK_FAILED;
+    }
+#else
+    struct flock fl
+    {
+    };
+    fl.l_type = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0; // whole file
+    if(::fcntl(handle, F_SETLKW, &fl) == -1)
+    {
+        return LineStoreStatus::LOCK_FAILED;
+    }
+#endif
+    return LineStoreStatus::OK;
+}
+
+inline void releaseLineStoreLock(NativeLineStoreHandle handle) noexcept
+{
+#if defined(_WIN32)
+    OVERLAPPED overlapped{};
+    UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &overlapped);
+#else
+    struct flock fl
+    {
+    };
+    fl.l_type = F_UNLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;
+    ::fcntl(handle, F_SETLK, &fl);
+#endif
+}
+
+inline void closeLineStoreHandle(NativeLineStoreHandle handle) noexcept
+{
+#if defined(_WIN32)
+    CloseHandle(handle);
+#else
+    ::close(handle);
+#endif
+}
+
+// Appends @p line plus a trailing '\n' as a single OS-level write, relying on the
+// handle's atomic-append file mode (O_APPEND on POSIX, FILE_APPEND_DATA on Win32) so a
+// concurrent lock-free reader never observes a torn line -- one local-filesystem write
+// call is atomic with respect to concurrent reads of the same file.
+inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_view line) noexcept
+{
+    std::string buffer;
+    buffer.reserve(line.size() + 1);
+    buffer.append(line);
+    buffer.push_back('\n');
+
+    size_t written = 0;
+#if defined(_WIN32)
+    while(written < buffer.size())
+    {
+        DWORD chunk = 0;
+        if(WriteFile(handle,
+                     buffer.data() + written,
+                     static_cast<DWORD>(buffer.size() - written),
+                     &chunk,
+                     nullptr)
+               == 0
+           || chunk == 0)
+        {
+            return false;
+        }
+        written += chunk;
+    }
+#else
+    while(written < buffer.size())
+    {
+        const ssize_t chunk = ::write(handle, buffer.data() + written, buffer.size() - written);
+        if(chunk <= 0)
+        {
+            return false;
+        }
+        written += static_cast<size_t>(chunk);
+    }
+#endif
+    return true;
+}
+
+// Reads the entire current contents of @p handle from offset zero. Used both for the
+// version-line check at open time and for readAllLines() -- LineStore shards are sized
+// for a modest number of records per (engine, arch) pair, so reading the whole file is
+// simpler and safer than incremental parsing.
+inline std::optional<std::string> readAllLineStoreBytes(NativeLineStoreHandle handle) noexcept
+{
+    std::string content;
+    std::array<char, 65536> buffer{};
+
+#if defined(_WIN32)
+    LARGE_INTEGER origin{};
+    if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
+    {
+        return std::nullopt;
+    }
+    for(;;)
+    {
+        DWORD count = 0;
+        if(ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &count, nullptr) == 0)
+        {
+            return std::nullopt;
+        }
+        if(count == 0)
+        {
+            break;
+        }
+        content.append(buffer.data(), count);
+    }
+#else
+    if(::lseek(handle, 0, SEEK_SET) == static_cast<off_t>(-1))
+    {
+        return std::nullopt;
+    }
+    for(;;)
+    {
+        const ssize_t count = ::read(handle, buffer.data(), buffer.size());
+        if(count < 0)
+        {
+            return std::nullopt;
+        }
+        if(count == 0)
+        {
+            break;
+        }
+        content.append(buffer.data(), static_cast<size_t>(count));
+    }
+#endif
+    return content;
+}
+
+// Splits raw file content into whole lines on '\n'. A trailing chunk with no terminating
+// newline is an incomplete write (e.g. a reader racing a not-yet-flushed append) and is
+// dropped rather than handed to a caller as a well-formed line.
+inline std::vector<std::string> splitLineStoreLines(const std::string& content)
+{
+    std::vector<std::string> lines;
+    size_t start = 0;
+    while(start < content.size())
+    {
+        const size_t newlinePos = content.find('\n', start);
+        if(newlinePos == std::string::npos)
+        {
+            break;
+        }
+        lines.emplace_back(content, start, newlinePos - start);
+        start = newlinePos + 1;
+    }
+    return lines;
+}
+
+// Grants the free functions below controlled access to LineStoreShard's private state.
+// A single friend class, rather than friending each free function individually, sidesteps
+// the rule that a template friend declaration may not carry a default template argument
+// (needed by readAllLines()'s deduced Record parameter) while keeping LineStoreShard's
+// constructor and native handle private to this header.
+class LineStoreAccess
+{
+public:
+    static LineStoreShard make(std::filesystem::path path)
+    {
+        return LineStoreShard(std::move(path));
+    }
+
+    static NativeLineStoreHandle handle(const LineStoreShard& shard) noexcept
+    {
+        return shard._handle;
+    }
+
+    static void setHandle(LineStoreShard& shard, NativeLineStoreHandle handle) noexcept
+    {
+        shard._handle = handle;
+    }
+
+    static bool locked(const LineStoreShard& shard) noexcept
+    {
+        return shard._locked;
+    }
+
+    static void setLocked(LineStoreShard& shard, bool locked) noexcept
+    {
+        shard._locked = locked;
+    }
+};
+
+} // namespace detail
 
 /// Opens the shard file at @p path for record access, creating it (and writing
 /// @p expectedVersion as its bare first line) if it does not yet exist.
 ///
 /// On an existing file, the first line is compared against @p expectedVersion. A mismatch
-/// is reported as LineStoreStatus::VersionMismatch and no shard is returned -- this is a
+/// is reported as LineStoreStatus::VERSION_MISMATCH and no shard is returned -- this is a
 /// decline, not a throw, since a version bump from a newer build must never crash an older
 /// one reading the same cache directory.
 ///
 /// @param path Path to the shard file; parent directories are assumed to already exist.
 /// @param expectedVersion Bare version string written to (or checked against) the first
 ///     line. Carries no format requirement beyond being one line of text.
-/// @return The open shard and LineStoreStatus::Ok on success; std::nullopt and a non-Ok
+/// @return The open shard and LineStoreStatus::OK on success; std::nullopt and a non-Ok
 ///     status describing the failure otherwise. Never throws.
 inline std::pair<std::optional<LineStoreShard>, LineStoreStatus>
-    openLineStore(const std::filesystem::path& path, std::string_view expectedVersion);
-// TODO(Stream A): implement in Phase 2
+    openLineStore(const std::filesystem::path& path, std::string_view expectedVersion)
+{
+#if defined(_WIN32)
+    const HANDLE nativeHandle = CreateFileW(path.wstring().c_str(),
+                                            FILE_GENERIC_READ | FILE_APPEND_DATA,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                            nullptr,
+                                            OPEN_ALWAYS,
+                                            FILE_ATTRIBUTE_NORMAL,
+                                            nullptr);
+    if(nativeHandle == INVALID_HANDLE_VALUE)
+    {
+        return {std::nullopt, LineStoreStatus::OPEN_FAILED};
+    }
+#else
+    const int nativeHandle = ::open(path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+    if(nativeHandle < 0)
+    {
+        return {std::nullopt, LineStoreStatus::OPEN_FAILED};
+    }
+#endif
+
+    LineStoreShard shard = detail::LineStoreAccess::make(path);
+    detail::LineStoreAccess::setHandle(shard, nativeHandle);
+
+    // Locked only long enough to check (or write) the version line, so two processes
+    // racing to create the same shard never both see an empty file and both write a
+    // version line. The shard this function returns starts out unlocked -- the caller
+    // must call lockLineStore() itself before appendLine().
+    if(detail::acquireLineStoreLock(nativeHandle) != LineStoreStatus::OK)
+    {
+        return {std::nullopt, LineStoreStatus::LOCK_FAILED};
+    }
+
+    const auto content = detail::readAllLineStoreBytes(nativeHandle);
+    if(!content)
+    {
+        detail::releaseLineStoreLock(nativeHandle);
+        return {std::nullopt, LineStoreStatus::IO_ERROR};
+    }
+
+    if(content->empty())
+    {
+        if(!detail::appendRawLineStoreLine(nativeHandle, expectedVersion))
+        {
+            detail::releaseLineStoreLock(nativeHandle);
+            return {std::nullopt, LineStoreStatus::IO_ERROR};
+        }
+    }
+    else
+    {
+        const auto lines = detail::splitLineStoreLines(*content);
+        if(lines.empty() || lines.front() != expectedVersion)
+        {
+            detail::releaseLineStoreLock(nativeHandle);
+            return {std::nullopt, LineStoreStatus::VERSION_MISMATCH};
+        }
+    }
+
+    detail::releaseLineStoreLock(nativeHandle);
+    return {std::optional<LineStoreShard>(std::move(shard)), LineStoreStatus::OK};
+}
 
 /// Acquires @p shard's per-shard advisory lock, blocking until it is held or acquisition
 /// fails. Never throws; a failure to lock (e.g. an incompatible external lock holder, or a
 /// filesystem that does not support the underlying primitive) is reported as
-/// LineStoreStatus::LockFailed so the caller can decline gracefully.
-inline LineStoreStatus lockLineStore(LineStoreShard& shard);
-// TODO(Stream A): implement in Phase 2
+/// LineStoreStatus::LOCK_FAILED so the caller can decline gracefully.
+inline LineStoreStatus lockLineStore(LineStoreShard& shard)
+{
+    const auto status = detail::acquireLineStoreLock(detail::LineStoreAccess::handle(shard));
+    if(status == LineStoreStatus::OK)
+    {
+        detail::LineStoreAccess::setLocked(shard, true);
+    }
+    return status;
+}
 
 /// Releases a lock previously acquired by lockLineStore(). A no-op, not an error, if
 /// @p shard is not currently locked.
-inline void unlockLineStore(LineStoreShard& shard) noexcept;
-// TODO(Stream A): implement in Phase 2
+inline void unlockLineStore(LineStoreShard& shard) noexcept
+{
+    if(!detail::LineStoreAccess::locked(shard))
+    {
+        return;
+    }
+    detail::releaseLineStoreLock(detail::LineStoreAccess::handle(shard));
+    detail::LineStoreAccess::setLocked(shard, false);
+}
 
 /// Appends one caller-formatted record line to @p shard.
 ///
@@ -109,10 +489,16 @@ inline void unlockLineStore(LineStoreShard& shard) noexcept;
 /// or encoding as needed -- LineStore does not inspect or validate line content beyond
 /// writing it followed by exactly one newline).
 ///
-/// @return LineStoreStatus::Ok on success; LineStoreStatus::IoError on any write failure.
+/// @return LineStoreStatus::OK on success; LineStoreStatus::IO_ERROR on any write failure.
 /// Never throws.
-inline LineStoreStatus appendLine(LineStoreShard& shard, std::string_view line);
-// TODO(Stream A): implement in Phase 2
+inline LineStoreStatus appendLine(LineStoreShard& shard, std::string_view line)
+{
+    if(!detail::appendRawLineStoreLine(detail::LineStoreAccess::handle(shard), line))
+    {
+        return LineStoreStatus::IO_ERROR;
+    }
+    return LineStoreStatus::OK;
+}
 
 /// Reads every record line from @p shard (i.e. every line after the version line) and
 /// hands each one to @p parseLine in file order.
@@ -137,13 +523,32 @@ inline LineStoreStatus appendLine(LineStoreShard& shard, std::string_view line);
 ///     of the file, never a torn line, because appendLine() only ever adds whole lines.
 /// @param parseLine Caller-supplied callback converting one raw line into
 ///     std::optional<Record>; std::nullopt skips the line.
-/// @return Every successfully parsed record, in file order, and LineStoreStatus::Ok; or an
+/// @return Every successfully parsed record, in file order, and LineStoreStatus::OK; or an
 ///     empty vector and a non-Ok status if the shard itself could not be read (a status
 ///     level failure, distinct from a per-line parse rejection). Never throws.
 template <typename ParseLine,
           typename Record = typename std::invoke_result_t<ParseLine, std::string_view>::value_type>
 std::pair<std::vector<Record>, LineStoreStatus> readAllLines(const LineStoreShard& shard,
-                                                             ParseLine parseLine);
-// TODO(Stream A): implement in Phase 2
+                                                             ParseLine parseLine)
+{
+    const auto content = detail::readAllLineStoreBytes(detail::LineStoreAccess::handle(shard));
+    if(!content)
+    {
+        return {{}, LineStoreStatus::IO_ERROR};
+    }
+
+    const auto lines = detail::splitLineStoreLines(*content);
+    std::vector<Record> records;
+    // Line 0 is the version line, already validated by openLineStore(); record lines
+    // start at index 1.
+    for(size_t i = 1; i < lines.size(); ++i)
+    {
+        if(auto parsed = parseLine(std::string_view(lines[i])))
+        {
+            records.push_back(std::move(*parsed));
+        }
+    }
+    return {std::move(records), LineStoreStatus::OK};
+}
 
 } // namespace hipdnn_data_sdk::utilities
