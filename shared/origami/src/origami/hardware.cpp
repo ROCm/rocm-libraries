@@ -118,7 +118,60 @@ size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
       return 1;
   }
 }
+
+// ORIGAMI_RDNA_CU_MULT overrides the WGP->CU multiplier used to derive N_CU, for
+// StreamK-grid / launch-budget experiments. Unset or <=0 uses the arch default
+// (so stock behaviour is unchanged). Read once (env latches in a static).
+size_t effective_cu_mult(hardware_t::architecture_t arch) {
+  static const size_t override_mult = []() -> size_t {
+    if (const char* e = std::getenv("ORIGAMI_RDNA_CU_MULT")) {
+      long v = std::atol(e);
+      if (v > 0) return static_cast<size_t>(v);
+    }
+    return 0;  // 0 => use arch default
+  }();
+  return override_mult ? override_mult : cus_per_multiProcessorCount(arch);
+}
 }  // namespace
+
+std::size_t effective_num_cus(const problem_t& problem, const hardware_t& hardware) {
+  const std::size_t base = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  // Opt-in size-dependent gfx1201 StreamK CU multiplier. Default off => stock.
+  // Measured on the HHS-TN eval: small GEMMs win with x3 (fills the 32 WGP at
+  // higher occupancy), large/compute GEMMs win with x1 (leaner grid, less
+  // reduction/fixup overhead). Env latches once in function-local statics.
+  static const bool enabled = []() {
+    const char* e = std::getenv("ORIGAMI_RDNA_CU_SIZEDEP");
+    return e && std::atol(e) != 0;
+  }();
+  if (!enabled) return base;
+  if (hardware.arch != hardware_t::architecture_t::gfx1201) return base;
+  // A genuine caller CU cap always wins (do not reshape a capped launch).
+  if (problem.num_cus > 0
+      && static_cast<std::size_t>(problem.num_cus) < hardware.N_CU) {
+    return base;
+  }
+  static const double threshold = []() {
+    const char* e = std::getenv("ORIGAMI_RDNA_CU_SMALL_FLOP");
+    return e ? std::atof(e) : 3.16e9;  // 2*M*N*K boundary (from the eval sweep)
+  }();
+  static const std::size_t small_mult = []() -> std::size_t {
+    const char* e = std::getenv("ORIGAMI_RDNA_CU_SMALL_MULT");
+    return e ? static_cast<std::size_t>(std::atol(e)) : 3;
+  }();
+  static const std::size_t big_mult = []() -> std::size_t {
+    const char* e = std::getenv("ORIGAMI_RDNA_CU_BIG_MULT");
+    return e ? static_cast<std::size_t>(std::atol(e)) : 1;
+  }();
+  const std::size_t base_mult = effective_cu_mult(hardware.arch);
+  const std::size_t wgp = base_mult ? hardware.N_CU / base_mult : hardware.N_CU;
+  const double flops = 2.0 * static_cast<double>(problem.size.m)
+                       * static_cast<double>(problem.size.n)
+                       * static_cast<double>(problem.size.k)
+                       * static_cast<double>(problem.batch ? problem.batch : 1);
+  const std::size_t mult = (flops < threshold) ? small_mult : big_mult;
+  return wgp * mult;
+}
 
 hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                                                    size_t num_xcds_override,
@@ -135,7 +188,7 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                       ? num_xcds_override
                       : get_default_num_xcds(arch_enum);
   return hardware_t(arch_enum,
-                    properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum),
+                    properties.multiProcessorCount * effective_cu_mult(arch_enum),
                     properties.sharedMemPerBlock,
                     properties.regsPerBlock * 4,  // RF capacity from device (regsPerBlock is in 32-bit registers, convert to bytes)
                     constants,
