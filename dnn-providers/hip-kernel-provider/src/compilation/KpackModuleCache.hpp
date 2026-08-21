@@ -167,7 +167,7 @@ public:
         const hipError_t status = hipModuleLoadData(&module, codeObject.data());
         if(status != hipSuccess)
         {
-            throw KpackModuleLoadFailure(KpackLoadStage::DECOMPRESS,
+            throw KpackModuleLoadFailure(KpackLoadStage::MODULE_LOAD,
                                          "hipModuleLoadData rejected the code object for toc_key '"
                                              + tocKey + "' at arch '" + *matched
                                              + "' from kpack archive '" + archivePath

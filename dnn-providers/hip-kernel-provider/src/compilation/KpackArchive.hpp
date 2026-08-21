@@ -13,16 +13,21 @@
 namespace hip_kernel_provider::compilation
 {
 
-/// Which step of reading a kpack archive failed. Carried separately from the raw
-/// reader code so a caller can phrase a diagnostic per stage: "wrong GPU" and "wrong
-/// toc_key" are the same reader error family but send a reader to entirely different
-/// places, and flattening both into one string loses that.
+/// Which step of turning a kpack archive into a loaded module failed. Carried separately
+/// from the raw reader code so a caller can phrase a diagnostic per stage: "wrong GPU" and
+/// "wrong toc_key" are the same reader error family but send a reader to entirely
+/// different places, and flattening both into one string loses that.
+///
+/// MODULE_LOAD is past the reader: the code object came out of the archive intact and HIP
+/// declined it. It is a distinct enumerator because folding it into DECOMPRESS makes a
+/// rejected code object read as a corrupt one, which is a different bug report entirely.
 enum class KpackLoadStage
 {
     OPEN_ARCHIVE,
     ARCH_LOOKUP,
     ENTRY_LOOKUP,
     DECOMPRESS,
+    MODULE_LOAD,
 };
 
 /// A staged reader failure: the step that failed plus the raw kpack_error_t value and
