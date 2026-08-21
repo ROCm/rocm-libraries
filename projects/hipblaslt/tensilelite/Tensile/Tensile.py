@@ -258,7 +258,10 @@ def addCommonArguments(argParser):
         help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
              "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
              "synthetic results CSV. For CPU-only CI/coverage; perf numbers are synthetic.")
-    argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
+    # extend (not store): repeated --global-parameters accumulate instead of the last
+    # occurrence clobbering earlier ones.
+    argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters,
+                           action="extend", default=[])
 
 
 def argUpdatedGlobalParameters(args):
