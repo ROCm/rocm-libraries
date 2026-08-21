@@ -3534,6 +3534,95 @@ class TestPreloopReorderGR:
         assert isinstance(partial_wgop, WaitGROp) and partial_wgop.force_drain, \
             "Multi-DU partial-path wait_gr must use force_drain=True"
 
+    def test_reorder_multi_partition_wait_gr_counts(self):
+        """Multi-partition: full-path WaitGROp carries partition counts and emitter
+        divides numGRTotal correctly so vmcnt = MT1-partition-0 load count only.
+
+        Uses a 2-partition-M split (partSizeM = numMFMATilesM/2 = 4 for 256x256 fp4).
+        The full-path WaitGROp must have numPartitionsM=2 and numPartitionsN=1.
+        The single-partition baseline must have numPartitionsM=1 / numPartitionsN=1.
+        """
+        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
+
+        cfg_single = make_cfg_256x256_fp4(pgr=2)
+        assert cfg_single.numPartitionsM == 1 and cfg_single.numPartitionsN == 1
+
+        cfg_multi = make_cfg_256x256_fp4(pgr=2, partSizeM=4)
+        assert cfg_multi.numPartitionsM == 2, \
+            "Prerequisite: partSizeM=4 must produce 2 M-partitions for 256x256 fp4"
+        assert cfg_multi.numPartitionsN == 1
+
+        def _full_wait_gr(cfg):
+            sched = self._build(cfg)
+            seq = self._op_sequence(sched)
+            wg_sources = [s for t, s in seq if t == 'wait_gr']
+            assert len(wg_sources) == 2
+            return wg_sources[0]  # full-path is first
+
+        # Single-partition: numPartitionsM/N default to 1
+        single_wgop = _full_wait_gr(cfg_single)
+        assert isinstance(single_wgop, WaitGROp)
+        assert single_wgop.wait_gr_counts.numPartitionsM == 1
+        assert single_wgop.wait_gr_counts.numPartitionsN == 1
+
+        # Multi-partition: partition counts must be threaded through
+        multi_wgop = _full_wait_gr(cfg_multi)
+        assert isinstance(multi_wgop, WaitGROp)
+        assert multi_wgop.wait_gr_counts.numPartitionsM == 2, \
+            "Full-path WaitGROp must carry numPartitionsM=2 for 2-partition-M config"
+        assert multi_wgop.wait_gr_counts.numPartitionsN == 1
+
+    def test_reorder_multi_partition_emit_wait_gr_vlcnt(self):
+        """Emitter-level: multi-partition vlcnt == single-partition vlcnt / numPartitionsM.
+
+        Constructs a real InstructionEmitter with MagicMock tileInfos that expose
+        numGRTotal and loadRatioGR, then calls emit_wait_gr directly to verify the
+        emitted SWaitCntEx.vlcnt is halved for a 2-partition-M config vs single-partition.
+        """
+        from unittest.mock import MagicMock
+        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from Tensile.Components.Subtile.LogicalScheduler import WaitGRCounts, WaitGROp
+
+        cfg = make_cfg_256x256_fp4(pgr=2)
+
+        def _make_emitter(cfg):
+            tiA = MagicMock()
+            tiA.numGRTotal = 8
+            tiA.loadRatioGR = 0.5   # grMap['A'] = max(1, int(1/0.5)) = 2; use_num_gr_total bypasses this
+            tiA.subtileShape = [1, 1]
+            tiB = MagicMock()
+            tiB.numGRTotal = 8
+            tiB.loadRatioGR = 0.5
+            tiB.subtileShape = [1, 1]
+            emitter = InstructionEmitter(
+                writer=MagicMock(), kernel={}, config=cfg,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=MagicMock(), vgprTilesA=[], vgprTilesB=[],
+                scaleTileInfoA=None, scaleTileInfoB=None,
+            )
+            emitter.tileInfoMap = {'A': tiA, 'B': tiB}
+            return emitter
+
+        def _vlcnt(emitter, numPartitionsM, numPartitionsN):
+            wgop = WaitGROp(wait_gr_counts=WaitGRCounts(
+                use_num_gr_total=True,
+                numPartitionsM=numPartitionsM,
+                numPartitionsN=numPartitionsN,
+            ))
+            instrs = emitter.emit_wait_gr(wgop)
+            assert instrs, "emit_wait_gr returned no instructions"
+            return instrs[0].vlcnt
+
+        emitter = _make_emitter(cfg)
+        vlcnt_single = _vlcnt(emitter, numPartitionsM=1, numPartitionsN=1)
+        vlcnt_multi  = _vlcnt(emitter, numPartitionsM=2, numPartitionsN=1)
+
+        # single: nA=8 + nB=8 = 16; multi (partM=2, partN=1): nA=4 + nB=8 = 12
+        assert vlcnt_single == 16, f"Expected 16 (8A+8B), got {vlcnt_single}"
+        assert vlcnt_multi  == 12, f"Expected 12 (4A+8B), got {vlcnt_multi}"
+        assert vlcnt_single - vlcnt_multi == 4, \
+            "Multi-partition vlcnt must be reduced by nA/numPartitionsM (=4)"
+
 
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.
 # Also calls the instruction scheduler to verify the emitted modules are valid input and to show the final instruction counts.

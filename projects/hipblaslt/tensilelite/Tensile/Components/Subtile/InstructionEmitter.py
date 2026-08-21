@@ -298,17 +298,35 @@ class InstructionEmitter:
             # mock-only tests must supply them if testing this branch directly).
             sa_info = self.tileInfoMap.get('SA')
             sb_info = self.tileInfoMap.get('SB')
-            nA = self.tileInfoA.numGRTotal
-            nB = self.tileInfoB.numGRTotal
-            nSA = sa_info.numGRTotal if sa_info else 0
-            nSB = sb_info.numGRTotal if sb_info else 0
+            assert self.tileInfoA.numGRTotal % counts.numPartitionsM == 0, (
+                f"numGRTotal(A)={self.tileInfoA.numGRTotal} not divisible by "
+                f"numPartitionsM={counts.numPartitionsM} — partition/GR subtile mismatch"
+            )
+            assert self.tileInfoB.numGRTotal % counts.numPartitionsN == 0, (
+                f"numGRTotal(B)={self.tileInfoB.numGRTotal} not divisible by "
+                f"numPartitionsN={counts.numPartitionsN} — partition/GR subtile mismatch"
+            )
+            if sa_info:
+                assert sa_info.numGRTotal % counts.numPartitionsM == 0, (
+                    f"numGRTotal(SA)={sa_info.numGRTotal} not divisible by "
+                    f"numPartitionsM={counts.numPartitionsM} — partition/GR subtile mismatch"
+                )
+            if sb_info:
+                assert sb_info.numGRTotal % counts.numPartitionsN == 0, (
+                    f"numGRTotal(SB)={sb_info.numGRTotal} not divisible by "
+                    f"numPartitionsN={counts.numPartitionsN} — partition/GR subtile mismatch"
+                )
+            nA = self.tileInfoA.numGRTotal // counts.numPartitionsM
+            nB = self.tileInfoB.numGRTotal // counts.numPartitionsN
+            nSA = (sa_info.numGRTotal // counts.numPartitionsM) if sa_info else 0
+            nSB = (sb_info.numGRTotal // counts.numPartitionsN) if sb_info else 0
             grCnt = nA + nB + nSA + nSB
             assert grCnt > 0, (
                 f"use_num_gr_total=True but numGRTotal sums to 0 "
                 f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB}); "
                 f"loadRatioGR may be 0 — check PGR=2 DTL preconditions at call site"
             )
-            label = f"per-subIterK: A={nA} B={nB} SA={nSA} SB={nSB}"
+            label = f"per-partition-0: A={nA} B={nB} SA={nSA} SB={nSB}"
         else:
             grCnt = (counts.A * grMap['A'] +
                      counts.B * grMap['B'] +
