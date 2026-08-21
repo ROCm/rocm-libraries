@@ -40,8 +40,10 @@ def _parse_args(argv):
     )
     p.add_argument(
         "--source-root",
-        required=True,
-        help="Flat authored source folder (KDP + generic JSON + HIP sources).",
+        action="append",
+        default=[],
+        help="Flat authored source folder (KDP + generic JSON + HIP sources); "
+        "repeatable. All folders merge into one kpack per arch.",
     )
     p.add_argument(
         "--out-root",
@@ -67,7 +69,7 @@ def _parse_args(argv):
         "out-root.",
     )
     p.add_argument(
-        "--kpack-python-dir",
+        "--rocm-kpack-dir",
         default=None,
         help="Path to the rocm-kpack 'python' directory (overrides any "
         "installed rocm_kpack).",
@@ -77,13 +79,15 @@ def _parse_args(argv):
 
 def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    if not args.source_root:
+        raise HkpPackError("at least one --source-root is required")
     arches = _split_arches(args.arches)
     run_pipeline(
-        source_root=Path(args.source_root),
+        source_roots=[Path(r) for r in args.source_root],
         arches=arches,
         out_root=Path(args.out_root),
         hipcc=args.hipcc,
-        kpack_python_dir=args.kpack_python_dir,
+        rocm_kpack_dir=args.rocm_kpack_dir,
         inter_root=Path(args.inter_root) if args.inter_root else None,
     )
     return 0

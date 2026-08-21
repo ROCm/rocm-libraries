@@ -5,12 +5,12 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .hip_compile import compile_hip_variant
-from .variant import variant_key
+from .hip_compile import compile_hip_variant, hip_variant_key
+from .rocke_compile import compile_rocke_variant, rocke_variant_key
 from .descriptors import (
     arch_matches,
     kdp_survives,
-    load_flat_input,
+    load_flat_inputs,
     reachable_generic_ids,
 )
 from .errors import HkpPackError
@@ -31,6 +31,9 @@ class InlineUKD:
     symbol: str
     variant_key: str
     extra: dict = field(default_factory=dict)
+    origin_kind: str = "hip"
+    builder: object = None
+    spec: object = None
 
 
 @dataclass
@@ -63,6 +66,7 @@ class IntermediateArch:
     directory: Path
     kdps: list = field(default_factory=list)
     variant_co: dict = field(default_factory=dict)
+    variant_symbol: dict = field(default_factory=dict)
     standalone_ukds: dict = field(default_factory=dict)
 
 
@@ -108,26 +112,77 @@ def _ukd_extra(ukd):
     }
 
 
-def _compile_ukd_variant(ukd, where, flat, arch, hipcc, inter_arch_dir, variant_co):
-    """Compile one hip UKD's (source,build) variant, deduped into variant_co.
+def _compile_ukd_variant(
+    ukd,
+    where,
+    origin_root,
+    origin_index,
+    arch,
+    hipcc,
+    inter_arch_dir,
+    variant_co,
+    variant_symbol,
+):
+    """Compile one UKD variant for arch, deduped into variant_co per kind.
 
-    Returns (variant_key, source, entry, build) so both inline and standalone
-    callers can build their record.
+    Dispatches on kernel_source.kind: hip resolves its source against
+    origin_root (the root this UKD's descriptor loaded from) and keys on
+    (source, build, origin_index), the positional ordinal of that root, so two
+    roots carrying an identically named source at the same relative path but
+    different bytes stay distinct. rocke keys on (source, builder, spec) and is
+    origin-independent (the source is a dotted module resolved by import), so
+    origin_root/origin_index are accepted only for signature uniformity. Returns
+    (variant_key, symbol, record_fields).
     """
     ks = ukd["kernel_source"]
-    if ks["kind"] != "hip":
-        raise HkpPackError(
-            f"{where} must be authored in hip form (got kind='{ks['kind']}')"
-        )
+    kind = ks["kind"]
     source = ks["source"]
-    entry = ks["entry"]
-    build = ks["build"]
-    vk = variant_key(source, build)
-    if vk not in variant_co:
-        variant_co[vk] = compile_hip_variant(
-            hipcc, flat.root, source, build, arch, inter_arch_dir
-        )
-    return vk, source, entry, build
+    if kind == "hip":
+        entry = ks["entry"]
+        build = ks["build"]
+        vk = hip_variant_key(source, build, origin_index)
+        if vk not in variant_co:
+            variant_co[vk] = compile_hip_variant(
+                hipcc,
+                origin_root,
+                source,
+                build,
+                arch,
+                inter_arch_dir,
+                key_origin_index=origin_index,
+            )
+            variant_symbol[vk] = entry
+        symbol = entry
+        fields = {
+            "origin_kind": "hip",
+            "source": source,
+            "entry": entry,
+            "build": build,
+            "builder": None,
+            "spec": None,
+        }
+    elif kind == "rocke":
+        builder = ks["builder"]
+        spec = ks["spec"]
+        vk = rocke_variant_key(source, builder, spec)
+        if vk not in variant_co:
+            co_path, captured = compile_rocke_variant(
+                origin_root, source, builder, spec, arch, inter_arch_dir
+            )
+            variant_co[vk] = co_path
+            variant_symbol[vk] = captured
+        symbol = variant_symbol[vk]
+        fields = {
+            "origin_kind": "rocke",
+            "source": source,
+            "entry": None,
+            "build": None,
+            "builder": builder,
+            "spec": spec,
+        }
+    else:
+        raise HkpPackError(f"{where} kernel_source has unsupported kind '{kind}'")
+    return vk, symbol, fields
 
 
 def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
@@ -145,6 +200,7 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
     inter_arch_dir.mkdir(parents=True, exist_ok=True)
 
     variant_co = {}
+    variant_symbol = {}
     arch_kdps = []
     standalone_ukds = {}
     ukd_by_id = flat.ukd_by_id()
@@ -173,21 +229,27 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
                     continue
                 sukd = sdesc.doc
                 where = f"standalone UKD {sdesc.path.name}"
-                vk, source, sentry, build = _compile_ukd_variant(
-                    sukd, where, flat, arch, hipcc, inter_arch_dir, variant_co
+                vk, symbol, fields = _compile_ukd_variant(
+                    sukd,
+                    where,
+                    sdesc.origin_root,
+                    sdesc.origin_index,
+                    arch,
+                    hipcc,
+                    inter_arch_dir,
+                    variant_co,
+                    variant_symbol,
                 )
                 standalone_ukds[entry] = StandaloneUKD(
                     id=sukd.get("id"),
                     name=sukd.get("name"),
                     metadata=sukd.get("metadata"),
                     priority=sukd.get("priority"),
-                    source=source,
-                    entry=sentry,
-                    build=build,
-                    symbol=sentry,
+                    symbol=symbol,
                     variant_key=vk,
                     extra=_ukd_extra(sukd),
                     filename=sdesc.path.name,
+                    **fields,
                 )
                 continue
 
@@ -196,27 +258,34 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
             if not arch_matches(ukd, arch):
                 continue
             where = f"UKD '{ukd.get('id')}' in {kdp.path.name}"
-            vk, source, uentry, build = _compile_ukd_variant(
-                ukd, where, flat, arch, hipcc, inter_arch_dir, variant_co
+            vk, symbol, fields = _compile_ukd_variant(
+                ukd,
+                where,
+                kdp.origin_root,
+                kdp.origin_index,
+                arch,
+                hipcc,
+                inter_arch_dir,
+                variant_co,
+                variant_symbol,
             )
             ukd["kernel_source"] = {
                 "kind": "hsaco",
                 "file": f"{vk}.co",
-                "symbol": uentry,
+                "symbol": symbol,
             }
-            ukd["build"] = build
+            if fields["build"] is not None:
+                ukd["build"] = fields["build"]
             new_kds.append(ukd)
             record = InlineUKD(
                 id=ukd.get("id"),
                 name=ukd.get("name"),
                 metadata=ukd.get("metadata"),
                 priority=ukd.get("priority"),
-                source=source,
-                entry=uentry,
-                build=build,
-                symbol=uentry,
+                symbol=symbol,
                 variant_key=vk,
                 extra=_ukd_extra(ukd),
+                **fields,
             )
             ukds.append(record)
             entries.append(record)
@@ -248,6 +317,7 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
         directory=inter_arch_dir,
         kdps=arch_kdps,
         variant_co=variant_co,
+        variant_symbol=variant_symbol,
         standalone_ukds=standalone_ukds,
     )
 
@@ -268,6 +338,20 @@ def prune(flat, arch):
 
 
 def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256):
+    if ukd.origin_kind == "rocke":
+        provenance = {
+            "origin_kind": "rocke",
+            "source": ukd.source,
+            "builder": ukd.builder,
+            "spec": ukd.spec,
+        }
+    else:
+        provenance = {
+            "origin_kind": "hip",
+            "source": ukd.source,
+            "entry": ukd.entry,
+            "build": ukd.build,
+        }
     doc = {
         "id": ukd.id,
         "name": ukd.name,
@@ -280,12 +364,7 @@ def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256):
         },
         "metadata": ukd.metadata,
         "priority": ukd.priority,
-        "provenance": {
-            "origin_kind": "hip",
-            "source": ukd.source,
-            "entry": ukd.entry,
-            "build": ukd.build,
-        },
+        "provenance": provenance,
     }
     doc.update(ukd.extra)
     # Every shipped UKD carries the single shard arch, matching the KDP. Set it
@@ -411,29 +490,31 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
 
 
 def run_pipeline(
-    source_root,
+    source_roots,
     arches,
     out_root,
     hipcc,
-    kpack_python_dir=None,
+    rocm_kpack_dir=None,
     inter_root=None,
     expected_sha256=None,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
 
-    Loads the flat source folder once, then for each arch compiles the targeting
-    KDPs' variants, prunes, and packs. An arch with no surviving KDP is skipped
-    cleanly (no folder, no kpack) and logged with 'no kernels for <arch>,
-    skipping'. Empty arch list installs nothing (exit 0).
+    Loads and merges every source folder once, then for each arch compiles the
+    targeting KDPs' variants, prunes, and packs. Each hip UKD's source resolves
+    against its own root, and all roots' descriptors combine into one kpack per
+    arch. An arch with no surviving KDP is skipped cleanly (no folder, no kpack)
+    and logged with 'no kernels for <arch>, skipping'. Empty arch list installs
+    nothing (exit 0).
     """
     out_root = Path(out_root)
     results = {}
     if not arches:
         return results
 
-    kpack_mod, comp = load_kpack(kpack_python_dir)
-    flat = load_flat_input(source_root, log=log)
+    kpack_mod, comp = load_kpack(rocm_kpack_dir)
+    flat = load_flat_inputs(source_roots, log=log)
 
     if inter_root is None:
         inter_root = out_root.parent / "hkp-intermediate"
