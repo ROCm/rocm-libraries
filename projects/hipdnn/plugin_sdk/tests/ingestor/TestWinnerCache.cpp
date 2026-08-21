@@ -264,6 +264,72 @@ TEST(TestIngestorWinnerCacheStateManager, AnEmptyRecordIsNotStored)
         << "an all-unusable sweep has no ranking; storing one would read as a covered hit";
 }
 
+/// A key whose graph yields no bytes matches nothing on lookup, so storing under one
+/// would strand an entry the cache can never serve or evict.
+TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotStored)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+
+    // Supplies no bytes(), taking IGraph's default: valid or not, it cannot be keyed.
+    class BytelessGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
+    {
+    public:
+        const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
+        {
+            throw std::logic_error("BytelessGraph carries no graph");
+        }
+        bool isValid() const override
+        {
+            return false;
+        }
+        uint32_t nodeCount() const override
+        {
+            return 0;
+        }
+        bool hasOnlySupportedAttributes(
+            std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes> /*supported*/)
+            const override
+        {
+            return false;
+        }
+        const hipdnn_flatbuffers_sdk::data_objects::Node& getNode(uint32_t /*index*/) const override
+        {
+            throw std::logic_error("BytelessGraph carries no nodes");
+        }
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper&
+            getNodeWrapper(uint32_t /*index*/) const override
+        {
+            throw std::logic_error("BytelessGraph carries no nodes");
+        }
+        const std::vector<
+            std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper>>&
+            nodeWrappers() const override
+        {
+            throw std::logic_error("BytelessGraph carries no nodes");
+        }
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            getTensorMap() const override
+        {
+            throw std::logic_error("BytelessGraph carries no tensors");
+        }
+    };
+
+    const BytelessGraph graph;
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942";
+    properties.warpSize = 64;
+    properties.multiProcessorCount = 304;
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    ASSERT_FALSE(key.graph.isUsable()) << "the fixture must actually be unkeyable";
+
+    manager->recordWinner(key, WinnerRecord{entryFor(definitionFor(0x01), 1.0)});
+
+    EXPECT_EQ(manager->winnerCacheSize(), 0U)
+        << "an unkeyable graph never matches on lookup, so the entry would be unreachable";
+}
+
 TEST(TestIngestorWinnerCacheStateManager, AMissReturnsNulloptRatherThanAnEmptyRecord)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
