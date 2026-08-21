@@ -274,6 +274,13 @@ typedef struct rocke_ll_smem_name
     const char* gname;
 } rocke_ll_smem_name_t;
 
+typedef struct rocke_ll_printf_global
+{
+    const char* name;
+    const char* escaped;
+    int byte_count;
+} rocke_ll_printf_global_t;
+
 /* One cached smem base pointer: the byte-level GEP SSA name computed for
  * `gname` inside basic block `block`. Reused for later accesses of the same
  * allocation in the same block (which the GEP dominates), so a non-zero-offset
@@ -324,6 +331,7 @@ struct rocke_lower
     /* smem pre-pass */
     ROCKE_VEC(rocke_ll_smem_global_t) smem_globals;
     ROCKE_VEC(rocke_ll_smem_name_t) smem_names;
+    ROCKE_VEC(rocke_ll_printf_global_t) printf_globals;
 
     /* smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
      * Populated by rocke_ll_compute_smem_layout() after _collect_smem. */
@@ -527,6 +535,7 @@ void rocke_ll_set_handler(rocke_opcode_t opcode, rocke_ll_op_fn fn);
  * every bucket's handlers are present in rocke_ll_dispatch before lowering. Each
  * is DEFINED in its own bucket .c file. */
 void rocke_ll_register_arith(void); /* bucket 1 */
+void rocke_ll_register_device_print(void);
 void rocke_ll_register_convert(void); /* bucket 2 */
 void rocke_ll_register_mem(void); /* bucket 3 */
 void rocke_ll_register_mma(void); /* bucket 4 */

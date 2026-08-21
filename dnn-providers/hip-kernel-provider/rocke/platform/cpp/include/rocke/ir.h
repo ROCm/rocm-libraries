@@ -265,6 +265,7 @@ typedef enum rocke_opcode
     /* gpu.* */
     ROCKE_OP_GPU_THREAD_ID,
     ROCKE_OP_GPU_BLOCK_ID,
+    ROCKE_OP_GPU_DEVICE_PRINT,
 
     /* memref.* */
     ROCKE_OP_MEMREF_GLOBAL_LOAD,
@@ -478,6 +479,20 @@ typedef struct rocke_kernel_def
     rocke_region_t* body; /* the "entry" region                          */
     rocke_attr_map_t attrs; /* max_workgroup_size, ...                      */
 } rocke_kernel_def_t;
+
+typedef enum rocke_print_item_kind
+{
+    ROCKE_PRINT_TEXT = 0,
+    ROCKE_PRINT_VALUE = 1
+} rocke_print_item_kind_t;
+
+typedef struct rocke_print_item
+{
+    rocke_print_item_kind_t kind;
+    const char* text; /* TEXT: NUL-terminated ASCII C string; otherwise NULL */
+    rocke_value_t* value; /* VALUE: required; otherwise NULL                    */
+    const char* format; /* VALUE: bool/i32/u32/f32/ptr; NULL selects default */
+} rocke_print_item_t;
 
 /* --------------------------------------------------------------- builder */
 
@@ -794,6 +809,16 @@ rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
+/* Emit one canonical Text/Value record. Text items are NUL-terminated ASCII C
+ * strings, so the first NUL ends the input. style is currently "compact".
+ * termination is "ensure_newline" or "none". predicate may be NULL. The
+ * implementation rejects records that exceed its configured safety limits. */
+void rocke_b_device_print(rocke_ir_builder_t* b,
+                          const rocke_print_item_t* items,
+                          int num_items,
+                          rocke_value_t* predicate,
+                          const char* style,
+                          const char* termination);
 
 /* ----- global memory ----- */
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,

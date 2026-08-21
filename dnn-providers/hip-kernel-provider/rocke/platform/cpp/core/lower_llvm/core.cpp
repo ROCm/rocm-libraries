@@ -1962,6 +1962,7 @@ static void ll_register_all(void)
 {
     memset(rocke_ll_dispatch, 0, sizeof rocke_ll_dispatch);
     rocke_ll_register_arith();
+    rocke_ll_register_device_print();
     rocke_ll_register_convert();
     rocke_ll_register_mem();
     rocke_ll_register_mma();
@@ -2130,6 +2131,19 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
                              L->smem_pool_size);
         rocke_strbuf_append(out, "\n");
     }
+
+    for(size_t i = 0; i < L->printf_globals.len; ++i)
+    {
+        const rocke_ll_printf_global_t* g = &L->printf_globals.data[i];
+        rocke_strbuf_appendf(out,
+                             "%s = private unnamed_addr addrspace(4) constant "
+                             "[%d x i8] c\"%s\", align 1\n",
+                             g->name,
+                             g->byte_count,
+                             g->escaped);
+    }
+    if(L->printf_globals.len > 0)
+        rocke_strbuf_append(out, "\n");
 
     /* Needed intrinsic declarations, in canonical TABLE order (then dynamic
      * decls). This mirrors finalize iterating self._decls in insertion order.
@@ -2389,6 +2403,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.dyn_decls);
     rocke_vec_init(&L.smem_globals);
     rocke_vec_init(&L.smem_names);
+    rocke_vec_init(&L.printf_globals);
     rocke_vec_init(&L.smem_offsets);
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;

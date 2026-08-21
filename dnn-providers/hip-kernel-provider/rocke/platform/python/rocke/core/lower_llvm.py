@@ -51,6 +51,13 @@ from .ir import (
 )
 
 
+# OCKL's append entry point carries exactly seven i64 argument slots per packet.
+_OCKL_PRINTF_ARGUMENT_SLOTS = 7
+
+# Nine significant digits preserve every f32 value through its decimal rendering.
+_DEVICE_PRINT_F32_FORMAT = b"%.9g"
+
+
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
 # -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
@@ -393,6 +400,14 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "workgroup.x": "declare i32 @llvm.amdgcn.workgroup.id.x()",
     "workgroup.y": "declare i32 @llvm.amdgcn.workgroup.id.y()",
     "workgroup.z": "declare i32 @llvm.amdgcn.workgroup.id.z()",
+    "ockl.printf.begin": "declare i64 @__ockl_printf_begin(i64)",
+    "ockl.printf.append.string": (
+        "declare i64 @__ockl_printf_append_string_n(i64, ptr, i64, i32)"
+    ),
+    "ockl.printf.append.args": (
+        "declare i64 @__ockl_printf_append_args("
+        "i64, i32, i64, i64, i64, i64, i64, i64, i64, i32)"
+    ),
     "s.barrier": "declare void @llvm.amdgcn.s.barrier()",
     # gfx1250 (gfx1250) split wait counters used to drain LDS / VMEM before an
     # LDS barrier (the monolithic s_waitcnt is not selectable there).
@@ -1162,6 +1177,7 @@ class _Lowerer:
         self._needs_fp_atomic_md: bool = False
         # Set when av.load/store.b128 intrinsics are lowered (agent-scope MD).
         self._needs_av_scope_md: bool = False
+        self._printf_globals: List[Tuple[str, bytes]] = []
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
         # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
@@ -2383,6 +2399,107 @@ class _Lowerer:
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.amdgcn.workgroup.id.{axis}()"
         )
+
+    def _op_gpu_device_print(self, op: Op) -> None:
+        items = op.attrs["items"]
+        predicate_index = op.attrs.get("predicate_operand")
+        source_block = None
+        print_block = None
+        if predicate_index is not None:
+            source_block = self._current()
+            print_block = self._new_block("device.print")
+
+        format_bytes = bytearray()
+        arguments: List[str] = []
+
+        for item in items:
+            if item["kind"] == "text":
+                format_bytes.extend(item["text"].encode("utf-8").replace(b"%", b"%%"))
+                continue
+
+            value = op.operands[int(item["operand"])]
+            operand = self._operand(value)
+            logical = str(item["format"])
+            if logical == "bool":
+                format_bytes.extend(b"%c")
+                tmp = self._fresh("printf_arg")
+                # Encode bool as an i64 character payload so it follows normal
+                # append_args packetization and needs no bool-only append branch.
+                self._current().emit(f"  {tmp} = select i1 {operand}, i64 116, i64 102")
+                arguments.append(tmp)
+            elif logical in ("i32", "u32"):
+                format_bytes.extend(b"%lld" if logical == "i32" else b"%llu")
+                tmp = self._fresh("printf_arg")
+                self._current().emit(
+                    f"  {tmp} = {'sext' if logical == 'i32' else 'zext'} "
+                    f"i32 {operand} to i64"
+                )
+                arguments.append(tmp)
+            elif logical == "f32":
+                format_bytes.extend(_DEVICE_PRINT_F32_FORMAT)
+                ext = self._fresh("printf_f64")
+                bits = self._fresh("printf_arg")
+                self._current().emit(f"  {ext} = fpext float {operand} to double")
+                self._current().emit(f"  {bits} = bitcast double {ext} to i64")
+                arguments.append(bits)
+            elif logical == "ptr":
+                format_bytes.extend(b"%p")
+                tmp = self._fresh("printf_arg")
+                self._current().emit(
+                    f"  {tmp} = ptrtoint {_llvm_type(value.type)} {operand} to i64"
+                )
+                arguments.append(tmp)
+            else:
+                raise TypeError(
+                    f"gpu.device_print unsupported logical format {logical!r}"
+                )
+
+        self._need("ockl.printf.begin")
+        self._need("ockl.printf.append.string")
+        if arguments:
+            self._need("ockl.printf.append.args")
+        message = self._fresh("printf_msg")
+        self._current().emit(f"  {message} = call i64 @__ockl_printf_begin(i64 0)")
+        format_data = bytes(format_bytes) + b"\x00"
+        format_name = f"@.rocke.printf.{len(self._printf_globals)}"
+        self._printf_globals.append((format_name, format_data))
+        next_message = self._fresh("printf_msg")
+        self._current().emit(
+            f"  {next_message} = call i64 @__ockl_printf_append_string_n("
+            f"i64 {message}, ptr addrspacecast (ptr addrspace(4) {format_name} to ptr), "
+            f"i64 {len(format_data)}, i32 {1 if not arguments else 0})"
+        )
+        message = next_message
+
+        argument_index = 0
+        while argument_index < len(arguments):
+            group = []
+            while (
+                argument_index < len(arguments)
+                and len(group) < _OCKL_PRINTF_ARGUMENT_SLOTS
+            ):
+                group.append(arguments[argument_index])
+                argument_index += 1
+            padded = group + ["0"] * (_OCKL_PRINTF_ARGUMENT_SLOTS - len(group))
+            next_message = self._fresh("printf_msg")
+            args = ", ".join(f"i64 {arg}" for arg in padded)
+            self._current().emit(
+                f"  {next_message} = call i64 @__ockl_printf_append_args("
+                f"i64 {message}, i32 {len(group)}, {args}, "
+                f"i32 {1 if argument_index == len(arguments) else 0})"
+            )
+            message = next_message
+
+        if source_block is not None and print_block is not None:
+            join_block = self._new_block("device.print.end")
+            predicate = self._operand(op.operands[int(predicate_index)])
+            source_block.emit(
+                f"  br i1 {predicate}, label %{print_block.label}, "
+                f"label %{join_block.label}"
+            )
+            source_block.terminated = True
+            print_block.emit(f"  br label %{join_block.label}")
+            print_block.terminated = True
 
     # memory
 
@@ -5392,6 +5509,22 @@ class _Lowerer:
                 f"{self._smem_pool_name} = internal unnamed_addr addrspace(3) "
                 f"global [{self._smem_pool_size} x i8] poison, align 16"
             )
+            out.append("")
+
+        for name, data in self._printf_globals:
+            escaped = "".join(
+                (
+                    chr(byte)
+                    if 0x20 <= byte <= 0x7E and byte not in (0x22, 0x5C)
+                    else f"\\{byte:02X}"
+                )
+                for byte in data
+            )
+            out.append(
+                f"{name} = private unnamed_addr addrspace(4) constant "
+                f'[{len(data)} x i8] c"{escaped}", align 1'
+            )
+        if self._printf_globals:
             out.append("")
 
         # Intrinsic declarations actually used. ``self._decls`` is

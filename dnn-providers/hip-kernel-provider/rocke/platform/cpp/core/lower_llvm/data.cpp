@@ -92,6 +92,11 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"workgroup.x", "declare i32 @llvm.amdgcn.workgroup.id.x()"},
     {"workgroup.y", "declare i32 @llvm.amdgcn.workgroup.id.y()"},
     {"workgroup.z", "declare i32 @llvm.amdgcn.workgroup.id.z()"},
+    {"ockl.printf.begin", "declare i64 @__ockl_printf_begin(i64)"},
+    {"ockl.printf.append.string", "declare i64 @__ockl_printf_append_string_n(i64, ptr, i64, i32)"},
+    {"ockl.printf.append.args",
+     "declare i64 @__ockl_printf_append_args(i64, "
+     "i32, i64, i64, i64, i64, i64, i64, i64, i32)"},
     {"s.barrier", "declare void @llvm.amdgcn.s.barrier()"},
     {"s.wait.dscnt", "declare void @llvm.amdgcn.s.wait.dscnt(i16)"},
     {"s.wait.loadcnt", "declare void @llvm.amdgcn.s.wait.loadcnt(i16)"},

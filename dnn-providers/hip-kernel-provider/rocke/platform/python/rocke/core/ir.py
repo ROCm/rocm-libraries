@@ -24,6 +24,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -49,6 +50,43 @@ F16 = Type("f16")
 F32 = Type("f32")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
+
+
+_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES = 4096
+_DEVICE_PRINT_DEFAULT_MAX_VALUE_COUNT = 64
+_DEVICE_PRINT_MAX_CONFIGURED_LIMIT = 2_147_483_647
+
+
+def _device_print_limit(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    value_text = raw.strip()
+    if not all("0" <= character <= "9" for character in value_text):
+        raise ValueError(
+            f"{name}={raw!r} is invalid; expected a base-10 integer in "
+            f"[1, {_DEVICE_PRINT_MAX_CONFIGURED_LIMIT}]"
+        )
+    value = int(value_text, 10)
+    if not 1 <= value <= _DEVICE_PRINT_MAX_CONFIGURED_LIMIT:
+        raise ValueError(
+            f"{name}={raw!r} is invalid; expected a base-10 integer in "
+            f"[1, {_DEVICE_PRINT_MAX_CONFIGURED_LIMIT}]"
+        )
+    return value
+
+
+def _device_print_limits() -> tuple[int, int]:
+    return (
+        _device_print_limit(
+            "ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES",
+            _DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES,
+        ),
+        _device_print_limit(
+            "ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT",
+            _DEVICE_PRINT_DEFAULT_MAX_VALUE_COUNT,
+        ),
+    )
 
 
 # AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
@@ -193,6 +231,50 @@ class Value:
             "Use IRBuilder.static_if(...) for Python-time branches or "
             "IRBuilder.scf_if(...) for runtime branches."
         )
+
+
+@dataclass(frozen=True)
+class PrintText:
+    """Compile-time ASCII text in a canonical device-print record."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class PrintValue:
+    """One SSA value and its explicit logical device-print format."""
+
+    value: Value
+    format: Optional[str] = None
+
+
+def _default_print_format(t: Type) -> str:
+    if t == I1:
+        return "bool"
+    if t == I32:
+        return "i32"
+    if t == F32:
+        return "f32"
+    if isinstance(t, PtrType) and t.space == "global":
+        return "ptr"
+    raise TypeError(
+        f"device_print prototype does not have a default format for {t.name}; "
+        "use a supported explicit PrintValue format"
+    )
+
+
+def _check_print_format_compatible(t: Type, logical: str) -> None:
+    if logical == "bool" and t == I1:
+        return
+    if logical in ("i32", "u32") and t == I32:
+        return
+    if logical == "f32" and t == F32:
+        return
+    if logical == "ptr" and isinstance(t, PtrType) and t.space == "global":
+        return
+    raise TypeError(
+        f"device_print format {logical!r} is not compatible with operand type {t.name}"
+    )
 
 
 @dataclass
@@ -1173,6 +1255,105 @@ class IRBuilder:
             result_types=[I32],
             result_name_hint="bid",
         ).result
+
+    def device_print(
+        self,
+        *items: object,
+        predicate: Optional[Value] = None,
+        style: str = "compact",
+        termination: str = "ensure_newline",
+    ) -> None:
+        """Emit one canonical device-print record.
+
+        Strings and :class:`PrintText` become Text items. A bare SSA
+        :class:`Value` selects its unambiguous prototype format; use
+        :class:`PrintValue` to request an explicit logical format such as
+        ``u32``. Frontend termination is resolved to an ordinary Text item
+        before the operation is serialized.
+        """
+        if style != "compact":
+            raise ValueError("device_print prototype supports only style='compact'")
+        if termination not in ("ensure_newline", "none"):
+            raise ValueError(
+                "device_print termination must be 'ensure_newline' or 'none'"
+            )
+        if predicate is not None:
+            if not isinstance(predicate, Value):
+                raise TypeError("device_print predicate must be a rocke SSA Value")
+            if predicate.type != I1:
+                raise TypeError("device_print predicate must have type i1")
+
+        canonical: List[Dict[str, Any]] = []
+        operands: List[Value] = []
+        text_bytes = 0
+        value_count = 0
+        max_literal_bytes, max_value_count = _device_print_limits()
+
+        for item in items:
+            if isinstance(item, str):
+                item = PrintText(item)
+            elif isinstance(item, Value):
+                item = PrintValue(item)
+
+            if isinstance(item, PrintText):
+                if not isinstance(item.text, str):
+                    raise TypeError("device_print Text must be a string")
+                if "\x00" in item.text:
+                    raise ValueError("device_print Text must not contain NUL")
+                if not item.text.isascii():
+                    raise ValueError("device_print Text must contain only ASCII")
+                text_bytes += len(item.text)
+                canonical.append({"kind": "text", "text": item.text})
+                continue
+
+            if not isinstance(item, PrintValue):
+                raise TypeError(
+                    "device_print items must be strings, PrintText, Values, or PrintValue"
+                )
+            if not isinstance(item.value, Value):
+                raise TypeError(
+                    "device_print Value item must contain a rocke SSA Value"
+                )
+            logical = item.format or _default_print_format(item.value.type)
+            _check_print_format_compatible(item.value.type, logical)
+            operand_index = len(operands)
+            operands.append(item.value)
+            value_count += 1
+            canonical.append(
+                {
+                    "format": logical,
+                    "kind": "value",
+                    "layout": "scalar",
+                    "operand": operand_index,
+                }
+            )
+
+        if termination == "ensure_newline":
+            ends_in_newline = bool(
+                canonical
+                and canonical[-1].get("kind") == "text"
+                and str(canonical[-1].get("text", "")).endswith("\n")
+            )
+            if not ends_in_newline:
+                canonical.append({"kind": "text", "text": "\n"})
+                text_bytes += 1
+
+        if not canonical:
+            raise ValueError("device_print record must contain at least one item")
+        if text_bytes > max_literal_bytes:
+            raise ValueError(
+                f"device_print record exceeds {max_literal_bytes} literal bytes"
+            )
+        if value_count > max_value_count:
+            raise ValueError(
+                f"device_print record exceeds {max_value_count} expanded values"
+            )
+
+        attrs: Dict[str, Any] = {"items": canonical, "style": style}
+        if predicate is not None:
+            attrs["predicate_operand"] = len(operands)
+            operands.append(predicate)
+        self._op("gpu.device_print", operands, attrs=attrs)
 
     # ----- memory -----
 

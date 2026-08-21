@@ -332,6 +332,12 @@ _action_info_set_isa_name = _bind(
 _action_info_set_language = _bind(
     "amd_comgr_action_info_set_language", ctypes.c_int, _ActionInfo, ctypes.c_int
 )
+_action_info_set_device_lib_linking = _bind(
+    "amd_comgr_action_info_set_device_lib_linking",
+    ctypes.c_int,
+    _ActionInfo,
+    ctypes.c_bool,
+)
 _action_info_set_options = _bind(
     "amd_comgr_action_info_set_option_list",
     ctypes.c_int,
@@ -392,11 +398,14 @@ def build_hsaco_from_llvm_ir(
     *,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     options: Optional[List[str]] = None,
+    link_device_libraries: bool = False,
 ) -> Tuple[bytes, ComgrTimings]:
     """Compile LLVM IR text to a loadable HSACO blob, all in-process.
 
     Returns the (hsaco_bytes, timings) tuple. `hsaco_bytes` can be passed
-    directly to `hipModuleLoadData`.
+    directly to `hipModuleLoadData`. Set `link_device_libraries` when the
+    source deliberately calls an OCKL or another ROCm device-library entry
+    point. Raw LLVM text is not scanned to infer this capability.
     """
     options = list(options or ["-O3"])
 
@@ -441,6 +450,11 @@ def build_hsaco_from_llvm_ir(
         _check(_create_action_info(ctypes.byref(info)), "create_action_info")
         _check(_action_info_set_isa_name(info, isa.encode("utf-8")), "set_isa")
         _check(_action_info_set_language(info, AMD_COMGR_LANGUAGE_LLVM_IR), "set_lang")
+        if link_device_libraries:
+            _check(
+                _action_info_set_device_lib_linking(info, True),
+                "set_device_lib_linking",
+            )
         opt_array = (ctypes.c_char_p * len(options))(
             *[o.encode("utf-8") for o in options]
         )
