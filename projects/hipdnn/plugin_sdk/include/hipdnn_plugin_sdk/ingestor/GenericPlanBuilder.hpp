@@ -220,8 +220,6 @@ public:
                     }
                 }
 
-                // Every ranked entry is unbuildable; not an error, fall back to normal
-                // selection.
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                        << _engine.name
                                        << "' found a benchmarked record whose entries no longer "

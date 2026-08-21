@@ -72,8 +72,6 @@ public:
     /// wrong answer.
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
 
-    /// When to start warning that the winner cache has grown unexpectedly large.
-    ///
     /// Not an `LruCache`: evicting a winner costs a GPU benchmark sweep or a silent
     /// quality regression, not a rematch. Unbounded is safe because entries are created
     /// only by opt-in benchmarking, so this is a tripwire, not a cap -- passing it logs
@@ -641,8 +639,8 @@ private:
     /// Check 1: reorders @p catalog by a covering record and returns true; false means
     /// no measured order was available, and the caller ranks as it always has.
     ///
-    /// Coverage is required, not merely a hit: a partial record cannot order the rest,
-    /// and interleaving measured with unmeasured entries would not be a valid order.
+    /// Coverage is required: a partial record cannot order the rest, and interleaving
+    /// measured with unmeasured entries would not be a valid order.
     bool orderFromWinnerRecord(Catalog& catalog, const MatchContext& context) const
     {
         // Cheap rejection first: building a WinnerKey costs a full graph UnPack, so this

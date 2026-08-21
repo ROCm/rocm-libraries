@@ -18,14 +18,12 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// The device half of a winner-cache key: a fold over every field of
 /// `DeviceProperties`, so a benchmarked ranking is never served to a device it was not
-/// measured on.
+/// measured on. Not a `memcpy` of the struct: `gcnArchName` is a `std::string`, not raw
+/// bytes, and the struct has unspecified padding.
 ///
-/// `gcnArchName` is a `std::string`, not raw bytes, and the struct has unspecified
-/// padding, so this cannot be a `memcpy` of the struct.
+/// `DeviceId` is absent -- it identifies a slot, not a device.
 ///
-/// `DeviceId` is deliberately absent -- it identifies a slot, not a device.
-///
-/// Widening `DeviceProperties` does NOT extend the key on its own -- a new field is
+/// Widening `DeviceProperties` does not extend the key on its own; a new field is
 /// hashed only once `fold()` below emits it. `TestDeviceKey.cpp` pins the field set
 /// with a structured binding that fails to compile when the struct grows.
 struct DeviceKey
@@ -50,7 +48,6 @@ struct DeviceKey
         return _properties;
     }
 
-    /// Hash first as a cheap reject, then a full field comparison.
     bool operator==(const DeviceKey& other) const
     {
         return _hash == other._hash && _properties.gcnArchName == other._properties.gcnArchName
@@ -64,8 +61,8 @@ struct DeviceKey
     }
 
 protected:
-    /// Test seam: overrides the narrowing hash so a collision can be forced. Proves
-    /// `operator==` still rejects on the fields when the hash agrees.
+    /// Test seam: forces a hash collision so a test can prove `operator==` still
+    /// rejects on the fields when the hash agrees.
     void forceHash(uint64_t hash)
     {
         _hash = hash;

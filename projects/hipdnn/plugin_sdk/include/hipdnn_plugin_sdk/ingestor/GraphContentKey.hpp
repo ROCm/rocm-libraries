@@ -19,37 +19,29 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// The graph half of a winner-cache key: content, never identity.
-///
-/// Two graphs are equal when a kernel measurement taken on one is valid for the other.
+/// The graph half of a winner-cache key: content, never identity. Two graphs are equal
+/// when a kernel measurement taken on one is valid for the other.
 ///
 /// `hash` narrows the lookup and may be lossy; `logicallyEqual` decides the match. Both
 /// are generated from `graph.fbs` into `cachekey_generated.h`, so a new schema field
-/// participates automatically. Both read the buffer in place: no `UnPack`, no
-/// allocation, no reflection.
+/// participates automatically, reading the buffer in place with no `UnPack` or
+/// allocation.
 ///
 /// Field policy lives in `graph.fbs`: `(cache_ignore)` drops a field, `(cache_uid)`
-/// marks a tensor reference.
-///
-/// A `(cache_uid)` reference folds as the referenced tensor's ordinal in
-/// `Graph.tensors`, not the uid, which is a caller-assigned label. Renumbering keys the
-/// same; rewiring an operand or aliasing two operands onto one tensor does not.
-/// Identically described tensors are therefore interchangeable: swapping which feeds
-/// which operand keys the same, since the described content is the same work.
+/// folds a tensor reference as its ordinal in `Graph.tensors`, not its caller-assigned
+/// uid -- renumbering keys the same, rewiring an operand does not.
 ///
 /// Tensors and nodes compare in vector order, fixed by `IGraph`'s topological-order
-/// precondition. Two construction orders of one logical DAG miss rather than mismatch.
+/// precondition: two construction orders of one logical DAG miss rather than mismatch.
 class GraphContentKey
 {
 public:
-    /// Wire bytes of the graph this key matched on. Shared because a record outlives the
-    /// plan that produced it.
+    /// Shared because a record outlives the plan that produced it.
     using Content = std::shared_ptr<const std::vector<uint8_t>>;
 
     GraphContentKey() = default;
 
-    /// `_content` is retained before `fold()` reads it: the hash and the comparison must
-    /// walk the same bytes.
+    /// Retained before `fold()` reads it, so hash and comparison walk the same bytes.
     explicit GraphContentKey(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
         : _content(retain(graph))
         , _hash(fold())
@@ -66,9 +58,6 @@ public:
         return _content;
     }
 
-    /// Hash first rejects most non-matches cheaply; the structural comparison decides
-    /// the survivors.
-    ///
     /// An unkeyable graph matches nothing, including another unkeyable graph: absence
     /// of content is a permanent miss, not a wildcard.
     bool operator==(const GraphContentKey& other) const
@@ -86,8 +75,8 @@ public:
         return hipdnn_flatbuffers_sdk::data_objects::cachekey::logicallyEqual(left, right);
     }
 
-    /// Whether this key can identify a graph at all. False when the graph was invalid or
-    /// its implementation does not supply `bytes()`; callers must not cache under it.
+    /// False when the graph was invalid or supplied no `bytes()`; callers must not
+    /// cache under it.
     bool isUsable() const
     {
         return root() != nullptr;
@@ -99,17 +88,15 @@ public:
     }
 
 protected:
-    /// Test seam: overrides the narrowing hash to force a collision. `operator==`
-    /// short-circuits on a hash mismatch, so the structural comparison is otherwise
-    /// unreachable in a test.
+    /// Test seam: forces a hash collision so a test can reach the structural
+    /// comparison, which `operator==` otherwise short-circuits before.
     void forceHash(uint64_t hash)
     {
         _hash = hash;
     }
 
 private:
-    /// Copies the verified buffer: `IGraph` is a view over storage this key does not
-    /// own, and the bytes are already the comparison's input format.
+    /// Copies the verified buffer: `IGraph` is a view this key does not own.
     static Content retain(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
     {
         const auto bytes = graph.bytes();
@@ -131,9 +118,6 @@ private:
             _content->data());
     }
 
-    /// Walks the retained copy with the generated traversal, so the hash and the
-    /// comparison always read the same bytes.
-    ///
     /// Hash 0 means unkeyable, agreeing with `isUsable()` and `operator==`.
     uint64_t fold() const
     {
