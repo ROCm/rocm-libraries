@@ -28,14 +28,15 @@ include "moe_grouped_matmul_attributes.fbs";
 include "moe_grouped_matmul_bwd_attributes.fbs";
 
 // Excludes a field from the generated cache-key hash/equality (cachekey_generated.h).
-// Opt-out: an unannotated field always participates. Apply only when a benchmark result
-// transfers across every value of the field.
+// Opt-out: an unannotated field always participates; apply only when a benchmark
+// result transfers across every value of the field.
 attribute "cache_ignore";
 
-// Marks a field as holding a tensor uid. The key folds the referenced tensor's ordinal
-// in the `cache_uid_domain` vector rather than the uid, so renumbering a graph keys the
-// same while rewiring or aliasing operands does not. Apply only to genuine tensor
-// references: `PointwiseAttributes.axis_tensor_uid` is an axis index despite its name.
+// A field holding a tensor uid. Folds as the referenced tensor's ordinal in the
+// `cache_uid_domain` vector rather than the raw uid, so renumbering a graph keeps
+// the key unchanged while rewiring or aliasing operands changes it. Apply only to
+// genuine tensor references: `PointwiseAttributes.axis_tensor_uid` is an axis index
+// despite its name.
 attribute "cache_uid";
 
 // The vector whose element order defines those ordinals. Exactly one field carries it.

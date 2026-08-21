@@ -268,8 +268,9 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceResolverTh
     EXPECT_FALSE(builder.isApplicable(0, graph));
 }
 
-// contextFor's D10 guard rejects a device with an empty gcnArchName; isApplicable's
-// existing catch-all must turn that throw into a decline with a logged error.
+// contextFor's device-arch guard rejects a device with an empty gcnArchName;
+// isApplicable's existing catch-all must turn that throw into a decline with a logged
+// error.
 TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnresolved)
 {
     auto recorder
@@ -303,7 +304,7 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceAr
     const TestGraph graph(makeGraphId(0x95));
     KnobFilterContext context;
 
-    // The status, not merely the type: D10 specifies INTERNAL_ERROR.
+    // The status, not the type: an unresolved device arch reports INTERNAL_ERROR.
     try
     {
         builder.buildPlan(0, graph, engineConfig, context);
@@ -315,8 +316,8 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceAr
     }
 }
 
-// D10's guard also gates getMaxWorkspaceSize, which reaches contextFor before either
-// catalog lookup.
+// The device-arch guard also gates getMaxWorkspaceSize, which reaches contextFor before
+// either catalog lookup.
 TEST(TestIngestorGenericPlanBuilder,
      GetMaxWorkspaceSizeThrowsInternalErrorWhenTheDeviceArchIsUnresolved)
 {
@@ -339,7 +340,7 @@ TEST(TestIngestorGenericPlanBuilder,
     }
 }
 
-// D10's guard also gates getCustomKnobs, which reaches contextFor before
+// The device-arch guard also gates getCustomKnobs, which reaches contextFor before
 // sortedDefinitions.
 TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsThrowsInternalErrorWhenTheDeviceArchIsUnresolved)
 {
@@ -1037,7 +1038,7 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
 }
 
 // ---------------------------------------------------------------------------
-// Check 2: the winner-cache coverage gate and ranked walk at the lookup site
+// The winner-cache coverage gate and ranked walk at the buildPlan() lookup site
 // ---------------------------------------------------------------------------
 
 /// Workspace size is the observable proxy for "which kernel was selected": the heuristic
@@ -1106,7 +1107,7 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
         << "the measured winner must beat the heuristic front";
 }
 
-/// D16's scope note: Check 1 governs every `sortedCatalog` consumer, including
+/// The catalog-sort coverage rule governs every `sortedCatalog` consumer, including
 /// `getCustomKnobs`, whose `choices.front()` becomes the knob's advertised default.
 /// Same rig as `TestWinnerCache.cpp`'s `ACoveringRecordOrdersTheCatalogWithoutTheHeuristic`:
 /// record the heuristic's order reversed, covering the WHOLE catalog, and assert the
@@ -1280,14 +1281,13 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
         << "a stale record must degrade to today's behaviour, never throw or serve blind";
 }
 
-/// Regression for the bug where Check 2's coverage test (`recordCovers`, by `kernelId`
-/// alone) and its ordering (`orderByRecord`, by the full `(kernelId, packId,
+/// Regression for the bug where the lookup-site coverage test (`recordCovers`, by
+/// `kernelId` alone) and its ordering (`orderByRecord`, by the full `(kernelId, packId,
 /// dispatchId)` triple) could disagree: a record covering every candidate by
 /// `kernelId`, but with one entry's `packId` stale, must trigger a re-benchmark
 /// (workspace sizes for the max across all three candidates) rather than serve the
 /// subset that still resolves. Benchmarking ON, unlike the sibling wholly-stale test,
-/// since a stale-with-benchmarking-off record already falls back correctly; this is the
-/// case where the two checks previously diverged.
+/// since a stale-with-benchmarking-off record already falls back correctly.
 TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTriggersReBenchmarking)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1478,7 +1478,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
         << "a record measured for another graph must not decide this one's kernel";
 }
 
-/// D7's narrow-then-wide half: a record written under a narrow knob filter does NOT
+/// The narrow-then-wide half: a record written under a narrow knob filter does NOT
 /// cover a later unfiltered run, so that run must re-benchmark rather than serve the
 /// best of a subset it never fully measured. Observable without timing: benchmarking
 /// sizes for the max over all candidates (256), a served hit sizes for the one kernel

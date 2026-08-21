@@ -194,8 +194,8 @@ TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 }
 
 // ---------------------------------------------------------------------------
-// The cache inside KernelIngestorStateManager: no eviction, the soft threshold,
-// Check 1, and thread safety (D8, D13, D16)
+// The cache inside KernelIngestorStateManager: no eviction, the soft growth-warning
+// threshold, ordering a covering record, and thread safety
 // ---------------------------------------------------------------------------
 
 /// Builds a distinct key per index without needing a distinct graph: the device half is
@@ -273,7 +273,7 @@ TEST(TestIngestorWinnerCacheStateManager, AMissReturnsNulloptRatherThanAnEmptyRe
     EXPECT_FALSE(manager->winnerFor(keyForIndex(graph, 99)).has_value());
 }
 
-/// D8's soft threshold has no observable effect other than its log line, so the log
+/// The soft threshold has no observable effect other than its log line, so the log
 /// assertion is the only possible test of it.
 TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTheThreshold)
 {
@@ -308,8 +308,8 @@ TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTh
         << "the growth warning is reported once, not per insertion";
 }
 
-/// Check 1: a record covering the WHOLE catalog orders it, and rank() is never
-/// consulted. The heuristic is rigged to invert the order to make this observable.
+/// A record covering the WHOLE catalog orders it, and rank() is never consulted. The
+/// heuristic is rigged to invert the order to make this observable.
 TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithoutTheHeuristic)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -376,8 +376,8 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlread
     EXPECT_EQ(thirdCall.front().kernelId, measuredOrder.front().kernelId);
 }
 
-/// Check 1 fails on a partial record: the heuristic still ranks, because interleaving
-/// measured entries with unmeasured ones would invent an order nobody took.
+/// A partial record leaves the heuristic order intact: interleaving measured entries
+/// with unmeasured ones would invent an order nobody took.
 TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderIntact)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -401,8 +401,8 @@ TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderI
         << "an uncovering record must not reorder anything";
 }
 
-/// D8 puts the cache under its own mutex. Concurrent readers and writers must neither
-/// race nor lose entries; this is the guard for someone removing the lock as "unneeded".
+/// The cache sits under its own mutex. Concurrent readers and writers must neither race
+/// nor lose entries; this is the guard for someone removing the lock as "unneeded".
 TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEntry)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
