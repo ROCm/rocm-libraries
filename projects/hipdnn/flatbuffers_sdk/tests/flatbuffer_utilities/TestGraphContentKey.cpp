@@ -678,8 +678,6 @@ TEST(TestGraphContentKey, ADanglingReferenceDoesNotAliasAResolvedOrdinal)
 }
 
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
-/// The JSON representation layer 3 will embed in a JSON-Lines record: one base64
-/// field carrying the retained graph bytes. This pins the round trip through it.
 TEST(TestGraphContentKey, JsonRoundTripPreservesEquality)
 {
     const ContentCarryingTestGraph graph{Spec{}};
@@ -691,8 +689,6 @@ TEST(TestGraphContentKey, JsonRoundTripPreservesEquality)
     EXPECT_EQ(original, *restored);
 }
 
-/// Guards against a codec that loses discriminating content: two keys that differ
-/// before serialization must still differ after a round trip through JSON.
 TEST(TestGraphContentKey, JsonRoundTripPreservesDiscriminatingContent)
 {
     Spec narrow;
@@ -711,8 +707,6 @@ TEST(TestGraphContentKey, JsonRoundTripPreservesDiscriminatingContent)
         << "a codec that lost discriminating content would make these collide";
 }
 
-/// A field that is present but not valid base64 at all (wrong alphabet) must decline,
-/// never throw and never hand back a key.
 TEST(TestGraphContentKey, ANonBase64FieldDeclinesWithoutThrowing)
 {
     auto json = keyFor(ContentCarryingTestGraph{Spec{}}).toJson();
@@ -723,8 +717,6 @@ TEST(TestGraphContentKey, ANonBase64FieldDeclinesWithoutThrowing)
     EXPECT_FALSE(restored.has_value());
 }
 
-/// A field that is valid base64 alphabet but the wrong length (truncated mid-group)
-/// must decline the same way -- never throw, never a garbage key.
 TEST(TestGraphContentKey, ATruncatedBase64FieldDeclinesWithoutThrowing)
 {
     auto json = keyFor(ContentCarryingTestGraph{Spec{}}).toJson();
@@ -737,7 +729,6 @@ TEST(TestGraphContentKey, ATruncatedBase64FieldDeclinesWithoutThrowing)
     EXPECT_FALSE(restored.has_value());
 }
 
-/// A missing field is as much a decline as a corrupted one.
 TEST(TestGraphContentKey, AMissingContentFieldDeclinesWithoutThrowing)
 {
     const auto json = nlohmann::json::object();
@@ -747,7 +738,6 @@ TEST(TestGraphContentKey, AMissingContentFieldDeclinesWithoutThrowing)
     EXPECT_FALSE(restored.has_value());
 }
 
-/// Non-object JSON (e.g. a bare string or array line) declines the same way.
 TEST(TestGraphContentKey, NonObjectJsonDeclinesWithoutThrowing)
 {
     const nlohmann::json json = "not an object";
@@ -757,9 +747,8 @@ TEST(TestGraphContentKey, NonObjectJsonDeclinesWithoutThrowing)
     EXPECT_FALSE(restored.has_value());
 }
 
-/// Base64-decodable bytes that do not reverify as a `Graph` flatbuffer (garbage
-/// payload of the right shape) must also decline rather than hand back a key that
-/// looks usable but reads nonsense.
+/// Base64-decodable bytes that do not reverify as a `Graph` flatbuffer must also
+/// decline, not hand back a key that looks usable but reads nonsense.
 TEST(TestGraphContentKey, ValidBase64OfNonGraphBytesDeclinesWithoutThrowing)
 {
     nlohmann::json json;
@@ -770,9 +759,8 @@ TEST(TestGraphContentKey, ValidBase64OfNonGraphBytesDeclinesWithoutThrowing)
     EXPECT_FALSE(restored.has_value());
 }
 
-/// The "empty but keyed" flavor of an unkeyable-adjacent graph: `EmptyTestGraph` still
-/// retains real bytes and a non-zero hash (see `AnEmptyGraphKeysToANonZeroHash`), so it
-/// round-trips like any other usable key and two empties still match each other.
+/// `EmptyTestGraph` still retains real bytes and a non-zero hash, so it round-trips
+/// like any other usable key.
 TEST(TestGraphContentKey, AnEmptyGraphRoundTripsAndStillMatchesAnotherEmptyGraph)
 {
     const EmptyTestGraph first(makeGraphId(0xD1));
@@ -787,10 +775,8 @@ TEST(TestGraphContentKey, AnEmptyGraphRoundTripsAndStillMatchesAnotherEmptyGraph
     EXPECT_EQ(*restoredFirst, *restoredSecond);
 }
 
-/// The genuinely unkeyable flavor: no retained bytes at all. `toJson()` still succeeds
-/// (an empty base64 field is well-formed, not corruption) but `fromJson()` must hand
-/// back a key consistent with `TwoUnkeyableGraphsDoNotMatchEachOther` -- unusable, hash
-/// 0, and not equal to another round-tripped unusable key or to itself.
+/// No retained bytes at all: `toJson()` still succeeds (an empty base64 field is
+/// well-formed, not corruption) but the restored key must stay unusable.
 TEST(TestGraphContentKey, AnUnusableKeyRoundTripsToAnUnusableKeyThatMatchesNothing)
 {
     const UnkeyableGraph graph;

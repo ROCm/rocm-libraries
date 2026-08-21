@@ -53,13 +53,12 @@ add_executable(
     utilities/TestVisitor.cpp
 )
 
-# Standalone helper process for TestLineStore's two-process lock contention case -- see
-# LineStoreLockHelper.cpp. Not a gtest binary and not registered via add_hipdnn_test().
+# Standalone helper process for TestLineStore's two-process lock contention case (see
+# LineStoreLockHelper.cpp). Not a gtest binary and not registered via add_hipdnn_test().
 #
-# Only the helper's FILENAME is baked in; the test resolves it next to its own executable at
-# runtime. An absolute $<TARGET_FILE:...> path would name the build tree, which does not
-# exist when CI installs the test binaries and runs them from the install prefix -- the
-# child then fails execl() and exits 127.
+# Only the helper's FILENAME is baked in and resolved next to the test's own executable at
+# runtime, since an absolute $<TARGET_FILE:...> path would name the build tree, which does
+# not exist once CI installs and runs the test binaries from the install prefix.
 add_executable(LineStoreLockHelper utilities/LineStoreLockHelper.cpp)
 target_link_libraries(LineStoreLockHelper hipdnn_data_sdk)
 set_target_properties(
@@ -70,8 +69,7 @@ target_compile_definitions(
     HIPDNN_LINESTORE_LOCK_HELPER_NAME="$<TARGET_FILE_NAME:LineStoreLockHelper>"
 )
 
-# The test spawns the helper, so it must exist before the test runs, and must ship wherever
-# the test binaries ship.
+# The test spawns the helper, so it must exist before the test runs and ship alongside it.
 add_dependencies(hipdnn_data_sdk_tests LineStoreLockHelper)
 install(TARGETS LineStoreLockHelper RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 

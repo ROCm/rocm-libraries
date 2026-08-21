@@ -628,9 +628,8 @@ inline std::unique_ptr<StateManager>
 }
 
 /// The same engine as makeStateManager(), but carrying @p engineName so its on-disk
-/// winner-cache shard resolves. makeStateManager() deliberately leaves the name empty,
-/// which disables the disk cache -- every test that does not opt in stays in-memory and
-/// touches no filesystem.
+/// winner-cache shard resolves. makeStateManager() leaves the name empty, which
+/// disables the disk cache, so every test that does not opt in stays in-memory only.
 inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
 {
     std::vector<MatchDescriptor> matchers{

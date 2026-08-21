@@ -61,11 +61,11 @@ target_link_libraries(
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# D4's cross-process criterion: one process writes a winner record, a SECOND process
-# reads it back. Two ctest invocations of the same binary, sequenced with
+# Cross-process coverage: one process writes a winner record, a SECOND process reads it
+# back. Two ctest invocations of the same binary, sequenced with
 # FIXTURES_SETUP/FIXTURES_REQUIRED, following the shape hipdnn/cmake/Tests.cmake's
-# MIOpen-cache fixture already uses. A single-process double-compute does not satisfy the
-# criterion, and MIOpen's ProcessAsync self-invocation was rejected as flaky.
+# MIOpen-cache fixture already uses. A single-process double-compute proves nothing here:
+# the in-memory map would satisfy it without the file being read at all.
 #
 # Both halves are DISABLED_ in gtest so a bare developer run of the suite skips them --
 # neither is meaningful alone -- and ctest opts in with --gtest_also_run_disabled_tests.

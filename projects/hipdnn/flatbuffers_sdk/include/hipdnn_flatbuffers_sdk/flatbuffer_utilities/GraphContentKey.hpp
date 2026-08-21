@@ -95,12 +95,7 @@ public:
 
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
     /// This key's JSON representation: one field, the retained graph bytes as base64.
-    /// Layer 3 embeds this object under its own field name in the JSON-Lines record;
-    /// this method knows nothing about that envelope or its version line -- both are
-    /// layer 3's, per D29's layering.
-    ///
-    /// An unusable key (no retained content) still serializes, as an empty base64
-    /// field; see `fromJson()` for how that round-trips.
+    /// An unusable key still serializes, as an empty base64 field; see `fromJson()`.
     nlohmann::json toJson() const
     {
         nlohmann::json json;
@@ -108,16 +103,10 @@ public:
         return json;
     }
 
-    /// Parses `toJson()`'s output back into a key. Fail-soft: a missing or mistyped
-    /// field, a payload that is not valid base64, or content that does not reverify
-    /// as a `Graph` flatbuffer all return `std::nullopt` rather than throwing or
-    /// handing back a key that could compare equal to something it is not. Callers
-    /// read `std::nullopt` as "decline this line."
-    ///
-    /// An empty content field round-trips to a default-constructed, unusable key --
-    /// the same state `retain()` produces for an `IGraph` with no bytes -- so it never
-    /// matches even itself, consistent with `operator==`'s existing contract for
-    /// unusable keys.
+    /// Parses `toJson()`'s output back into a key, fail-soft: a missing or mistyped
+    /// field, invalid base64, or content that fails a `flatbuffers::Verifier` recheck
+    /// (base64 that decodes cleanly can still not be a valid `Graph`) all return
+    /// `std::nullopt` rather than throwing or handing back a mismatched key.
     static std::optional<GraphContentKey> fromJson(const nlohmann::json& json) noexcept
     {
         try
@@ -167,11 +156,8 @@ private:
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
     static constexpr const char* CONTENT_FIELD = "content_base64";
 
-    /// Constructs directly from an already-verified `Graph` buffer: the JSON
-    /// deserialization path, which re-verifies the decoded bytes with
-    /// `flatbuffers::Verifier` before calling this -- the same contract `root()`
-    /// relies on for the `IGraph::bytes()` path. Never exposed publicly: every other
-    /// caller goes through the `IGraph` constructor.
+    /// Takes already-verified bytes; every other caller goes through the `IGraph`
+    /// constructor instead.
     explicit GraphContentKey(Content verifiedContent)
         : _content(std::move(verifiedContent))
         , _hash(fold())
@@ -215,8 +201,6 @@ private:
         return out;
     }
 
-    /// -1 for any byte outside the base64 alphabet, including padding: callers branch
-    /// on '=' themselves before reaching here.
     static int decodeBase64Char(char c)
     {
         if(c >= 'A' && c <= 'Z')
@@ -242,10 +226,8 @@ private:
         return -1;
     }
 
-    /// `std::nullopt` for anything that is not exactly a sequence of complete,
-    /// correctly-padded 4-character groups: a wrong length, a non-alphabet character,
-    /// or a '=' anywhere but the last one or two positions of the final group. Never
-    /// throws.
+    /// `std::nullopt` for a wrong length, a non-alphabet character, or a '=' anywhere
+    /// but the last one or two positions of the final group. Never throws.
     static std::optional<std::vector<uint8_t>> decodeBase64(const std::string& text)
     {
         if(text.size() % 4 != 0)
@@ -296,8 +278,7 @@ private:
     }
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
-    /// Copies the verified buffer: `IGraph` is a view over storage this key does not
-    /// own, and the bytes are already the comparison's input format.
+    /// Copies the verified buffer: `IGraph` is a view this key does not own.
     static Content retain(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
     {
         const auto bytes = graph.bytes();
