@@ -157,7 +157,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure, resolve_therock_ref]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -191,7 +191,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -219,7 +219,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
