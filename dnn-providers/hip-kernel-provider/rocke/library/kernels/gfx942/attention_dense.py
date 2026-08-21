@@ -868,6 +868,8 @@ def supports_attention_dense(
         return False, "gfx942 attention_dense: ragged not yet supported"
     if spec.sliding_window:
         return False, "gfx942 attention_dense: sliding_window not yet supported"
+    if spec.use_sinks:
+        return False, "gfx942 attention_dense: sinks not yet supported"
 
     # --- Tuning struct (gfx942-private sweep knobs). Validated here rather than only
     # in the builder because the module contract is support() => build(): a knob that
