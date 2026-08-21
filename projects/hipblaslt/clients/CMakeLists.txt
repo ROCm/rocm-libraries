@@ -22,7 +22,7 @@ if(HIPBLASLT_ENABLE_COVERAGE)
             ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include
             ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include
             ${PROJECT_SOURCE_DIR}/tensilelite/rocisa
-            ${PROJECT_SOURCE_DIR}/../../shared/origami/include
+            ${PROJECT_SOURCE_DIR}/../../shared/origami/origami-cpp/include
     )
 endif()
 
