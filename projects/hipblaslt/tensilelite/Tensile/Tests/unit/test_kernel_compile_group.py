@@ -126,6 +126,7 @@ def test_distinct_compile_keys_cannot_share_an_artifact(monkeypatch):
     import Tensile.TensileCreateLibrary.Run as run
 
     kernels = [_kernel(), _kernel()]
+    kernels[1]["ISA"] = (9, 4, 2)
     keys = iter(("first", "second"))
     monkeypatch.setattr(run, "getKernelCompileKey", lambda kernel, split: next(keys))
     monkeypatch.setattr(run, "getKernelNameMin", lambda kernel, split: "same")

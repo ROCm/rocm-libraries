@@ -173,8 +173,7 @@ def groupKernelRecords(kernels, splitGSU: bool):
         key = getKernelCompileKey(kernel, splitGSU)
         symbol = getKernelNameMin(kernel, splitGSU)
         base = getKernelFileBase(splitGSU, kernel)
-        artifactKey = (tuple(kernel["ISA"]), base)
-        owner = artifactOwners.setdefault(artifactKey, key)
+        owner = artifactOwners.setdefault(base, key)
         if owner != key:
             raise RuntimeError(
                 f"Distinct kernel compile keys share generated artifact {base!r}"

@@ -22,8 +22,8 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Mode 0 correctness for the subtile path. Nonzero modes are incompatible
-  # with UseSubtileImpl and are covered by the gfx1250 launch-only test.
+  # Validate mode 0 on the required subtile path. Modes 1-3 reject
+  # UseSubtileImpl and run in the gfx1250 launch-only test.
   # TN transpose only
   #######################################
   -

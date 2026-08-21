@@ -44,6 +44,7 @@ _INTERNAL_ARGS = (
     "SFCWGM",
 )
 
+# Construction and selection controls that do not affect emitted assembly.
 _NON_CODEGEN_PARAMETERS = (
     "AssertAIGreaterThanEqual",
     "AssertAILessThanEqual",
@@ -53,15 +54,12 @@ _NON_CODEGEN_PARAMETERS = (
 )
 
 def getKernelCompileKey(state, splitGSU: bool) -> str:
-  """Return a key that identifies generated assembly, excluding placement.
+  """Return generated-assembly identity without code-object placement.
 
   Internal args (WorkGroupMapping, StaggerU, etc.) are runtime dispatch
-  parameters — they don't change the generated assembly. This function
-  produces a canonical key where those parameters are masked to "M" and
-  GroupedGemm is forced to False, so that kernels differing only in
-  internal args map to the same key. GroupedGemm masking is skipped when
-  SupportUserArgs is set, because the batch-offset codegen is gated on
-  GroupedGemm there and the assembly genuinely differs.
+  parameters and map to the same compile key. GroupedGemm shares a key for
+  the standard argument path and remains distinct when SupportUserArgs makes
+  grouped batch-offset handling part of generated assembly.
 
   Used to:
     - Deduplicate kernels before code generation (BenchmarkProblems.py,
