@@ -189,9 +189,10 @@ TEST_F(LegalizationUtilsTest, VCmpXExpandsWhenNoCMPXWritesSGPR) {
 // ---------------------------------------------------------------------------
 
 TEST_F(LegalizationUtilsTest, WaitCntNonGfx1250IsNoOp) {
-    // Only Gfx1250 is registered in this build; pass a synthetic non-1250 archId
-    // to exercise the early-return path without needing a second arch setup.
-    auto nonGfx1250 = static_cast<GfxArchID>(static_cast<uint32_t>(GfxArchID::Gfx1250) + 1);
+    // Pass an archId past the end of the per-build arch list so getArchInfo() returns null and
+    // isGfx125() is false, exercising the early-return path. A small offset from Gfx1250 would now
+    // collide with the Gfx1250v0 stepping (a real gfx12.5 arch), so use an id no build registers.
+    auto nonGfx1250 = static_cast<GfxArchID>(1u << 20);
 
     StinkyInstruction* inst = createInst(GFX::s_waitcnt);
     inst->addModifier<SWaitCntData>(SWaitCntData(/*vlcnt=*/0));
