@@ -1,0 +1,90 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# A0-compatible test: Minimal and edge case problem sizes
+# Tests boundary conditions: 1x1, prime numbers, just above/below tile boundaries
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # Minimal and edge sizes
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          # Minimal
+          - Exact: [1, 1, 1, 1]
+          - Exact: [1, 1, 1, 16]
+          - Exact: [1, 16, 1, 1]
+          - Exact: [16, 1, 1, 1]
+          # Just below tile size (16)
+          - Exact: [15, 15, 1, 15]
+          # At tile size
+          - Exact: [16, 16, 1, 16]
+          # Just above tile size
+          - Exact: [17, 17, 1, 17]
+          # Just below DepthU (32)
+          - Exact: [32, 32, 1, 31]
+          # At DepthU
+          - Exact: [32, 32, 1, 32]
+          # Just above DepthU
+          - Exact: [32, 32, 1, 33]
+          # Prime numbers
+          - Exact: [31, 37, 1, 41]
+          - Exact: [13, 17, 1, 19]
+          - Exact: [97, 101, 1, 103]
+          # Batched minimal
+          - Exact: [1, 1, 8, 1]
+          - Exact: [16, 16, 16, 16]
+          # Larger sizes for coverage
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
+          # Non-square
+          - Exact: [64, 128, 1, 64]
+          - Exact: [128, 64, 1, 64]
+          # === RANGE SIZES ===
+          # Tile boundary sweep
+          - Range: [ [15, 1, 17], [15, 1, 17], [1], [32] ]
+          # DepthU boundary sweep
+          - Range: [ [32], [32], [1], [31, 1, 33] ]
