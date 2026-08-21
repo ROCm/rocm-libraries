@@ -252,6 +252,9 @@ function(create_device_library)
         TOOL_BIN_DIRS ${_tool_bin_dirs}
         ${_python_flags}
     )
+    if(HIPBLASLT_PYTHON_COMMAND AND NOT _cdl_PYTHON_EXECUTABLE)
+        set(_python_command ${HIPBLASLT_PYTHON_COMMAND})
+    endif()
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
 
