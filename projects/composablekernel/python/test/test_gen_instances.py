@@ -237,13 +237,19 @@ class TestDeterministicOrder(unittest.TestCase):
                 )
 
     def test_enumeration_is_repeatable(self):
-        # Two calls in one process must agree -- catches a future enumerator that
+        # Two independent enumerations must agree -- catches an enumerator that
         # sorts by something unstable (e.g. object identity or a set iteration).
+        #
+        # cache_clear() between the calls is important: every enumerator is
+        # @lru_cache(None), so calling one twice returns the *same list object*
+        # and the assertion would compare a list to itself.
         for label, fn in self.ENUMERATORS:
             with self.subTest(enumerator=label):
-                self.assertEqual(
-                    [op.name() for op in fn()], [op.name() for op in fn()]
-                )
+                fn.cache_clear()
+                first = [op.name() for op in fn()]
+                fn.cache_clear()
+                second = [op.name() for op in fn()]
+                self.assertEqual(first, second)
 
 
 class TestCheckHeaders(unittest.TestCase):
