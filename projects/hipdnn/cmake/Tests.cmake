@@ -228,10 +228,10 @@ endfunction() # _create_check_targets_internal
 # Registers the cache-key generator's own unit tests as a ctest test. The generated
 # header's runtime behaviour is covered by the C++ suites; this covers the generator's
 # field policy, so a change to it fails here rather than silently reshaping the key.
+#
+# The policy under test belongs to the schemas, so this runs regardless of
+# HIPDNN_ENABLE_KERNEL_INGESTOR.
 function(_create_cache_key_codegen_test_internal prefix_name)
-    # Not gated on HIPDNN_ENABLE_KERNEL_INGESTOR: the field policy under test belongs to
-    # the schemas, which every build has, and the tests drive the generator directly
-    # without flatc or any build artifact.
     if(Python3_FOUND)
         add_test(
             NAME ${prefix_name}_cache_key_codegen_tests
