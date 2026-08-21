@@ -20,11 +20,14 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "primbench.hpp"
 
 #ifdef __HIP__
     #include <rocrand/rocrand_kernel.h>
 #elif defined(__CUDACC__)
+    #include <cuda.h>
     #include <curand_kernel.h>
 #endif
 
@@ -66,6 +69,7 @@ using rand_discrete_distribution_t = rocrand_discrete_distribution;
 using rand_direction_vector_set_t  = rocrand_direction_vector_set;
 using direction_vectors32_t        = const unsigned int;
 using direction_vectors64_t        = const unsigned long long;
+using gpu_func_attributes_t        = hipFuncAttributes;
 #elif defined(__CUDACC__)
 using stream_t                     = cudaStream_t;
 using rng_type_t                   = curandRngType;
@@ -76,6 +80,7 @@ using rand_discrete_distribution_t = curandDiscreteDistribution_t;
 using rand_direction_vector_set_t  = curandDirectionVectorSet_t;
 using direction_vectors32_t        = curandDirectionVectors32_t;
 using direction_vectors64_t        = curandDirectionVectors64_t;
+using gpu_func_attributes_t        = cudaFuncAttributes;
 #endif
 
 #ifdef __HIP__
@@ -110,7 +115,7 @@ constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = hipMemcpyDeviceToHost;
 constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = cudaMemcpyDeviceToHost;
 #endif
 
-inline std::string engine_name(const rng_type_t rng_type)
+constexpr std::string_view engine_name(const rng_type_t rng_type)
 {
     // The returned names have to be able to reproduce the rocrand_rng_type by prepending
     // `ROCRAND_RNG_{PSEUDO|QUASI}_` to the name written in all capital letters. The scripts in
@@ -229,6 +234,36 @@ inline auto gpu_malloc(T** device, size_t size)
 inline auto gpu_memcpy(void* dst, const void* src, size_t count, memcpy_kind_t kind)
 {
     return DISPATCH(hipMemcpy, cudaMemcpy)(dst, src, count, kind);
+}
+
+inline auto gpu_occupancy_max_active_blocks_per_mp(int*        num_blocks,
+                                                   const void* f,
+                                                   int         block_size,
+                                                   size_t      dynamic_shared_memory = 0)
+{
+    return DISPATCH(hipOccupancyMaxActiveBlocksPerMultiprocessor,
+                    cudaOccupancyMaxActiveBlocksPerMultiprocessor)(num_blocks,
+                                                                   f,
+                                                                   block_size,
+                                                                   dynamic_shared_memory);
+}
+
+inline auto gpu_get_device(int* device_id)
+{
+    return DISPATCH(hipGetDevice, cudaGetDevice)(device_id);
+}
+
+inline auto gpu_get_mp_count(int* mp_count, int device_id)
+{
+    return DISPATCH(hipDeviceGetAttribute, cudaDeviceGetAttribute)(
+        mp_count,
+        DISPATCH(hipDeviceAttributeMultiprocessorCount, cudaDevAttrMultiProcessorCount),
+        device_id);
+}
+
+inline auto gpu_get_attributes(gpu_func_attributes_t* attr, const void* f)
+{
+    return DISPATCH(hipFuncGetAttributes, cudaFuncGetAttributes)(attr, f);
 }
 
 /// This exposes the C-style device API through template parameters.

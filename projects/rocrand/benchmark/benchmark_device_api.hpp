@@ -50,7 +50,14 @@
 // 5. The vectorized output is unrolled via the `unrolled` utility type.
 
 /// The default maximum number of threads per block.
-#define RAND_DEFAULT_MAX_BLOCK_SIZE 256
+///
+/// Default maximum thread count for most generators. Higher values (like 1024)
+/// typically cause register pressure and slowdowns in state-heavy generators
+/// like Sobol.
+#define RAND_DEFAULT_MAX_BLOCK_SIZE 512
+
+/// Specifically for Threefry which requests higher amount of threads.
+#define RAND_THREEFRY_DEFAULT_MAX_BLOCK_SIZE 1024
 
 #ifdef __HIP__
 using rand_state_mrg32k3a_t          = rocrand_state_mrg32k3a;
@@ -100,8 +107,111 @@ constexpr size_t next_power2(size_t x)
     return power;
 }
 
+struct config
+{
+    int block_size;
+    int grid_size;
+    int occupancy;
+
+    /// Returns a configuration that returns the kernel with
+    /// the highest possible occupancy.
+    template<typename Kernel>
+    static config from_kernel_with_max_occupancy(Kernel kernel,
+                                                 int    max_block_size,
+                                                 int    req_grid_size  = 0,
+                                                 int    req_block_size = 0)
+    {
+        config result{0, 0, 0};
+        int    dev_id;
+        int    mp_count;
+
+        PRIMBENCH_CHECK(gpu_get_device(&dev_id));
+        PRIMBENCH_CHECK(gpu_get_mp_count(&mp_count, dev_id));
+
+        gpu_func_attributes_t attr;
+        PRIMBENCH_CHECK(gpu_get_attributes(&attr, (const void*)kernel));
+        int kernel_max_threads    = attr.maxThreadsPerBlock;
+        int actual_max_block_size = std::min(max_block_size, kernel_max_threads);
+
+        if(req_block_size > 0)
+        {
+            // If a block size is requested, use that.
+            int safe_req_block_size = std::min(req_block_size, kernel_max_threads);
+
+            int  occupancy = 0;
+            auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                (const void*)kernel,
+                                                                safe_req_block_size);
+
+            result.block_size = safe_req_block_size;
+            result.occupancy  = (error == 0) ? occupancy : 1;
+        }
+        else
+        {
+            // Otherwise, sweep options to find the best occupancy configuration
+            for(int block_size = 32; block_size <= actual_max_block_size; block_size *= 2)
+            {
+                if(block_size > max_block_size)
+                {
+                    continue;
+                }
+
+                int  occupancy = 0;
+                auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                    (const void*)kernel,
+                                                                    block_size);
+                if(error != 0)
+                {
+                    continue;
+                }
+
+                // Higher threads are preferred if occupancy stays the same
+                if(occupancy > result.occupancy
+                   || (occupancy == result.occupancy && block_size > result.block_size))
+                {
+                    result.block_size = block_size;
+                    result.occupancy  = occupancy;
+                }
+            }
+        }
+
+        // Respect user input if provided via cmd
+        result.grid_size = req_grid_size > 0 ? req_grid_size : (result.occupancy * mp_count);
+
+        // Fallback safety guards to avoid zero-sized kernel grid launches
+        if(result.grid_size <= 0)
+        {
+            result.grid_size = 1;
+        }
+        if(result.block_size <= 0)
+        {
+            result.block_size = 256;
+        }
+
+        return result;
+    }
+};
+
+// Helper to provide a block size with respect to generator type
+// Used later in the launch bounds of the generalized kernels.
 template<typename EngineState>
-__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
+constexpr int get_max_block_size()
+{
+#ifdef __HIP__
+    constexpr bool is_threefry = std::is_same_v<EngineState, rocrand_state_threefry2x32_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry2x64_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry4x32_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry4x64_20>;
+    if constexpr(is_threefry)
+    {
+        return RAND_THREEFRY_DEFAULT_MAX_BLOCK_SIZE;
+    }
+#endif
+    return RAND_DEFAULT_MAX_BLOCK_SIZE;
+}
+
+template<typename EngineState>
+__global__ __launch_bounds__(get_max_block_size<EngineState>())
 void init_kernel(EngineState*             states,
                  const unsigned long long seed,
                  const unsigned long long offset)
@@ -224,7 +334,7 @@ struct unrolled
 };
 
 template<typename EngineState, typename T, typename Generator>
-__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(get_max_block_size<EngineState>())
 void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const auto         f        = unrolled<Generator, T, EngineState>(generator);
@@ -500,13 +610,14 @@ struct runner<rand_state_sobol32_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
 
         direction_vectors32_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors32(&h_directions, RAND_DIRECTION_VECTORS_32_JOEKUO6));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol32_t)));
 
         unsigned int* directions;
@@ -514,7 +625,6 @@ struct runner<rand_state_sobol32_t>
         PRIMBENCH_CHECK(gpu_malloc(&directions, size));
         PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
             states,
             directions,
@@ -559,9 +669,8 @@ struct runner<rand_state_scrambled_sobol32_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
-
         direction_vectors32_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors32(&h_directions,
                                                 RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6));
@@ -569,7 +678,8 @@ struct runner<rand_state_scrambled_sobol32_t>
         const unsigned int* h_constants;
         RAND_CHECK(rand_get_scramble_constants32(&h_constants));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol32_t)));
 
         unsigned int* directions;
@@ -584,7 +694,6 @@ struct runner<rand_state_scrambled_sobol32_t>
         PRIMBENCH_CHECK(
             gpu_memcpy(scramble_constants, h_constants, constants_size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
             states,
             directions,
@@ -631,13 +740,13 @@ struct runner<rand_state_sobol64_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
-
         direction_vectors64_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors64(&h_directions, RAND_DIRECTION_VECTORS_64_JOEKUO6));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol64_t)));
 
         unsigned long long int* directions;
@@ -645,7 +754,6 @@ struct runner<rand_state_sobol64_t>
         PRIMBENCH_CHECK(gpu_malloc(&directions, size));
         PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(states,
                                                                          directions,
                                                                          offset);
@@ -689,9 +797,8 @@ struct runner<rand_state_scrambled_sobol64_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
-
         direction_vectors64_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors64(&h_directions,
                                                 RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6));
@@ -699,7 +806,8 @@ struct runner<rand_state_scrambled_sobol64_t>
         const unsigned long long* h_constants;
         RAND_CHECK(rand_get_scramble_constants64(&h_constants));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol64_t)));
 
         unsigned long long int* directions;
@@ -714,7 +822,6 @@ struct runner<rand_state_scrambled_sobol64_t>
         PRIMBENCH_CHECK(
             gpu_memcpy(scramble_constants, h_constants, constants_size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
             states,
             directions,
@@ -883,17 +990,28 @@ struct device_api_benchmark : public primbench::benchmark_interface
         , m_dimensions(dimensions)
         , m_offset(offset)
         , m_poisson_lambda(poisson_lambda)
-    {}
+    {
+        // Calculate and overwrite block/grid configs if not provided by the user, using occupancy helper.
+        auto cfg = config::from_kernel_with_max_occupancy(
+            generate_kernel<State, T, Generator>,
+            get_max_block_size<State>(), // max threads per block
+            static_cast<int>(blocks),
+            static_cast<int>(threads));
+
+        m_blocks  = cfg.grid_size;
+        m_threads = cfg.block_size;
+    }
 
     primbench::json meta() const override
     {
-        auto json
-            = primbench::json{}
-                  .add("algo", "device_api")
-                  .add("engine", engine_name(m_engine))
-                  .add("type", primbench::name<T>())
-                  .add("distribution", distribution_name(Distribution))
-                  .add("cfg", primbench::json{}.add("blocks", m_blocks).add("threads", m_threads));
+        // Even though we know the config, we do not tell primbench about it.
+        // This is because we want to make comparisons per algo, engine, and type.
+        // The configuration itself is not relevant for performance.
+        auto json = primbench::json{}
+                        .add("algo", "device_api")
+                        .add("engine", engine_name(m_engine))
+                        .add("type", primbench::name<T>())
+                        .add("distribution", distribution_name(Distribution));
 
         if constexpr(Distribution == DISTRIBUTION_POISSON
                      || Distribution == DISTRIBUTION_DISCRETE_POISSON)
