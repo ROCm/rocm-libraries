@@ -26,8 +26,8 @@ namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
 /// A graph fake carrying real content, for tests proving `GraphContentKey` discriminates
-/// on it; `TestGraph` is content-empty by construction (D12). Every field the key
-/// compares is independently settable through `Spec`.
+/// on it; `TestGraph` (the ordinary fixture used elsewhere) is content-empty by
+/// construction. Every field the key compares is independently settable through `Spec`.
 class ContentCarryingTestGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
@@ -38,7 +38,6 @@ public:
             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         std::vector<int64_t> dims{4, 8};
         std::vector<int64_t> strides{8, 1};
-        /// A nullable tensor reference.
         std::optional<int64_t> raggedOffsetTensorUid = std::nullopt;
     };
     struct NodeSpec

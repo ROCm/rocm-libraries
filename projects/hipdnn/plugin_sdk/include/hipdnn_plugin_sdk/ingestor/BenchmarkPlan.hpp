@@ -95,11 +95,6 @@ public:
     /// accessor, so the ids ride alongside: kernelId for the selection log,
     /// packId/dispatchId as the staleness cross-check a cached ranking is validated
     /// against on a later run.
-    ///
-    /// The two staleness ids default and sit after `plan`, so a caller that does not
-    /// cache constructs a Candidate exactly as before. A default-constructed packId
-    /// matches no id any in-tree pack declares, but descriptor loading does not reject a
-    /// nil UUID, so that is a convention rather than an enforced invariant.
     struct Candidate
     {
         DescriptorId kernelId;
@@ -238,8 +233,8 @@ private:
             return resolved;
         }
 
-        // Every usable candidate's time is retained, not just the running minimum, so a
-        // later run whose knob filter excludes the winner can still serve the runner-up.
+        // Every usable candidate's time is retained so a later run whose knob filter
+        // excludes the winner can still serve the runner-up.
         std::vector<std::pair<double, size_t>> ranked;
         ranked.reserve(_candidates.size());
 

@@ -22,10 +22,8 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// One benchmarked candidate. `packId`/`dispatchId` travel with `kernelId` as a staleness
 /// cross-check: a pack can be replaced between runs, making the same id a different
-/// kernel.
-///
-/// `timeMs` is diagnostic only -- order is the decision. Times are never comparable
-/// across runs or records.
+/// kernel. `timeMs` is diagnostic only; times are never comparable across runs or
+/// records.
 struct RankedEntry
 {
     DescriptorId kernelId{};
@@ -39,9 +37,9 @@ struct RankedEntry
 /// fallback.
 using WinnerRecord = std::vector<RankedEntry>;
 
-/// Graph content plus device. Knobs are deliberately absent: a knob filter narrows which
-/// candidates a run considers, never what the graph computes, so runs with different
-/// filters share a record -- which is why the coverage gate exists.
+/// Graph content plus device. Knobs are absent: a knob filter narrows which candidates
+/// a run considers, never what the graph computes, so runs with different filters share
+/// a record, which is why the coverage gate exists.
 struct WinnerKey
 {
     GraphContentKey graph;
@@ -69,13 +67,9 @@ struct WinnerKeyHash
     }
 };
 
-/// Does @p record carry a measurement for every kernel in @p kernels?
-///
-/// One-directional: entries in @p record absent from @p kernels do not fail coverage,
-/// so a record wider than the current candidate set still serves. Used directly only by
-/// `orderIfFullyCovered` below and by tests; production coverage decisions go through
-/// that helper so coverage and orderability cannot be checked independently and drift
-/// apart.
+/// Does @p record carry a measurement for every kernel in @p kernels? One-directional:
+/// entries in @p record absent from @p kernels do not fail coverage. Production
+/// decisions go through `orderIfFullyCovered` below, not this directly.
 inline bool recordCovers(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
 {
     return std::all_of(kernels.begin(), kernels.end(), [&record](const KernelDefinition& kernel) {
@@ -85,10 +79,9 @@ inline bool recordCovers(const WinnerRecord& record, const std::vector<KernelDef
     });
 }
 
-/// Reorders @p kernels into @p record's ranked order, dropping any kernel the record does
-/// not carry and any entry whose `packId`/`dispatchId` no longer agree (distinct from
-/// `recordCovers`'s coverage check). A stale entry is skipped, not an error; an empty
-/// result means the caller falls back to its normal path.
+/// Reorders @p kernels into @p record's ranked order, dropping any kernel the record
+/// does not carry and any entry whose `packId`/`dispatchId` no longer agree (distinct
+/// from `recordCovers`'s coverage check). An empty result means the caller falls back.
 inline std::vector<KernelDefinition> orderByRecord(const WinnerRecord& record,
                                                    const std::vector<KernelDefinition>& kernels)
 {
@@ -110,12 +103,10 @@ inline std::vector<KernelDefinition> orderByRecord(const WinnerRecord& record,
 }
 
 /// Returns @p record's order over @p kernels only when the record both covers every
-/// kernel and orders every one of them; nullopt otherwise. The two conditions can
-/// diverge -- `recordCovers` matches by `kernelId` alone, `orderByRecord` requires the
-/// full `(kernelId, packId, dispatchId)` triple -- so an entry covered by id but whose
-/// pack has since moved must decline the whole record rather than silently serve the
-/// entries that still resolve. The sole coverage-plus-order decision point; every
-/// caller that needs to know if a record can serve a candidate set goes through this.
+/// kernel and orders every one of them; nullopt otherwise. The two can diverge --
+/// `recordCovers` matches by `kernelId` alone, `orderByRecord` requires the full
+/// `(kernelId, packId, dispatchId)` triple -- so an entry covered by id but whose pack
+/// has since moved declines the whole record rather than serving what still resolves.
 inline std::optional<std::vector<KernelDefinition>>
     orderIfFullyCovered(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
 {
