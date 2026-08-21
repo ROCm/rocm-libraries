@@ -7,6 +7,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Added
 * Added a host-only stub `libhiptensor`, built automatically when `GPU_TARGETS` resolves to an empty target list (or explicitly with `-DHIPTENSOR_DISABLE_DEVICE=ON`), so the package, headers, and CMake config remain available and every API call returns `HIPTENSOR_STATUS_NOT_SUPPORTED` instead of failing to link.
 * Added `ffm-quick` and `ffm-full` test categories for emulation tests.
+* Added a Windows version resource so `hiptensor.dll` exposes file metadata (file description, version, product name, and copyright) in File Explorer properties.
 
 ### Changed
 * Reorganized test configurations per tier and category.
