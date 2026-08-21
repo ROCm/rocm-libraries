@@ -159,6 +159,13 @@ struct ORIGAMI_EXPORT heuristic_params_t {
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
+  // === Resource residency term (default-inert) ===
+  // Used only when CUOccupancy is serialized into the runtime; declared here so
+  // the gfx1201 tuned genome can carry its fitted values (parity with the
+  // offline distillation model). No effect on the default latency prediction.
+  double resource_residency_weight = 0.0;
+  double resource_residency_target = 1.0;
+
   // === Kernel Rejection ===
   /// When true, the kernel is rejected: its predicted latency is forced to the
   /// maximum so that rank_configs() drops it from selection entirely.
