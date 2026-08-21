@@ -116,6 +116,22 @@ struct HasSetStream<
 };
 
 /**
+ * @brief Check for getStream() method returning hipStream_t.
+ */
+template <typename T, typename = void>
+struct HasGetStream : std::false_type
+{
+};
+
+template <typename T>
+struct HasGetStream<
+    T,
+    std::void_t<decltype(static_cast<hipStream_t>(std::declval<const T&>().getStream()))>>
+    : std::true_type
+{
+};
+
+/**
  * @brief Check for removeEngineDetailsDetachedBuffer(const void*) method.
  */
 template <typename T, typename = void>
