@@ -178,7 +178,8 @@ jobs:
       repository: ROCm/TheRock
       # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
-      ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5
+      # TODO: After multi-arch CI is fully migrated to TheRock, remove the explicit ref here
+      ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5  # 08/21/2026
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
