@@ -80,11 +80,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
         HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
+
+    # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
+    # because it does not compile without the ingestor: KpackArchive.cpp is the only
+    # translation unit in the provider that includes <rocm_kpack/kpack.h>.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        compilation/KpackArchive.cpp
+        compilation/KpackKernelLoader.cpp
+        compilation/KpackProgram.cpp
+    )
+
+    # rocm_kpack is plain and unnamespaced -- rocm::rocm_kpack does not exist. It is
+    # static, and linking it inherits ROCM_KPACK_STATIC PUBLIC, so nothing here defines
+    # it. The object library gets it for its include directories; the two targets that
+    # actually link have to name it themselves, because they consume the objects via
+    # $<TARGET_OBJECTS:...>, which carries no link interface.
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm_kpack)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm_kpack)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
+    # interface, so the plugin has to name the kpack reader itself.
+    target_link_libraries(hip_kernel_provider PRIVATE rocm_kpack)
+endif()
 
 if(NOT WIN32)
     target_link_libraries(hip_kernel_provider PRIVATE "-Xlinker --exclude-libs=ALL")

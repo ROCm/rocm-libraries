@@ -2522,6 +2522,53 @@ TEST(TestDescriptorLoader, ResolvesTheOriginDirectoryOfAReferencedKernel)
     EXPECT_EQ(kernels.back().originDirectory, dir.path() / "gfx942");
 }
 
+/// The two cases above prove `originDirectory` is *stamped*; neither performs the join that
+/// makes it useful. This one reproduces the tree `pipeline.py` emits -- a per-arch shard
+/// directory holding the descriptors, with the archive in a `kpack/` subdirectory beside
+/// them, and `library` written relative to the declaring descriptor -- and asserts that
+/// `originDirectory / library` names the archive on disk.
+///
+/// The resolution under test is a pure path operation, which is why this belongs here and
+/// not behind a device: a staged tree is indistinguishable from an installed one, so no
+/// install, no archive contents, and no GPU are needed. Only the path has to be real, so
+/// the file is created empty -- weakly_canonical resolves an existing path without reading
+/// a byte of it.
+TEST(TestDescriptorLoader, JoinsARelativeLibraryAgainstThePackagerLayout)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packager_layout"));
+    const auto shard = dir.path() / "gfx942";
+    const auto archive = shard / "kpack" / "hip_kernel_provider_gfx942.kpack";
+    std::filesystem::create_directories(archive.parent_path());
+    {
+        std::ofstream file(archive, std::ios::binary);
+    }
+    ASSERT_TRUE(std::filesystem::exists(archive));
+
+    auto documents = makeSetDocuments('1', "test:packager_layout");
+    auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors").front();
+    kernel["kernel_source"] = {{"kind", "kpack"},
+                               {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                               {"toc_key", "PointwiseAdd/block64"},
+                               {"symbol", "PointwiseAdd"},
+                               {"sha256", std::string(64, 'a')}};
+    writeDocuments(shard, documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    const auto& packaged = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(packaged.source.kind, KernelSourceKind::KPACK);
+
+    // The join an adapter performs, spelled out here rather than called through one: the
+    // adapter lives in a provider, and this file's subject is what the loader hands it.
+    const auto resolved
+        = std::filesystem::weakly_canonical(packaged.originDirectory / packaged.source.library);
+    EXPECT_EQ(resolved, std::filesystem::weakly_canonical(archive));
+    EXPECT_TRUE(std::filesystem::exists(resolved));
+}
+
 /// A typo in an OPTIONAL key is the case the extension rule exists to catch: `heuristik`
 /// leaves a UED with no heuristic at all, which is legal, so warning about it would let
 /// the engine load and rank by the fallback forever with the default log level off.

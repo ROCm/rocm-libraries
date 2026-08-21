@@ -105,6 +105,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
         HIPDNN_TEST_DESCRIPTOR_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+
+    # The kpack adapter's tests. Gated with the sources they exercise, and kept together
+    # here -- including the dispatch one, which sits under engines/ -- so all three are
+    # visible at the point the archive path below is defined for them.
+    target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestKpackKernelLoader.cpp
+        compilation/TestKpackModuleCache.cpp
+        engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
+    )
+
+    # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
+    # actual reader rather than a hand-forged header. rocm-kpack's own test asset is
+    # used because it is the archive the pinned reader is tested against; taken from
+    # ROCM_KPACK_SOURCE_DIR, which rocm_kpack_populate() publishes as an INTERNAL cache
+    # entry, rather than hardcoded, so a change to the fetch layout cannot silently
+    # leave this naming nothing.
+    if(NOT ROCM_KPACK_SOURCE_DIR)
+        message(FATAL_ERROR
+            "ROCM_KPACK_SOURCE_DIR is unset, but the ingestor is ON. "
+            "rocm_kpack_add_runtime() should have populated it before src/ was added.")
+    endif()
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPDNN_TEST_KPACK_ARCHIVE="${ROCM_KPACK_SOURCE_DIR}/runtime/tests/test_assets/test_zstd.kpack")
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
